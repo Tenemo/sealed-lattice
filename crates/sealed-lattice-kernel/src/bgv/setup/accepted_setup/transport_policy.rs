@@ -11,9 +11,7 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
                 "vssCoefficientCommitmentMaterial was required before profile-ring verification",
             )
         })?;
-    if material_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64)
-        || material_set.get("ringDegreeStatus").and_then(Value::as_str) != Some("profile-ring")
-    {
+    if material_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
         return Ok(Some(vss_material_outside_profile(
             "vssCoefficientCommitmentMaterial must use the accepted profile ring degree",
             "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",

@@ -25,7 +25,6 @@ describe('direct encrypted ballot kernel command', () => {
             proofCount: 1,
             rnsLimbCount: 17,
         });
-        expect(result.proofAttempt.proofGate).toContain('yellow');
         expect(result.proofAttempt.proofAccounting).toMatchObject({
             targetClassicalSoundnessBits: 128,
             minimumIndependentRepetitionsForTarget: null,

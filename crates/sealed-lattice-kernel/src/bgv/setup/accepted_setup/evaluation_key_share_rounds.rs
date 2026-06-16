@@ -66,14 +66,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "relinearization-key-share"),
-        (
-            "proofVerificationStatus",
-            EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
-        ),
     ] {
         if rounds.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
@@ -1050,14 +1042,6 @@ fn verify_evaluation_key_record_object(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", expected_proof_family),
-        (
-            "proofVerificationStatus",
-            EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
-        ),
     ] {
         if record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(

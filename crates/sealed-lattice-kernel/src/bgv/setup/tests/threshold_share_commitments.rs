@@ -515,7 +515,6 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                             "shamirCoefficientIndex": shamir_coefficient_index,
                         }),
                     ).expect("coefficient vector hash"),
-                    "openingVerificationStatus": "pending-private-envelope-opening",
                 }));
                 coefficient_commitment_material.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitmentMaterial",

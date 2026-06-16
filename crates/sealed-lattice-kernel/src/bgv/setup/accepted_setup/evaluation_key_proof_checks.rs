@@ -121,19 +121,10 @@ fn verify_trustee_evaluation_key_proof_set(
     })?;
     let roster = super::accepted_roster_from_package(setup_package);
     verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
-    // These status strings are claim-gate labels: exact-matching them is what refuses fixture-backed or non-succinct records.
     for (field_name, expected_value) in [
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
-        ),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -384,14 +375,6 @@ fn verify_trustee_evaluation_key_proof_record(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
-        ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(

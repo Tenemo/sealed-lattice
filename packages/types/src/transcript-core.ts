@@ -1,9 +1,3 @@
-/** Claim profile label attached to transcript-core fixtures and results. */
-export type BaseClaimProfile = 'FoundationTranscript';
-
-/** Security closure claimed by transcript-core fixtures. */
-export type TranscriptCoreSecurityClosure = 'FoundationOnly';
-
 /** Top-level transcript-core verification label for accepted and rejected fixtures. */
 export type TranscriptCoreVerificationLabel =
     | 'TranscriptCoreVerified'
@@ -98,7 +92,6 @@ export type TranscriptCoreAnalysis = {
 
 /** Verification result for a golden transcript-core fixture. */
 export type GoldenTranscriptCoreFixtureVerification = {
-    readonly verified: true;
     readonly caseName: string;
     readonly objectHash512: string;
     readonly chunkRoot: string;
@@ -106,7 +99,6 @@ export type GoldenTranscriptCoreFixtureVerification = {
 
 /** Verification result for a malformed transcript-core fixture. */
 export type MalformedObjectFixtureVerification = {
-    readonly verified: true;
     readonly caseName: string;
     readonly expectedErrorCode: CanonicalErrorCode;
 };

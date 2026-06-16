@@ -756,17 +756,6 @@ fn private_vss_envelope_binding_from_reference(
             &format!("privateVssEnvelopeCommitments.envelopeReferences.{field_name}"),
         )?;
     }
-    if envelope_reference
-        .get("openingVerificationStatus")
-        .and_then(Value::as_str)
-        != Some("accepted-local-private-vss-opening")
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeOpeningStatusMismatch",
-            "private VSS envelope commitment openingVerificationStatus must be accepted-local-private-vss-opening",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.openingVerificationStatus",
-        )));
-    }
 
     let expected_aad = private_vss_envelope_aad_value(
         setup_context,
@@ -1185,7 +1174,6 @@ fn private_vss_envelope_aad_value(
         "envelopeSequenceNumber": envelope_sequence_number,
         "deliveryPhaseNumber": PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER,
         "verificationPhaseNumber": PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER,
-        "recipientVerificationRequirement": "recipient-verifies-private-vss-opening-before-acceptance",
     }))
 }
 

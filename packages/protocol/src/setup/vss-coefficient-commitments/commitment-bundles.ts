@@ -155,7 +155,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                 commitmentChunkRoot: commitmentComputation.commitmentChunkRoot,
                 coefficientVectorHash512:
                     commitmentComputation.coefficientVectorHash512,
-                openingVerificationStatus: 'pending-private-envelope-opening',
             });
             const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',

@@ -9,10 +9,7 @@
 // and public surface unchanged.
 export {
     evaluationKeyShareComponentMaterialEncoding,
-    evaluationKeyShareRecordVerificationStatus,
     trusteeEvaluationKeyProofFamily,
-    trusteeEvaluationKeyProofModelStatus,
-    trusteeEvaluationKeyProofVerificationStatus,
     type BinaryChunkedEvaluationKeyShareMaterialTransport,
     type BinaryChunkedPublicEvaluationKeyMaterialTransport,
     type EvaluationKeyProofCommonInput,

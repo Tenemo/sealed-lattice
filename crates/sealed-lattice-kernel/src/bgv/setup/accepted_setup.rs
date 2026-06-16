@@ -233,23 +233,12 @@ pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE: &str 
     "SetupTransportedPublicEvaluationKeyMaterialSet";
 pub(super) const PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedPublicEvaluationKeyMaterial";
-const PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS: &str =
-    "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate";
 const PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING: &str =
     "root-bound-public-key-switch-component-roots";
 pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
     "binary-chunked-public-evaluation-key-root-manifest";
-const PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE: &str =
-    "verified-relinearization-and-galois-proof-records";
 const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
-// Share records carry no proof fields: their correctness claim is the
-// per-trustee succinct argument, so every record pins this status pair.
-pub(in crate::bgv::setup) const EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS: &str =
-    "share-records-bound-to-trustee-evaluation-key-argument";
-use super::trustee_evaluation_key_proof::{
-    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
-    TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-};
+use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_SET_OBJECT_TYPE: &str =
     "VssCoefficientCommitmentMaterialSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";

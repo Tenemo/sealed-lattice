@@ -30,8 +30,6 @@ import {
     setupProofMaterialTransportEncoding,
     trusteeEvaluationKeyProofBytesHashDomain,
     trusteeEvaluationKeyProofFamily,
-    trusteeEvaluationKeyProofModelStatus,
-    trusteeEvaluationKeyProofVerificationStatus,
 } from './constants-and-types.js';
 import {
     assertLowercaseHex,
@@ -709,14 +707,6 @@ export const createTrusteeEvaluationKeyProofs = (
                 'trusteeEvaluationKeyProofGenerator returned the wrong operation.',
             );
         }
-        if (
-            generatedProof.proofModelStatus !==
-            trusteeEvaluationKeyProofModelStatus
-        ) {
-            throw new Error(
-                'trusteeEvaluationKeyProofGenerator returned an unexpected proof model status.',
-            );
-        }
         assertProtocolHash(
             generatedProof.proofAccountingHash,
             'generatedProof.proofAccountingHash',
@@ -768,9 +758,6 @@ export const createTrusteeEvaluationKeyProofs = (
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
-            proofVerificationStatus:
-                trusteeEvaluationKeyProofVerificationStatus,
-            proofModelStatus: trusteeEvaluationKeyProofModelStatus,
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
             trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -813,8 +800,6 @@ export const createTrusteeEvaluationKeyProofs = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: trusteeEvaluationKeyProofFamily,
-        proofVerificationStatus: trusteeEvaluationKeyProofVerificationStatus,
-        proofModelStatus: trusteeEvaluationKeyProofModelStatus,
         proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

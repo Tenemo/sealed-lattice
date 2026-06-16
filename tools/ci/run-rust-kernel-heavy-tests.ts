@@ -44,6 +44,27 @@ const heavyAcceptedSetupTestThreadCount = Math.min(
     memoryBoundedHeavyTestThreadCount,
 );
 
+// Each trustee evaluation-key prover holds a several-gigabyte working set while
+// the first-profile package fixture is assembled, so the number of provers
+// running at once must also fit available memory. The kernel proves the trustees
+// in batches; size that batch from free memory the same way as the libtest
+// thread pool, capped so a workstation keeps proving three trustees at a time
+// while a 16 GiB CI runner proves one and the build is no longer killed
+// mid-proving. The kernel reads this through SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE.
+const approximateGigabytesPerTrusteeProver = 8;
+const workstationTrusteeProverConcurrency = 3;
+const memoryBoundedTrusteeProofBatchSize = Math.max(
+    1,
+    Math.floor(
+        (availableGigabytes * heavyTestMemoryBudgetFraction) /
+            approximateGigabytesPerTrusteeProver,
+    ),
+);
+const trusteeProofBatchSize = Math.min(
+    workstationTrusteeProverConcurrency,
+    memoryBoundedTrusteeProofBatchSize,
+);
+
 const rustKernelHeavyTestCommand: CommandInvocation = {
     args: [
         'test',
@@ -61,6 +82,9 @@ const rustKernelHeavyTestCommand: CommandInvocation = {
     env: {
         ...process.env,
         CARGO_INCREMENTAL: '0',
+        SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
+            process.env.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE ??
+            String(trusteeProofBatchSize),
     },
     logFileSlug: 'cargo-test-heavy-accepted-setup',
 };
@@ -85,6 +109,11 @@ const main = async (): Promise<void> => {
         `Rust kernel heavy lane: running with ${heavyAcceptedSetupTestThreadCount} test thread(s) ` +
             `(memory-bounded; ${availableGigabytes.toFixed(1)} GiB available, ` +
             `${approximateGigabytesPerHeavyTest} GiB budgeted per test).`,
+    );
+    console.log(
+        `Rust kernel heavy lane: proving up to ${trusteeProofBatchSize} trustee evaluation-key ` +
+            `proof(s) concurrently (memory-bounded; ${approximateGigabytesPerTrusteeProver} GiB ` +
+            `budgeted per prover).`,
     );
 
     const progressReporter = createHeavyTestProgressReporter({

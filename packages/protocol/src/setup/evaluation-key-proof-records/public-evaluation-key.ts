@@ -120,9 +120,7 @@ export function createPublicEvaluationKeySet(
                         objectVersion: 1,
                         setupProfileId: 'CollectiveBgvSetup-v1',
                         setupProofProfileId,
-                        assemblyStatus: publicEvaluationKeyAssemblyStatus,
                         materialEncoding: publicEvaluationKeyMaterialEncoding,
-                        materialSource: publicEvaluationKeyMaterialSource,
                         evaluatorKeyScheduleRoot:
                             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                         sameSecretProofFamilyBindingRoot:
@@ -213,9 +211,7 @@ export function createPublicEvaluationKeySet(
                     objectVersion: 1,
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     setupProofProfileId,
-                    assemblyStatus: publicEvaluationKeyAssemblyStatus,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
-                    materialSource: publicEvaluationKeyMaterialSource,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                     sameSecretProofFamilyBindingRoot:
@@ -453,10 +449,8 @@ const publicEvaluationKeyMaterialManifest = (
     objectVersion: 1,
     setupProfileId: 'CollectiveBgvSetup-v1',
     setupProofProfileId,
-    assemblyStatus: publicEvaluationKeyAssemblyStatus,
     materialEncoding: publicEvaluationKeyMaterialEncoding,
     materialTransportEncoding: publicEvaluationKeyTransportMaterialEncoding,
-    materialSource: publicEvaluationKeyMaterialSource,
     ...contextFields(input.setupContext),
     participantCount: input.participantCount,
     rnsLimbCount: input.qSharePrimes.length,
@@ -480,8 +474,6 @@ const publicEvaluationKeyMaterialManifest = (
         input.galoisKeyShareBatches,
     ),
     genericKeySwitchKeyRoots: evaluationKeys.genericKeySwitchKeyRoots,
-    rawKeyBytesEmbedded: false,
-    verifierGeneratedKeyMaterial: false,
 });
 
 const encodePublicEvaluationKeyMaterialManifest = (
@@ -620,9 +612,7 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
-        assemblyStatus: publicEvaluationKeyAssemblyStatus,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
-        materialSource: publicEvaluationKeyMaterialSource,
         ceremonyId: evaluationKeys.ceremonyId,
         manifestHash: evaluationKeys.manifestHash,
         rosterHash: evaluationKeys.rosterHash,

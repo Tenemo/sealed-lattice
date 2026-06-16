@@ -7,9 +7,6 @@
 // unchanged.
 export {
     publicKeyShareProofFamily,
-    publicKeyShareProofVerificationStatus,
-    publicKeyShareSuccinctProofVerificationStatus,
-    publicKeyShareSuccinctProofModelStatus,
     publicKeyShareProofBindingStatus,
     publicKeyShareMaterialEncoding,
     publicKeyShareMaterialTransportEncoding,

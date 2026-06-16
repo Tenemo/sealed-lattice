@@ -50,30 +50,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_succinct_proofs_before_missing_terminal_objects()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_succinct_proofs_before_missing_terminal_objects",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["proofModelStatus"] =
-        serde_json::json!("weakened-public-key-share-proof-model");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofSetProfileMismatch"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_public_key_proofs() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_public_key_proofs",

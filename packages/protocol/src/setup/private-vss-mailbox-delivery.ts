@@ -314,16 +314,10 @@ const privateEnvelopeDeliveryContentType = 'private-vss-share-envelope';
 const privateEnvelopeObjectType = 'PrivateVssShareEnvelope';
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
 const localOpeningAcceptedStatus = 'accepted-local-private-vss-opening';
-const recipientVerificationRequirement =
-    'recipient-verifies-private-vss-opening-before-acceptance';
 const setupProfileId = 'CollectiveBgvSetup-v1';
 const privateVssShareProofProfileId =
     'sealed-lattice-private-vss-share-proof-succinct-v1';
 const privateVssShareProofFamily = 'vss-opening-carry';
-export const privateVssShareSuccinctProofVerificationStatus =
-    'succinct-private-vss-share-argument-verified-with-accepted-proof-accounting';
-export const privateVssShareSuccinctProofModelStatus =
-    'succinct-private-vss-share-argument-accounting-accepted';
 const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
@@ -733,7 +727,6 @@ const privateEnvelopeAad = (
     envelopeSequenceNumber,
     deliveryPhaseNumber: input.deliveryPhaseNumber,
     verificationPhaseNumber: input.verificationPhaseNumber,
-    recipientVerificationRequirement,
 });
 
 const transportPrivateVssShareProofMaterial = (
@@ -743,27 +736,6 @@ const transportPrivateVssShareProofMaterial = (
     readonly proofRecord: JsonRecord;
     readonly proofMaterial: TransportedPrivateVssShareProofMaterial;
 } => {
-    const proofVerificationStatus = assertString(
-        proofRecord.proofVerificationStatus,
-        'privateVssShareProof.proofVerificationStatus',
-    );
-    if (
-        proofVerificationStatus !==
-        privateVssShareSuccinctProofVerificationStatus
-    ) {
-        throw new Error(
-            'privateVssShareProof.proofVerificationStatus must match the accepted private VSS share verifier status.',
-        );
-    }
-    const proofModelStatus = assertString(
-        proofRecord.proofModelStatus,
-        'privateVssShareProof.proofModelStatus',
-    );
-    if (proofModelStatus !== privateVssShareSuccinctProofModelStatus) {
-        throw new Error(
-            'privateVssShareProof.proofModelStatus must match the accepted private VSS share proof model.',
-        );
-    }
     const proofBytesHex = assertString(
         proofRecord.proofBytesHex,
         'privateVssShareProof.proofBytesHex',

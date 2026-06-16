@@ -26,12 +26,6 @@ export const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretAnchorProofBytesHashDomain =
     'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
-export const sameSecretProofVerificationStatus =
-    'anchor-proof-verification-pending';
-export const sameSecretAnchorProofVerificationStatus =
-    'succinct-same-secret-linkage-anchor-argument-verified-with-accepted-proof-accounting';
-export const sameSecretAnchorProofModelStatus =
-    'succinct-same-secret-linkage-anchor-argument-accounting-accepted';
 export const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
 export const sameSecretAnchorArgument =
@@ -69,7 +63,6 @@ export type SameSecretConsistencyStatementRecord = Readonly<
         readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
-        readonly proofVerificationStatus: typeof sameSecretProofVerificationStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly vssSourceTrusteeCommitmentRoot: ProtocolHash;
@@ -92,7 +85,6 @@ export type SameSecretConsistencyStatementSet = Readonly<
         readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
-        readonly proofVerificationStatus: typeof sameSecretProofVerificationStatus;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly thresholdDegree: number;
@@ -127,8 +119,6 @@ export type SameSecretProofMaterial = Readonly<
     SameSecretProofByteMaterial & {
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
-        readonly proofVerificationStatus: typeof sameSecretAnchorProofVerificationStatus;
-        readonly proofModelStatus: typeof sameSecretAnchorProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly statementHash: ProtocolHash;
@@ -146,8 +136,6 @@ export type SameSecretProofRecord = Readonly<
             readonly commitmentProfileId: typeof setupCommitmentProfileId;
             readonly setupProofProfileId: typeof setupProofProfileId;
             readonly proofFamily: typeof sameSecretProofFamily;
-            readonly proofVerificationStatus: typeof sameSecretAnchorProofVerificationStatus;
-            readonly proofModelStatus: typeof sameSecretAnchorProofModelStatus;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
             readonly ringDegree: number;
@@ -175,8 +163,6 @@ export type SameSecretProofSet = Readonly<
         readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
-        readonly proofVerificationStatus: typeof sameSecretAnchorProofVerificationStatus;
-        readonly proofModelStatus: typeof sameSecretAnchorProofModelStatus;
         readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -343,19 +329,6 @@ const validateSameSecretProofMaterial = (
     if (material.proofFamily !== sameSecretProofFamily) {
         throw new Error(
             `${fieldName}.proofFamily must be the same-secret linkage anchor family.`,
-        );
-    }
-    if (
-        material.proofVerificationStatus !==
-        sameSecretAnchorProofVerificationStatus
-    ) {
-        throw new Error(
-            `${fieldName}.proofVerificationStatus must be the anchor verification status.`,
-        );
-    }
-    if (material.proofModelStatus !== sameSecretAnchorProofModelStatus) {
-        throw new Error(
-            `${fieldName}.proofModelStatus must match the anchor proof model status.`,
         );
     }
     assertNonEmptyString(
@@ -579,8 +552,6 @@ const trusteeSecretCommitmentPayload = (
     trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
     vssSourceTrusteeCommitmentRoot:
         sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
-    secretCommitmentSource: 'vss-constant-coefficient-commitments',
-    sameSecretRelation,
     constantCoefficientCommitmentRoots: constantRoots,
 });
 
@@ -627,7 +598,6 @@ const createStatementRecord = (
         commitmentProfileId: setupCommitmentProfileId,
         setupProofProfileId,
         proofFamily: sameSecretProofFamily,
-        proofVerificationStatus: sameSecretProofVerificationStatus,
         ...contextFields(setupContext),
         trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
         trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
@@ -686,7 +656,6 @@ export const createSameSecretConsistencyStatementSet = (
         commitmentProfileId: setupCommitmentProfileId,
         setupProofProfileId,
         proofFamily: sameSecretProofFamily,
-        proofVerificationStatus: sameSecretProofVerificationStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -845,9 +814,6 @@ export const createSameSecretProofSet = (
                 commitmentProfileId: setupCommitmentProfileId,
                 setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
-                proofVerificationStatus:
-                    sameSecretAnchorProofVerificationStatus,
-                proofModelStatus: sameSecretAnchorProofModelStatus,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: statementRecord.trusteeIdentity,
                 trusteeRosterPosition: statementRecord.trusteeRosterPosition,
@@ -883,8 +849,6 @@ export const createSameSecretProofSet = (
         commitmentProfileId: setupCommitmentProfileId,
         setupProofProfileId,
         proofFamily: sameSecretProofFamily,
-        proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
-        proofModelStatus: sameSecretAnchorProofModelStatus,
         proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

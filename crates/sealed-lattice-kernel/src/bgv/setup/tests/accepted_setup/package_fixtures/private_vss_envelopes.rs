@@ -99,7 +99,6 @@ pub(super) fn private_vss_envelope_commitments_object(
                     "envelopeSequenceNumber": envelope_sequence_number,
                     "deliveryPhaseNumber": 6,
                     "verificationPhaseNumber": 7,
-                    "recipientVerificationRequirement": "recipient-verifies-private-vss-opening-before-acceptance",
                 });
                 let private_envelope_aad_hash = derive_protocol_hash(
                     "PrivateVssEnvelopeAadHash",
@@ -192,7 +191,6 @@ pub(super) fn private_vss_envelope_commitments_object(
                     "encryptedEnvelope": encrypted_envelope,
                     "recipientMailboxPublicKeyHash": recipient_mailbox_public_key_hash,
                     "localVerificationRoot": local_verification_root,
-                    "openingVerificationStatus": "accepted-local-private-vss-opening",
                 });
                 envelope_reference["privateEnvelopeCommitmentRoot"] = serde_json::json!(
                     derive_protocol_hash(
@@ -299,7 +297,6 @@ pub(super) fn vss_share_acceptances_object(
                     "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
                     "privateEnvelopeHash": private_envelope_hash,
                     "localVerificationRoot": local_verification_root,
-                    "verificationStatus": "accepted",
                     "recoveryEpoch": 0,
                     "deviceEpoch": 0,
                     "signingPublicKeyHash": signing_public_key_hash,
@@ -467,7 +464,6 @@ pub(in super::super) fn vss_complaints_object(
         "privateEnvelopeHash": private_envelope_hash,
         "complaintEvidenceRoot": complaint_evidence_root.as_str(),
         "complaintReasonCode": complaint_reason_code,
-        "complaintStatus": "valid-complaint-aborts-setup",
         "recoveryEpoch": 0,
         "deviceEpoch": 0,
         "signingPublicKeyHash": signing_public_key_hash,

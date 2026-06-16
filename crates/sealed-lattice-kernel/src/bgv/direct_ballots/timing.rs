@@ -59,14 +59,3 @@ pub(super) fn direct_ballot_timing_report_value(elapsed_milliseconds: Option<u12
         .map(|milliseconds| milliseconds.to_string())
         .unwrap_or_else(|| "not measured on wasm32-unknown-unknown".to_string())
 }
-
-pub(super) fn direct_ballot_timing_status() -> &'static str {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        "measured"
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        "not measured on wasm32-unknown-unknown"
-    }
-}

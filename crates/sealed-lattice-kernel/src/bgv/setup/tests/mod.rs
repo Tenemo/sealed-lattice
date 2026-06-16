@@ -38,11 +38,7 @@ use super::{
         PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
         verify_private_vss_share_succinct_relation_proof,
     },
-    trustee_evaluation_key_proof::{
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        succinct_private_vss_share_accounting_hash,
-    },
+    trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash,
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
 use crate::bgv::evaluator::{
@@ -70,7 +66,7 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "8b59271957383a2eda7e77dfb33d7304cc8bb534fc08696ae80495c5b85a54d7e45f66a820503394f9f73d158e6f82bd285f548ac571fddc61972f4b4cd4fa3d";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "a0b7af2ca88c70310b0bfdfb2551b15f718d5ef306df331394d27f59b3e16db9808a3d1fb74d90637f92716ea7208d1fe269e70610082bf5bba3eca2f2180fc6";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();

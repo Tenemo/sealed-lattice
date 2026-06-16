@@ -141,10 +141,6 @@ pub(in super::super) fn same_secret_proofs_object(
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily":
                 crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
-            "proofVerificationStatus":
-                crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus":
-                crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -192,10 +188,6 @@ pub(in super::super) fn same_secret_proofs_object(
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily":
             crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
-        "proofVerificationStatus":
-            crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus":
-            crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
         "proofAccountingHash":
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()
                 .expect("same-secret anchor accounting hash"),

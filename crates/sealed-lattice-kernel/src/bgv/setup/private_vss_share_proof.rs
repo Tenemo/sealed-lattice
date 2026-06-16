@@ -20,9 +20,8 @@ use super::{
     },
     sharing::canonical_trustee_point,
     trustee_evaluation_key_proof::{
-        PRIVATE_VSS_SHARE_PROOF_FAMILY, PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS, PrivateVssShareStatement,
-        SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+        PRIVATE_VSS_SHARE_PROOF_FAMILY, PrivateVssShareStatement, SuccinctSetupProofContext,
+        TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
         decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
         private_vss_share_succinct_proof_bytes_hash, prove_evaluation_key_share,
         succinct_private_vss_share_accounting_hash, verify_evaluation_key_share,
@@ -281,18 +280,6 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
             ));
         }
     }
-    expect_string_field(
-        proof_record,
-        "proofVerificationStatus",
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        "private VSS share proofVerificationStatus does not match the accepted verifier status",
-    )?;
-    expect_string_field(
-        proof_record,
-        "proofModelStatus",
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        "private VSS share proofModelStatus does not match the accepted verifier model status",
-    )?;
     expect_string_field(
         proof_record,
         "proofAccountingHash",
@@ -747,8 +734,6 @@ fn private_vss_share_succinct_statement_value(
         "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "proofProfileId": PRIVATE_VSS_SHARE_PROOF_PROFILE_ID,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "proofVerificationStatus": PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         "proofAccountingHash": succinct_private_vss_share_accounting_hash()?,
         "setupContext": input.setup_context,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
@@ -1021,8 +1006,6 @@ pub(super) fn private_vss_share_succinct_proof_record(
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
-        "proofVerificationStatus": PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         "proofAccountingHash": proof_accounting_hash,
         "proofStatementRoot": proof_statement_root,
         "statementHash": statement_hash_hex,

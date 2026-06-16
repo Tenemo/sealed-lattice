@@ -36,9 +36,6 @@ export {
     publicKeyShareMaterialEncoding,
     publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
-    publicKeyShareProofVerificationStatus,
-    publicKeyShareSuccinctProofModelStatus,
-    publicKeyShareSuccinctProofVerificationStatus,
     materialRecordsFromTransportedPublicKeyShareMaterial,
 } from './setup/public-key-share-records.js';
 export {
@@ -51,11 +48,8 @@ export {
     evaluationKeyShareComponentMaterialEncoding,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
-    evaluationKeyShareRecordVerificationStatus,
     transportTrusteeEvaluationKeyProofSet,
     trusteeEvaluationKeyProofFamily,
-    trusteeEvaluationKeyProofModelStatus,
-    trusteeEvaluationKeyProofVerificationStatus,
 } from './setup/evaluation-key-proof-records.js';
 export {
     createEvaluatorKeySchedule,
@@ -119,12 +113,9 @@ export {
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
     sameSecretAnchorArgument,
-    sameSecretAnchorProofModelStatus,
-    sameSecretAnchorProofVerificationStatus,
     sameSecretBoundProofFamilies,
     sameSecretGenericKeySwitchBindingPolicy,
     sameSecretProofFamily,
-    sameSecretProofVerificationStatus,
     sameSecretRelation,
     sameSecretTargetDecryptionBindingPolicy,
     setupProofProfileId,

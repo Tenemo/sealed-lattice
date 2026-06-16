@@ -13,15 +13,6 @@ export type EvaluationKeyShareProofFamily =
     | 'relinearization-key-share'
     | 'galois-key-share';
 
-// Share records carry no proof fields: their correctness claim is the
-// per-trustee succinct evaluation-key argument, so every record pins this
-// status pair. Mirrors the kernel record statuses.
-export const evaluationKeyShareRecordVerificationStatus =
-    'share-records-bound-to-trustee-evaluation-key-argument';
-export const trusteeEvaluationKeyProofModelStatus =
-    'succinct-trustee-evaluation-key-argument-accounting-accepted';
-export const trusteeEvaluationKeyProofVerificationStatus =
-    'succinct-trustee-evaluation-key-argument-verified-with-accepted-proof-accounting';
 export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
 export const publicEvaluationKeyAssemblyStatus =
     'assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate';
@@ -147,8 +138,6 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
-        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
-        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly level: number;
@@ -177,8 +166,6 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
-        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
-        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly level: number;
@@ -210,8 +197,6 @@ export type RelinearizationKeyShareRounds = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
-        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
-        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -268,8 +253,6 @@ export type GaloisKeyShareBatch = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'galois-key-share';
-        readonly proofVerificationStatus: typeof evaluationKeyShareRecordVerificationStatus;
-        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -311,8 +294,6 @@ export type TrusteeEvaluationKeyProofRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
-        readonly proofVerificationStatus: typeof trusteeEvaluationKeyProofVerificationStatus;
-        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly sameSecretStatementRoot: ProtocolHash;
@@ -336,8 +317,6 @@ export type TrusteeEvaluationKeyProofSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
-        readonly proofVerificationStatus: typeof trusteeEvaluationKeyProofVerificationStatus;
-        readonly proofModelStatus: typeof trusteeEvaluationKeyProofModelStatus;
         readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -397,7 +376,6 @@ export type TrusteeEvaluationKeyStatementContext = Readonly<{
 export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly ok: true;
     readonly operation: 'generateTrusteeEvaluationKeyProof';
-    readonly proofModelStatus: string;
     readonly proofAccountingHash: ProtocolHash;
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;

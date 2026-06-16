@@ -7,7 +7,6 @@ import { setupTransportChunkSizeBytes } from '../vss-coefficient-commitments.js'
 import {
     publicKeyShareMaterialEncoding,
     publicKeyShareProofFamily,
-    publicKeyShareSuccinctProofModelStatus,
     type PublicKeyShareCoefficientVectorMaterial,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialRecord,
@@ -157,7 +156,6 @@ export const publicKeyShareMaterialRecordsFromContributions = (
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
-                proofModelStatus: publicKeyShareSuccinctProofModelStatus,
                 materialEncoding: publicKeyShareMaterialEncoding,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -233,7 +231,6 @@ export const createPublicKeyShareMaterialSet = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         materialEncoding: publicKeyShareMaterialEncoding,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

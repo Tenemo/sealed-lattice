@@ -30,9 +30,20 @@ pub(super) struct BuiltTrusteeEvaluationKeyProofRecord {
 // proving all ten trustees at once needs far more than physical memory and
 // forces heavy paging. Generating the proofs in batches of this size keeps
 // per-trustee proving parallel (each batch member still uses the shared work
-// pool for its internal parallelism) while capping concurrent prover memory to
-// fit a workstation-class machine.
-pub(super) const TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE: usize = 3;
+// pool for its internal parallelism) while capping concurrent prover memory.
+// Three fits a workstation-class machine; a memory-constrained host such as a
+// 16 GiB CI runner exports SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE through the
+// memory-aware heavy test runner so the build stays within available memory
+// instead of being killed mid-proving.
+const DEFAULT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE: usize = 3;
+
+pub(super) fn trustee_evaluation_key_proof_generation_batch_size() -> usize {
+    std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE")
+        .ok()
+        .and_then(|configured_batch_size| configured_batch_size.parse::<usize>().ok())
+        .filter(|configured_batch_size| *configured_batch_size >= 1)
+        .unwrap_or(DEFAULT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE)
+}
 
 // The proof-bearing fixtures are split by proof family. Each sub-module begins
 // with `use super::super::*;` (to reach the accepted_setup test glob) and

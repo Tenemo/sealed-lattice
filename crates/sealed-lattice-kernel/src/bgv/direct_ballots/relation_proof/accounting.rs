@@ -1,15 +1,5 @@
 use super::*;
 
-pub(super) fn direct_ballot_relation_proof_gate(proof_size_bytes: usize) -> &'static str {
-    if proof_size_bytes <= DIRECT_BALLOT_RELATION_PROOF_GREEN_BYTES {
-        "green: proof bytes are within the target size"
-    } else if proof_size_bytes <= DIRECT_BALLOT_RELATION_PROOF_YELLOW_BYTES {
-        "yellow: proof bytes are large but below the stop threshold"
-    } else {
-        "red: proof bytes exceed the stop threshold"
-    }
-}
-
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {

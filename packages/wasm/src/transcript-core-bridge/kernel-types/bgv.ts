@@ -754,7 +754,6 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
         | 'trustee-evaluation-key'
         | 'same-secret-linkage-anchor'
         | 'public-key-share';
-    readonly proofModelStatus: string;
     readonly proofAccountingHash: ProtocolHash;
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
@@ -777,7 +776,6 @@ export type BgvTrusteeEvaluationKeyProofVerification = {
         | 'trustee-evaluation-key'
         | 'same-secret-linkage-anchor'
         | 'public-key-share';
-    readonly proofModelStatus: string;
     readonly proofAccountingHash: ProtocolHash;
     readonly proofAccounting: Readonly<Record<string, unknown>>;
     readonly statementHash: ProtocolHash;

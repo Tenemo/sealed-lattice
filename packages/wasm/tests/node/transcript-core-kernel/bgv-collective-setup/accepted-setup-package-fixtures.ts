@@ -47,8 +47,6 @@ import {
     createPublicKeyShareSet,
     createPublicKeyShareSuccinctProofSet,
     publicKeyShareProofFamily,
-    publicKeyShareSuccinctProofModelStatus,
-    publicKeyShareSuccinctProofVerificationStatus,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialContributionInput,
     type PublicKeyShareMaterialSet,
@@ -60,8 +58,6 @@ import {
 import {
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
-    sameSecretAnchorProofModelStatus,
-    sameSecretAnchorProofVerificationStatus,
     sameSecretProofFamily,
     setupProofProfileId,
     type SameSecretConsistencyStatementSet,
@@ -165,8 +161,6 @@ export function sameSecretProofsWithDriftedStatementHashes(
         sameSecretConsistency.statementRecords.map((statementRecord) => ({
             setupProofProfileId,
             proofFamily: sameSecretProofFamily,
-            proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
-            proofModelStatus: sameSecretAnchorProofModelStatus,
             trusteeIdentity: statementRecord.trusteeIdentity,
             trusteeRosterPosition: statementRecord.trusteeRosterPosition,
             statementHash: validHash('7'),
@@ -340,9 +334,6 @@ export function sameSecretProofsWithGeneratedProofs(
                 return {
                     setupProofProfileId,
                     proofFamily: sameSecretProofFamily,
-                    proofVerificationStatus:
-                        sameSecretAnchorProofVerificationStatus,
-                    proofModelStatus: sameSecretAnchorProofModelStatus,
                     trusteeIdentity:
                         sourceTrusteeOpeningMaterial.sourceTrusteeIdentity,
                     trusteeRosterPosition:
@@ -542,9 +533,6 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
         publicKeyShares.shareRecords.map((shareRecord) => ({
             setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
-            proofVerificationStatus:
-                publicKeyShareSuccinctProofVerificationStatus,
-            proofModelStatus: publicKeyShareSuccinctProofModelStatus,
             trusteeIdentity: shareRecord.trusteeIdentity,
             trusteeRosterPosition: shareRecord.trusteeRosterPosition,
             statementHash: validHash('8'),

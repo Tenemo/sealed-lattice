@@ -92,7 +92,6 @@ export type VssShareAcceptanceRecord = Readonly<
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly privateEnvelopeHash: ProtocolHash;
         readonly localVerificationRoot: ProtocolHash;
-        readonly verificationStatus: 'accepted';
         readonly recoveryEpoch: number;
         readonly deviceEpoch: number;
         readonly signingPublicKeyHash: ProtocolHash;
@@ -117,7 +116,6 @@ export type VssShareComplaintRecord = Readonly<
         readonly privateEnvelopeHash: ProtocolHash;
         readonly complaintEvidenceRoot: ProtocolHash;
         readonly complaintReasonCode: string;
-        readonly complaintStatus: 'valid-complaint-aborts-setup';
         readonly recoveryEpoch: number;
         readonly deviceEpoch: number;
         readonly signingPublicKeyHash: ProtocolHash;
@@ -334,7 +332,6 @@ export const createVssShareAcceptanceRecord = async (
             input.envelopeReference,
         ),
         localVerificationRoot: input.envelopeReference.localVerificationRoot,
-        verificationStatus: 'accepted',
         recoveryEpoch: input.recoveryEpoch,
         deviceEpoch: input.deviceEpoch,
         signingPublicKeyHash: input.signingPublicKeyHash,
@@ -444,7 +441,6 @@ export const createVssShareComplaintRecord = async (
         ),
         complaintEvidenceRoot: input.complaintEvidenceRoot,
         complaintReasonCode: input.complaintReasonCode,
-        complaintStatus: 'valid-complaint-aborts-setup',
         recoveryEpoch: input.recoveryEpoch,
         deviceEpoch: input.deviceEpoch,
         signingPublicKeyHash: input.signingPublicKeyHash,

@@ -820,17 +820,6 @@ fn verify_vss_coefficient_commitment_record(
             ),
         )?;
     }
-    if coefficient_record
-        .get("openingVerificationStatus")
-        .and_then(Value::as_str)
-        != Some("pending-private-envelope-opening")
-    {
-        return Ok(Some(vss_commitment_refusal(
-            "vssCoefficientCommitmentOpeningStatusMismatch",
-            "VSS coefficient commitment openingVerificationStatus must be pending-private-envelope-opening until private VSS envelopes are verified",
-            "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.openingVerificationStatus",
-        )?));
-    }
 
     Ok(None)
 }

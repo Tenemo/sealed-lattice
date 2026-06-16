@@ -198,14 +198,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         .expect("private VSS proof record");
     assert_eq!(proof_record["proofFamily"], "vss-opening-carry");
     assert_eq!(
-        proof_record["proofVerificationStatus"],
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS
-    );
-    assert_eq!(
-        proof_record["proofModelStatus"],
-        PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS
-    );
-    assert_eq!(
         proof_record["proofAccountingHash"],
         serde_json::json!(
             succinct_private_vss_share_accounting_hash()
@@ -997,7 +989,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                         "shamirCoefficientIndex": shamir_coefficient_index,
                     }),
                 ).expect("coefficient vector hash"),
-                "openingVerificationStatus": "pending-private-envelope-opening",
             }));
             source_trustee_coefficient_commitment_material_records.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitmentMaterial",

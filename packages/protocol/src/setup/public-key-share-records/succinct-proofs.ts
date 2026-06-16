@@ -17,8 +17,6 @@ import {
 
 import {
     publicKeyShareProofFamily,
-    publicKeyShareSuccinctProofModelStatus,
-    publicKeyShareSuccinctProofVerificationStatus,
     type BinaryChunkedPublicKeyShareProofMaterialTransport,
     type JsonRecord,
     type PublicKeyShareMaterialRootReference,
@@ -253,19 +251,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
     }
     if (material.proofFamily !== publicKeyShareProofFamily) {
         throw new Error(`${fieldName}.proofFamily must be public-key share.`);
-    }
-    if (
-        material.proofVerificationStatus !==
-        publicKeyShareSuccinctProofVerificationStatus
-    ) {
-        throw new Error(
-            `${fieldName}.proofVerificationStatus must be the public-key share succinct verification status.`,
-        );
-    }
-    if (material.proofModelStatus !== publicKeyShareSuccinctProofModelStatus) {
-        throw new Error(
-            `${fieldName}.proofModelStatus must match public-key share succinct proof model.`,
-        );
     }
     assertNonEmptyString(
         material.trusteeIdentity,
@@ -513,9 +498,6 @@ export const createPublicKeyShareSuccinctProofSet = (
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
-                proofVerificationStatus:
-                    publicKeyShareSuccinctProofVerificationStatus,
-                proofModelStatus: publicKeyShareSuccinctProofModelStatus,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
@@ -556,8 +538,6 @@ export const createPublicKeyShareSuccinctProofSet = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
-        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

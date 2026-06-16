@@ -187,8 +187,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "sharedResponsePolynomialCount": first_proof.shared_response_polynomial_count,
             "sharedScoreResponseScalarCount": first_proof.shared_response_scalar_count,
             "provingTimeMilliseconds": total_proving_time_milliseconds.report_value(),
-            "verificationTimeMilliseconds": total_verification_time_milliseconds.report_value(),
-            "proofGate": first_proof.proof_gate
+            "verificationTimeMilliseconds": total_verification_time_milliseconds.report_value()
         },
         "aggregation": aggregation_result.report,
         "evaluatorReplay": evaluator_replay

@@ -82,8 +82,6 @@ pub(super) fn same_secret_consistency_object(
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
             "vssSourceTrusteeCommitmentRoot": vss_source_trustee_commitment_root,
-            "secretCommitmentSource": "vss-constant-coefficient-commitments",
-            "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
             "constantCoefficientCommitmentRoots": constant_coefficient_commitment_roots,
         });
         let trustee_secret_commitment_root = derive_protocol_hash(
@@ -98,7 +96,6 @@ pub(super) fn same_secret_consistency_object(
             "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
-            "proofVerificationStatus": "anchor-proof-verification-pending",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -141,7 +138,6 @@ pub(super) fn same_secret_consistency_object(
         "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "same-secret-linkage-anchor",
-        "proofVerificationStatus": "anchor-proof-verification-pending",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

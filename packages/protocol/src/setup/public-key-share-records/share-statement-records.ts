@@ -8,7 +8,6 @@ import {
 import {
     publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
-    publicKeyShareProofVerificationStatus,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
     type PublicKeyShareProofRecord,
@@ -291,7 +290,6 @@ export const createPublicKeyShareProofSet = (
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
-                proofVerificationStatus: publicKeyShareProofVerificationStatus,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
                 trusteeRosterPosition: shareRecord.trusteeRosterPosition,
@@ -327,7 +325,6 @@ export const createPublicKeyShareProofSet = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofVerificationStatus: publicKeyShareProofVerificationStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

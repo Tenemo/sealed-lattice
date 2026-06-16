@@ -138,7 +138,6 @@ export type VssCoefficientCommitmentRecord = Readonly<
         readonly commitmentRoot: ProtocolHash;
         readonly commitmentChunkRoot: ProtocolHash;
         readonly coefficientVectorHash512: string;
-        readonly openingVerificationStatus: 'pending-private-envelope-opening';
     }
 >;
 

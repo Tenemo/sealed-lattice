@@ -56,8 +56,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "publicKeyComponentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
         "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
         "participantCount": public_key_share_roots.len(),
-        "externallySuppliedSecretReconstruction": false,
-        "rawSecretShareExported": false,
     });
     let collective_public_key_root =
         derive_protocol_hash("CollectivePublicKeyRoot", &record_without_roots)?;
@@ -249,8 +247,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
         "participants": participant_descriptors,
         "modulusSummaries": modulus_summaries,
         "coefficientTables": coefficient_tables,
-        "algebraicPublicKeyProofStatus": "BgvAlgebraicPublicKeyProofMissing",
-        "rawSecretShareExported": false,
     }))
 }
 

@@ -1,10 +1,6 @@
 use super::*;
 
 use crate::bgv::coefficient_codec::coefficient_vector_hash512;
-use crate::bgv::setup::trustee_evaluation_key_proof::{
-    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-};
 
 // Canonical per-limb hash of a public-key share coefficient vector, bound into
 // the public-key share records and the public-key share material records.
@@ -110,18 +106,6 @@ pub(super) fn verify_collective_public_key_material(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        (
-            "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        ),
-        (
-            "aggregationStatus",
-            "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
-        ),
         (
             "materialEncoding",
             "embedded-full-collective-public-key-coefficients",
@@ -1247,7 +1231,6 @@ fn decode_public_key_share_material_bindings(
             "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
             "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "public-key-share",
-            "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
             "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,
             "manifestHash": value_string(setup_context, "manifestHash")?,
@@ -1334,10 +1317,6 @@ pub(super) fn verify_public_key_share_material_set(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        ),
     ] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1483,10 +1462,6 @@ fn verify_public_key_share_material_record(
         (
             "materialEncoding",
             "embedded-full-public-key-share-coefficients",
-        ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         ),
     ] {
         if material_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {

@@ -5,9 +5,8 @@ use rayon::prelude::*;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PUBLIC_KEY_SHARE_PROOF_FAMILY, PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS, SameSecretLinkageStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
+    PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
     public_key_share_succinct_proof_bytes_hash, succinct_public_key_share_accounting_hash,
     verify_evaluation_key_share,
 };
@@ -832,10 +831,6 @@ pub(super) fn verify_public_key_share_proofs(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        (
-            "proofVerificationStatus",
-            "succinct-proof-verification-pending",
-        ),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
@@ -1149,14 +1144,6 @@ pub(super) fn verify_optional_public_key_share_succinct_proofs(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        ),
         ("proofAccountingHash", expected_accounting_hash.as_str()),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -1392,14 +1379,6 @@ fn verify_public_key_share_succinct_proof_record(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
@@ -1752,18 +1731,6 @@ fn verify_public_key_share_proof_record(
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
-        (
-            "proofVerificationStatus",
-            "succinct-proof-verification-pending",
-        ),
-        (
-            "errorSupport",
-            "checked-by-public-key-share-succinct-proof-set",
-        ),
-        (
-            "proofBytesStatus",
-            "supplied-by-public-key-share-succinct-proof-set",
-        ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(

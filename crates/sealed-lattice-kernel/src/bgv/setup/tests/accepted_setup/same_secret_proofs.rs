@@ -151,30 +151,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_befo
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_weakened_same_secret_proof_model_status()
-{
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_weakened_same_secret_proof_model_status",
-    );
-    let mut package = same_secret_proof_bearing_collective_setup_package();
-    package["sameSecretProofs"]["proofModelStatus"] =
-        serde_json::json!("weakened-same-secret-proof-model");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "sameSecretProofSetProfileMismatch"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_same_secret_proof_container() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_same_secret_proof_container",

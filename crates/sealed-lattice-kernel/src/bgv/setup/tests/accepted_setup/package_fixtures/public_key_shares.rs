@@ -161,7 +161,6 @@ pub(super) fn public_key_share_proofs_object(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofVerificationStatus": "succinct-proof-verification-pending",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -199,7 +198,6 @@ pub(super) fn public_key_share_proofs_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": "succinct-proof-verification-pending",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -270,8 +268,6 @@ pub(super) fn evaluator_key_schedule_object(
         "requiredGaloisKeySchedule": schedule_profile["requiredGaloisKeySchedule"],
         "requiredGaloisSetHash": schedule_profile["requiredGaloisSetHash"],
         "genericKeySwitchPolicy": "refused-unless-explicitly-required",
-        "genericKeySwitchProofStatus": "not-required-for-first-profile",
-        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting",
     });
     schedule["evaluatorKeyScheduleRoot"] = serde_json::json!(
         derive_protocol_hash("EvaluatorKeyScheduleRoot", &schedule)

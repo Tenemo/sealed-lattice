@@ -168,7 +168,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "evaluatorReplayContextHash": evaluator_replay_context_hash,
             "evaluatorReplayRecordHash": evaluator_replay_record_hash,
             "targetProposal": target_proposal,
-            "timingStatus": direct_ballot_timing_status(),
             "replayTimeMilliseconds": direct_ballot_timing_report_value(replay_time_milliseconds)
         });
         if let Some(material_hash) = public_evaluation_key_material_hash {

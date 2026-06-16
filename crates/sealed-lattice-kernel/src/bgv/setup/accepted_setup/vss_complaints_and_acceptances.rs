@@ -383,17 +383,6 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.complaintReasonCode",
         )?));
     }
-    if complaint_record
-        .get("complaintStatus")
-        .and_then(Value::as_str)
-        != Some("valid-complaint-aborts-setup")
-    {
-        return Ok(Some(vss_complaint_refusal(
-            "vssComplaintStatusMismatch",
-            "VSS complaint complaintStatus must be valid-complaint-aborts-setup",
-            "setupPackage.vssComplaints.complaintRecords.complaintStatus",
-        )?));
-    }
 
     let recovery_epoch = complaint_record
         .get("recoveryEpoch")
@@ -588,7 +577,6 @@ fn vss_complaint_payload_value(complaint_record: &Value) -> CanonicalResult<Valu
         "privateEnvelopeHash": value_string(complaint_record, "privateEnvelopeHash")?,
         "complaintEvidenceRoot": value_string(complaint_record, "complaintEvidenceRoot")?,
         "complaintReasonCode": value_string(complaint_record, "complaintReasonCode")?,
-        "complaintStatus": "valid-complaint-aborts-setup",
         "recoveryEpoch": value_u64(complaint_record, "recoveryEpoch")?,
         "deviceEpoch": value_u64(complaint_record, "deviceEpoch")?,
         "signingPublicKeyHash": value_string(complaint_record, "signingPublicKeyHash")?,
@@ -1083,17 +1071,6 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.localVerificationRoot",
         )?));
     }
-    if acceptance_record
-        .get("verificationStatus")
-        .and_then(Value::as_str)
-        != Some("accepted")
-    {
-        return Ok(Some(vss_share_acceptance_refusal(
-            "vssShareAcceptanceStatusMismatch",
-            "VSS share acceptance verificationStatus must be accepted",
-            "setupPackage.vssShareAcceptances.acceptanceRecords.verificationStatus",
-        )?));
-    }
 
     let recovery_epoch = acceptance_record
         .get("recoveryEpoch")
@@ -1295,7 +1272,6 @@ fn vss_share_acceptance_payload_value(acceptance_record: &Value) -> CanonicalRes
         )?,
         "privateEnvelopeHash": value_string(acceptance_record, "privateEnvelopeHash")?,
         "localVerificationRoot": value_string(acceptance_record, "localVerificationRoot")?,
-        "verificationStatus": "accepted",
         "recoveryEpoch": value_u64(acceptance_record, "recoveryEpoch")?,
         "deviceEpoch": value_u64(acceptance_record, "deviceEpoch")?,
         "signingPublicKeyHash": value_string(acceptance_record, "signingPublicKeyHash")?,

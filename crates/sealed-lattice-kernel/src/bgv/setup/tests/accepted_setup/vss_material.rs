@@ -358,16 +358,6 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
         "vssShareAcceptancePrivateEnvelopeHashMismatch",
     );
 
-    assert_minimal_collective_setup_package_refused_without_handoff(
-        "wrong VSS share acceptance verification status",
-        |package| {
-            package["vssShareAcceptances"]["acceptanceRecords"][0]["verificationStatus"] =
-                serde_json::json!("pending-local-private-vss-opening");
-            rebind_collective_vss_acceptance_root(package);
-        },
-        "vssShareAcceptanceStatusMismatch",
-    );
-
     assert_minimal_collective_setup_package_refused(
         "tampered VSS share acceptance signature",
         |package| {

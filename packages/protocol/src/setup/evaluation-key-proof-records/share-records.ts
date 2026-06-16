@@ -20,9 +20,7 @@ import {
     type RelinearizationKeyShareRoundsInput,
     type SameSecretProofReference,
     evaluationKeyShareComponentMaterialEncoding,
-    evaluationKeyShareRecordVerificationStatus,
     setupContextFieldNames,
-    trusteeEvaluationKeyProofModelStatus,
 } from './constants-and-types.js';
 import {
     assertLowercaseHex,
@@ -508,9 +506,6 @@ export const createRelinearizationKeyShareRounds = (
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
-                    proofVerificationStatus:
-                        evaluationKeyShareRecordVerificationStatus,
-                    proofModelStatus: trusteeEvaluationKeyProofModelStatus,
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -618,9 +613,6 @@ export const createRelinearizationKeyShareRounds = (
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
-                    proofVerificationStatus:
-                        evaluationKeyShareRecordVerificationStatus,
-                    proofModelStatus: trusteeEvaluationKeyProofModelStatus,
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -696,8 +688,6 @@ export const createRelinearizationKeyShareRounds = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: 'relinearization-key-share',
-        proofVerificationStatus: evaluationKeyShareRecordVerificationStatus,
-        proofModelStatus: trusteeEvaluationKeyProofModelStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -838,8 +828,6 @@ export const createGaloisKeyShareBatches = (
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId,
             proofFamily: 'galois-key-share',
-            proofVerificationStatus: evaluationKeyShareRecordVerificationStatus,
-            proofModelStatus: trusteeEvaluationKeyProofModelStatus,
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
             trusteeRosterPosition: proofReference.trusteeRosterPosition,

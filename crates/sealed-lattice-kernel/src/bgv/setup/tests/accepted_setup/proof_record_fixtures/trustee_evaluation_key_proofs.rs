@@ -87,10 +87,10 @@ fn trustee_evaluation_key_proofs_object_inner(
         // scale with (and stay within) the machine's memory.
         std::thread::available_parallelism()
             .map(|cores| (cores.get() / 4).max(1))
-            .unwrap_or(TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE)
+            .unwrap_or_else(|_| trustee_evaluation_key_proof_generation_batch_size())
             .min(same_secret_proofs.len())
     } else {
-        TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+        trustee_evaluation_key_proof_generation_batch_size()
     };
     let mut built_records: Vec<BuiltTrusteeEvaluationKeyProofRecord> =
         Vec::with_capacity(same_secret_proofs.len());
@@ -120,8 +120,6 @@ fn trustee_evaluation_key_proofs_object_inner(
                     "setupProfileId": "CollectiveBgvSetup-v1",
                     "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-                    "proofVerificationStatus": TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-                    "proofModelStatus": TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
                     "ceremonyId": setup_context["ceremonyId"],
                     "manifestHash": setup_context["manifestHash"],
                     "rosterHash": setup_context["rosterHash"],
@@ -209,8 +207,6 @@ fn trustee_evaluation_key_proofs_object_inner(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        "proofVerificationStatus": TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
         "proofAccountingHash": succinct_evaluation_key_proof_accounting_hash()
             .expect("succinct evaluation-key proof accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],

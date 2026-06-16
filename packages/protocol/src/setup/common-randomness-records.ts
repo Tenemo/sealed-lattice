@@ -370,11 +370,6 @@ const assertPublicDerivationsMatchKernelShape = (
             'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
         );
     }
-    if (publicDerivations.status !== 'deterministic-public-derivations-bound') {
-        throw new Error(
-            'publicDerivations.status must be deterministic-public-derivations-bound.',
-        );
-    }
 
     const bgvPublicA = assertJsonRecord(
         publicDerivations.bgvPublicA,
@@ -403,9 +398,7 @@ const assertPublicDerivationsMatchKernelShape = (
         publicMatrices.objectType !== 'SetupPublicMatrixMaterial' ||
         publicMatrices.objectVersion !== 1 ||
         publicMatrices.setupProfileId !== 'CollectiveBgvSetup-v1' ||
-        publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash ||
-        publicMatrices.materializationStatus !==
-            'deterministic-entry-streams-bound'
+        publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
             'publicDerivations.publicMatrices must match the accepted setup public matrix profile.',

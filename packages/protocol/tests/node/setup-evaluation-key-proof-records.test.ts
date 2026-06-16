@@ -10,11 +10,8 @@ import {
     createTrusteeEvaluationKeyProofs,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
-    evaluationKeyShareRecordVerificationStatus,
     transportTrusteeEvaluationKeyProofSet,
     trusteeEvaluationKeyProofFamily,
-    trusteeEvaluationKeyProofModelStatus,
-    trusteeEvaluationKeyProofVerificationStatus,
     type EvaluationKeyProofCommonInput,
     type EvaluationKeyShareMaterial,
     type GaloisKeyShareBatchContribution,
@@ -399,7 +396,6 @@ const stubGenerator = (
         return {
             ok: true,
             operation: 'generateTrusteeEvaluationKeyProof',
-            proofModelStatus: trusteeEvaluationKeyProofModelStatus,
             proofAccountingHash: fixtureHash('proof-accounting'),
             statementHash: fixtureHash(
                 `statement-${String(input.context.trusteeRosterPosition)}`,
@@ -508,12 +504,6 @@ describe('createRelinearizationKeyShareRounds', () => {
         });
 
         expect(rounds.objectType).toBe('RelinearizationKeyShareRounds');
-        expect(rounds.proofVerificationStatus).toBe(
-            evaluationKeyShareRecordVerificationStatus,
-        );
-        expect(rounds.proofModelStatus).toBe(
-            trusteeEvaluationKeyProofModelStatus,
-        );
         expect(rounds.publicKeyShareSetRoot).toBe(
             fixture.schedule.publicKeyShareSetRoot,
         );
@@ -706,9 +696,6 @@ describe('createGaloisKeyShareBatches', () => {
         batches.forEach((batch, batchIndex) => {
             expect(batch.objectType).toBe('GaloisKeyShareBatch');
             expect(batch.trusteeRosterPosition).toBe(batchIndex);
-            expect(batch.proofVerificationStatus).toBe(
-                evaluationKeyShareRecordVerificationStatus,
-            );
             expect(batch.galoisKeyShareMaterialRecords).toHaveLength(
                 requiredGaloisKeySchedule.length,
             );
@@ -884,9 +871,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         );
         expect(trusteeEvaluationKeyProofs.proofFamily).toBe(
             trusteeEvaluationKeyProofFamily,
-        );
-        expect(trusteeEvaluationKeyProofs.proofVerificationStatus).toBe(
-            trusteeEvaluationKeyProofVerificationStatus,
         );
         expect(trusteeEvaluationKeyProofs.proofAccountingHash).toBe(
             fixtureHash('proof-accounting'),

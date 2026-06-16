@@ -122,8 +122,6 @@ fn galois_key_share_batches_object_inner(
                 "setupProfileId": "CollectiveBgvSetup-v1",
                 "setupProofProfileId": "SealedLattice-SetupProof-v1",
                 "proofFamily": "galois-key-share",
-                "proofVerificationStatus": EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS,
-                "proofModelStatus": TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS,
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
                 "rosterHash": setup_context["rosterHash"],

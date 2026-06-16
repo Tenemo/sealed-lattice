@@ -53,18 +53,6 @@ pub(super) fn verify_evaluator_key_schedule(
     for (field_name, expected_value) in [
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        (
-            "genericKeySwitchPolicy",
-            "refused-unless-explicitly-required",
-        ),
-        (
-            "genericKeySwitchProofStatus",
-            "not-required-for-first-profile",
-        ),
-        (
-            "scheduleBindingStatus",
-            "relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting",
-        ),
     ] {
         if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluator_key_schedule_refusal(
@@ -303,36 +291,22 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
 pub(super) fn verify_generic_key_switch_policy(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    let evaluator_key_schedule = setup_package
-        .get("evaluatorKeySchedule")
-        .and_then(Value::as_object);
-    let generic_key_switch_policy = evaluator_key_schedule
-        .and_then(|schedule| schedule.get("genericKeySwitchPolicy"))
-        .and_then(Value::as_str)
-        .unwrap_or("refused-unless-explicitly-required");
-    if setup_package.get("genericKeySwitchKeys").is_some()
-        && generic_key_switch_policy != "explicitly-required-by-frozen-schedule"
-    {
+    // The first profile never schedules generic key-switch material and the matching
+    // proof family is unimplemented, so any generic key-switch keys are refused
+    // unconditionally. The frozen evaluator-key schedule the verifier recomputes
+    // (verify_evaluator_key_schedule, EvaluatorKeyScheduleRoot) covers only the
+    // relinearization and Galois key roots and never binds a top-level
+    // genericKeySwitchKeys object, so this is the sole coverage for its absence.
+    if setup_package.get("genericKeySwitchKeys").is_some() {
         return Ok(Some(verification_response(
             VerifierStatus::Refused,
             Some("setupPackageVerification"),
             Vec::new(),
             vec![Refusal::new(
                 "genericKeySwitchOutsideProfile",
-                "generic key-switch material is refused unless the frozen evaluator schedule explicitly requires it",
+                "generic key-switch material is refused: the first profile never schedules it and the matching proof family is unimplemented",
                 "setupPackage.genericKeySwitchKeys".to_string(),
             )],
-            Vec::new(),
-        )?));
-    }
-    if generic_key_switch_policy == "explicitly-required-by-frozen-schedule"
-        && setup_package.get("genericKeySwitchProofs").is_none()
-    {
-        return Ok(Some(verification_response(
-            VerifierStatus::Pending,
-            Some("setupPackageVerification"),
-            vec!["genericKeySwitchProofs".to_string()],
-            Vec::new(),
             Vec::new(),
         )?));
     }

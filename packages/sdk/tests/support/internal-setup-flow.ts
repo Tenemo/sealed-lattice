@@ -323,7 +323,6 @@ export type VssShareAcceptance = Readonly<
         readonly privateVssEnvelopeCommitmentRoot: ProtocolHash;
         readonly privateEnvelopeHash: ProtocolHash;
         readonly localVerificationRoot: ProtocolHash;
-        readonly verificationStatus: 'accepted';
         readonly recoveryEpoch: number;
         readonly deviceEpoch: number;
         readonly signingPublicKeyHash: ProtocolHash;
@@ -359,7 +358,6 @@ export type VssComplaint = Readonly<
         readonly privateEnvelopeHash: ProtocolHash;
         readonly complaintEvidenceRoot: ProtocolHash;
         readonly complaintReasonCode: string;
-        readonly complaintStatus: 'valid-complaint-aborts-setup';
         readonly recoveryEpoch: number;
         readonly deviceEpoch: number;
         readonly signingPublicKeyHash: ProtocolHash;

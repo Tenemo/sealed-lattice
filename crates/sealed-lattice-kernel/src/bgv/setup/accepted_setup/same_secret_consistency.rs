@@ -4,9 +4,8 @@ use super::*;
 use rayon::prelude::*;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
-    SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
-    SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS, SameSecretLinkageStatement,
-    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
+    SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
+    TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
     same_secret_anchor_proof_bytes_hash, succinct_same_secret_linkage_anchor_accounting_hash,
     verify_evaluation_key_share,
 };
@@ -86,10 +85,6 @@ pub(super) fn verify_same_secret_consistency(
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            "anchor-proof-verification-pending",
-        ),
     ] {
         if statement_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
@@ -282,23 +277,6 @@ fn verify_same_secret_statement_record(
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            "anchor-proof-verification-pending",
-        ),
-        // This relation asserts the per-limb VSS constant commitments C_i,l,0 all open to one short secret congruent across every Q_share limb, proven over the commitment modulus product by CRT.
-        (
-            "sameSecretRelation",
-            "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
-        ),
-        (
-            "genericKeySwitchBindingPolicy",
-            "absent-unless-frozen-schedule-requires-proof-family",
-        ),
-        (
-            "targetDecryptionBindingPolicy",
-            "later-target-share-must-bind-threshold-share-commitment",
-        ),
     ] {
         if statement_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
@@ -567,8 +545,6 @@ fn trustee_secret_commitment_payload(
         "trusteeIdentity": binding.trustee_identity,
         "trusteeRosterPosition": binding.trustee_roster_position,
         "vssSourceTrusteeCommitmentRoot": binding.vss_source_trustee_commitment_root,
-        "secretCommitmentSource": "vss-constant-coefficient-commitments",
-        "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         "constantCoefficientCommitmentRoots": binding.constant_commitment_roots,
     }))
 }
@@ -620,14 +596,6 @@ pub(super) fn verify_optional_same_secret_proofs(
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
-        ),
         ("proofAccountingHash", anchor_accounting_hash.as_str()),
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -844,14 +812,6 @@ fn verify_same_secret_anchor_proof_record(
         ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-        (
-            "proofVerificationStatus",
-            SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS,
-        ),
-        (
-            "proofModelStatus",
-            SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS,
-        ),
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(

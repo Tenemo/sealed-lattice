@@ -174,8 +174,6 @@ const setupProofBytesDomain =
 const setupProofSerialization = 'binary';
 const setupProofByteDecoder =
     'sealed-lattice-succinct-setup-proof-byte-decoder-v1';
-const setupProofBytesAcceptedStatus =
-    'private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting';
 const setupProofFamilies = ['vss-opening-carry'] as const;
 const succinctSameSecretLinkageAnchorAccountingHashNamespace =
     'SuccinctSameSecretLinkageAnchorAccountingHash';
@@ -946,7 +944,6 @@ const setupProofRecordBindingForCertificate = (
             'privateVssShareProofAccountingHash',
             'setupProfile.setupProofProfile',
         ),
-        proofBytesAcceptedStatus: setupProofBytesAcceptedStatus,
     };
 };
 
@@ -1065,22 +1062,6 @@ const setupProofAccountingCertificateBody = (
     ) {
         throw new Error(
             `setupProfile.setupProofProfile.profileId must be ${setupProofProfileId}.`,
-        );
-    }
-    const verificationPolicy = objectField(
-        setupProofProfile,
-        'verificationPolicy',
-        'setupProfile.setupProofProfile',
-    );
-    if (
-        stringField(
-            verificationPolicy,
-            'proofBytesAcceptedStatus',
-            'setupProfile.setupProofProfile.verificationPolicy',
-        ) !== setupProofBytesAcceptedStatus
-    ) {
-        throw new Error(
-            `setupProfile.setupProofProfile.verificationPolicy.proofBytesAcceptedStatus must be ${setupProofBytesAcceptedStatus}.`,
         );
     }
     const setupProofRecordBinding =

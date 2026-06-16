@@ -81,9 +81,7 @@ pub(super) fn verify_public_evaluation_key_set(
     for (field_name, expected_value) in [
         ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
         ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("assemblyStatus", PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS),
         ("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING),
-        ("materialSource", PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE),
     ] {
         if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
@@ -101,18 +99,6 @@ pub(super) fn verify_public_evaluation_key_set(
             return Ok(Some(evaluation_key_material_refusal(
                 "evaluationKeysCountMismatch",
                 format!("evaluationKeys.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluationKeys.{field_name}"),
-            )?));
-        }
-    }
-    for (field_name, expected_value) in [
-        ("rawKeyBytesEmbedded", false),
-        ("verifierGeneratedKeyMaterial", false),
-    ] {
-        if evaluation_keys.get(field_name).and_then(Value::as_bool) != Some(expected_value) {
-            return Ok(Some(evaluation_key_material_refusal(
-                "evaluationKeysMaterialBoundaryMismatch",
-                format!("evaluationKeys.{field_name} must be false"),
                 format!("setupPackage.evaluationKeys.{field_name}"),
             )?));
         }
@@ -1002,9 +988,7 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
             "objectVersion": 1,
             "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
             "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
             "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-            "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
             "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
             "manifestHash": value_string(evaluation_keys, "manifestHash")?,
             "rosterHash": value_string(evaluation_keys, "rosterHash")?,
@@ -1053,10 +1037,8 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
         "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
         "materialTransportEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-        "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
         "manifestHash": value_string(evaluation_keys, "manifestHash")?,
         "rosterHash": value_string(evaluation_keys, "rosterHash")?,
@@ -1092,8 +1074,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "galoisKeyRoots": evaluation_keys["galoisKeyRoots"],
         "galoisShareMaterialRoots": galois_share_material_manifest(setup_package)?,
         "genericKeySwitchKeyRoots": evaluation_keys["genericKeySwitchKeyRoots"],
-        "rawKeyBytesEmbedded": false,
-        "verifierGeneratedKeyMaterial": false,
     }))
 }
 
@@ -1317,9 +1297,7 @@ fn expected_relinearization_key_roots_for_evaluation_keys(
                     "objectVersion": 1,
                     "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
                     "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-                    "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
                     "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
-                    "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
                     "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                     "sameSecretProofFamilyBindingRoot": binding
                         .same_secret_proof_family_binding_root
@@ -1442,9 +1420,7 @@ fn expected_galois_key_roots_for_evaluation_keys(
                     "objectVersion": 1,
                     "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
                     "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-                    "assemblyStatus": PUBLIC_EVALUATION_KEY_ASSEMBLY_STATUS,
                     "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
-                    "materialSource": PUBLIC_EVALUATION_KEY_MATERIAL_SOURCE,
                     "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                     "sameSecretProofFamilyBindingRoot": binding
                         .same_secret_proof_family_binding_root

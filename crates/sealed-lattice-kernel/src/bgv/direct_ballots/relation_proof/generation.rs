@@ -51,6 +51,5 @@ pub(in crate::bgv::direct_ballots) fn generate_direct_ballot_relation_proof(
         relation_commitment_polynomial_count: DATA_PRIMES.len() * 2,
         shared_response_polynomial_count: DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS,
         shared_response_scalar_count: direct_ballot_relation_response_scalar_count(),
-        proof_gate: direct_ballot_relation_proof_gate(proof_size_bytes),
     })
 }

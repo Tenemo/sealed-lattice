@@ -90,7 +90,6 @@ pub(super) fn vss_coefficient_commitments_object(
                     "commitmentRoot": commitment_root,
                     "commitmentChunkRoot": commitment_chunk_root,
                     "coefficientVectorHash512": coefficient_vector_hash512,
-                    "openingVerificationStatus": "pending-private-envelope-opening",
                 }));
                 coefficient_commitment_material.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitmentMaterial",
@@ -314,7 +313,6 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
                     "commitmentRoot": commitment_root,
                     "commitmentChunkRoot": commitment_chunk_root,
                     "coefficientVectorHash512": coefficient_vector_hash512,
-                    "openingVerificationStatus": "pending-private-envelope-opening",
                 }));
                 let mut record_bytes = Vec::new();
                 append_vss_material_binary_record(

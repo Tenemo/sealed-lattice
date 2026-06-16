@@ -65,8 +65,6 @@ pub(in super::super) fn collective_public_key_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofVerificationStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         "aggregationStatus": "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
@@ -195,7 +193,6 @@ pub(in super::super) fn public_key_share_material_object(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
-            "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
@@ -232,7 +229,6 @@ pub(in super::super) fn public_key_share_material_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -333,10 +329,9 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
 ) -> serde_json::Value {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-        PUBLIC_KEY_SHARE_PROOF_FAMILY, PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-        PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS, SameSecretLinkageStatement,
-        SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
-        public_key_share_succinct_proof_bytes_hash, succinct_public_key_share_accounting_hash,
+        PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
+        TrusteeEvaluationKeyStatement, public_key_share_succinct_proof_bytes_hash,
+        succinct_public_key_share_accounting_hash,
     };
     let setup_context = &package["setupContext"];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -499,8 +494,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             "setupProfileId": "CollectiveBgvSetup-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
-            "proofVerificationStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-            "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -552,8 +545,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
-        "proofVerificationStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
-        "proofModelStatus": PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
         "proofAccountingHash": succinct_public_key_share_accounting_hash()
             .expect("public-key share succinct accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],

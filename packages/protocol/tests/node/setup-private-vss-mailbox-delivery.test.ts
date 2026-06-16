@@ -7,10 +7,6 @@ import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
 import {
-    privateVssShareSuccinctProofModelStatus,
-    privateVssShareSuccinctProofVerificationStatus,
-} from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
-import {
     makeSetupContext,
     makeSetupFixtureHash,
 } from '#tests/support/setup-fixtures';
@@ -137,9 +133,6 @@ describe('private VSS mailbox delivery', () => {
                 setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-                proofVerificationStatus:
-                    privateVssShareSuccinctProofVerificationStatus,
-                proofModelStatus: privateVssShareSuccinctProofModelStatus,
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),
                 proofSizeBytes: proofBytes.byteLength,
@@ -256,9 +249,6 @@ describe('private VSS mailbox delivery', () => {
                     setupProofProfileId: 'SealedLattice-SetupProof-v1',
                     proofFamily: 'vss-opening-carry',
                     proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
-                    proofVerificationStatus:
-                        privateVssShareSuccinctProofVerificationStatus,
-                    proofModelStatus: privateVssShareSuccinctProofModelStatus,
                     proofStatementRoot: fixtureHash(
                         `short-proof-count-statement-root-${String(
                             rnsLimbIndex,

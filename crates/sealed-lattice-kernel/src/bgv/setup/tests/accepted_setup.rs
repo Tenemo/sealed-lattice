@@ -82,7 +82,6 @@ use self::record_rebinding::{
 };
 
 use super::super::accepted_setup::{
-    EVALUATION_KEY_SHARE_RECORD_VERIFICATION_STATUS,
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
     PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT,
@@ -122,15 +121,10 @@ use super::super::setup_proof::{
     setup_proof_material_transport_hashes,
 };
 use super::super::trustee_evaluation_key_proof::{
-    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-    TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS, TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS,
-    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
+    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyWitness,
+    encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
     public_key_share_succinct_proof_bytes_hash, succinct_evaluation_key_proof_accounting_hash,
     trustee_evaluation_key_proof_bytes_hash,
-};
-use super::super::trustee_evaluation_key_proof::{
-    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS,
-    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS,
 };
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};

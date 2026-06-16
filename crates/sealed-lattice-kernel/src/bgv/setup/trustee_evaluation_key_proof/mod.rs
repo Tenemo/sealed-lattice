@@ -98,24 +98,6 @@ pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_FAMILY: &str = "trustee-evaluation
 pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
 pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
-// The anchor family runs the same closed argument; its accounting object
-// carries the family relation rows and the WASM browser measurement row.
-pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS: &str =
-    "succinct-same-secret-linkage-anchor-argument-accounting-accepted";
-pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_PROOF_VERIFICATION_STATUS: &str =
-    "succinct-same-secret-linkage-anchor-argument-verified-with-accepted-proof-accounting";
-// The public-key share family runs the same closed argument with one
-// share-correctness relation per Q_share limb and the single constant
-// commitment opening that links its secret to the anchor.
-pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS: &str =
-    "succinct-public-key-share-argument-accounting-accepted";
-pub(crate) const PUBLIC_KEY_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS: &str =
-    "succinct-public-key-share-argument-verified-with-accepted-proof-accounting";
-pub(crate) const PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS: &str =
-    "succinct-private-vss-share-argument-accounting-accepted";
-pub(crate) const PRIVATE_VSS_SHARE_SUCCINCT_PROOF_VERIFICATION_STATUS: &str =
-    "succinct-private-vss-share-argument-verified-with-accepted-proof-accounting";
-
 // Canonical hash of transported same-secret linkage anchor proof bytes.
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
@@ -143,14 +125,6 @@ pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
         &[proof_bytes],
     )
 }
-// The model status states the closed accounting on every record. The bound
-// accounting is classical and accepted under the explicitly named FRI
-// conjecture, while QROM loss and 128-bit zero-knowledge remain outside this
-// status until separately closed.
-pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS: &str =
-    "succinct-trustee-evaluation-key-argument-accounting-accepted";
-pub(crate) const TRUSTEE_EVALUATION_KEY_PROOF_VERIFICATION_STATUS: &str =
-    "succinct-trustee-evaluation-key-argument-verified-with-accepted-proof-accounting";
 
 // Each logical length-N witness vector is split into TRACE_SPLIT physical
 // columns over a trace domain of size N / TRACE_SPLIT. The split frees domain

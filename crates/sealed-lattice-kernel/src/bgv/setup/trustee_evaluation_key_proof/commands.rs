@@ -26,26 +26,9 @@ use crate::hashing::{derive_protocol_hash, to_hex};
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 
-// The model status and accounting object each migrated family carries on its
-// command responses. The argument machinery is shared, so only the family
-// label, model status, and accounting object differ.
-fn family_proof_model_status(shape: SuccinctSetupProofFamilyShape) -> &'static str {
-    match shape {
-        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-            SAME_SECRET_LINKAGE_ANCHOR_PROOF_MODEL_STATUS
-        }
-        SuccinctSetupProofFamilyShape::PublicKeyShare => {
-            PUBLIC_KEY_SHARE_SUCCINCT_PROOF_MODEL_STATUS
-        }
-        SuccinctSetupProofFamilyShape::PrivateVssShare => {
-            PRIVATE_VSS_SHARE_SUCCINCT_PROOF_MODEL_STATUS
-        }
-        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
-            TRUSTEE_EVALUATION_KEY_PROOF_MODEL_STATUS
-        }
-    }
-}
-
+// The accounting object each migrated family carries on its command responses.
+// The argument machinery is shared, so only the family label and accounting
+// object differ.
 fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<String> {
     match shape {
         SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
@@ -137,7 +120,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         "ok": true,
         "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
-        "proofModelStatus": family_proof_model_status(shape),
         "proofAccountingHash": family_accounting_hash(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
@@ -219,7 +201,6 @@ pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
         "ok": true,
         "operation": "verifyTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
-        "proofModelStatus": family_proof_model_status(shape),
         "proofAccountingHash": family_accounting_hash(shape)?,
         "proofAccounting": family_accounting_value(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),

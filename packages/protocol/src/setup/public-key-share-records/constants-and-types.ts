@@ -18,12 +18,6 @@ export const isJsonRecord = (value: unknown): value is JsonRecord =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const publicKeyShareProofFamily = 'public-key-share';
-export const publicKeyShareProofVerificationStatus =
-    'succinct-proof-verification-pending';
-export const publicKeyShareSuccinctProofVerificationStatus =
-    'succinct-public-key-share-argument-verified-with-accepted-proof-accounting';
-export const publicKeyShareSuccinctProofModelStatus =
-    'succinct-public-key-share-argument-accounting-accepted';
 export const publicKeyShareProofBindingStatus =
     'public-key-share-proof-required';
 export const publicKeyShareMaterialEncoding =
@@ -116,7 +110,6 @@ export type PublicKeyShareProofRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareProofVerificationStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -139,7 +132,6 @@ export type PublicKeyShareProofSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareProofVerificationStatus;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -164,7 +156,6 @@ export type PublicKeyShareMaterialRecord = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -192,7 +183,6 @@ export type PublicKeyShareMaterialSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly materialEncoding: typeof publicKeyShareMaterialEncoding;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -214,7 +204,6 @@ export type BinaryChunkedPublicKeyShareMaterialSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly materialEncoding: typeof publicKeyShareMaterialTransportEncoding;
         readonly binaryFormat: typeof publicKeyShareMaterialBinaryFormat;
         readonly participantCount: number;
@@ -292,8 +281,6 @@ export type PublicKeyShareSuccinctProofMaterial = Readonly<
     PublicKeyShareSuccinctProofByteMaterial & {
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
-        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly statementHash: ProtocolHash;
@@ -310,8 +297,6 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
             readonly setupProfileId: 'CollectiveBgvSetup-v1';
             readonly setupProofProfileId: typeof setupProofProfileId;
             readonly proofFamily: typeof publicKeyShareProofFamily;
-            readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
-            readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
             readonly ringDegree: number;
@@ -342,8 +327,6 @@ export type PublicKeyShareSuccinctProofSet = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
-        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -387,8 +370,6 @@ export type CollectivePublicKey = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofVerificationStatus: typeof publicKeyShareSuccinctProofVerificationStatus;
-        readonly proofModelStatus: typeof publicKeyShareSuccinctProofModelStatus;
         readonly aggregationStatus: 'succinct-proof-aggregated-with-accepted-setup-proof-accounting';
         readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
         readonly participantCount: number;

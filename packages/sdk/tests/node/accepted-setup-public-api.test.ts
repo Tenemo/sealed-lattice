@@ -19,10 +19,6 @@ import {
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     publicKeyShareCoefficientVectorHashDomain,
-    publicKeyShareSuccinctProofModelStatus,
-    publicKeyShareSuccinctProofVerificationStatus,
-    sameSecretAnchorProofModelStatus,
-    sameSecretAnchorProofVerificationStatus,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
@@ -349,8 +345,6 @@ const sameSecretProofMaterial = (
     return {
         setupProofProfileId,
         proofFamily: 'same-secret-linkage-anchor',
-        proofVerificationStatus: sameSecretAnchorProofVerificationStatus,
-        proofModelStatus: sameSecretAnchorProofModelStatus,
         trusteeIdentity: statementRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
         statementHash: hashFromKernel(
@@ -390,8 +384,6 @@ const publicKeyShareSuccinctProofMaterial = (
     return {
         setupProofProfileId,
         proofFamily: 'public-key-share',
-        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
-        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         trusteeIdentity: proofRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
         statementHash: hashFromKernel(
@@ -982,7 +974,6 @@ describe('accepted setup public package API in Node', () => {
             recipientIdentity: trusteeIdentity,
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: envelopeReference.localVerificationRoot,
-            verificationStatus: 'accepted',
         });
         expect(String(acceptance.acceptanceRoot)).toHaveLength(128);
         expect(JSON.stringify(acceptance)).not.toMatch(
@@ -1039,7 +1030,6 @@ describe('accepted setup public package API in Node', () => {
             recipientIdentity: trusteeIdentity,
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             complaintReasonCode: 'private-vss-opening-verification-failed',
-            complaintStatus: 'valid-complaint-aborts-setup',
         });
         expect(String(complaint.complaintRoot)).toHaveLength(128);
         expect(JSON.stringify(complaint)).not.toMatch(

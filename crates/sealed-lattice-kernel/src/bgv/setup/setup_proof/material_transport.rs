@@ -74,7 +74,6 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
         "proofByteDecoder": SETUP_PROOF_BYTE_DECODER,
         "privateVssShareProofAccountingHash":
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
-        "proofBytesAcceptedStatus": "private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting",
     }))
 }
 

@@ -6,8 +6,6 @@ import { transportedPublicKeyShareMaterialReader } from './binary-material-trans
 import {
     publicKeyShareMaterialEncoding,
     publicKeyShareProofFamily,
-    publicKeyShareSuccinctProofModelStatus,
-    publicKeyShareSuccinctProofVerificationStatus,
     type CollectivePublicKey,
     type CollectivePublicKeyCoefficientVectorMaterial,
     type CollectivePublicKeyInput,
@@ -137,8 +135,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        proofVerificationStatus: publicKeyShareSuccinctProofVerificationStatus,
-        proofModelStatus: publicKeyShareSuccinctProofModelStatus,
         aggregationStatus:
             'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
@@ -370,7 +366,6 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
             setupProfileId: 'CollectiveBgvSetup-v1',
             setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
-            proofModelStatus: publicKeyShareSuccinctProofModelStatus,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),
             trusteeIdentity: shareRecord.trusteeIdentity,
