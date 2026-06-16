@@ -253,6 +253,174 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
     );
 }
 
+// Multi-recipient consistency is what actually makes Option A sound (see
+// implementation-plan/SL2-private-vss-zero-knowledge-closure.md section 4): with
+// the message consistency claims removed, a single recipient's proof does NOT pin
+// the Shamir coefficients across the RNS commitment fields, so soundness comes
+// from >= t honest recipients each verifying the SAME source commitment. This
+// test exercises that structure: one committed degree-(t-1) polynomial, verified
+// at the four distinct recipient points of the first-profile decryption threshold
+// (t_secret = 4), all accepting. The shares differ per recipient (distinct
+// evaluation points) yet every proof binds the identical coefficient commitments.
+//
+// The dual negative direction - a single recipient accepting an inconsistent or
+// out-of-range coefficient set that >= t honest recipients would jointly reject -
+// cannot be expressed through this generation path: the witness API carries one
+// integer message per coefficient, reduced consistently into each commitment
+// field, so it structurally cannot emit per-field-inconsistent messages.
+// Demonstrating that requires constructing the committed columns below the prover
+// (bypassing validate_private_vss_witness), and is the recorded gold-standard
+// follow-up; the verifier-side gap it would exercise is documented in section 4b.
+#[test]
+fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients() {
+    let ring_degree = PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE;
+    let request = private_vss_share_envelope_request(ring_degree);
+    let setup_context = request["setupContext"].clone();
+    let public_matrix_seed_hash = request["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    let private_envelope = &request["privateEnvelope"];
+    let private_envelope_aad_hash = private_envelope["privateEnvelopeAadHash"]
+        .as_str()
+        .expect("private envelope AAD hash");
+    let source_trustee_commitment_root = private_envelope["sourceTrusteeCommitmentRoot"]
+        .as_str()
+        .expect("source trustee commitment root");
+    let rns_prime = private_envelope["rnsShareOpenings"][0]["rnsPrime"]
+        .as_u64()
+        .expect("RNS prime");
+
+    // One committed degree-(t-1) polynomial, shared by every recipient: four
+    // non-zero Shamir coefficient messages and their commitments.
+    let coefficient_messages_by_shamir_index = (0..4_u64)
+        .map(|shamir_coefficient_index| {
+            coefficient_message_fixture(0, shamir_coefficient_index, rns_prime, ring_degree)
+        })
+        .collect::<Vec<_>>();
+    let opening_randomness_by_shamir_index = (0..4_u64)
+        .map(|shamir_coefficient_index| {
+            randomness_fixture(0, shamir_coefficient_index, ring_degree)
+        })
+        .collect::<Vec<_>>();
+    let coefficient_commitments = coefficient_messages_by_shamir_index
+        .iter()
+        .zip(opening_randomness_by_shamir_index.iter())
+        .enumerate()
+        .map(|(shamir_coefficient_index, (messages, opening_randomness))| {
+            let messages_u128 = messages.iter().map(|value| u128::from(*value)).collect::<Vec<_>>();
+            compute_setup_commitment_for_tests(
+                public_matrix_seed_hash,
+                0,
+                rns_prime,
+                shamir_coefficient_index as u64,
+                &messages_u128,
+                opening_randomness,
+                ring_degree,
+            )
+            .expect("coefficient commitment")
+        })
+        .collect::<Vec<_>>();
+    let coefficient_commitment_roots = coefficient_commitments
+        .iter()
+        .map(|commitment| setup_commitment_root(commitment).expect("commitment root"))
+        .collect::<Vec<_>>();
+
+    // Four distinct recipient points (the first-profile decryption threshold),
+    // each inside the first accepted profile roster (positions < 10).
+    for recipient_roster_position in [1_usize, 3, 5, 8] {
+        let (share_values, carry_strings) = share_values_and_carries(
+            &coefficient_messages_by_shamir_index,
+            recipient_roster_position,
+            rns_prime,
+            ring_degree,
+        );
+        let carry_witnesses = carry_strings
+            .iter()
+            .map(|carry| carry.parse::<i128>().expect("carry witness parses"))
+            .collect::<Vec<_>>();
+        let share_values_hash = derive_protocol_hash(
+            "PrivateVssLocalVerificationRoot",
+            &serde_json::json!({
+                "objectType": "PrivateVssShareValueVector",
+                "objectVersion": 1,
+                "rnsLimbIndex": 0,
+                "rnsPrime": rns_prime,
+                "shareValues": share_values,
+            }),
+        )
+        .expect("share values hash");
+        let proof_randomness_seed_hex = derive_protocol_hash(
+            "PrivateVssLocalVerificationRoot",
+            &serde_json::json!({
+                "fixture": "private-vss-multi-recipient-consistency",
+                "recipientRosterPosition": recipient_roster_position,
+            }),
+        )
+        .expect("private VSS proof randomness seed");
+        let recipient_identity = format!("trustee-{recipient_roster_position}");
+        let proof_record = private_vss_share_succinct_proof_record(
+            PrivateVssShareSuccinctProofGenerationInput {
+                setup_context: &setup_context,
+                public_matrix_seed_hash,
+                private_envelope_aad_hash,
+                source_trustee_identity: "trustee-0",
+                source_trustee_roster_position: 0,
+                recipient_identity: &recipient_identity,
+                recipient_roster_position: recipient_roster_position as u64,
+                source_trustee_commitment_root,
+                rns_limb_index: 0,
+                rns_prime,
+                ring_degree,
+                coefficient_commitment_roots: &coefficient_commitment_roots,
+                share_values: &share_values,
+                share_values_hash: &share_values_hash,
+                coefficient_commitments: &coefficient_commitments,
+                witness: &PrivateVssShareSuccinctProofWitness {
+                    coefficient_messages_by_shamir_index: coefficient_messages_by_shamir_index
+                        .clone(),
+                    opening_randomness_by_shamir_index: opening_randomness_by_shamir_index.clone(),
+                    carry_witnesses,
+                },
+                proof_randomness_seed_hex: &proof_randomness_seed_hex,
+            },
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "proof record for recipient {recipient_roster_position}: {}",
+                error.message
+            )
+        });
+
+        verify_private_vss_share_succinct_relation_proof(
+            PrivateVssShareSuccinctProofVerificationInput {
+                setup_context: &setup_context,
+                public_matrix_seed_hash,
+                private_envelope_aad_hash,
+                source_trustee_identity: "trustee-0",
+                source_trustee_roster_position: 0,
+                recipient_identity: &recipient_identity,
+                recipient_roster_position: recipient_roster_position as u64,
+                source_trustee_commitment_root,
+                rns_limb_index: 0,
+                rns_prime,
+                ring_degree,
+                coefficient_commitment_roots: &coefficient_commitment_roots,
+                share_values: &share_values,
+                share_values_hash: &share_values_hash,
+                coefficient_commitments: &coefficient_commitments,
+                proof_record: &proof_record,
+                transported_proof_material: None,
+            },
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "verification for recipient {recipient_roster_position}: {}",
+                error.message
+            )
+        });
+    }
+}
+
 // Decisive Option A soundness gate. Option A drops the per-field consistency
 // claims on the Shamir coefficient message columns, leaving the commitment
 // opening lincheck as the message column's only binding. This test confirms that

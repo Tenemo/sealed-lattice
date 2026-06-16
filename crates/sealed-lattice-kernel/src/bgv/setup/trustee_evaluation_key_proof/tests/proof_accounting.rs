@@ -73,13 +73,16 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
 #[test]
 fn private_vss_share_accounting_discloses_family_aware_leakage() {
     // The recipient-private VSS family masks only its carry and ternary
-    // opening-randomness columns; its message columns are pinned cross-field by
-    // the opening rows plus randomness consistency and carry no consistency claim.
-    // So its disclosed smudging leakage must be the carry-driven family-aware
-    // figure (clear bound about 2^34, per-claim about 2^-58, total about 2^-41),
-    // not the magnitude-two centered-binomial figure inherited from the base
-    // accounting, and not the message-driven 2^-22 of the pre-Option-A variant.
-    // This guards against the override silently reverting to either.
+    // opening-randomness columns; its message columns carry no consistency claim
+    // and are pinned cross-field GLOBALLY (carry consistency + the public
+    // range-checked share pin the evaluation per recipient, and >= t honest
+    // recipients pin the polynomial; see consistency_vector_count), not locally by
+    // the opening rows. So its disclosed smudging leakage must be the carry-driven
+    // family-aware figure (clear bound about 2^34, per-claim about 2^-58, and the
+    // total about 2^-40 over the ~2^17.7 masked claims a c_priv-bounded adversary
+    // observes), not the magnitude-two centered-binomial figure inherited from the
+    // base accounting, and not the message-driven 2^-22 of the pre-Option-A
+    // variant. This guards against the override silently reverting to either.
     let private_vss = super::accounting::succinct_private_vss_share_accounting_value()
         .expect("private VSS accounting value");
     let eval_key = super::accounting::succinct_evaluation_key_proof_accounting_value()
@@ -94,9 +97,16 @@ fn private_vss_share_accounting_discloses_family_aware_leakage() {
         private_vss_smudging["perClaimStatisticalDistanceLog2"],
         serde_json::json!(-58)
     );
+    // Honest per-adversary-view union: c_priv (3) corrupted recipients * n (10)
+    // sources * 17 limb proofs * 420 masked claims ~ 2^17.7, ceil-log = 18, so the
+    // total is -58 + 18 = -40 (the earlier flat 2^17 budget under-counted).
+    assert_eq!(
+        private_vss_smudging["claimBudgetLog2Approximate"],
+        serde_json::json!(18)
+    );
     assert_eq!(
         private_vss_smudging["totalLeakageLog2Approximate"],
-        serde_json::json!(-41)
+        serde_json::json!(-40)
     );
     assert_eq!(
         private_vss_smudging["leakageDominatingFamily"],

@@ -53,11 +53,11 @@ impl LimbColumnLayout {
         // The mask columns are sized from the number of published consistency
         // claims, so this must mirror consistency_vector_count() exactly. For
         // private VSS the message (Shamir coefficient) columns carry no
-        // consistency claim (they are pinned by the opening rows plus the
-        // opening-randomness consistency), so the count is the carry plus the
-        // opening-randomness columns, not the full logical column count. Sizing
-        // the masks from the logical column count instead would commit unused
-        // mask columns for claims that are never published.
+        // consistency claim (their cross-field consistency is argued globally,
+        // not by a per-claim mask; see consistency_vector_count), so the count is
+        // the carry plus the opening-randomness columns, not the full logical
+        // column count. Sizing the masks from the logical column count instead
+        // would commit unused mask columns for claims that are never published.
         let consistency_vector_count = match family_shape {
             SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
             _ => {
@@ -107,8 +107,10 @@ impl LimbColumnLayout {
     // message (Shamir coefficient) columns, the carry column, and the
     // opening-randomness columns. This is the trace width and the length of the
     // opening lincheck (`publics.linkage`). It deliberately exceeds
-    // consistency_vector_count(), which now claims only the carry and randomness
-    // columns; the message columns remain witnesses pinned by the opening rows.
+    // consistency_vector_count(), which claims only the carry and randomness
+    // columns; the message columns remain witnesses for the opening and share
+    // linchecks (their cross-field consistency is argued globally rather than by
+    // a per-claim consistency mask; see consistency_vector_count).
     pub(crate) fn private_vss_logical_columns(&self) -> usize {
         if self.private_vss_active() {
             self.private_vss_coefficient_columns + 1 + self.private_vss_randomness_columns
@@ -130,17 +132,27 @@ impl LimbColumnLayout {
     // then the linkage negative indicator and opening-randomness vectors.
     pub(crate) fn consistency_vector_count(&self) -> usize {
         if self.private_vss_active() {
-            // The message (Shamir coefficient) columns are intentionally NOT
-            // consistency-claimed. They are pinned across the commitment fields
-            // by the per-field opening rows plus the ternary opening-randomness
-            // consistency: with the randomness fixed to one integer r* across the
-            // fields, each opening row forces the message to the residues of the
-            // single integer (t - A*r*)_msg, so a masked message consistency
-            // claim would only add zero-knowledge leakage with no soundness gain.
-            // Only the carry and the opening-randomness columns carry consistency
-            // claims. This intentionally diverges from private_vss_logical_columns(),
-            // which still counts the message columns because they remain witness
-            // columns for the opening and share relations (the opening lincheck).
+            // The message (Shamir coefficient) columns carry no cross-field
+            // consistency claim; only the carry and the opening-randomness
+            // columns do. This is NOT because the commitment opening rows pin the
+            // message across fields: the published commitment's message row is
+            // free per commitment field (only the binding rows t1 = A1*r are
+            // forced consistent, via the kept randomness consistency r*), so
+            // m_msg^(c) = (t_msg^(c) - A2*r*) is free per field and a single
+            // recipient's check does not bind the message coefficients across the
+            // RNS commitment fields. The sharing is pinned GLOBALLY instead: the
+            // kept carry consistency claim plus the public, range-checked share
+            // pin the evaluation sum_k alpha_j^k F_k at each recipient point
+            // alpha_j to one bounded integer across the commitment fields (carry
+            // pinned + bounded => the evaluation is the bounded centered lift),
+            // and >= t honest recipients at distinct points force the degree
+            // (t-1) sharing polynomial to be consistent. This requires
+            // q_setup_complete - c_priv >= t honest verifying recipients
+            // (7 >= 4 in the first profile). Dropping the carry from this set, or
+            // weakening the carry/share range checks, breaks the argument.
+            // private_vss_logical_columns() still counts the message columns
+            // because they remain witnesses for the opening and share linchecks.
+            // See implementation-plan/SL2-private-vss-zero-knowledge-closure.md.
             1 + self.private_vss_randomness_columns
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
@@ -225,8 +237,11 @@ impl LimbColumnLayout {
     }
 
     // Row-check constraints are present for restricted witness columns and
-    // mask digits. Private VSS message and carry columns are unrestricted
-    // field columns; their integer lift is checked by masked consistency.
+    // mask digits. Private VSS message and carry columns are unrestricted field
+    // columns. The carry's integer lift is pinned by its masked consistency
+    // claim; the message columns carry no consistency claim, so they are not
+    // pinned by masked consistency and the sharing relies on the global argument
+    // in consistency_vector_count instead.
     pub(crate) fn row_check_constraint_count(&self) -> usize {
         if self.private_vss_active() {
             TRACE_SPLIT * (self.private_vss_randomness_columns + self.mask_column_count)

@@ -445,20 +445,22 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
 
     // Recompute the disclosed clear claim bound from the witnesses that actually
     // carry a masked consistency claim. The message (Shamir coefficient) columns
-    // do NOT: they are pinned across the commitment fields by the per-field
-    // opening rows plus the opening-randomness consistency (see
-    // consistency_vector_count in relation.rs), so the published masked claims
-    // range only over the carry and the ternary opening-randomness columns. The
-    // lifted carry bound dominates the magnitude-one randomness, so the clear
-    // bound is the worst-case carry bound times the ring degree times the
-    // per-coefficient bound, mirroring the private-VSS branch of
-    // masked_claim_bounds. Worst case over the first profile: the recipient
-    // trustee point is largest at the last roster position (participant count ten
-    // minus one) and the Shamir coefficient count is the decryption threshold
-    // (four). Sourcing the carry bound from the same helper masked_claim_bounds
-    // uses keeps the relation bound and the disclosed figure from diverging. This
-    // yields a clear bound about 2^34, so per-claim leakage about 2^-58 and total
-    // about 2^-41.
+    // do NOT carry one: their cross-field consistency is argued GLOBALLY (carry
+    // consistency + the public range-checked share pin the evaluation per
+    // recipient, and >= t honest recipients pin the polynomial; see
+    // consistency_vector_count in relation/column_layout.rs and
+    // SL2-private-vss-zero-knowledge-closure.md section 4), NOT by the per-field
+    // opening rows. So the published masked claims range only over the carry and
+    // the ternary opening-randomness columns. The lifted carry bound dominates
+    // the magnitude-one randomness, so the clear bound is the worst-case carry
+    // bound times the ring degree times the per-coefficient bound, mirroring the
+    // private-VSS branch of masked_claim_bounds. Worst case over the first
+    // profile: the recipient trustee point is largest at the last roster position
+    // (participant count ten minus one) and the Shamir coefficient count is the
+    // decryption threshold (four). Sourcing the carry bound from the same helper
+    // masked_claim_bounds uses keeps the relation bound and the disclosed figure
+    // from diverging. This yields a clear bound about 2^34, so per-claim leakage
+    // about 2^-58.
     const FIRST_PROFILE_LARGEST_RECIPIENT_ROSTER_POSITION: u64 = 9;
     const FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT: usize = 4;
     let worst_case_carry_bound =
@@ -472,7 +474,25 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
         worst_case_carry_bound * POLYNOMIAL_DEGREE as u128 * consistency_coefficient_bound;
     let private_vss_clear_claim_bound_bits = i64::from(private_vss_clear_claim_bound.ilog2()) + 1;
     let per_claim_leakage_log2 = private_vss_clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64;
-    let claim_budget_log2 = 17_i64;
+    // Union budget: the masked claims a c_priv-bounded adversary actually
+    // observes in the first profile. A corrupted recipient receives, from each of
+    // the n sources, one envelope of DATA_PRIMES.len() limb proofs, each
+    // publishing (4 Shamir coefficients * 5 opening-randomness columns + 1 carry)
+    // * 20 repetitions = 420 masked claims (mirrors consistency_vector_count for
+    // this family). With c_priv corrupted recipients the adversary view is
+    // c_priv * n * DATA_PRIMES.len() * 420 ~ 2^17.7 claims, whose ceil-log gives a
+    // conservative 18-bit budget, so the total statistical distance over the
+    // adversary's view is about 2^-40. The earlier flat 2^17 budget under-counted
+    // the bounded adversary's view (~2^17.7).
+    const FIRST_PROFILE_CORRUPTED_RECIPIENTS: u128 = 3;
+    const FIRST_PROFILE_ROSTER_SIZE: u128 = 10;
+    const FIRST_PROFILE_PRIVATE_VSS_CLAIMS_PER_LIMB_PROOF: u128 =
+        (FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT as u128 * 5 + 1) * CONSISTENCY_REPETITIONS as u128;
+    let adversary_view_claim_count = FIRST_PROFILE_CORRUPTED_RECIPIENTS
+        * FIRST_PROFILE_ROSTER_SIZE
+        * DATA_PRIMES.len() as u128
+        * FIRST_PROFILE_PRIVATE_VSS_CLAIMS_PER_LIMB_PROOF;
+    let claim_budget_log2 = i64::from(adversary_view_claim_count.ilog2()) + 1;
     let total_leakage_log2 = per_claim_leakage_log2 + claim_budget_log2;
 
     if let Some(zero_knowledge) = accounting_fields
@@ -485,7 +505,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
                 "perClaimStatisticalDistanceLog2": per_claim_leakage_log2,
                 "clearClaimBoundBits": private_vss_clear_claim_bound_bits,
                 "maskDigitCount": CLAIM_MASK_DIGIT_COUNT,
-                "leakageStatement": "the recipient-private VSS family masks only its carry and ternary opening-randomness columns; its full-range Shamir message columns carry no consistency claim because the per-field commitment opening rows plus the opening-randomness consistency already pin each message to one integer's residues across the commitment fields, so masking the messages would add leakage with no soundness gain. The masked claims are therefore bounded by the lifted carry bound (about two to the eleven) rather than the source limb prime, so the clear claim bound is about two to the thirty-four and the shared ninety-two-bit smudging mask hides each published claim to a per-claim statistical distance of about two to the minus fifty-eight; across the first profile's about two to the seventeen claims the total statistical distance is about two to the minus forty-one. This is still the leakage-dominating family among the four accepted setup proof families, but only mildly so relative to the about two to the minus sixty-eight per-claim, about two to the minus fifty-one total figure of the magnitude-two centered-binomial families; the bound says nothing about quantities outside the published claims",
+                "leakageStatement": "the recipient-private VSS family masks only its carry and ternary opening-randomness columns; its full-range Shamir message columns carry no consistency claim. Their cross-field consistency is argued globally - the carry consistency claim plus the public range-checked share pin the polynomial evaluation at each recipient point across the commitment fields, and at least t honest recipients verifying the same source commitment pin the degree-(t-1) sharing polynomial (this requires q_setup_complete - c_priv >= t, which holds for the first profile as 7 >= 4) - not by the per-field commitment opening rows, which do not bind the message cross-field. Masking the messages would therefore add leakage with no soundness gain. The masked claims are bounded by the lifted carry bound (about two to the eleven) rather than the source limb prime, so the clear claim bound is about two to the thirty-four and the shared ninety-two-bit smudging mask hides each published claim to a per-claim statistical distance of about two to the minus fifty-eight; summed over the masked claims a c_priv-bounded adversary observes in the first profile (c_priv corrupted recipients, each receiving one envelope of seventeen limb proofs with about four hundred twenty masked claims from every source, about two to the seventeen point seven claims) the total statistical distance is about two to the minus forty. This is still the leakage-dominating family among the four accepted setup proof families, but only mildly so relative to the about two to the minus sixty-eight per-claim, about two to the minus fifty-one total figure of the magnitude-two centered-binomial families; the bound says nothing about quantities outside the published claims",
                 "claimBudgetLog2Approximate": claim_budget_log2,
                 "totalLeakageLog2Approximate": total_leakage_log2,
                 "leakageDominatingFamily": true,

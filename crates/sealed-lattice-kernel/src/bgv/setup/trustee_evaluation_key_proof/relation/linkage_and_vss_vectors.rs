@@ -241,12 +241,15 @@ pub(crate) fn build_private_vss_public_vectors(
 // smudging mask lies in [0, 2^CLAIM_MASK_DIGIT_COUNT).
 // Family-aware clear bound: the private-VSS family masks only the carry and the
 // ternary opening-randomness columns (its message columns carry no consistency
-// claim; see consistency_vector_count), so its witness bound is the lifted carry
+// claim; see consistency_vector_count for why the message is pinned globally
+// rather than by a per-claim mask), so its witness bound is the lifted carry
 // bound (about 2^11); every other family uses 2 (centered-binomial magnitude).
 // The mask is one-sided in [0, 2^CLAIM_MASK_DIGIT_COUNT), so the centered claim
 // lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging
 // figure in accounting.rs recomputes from this same carry-driven family bound,
 // so the relation bound and the disclosed leakage figure agree by construction.
+// The carry's range bound here is load-bearing for the global sharing-soundness
+// argument: it keeps the pinned evaluation a bounded centered lift.
 pub(crate) fn masked_claim_bounds(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<(i128, i128)> {
@@ -254,12 +257,13 @@ pub(crate) fn masked_claim_bounds(
     let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
     let witness_bound = match &statement.private_vss_share {
         Some(private_vss_share) => {
-            // The message (Shamir coefficient) columns no longer carry a masked
-            // consistency claim: they are pinned by the opening rows plus the
-            // opening-randomness consistency (see consistency_vector_count), so
-            // the published masked claims range only over the carry and the
-            // ternary opening-randomness columns. The lifted carry bound
-            // dominates the magnitude-one randomness, so it is the witness bound.
+            // The message (Shamir coefficient) columns carry no masked
+            // consistency claim (their cross-field consistency is argued globally
+            // via the carry consistency, the public share, and >= t honest
+            // recipients; see consistency_vector_count), so the published masked
+            // claims range only over the carry and the ternary opening-randomness
+            // columns. The lifted carry bound dominates the magnitude-one
+            // randomness, so it is the witness bound.
             let carry_bound = private_vss_share_lifted_carry_bound(
                 private_vss_share.recipient_roster_position,
                 private_vss_share.coefficient_commitments.len(),
