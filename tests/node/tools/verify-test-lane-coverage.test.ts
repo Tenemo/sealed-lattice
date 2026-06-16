@@ -19,7 +19,7 @@ describe('test lane coverage verification', () => {
         ).toEqual(['node-kernel']);
         expect(
             testLaneGroupsForRelativePath(
-                'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup.kernel.test.ts',
+                'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/setup-package-verification.kernel.test.ts',
             ),
         ).toEqual(['node-kernel-heavy']);
         expect(

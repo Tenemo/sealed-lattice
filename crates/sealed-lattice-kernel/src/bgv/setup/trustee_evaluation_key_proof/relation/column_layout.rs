@@ -1,0 +1,259 @@
+use super::super::*;
+use super::*;
+
+// Per-limb physical column layout. Every logical length-N vector occupies
+// TRACE_SPLIT physical columns of length N / TRACE_SPLIT, in half order. The
+// layout is: secret halves, then per active key per digit the error halves,
+// then the matching error-square halves, then the claim-mask digit halves.
+pub(crate) struct LimbColumnLayout {
+    pub(crate) ring_degree: usize,
+    pub(crate) trace_size: usize,
+    pub(crate) family_shape: SuccinctSetupProofFamilyShape,
+    // (key index, digit count) per active key, in key order.
+    pub(crate) active_keys: Vec<(usize, usize)>,
+    pub(crate) total_error_columns: usize,
+    pub(crate) private_vss_coefficient_columns: usize,
+    // Linkage logical columns active in this limb: the binary negative
+    // indicator plus the per-commitment opening-randomness columns, or zero
+    // outside the commitment fields.
+    pub(crate) linkage_randomness_columns: usize,
+    pub(crate) private_vss_randomness_columns: usize,
+    pub(crate) mask_column_count: usize,
+}
+
+impl LimbColumnLayout {
+    pub(crate) fn new(
+        statement: &TrusteeEvaluationKeyStatement,
+        limb_index: usize,
+    ) -> CanonicalResult<Self> {
+        let family_shape = statement.family_shape()?;
+        let active_keys = statement
+            .active_key_indices(limb_index)
+            .into_iter()
+            .map(|key_index| (key_index, statement.keys[key_index].digit_count()))
+            .collect::<Vec<_>>();
+        let private_vss_coefficient_columns = statement
+            .private_vss_share
+            .as_ref()
+            .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+            .map(|statement| statement.coefficient_commitments.len())
+            .unwrap_or(0);
+        if active_keys.is_empty()
+            && statement.linkage_randomness_count(limb_index) == 0
+            && private_vss_coefficient_columns == 0
+        {
+            return Err(invalid_succinct_setup_proof(
+                "limb layout requires an active key or active linkage relations",
+            ));
+        }
+        let total_error_columns = active_keys.iter().map(|(_, digits)| *digits).sum::<usize>();
+        let linkage_randomness_columns = statement.linkage_randomness_count(limb_index);
+        let private_vss_randomness_columns = statement.private_vss_randomness_count(limb_index);
+        let ring_degree = statement.ring_degree;
+        // The mask columns are sized from the number of published consistency
+        // claims, so this must mirror consistency_vector_count() exactly. For
+        // private VSS the message (Shamir coefficient) columns carry no
+        // consistency claim (they are pinned by the opening rows plus the
+        // opening-randomness consistency), so the count is the carry plus the
+        // opening-randomness columns, not the full logical column count. Sizing
+        // the masks from the logical column count instead would commit unused
+        // mask columns for claims that are never published.
+        let consistency_vector_count = match family_shape {
+            SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
+            _ => {
+                1 + total_error_columns
+                    + if linkage_randomness_columns > 0 {
+                        1 + linkage_randomness_columns
+                    } else {
+                        0
+                    }
+            }
+        };
+        let claim_count = consistency_vector_count * CONSISTENCY_REPETITIONS;
+        let mask_slot_count = claim_count * CLAIM_MASK_DIGIT_COUNT;
+        let mask_column_count = mask_slot_count.div_ceil(ring_degree);
+
+        Ok(Self {
+            ring_degree,
+            trace_size: ring_degree / TRACE_SPLIT,
+            family_shape,
+            active_keys,
+            total_error_columns,
+            private_vss_coefficient_columns,
+            linkage_randomness_columns,
+            private_vss_randomness_columns,
+            mask_column_count,
+        })
+    }
+
+    pub(crate) fn linkage_active(&self) -> bool {
+        self.linkage_randomness_columns > 0
+    }
+
+    // Logical linkage columns: the negative indicator plus the randomness.
+    fn linkage_logical_columns(&self) -> usize {
+        if self.linkage_active() {
+            1 + self.linkage_randomness_columns
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn private_vss_active(&self) -> bool {
+        self.family_shape == SuccinctSetupProofFamilyShape::PrivateVssShare
+    }
+
+    // Every private-VSS logical witness column committed in the trace: the
+    // message (Shamir coefficient) columns, the carry column, and the
+    // opening-randomness columns. This is the trace width and the length of the
+    // opening lincheck (`publics.linkage`). It deliberately exceeds
+    // consistency_vector_count(), which now claims only the carry and randomness
+    // columns; the message columns remain witnesses pinned by the opening rows.
+    pub(crate) fn private_vss_logical_columns(&self) -> usize {
+        if self.private_vss_active() {
+            self.private_vss_coefficient_columns + 1 + self.private_vss_randomness_columns
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn private_vss_relation_count(&self) -> usize {
+        if self.private_vss_active() {
+            self.private_vss_coefficient_columns * SETUP_COMMITMENT_ROW_COUNT + 1
+        } else {
+            0
+        }
+    }
+
+    // Logical witness vectors carrying cross-limb consistency claims: the
+    // shared secret first, then every active key's error vectors in order,
+    // then the linkage negative indicator and opening-randomness vectors.
+    pub(crate) fn consistency_vector_count(&self) -> usize {
+        if self.private_vss_active() {
+            // The message (Shamir coefficient) columns are intentionally NOT
+            // consistency-claimed. They are pinned across the commitment fields
+            // by the per-field opening rows plus the ternary opening-randomness
+            // consistency: with the randomness fixed to one integer r* across the
+            // fields, each opening row forces the message to the residues of the
+            // single integer (t - A*r*)_msg, so a masked message consistency
+            // claim would only add zero-knowledge leakage with no soundness gain.
+            // Only the carry and the opening-randomness columns carry consistency
+            // claims. This intentionally diverges from private_vss_logical_columns(),
+            // which still counts the message columns because they remain witness
+            // columns for the opening and share relations (the opening lincheck).
+            1 + self.private_vss_randomness_columns
+        } else {
+            1 + self.total_error_columns + self.linkage_logical_columns()
+        }
+    }
+
+    pub(crate) fn claim_count(&self) -> usize {
+        self.consistency_vector_count() * CONSISTENCY_REPETITIONS
+    }
+
+    pub(crate) fn physical_secret(&self, half: usize) -> usize {
+        debug_assert!(!self.private_vss_active());
+        half
+    }
+
+    // error_position counts error vectors across active keys in layout order.
+    pub(crate) fn physical_error(&self, error_position: usize, half: usize) -> usize {
+        debug_assert!(!self.private_vss_active());
+        TRACE_SPLIT * (1 + error_position) + half
+    }
+
+    pub(crate) fn physical_error_square(&self, error_position: usize, half: usize) -> usize {
+        debug_assert!(!self.private_vss_active());
+        TRACE_SPLIT * (1 + self.total_error_columns + error_position) + half
+    }
+
+    pub(crate) fn physical_negative_indicator(&self, half: usize) -> usize {
+        debug_assert!(self.linkage_active());
+        debug_assert!(!self.private_vss_active());
+        TRACE_SPLIT * (1 + 2 * self.total_error_columns) + half
+    }
+
+    pub(crate) fn physical_linkage_randomness(
+        &self,
+        randomness_position: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.linkage_active());
+        debug_assert!(!self.private_vss_active());
+        TRACE_SPLIT * (1 + 2 * self.total_error_columns + 1 + randomness_position) + half
+    }
+
+    pub(crate) fn physical_private_vss_message(
+        &self,
+        coefficient_index: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.private_vss_active());
+        TRACE_SPLIT * coefficient_index + half
+    }
+
+    pub(crate) fn physical_private_vss_carry(&self, half: usize) -> usize {
+        debug_assert!(self.private_vss_active());
+        TRACE_SPLIT * self.private_vss_coefficient_columns + half
+    }
+
+    pub(crate) fn physical_private_vss_randomness(
+        &self,
+        randomness_position: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.private_vss_active());
+        TRACE_SPLIT * (self.private_vss_coefficient_columns + 1 + randomness_position) + half
+    }
+
+    pub(crate) fn physical_mask(&self, mask_column: usize, half: usize) -> usize {
+        let logical_prefix = if self.private_vss_active() {
+            self.private_vss_logical_columns()
+        } else {
+            1 + 2 * self.total_error_columns + self.linkage_logical_columns()
+        };
+        TRACE_SPLIT * (logical_prefix + mask_column) + half
+    }
+
+    pub(crate) fn phase_one_physical_count(&self) -> usize {
+        let logical_prefix = if self.private_vss_active() {
+            self.private_vss_logical_columns()
+        } else {
+            1 + 2 * self.total_error_columns + self.linkage_logical_columns()
+        };
+        TRACE_SPLIT * (logical_prefix + self.mask_column_count)
+    }
+
+    // Row-check constraints are present for restricted witness columns and
+    // mask digits. Private VSS message and carry columns are unrestricted
+    // field columns; their integer lift is checked by masked consistency.
+    pub(crate) fn row_check_constraint_count(&self) -> usize {
+        if self.private_vss_active() {
+            TRACE_SPLIT * (self.private_vss_randomness_columns + self.mask_column_count)
+        } else {
+            self.phase_one_physical_count()
+        }
+    }
+
+    // Mask slot of one claim digit: claims are laid out consecutively with
+    // CLAIM_MASK_DIGIT_COUNT binary digits each.
+    pub(crate) fn mask_slot(
+        &self,
+        claim_index: usize,
+        digit_index: usize,
+    ) -> (usize, usize, usize) {
+        let slot = claim_index * CLAIM_MASK_DIGIT_COUNT + digit_index;
+        let logical_column = slot / self.ring_degree;
+        let position = slot % self.ring_degree;
+        let half = position / self.trace_size;
+        let half_position = position % self.trace_size;
+
+        (logical_column, half, half_position)
+    }
+}
+
+pub(crate) const PHASE_TWO_COLUMN_COUNT: usize = 4;
+pub(crate) const QUOTIENT_COLUMN_ROW_CHECK_LOW: usize = 0;
+pub(crate) const QUOTIENT_COLUMN_ROW_CHECK_HIGH: usize = 1;
+pub(crate) const QUOTIENT_COLUMN_SUMCHECK_VANISHING: usize = 2;
+pub(crate) const QUOTIENT_COLUMN_SUMCHECK_LINEAR: usize = 3;

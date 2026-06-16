@@ -31,7 +31,7 @@ const kernelNodeTestGlobs = [
 ] as const;
 
 const heavyKernelNodeTestGlobs = [
-    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup.kernel.test.ts',
+    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/**/*.kernel.test.ts',
 ] as const;
 
 export const nodeTestLaneDefinitions = {

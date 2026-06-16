@@ -5,8 +5,8 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { collectFiles, toPosixPath } from '#tools/internal/files.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const heavyKernelNodeTestPath =
-    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup.kernel.test.ts';
+const heavyKernelNodeTestDirectory =
+    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/';
 
 type TestLaneGroup =
     | 'browser'
@@ -38,7 +38,10 @@ export const testLaneGroupsForRelativePath = (
 
     if (relativePath.startsWith('packages/protocol/tests/node/')) {
         laneGroups.push('node-protocol');
-    } else if (relativePath === heavyKernelNodeTestPath) {
+    } else if (
+        relativePath.startsWith(heavyKernelNodeTestDirectory) &&
+        relativePath.endsWith('.kernel.test.ts')
+    ) {
         laneGroups.push('node-kernel-heavy');
     } else if (
         relativePath.startsWith('packages/wasm/tests/node/') &&

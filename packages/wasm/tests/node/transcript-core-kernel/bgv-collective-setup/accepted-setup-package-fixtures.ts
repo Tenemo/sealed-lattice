@@ -1,9 +1,28 @@
-import { describe, expect, it } from 'vitest';
+import { expect } from 'vitest';
 
-import { setupRequest, validHash } from './bgv-passive-setup-fixtures.js';
+import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
 
 import {
-    createPrivateVssMailboxKeyPair,
+    cloneJsonRecord,
+    coefficientVectorLittleEndianHex,
+    deterministicRandomBytes,
+    firstProfileDecryptionThreshold,
+    firstProfileParticipantCount,
+    hexToBytes,
+    jsonRecord,
+    minimumSuccinctProofFixtureRingDegree,
+    privateVssMailboxKeyPairForRosterPosition,
+    privateVssMailboxPublicKeyBytesHash,
+    protocolHashPattern,
+    publicKeyShareCoefficientVectorHash,
+    setupTransportChunkCount,
+    setupTransportChunkSizeBytes,
+    setupTransportTotalByteLength,
+    textEncoder,
+    type JsonRecord,
+} from './setup-fixture-primitives.js';
+
+import {
     hash512Hex,
     privateVssMailboxEncryptionProfileId,
 } from '#packages/crypto/src/index';
@@ -16,7 +35,6 @@ import {
     createEvaluatorKeySchedule,
     type EvaluatorKeySchedule,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
-import { createLocalTrusteeSetupStateCommitment } from '#packages/protocol/src/setup/local-trustee-setup-state';
 import {
     createPrivateVssMailboxDeliverySetFromReferences,
     createPrivateVssMailboxSourceTrusteeDeliveryReferences,
@@ -28,7 +46,6 @@ import {
     createPublicKeyShareProofSet,
     createPublicKeyShareSet,
     createPublicKeyShareSuccinctProofSet,
-    publicKeyShareCoefficientVectorHashDomain,
     publicKeyShareProofFamily,
     publicKeyShareSuccinctProofModelStatus,
     publicKeyShareSuccinctProofVerificationStatus,
@@ -55,7 +72,6 @@ import {
     createSetupPhaseParticipantObject,
     createSetupPhaseRecord,
 } from '#packages/protocol/src/setup/setup-phase-records';
-import { binaryVssCoefficientCommitmentMaterialByteLength } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import {
     createVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientOpeningState,
@@ -64,7 +80,6 @@ import {
     type VssCoefficientOpeningMaterial,
     type VssCoefficientCommitmentSet,
     type VssSourceTrusteeOpeningMaterial,
-    type VssOpeningRandomByteSource,
 } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import {
     createVssComplaintSet,
@@ -78,149 +93,13 @@ import {
     type VssShareAcceptanceRecord,
     type VssShareComplaintRecord,
 } from '#packages/protocol/src/setup/vss-share-verification-records';
-import {
-    loadTranscriptCoreKernel,
-    TranscriptCoreKernelCommandError,
-} from '#packages/wasm/src/index';
 import type {
     BgvCollectiveSetupProfileDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
 
-type JsonRecord = Record<string, unknown>;
-
-const jsonRecord = (value: unknown, label: string): JsonRecord => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        throw new Error(`${label} must be a JSON object.`);
-    }
-
-    return value as JsonRecord;
-};
-
-const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
-    JSON.parse(JSON.stringify(value)) as JsonRecord;
-
-const textEncoder = new TextEncoder();
-// Reduced collective setup coverage still runs below the profile ring, but it
-// must use a ring degree accepted by the succinct proof relation.
-const minimumSuccinctProofFixtureRingDegree = 128;
-const firstProfileParticipantCount = 10;
-const firstProfileDecryptionThreshold = 4;
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-const setupTransportChunkSizeBytes = 1_048_576;
-// The accepted transport certificate must bind the exact first-profile binary
-// VSS coefficient commitment material byte length the kernel recomputes.
-const setupTransportTotalByteLength =
-    binaryVssCoefficientCommitmentMaterialByteLength({
-        participantCount: firstProfileParticipantCount,
-        thresholdDegree: firstProfileDecryptionThreshold,
-        rnsLimbCount: 17,
-        ringDegree: 32_768,
-    });
-const setupTransportChunkCount = Math.ceil(
-    setupTransportTotalByteLength / setupTransportChunkSizeBytes,
-);
-
-const hexToBytes = (hexValue: string): Uint8Array =>
-    Uint8Array.from(
-        Array.from({ length: hexValue.length / 2 }, (_unused, byteIndex) =>
-            Number.parseInt(
-                hexValue.slice(byteIndex * 2, byteIndex * 2 + 2),
-                16,
-            ),
-        ),
-    );
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-const coefficientVectorBytes = (
-    coefficients: readonly number[],
-): Uint8Array => {
-    const bytes = new Uint8Array(coefficients.length * 8);
-    const view = new DataView(bytes.buffer);
-    coefficients.forEach((coefficient, coefficientIndex) => {
-        view.setBigUint64(coefficientIndex * 8, BigInt(coefficient), true);
-    });
-
-    return bytes;
-};
-
-const coefficientVectorLittleEndianHex = (
-    coefficients: readonly number[],
-): string => bytesToHex(coefficientVectorBytes(coefficients));
-
-const publicKeyShareCoefficientVectorHash = (
-    coefficients: readonly number[],
-): string =>
-    hash512Hex(publicKeyShareCoefficientVectorHashDomain, [
-        coefficientVectorBytes(coefficients),
-    ]);
-
-const privateVssMailboxKeyPairForRosterPosition = (
-    rosterPosition: number,
-): ReturnType<typeof createPrivateVssMailboxKeyPair> =>
-    createPrivateVssMailboxKeyPair(
-        hash512Hex('sealed-lattice-test/private-vss-mailbox-key', [
-            textEncoder.encode(String(rosterPosition)),
-        ]),
-    );
-
-const privateVssMailboxPublicKeyBytesHash = (
-    publicKeyBytesHex: string,
-): string =>
-    hash512Hex('sealed-lattice-private-vss-mailbox/ml-kem-768-public-key-v1', [
-        hexToBytes(publicKeyBytesHex),
-    ]);
-
-const deterministicRandomBytes = (
-    seedLabel: string,
-): VssOpeningRandomByteSource => {
-    let blockIndex = 0;
-    let bufferedBytes = new Uint8Array(0);
-    let bufferedOffset = 0;
-
-    return (byteLength) => {
-        const outputBytes = new Uint8Array(byteLength);
-        let outputOffset = 0;
-        while (outputOffset < byteLength) {
-            if (bufferedOffset >= bufferedBytes.byteLength) {
-                const blockHex = hash512Hex(
-                    'sealed-lattice-test/vss-opening-randomness',
-                    [
-                        textEncoder.encode(seedLabel),
-                        textEncoder.encode(String(blockIndex)),
-                    ],
-                );
-                bufferedBytes = Uint8Array.from(
-                    blockHex
-                        .match(/../gu)
-                        ?.map((byteHex) => Number.parseInt(byteHex, 16)) ?? [],
-                );
-                bufferedOffset = 0;
-                blockIndex += 1;
-            }
-            const copyLength = Math.min(
-                byteLength - outputOffset,
-                bufferedBytes.byteLength - bufferedOffset,
-            );
-            outputBytes.set(
-                bufferedBytes.subarray(
-                    bufferedOffset,
-                    bufferedOffset + copyLength,
-                ),
-                outputOffset,
-            );
-            bufferedOffset += copyLength;
-            outputOffset += copyLength;
-        }
-
-        return outputBytes;
-    };
-};
-
-function acceptedVssCoefficientCommitments(
+export function acceptedVssCoefficientCommitments(
     setupContext: CollectiveBgvSetupContext,
     profile: BgvCollectiveSetupProfileDescription,
     publicMatrixSeedHash: string,
@@ -251,7 +130,7 @@ function acceptedVssCoefficientCommitments(
     });
 }
 
-function acceptedSameSecretConsistency(
+export function acceptedSameSecretConsistency(
     setupContext: CollectiveBgvSetupContext,
     profile: BgvCollectiveSetupProfileDescription,
     vssCoefficientCommitments: VssCoefficientCommitmentSet,
@@ -271,7 +150,7 @@ const sameSecretProofBytesHash = (proofBytesHex: string): string =>
         [hexToBytes(proofBytesHex)],
     );
 
-function sameSecretProofsWithDriftedStatementHashes(
+export function sameSecretProofsWithDriftedStatementHashes(
     profile: BgvCollectiveSetupProfileDescription,
     setupPackage: JsonRecord,
 ): SameSecretProofSet {
@@ -340,7 +219,7 @@ const centeredTernaryFromResidue = (
     return centeredValue;
 };
 
-function sameSecretProofsWithGeneratedProofs(
+export function sameSecretProofsWithGeneratedProofs(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
     setupPackage: JsonRecord,
@@ -560,7 +439,7 @@ const publicKeyShareContributionsFromMaterial = (
             ),
     }));
 
-function acceptedPublicKeyShares(
+export function acceptedPublicKeyShares(
     setupContext: CollectiveBgvSetupContext,
     profile: BgvCollectiveSetupProfileDescription,
     commonRandomness: JsonRecord,
@@ -587,7 +466,7 @@ function acceptedPublicKeyShares(
     });
 }
 
-function acceptedPublicKeyShareMaterial(
+export function acceptedPublicKeyShareMaterial(
     setupContext: CollectiveBgvSetupContext,
     profile: BgvCollectiveSetupProfileDescription,
     commonRandomness: JsonRecord,
@@ -612,7 +491,7 @@ function acceptedPublicKeyShareMaterial(
     });
 }
 
-function acceptedPublicKeyShareProofs(
+export function acceptedPublicKeyShareProofs(
     setupContext: CollectiveBgvSetupContext,
     profile: BgvCollectiveSetupProfileDescription,
     commonRandomness: JsonRecord,
@@ -644,7 +523,7 @@ const publicKeyShareSuccinctProofBytesHash = (proofBytesHex: string): string =>
         [hexToBytes(proofBytesHex)],
     );
 
-function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
+export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
     profile: BgvCollectiveSetupProfileDescription,
     setupPackage: JsonRecord,
 ): PublicKeyShareSuccinctProofSet {
@@ -696,7 +575,7 @@ function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
     });
 }
 
-function acceptedEvaluatorKeySchedule(
+export function acceptedEvaluatorKeySchedule(
     setupContext: CollectiveBgvSetupContext,
     profile: BgvCollectiveSetupProfileDescription,
     commonRandomness: JsonRecord,
@@ -963,7 +842,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
     } as const satisfies PrivateVssEnvelopeCommitment;
 }
 
-function packageShapePrivateVssEnvelopeCommitments(
+export function packageShapePrivateVssEnvelopeCommitments(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
     setupContext: JsonRecord,
@@ -1021,7 +900,7 @@ function packageShapePrivateVssEnvelopeCommitments(
     return privateVssEnvelopeCommitmentSet;
 }
 
-async function focusedPrivateVssSourceDeliveryReferences(
+export async function focusedPrivateVssSourceDeliveryReferences(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
     setupContext: JsonRecord,
@@ -1077,7 +956,7 @@ async function focusedPrivateVssSourceDeliveryReferences(
     });
 }
 
-async function acceptedVssShareAcceptances(
+export async function acceptedVssShareAcceptances(
     setupContext: JsonRecord,
     privateVssEnvelopeCommitments: JsonRecord,
 ): Promise<JsonRecord> {
@@ -1140,7 +1019,7 @@ async function acceptedVssShareAcceptances(
     });
 }
 
-async function acceptedVssComplaintSet(
+export async function acceptedVssComplaintSet(
     setupContext: JsonRecord,
     privateVssEnvelopeCommitments: JsonRecord,
 ): Promise<JsonRecord> {
@@ -1200,7 +1079,7 @@ async function acceptedVssComplaintSet(
     });
 }
 
-function acceptedCommonRandomness(
+export function acceptedCommonRandomness(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): JsonRecord {
@@ -1330,6 +1209,8 @@ function publicPrivateVssEnvelopeCommitmentReference(
     return publicReference;
 }
 
+export { publicPrivateVssEnvelopeCommitmentReference };
+
 function publicPrivateVssEnvelopeCommitmentSet(
     privateVssEnvelopeCommitments: JsonRecord,
 ): JsonRecord {
@@ -1352,7 +1233,7 @@ function setupPackageHashInput(setupPackage: JsonRecord): JsonRecord {
     return hashInput;
 }
 
-function rebindCollectiveSetupPackageHash(
+export function rebindCollectiveSetupPackageHash(
     kernel: TranscriptCoreKernel,
     setupPackage: JsonRecord,
 ): void {
@@ -1586,7 +1467,7 @@ function optionalNestedHashFromRecord(
     return optionalHashFromRecord(objectValue as JsonRecord, hashFieldName);
 }
 
-function acceptedActiveStaticSetupTheoremCertificate(
+export function acceptedActiveStaticSetupTheoremCertificate(
     kernel: TranscriptCoreKernel,
     setupPackage: JsonRecord,
 ): JsonRecord {
@@ -1951,7 +1832,7 @@ async function buildAcceptedShapedSetupPackage(
     return setupPackage;
 }
 
-async function acceptedShapedSetupPackage(
+export async function acceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
     profile: BgvCollectiveSetupProfileDescription,
 ): Promise<JsonRecord> {
@@ -1971,591 +1852,3 @@ async function acceptedShapedSetupPackage(
 
     return cloneJsonRecord(await acceptedShapedSetupPackagePromise);
 }
-
-describe('collective BGV setup kernel commands', () => {
-    it('describes the accepted setup profile and compact verifier states', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-
-        expect(profile).toMatchObject({
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            objectType: 'SetupPackage',
-            adversaryModel: 'active-static',
-            livenessModel: 'secure-with-abort',
-            sharingModel: 'recipient-verified-vss',
-            sharingDomain: 'per-rns-prime',
-            participantCount: 10,
-            qSetupComplete: 10,
-            qBallotRelease: 10,
-            qFinal: 10,
-            qDec: 4,
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
-        });
-        expect(profile.qShare).toMatchObject({
-            objectType: 'QSharePrimeList',
-            sharingDomain: 'per-rns-prime',
-            primeOrder: 'profile-order',
-        });
-        expect(profile.qShare.primes.length).toBeGreaterThan(0);
-        expect(profile.qShareHash).toHaveLength(128);
-        expect(
-            profile.commitmentProfile.assumptions.parameterAcceptanceStatus,
-        ).toBe('claim-bearing-setup-commitment-parameter-accounting-accepted');
-        expect(profile.publicVssCommitmentMaterialSizeProfile).toMatchObject({
-            objectType: 'PublicVssCommitmentMaterialSizeProfile',
-            ringDegree: 32768,
-            ringDegreeStatus: 'profile-ring',
-            fullMaterialCoefficientBytes: 1_604_321_280,
-            fullMaterialCoefficientMebibytes: 1530,
-            streamingRequirement:
-                'binary-chunked-stream-verification-with-one-commitment-resident',
-        });
-        expect(profile.publicVssCommitmentMaterialSizeProfileHash).toHaveLength(
-            128,
-        );
-        expect(profile.setupTransportProfile).toMatchObject({
-            objectType: 'SetupTransportProfile',
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
-            chunkSizeBytes: setupTransportChunkSizeBytes,
-            storageQuotaBytes: 2_147_483_648,
-            largestSingleBufferBytes: 1_572_864,
-            streamVerificationOrder: 'ascending-chunk-index',
-            lazyLoadingPolicy: 'root-addressed-large-object-loading',
-        });
-        expect(profile.setupTransportProfileHash).toHaveLength(128);
-        expect(profile.carryAwareVssShareRelationProfile).toMatchObject({
-            objectType: 'CarryAwareVssShareRelationProfile',
-            sharingDomain: 'per-rns-prime',
-            carryWitnessDomain: 'non-negative-bounded-integer',
-        });
-        expect(profile.carryAwareVssShareRelationProfileHash).toHaveLength(128);
-        expect(profile.commitmentProfile).toMatchObject({
-            objectType: 'BdlopCommitmentProfile',
-        });
-        expect(profile.commitmentProfile.messageEncoding).toMatchObject({
-            integerEncoding: 'crt-lifted-integer-coefficients',
-        });
-        expect(profile.commitmentProfileHash).toHaveLength(128);
-        expect(profile.evaluatorKeyScheduleProfile).toMatchObject({
-            objectType: 'EvaluatorKeyScheduleProfile',
-            genericKeySwitchPolicy: 'refused-unless-explicitly-required',
-            genericKeySwitchProofStatus: 'not-required-for-first-profile',
-        });
-        expect(
-            profile.evaluatorKeyScheduleProfile.relinearizationLevelSchedule,
-        ).not.toHaveLength(0);
-        expect(
-            profile.evaluatorKeyScheduleProfile.requiredGaloisKeySchedule,
-        ).not.toHaveLength(0);
-        expect(
-            profile.evaluatorKeyScheduleProfile.requiredGaloisSetHash,
-        ).toHaveLength(128);
-        expect(profile.evaluatorKeyScheduleProfileHash).toHaveLength(128);
-        expect(profile.verifierStatuses).toEqual([
-            'accepted',
-            'pending',
-            'refused',
-            'aborted',
-            'forkDetected',
-            'outsideProfile',
-        ]);
-        expect(profile.phaseOrder).toHaveLength(15);
-        expect(profile.requiredFinalObjects).toContain(
-            'setupTransportCertificate',
-        );
-    });
-
-    it('classifies passive setup packages as outside profile', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const passiveSetup = kernel.generateBgvPassiveSetup(setupRequest);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage: passiveSetup,
-        });
-
-        expect(result).toMatchObject({
-            ok: false,
-            operation: 'verifyCollectiveBgvSetupPackage',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            verifierStatus: 'outsideProfile',
-        });
-        expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'outsideCollectiveBgvSetupProfile',
-        );
-        expect(result.acceptedSetupHandoff).toBeUndefined();
-    });
-
-    it('maps malformed accepted setup command errors to neutral protocol errors', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(() => {
-            kernel.verifyCollectiveBgvSetup({
-                setupPackage: undefined,
-            });
-        }).toThrow(TranscriptCoreKernelCommandError);
-
-        let thrownError: unknown;
-        try {
-            kernel.verifyCollectiveBgvSetup({
-                setupPackage: undefined,
-            });
-            throw new Error('verifyCollectiveBgvSetup should have failed.');
-        } catch (error) {
-            thrownError = error;
-        }
-        expect(thrownError).toBeInstanceOf(TranscriptCoreKernelCommandError);
-        const commandError = thrownError as TranscriptCoreKernelCommandError;
-        expect(commandError.code).toBe('InvalidProtocolObject');
-        expect(commandError.message).not.toContain('InvalidFixture');
-        expect(commandError.message).toContain('setupPackage is required');
-    });
-
-    it('reports accepted-shaped setup as pending before reduced-ring public VSS profile checks', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage,
-            expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
-        });
-
-        expect(result).toMatchObject({
-            ok: false,
-            verifierStatus: 'pending',
-            currentPhase: 'setupPackageVerification',
-            missingObjects: [
-                'sameSecretProofs',
-                'publicKeyShareMaterial',
-                'publicKeyShareSuccinctProofs',
-                'collectivePublicKey',
-                'collectivePublicKeyRoot',
-            ],
-            refusedObjects: [],
-        });
-    });
-
-    it('refuses protocol-built setup packages with malformed setup context before later pending', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-
-        for (const [fieldName, malformedValue] of [
-            ['setupEpoch', 'setup-epoch 1'],
-            ['ceremonyId', 'ceremony-1\nfork'],
-        ] as const) {
-            const setupPackage = await acceptedShapedSetupPackage(
-                kernel,
-                profile,
-            );
-            const setupContext = setupPackage.setupContext as JsonRecord;
-            setupContext[fieldName] = malformedValue;
-            delete setupPackage.phaseTranscript;
-            rebindCollectiveSetupPackageHash(kernel, setupPackage);
-
-            const result = kernel.verifyCollectiveBgvSetup({
-                setupPackage,
-                expectedManifestHash: setupRequest.manifestHash,
-                expectedRosterHash: setupRequest.rosterHash,
-            });
-
-            expect(result.verifierStatus).toBe('refused');
-            expect(result.refusedObjects[0]).toMatchObject({
-                reasonCode: 'setupContextTokenMalformed',
-                objectPath: `setupPackage.setupContext.${fieldName}`,
-            });
-            expect(result.missingObjects).toEqual([]);
-            expect(result.acceptedSetupHandoff).toBeUndefined();
-        }
-    });
-
-    it('refuses protocol-built same-secret proofs with statement-hash drift before later pending', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
-        setupPackage.sameSecretProofs =
-            sameSecretProofsWithDriftedStatementHashes(profile, setupPackage);
-        const activeStaticSetupTheoremCertificate =
-            acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-        setupPackage.activeStaticSetupTheoremCertificate =
-            activeStaticSetupTheoremCertificate;
-        setupPackage.activeStaticSetupTheoremCertificateHash =
-            activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
-        rebindCollectiveSetupPackageHash(kernel, setupPackage);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage,
-            expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
-        });
-
-        expect(result.verifierStatus).toBe('refused');
-        expect(result.refusedObjects[0]).toMatchObject({
-            reasonCode: 'sameSecretProofVerificationFailed',
-        });
-        expect(String(result.refusedObjects[0]?.message)).toContain(
-            'statementHash must match',
-        );
-        expect(result.missingObjects).toEqual([]);
-        expect(result.acceptedSetupHandoff).toBeUndefined();
-    });
-
-    it('refuses protocol-built public-key share succinct proofs with statement-hash drift before later pending', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
-        const setupContext =
-            setupPackage.setupContext as CollectiveBgvSetupContext;
-        const commonRandomness = setupPackage.commonRandomness as JsonRecord;
-        const vssCoefficientCommitmentBundle =
-            acceptedVssCoefficientCommitments(
-                setupContext,
-                profile,
-                String(commonRandomness.publicMatrixSeedHash),
-            );
-        setupPackage.sameSecretProofs = sameSecretProofsWithGeneratedProofs(
-            kernel,
-            profile,
-            setupPackage,
-            vssCoefficientCommitmentBundle,
-        );
-        setupPackage.publicKeyShareMaterial = acceptedPublicKeyShareMaterial(
-            setupContext,
-            profile,
-            commonRandomness,
-            setupPackage.publicKeyShares as PublicKeyShareSet,
-        );
-        setupPackage.publicKeyShareSuccinctProofs =
-            publicKeyShareSuccinctProofsWithDriftedStatementHashes(
-                profile,
-                setupPackage,
-            );
-        const activeStaticSetupTheoremCertificate =
-            acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-        setupPackage.activeStaticSetupTheoremCertificate =
-            activeStaticSetupTheoremCertificate;
-        setupPackage.activeStaticSetupTheoremCertificateHash =
-            activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
-        rebindCollectiveSetupPackageHash(kernel, setupPackage);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage,
-            expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
-        });
-
-        expect(result.verifierStatus).toBe('refused');
-        expect(result.refusedObjects[0]).toMatchObject({
-            reasonCode: 'publicKeyShareSuccinctProofVerificationFailed',
-        });
-        expect(String(result.refusedObjects[0]?.message)).toContain(
-            'statementHash must match',
-        );
-        expect(result.missingObjects).toEqual([]);
-        expect(result.acceptedSetupHandoff).toBeUndefined();
-    });
-
-    it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
-        setupPackage.vssComplaints = await acceptedVssComplaintSet(
-            setupPackage.setupContext as JsonRecord,
-            setupPackage.privateVssEnvelopeCommitments as JsonRecord,
-        );
-        rebindCollectiveSetupPackageHash(kernel, setupPackage);
-
-        const result = kernel.verifyCollectiveBgvSetup({
-            setupPackage,
-            expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
-        });
-
-        expect(result).toMatchObject({
-            ok: false,
-            verifierStatus: 'aborted',
-            currentPhase: 'vssAcceptanceOrComplaint',
-        });
-        expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'vssComplaintAcceptedAbort',
-        );
-        expect(result.acceptedHashes).toContain(
-            (setupPackage.vssComplaints as JsonRecord).vssComplaintRoot,
-        );
-    });
-
-    it('refuses undeclared generic key-switch material', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const baseSetupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            profile,
-        );
-        const genericKeySwitchPackage = cloneJsonRecord(baseSetupPackage);
-        genericKeySwitchPackage.genericKeySwitchKeys = {
-            keyRoot: validHash('8'),
-        };
-        rebindCollectiveSetupPackageHash(kernel, genericKeySwitchPackage);
-
-        const genericKeySwitchResult = kernel.verifyCollectiveBgvSetup({
-            setupPackage: genericKeySwitchPackage,
-        });
-
-        expect(genericKeySwitchResult.verifierStatus).toBe('refused');
-        expect(genericKeySwitchResult.refusedObjects[0]?.reasonCode).toBe(
-            'genericKeySwitchOutsideProfile',
-        );
-    });
-
-    it('refuses malformed commitment security certificates', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const baseSetupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            profile,
-        );
-        const malformedCommitmentCertificatePackage =
-            cloneJsonRecord(baseSetupPackage);
-        const malformedCommitmentCertificate =
-            malformedCommitmentCertificatePackage.setupCommitmentSecurityCertificate as JsonRecord;
-        (
-            malformedCommitmentCertificate.aggregateOpeningBounds as JsonRecord
-        ).thresholdShareOpeningInfinityBound = 11_109;
-        rebindCollectiveSetupPackageHash(
-            kernel,
-            malformedCommitmentCertificatePackage,
-        );
-
-        const malformedCommitmentCertificateResult =
-            kernel.verifyCollectiveBgvSetup({
-                setupPackage: malformedCommitmentCertificatePackage,
-            });
-
-        expect(malformedCommitmentCertificateResult.verifierStatus).toBe(
-            'refused',
-        );
-        expect(
-            malformedCommitmentCertificateResult.refusedObjects[0]?.reasonCode,
-        ).toBe('commitmentSecurityCertificatePayloadMismatch');
-    });
-
-    it('refuses JSON setup transport certificates', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const baseSetupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            profile,
-        );
-        const jsonTransportPackage = cloneJsonRecord(baseSetupPackage);
-        (
-            jsonTransportPackage.setupTransportCertificate as JsonRecord
-        ).largeObjectEncoding = 'json';
-        rebindCollectiveSetupPackageHash(kernel, jsonTransportPackage);
-
-        const jsonTransportResult = kernel.verifyCollectiveBgvSetup({
-            setupPackage: jsonTransportPackage,
-        });
-
-        expect(jsonTransportResult.verifierStatus).toBe('refused');
-        expect(jsonTransportResult.refusedObjects[0]?.reasonCode).toBe(
-            'transportEncodingMismatch',
-        );
-    });
-
-    it('refuses setup transport chunk hash count mismatches', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const baseSetupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            profile,
-        );
-        const malformedTransportPackage = cloneJsonRecord(baseSetupPackage);
-        const malformedTransportCertificate =
-            malformedTransportPackage.setupTransportCertificate as JsonRecord;
-        (malformedTransportCertificate.chunkHashes as string[]).pop();
-        rebindCollectiveSetupPackageHash(kernel, malformedTransportPackage);
-
-        const malformedTransportResult = kernel.verifyCollectiveBgvSetup({
-            setupPackage: malformedTransportPackage,
-        });
-
-        expect(malformedTransportResult.verifierStatus).toBe('refused');
-        expect(malformedTransportResult.refusedObjects[0]?.reasonCode).toBe(
-            'transportChunkHashCountMismatch',
-        );
-    });
-
-    it('routes private VSS share envelope verification refusals', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        const result = kernel.verifyPrivateVssShareEnvelope({
-            setupContext: {},
-            publicMatrixSeedHash: validHash('1'),
-            sourceTrusteeCoefficientCommitmentRecord: {},
-            sourceTrusteeCoefficientCommitmentMaterialRecords: [],
-            privateEnvelope: {},
-        });
-
-        expect(result).toMatchObject({
-            ok: false,
-            operation: 'verifyPrivateVssShareEnvelope',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            verifierStatus: 'refused',
-        });
-        expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'setupContextFieldMissing',
-        );
-    });
-
-    it('routes threshold share commitment derivation errors', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(() => {
-            kernel.deriveThresholdShareCommitments({
-                setupContext: {},
-                publicMatrixSeedHash: validHash('1'),
-                sourceTrusteeCoefficientCommitmentRecords: [],
-                coefficientCommitments: [],
-            });
-        }).toThrow(TranscriptCoreKernelCommandError);
-        expect(() => {
-            kernel.deriveThresholdShareCommitments({
-                setupContext: {},
-                publicMatrixSeedHash: validHash('1'),
-                sourceTrusteeCoefficientCommitmentRecords: [],
-                coefficientCommitments: [],
-            });
-        }).toThrow(/setupContext\.ceremonyId is required/);
-    });
-
-    it('verifies protocol-built local trustee setup state commitments', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupContext = {
-            ceremonyId: setupRequest.ceremonyId,
-            manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
-            setupProfileHash: profile.setupProfileHash,
-            qShareHash: profile.qShareHash,
-            carryAwareVssShareRelationProfileHash:
-                profile.carryAwareVssShareRelationProfileHash,
-            commitmentProfileHash: profile.commitmentProfileHash,
-            setupEpoch: 'setup-epoch-1',
-        } satisfies CollectiveBgvSetupContext;
-        const localStateCommitment = createLocalTrusteeSetupStateCommitment({
-            setupContext,
-            trusteeIdentity: 'trustee-3',
-            trusteeRosterPosition: 3,
-            thresholdShareCommitmentRecipientRoot: validHash('1'),
-            aggregateThresholdShareRoot: validHash('2'),
-            issuedVssAcceptanceRoot: validHash('4'),
-            issuedVssComplaintRoots: [validHash('5'), validHash('6')],
-        });
-
-        expect(
-            kernel.verifyLocalTrusteeSetupState({
-                setupContext,
-                localStateCommitment,
-            }),
-        ).toMatchObject({
-            ok: true,
-            operation: 'verifyLocalTrusteeSetupState',
-            trusteeIdentity: 'trustee-3',
-            trusteeRosterPosition: 3,
-            trusteePoint: 4,
-            localStateRoot: localStateCommitment.localStateRoot,
-            deletionReceiptRoot: localStateCommitment.deletionReceiptRoot,
-        });
-    });
-
-    it('builds proof-shaped private VSS envelope references without public ciphertext leakage', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupContext = {
-            ceremonyId: setupRequest.ceremonyId,
-            manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
-            setupProfileHash: profile.setupProfileHash,
-            qShareHash: profile.qShareHash,
-            carryAwareVssShareRelationProfileHash:
-                profile.carryAwareVssShareRelationProfileHash,
-            commitmentProfileHash: profile.commitmentProfileHash,
-            setupEpoch: 'setup-epoch-1',
-            participantCount: firstProfileParticipantCount,
-            qSetupComplete: 10,
-            qBallotRelease: 10,
-            qFinal: 10,
-            qDec: firstProfileDecryptionThreshold,
-        } satisfies CollectiveBgvSetupContext;
-        const commonRandomness = acceptedCommonRandomness(kernel, profile);
-        const vssCoefficientCommitmentBundle =
-            acceptedVssCoefficientCommitments(
-                setupContext,
-                profile,
-                String(commonRandomness.publicMatrixSeedHash),
-            );
-        const envelopeReferences =
-            await focusedPrivateVssSourceDeliveryReferences(
-                kernel,
-                profile,
-                setupContext,
-                commonRandomness,
-                vssCoefficientCommitmentBundle.commitmentSet,
-                vssCoefficientCommitmentBundle.privateOpeningMaterialBySourceTrustee,
-            );
-        const envelopeReference = envelopeReferences[0];
-        if (envelopeReference === undefined) {
-            throw new Error(
-                'Missing generated private VSS envelope reference.',
-            );
-        }
-        expect(
-            envelopeReference.transportedPrivateVssShareProofMaterial,
-        ).toMatchObject({
-            objectType: 'SetupTransportedPrivateVssShareProofMaterialSet',
-            proofFamily: 'vss-opening-carry',
-        });
-
-        const publicEnvelopeReference =
-            publicPrivateVssEnvelopeCommitmentReference(envelopeReference);
-
-        expect(publicEnvelopeReference.encryptedEnvelope).toBeUndefined();
-        expect(
-            publicEnvelopeReference.transportedPrivateVssShareProofMaterial,
-        ).toBeUndefined();
-        expect(publicEnvelopeReference.openingVerificationStatus).toBe(
-            'accepted-local-private-vss-opening',
-        );
-        expect(String(publicEnvelopeReference.privateEnvelopeHash)).toMatch(
-            protocolHashPattern,
-        );
-        expect(String(publicEnvelopeReference.encryptedEnvelopeHash)).toMatch(
-            protocolHashPattern,
-        );
-        expect(String(publicEnvelopeReference.localVerificationRoot)).toMatch(
-            protocolHashPattern,
-        );
-        expect(
-            String(publicEnvelopeReference.privateEnvelopeCommitmentRoot),
-        ).toMatch(protocolHashPattern);
-    });
-
-    it('routes local trustee setup state verification errors', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(() => {
-            kernel.verifyLocalTrusteeSetupState({
-                setupContext: {},
-                localStateCommitment: {},
-            });
-        }).toThrow(TranscriptCoreKernelCommandError);
-        expect(() => {
-            kernel.verifyLocalTrusteeSetupState({
-                setupContext: {},
-                localStateCommitment: {},
-            });
-        }).toThrow(/setupContext\.ceremonyId is required/);
-    });
-});
