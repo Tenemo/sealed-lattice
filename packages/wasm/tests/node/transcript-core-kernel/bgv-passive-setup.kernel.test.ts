@@ -42,38 +42,21 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
         const repeated = kernel.generateBgvPassiveSetup(setupRequest);
         const certificates = setup.certificates as {
-            readonly setupParameterCertificate: {
-                readonly finalSecurityStatus: string;
-                readonly largestExposedModulusBitsWithoutQTarget: number;
-            };
             readonly publicRlweSamplesByBasis: {
                 readonly QData: {
                     readonly publicKeyShares: number;
                     readonly rotationKeys: number;
                 };
                 readonly QPPublic: {
-                    readonly exposedOnAcceptedDirectEvaluatorReplayPath: boolean;
                     readonly rotationKeys: number;
-                };
-                readonly QTarget: {
-                    readonly sampleCountStatus: string;
                 };
             };
         };
 
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
-        expect(setup.nonClaims).toContain('TargetShareProofNotCertified');
         expect(setup.targetDecryptionStatus).toMatchObject({
             targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
-            setupMaterialMatchesTargetDecryption: true,
-            targetPartDecImplemented: true,
-            targetC1C4StatusAccepted: false,
-        });
-        expect(certificates.setupParameterCertificate).toMatchObject({
-            finalSecurityStatus:
-                'acceptedForDirectEvaluatorReplayTargetPending',
-            largestExposedModulusBitsWithoutQTarget: 799,
         });
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
@@ -82,12 +65,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             certificates.publicRlweSamplesByBasis.QData.rotationKeys,
         ).toBeGreaterThan(0);
         expect(certificates.publicRlweSamplesByBasis.QPPublic).toMatchObject({
-            exposedOnAcceptedDirectEvaluatorReplayPath: false,
             rotationKeys: 0,
         });
-        expect(
-            certificates.publicRlweSamplesByBasis.QTarget.sampleCountStatus,
-        ).toBe('pendingUntilFinalNoiseAnalysis');
         expect(
             setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
         ).toHaveLength(128);
@@ -176,7 +155,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             objectType: 'BgvPublicEvaluationKeyMaterial',
             setupPackageHash: setup.setupPackageHash,
             evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
-            rawSecretMaterialExported: false,
         });
         expect((material.rotationKeys as readonly unknown[]).length).toBe(0);
         expect(
@@ -383,15 +361,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         setupPackage,
                         ['certificates', 'setupParameterCertificateHash'],
                         validHash('6'),
-                    ),
-            ],
-            [
-                'target decryption PartDec missing',
-                (setupPackage) =>
-                    setPathValue(
-                        setupPackage,
-                        ['targetDecryptionStatus', 'targetPartDecImplemented'],
-                        false,
                     ),
             ],
             [

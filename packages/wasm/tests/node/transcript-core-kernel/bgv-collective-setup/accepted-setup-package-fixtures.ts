@@ -1472,12 +1472,6 @@ export function acceptedActiveStaticSetupTheoremCertificate(
     setupPackage: JsonRecord,
 ): JsonRecord {
     const setupContext = setupPackage.setupContext as JsonRecord;
-    const evaluationKeys = setupPackage.evaluationKeys;
-    const evaluationKeysDeclared =
-        typeof evaluationKeys === 'object' &&
-        evaluationKeys !== null &&
-        !Array.isArray(evaluationKeys) &&
-        Object.keys(evaluationKeys).length > 0;
     const certificate = {
         objectType: 'ActiveStaticSetupTheoremCertificate',
         objectVersion: 1,
@@ -1492,9 +1486,6 @@ export function acceptedActiveStaticSetupTheoremCertificate(
         commitmentProfileHash: setupContext.commitmentProfileHash,
         setupEpoch: setupContext.setupEpoch,
         adversaryModel: {
-            corruptionTiming: 'active-static',
-            maliciousBehavior:
-                'arbitrary-invalid-public-setup-artifacts-and-abort',
             secretConfidentialityCorruptTrusteeBound:
                 firstProfileDecryptionThreshold - 1,
             fullRosterSetupCompletionRequired: true,
@@ -1503,31 +1494,7 @@ export function acceptedActiveStaticSetupTheoremCertificate(
             model: 'secure-with-abort',
             setupCompletionQuorum: firstProfileParticipantCount,
             participantCount: firstProfileParticipantCount,
-            acceptedAbortEvents: [
-                'missing required setup phase object',
-                'malformed public setup object',
-                'invalid private VSS acceptance state',
-                'invalid setup proof or proof material root',
-                'invalid collective public-key or evaluation-key root',
-                'unsupported target-decryption readiness claim',
-            ],
-            notClaimed: [
-                'guaranteed output delivery',
-                'identifiable abort',
-                'post-setup target decryption',
-                'production audit readiness',
-            ],
         },
-        verifiedSetupGates: [
-            'setup context and package hash bind the ceremony, roster, manifest, profile, Q_share, commitment profile, and setup epoch',
-            'full-roster common randomness commit/reveal records derive public setup matrices before proof and key verification',
-            'public VSS coefficient commitments and recipient-local signed acceptances are checked before threshold-share commitment derivation',
-            'threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied',
-            'same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted',
-            'collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records',
-            'setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects',
-            'generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused',
-        ],
         dependencyHashes: {
             setupCommitmentSecurityCertificateHash:
                 setupPackage.setupCommitmentSecurityCertificateHash,
@@ -1582,50 +1549,9 @@ export function acceptedActiveStaticSetupTheoremCertificate(
                 'publicEvaluationKeyMaterialRoot',
             ),
         },
-        referenceRows: [
-            {
-                document: 'BCD25_Threshold (Fully) Homomorphic Encryption',
-                localReferencePath:
-                    'reference-documents/BCD25_Threshold (Fully) Homomorphic Encryption.txt',
-                sections: [
-                    'active-with-abort security model',
-                    'static malicious adversaries',
-                    'threshold FHE setup and abort boundaries',
-                ],
-            },
-            {
-                document:
-                    'LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General',
-                localReferencePath:
-                    'reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt',
-                sections: [
-                    'Fiat-Shamir with aborts',
-                    'commit-and-prove simulatability',
-                    'knowledge soundness',
-                ],
-            },
-            {
-                document:
-                    'BFM25_Threshold FHE with Efficient Asynchronous Decryption',
-                localReferencePath:
-                    'reference-documents/BFM25_Threshold FHE with Efficient Asynchronous Decryption.txt',
-                sections: [
-                    'malicious participant detection',
-                    'setup preprocessing',
-                    'abort behavior',
-                ],
-            },
-        ],
         claimBoundary: {
-            certificateStatus:
-                'active-static-secure-with-abort-theorem-accepted',
-            evaluationKeyCorrectnessStatus: evaluationKeysDeclared
-                ? 'requires-setup-key-correctness-certificate'
-                : 'no-public-evaluation-key-runtime-material-declared',
             remainingDependencies: [],
             integrationDependencies: [],
-            completionBoundary:
-                'external validation, independent audit, and third-party proof review are not setup completion prerequisites',
         },
     };
 

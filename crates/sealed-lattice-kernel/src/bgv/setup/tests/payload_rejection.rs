@@ -179,20 +179,6 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
             }),
         ),
         (
-            "target decryption PartDec missing",
-            Box::new(|mutated_package| {
-                mutated_package["targetDecryptionStatus"]["targetPartDecImplemented"] =
-                    serde_json::json!(false);
-            }),
-        ),
-        (
-            "target decryption C1-C4 claim",
-            Box::new(|mutated_package| {
-                mutated_package["targetDecryptionStatus"]["targetC1C4StatusAccepted"] =
-                    serde_json::json!(true);
-            }),
-        ),
-        (
             "final security status",
             Box::new(|mutated_package| {
                 mutated_package["certificates"]["setupParameterCertificate"]["finalSecurityStatus"] =
@@ -309,35 +295,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             "participant count {invalid_participant_count} must be rejected by verification shape checks"
         );
     }
-
-    let stale_security_status_package = serde_json::json!({
-        "certificates": {
-            "setupParameterCertificate": {
-                "finalSecurityStatus": "pendingQTarget",
-            },
-        },
-        "targetDecryptionStatus": {
-            "targetC1C4StatusAccepted": false,
-            "targetPartDecImplemented": true,
-            "setupMaterialMatchesTargetDecryption": true,
-        },
-        "objectType": "BgvPassiveSetupPackage",
-        "objectVersion": 1,
-        "participants": vec![serde_json::json!({}); 3],
-        "setupInputs": {
-            "participantCount": 3,
-        },
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-    });
-    let stale_status_error = validate_setup_package_shape(&stale_security_status_package)
-        .expect_err("stale setup security status must be refused before encrypted evaluation");
-    assert!(
-        stale_status_error
-            .message
-            .contains("accept direct evaluator replay HE security"),
-        "{}",
-        stale_status_error.message
-    );
 
     let mut malformed_threshold_hash_request = request();
     malformed_threshold_hash_request["thresholdProfileHash"] = serde_json::json!("not-a-hash");

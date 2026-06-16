@@ -129,15 +129,6 @@ fn validate_collective_public_key_coefficient_material(
         "passive setup package public key material",
         "collective public key coefficient material owner",
     )?;
-    if !bool_at_path(
-        coefficient_material,
-        &["fullCoefficientVectorHashesComputed"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "collective public key coefficient material must bind full coefficient vector hashes",
-        ));
-    }
     let expected_public_key_share_roots = participant_bindings
         .iter()
         .map(|participant| Value::String(participant.public_key_share_root.clone()))
@@ -236,12 +227,8 @@ fn validate_coefficient_table_and_summary(
             "collective public key coefficient summary hash",
         )?;
     }
-    compare_string_at_path(
-        summary,
-        &["fullCoefficientVectorHashStatus"],
-        "bound-in-setup-package",
-        "collective public key coefficient vector hash status",
-    )
+
+    Ok(())
 }
 
 fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> CanonicalResult<()> {

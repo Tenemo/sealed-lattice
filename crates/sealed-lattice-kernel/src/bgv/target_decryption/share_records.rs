@@ -217,12 +217,8 @@ pub(super) fn compare_share_record_fields(
     ] {
         compare_hash_field(share, field_name, expected, field_name)?;
     }
-    compare_string_field(
-        share,
-        "shareEquation",
-        TARGET_SHARE_EQUATION,
-        "target share equation",
-    )
+
+    Ok(())
 }
 
 pub(super) fn share_payload(
@@ -365,7 +361,6 @@ pub(super) fn share_record_hash_input(
         "thresholdShareVerificationKeyRoot": setup_binding.threshold_verification.threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": setup_binding.threshold_verification.threshold_share_verification_key_hash,
         "trusteeThresholdVerificationKeyHash": participant.trustee_threshold_verification_key_hash,
-        "shareEquation": TARGET_SHARE_EQUATION,
         "shareRoot": share_root,
     })
 }

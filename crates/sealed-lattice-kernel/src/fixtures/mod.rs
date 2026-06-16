@@ -42,10 +42,6 @@ pub struct GoldenTranscriptCoreFixture {
     pub object_type: String,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "baseClaimProfile")]
-    pub base_claim_profile: String,
-    #[serde(rename = "securityClosure")]
-    pub security_closure: String,
     #[serde(rename = "baseClaimProfileId")]
     pub base_claim_profile_id: String,
     #[serde(rename = "securityProfileId")]
@@ -218,16 +214,6 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.object_version,
     )?;
     compare_fixture_value(
-        "baseClaimProfile",
-        fixture.base_claim_profile.as_str(),
-        analysis.base_claim_profile,
-    )?;
-    compare_fixture_value(
-        "securityClosure",
-        fixture.security_closure.as_str(),
-        analysis.security_closure,
-    )?;
-    compare_fixture_value(
         "baseClaimProfileId",
         fixture.base_claim_profile_id.as_str(),
         analysis.base_claim_profile_id.as_str(),
@@ -320,8 +306,6 @@ fn build_golden_fixture(
         canonical_bytes_hex: encode_hex(&canonical_bytes),
         object_type: analysis.object_type.to_string(),
         object_version: analysis.object_version,
-        base_claim_profile: analysis.base_claim_profile.to_string(),
-        security_closure: analysis.security_closure.to_string(),
         base_claim_profile_id: analysis.base_claim_profile_id,
         security_profile_id: analysis.security_profile_id,
         he_setup_proof_profile_id: analysis.he_setup_proof_profile_id,

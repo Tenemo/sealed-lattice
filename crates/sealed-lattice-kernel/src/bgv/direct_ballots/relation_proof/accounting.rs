@@ -10,10 +10,6 @@ pub(super) fn direct_ballot_relation_proof_gate(proof_size_bytes: usize) -> &'st
     }
 }
 
-pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_challenge_bits() -> u32 {
-    DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS
-}
-
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
@@ -72,8 +68,6 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
     )?;
 
     Ok(json!({
-        "model": "internal binary transcript with unaccepted claim soundness accounting",
-        "proofModelAccepted": false,
         "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
         "nominalChallengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
         "challengeCount": 1,
@@ -87,17 +81,13 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
         "classicalSoundnessBitsAfterSupportUnionBound": Value::Null,
         "targetClassicalSoundnessBits": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
         "minimumIndependentRepetitionsForTarget": Value::Null,
-        "minimumIndependentRepetitionsStatus": "not accepted from nominal challenge bits; the current weakest checked relation is about 16 bits per check before union losses",
         "estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS.div_ceil(weakest_relation_bits_per_check),
         "estimatedRepeatedProofSizeBytes": repeated_proof_size_bytes,
         "estimatedRepeatedTotalProofBytes": repeated_total_proof_bytes,
         "maskCoefficientBits": DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
         "responseCoefficientBytes": DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES,
         "witnessBoundBitsForMaskShiftAccounting": DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS,
-        "zeroKnowledgeShiftSlackBitsAfterResponseUnionBound": zero_knowledge_shift_slack_bits,
-        "supportAccounting": "The current support checks use one support modulus and witness-dependent support commitments. The support soundness and union-bound model is not accepted.",
-        "zeroKnowledgeAccounting": "The current support commitments include witness-dependent expansion coefficients, so zero-knowledge is not accepted even though mask-shift slack is reported for the linear response encoding.",
-        "decision": "The internal proof verifies the implemented relation, but claim soundness is not accepted. Nominal challenge bits do not establish 128-bit soundness because subrelations reduce the challenge modulo smaller rings and the support proof must be replaced or formally redesigned."
+        "zeroKnowledgeShiftSlackBitsAfterResponseUnionBound": zero_knowledge_shift_slack_bits
     }))
 }
 

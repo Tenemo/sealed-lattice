@@ -154,7 +154,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         )?;
 
         let mut evaluation = json!({
-            "result": "Replayed the packed batched-pair encrypted evaluator over the direct aggregate and produced a sparse encrypted target without opening ranks, comparisons, masks, aggregate scores, or evaluator intermediates.",
             "topCount": top_count,
             "scoreDomainMax": score_domain_max,
             "tiePolicy": TIE_POLICY,
@@ -162,7 +161,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "evaluationKeyMaterialSource": evaluation_key_material_source,
             "packedScoreRoot": packed_score_root.clone(),
             "rankRoot": rank_root.clone(),
-            "targetProjection": "Encrypted sparse target projection completed for the requested top count; intermediate evaluator ciphertexts remain unopened.",
             "targetLayoutHash": target_layout_root,
             "targetIdRoot": target_id_root,
             "targetOrderRoot": target_order_root,
@@ -170,7 +168,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "evaluatorReplayContextHash": evaluator_replay_context_hash,
             "evaluatorReplayRecordHash": evaluator_replay_record_hash,
             "targetProposal": target_proposal,
-            "privateCorrectnessCheck": "The command privately checked the final target ciphertext against the plaintext oracle and does not publish aggregate scores, ranks, comparisons, masks, or decoded target slots in the replay report.",
             "timingStatus": direct_ballot_timing_status(),
             "replayTimeMilliseconds": direct_ballot_timing_report_value(replay_time_milliseconds)
         });

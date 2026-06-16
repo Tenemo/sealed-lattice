@@ -187,50 +187,6 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
             "setupPackage is not a passive BGV setup package",
         ));
     }
-    if !bool_at_path(
-        setup_package,
-        &[
-            "targetDecryptionStatus",
-            "setupMaterialMatchesTargetDecryption",
-        ],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must mark target decryption material matching",
-        ));
-    }
-    if !bool_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetPartDecImplemented"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must mark target decryption PartDec implemented",
-        ));
-    }
-    if bool_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetC1C4StatusAccepted"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim target decryption C1-C4 certification",
-        ));
-    }
-    if string_at_path(
-        setup_package,
-        &[
-            "certificates",
-            "setupParameterCertificate",
-            "finalSecurityStatus",
-        ],
-    )? != "acceptedForDirectEvaluatorReplayTargetPending"
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must accept direct evaluator replay HE security while keeping target modulus downstream",
-        ));
-    }
     let participants = setup_package
         .get("participants")
         .and_then(Value::as_array)

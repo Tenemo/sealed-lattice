@@ -47,7 +47,6 @@ fn target_share_profile(setup_package: &Value) -> Value {
         "decryptionThreshold": 2,
         "minimumSharesForInterpolation": 2,
         "decryptionShareQuorum": 2,
-        "selectedShareRule": SELECTED_SHARE_RULE,
     });
     let mut with_hash = profile;
     with_hash["targetShareProfileHash"] = json!(
@@ -92,7 +91,6 @@ fn accepted_record(
         "objectVersion": 1,
         "ceremonyId": setup_package["setupInputs"]["ceremonyId"],
         "electionManifestHash": setup_package["setupInputs"]["manifestHash"],
-        "targetFinalityScope": "target-decryption-test-finality",
         "targetProposalHash": derive_protocol_hash(
             "TargetProposalHash",
             &json!({ "target": "accepted" }),
@@ -127,7 +125,6 @@ fn accepted_record(
             "TargetBasisHash",
             &json!({ "basis": "test" }),
         ).expect("target basis hash"),
-        "acceptanceMode": "evaluator-replay",
         "boardSequence": 0,
         "boardPosition": 0,
         "organizerIdentity": "organizer",

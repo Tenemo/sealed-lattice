@@ -97,7 +97,6 @@ fn target_recombination_selects_first_valid_shares_in_board_order() {
     }))
     .expect("recombine target");
 
-    assert_eq!(recombined["selectedShareRule"], json!(SELECTED_SHARE_RULE));
     assert_eq!(recombined["selectedBoardPositions"], json!([1, 2]));
     assert_eq!(recombined["selectedRosterPositions"], json!([1, 2]));
 }

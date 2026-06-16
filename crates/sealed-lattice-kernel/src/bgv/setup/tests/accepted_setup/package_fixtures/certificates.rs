@@ -31,18 +31,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
         "commitmentProfileHash": profile["commitmentProfileHash"],
         "qShareHash": profile["qShareHash"],
         "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
-        "certificateScope": "first-profile-BDLOP-commitment-parameters-and-opening-bounds",
-        "acceptedUse": [
-            "VSS coefficient commitment records",
-            "recipient-local private VSS proof witness checks",
-            "verifier-derived threshold-share commitment roots",
-            "same-secret trustee commitment roots",
-        ],
-        "nonClosure": [
-            "public evaluation-key assembly and setup-package terminal acceptance remain separate from this commitment parameter certificate",
-            "profile-scale binary streaming evidence remains separate from this commitment parameter certificate",
-            "future target-decryption readiness remains outside this commitment parameter certificate",
-        ],
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,
@@ -104,16 +92,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "randomnessWidth": 5,
             "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
             "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
-            "referenceRows": [
-                {
-                    "document": "FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting",
-                    "localReferencePath": "reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt",
-                    "sections": [
-                        "BDLOP commitment background",
-                        "Module-LWE and Module-SIS definitions"
-                    ]
-                }
-            ],
             "estimatorStatus": "repo-owned-module-sis-parameter-accounting-accepted",
         },
         "hidingAssumption": {
@@ -148,7 +126,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
                 "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
-        "certificateStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",
     });
 
     let certificate_hash =

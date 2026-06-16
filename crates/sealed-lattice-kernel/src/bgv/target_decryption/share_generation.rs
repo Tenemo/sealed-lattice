@@ -68,7 +68,6 @@ pub(super) fn generate_target_decryption_share(
         "thresholdShareVerificationKeyRoot": setup_binding.threshold_verification.threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": setup_binding.threshold_verification.threshold_share_verification_key_hash,
         "trusteeThresholdVerificationKeyHash": participant.trustee_threshold_verification_key_hash,
-        "shareEquation": TARGET_SHARE_EQUATION,
         "shareRoot": share_root,
         "sharePayload": payload,
     }))

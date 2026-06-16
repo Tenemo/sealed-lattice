@@ -53,7 +53,6 @@ pub(in crate::bgv::setup) fn evaluation_keys(
         "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
         "regenerateIfRotSetChanges": true,
-        "maliciousEvaluationKeyProofIncluded": false,
     });
     let evaluation_key_root = derive_protocol_hash("EvalKeyRoot", &evaluation_key_record)?;
 

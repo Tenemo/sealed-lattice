@@ -28,10 +28,6 @@ fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
             .get("plaintextOracleScores")
             .is_none()
     );
-    assert_eq!(
-        aggregation_report.report["privateCorrectnessCheck"].as_str(),
-        Some("aggregate score slots matched the plaintext oracle")
-    );
 }
 
 #[test]

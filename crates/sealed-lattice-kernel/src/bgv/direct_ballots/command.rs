@@ -147,12 +147,9 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "encryptedBallotHashes": encrypted_ballot_hashes,
             "ciphertextRoots": ciphertext_roots,
             "ciphertextCanonicalByteLengths": ciphertext_byte_lengths,
-            "ballotEncryptionRandomness": ballot_encryption_randomness.report_value(),
-            "result": "Direct score slots, one-hot witnesses, batch encoding, all data-limb encryption algebra, and reserved zero slots passed private preflight."
+            "ballotEncryptionRandomness": ballot_encryption_randomness.report_value()
         },
         "proofAttempt": {
-            "relation": "all BGV data-prime encryption equations for c0=b*u+p*e0+encode(score) and c1=a*u+p*e1, with score-to-encoding carry linkage",
-            "coverage": "all RNS limb encryption equations, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, one-hot Booleanity, randomizer support, and error support are checked by one internal binary transcript; claim soundness and zero-knowledge are not accepted for the current proof model",
             "proofEncoding": "internal binary feasibility encoding",
             "sourceRingDegree": POLYNOMIAL_DEGREE,
             "rnsLimbCount": DATA_PRIMES.len(),
@@ -171,12 +168,9 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "verifiedRelationCommitmentHash": first_proof.verified_relation_commitment_hash_hex,
             "challenge": first_proof.challenge.to_string(),
             "verifiedChallenge": first_proof.verified_challenge.to_string(),
-            "challengeSoundness": format!("single nominal {}-bit challenge; claim soundness is not accepted because weaker subrelations reduce the challenge modulo smaller rings and the current support-proof model is not accepted", direct_ballot_relation_challenge_bits()),
             "proofAccounting": direct_ballot_relation_proof_accounting(first_proof.proof_size_bytes, total_proof_bytes)?,
             "proofTransport": {
                 "encoding": "binary proof chunks",
-                "status": "each generated proof is framed into fixed-size binary chunks, chunk-hash checked, root-checked, reassembled, and verified from the transported bytes",
-                "retention": "proof chunks and reassembled proof bytes are verified and then dropped; the report keeps hashes, sizes, chunk counts, and chunk Merkle roots only",
                 "chunkSizeBytes": DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
                 "chunksPerProof": first_proof.proof_chunk_count,
                 "chunksForBatch": chunk_count_for_bytes(total_proof_bytes, DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES)?,
@@ -192,17 +186,11 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "relationCommitmentPolynomialCount": first_proof.relation_commitment_polynomial_count,
             "sharedResponsePolynomialCount": first_proof.shared_response_polynomial_count,
             "sharedScoreResponseScalarCount": first_proof.shared_response_scalar_count,
-            "responseSharing": "one binary response vector is checked against all 17 RNS limb equations, score-linear constraints, and support constraints; response bytes are not duplicated per limb",
-            "timingStatus": direct_ballot_timing_status(),
             "provingTimeMilliseconds": total_proving_time_milliseconds.report_value(),
             "verificationTimeMilliseconds": total_verification_time_milliseconds.report_value(),
-            "proofGate": first_proof.proof_gate,
-            "generation": "Generated and verified one internal binary proof for the all-limb BGV encryption relation, score-linear constraints, and support constraints. This is internal relation evidence only; the proof model is not claim-bearing until weakest-relation soundness and zero-knowledge support checks are fixed.",
-            "fullRnsCoverage": "The proof covers all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector.",
-            "blocker": "Next missing pieces are accepted weakest-relation soundness accounting, replacement or formal redesign of witness-dependent support commitments, Fiat-Shamir/QROM accounting, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, public package proof transport for an accepted proof profile, public accepted randomness API boundaries, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
+            "proofGate": first_proof.proof_gate
         },
         "aggregation": aggregation_result.report,
-        "evaluatorReplay": evaluator_replay,
-        "decision": "Direct BGV ballot encryption, all-limb private preflight, one widened shared-response internal proof, direct ciphertext aggregation, binary chunk proof transport with public hashes, and requested-top-count encrypted sparse target projection are the active path. They are not claim-bearing because proof soundness is not accepted, current support commitments are not accepted as zero-knowledge, mobile evidence is missing, public accepted proof transport is missing, public accepted randomness boundaries are not finalized, and target share proof/C1-C4/public target-decryption gates are not closed."
+        "evaluatorReplay": evaluator_replay
     }))
 }

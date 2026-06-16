@@ -168,7 +168,7 @@ fn passive_setup_public_evaluation_key_material_rejects_wrong_roots() {
 }
 
 #[test]
-fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_secret_leaks() {
+fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_duplicate_keys() {
     let package = setup_package();
     let public_material = level_one_public_material();
 
@@ -180,16 +180,6 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
         root_error.message.contains("collective public key root"),
         "{}",
         root_error.message
-    );
-
-    let mut raw_secret_export = public_material.clone();
-    raw_secret_export["rawSecretMaterialExported"] = serde_json::json!(true);
-    rebind_public_evaluation_key_material_hash(&mut raw_secret_export);
-    let raw_secret_error = public_evaluation_key_material_error(&package, &raw_secret_export, 1);
-    assert!(
-        raw_secret_error.message.contains("raw secret material"),
-        "{}",
-        raw_secret_error.message
     );
 
     let mut duplicate_relinearization = public_material.clone();

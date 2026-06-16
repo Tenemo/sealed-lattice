@@ -243,7 +243,6 @@ export const createFoundationTranscriptCoreFixture = (
     const canonicalBytes = encodeFoundationTranscriptCoreBytes(payloadBytes);
 
     return {
-        baseClaimProfile: 'FoundationTranscript',
         baseClaimProfileId: foundationTranscriptProfileId,
         canonicalBytesHex: bytesToHex(canonicalBytes),
         caseName: 'foundation-transcript-roots',
@@ -258,7 +257,6 @@ export const createFoundationTranscriptCoreFixture = (
         fixtureVersion: 1,
         heSetupProofProfileId: noHeSetupProofProfileId,
         kind: 'golden-transcript-core',
-        securityClosure: 'FoundationOnly',
         securityProfileId: foundationOnlyProfileId,
         objectType: 'TranscriptCore',
         objectVersion: 1,

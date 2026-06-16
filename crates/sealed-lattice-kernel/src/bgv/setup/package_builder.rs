@@ -180,22 +180,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
             "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
-            "setupMaterialMatchesTargetDecryption": true,
-            "targetPartDecImplemented": true,
-            "targetC1C4StatusAccepted": false,
         },
-        "nonClaims": [
-            "ActiveMaliciousSetupProofMissing",
-            "BgvAlgebraicPublicKeyProofMissing",
-            "MaliciousEvaluationKeyProofMissing",
-            "TargetShareProofNotCertified",
-            "TargetC1C4NotCertified",
-            "FinalTargetSecurityPendingTargetModulus",
-            "DirectEvaluatorReplayNoiseClosurePending",
-            "EvaluatorReplayNotClosed",
-            "TargetDecryptionNotClosed",
-            "ActiveMaliciousSetupNotClosed"
-        ],
     });
     let setup_package_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &package)?;
     package["setupPackageHash"] = Value::String(setup_package_hash);

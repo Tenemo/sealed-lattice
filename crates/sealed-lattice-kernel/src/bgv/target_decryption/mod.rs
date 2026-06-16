@@ -43,8 +43,8 @@ use crate::{
             validate_passive_setup_package_for_encrypted_evaluation,
         },
         setup_helpers::{
-            array_at_path, bool_at_path, hash_at_path, string_at_path, unsigned_at_path,
-            usize_at_path, value_at_path,
+            array_at_path, hash_at_path, string_at_path, unsigned_at_path, usize_at_path,
+            value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -59,9 +59,6 @@ const TARGET_SHARE_PAYLOAD_ENCODING: &str =
     "coefficient-domain-u64-little-endian-partial-decryption-limbs";
 const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1";
-const TARGET_SHARE_EQUATION: &str =
-    "PartDec_i(C_target)=c1*s_i(x_i) over each active BGV data prime";
-const SELECTED_SHARE_RULE: &str = "FirstValidSharesInCanonicalBoardOrder";
 
 #[derive(Clone)]
 struct TargetShareProfile {

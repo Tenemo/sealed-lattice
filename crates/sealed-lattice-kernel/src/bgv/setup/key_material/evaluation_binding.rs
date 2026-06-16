@@ -134,7 +134,6 @@ pub(super) fn evaluation_key_material_binding(
         "levelSchedule": relinearization_levels,
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?),
         "keyMaterialStreamHash": relinearization_stream_hash,
-        "maliciousEvaluationKeyProofIncluded": false,
     });
     let relinearization_key_root =
         derive_protocol_hash("RelinearizationKeyRoot", &relinearization_key_record)?;
@@ -177,7 +176,6 @@ pub(super) fn evaluation_key_material_binding(
             "publicBasisId": BgvBasisKind::Data.basis_id(),
             "publicRlweSampleCount": entry.level + 1,
             "keyMaterialStreamHash": entry_stream_hash,
-            "maliciousEvaluationKeyProofIncluded": false,
         });
         let root = derive_protocol_hash("RotationKeyRoot", &record)?;
         rotation_key_roots.push(json!({
@@ -212,7 +210,6 @@ pub(super) fn evaluation_key_material_binding(
             + rotation_schedule.iter().map(|entry| entry.level + 1).sum::<usize>(),
         "keyMaterialStreamHash": key_switch_stream_hash,
         "genericKeySwitchApiExported": false,
-        "maliciousEvaluationKeyProofIncluded": false,
     });
     let key_switch_key_root = derive_protocol_hash("KeySwitchKeyRoot", &key_switch_key_record)?;
     let record = json!({
@@ -237,8 +234,6 @@ pub(super) fn evaluation_key_material_binding(
         "keySwitchStreamHash": key_switch_stream_hash,
         "sampledRelationChecks": sampled_relation_checks,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
-        "rawSecretMaterialExported": false,
-        "maliciousEvaluationKeyProofIncluded": false,
     });
     let material_hash = derive_protocol_hash("EvaluationKeySetHash", &record)?;
 

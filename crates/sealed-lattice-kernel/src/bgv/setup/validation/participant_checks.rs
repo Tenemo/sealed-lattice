@@ -151,8 +151,6 @@ pub(super) fn validate_participant_setup_records(
             "recoveryEpoch": recovery_epoch,
             "deviceEpoch": device_epoch,
             "publicKeyShareRoot": public_key_share_root,
-            "verificationStatement": "passive-transcript-identity-profile-and-share-domain-binding",
-            "maliciousDkgProofIncluded": false,
         });
         compare_derived_hash(
             "TrusteeThresholdVerificationKeyHash",

@@ -59,45 +59,22 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         proof_family_accounting[0]["proofFamily"],
         "vss-opening-carry"
     );
+    // Each proof family row now binds its succinct accounting object only
+    // through the recomputed accounting hash. The private VSS row hash must
+    // match the hash the Fiat-Shamir transcript accounting records for the
+    // same family, so the row and the transcript object cannot drift apart.
     assert_eq!(
-        proof_family_accounting[0]["verifierClosedStatus"],
-        "statement-rebuild-and-succinct-argument-checks-verifier-closed"
-    );
-    assert_eq!(
-        proof_family_accounting[0]["accountingStatus"],
-        "succinct-private-vss-share-theorem-accounting-accepted"
-    );
-    assert!(
-        proof_family_accounting[0]["verifierClosedChecks"]
-            .as_array()
-            .expect("private VSS verifier-closed checks")
-            .iter()
-            .any(|check| check
-                .as_str()
-                .is_some_and(|text| text.contains("lifted share relation")))
-    );
-    assert_eq!(
-        proof_family_accounting[0]["claimAccounting"]["accountingObject"],
-        "SuccinctPrivateVssShareAccounting"
+        proof_family_accounting[0]["claimAccounting"]["accountingHash"],
+        certificate["fiatShamirTranscriptAccounting"]["familyAccountingHashes"]["privateVssShare"]
     );
 
-    // The same-secret linkage anchor carries its accepted succinct accounting:
-    // the row binds the anchor accounting object with every theorem row closed
-    // under the explicitly named FRI conjecture.
+    // The same-secret linkage anchor row binds the anchor accounting hash that
+    // the certificate also surfaces as a top-level dependency hash.
     let anchor_family = &proof_family_accounting[1];
     assert_eq!(anchor_family["proofFamily"], "same-secret-linkage-anchor");
     assert_eq!(
-        anchor_family["accountingStatus"],
-        "succinct-same-secret-linkage-anchor-theorem-accounting-accepted"
-    );
-    assert_eq!(
         anchor_family["claimAccounting"]["accountingHash"],
         certificate["sameSecretLinkageAnchorProofAccountingHash"]
-    );
-    assert!(
-        anchor_family["claimAccounting"]["claimBoundary"]
-            .as_str()
-            .is_some_and(|text| text.contains("named FRI conjecture"))
     );
     assert_eq!(
         certificate["sameSecretLinkageAnchorProofAccounting"]["objectType"],
@@ -107,10 +84,6 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     let public_key_family = &proof_family_accounting[2];
     assert_eq!(public_key_family["proofFamily"], "public-key-share");
     assert_eq!(
-        public_key_family["accountingStatus"],
-        "succinct-public-key-share-theorem-accounting-accepted"
-    );
-    assert_eq!(
         public_key_family["claimAccounting"]["accountingHash"],
         certificate["publicKeyShareProofAccountingHash"]
     );
@@ -118,51 +91,22 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         certificate["publicKeyShareProofAccounting"]["objectType"],
         "SuccinctPublicKeyShareAccounting"
     );
-    assert!(
-        public_key_family["verifierClosedChecks"]
-            .as_array()
-            .expect("public-key verifier checks")
-            .iter()
-            .any(|check| check
-                .as_str()
-                .is_some_and(|text| text.contains("limb-zero"))),
-        "public-key setup proof accounting must state the limb-zero linkage dependency"
-    );
 
-    // The trustee evaluation-key family carries its accepted accounting: the
-    // row binds the succinct accounting object with every theorem row closed
-    // under the explicitly named FRI conjecture.
+    // The trustee evaluation-key row binds the evaluation-key accounting hash
+    // that the certificate also surfaces as a top-level dependency hash.
     let trustee_family = &proof_family_accounting[3];
     assert_eq!(trustee_family["proofFamily"], "trustee-evaluation-key");
     assert_eq!(
-        trustee_family["accountingStatus"],
-        "succinct-trustee-evaluation-key-theorem-accounting-accepted"
-    );
-    assert_eq!(
         trustee_family["claimAccounting"]["accountingHash"],
         certificate["trusteeEvaluationKeyProofAccountingHash"]
-    );
-    assert!(
-        trustee_family["claimAccounting"]["claimBoundary"]
-            .as_str()
-            .is_some_and(|text| text.contains("named FRI conjecture"))
     );
     assert_eq!(
         certificate["trusteeEvaluationKeyProofAccounting"]["objectType"],
         "SuccinctEvaluationKeyProofAccounting"
     );
-    assert_eq!(
-        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["accepted"],
-        true
-    );
-    assert_eq!(
-        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["acceptedUnderNamedFriConjecture"],
-        true
-    );
-    assert_eq!(
-        certificate["trusteeEvaluationKeyProofAccounting"]["lowDegreeSoundness"]["acceptedUnderProvenFallback"],
-        false
-    );
+    // The recomputed effective soundness, not a self-attested verdict flag, is
+    // what the bound accounting object must carry: it stays at or above the
+    // 128-bit target after the union allowance.
     assert!(
         certificate["trusteeEvaluationKeyProofAccounting"]["fiatShamir"]
             ["effectiveSoundnessBitsAfterUnion"]
@@ -170,78 +114,29 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
             .expect("effective soundness bits")
             >= 128
     );
-    assert_eq!(
-        certificate["trusteeEvaluationKeyProofAccounting"]["fiatShamir"]["qromAccepted"],
-        false
-    );
-    assert_eq!(
-        certificate["trusteeEvaluationKeyProofAccounting"]["zeroKnowledge"]["smudgingBudget"]["acceptedFor128BitZeroKnowledge"],
-        false
-    );
-    assert_eq!(
-        certificate["certificateStatus"],
-        "succinct-setup-proof-family-classical-accounting-accepted-qrom-open"
-    );
-
-    let succinct_transport_accounting = certificate["succinctTransportAccounting"]
-        .as_object()
-        .expect("succinct transport accounting");
-    assert_eq!(
-        succinct_transport_accounting["accountingStatus"],
-        "succinct-proof-material-roots-and-transport-binding-accepted"
-    );
-    assert_eq!(
-        succinct_transport_accounting["closedProofFamilies"]
-            .as_array()
-            .expect("closed succinct transport proof families")
-            .len(),
-        4
-    );
-    assert!(
-        succinct_transport_accounting["closedVerifierChecks"]
-            .as_array()
-            .expect("closed succinct transport verifier checks")
-            .iter()
-            .any(|check| check
-                .as_str()
-                .is_some_and(|text| text.contains("no relation-commitment or tbox metadata")))
-    );
-
+    // The Fiat-Shamir transcript accounting binds the four family accounting
+    // hashes; the private VSS hash must equal the hash carried in the matching
+    // proof family row, so the per-family objects stay consistent.
     let fiat_shamir_accounting = certificate["fiatShamirTranscriptAccounting"]
         .as_object()
         .expect("Fiat-Shamir transcript accounting");
     assert_eq!(
-        fiat_shamir_accounting["accountingStatus"],
-        "succinct-family-classical-fiat-shamir-accounting-bound-per-family"
-    );
-    assert_eq!(
-        fiat_shamir_accounting["qromReductionStatus"],
-        "qrom-reduction-loss-computed-cms19-classical-accepted-quantum-soundness-recorded-not-128-bit-accepted"
-    );
-    assert_eq!(
         fiat_shamir_accounting["familyAccountingHashes"]["privateVssShare"],
         proof_family_accounting[0]["claimAccounting"]["accountingHash"]
     );
-
+    // The leakage accounting binds the same four family hashes as the
+    // Fiat-Shamir accounting, never a different set.
     let succinct_leakage_accounting = certificate["succinctLeakageAccounting"]
         .as_object()
         .expect("succinct leakage accounting");
     assert_eq!(
-        succinct_leakage_accounting["accountingStatus"],
-        "succinct-family-leakage-scope-bound-per-family"
+        succinct_leakage_accounting["familyAccountingHashes"],
+        fiat_shamir_accounting["familyAccountingHashes"]
     );
-    assert!(
-        succinct_leakage_accounting["zeroKnowledgeScope"]
-            .as_str()
-            .is_some_and(|text| text.contains("bounded-leakage"))
-    );
+
     let proof_theorem_accounting = certificate["proofTheoremAccounting"]
         .as_object()
         .expect("proof theorem accounting");
-    assert_eq!(
-        proof_theorem_accounting["accountingStatus"],
-        "succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open"
-    );
     assert_eq!(
         proof_theorem_accounting["familyAccounting"]["privateVssShare"]["objectType"],
         "SuccinctPrivateVssShareAccounting"
@@ -292,25 +187,20 @@ fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
         "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
     );
 
-    let model_row_mutations: [LabeledProofModelRowMutation; 3] = [
-        ("upgraded Fiat-Shamir QROM reduction status", |package| {
-            package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromReductionStatus"] =
-                serde_json::json!("qrom-reduction-loss-accepted-for-final-claim");
-        }),
+    let model_row_mutations: [LabeledProofModelRowMutation; 2] = [
+        (
+            "upgraded trustee evaluation-key Fiat-Shamir QROM acceptance flag",
+            |package| {
+                package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]
+                    ["fiatShamir"]["qromAccepted"] = serde_json::json!(true);
+            },
+        ),
         (
             "upgraded succinct leakage zero-knowledge scope",
             |package| {
                 package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] = serde_json::json!(
                     "128-bit zero-knowledge accepted for every setup proof family"
                 );
-            },
-        ),
-        (
-            "upgraded trustee evaluation-key smudging budget 128-bit zero-knowledge flag",
-            |package| {
-                package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]
-                    ["zeroKnowledge"]["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] =
-                    serde_json::json!(true);
             },
         ),
     ];
@@ -346,19 +236,21 @@ fn collective_setup_verifier_checks_he_security_certificate() {
 fn he_security_certificate_accepts_direct_setup_evaluator_parameter_boundary() {
     let certificate = accepted_he_security_certificate_value().expect("HE security certificate");
 
-    assert_eq!(
-        certificate["parameterBoundary"]["certificateStatus"],
-        "accepted-for-direct-setup-and-evaluator-HE-parameter-boundary"
-    );
+    // The operative accept/reject decision is carried by the recomputed
+    // boolean verdicts, not by a self-attested status string: direct evaluator
+    // replay is accepted while target decryption stays refused.
     assert_eq!(certificate["acceptedForDirectEvaluatorReplay"], true);
     assert_eq!(certificate["acceptedForTargetDecryption"], false);
     assert_eq!(
         certificate["targetDecryptionStatus"]["targetDecryptionReadiness"],
         "refused-until-q-target-certificate-closes"
     );
-    assert_eq!(
-        certificate["errorDistribution"]["certificateStatus"],
-        "accepted-for-direct-evaluator-replay-HE-parameter-boundary"
+    // The parameter boundary still records the excluded target-decryption scope
+    // even though the self-attested verdict string was dropped.
+    assert!(
+        certificate["parameterBoundary"]["excludedScope"]
+            .as_str()
+            .is_some_and(|text| text.contains("target decryption"))
     );
 }
 
@@ -448,10 +340,6 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
         .expect("setup key correctness certificate");
 
     assert_eq!(
-        certificate["keyCorrectnessTheorem"]["theoremStatus"],
-        "repo-owned-key-correctness-theorem-accepted-for-verifier-recomputed-roots"
-    );
-    assert_eq!(
         certificate["collectivePublicKey"]["status"],
         "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots"
     );
@@ -459,15 +347,16 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
         certificate["publicEvaluationKeys"]["status"],
         "public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records"
     );
-    assert!(
-        certificate["keyCorrectnessTheorem"]["checkedByVerifier"]
-            .as_array()
-            .expect("checked theorem clauses")
-            .iter()
-            .any(|clause| {
-                clause
-                    == "transported public evaluation-key runtime material is verified against evaluationKeys when supplied"
-            })
+    // The certificate binds its dependency certificate hashes straight from the
+    // setup package, so the verifier-recomputed body cannot drift from the
+    // proof-accounting and HE-security certificates it depends on.
+    assert_eq!(
+        certificate["certificateDependencies"]["setupProofAccountingCertificateHash"],
+        package["setupProofAccountingCertificateHash"]
+    );
+    assert_eq!(
+        certificate["certificateDependencies"]["heSecurityCertificateHash"],
+        package["heSecurityCertificateHash"]
     );
 }
 
@@ -555,19 +444,24 @@ fn active_static_setup_theorem_certificate_records_accepted_claim_boundary() {
         certificate["objectType"],
         "ActiveStaticSetupTheoremCertificate"
     );
-    assert_eq!(
-        certificate["adversaryModel"]["corruptionTiming"],
-        "active-static"
-    );
     assert_eq!(certificate["livenessModel"]["model"], "secure-with-abort");
+    // The adversary model still records the operative confidentiality bound:
+    // the tolerated corrupt-trustee count must stay strictly below the full
+    // roster participant count.
+    let corrupt_trustee_bound =
+        certificate["adversaryModel"]["secretConfidentialityCorruptTrusteeBound"]
+            .as_u64()
+            .expect("confidentiality corrupt-trustee bound");
+    let participant_count = certificate["livenessModel"]["participantCount"]
+        .as_u64()
+        .expect("liveness participant count");
+    assert!(corrupt_trustee_bound < participant_count);
     assert_eq!(
         certificate["dependencyHashes"]["setupKeyCorrectnessCertificateHash"],
         package["setupKeyCorrectnessCertificateHash"]
     );
-    assert_eq!(
-        certificate["claimBoundary"]["certificateStatus"],
-        "active-static-secure-with-abort-theorem-accepted"
-    );
+    // The remaining-dependency list stays empty and never reintroduces a legacy
+    // open-soundness dependency row.
     let remaining_dependencies = certificate["claimBoundary"]["remainingDependencies"]
         .as_array()
         .expect("remaining theorem dependencies");
@@ -587,19 +481,15 @@ fn active_static_setup_theorem_certificate_records_accepted_claim_boundary() {
             .as_str()
             .is_some_and(|text| !text.contains("tbox"))
     }));
-    assert_eq!(
-        certificate["claimBoundary"]["completionBoundary"],
-        "external validation, independent audit, and third-party proof review are not setup completion prerequisites"
-    );
 }
 
 #[test]
 fn collective_setup_verifier_checks_active_static_setup_theorem_certificate() {
     assert_minimal_collective_setup_package_refused(
-        "active-static setup theorem certificate with a weakened completion boundary",
+        "active-static setup theorem certificate with an inflated corrupt-trustee tolerance",
         |package| {
-            package["activeStaticSetupTheoremCertificate"]["claimBoundary"]["completionBoundary"] =
-                serde_json::json!("external-review-required");
+            package["activeStaticSetupTheoremCertificate"]["adversaryModel"]["secretConfidentialityCorruptTrusteeBound"] =
+                serde_json::json!(9_999_u64);
         },
         "activeStaticSetupTheoremCertificatePayloadMismatch",
     );

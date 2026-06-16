@@ -85,8 +85,6 @@ mod tests {
         let analysis = analyze_canonical_object(&foundation_bytes, 8)
             .expect("foundation profile should analyze");
 
-        assert_eq!(analysis.base_claim_profile, "FoundationTranscript");
-        assert_eq!(analysis.security_closure, "FoundationOnly");
         assert_eq!(
             analysis.evaluator_replay_profile_id,
             "transcript-core-no-evaluator-replay-proof-v1",

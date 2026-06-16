@@ -277,8 +277,6 @@ pub fn analyze_canonical_object(
         canonical_bytes_hex: encode_hex(bytes),
         object_type: "TranscriptCore",
         object_version: TRANSCRIPT_CORE_OBJECT_VERSION,
-        base_claim_profile: object.base_claim_profile.label(),
-        security_closure: object.security_closure.label(),
         base_claim_profile_id: object.base_claim_profile_id,
         security_profile_id: object.security_profile_id,
         he_setup_proof_profile_id: object.he_setup_proof_profile_id,

@@ -306,19 +306,24 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
         .iter()
         .zip(opening_randomness_by_shamir_index.iter())
         .enumerate()
-        .map(|(shamir_coefficient_index, (messages, opening_randomness))| {
-            let messages_u128 = messages.iter().map(|value| u128::from(*value)).collect::<Vec<_>>();
-            compute_setup_commitment_for_tests(
-                public_matrix_seed_hash,
-                0,
-                rns_prime,
-                shamir_coefficient_index as u64,
-                &messages_u128,
-                opening_randomness,
-                ring_degree,
-            )
-            .expect("coefficient commitment")
-        })
+        .map(
+            |(shamir_coefficient_index, (messages, opening_randomness))| {
+                let messages_u128 = messages
+                    .iter()
+                    .map(|value| u128::from(*value))
+                    .collect::<Vec<_>>();
+                compute_setup_commitment_for_tests(
+                    public_matrix_seed_hash,
+                    0,
+                    rns_prime,
+                    shamir_coefficient_index as u64,
+                    &messages_u128,
+                    opening_randomness,
+                    ring_degree,
+                )
+                .expect("coefficient commitment")
+            },
+        )
         .collect::<Vec<_>>();
     let coefficient_commitment_roots = coefficient_commitments
         .iter()
@@ -358,8 +363,8 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
         )
         .expect("private VSS proof randomness seed");
         let recipient_identity = format!("trustee-{recipient_roster_position}");
-        let proof_record = private_vss_share_succinct_proof_record(
-            PrivateVssShareSuccinctProofGenerationInput {
+        let proof_record =
+            private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
                 setup_context: &setup_context,
                 public_matrix_seed_hash,
                 private_envelope_aad_hash,
@@ -382,14 +387,13 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
                     carry_witnesses,
                 },
                 proof_randomness_seed_hex: &proof_randomness_seed_hex,
-            },
-        )
-        .unwrap_or_else(|error| {
-            panic!(
-                "proof record for recipient {recipient_roster_position}: {}",
-                error.message
-            )
-        });
+            })
+            .unwrap_or_else(|error| {
+                panic!(
+                    "proof record for recipient {recipient_roster_position}: {}",
+                    error.message
+                )
+            });
 
         verify_private_vss_share_succinct_relation_proof(
             PrivateVssShareSuccinctProofVerificationInput {

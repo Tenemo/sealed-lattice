@@ -50,7 +50,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly publicEvaluationKeyMaterialHash?: string;
     readonly packedScoreRoot: string;
     readonly rankRoot: string;
-    readonly targetProjection: string;
     readonly targetLayoutHash: string;
     readonly targetIdRoot: string;
     readonly targetOrderRoot: string;
@@ -60,7 +59,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly targetProposal:
         | {
               readonly status: string;
-              readonly requiredForFinality: string;
           }
         | {
               readonly targetProposalHash: string;
@@ -75,8 +73,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
               readonly evaluatorReplayProfileHash: string;
               readonly targetFinalityPolicyHash: string;
           };
-    readonly privateCorrectnessCheck: string;
-    readonly timingStatus: string;
     readonly replayTimeMilliseconds: string;
 };
 
@@ -103,7 +99,6 @@ export type DirectEncryptedBallotResult = {
         };
     };
     readonly proofAttempt: {
-        readonly coverage: string;
         readonly proofCount: number;
         readonly rnsLimbCount: number;
         readonly responseEncoding: string;
@@ -114,12 +109,9 @@ export type DirectEncryptedBallotResult = {
         readonly totalProofBytes: number;
         readonly proofBytesHash: string;
         readonly proofGate: string;
-        readonly timingStatus: string;
-        readonly challengeSoundness: string;
         readonly proofAccounting: {
             readonly challengeBits: number;
             readonly nominalChallengeBits: number;
-            readonly proofModelAccepted: boolean;
             readonly weakestCheckedRelation: string;
             readonly weakestRelationEffectiveBitsPerCheck: number;
             readonly supportRelationModulusBits: number;
@@ -133,18 +125,14 @@ export type DirectEncryptedBallotResult = {
             readonly supportUnionLossBits: number;
             readonly targetClassicalSoundnessBits: number;
             readonly minimumIndependentRepetitionsForTarget: number | null;
-            readonly minimumIndependentRepetitionsStatus: string;
             readonly estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses: number;
             readonly estimatedRepeatedProofSizeBytes: number;
             readonly estimatedRepeatedTotalProofBytes: number;
             readonly witnessBoundBitsForMaskShiftAccounting: number;
             readonly zeroKnowledgeShiftSlackBitsAfterResponseUnionBound: number;
-            readonly decision: string;
         };
         readonly proofTransport: {
             readonly encoding: string;
-            readonly status: string;
-            readonly retention: string;
             readonly chunkSizeBytes: number;
             readonly chunksPerProof: number;
             readonly chunksForBatch: number;
@@ -170,8 +158,6 @@ export type DirectEncryptedBallotResult = {
         readonly ballotCount: number;
         readonly aggregateCiphertextRoot: string;
         readonly aggregateCiphertextCanonicalByteLength: number;
-        readonly privateCorrectnessCheck: string;
-        readonly result: string;
     };
     readonly evaluatorReplay:
         | string

@@ -52,8 +52,6 @@ export type GoldenTranscriptCoreFixture = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseClaimProfile: BaseClaimProfile;
-    readonly securityClosure: TranscriptCoreSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly securityProfileId: string;
     readonly heSetupProofProfileId: string;
@@ -83,8 +81,6 @@ export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseClaimProfile: BaseClaimProfile;
-    readonly securityClosure: TranscriptCoreSecurityClosure;
     readonly baseClaimProfileId: string;
     readonly securityProfileId: string;
     readonly heSetupProofProfileId: string;

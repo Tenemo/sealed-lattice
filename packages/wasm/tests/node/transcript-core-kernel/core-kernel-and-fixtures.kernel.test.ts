@@ -205,10 +205,6 @@ describe('transcript-core kernel in Node', () => {
             chunkSize: foundationTranscriptCoreFixture.chunkSize,
         });
 
-        expect(foundationAnalysis.baseClaimProfile).toBe(
-            'FoundationTranscript',
-        );
-        expect(foundationAnalysis.securityClosure).toBe('FoundationOnly');
         expect(foundationAnalysis.evaluatorReplayProfileId).toBe(
             'transcript-core-no-evaluator-replay-proof-v1',
         );

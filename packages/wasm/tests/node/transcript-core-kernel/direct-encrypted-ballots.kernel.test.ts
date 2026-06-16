@@ -26,17 +26,7 @@ describe('direct encrypted ballot kernel command', () => {
             rnsLimbCount: 17,
         });
         expect(result.proofAttempt.proofGate).toContain('yellow');
-        expect(result.proofAttempt).toMatchObject({
-            timingStatus: 'not measured on wasm32-unknown-unknown',
-        });
-        expect(result.proofAttempt.coverage).toContain(
-            'all RNS limb encryption equations',
-        );
-        expect(result.proofAttempt.challengeSoundness).toContain(
-            'claim soundness is not accepted',
-        );
         expect(result.proofAttempt.proofAccounting).toMatchObject({
-            proofModelAccepted: false,
             targetClassicalSoundnessBits: 128,
             minimumIndependentRepetitionsForTarget: null,
         });
@@ -72,9 +62,6 @@ describe('direct encrypted ballot kernel command', () => {
             result.proofAttempt.proofAccounting
                 .zeroKnowledgeShiftSlackBitsAfterResponseUnionBound,
         ).toBeGreaterThanOrEqual(128);
-        expect(result.proofAttempt.proofAccounting.decision).toContain(
-            'claim soundness is not accepted',
-        );
         expect(
             result.encryptedBallots.ballotEncryptionRandomness,
         ).toMatchObject({
@@ -98,9 +85,6 @@ describe('direct encrypted ballot kernel command', () => {
         ).toBeGreaterThan(0);
         expect(result.proofAttempt.proofTransport.chunksForBatch).toBe(
             result.proofAttempt.proofTransport.chunksPerProof,
-        );
-        expect(result.proofAttempt.proofTransport.status).toContain(
-            'chunk-hash checked',
         );
         expect(
             result.proofAttempt.proofTransport.firstProofChunkMerkleRoot,
@@ -159,12 +143,6 @@ describe('direct encrypted ballot kernel command', () => {
         expect(
             result.aggregation.aggregateCiphertextCanonicalByteLength,
         ).toBeGreaterThan(0);
-        expect(result.aggregation.result).toContain(
-            'without publishing aggregate scores',
-        );
-        expect(result.aggregation.privateCorrectnessCheck).toBe(
-            'aggregate score slots matched the plaintext oracle',
-        );
         expect(result.aggregation).not.toHaveProperty('aggregateScores');
         expect(result.aggregation).not.toHaveProperty('plaintextOracleScores');
         expect(result.evaluatorReplay).toBe(

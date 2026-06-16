@@ -321,11 +321,7 @@ export type BgvPassiveSetupPackage = {
         readonly targetDecryptionProfileId: string;
         readonly targetDecryptionProfileHash: ProtocolHash;
         readonly targetDecryptionProfileBindingHash: ProtocolHash;
-        readonly setupMaterialMatchesTargetDecryption: boolean;
-        readonly targetPartDecImplemented: boolean;
-        readonly targetC1C4StatusAccepted: boolean;
     };
-    readonly nonClaims: readonly string[];
 };
 
 export type BgvPassiveSetupVerification = {
@@ -953,9 +949,6 @@ export type BgvTargetDecryptionResult = {
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetShareProfileHash: ProtocolHash;
     readonly targetDecryptionProfileHash: ProtocolHash;
-    readonly shareEquation: string;
-    readonly recombinationEquation: string;
-    readonly selectedShareRule: string;
     readonly minimumSharesForInterpolation: number;
     readonly decryptionThreshold: number;
     readonly decryptionShareQuorum: number;

@@ -26,9 +26,9 @@ mod relation_proof;
 
 use relation_proof::{
     DirectBallotRelationProofGeneration, DirectBallotRelationProofVerification,
-    direct_ballot_relation_challenge_bits, direct_ballot_relation_proof_accounting,
-    direct_ballot_relation_proof_bytes_hash, direct_ballot_relation_proof_profile_hash,
-    generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof,
+    direct_ballot_relation_proof_accounting, direct_ballot_relation_proof_bytes_hash,
+    direct_ballot_relation_proof_profile_hash, generate_direct_ballot_relation_proof,
+    verify_direct_ballot_relation_proof,
 };
 
 use crate::{

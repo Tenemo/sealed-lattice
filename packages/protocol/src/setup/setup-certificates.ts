@@ -784,19 +784,6 @@ const setupCommitmentSecurityCertificateBody = (
         qShareHash: setupProfile.qShareHash,
         carryAwareVssShareRelationProfileHash:
             setupProfile.carryAwareVssShareRelationProfileHash,
-        certificateScope:
-            'first-profile-BDLOP-commitment-parameters-and-opening-bounds',
-        acceptedUse: [
-            'VSS coefficient commitment records',
-            'recipient-local private VSS proof witness checks',
-            'verifier-derived threshold-share commitment roots',
-            'same-secret trustee commitment roots',
-        ],
-        nonClosure: [
-            'public evaluation-key assembly and setup-package terminal acceptance remain separate from this commitment parameter certificate',
-            'profile-scale binary streaming evidence remains separate from this commitment parameter certificate',
-            'future target-decryption readiness remains outside this commitment parameter certificate',
-        ],
         ringAndMatrixParameters: {
             coefficientRing: 'Z_q[X]/(X^N+1)',
             ringDegree: 32_768,
@@ -871,18 +858,6 @@ const setupCommitmentSecurityCertificateBody = (
             randomnessWidth: 5,
             commitmentModulusProductCeilBits: commitmentModulusProductBits,
             extractedOpeningInfinityBound: Number(thresholdScalarSum),
-            referenceRows: [
-                {
-                    document:
-                        'FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting',
-                    localReferencePath:
-                        'reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt',
-                    sections: [
-                        'BDLOP commitment background',
-                        'Module-LWE and Module-SIS definitions',
-                    ],
-                },
-            ],
             estimatorStatus:
                 'repo-owned-module-sis-parameter-accounting-accepted',
         },
@@ -923,8 +898,6 @@ const setupCommitmentSecurityCertificateBody = (
                     'accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary',
             },
         ],
-        certificateStatus:
-            'claim-bearing-setup-commitment-parameter-accounting-accepted',
     };
 };
 
@@ -985,101 +958,26 @@ const setupProofFamilyAccounting = (
 ): JsonRecord[] => [
     {
         proofFamily: 'vss-opening-carry',
-        claimScope:
-            'recipient-local private VSS share proof relation over accepted Q_share limbs',
-        verifierClosedStatus:
-            'statement-rebuild-and-succinct-argument-checks-verifier-closed',
-        verifierClosedChecks: [
-            'every private VSS statement is rebuilt by the recipient verifier from the encrypted envelope AAD hash, accepted VSS coefficient commitments, share values, setup context, and source and recipient identities',
-            'canonical proof bytes are hashed, decoded, checked for canonical field elements, and rebound to the statement hash, proof statement root, proof material root, and accepted accounting hash before acceptance',
-            'one succinct argument checks all four hidden Shamir coefficient commitment openings and the hidden lifted carry vector over the commitment-modulus fields',
-            'the recipient-point lifted share relation sum_k alpha_j^k F_k - q_l * carry = sigma is enforced coefficientwise inside the batched sumcheck',
-            'coefficient messages, opening randomness, carry witnesses, and source trustee secret constants remain outside public transcript artifacts',
-        ],
-        accountingStatus:
-            'succinct-private-vss-share-theorem-accounting-accepted',
         claimAccounting: {
-            accountingObject: 'SuccinctPrivateVssShareAccounting',
             accountingHash: privateVssShareProofAccountingHash,
-            closedItems:
-                'the relation shape, canonical statement binding, proof-byte decoding, batched low-degree checks, cross-field integer consistency bound, classical Fiat-Shamir transcript rows, and bounded-leakage scope are recorded inside the bound accounting object',
-            claimBoundary:
-                'recipient-local private VSS accounting is accepted only for the succinct family under the named FRI conjecture and classical Fiat-Shamir rows; QROM loss and 128-bit zero-knowledge are not accepted rows',
         },
     },
     {
         proofFamily: 'same-secret-linkage-anchor',
-        claimScope:
-            'one short trustee secret behind every accepted VSS constant commitment, proven once per trustee by a keyless succinct linkage argument over the commitment-modulus fields',
-        verifierClosedStatus:
-            'statement-rebuild-and-argument-checks-verifier-closed',
-        verifierClosedChecks: [
-            'every anchor statement is rebuilt by the verifier from the accepted VSS constant commitments, the accepted public VSS material root, and the ceremony context; no prover-supplied statement field is trusted',
-            'the linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against one committed ternary secret with Boolean negative-indicator support',
-            'per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every commitment-modulus field',
-            'cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb',
-            'canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package',
-        ],
-        accountingStatus:
-            'succinct-same-secret-linkage-anchor-theorem-accounting-accepted',
         claimAccounting: {
-            accountingObject: 'SuccinctSameSecretLinkageAnchorAccounting',
             accountingHash: sameSecretLinkageAnchorProofAccountingHash,
-            closedItems:
-                'the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows',
-            claimBoundary:
-                'active-malicious same-secret linkage accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; secret-dependent setup families reference this anchor through the accepted family binding root',
         },
     },
     {
         proofFamily: 'public-key-share',
-        claimScope:
-            'the public-key share of one trustee over every accepted Q_share limb, proven by one succinct argument against the committed trustee secret, one shared centered-binomial error, and the accepted common reference polynomial',
-        verifierClosedStatus:
-            'statement-rebuild-and-argument-checks-verifier-closed',
-        verifierClosedChecks: [
-            'every statement is rebuilt by the verifier from the accepted public-key share records, the seed-derived common reference polynomial, the selected accepted limb-zero same-secret constant commitment, the accepted same-secret anchor roots, and the ceremony context; no prover-supplied statement field is trusted',
-            'per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every Q_share limb field',
-            'the share-correctness relation b_l + a_l*s - p*e = 0 is enforced inside the argument over every Q_share limb against one committed ternary secret and one shared centered-binomial error column',
-            'one limb-zero constant-commitment linkage opening rebinds the share secret to the accepted same-secret anchor over the commitment-modulus fields; this is sufficient only because the same-secret anchor already proves all accepted Q_share constant commitments open to the same ternary trustee secret',
-            'cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb',
-            'canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package',
-        ],
-        accountingStatus:
-            'succinct-public-key-share-theorem-accounting-accepted',
         claimAccounting: {
-            accountingObject: 'SuccinctPublicKeyShareAccounting',
             accountingHash: publicKeyShareProofAccountingHash,
-            closedItems:
-                'the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows',
-            claimBoundary:
-                'active-malicious public-key share accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; the share secret is rebound to the same-secret linkage anchor through the accepted family binding root and the limb-zero commitment opening theorem dependency',
         },
     },
     {
         proofFamily: 'trustee-evaluation-key',
-        claimScope:
-            'every scheduled relinearization and Galois key share of one trustee, proven by one batched succinct argument against the committed trustee secret and the recomputed round-one public aggregates',
-        verifierClosedStatus:
-            'statement-rebuild-and-argument-checks-verifier-closed',
-        verifierClosedChecks: [
-            'every statement is rebuilt by the verifier from the transported share records, the recomputed round-one public aggregate diagonals, the accepted same-secret constant commitments, and the ceremony context; no prover-supplied statement field is trusted',
-            'key-switch component material is decoded against record-bound component vector roots and deterministic public sampler seeds shared by schedule entry',
-            'per-limb trace commitments, masked column openings, batched row checks, the digit-and-key-batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every limb field',
-            'arithmetic source relations are enforced inside the argument: round-one sources equal the committed secret, round-two sources equal the secret times the recomputed public aggregate, and Galois sources equal the automorphism image',
-            'the same-secret linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against the shared key-relation secret',
-            'cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb',
-            'canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package',
-        ],
-        accountingStatus:
-            'succinct-trustee-evaluation-key-theorem-accounting-accepted',
         claimAccounting: {
-            accountingObject: 'SuccinctEvaluationKeyProofAccounting',
             accountingHash: trusteeEvaluationKeyProofAccountingHash,
-            closedItems:
-                'the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows',
-            claimBoundary:
-                'active-malicious evaluation-key proof accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; ceremony transport, roster binding, and target decryption keep their own gates',
         },
     },
 ];
@@ -1088,22 +986,6 @@ const setupProofSuccinctTransportAccounting = (): JsonRecord => ({
     objectType: 'SetupProofSuccinctTransportAccounting',
     objectVersion: 1,
     setupProofProfileId,
-    accountingStatus:
-        'succinct-proof-material-roots-and-transport-binding-accepted',
-    closedProofFamilies: [
-        'same-secret-linkage-anchor',
-        'public-key-share',
-        'vss-opening-carry',
-        'trustee-evaluation-key',
-    ],
-    closedVerifierChecks: [
-        'embedded proof bytes bind statement hash, proof size, proof bytes hash, and proof material root',
-        'transported proof bytes bind chunk size, chunk count, total byte length, full object hash, chunk root, and chunk hashes',
-        'private VSS transported proof material uses the succinct proof material root and carries no relation-commitment or tbox metadata',
-        'canonical proof decoding and verifier arithmetic reject malformed proof bytes before accepted setup handoff',
-    ],
-    claimBoundary:
-        "proof material transport accounting covers root binding and canonical byte delivery only; each proof family's soundness, leakage, and Fiat-Shamir rows live in its bound succinct accounting object",
 });
 
 const setupProofSuccinctLeakageAccounting = (
@@ -1115,7 +997,6 @@ const setupProofSuccinctLeakageAccounting = (
     objectType: 'SetupProofSuccinctLeakageAccounting',
     objectVersion: 1,
     setupProofProfileId,
-    accountingStatus: 'succinct-family-leakage-scope-bound-per-family',
     familyAccountingHashes: {
         sameSecretLinkageAnchor: sameSecretLinkageAnchorProofAccountingHash,
         publicKeyShare: publicKeyShareProofAccountingHash,
@@ -1124,8 +1005,6 @@ const setupProofSuccinctLeakageAccounting = (
     },
     zeroKnowledgeScope:
         'bounded-leakage succinct-family accounting only; the setup certificate does not claim 128-bit zero-knowledge for these families',
-    claimBoundary:
-        'legacy response-mask accounting for non-succinct private VSS records is not terminal setup evidence after the private VSS succinct migration',
 });
 
 const setupProofFiatShamirTranscriptAccounting = (
@@ -1137,10 +1016,6 @@ const setupProofFiatShamirTranscriptAccounting = (
     objectType: 'SetupProofFiatShamirTranscriptAccounting',
     objectVersion: 1,
     setupProofProfileId,
-    accountingStatus:
-        'succinct-family-classical-fiat-shamir-accounting-bound-per-family',
-    qromReductionStatus:
-        'qrom-reduction-loss-computed-cms19-classical-accepted-quantum-soundness-recorded-not-128-bit-accepted',
     familyAccountingHashes: {
         sameSecretLinkageAnchor: sameSecretLinkageAnchorProofAccountingHash,
         publicKeyShare: publicKeyShareProofAccountingHash,
@@ -1149,8 +1024,6 @@ const setupProofFiatShamirTranscriptAccounting = (
     },
     challengeBinding:
         'each succinct proof statement hash, proof family label, binding roots, Merkle transcript, low-degree transcript, and challenge-extension sampling rule is recorded inside the bound family accounting object',
-    claimBoundary:
-        'the setup accounting certificate binds classical Fiat-Shamir rows only through the succinct family accounting objects; QROM rows remain reference-only until a fixed-profile reduction-loss calculation exists',
 });
 
 const setupProofTheoremAccounting = (
@@ -1168,22 +1041,12 @@ const setupProofTheoremAccounting = (
         'vss-opening-carry',
         'trustee-evaluation-key',
     ],
-    accountingStatus:
-        'succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open',
     familyAccounting: {
         sameSecretLinkageAnchor: sameSecretLinkageAnchorProofAccounting,
         publicKeyShare: publicKeyShareProofAccounting,
         privateVssShare: privateVssShareProofAccounting,
         trusteeEvaluationKey: trusteeEvaluationKeyProofAccounting,
     },
-    acceptedClaimScope: [
-        'same-secret linkage anchor relation',
-        'public-key share correctness relation',
-        'recipient-local private VSS opening and carry relation',
-        'trustee evaluation-key schedule relation',
-    ],
-    claimBoundary:
-        'accepted only for the listed succinct setup proof families under their bound family accounting objects; QROM reduction loss and 128-bit zero-knowledge are not accepted rows, and this does not close ballot proofs, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families',
 });
 
 const setupProofAccountingCertificateBody = (
@@ -1302,12 +1165,6 @@ const setupProofAccountingCertificateBody = (
             publicKeyShareProofAccounting,
             trusteeEvaluationKeyProofAccounting,
         ),
-        completionBoundary:
-            'claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate',
-        certificateStatus:
-            'succinct-setup-proof-family-classical-accounting-accepted-qrom-open',
-        claimBoundary:
-            'every bound setup proof family carries accepted classical accounting through its succinct-family accounting object under the named FRI conjecture where applicable; QROM reduction loss and 128-bit zero-knowledge are not accepted by this certificate',
     };
 };
 
@@ -1596,19 +1453,6 @@ const bgvHeSecurityCertificateBody = (
         setupProofProfileHash: setupProfile.setupProofProfileHash,
         evaluatorKeyScheduleProfileHash:
             setupProfile.evaluatorKeyScheduleProfileHash,
-        certificateScope:
-            'first-profile-accepted-setup-direct-evaluator-replay-Q-data-boundary',
-        reference: {
-            document: 'ACC18 Homomorphic Encryption Standard',
-            localReferencePath:
-                'reference-documents/ACC18_Homomorphic Encryption Standard.txt',
-            sections: [
-                'Section 2.1.3 secret key distribution',
-                'Table 1 BKZ.sieve ternary n=32768 row',
-                'Table 2 BKZ.qsieve ternary n=32768 row',
-            ],
-            tableScope: 'power-of-two cyclotomic RLWE parameter table',
-        },
         assessedRing: {
             polynomialDegree: bgvProfile.profile.polynomialDegree,
             plaintextModulus: bgvProfile.profile.plaintextModulus,
@@ -1637,8 +1481,6 @@ const bgvHeSecurityCertificateBody = (
             distributionKind: 'centered-binomial-eta2',
             support: [-2, -1, 0, 1, 2],
             keySwitchNoiseDistribution: 'centered-binomial-eta2',
-            certificateStatus:
-                'accepted-for-direct-evaluator-replay-HE-parameter-boundary',
         },
         publicSampleAccounting: {
             publicKeyCrpPolynomials: 1,
@@ -1655,9 +1497,6 @@ const bgvHeSecurityCertificateBody = (
         },
         standardRows: {
             postQuantumTernary128: {
-                status: postQuantumAccepted
-                    ? 'accepted'
-                    : 'rejected-largest-exposed-modulus-exceeds-row',
                 costModel: 'BKZ.qsieve',
                 secretDistribution: 'ternary',
                 polynomialDegree: 32_768,
@@ -1673,9 +1512,6 @@ const bgvHeSecurityCertificateBody = (
                 dualBits: '128.4',
             },
             classicalTernary128: {
-                status: classicalAccepted
-                    ? 'accepted'
-                    : 'rejected-largest-exposed-modulus-exceeds-row',
                 costModel: 'BKZ.sieve',
                 secretDistribution: 'ternary',
                 polynomialDegree: 32_768,
@@ -1692,9 +1528,6 @@ const bgvHeSecurityCertificateBody = (
             },
         },
         estimatorBinding: {
-            status: acceptedForDirectEvaluatorReplay
-                ? 'accepted-by-local-HE-standard-table-row'
-                : 'rejected-by-local-HE-standard-table-row',
             tool: 'HE-standard published parameter table',
             toolVersion: 'ACC18 local text reference',
             securityEstimatorInputHash: bgvProfile.securityEstimatorInputHash,
@@ -1711,20 +1544,14 @@ const bgvHeSecurityCertificateBody = (
             targetDecryptionReadiness:
                 'refused-until-q-target-certificate-closes',
         },
+        parameterBoundary: {
+            acceptedScope:
+                'current Q_data/Q_share direct evaluator replay and accepted setup public key/evaluation-key exposure',
+            excludedScope:
+                'Q_target, target decryption, smudging, C1-C4, and downstream decryption-share proof material',
+        },
         acceptedForDirectEvaluatorReplay,
         acceptedForTargetDecryption: false,
-        statusLabels: acceptedForDirectEvaluatorReplay
-            ? [
-                  'HEStandardPostQuantum128Accepted',
-                  'HEStandardClassical128Accepted',
-                  'DataBasisLargestExposedModulusAccepted',
-                  'SpecialPrimeNotPubliclyExposedOnAcceptedPath',
-                  'TargetDecryptionReadinessRefusedUntilQTargetCertificate',
-              ]
-            : [
-                  'HEStandardSecurityRejected',
-                  'DataBasisLargestExposedModulusRejected',
-              ],
     };
 };
 

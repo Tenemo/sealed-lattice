@@ -21,15 +21,12 @@ pub(super) fn public_rlwe_samples_by_basis(
         "QPPublic": {
             "basisId": BgvBasisKind::Extended.basis_id(),
             "modulusBits": q_extended_utility_bits,
-            "exposedOnAcceptedDirectEvaluatorReplayPath": false,
             "relinearizationKeys": 0,
             "rotationKeys": 0,
             "keySwitchKeys": 0,
-            "exposurePolicy": "special-prime utility basis is not public key-switch material in the current accepted direct evaluator replay path",
         },
         "QTarget": {
             "modulusBits": null,
-            "sampleCountStatus": "pendingUntilFinalNoiseAnalysis"
         },
     })
 }
@@ -89,16 +86,11 @@ pub(super) fn evaluation_key_size_certificate(evaluation_keys: &Value) -> Canoni
             "chunkRootRequired": true,
             "streamingVerificationRequired": true
         },
-        "storagePressure": {
-            "status": "large-public-evaluation-key-material",
-            "mobileDownloadRequiresPerformanceMeasurement": true
-        },
     }))
 }
 
 pub(super) fn evaluation_key_streaming_commitment(
     evaluation_keys: &Value,
-    evaluation_key_size_certificate: &Value,
 ) -> CanonicalResult<Value> {
     let stream_record = json!({
         "objectType": "BgvEvaluationKeyMaterialCommitmentStream",
@@ -117,12 +109,6 @@ pub(super) fn evaluation_key_streaming_commitment(
     });
     let stream_bytes = canonical_json(&stream_record)?.into_bytes();
     let chunk_root_value = chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?;
-    let total_evaluation_key_byte_estimate = usize_at_path(
-        evaluation_key_size_certificate,
-        &["totalEvaluationKeyByteEstimate"],
-    )?;
-    let storage_quota_refused =
-        total_evaluation_key_byte_estimate > DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES;
     let commitment_record = json!({
         "objectType": "BgvEvaluationKeyStreamingCommitment",
         "objectVersion": 1,
@@ -133,16 +119,6 @@ pub(super) fn evaluation_key_streaming_commitment(
         "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,
         "chunkRoot": chunk_root_value,
         "chunkCount": stream_bytes.len().div_ceil(EVALUATION_KEY_CHUNK_SIZE_BYTES),
-        "storageQuotaDecision": {
-            "quotaBytes": DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES,
-            "totalEvaluationKeyByteEstimate": total_evaluation_key_byte_estimate,
-            "accepted": !storage_quota_refused,
-            "refusalReason": if storage_quota_refused {
-                "evaluation-key-estimate-exceeds-development-mobile-storage-quota"
-            } else {
-                "within-development-mobile-storage-quota"
-            }
-        },
         "streamCommitmentEvidence": true,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
     });

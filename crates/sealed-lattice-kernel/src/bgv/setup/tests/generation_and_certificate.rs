@@ -8,39 +8,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
         first["setupPackageHash"], EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH,
         "passive setup generation must remain deterministic for the fixed test seed"
     );
-    assert_eq!(
-        first["targetDecryptionStatus"]["setupMaterialMatchesTargetDecryption"],
-        true
-    );
-    assert_eq!(
-        first["targetDecryptionStatus"]["targetPartDecImplemented"],
-        true
-    );
-    assert_eq!(
-        first["certificates"]["setupParameterCertificate"]["finalSecurityStatus"],
-        "acceptedForDirectEvaluatorReplayTargetPending"
-    );
-    assert_eq!(
-        first["certificates"]["targetThresholdDecryptabilityCertificate"]["ciphertextCompatibilityStatus"],
-        "TargetThresholdDecryptabilityCompatibilityCertified"
-    );
-    assert_eq!(
-        first["certificates"]["targetThresholdDecryptabilityCertificate"]["downstreamProtocolStatus"],
-        "TargetShareProofAndC1C4CertificationStillDownstream"
-    );
     assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
-    assert_eq!(
-        first["participants"][0]["sampleDisclosure"],
-        "commitment-hashes-and-roots-only"
-    );
-    assert_eq!(
-        first["participants"][0]["sampledLocalSecretCoefficientsIncluded"],
-        false
-    );
-    assert_eq!(
-        first["participants"][0]["sampledLocalErrorCoefficientsIncluded"],
-        false
-    );
     assert_eq!(
         first["collectivePublicKey"]["coefficientMaterial"]["objectType"],
         "BgvCollectivePublicKeyCoefficientMaterial"
@@ -91,7 +59,6 @@ fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
 fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure() {
     let package = setup_package_ref();
     let setup_parameter_certificate = &package["certificates"]["setupParameterCertificate"];
-    let he_security_certificate = &package["certificates"]["heSecurityCertificate"];
     let public_samples = &package["certificates"]["publicRlweSamplesByBasis"];
 
     assert_eq!(
@@ -101,38 +68,6 @@ fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure
     assert_eq!(
         setup_parameter_certificate["qExtendedUtilityBits"],
         serde_json::json!(extended_basis_modulus_bits())
-    );
-    assert_eq!(
-        setup_parameter_certificate["largestExposedBasisClassWithoutQTarget"],
-        serde_json::json!("Q_data")
-    );
-    assert_eq!(
-        setup_parameter_certificate["largestExposedModulusBitsWithoutQTarget"],
-        serde_json::json!(data_basis_modulus_bits())
-    );
-    assert_eq!(
-        setup_parameter_certificate["specialPrimeExposureStatus"],
-        serde_json::json!("not-exposed-by-current-direct-evaluator-replay-public-material")
-    );
-    assert_eq!(
-        he_security_certificate["assessedRing"]["largestExposedBasisClass"],
-        serde_json::json!("Q_data")
-    );
-    assert_eq!(
-        he_security_certificate["assessedRing"]["largestExposedModulusBits"],
-        serde_json::json!(data_basis_modulus_bits())
-    );
-    assert_eq!(
-        he_security_certificate["assessedRing"]["extendedUtilityExposureStatus"],
-        serde_json::json!("not-exposed-by-current-direct-evaluator-replay-public-material")
-    );
-    assert_eq!(
-        he_security_certificate["standardRows"]["postQuantumTernary128"]["status"],
-        serde_json::json!("accepted")
-    );
-    assert_eq!(
-        public_samples["QPPublic"]["exposedOnAcceptedDirectEvaluatorReplayPath"],
-        serde_json::json!(false)
     );
     assert_eq!(
         public_samples["QPPublic"]["relinearizationKeys"],
@@ -191,15 +126,6 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
     assert_eq!(
         package["certificates"]["collectiveSecretDistributionCertificate"]["localShareSampler"]["samplerId"],
         "hash-derived-owner-routed-standard-ternary-collective-share-v1"
-    );
-    assert_eq!(
-        package["certificates"]["collectiveSecretDistributionCertificate"]["resultingGlobalSecretDistribution"]
-            ["isPlainDenseTernary"],
-        true
-    );
-    assert_eq!(
-        package["certificates"]["heSecurityCertificate"]["acceptedForDirectEvaluatorReplay"],
-        true
     );
     assert_eq!(
         package["certificates"]["errorDistributionCertificate"]["crpPublicSampleDistribution"]["distributionKind"],

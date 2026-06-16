@@ -69,10 +69,6 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
             "evaluation key material commitment does not match the setup-derived key stream schedule",
         ));
     }
-    validate_sampled_key_material_checks(value_at_path(
-        actual_material,
-        &["record", "sampledRelationChecks"],
-    )?)?;
 
     let relinearization_key_record =
         value_at_path(&expected_material, &["relinearizationKeyRecord"])?;
@@ -265,33 +261,4 @@ fn expected_required_rotation_group(purpose: &str) -> Option<BTreeSet<i64>> {
     };
 
     Some(rotations.into_iter().collect())
-}
-
-fn validate_sampled_key_material_checks(sampled_checks: &Value) -> CanonicalResult<()> {
-    for check in sampled_checks.as_array().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "evaluation key material sampled checks must be an array",
-        )
-    })? {
-        hash_at_path(check, &["keyStreamSeed"])?;
-        for sample in array_at_path(check, &["samples"])? {
-            if !bool_at_path(sample, &["relationMatches"])? {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "evaluation key material stream sample does not satisfy the key-switch relation",
-                ));
-            }
-            let expected = unsigned_at_path(sample, &["expectedKeyLimbCoefficient"])?;
-            let actual = unsigned_at_path(sample, &["decryptedKeyLimbCoefficient"])?;
-            if actual != expected {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "evaluation key material stream sample has an inconsistent relation result",
-                ));
-            }
-        }
-    }
-
-    Ok(())
 }

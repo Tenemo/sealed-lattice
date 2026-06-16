@@ -10,10 +10,7 @@ pub(super) fn direct_ballot_target_proposal(
     target_finality_policy_hash: Option<&str>,
 ) -> CanonicalResult<Value> {
     let Some(target_finality_policy_hash) = target_finality_policy_hash else {
-        return Ok(json!({
-            "status": "not constructed because targetFinalityPolicyHash was not supplied",
-            "requiredForFinality": "target proposal hashing requires the finality policy hash"
-        }));
+        return Ok(json!({}));
     };
 
     validate_direct_ballot_hash_hex(target_finality_policy_hash, "targetFinalityPolicyHash")?;

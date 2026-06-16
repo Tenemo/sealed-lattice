@@ -450,42 +450,6 @@ pub(super) fn sample_signed_values(values: &[i64]) -> Vec<Value> {
         .collect()
 }
 
-pub(super) fn sample_encryption_relation_checks(
-    message_residues: &[u64],
-    public_key_product: &[u64],
-    public_sample_product: &[u64],
-    scaled_error_zero_residues: &[u64],
-    scaled_error_one_residues: &[u64],
-) -> CanonicalResult<Vec<Value>> {
-    let modulus = DATA_PRIMES[0];
-    sample_positions()
-        .into_iter()
-        .map(|position| {
-            let component_zero = add_mod(
-                add_mod(
-                    public_key_product[position],
-                    scaled_error_zero_residues[position],
-                    modulus,
-                )?,
-                message_residues[position],
-                modulus,
-            )?;
-            let component_one = add_mod(
-                public_sample_product[position],
-                scaled_error_one_residues[position],
-                modulus,
-            )?;
-            Ok(json!({
-                "position": position,
-                "modulus": modulus,
-                "componentZeroCoefficient": component_zero,
-                "componentOneCoefficient": component_one,
-                "relationMatches": true,
-            }))
-        })
-        .collect()
-}
-
 pub(super) fn sample_residue(seed_hash: &str, label: &str, position: usize, modulus: u64) -> u64 {
     let position_text = position.to_string();
     let modulus_text = modulus.to_string();

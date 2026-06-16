@@ -210,18 +210,6 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "qShareHash": q_share_hash()?,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
-        "certificateScope": "first-profile-BDLOP-commitment-parameters-and-opening-bounds",
-        "acceptedUse": [
-            "VSS coefficient commitment records",
-            "recipient-local private VSS proof witness checks",
-            "verifier-derived threshold-share commitment roots",
-            "same-secret trustee commitment roots",
-        ],
-        "nonClosure": [
-            "public evaluation-key assembly and setup-package terminal acceptance remain separate from this commitment parameter certificate",
-            "profile-scale binary streaming evidence remains separate from this commitment parameter certificate",
-            "future target-decryption readiness remains outside this commitment parameter certificate",
-        ],
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,
@@ -284,16 +272,6 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "randomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
             "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
             "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
-            "referenceRows": [
-                {
-                    "document": "FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting",
-                    "localReferencePath": "reference-documents/FPS25_Lattice-Based Zero-Knowledge Proofs in Action Applications to Electronic Voting.txt",
-                    "sections": [
-                        "BDLOP commitment background",
-                        "Module-LWE and Module-SIS definitions"
-                    ]
-                }
-            ],
             "estimatorStatus": "repo-owned-module-sis-parameter-accounting-accepted",
         },
         "hidingAssumption": {
@@ -328,7 +306,6 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
                 "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
-        "certificateStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",
     }))
 }
 
@@ -462,82 +439,26 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
     Ok(json!([
         {
             "proofFamily": "vss-opening-carry",
-            "claimScope": "recipient-local private VSS share proof relation over accepted Q_share limbs",
-            "verifierClosedStatus": "statement-rebuild-and-succinct-argument-checks-verifier-closed",
-            "verifierClosedChecks": [
-                "every private VSS statement is rebuilt by the recipient verifier from the encrypted envelope AAD hash, accepted VSS coefficient commitments, share values, setup context, and source and recipient identities",
-                "canonical proof bytes are hashed, decoded, checked for canonical field elements, and rebound to the statement hash, proof statement root, proof material root, and accepted accounting hash before acceptance",
-                "one succinct argument checks all four hidden Shamir coefficient commitment openings and the hidden lifted carry vector over the commitment-modulus fields",
-                "the recipient-point lifted share relation sum_k alpha_j^k F_k - q_l * carry = sigma is enforced coefficientwise inside the batched sumcheck",
-                "coefficient messages, opening randomness, carry witnesses, and source trustee secret constants remain outside public transcript artifacts",
-            ],
-            "accountingStatus": "succinct-private-vss-share-theorem-accounting-accepted",
             "claimAccounting": {
-                "accountingObject": "SuccinctPrivateVssShareAccounting",
                 "accountingHash": succinct_private_vss_share_accounting_hash()?,
-                "closedItems": "the relation shape, canonical statement binding, proof-byte decoding, batched low-degree checks, cross-field integer consistency bound, classical Fiat-Shamir transcript rows, and bounded-leakage scope are recorded inside the bound accounting object",
-                "claimBoundary": "recipient-local private VSS accounting is accepted only for the succinct family under the named FRI conjecture and classical Fiat-Shamir rows; QROM loss and 128-bit zero-knowledge are not accepted rows",
             },
         },
         {
             "proofFamily": "same-secret-linkage-anchor",
-            "claimScope": "one short trustee secret behind every accepted VSS constant commitment, proven once per trustee by a keyless succinct linkage argument over the commitment-modulus fields",
-            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
-            "verifierClosedChecks": [
-                "every anchor statement is rebuilt by the verifier from the accepted VSS constant commitments, the accepted public VSS material root, and the ceremony context; no prover-supplied statement field is trusted",
-                "the linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against one committed ternary secret with Boolean negative-indicator support",
-                "per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every commitment-modulus field",
-                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
-                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
-            ],
-            "accountingStatus": "succinct-same-secret-linkage-anchor-theorem-accounting-accepted",
             "claimAccounting": {
-                "accountingObject": "SuccinctSameSecretLinkageAnchorAccounting",
                 "accountingHash": succinct_same_secret_linkage_anchor_accounting_hash()?,
-                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
-                "claimBoundary": "active-malicious same-secret linkage accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; secret-dependent setup families reference this anchor through the accepted family binding root",
             },
         },
         {
             "proofFamily": "public-key-share",
-            "claimScope": "the public-key share of one trustee over every accepted Q_share limb, proven by one succinct argument against the committed trustee secret, one shared centered-binomial error, and the accepted common reference polynomial",
-            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
-            "verifierClosedChecks": [
-                "every statement is rebuilt by the verifier from the accepted public-key share records, the seed-derived common reference polynomial, the selected accepted limb-zero same-secret constant commitment, the accepted same-secret anchor roots, and the ceremony context; no prover-supplied statement field is trusted",
-                "per-limb trace commitments, masked column openings, batched row checks, the batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every Q_share limb field",
-                "the share-correctness relation b_l + a_l*s - p*e = 0 is enforced inside the argument over every Q_share limb against one committed ternary secret and one shared centered-binomial error column",
-                "one limb-zero constant-commitment linkage opening rebinds the share secret to the accepted same-secret anchor over the commitment-modulus fields; this is sufficient only because the same-secret anchor already proves all accepted Q_share constant commitments open to the same ternary trustee secret",
-                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
-                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
-            ],
-            "accountingStatus": "succinct-public-key-share-theorem-accounting-accepted",
             "claimAccounting": {
-                "accountingObject": "SuccinctPublicKeyShareAccounting",
                 "accountingHash": succinct_public_key_share_accounting_hash()?,
-                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
-                "claimBoundary": "active-malicious public-key share accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; the share secret is rebound to the same-secret linkage anchor through the accepted family binding root and the limb-zero commitment opening theorem dependency",
             },
         },
         {
             "proofFamily": "trustee-evaluation-key",
-            "claimScope": "every scheduled relinearization and Galois key share of one trustee, proven by one batched succinct argument against the committed trustee secret and the recomputed round-one public aggregates",
-            "verifierClosedStatus": "statement-rebuild-and-argument-checks-verifier-closed",
-            "verifierClosedChecks": [
-                "every statement is rebuilt by the verifier from the transported share records, the recomputed round-one public aggregate diagonals, the accepted same-secret constant commitments, and the ceremony context; no prover-supplied statement field is trusted",
-                "key-switch component material is decoded against record-bound component vector roots and deterministic public sampler seeds shared by schedule entry",
-                "per-limb trace commitments, masked column openings, batched row checks, the digit-and-key-batched linear sumcheck, DEEP out-of-domain bindings, and the batched low-degree proof are verified for every limb field",
-                // A Galois/rotation key switches s(X^k) back to s, so its proven source is the automorphism image of the secret, and the rotation amount is the Galois exponent k.
-                "arithmetic source relations are enforced inside the argument: round-one sources equal the committed secret, round-two sources equal the secret times the recomputed public aggregate, and Galois sources equal the automorphism image",
-                "the same-secret linkage opens the accepted BDLOP constant commitments natively over the commitment-modulus fields against the shared key-relation secret",
-                "cross-limb consistency claims are checked as residues of one shared masked integer per claim, lifted from two limb fields and matched in every other limb",
-                "canonical proof bytes are decoded with trailing-byte refusal and rebound to the statement hash recorded in the package",
-            ],
-            "accountingStatus": "succinct-trustee-evaluation-key-theorem-accounting-accepted",
             "claimAccounting": {
-                "accountingObject": "SuccinctEvaluationKeyProofAccounting",
                 "accountingHash": succinct_evaluation_key_proof_accounting_hash()?,
-                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
-                "claimBoundary": "active-malicious evaluation-key proof accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; ceremony transport, roster binding, and target decryption keep their own gates",
             },
         },
     ]))
@@ -548,20 +469,6 @@ fn setup_proof_succinct_transport_accounting_value() -> CanonicalResult<Value> {
         "objectType": "SetupProofSuccinctTransportAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "succinct-proof-material-roots-and-transport-binding-accepted",
-        "closedProofFamilies": [
-            "same-secret-linkage-anchor",
-            "public-key-share",
-            "vss-opening-carry",
-            "trustee-evaluation-key"
-        ],
-        "closedVerifierChecks": [
-            "embedded proof bytes bind statement hash, proof size, proof bytes hash, and proof material root",
-            "transported proof bytes bind chunk size, chunk count, total byte length, full object hash, chunk root, and chunk hashes",
-            "private VSS transported proof material uses the succinct proof material root and carries no relation-commitment or tbox metadata",
-            "canonical proof decoding and verifier arithmetic reject malformed proof bytes before accepted setup handoff"
-        ],
-        "claimBoundary": "proof material transport accounting covers root binding and canonical byte delivery only; each proof family's soundness, leakage, and Fiat-Shamir rows live in its bound succinct accounting object"
     }))
 }
 fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Value> {
@@ -569,8 +476,6 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
         "objectType": "SetupProofFiatShamirTranscriptAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "succinct-family-classical-fiat-shamir-accounting-bound-per-family",
-        "qromReductionStatus": "qrom-reduction-loss-computed-cms19-classical-accepted-quantum-soundness-recorded-not-128-bit-accepted",
         "familyAccountingHashes": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
@@ -578,7 +483,6 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
             "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         },
         "challengeBinding": "each succinct proof statement hash, proof family label, binding roots, Merkle transcript, low-degree transcript, and challenge-extension sampling rule is recorded inside the bound family accounting object",
-        "claimBoundary": "the setup accounting certificate binds classical Fiat-Shamir rows only through the succinct family accounting objects; QROM rows remain reference-only until a fixed-profile reduction-loss calculation exists"
     }))
 }
 fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
@@ -592,20 +496,12 @@ fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
             "vss-opening-carry",
             "trustee-evaluation-key"
         ],
-        "accountingStatus": "succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open",
         "familyAccounting": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_value()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
             "privateVssShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_value()?,
             "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_value()?,
         },
-        "acceptedClaimScope": [
-            "same-secret linkage anchor relation",
-            "public-key share correctness relation",
-            "recipient-local private VSS opening and carry relation",
-            "trustee evaluation-key schedule relation"
-        ],
-        "claimBoundary": "accepted only for the listed succinct setup proof families under their bound family accounting objects; QROM reduction loss and 128-bit zero-knowledge are not accepted rows, and this does not close ballot proofs, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families"
     }))
 }
 fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
@@ -613,7 +509,6 @@ fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
         "objectType": "SetupProofSuccinctLeakageAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "succinct-family-leakage-scope-bound-per-family",
         "familyAccountingHashes": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
@@ -621,7 +516,6 @@ fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
             "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         },
         "zeroKnowledgeScope": "bounded-leakage succinct-family accounting only; the setup certificate does not claim 128-bit zero-knowledge for these families",
-        "claimBoundary": "legacy response-mask accounting for non-succinct private VSS records is not terminal setup evidence after the private VSS succinct migration"
     }))
 }
 pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Value> {
@@ -654,9 +548,6 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
         "succinctLeakageAccounting": setup_proof_succinct_leakage_accounting_value()?,
         "fiatShamirTranscriptAccounting": setup_proof_fiat_shamir_transcript_accounting_value()?,
         "proofTheoremAccounting": setup_proof_theorem_accounting_value()?,
-        "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
-        "certificateStatus": "succinct-setup-proof-family-classical-accounting-accepted-qrom-open",
-        "claimBoundary": "every bound setup proof family carries accepted classical accounting through its succinct-family accounting object under the named FRI conjecture where applicable; QROM reduction loss and 128-bit zero-knowledge are not accepted by this certificate",
     }))
 }
 
@@ -803,15 +694,6 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
         "setupProofProfileBinding": "fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate",
         "keyCorrectnessScope": "collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records",
         "keyCorrectnessTheorem": {
-            "theoremStatus": "repo-owned-key-correctness-theorem-accepted-for-verifier-recomputed-roots",
-            "claimDependency": "terminal accepted setup verifies these roots before returning the accepted setup handoff",
-            "checkedByVerifier": [
-                "collective public-key coefficients are recomputed from publicKeyShareMaterial records and verified source roots",
-                "collectivePublicKeyRoot is canonical and matches the top-level setup package root",
-                "evaluationKeySetHash is canonical and binds the frozen evaluator schedule, relinearization rounds, and Galois batch records",
-                "transported public evaluation-key runtime material is verified against evaluationKeys when supplied",
-                "generic key-switch material and unscheduled Galois keys are refused for the first profile",
-            ],
             "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
         },
         "collectivePublicKey": {
@@ -836,7 +718,6 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
             "setupProofAccountingCertificateHash": value_string(setup_package, "setupProofAccountingCertificateHash")?,
             "heSecurityCertificateHash": value_string(setup_package, "heSecurityCertificateHash")?,
         },
-        "claimBoundary": "key-correctness theorem is accepted for verified roots, loaded runtime material, and terminal accepted setup handoff construction",
     }))
 }
 
@@ -918,7 +799,6 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
             "setupContext was required before active-static setup theorem certificate verification",
         )
     })?;
-    let evaluation_keys_declared = setup_package_declares_public_runtime_material(setup_package);
     let roster = super::accepted_roster_from_setup_context(setup_context);
 
     Ok(json!({
@@ -934,8 +814,6 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
         "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "adversaryModel": {
-            "corruptionTiming": "active-static",
-            "maliciousBehavior": "arbitrary-invalid-public-setup-artifacts-and-abort",
             "secretConfidentialityCorruptTrusteeBound": roster.decryption_threshold - 1,
             "fullRosterSetupCompletionRequired": true,
         },
@@ -943,31 +821,7 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
             "model": "secure-with-abort",
             "setupCompletionQuorum": roster.setup_completion_quorum,
             "participantCount": roster.participant_count,
-            "acceptedAbortEvents": [
-                "missing required setup phase object",
-                "malformed public setup object",
-                "invalid private VSS acceptance state",
-                "invalid setup proof or proof material root",
-                "invalid collective public-key or evaluation-key root",
-                "unsupported target-decryption readiness claim",
-            ],
-            "notClaimed": [
-                "guaranteed output delivery",
-                "identifiable abort",
-                "post-setup target decryption",
-                "production audit readiness",
-            ],
         },
-        "verifiedSetupGates": [
-            "setup context and package hash bind the ceremony, roster, manifest, profile, Q_share, commitment profile, and setup epoch",
-            "full-roster common randomness commit/reveal records derive public setup matrices before proof and key verification",
-            "public VSS coefficient commitments and recipient-local signed acceptances are checked before threshold-share commitment derivation",
-            "threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied",
-            "same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted",
-            "collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records",
-            "setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects",
-            "generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused",
-        ],
         "dependencyHashes": {
             "setupCommitmentSecurityCertificateHash": required_top_level_hash_value(
                 setup_package,
@@ -1031,45 +885,9 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
                 "publicEvaluationKeyMaterialRoot",
             )?,
         },
-        "referenceRows": [
-            {
-                "document": "BCD25_Threshold (Fully) Homomorphic Encryption",
-                "localReferencePath": "reference-documents/BCD25_Threshold (Fully) Homomorphic Encryption.txt",
-                "sections": [
-                    "active-with-abort security model",
-                    "static malicious adversaries",
-                    "threshold FHE setup and abort boundaries"
-                ]
-            },
-            {
-                "document": "LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General",
-                "localReferencePath": "reference-documents/LNP22_Lattice-Based Zero-Knowledge Proofs and Applications Shorter, Simpler, and More General.txt",
-                "sections": [
-                    "Fiat-Shamir with aborts",
-                    "commit-and-prove simulatability",
-                    "knowledge soundness"
-                ]
-            },
-            {
-                "document": "BFM25_Threshold FHE with Efficient Asynchronous Decryption",
-                "localReferencePath": "reference-documents/BFM25_Threshold FHE with Efficient Asynchronous Decryption.txt",
-                "sections": [
-                    "malicious participant detection",
-                    "setup preprocessing",
-                    "abort behavior"
-                ]
-            }
-        ],
         "claimBoundary": {
-            "certificateStatus": "active-static-secure-with-abort-theorem-accepted",
-            "evaluationKeyCorrectnessStatus": if evaluation_keys_declared {
-                "requires-setup-key-correctness-certificate"
-            } else {
-                "no-public-evaluation-key-runtime-material-declared"
-            },
             "remainingDependencies": [],
             "integrationDependencies": [],
-            "completionBoundary": "external validation, independent audit, and third-party proof review are not setup completion prerequisites",
         },
     }))
 }
@@ -1294,17 +1112,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
         "qShareHash": q_share_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
         "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
-        "certificateScope": "first-profile-accepted-setup-direct-evaluator-replay-Q-data-boundary",
-        "reference": {
-            "document": "ACC18 Homomorphic Encryption Standard",
-            "localReferencePath": "reference-documents/ACC18_Homomorphic Encryption Standard.txt",
-            "sections": [
-                "Section 2.1.3 secret key distribution",
-                "Table 1 BKZ.sieve ternary n=32768 row",
-                "Table 2 BKZ.qsieve ternary n=32768 row"
-            ],
-            "tableScope": "power-of-two cyclotomic RLWE parameter table"
-        },
         "assessedRing": {
             "polynomialDegree": POLYNOMIAL_DEGREE,
             "plaintextModulus": PLAINTEXT_MODULUS,
@@ -1331,8 +1138,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
         "errorDistribution": {
             "distributionKind": "centered-binomial-eta2",
             "support": [-2, -1, 0, 1, 2],
-            "keySwitchNoiseDistribution": "centered-binomial-eta2",
-            "certificateStatus": "accepted-for-direct-evaluator-replay-HE-parameter-boundary"
+            "keySwitchNoiseDistribution": "centered-binomial-eta2"
         },
         "publicSampleAccounting": {
             "publicKeyCrpPolynomials": 1,
@@ -1346,11 +1152,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
         },
         "standardRows": {
             "postQuantumTernary128": {
-                "status": if post_quantum_accepted {
-                    "accepted"
-                } else {
-                    "rejected-largest-exposed-modulus-exceeds-row"
-                },
                 "costModel": "BKZ.qsieve",
                 "secretDistribution": "ternary",
                 "polynomialDegree": 32768,
@@ -1363,11 +1164,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
                 "dualBits": "128.4"
             },
             "classicalTernary128": {
-                "status": if classical_accepted {
-                    "accepted"
-                } else {
-                    "rejected-largest-exposed-modulus-exceeds-row"
-                },
                 "costModel": "BKZ.sieve",
                 "secretDistribution": "ternary",
                 "polynomialDegree": 32768,
@@ -1381,11 +1177,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
             }
         },
         "estimatorBinding": {
-            "status": if post_quantum_accepted && classical_accepted {
-                "accepted-by-local-HE-standard-table-row"
-            } else {
-                "rejected-by-local-HE-standard-table-row"
-            },
             "tool": "HE-standard published parameter table",
             "toolVersion": "ACC18 local text reference",
             "securityEstimatorInputHash": security_estimator_input_hash()?,
@@ -1402,14 +1193,8 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
             "targetDecryptionReadiness": "refused-until-q-target-certificate-closes"
         },
         "parameterBoundary": {
-            "certificateStatus": if post_quantum_accepted && classical_accepted {
-                "accepted-for-direct-setup-and-evaluator-HE-parameter-boundary"
-            } else {
-                "rejected-by-local-HE-standard-table-row"
-            },
             "acceptedScope": "current Q_data/Q_share direct evaluator replay and accepted setup public key/evaluation-key exposure",
             "excludedScope": "Q_target, target decryption, smudging, C1-C4, and downstream decryption-share proof material",
-            "proofDependency": "proof soundness and zero-knowledge certificates remain separate from this HE parameter certificate",
         },
         "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
         "acceptedForTargetDecryption": false,

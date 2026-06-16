@@ -42,6 +42,7 @@ impl BaseClaimProfile {
         }
     }
 
+    #[cfg(test)]
     pub fn label(self) -> &'static str {
         match self {
             Self::FoundationTranscript => "FoundationTranscript",
@@ -67,6 +68,7 @@ impl TranscriptCoreSecurityClosure {
         }
     }
 
+    #[cfg(test)]
     pub fn label(self) -> &'static str {
         match self {
             Self::FoundationOnly => "FoundationOnly",
@@ -152,10 +154,6 @@ pub struct TranscriptCoreAnalysis {
     pub object_type: &'static str,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "baseClaimProfile")]
-    pub base_claim_profile: &'static str,
-    #[serde(rename = "securityClosure")]
-    pub security_closure: &'static str,
     #[serde(rename = "baseClaimProfileId")]
     pub base_claim_profile_id: String,
     #[serde(rename = "securityProfileId")]

@@ -127,24 +127,6 @@ pub(super) fn string_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalRe
     })
 }
 
-pub(super) fn bool_at_path(value: &Value, path: &[&str]) -> CanonicalResult<bool> {
-    let mut current = value;
-    for field_name in path {
-        current = current.get(*field_name).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("missing setup package field {}", path.join(".")),
-            )
-        })?;
-    }
-    current.as_bool().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("setup package field {} must be a boolean", path.join(".")),
-        )
-    })
-}
-
 pub(super) fn value_at_path<'a>(value: &'a Value, path: &[&str]) -> CanonicalResult<&'a Value> {
     let mut current = value;
     for field_name in path {

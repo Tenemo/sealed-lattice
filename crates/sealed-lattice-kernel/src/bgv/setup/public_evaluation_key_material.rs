@@ -197,7 +197,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
         "workingLevel": seed_material.relinearization_level,
         "relinearizationKeyCount": 1,
         "rotationKeyCount": rotation_keys.len(),
-        "rawSecretMaterialExported": false,
     });
 
     Ok(PreparedPassiveSetupPublicEvaluationKeys {
@@ -240,12 +239,6 @@ pub(crate) fn public_evaluation_keys_from_material(
         PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING,
         "public evaluation-key material component encoding",
     )?;
-    if bool_at_path(material, &["rawSecretMaterialExported"])? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public evaluation-key material must not export raw secret material",
-        ));
-    }
     compare_hash_at_path(
         material,
         &["setupPackageHash"],

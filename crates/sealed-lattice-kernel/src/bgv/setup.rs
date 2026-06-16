@@ -66,9 +66,9 @@ pub(crate) use threshold_share_commitments::{
 use sampling::{
     dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
     negacyclic_product_mod, sample_bounded_collective_error_share_distribution,
-    sample_bounded_collective_secret_share_distribution, sample_encryption_relation_checks,
-    sample_positions, sample_public_residues, sample_signed_values, sample_values,
-    signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
+    sample_bounded_collective_secret_share_distribution, sample_positions, sample_public_residues,
+    sample_signed_values, sample_values, signed_to_modulus_residue,
+    signed_to_plaintext_scaled_residue,
 };
 
 use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
@@ -101,10 +101,10 @@ use crate::{
             serialize_bgv_object,
         },
         setup_helpers::{
-            array_at_path, bool_at_path, compare_derived_hash, compare_expected_string,
-            compare_hash_at_path, compare_string_at_path, hash_at_path, integer_at_path,
-            read_hash_field, read_non_empty_string, read_optional_u64, read_optional_usize,
-            string_at_path, unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
+            array_at_path, compare_derived_hash, compare_expected_string, compare_hash_at_path,
+            compare_string_at_path, hash_at_path, integer_at_path, read_hash_field,
+            read_non_empty_string, read_optional_u64, read_optional_usize, string_at_path,
+            unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -124,7 +124,6 @@ const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
 const EVALUATION_KEY_STREAMING_COMMITMENT_ID: &str =
     "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-commitment-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
-const DEVELOPMENT_MOBILE_STORAGE_QUOTA_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone)]
 struct SetupParticipant {

@@ -38,8 +38,7 @@ pub(super) fn setup_certificates(
         "EvaluationKeySizeProfileHash",
         &evaluation_key_size_certificate,
     )?;
-    let evaluation_key_streaming_commitment =
-        evaluation_key_streaming_commitment(evaluation_keys, &evaluation_key_size_certificate)?;
+    let evaluation_key_streaming_commitment = evaluation_key_streaming_commitment(evaluation_keys)?;
     let target_threshold_decryptability_certificate =
         target_threshold_decryptability_certificate_for_setup_parts(
             setup_inputs,
@@ -52,13 +51,6 @@ pub(super) fn setup_certificates(
         "TargetThresholdDecryptabilityCertificateHash",
         &target_threshold_decryptability_certificate,
     )?;
-    let he_security_certificate = he_security_certificate_for_setup_profile(
-        collective_secret_distribution_certificate,
-        error_distribution_certificate,
-        &public_samples,
-    )?;
-    let he_security_certificate_hash =
-        derive_protocol_hash("BGVHeSecurityCertificateHash", &he_security_certificate)?;
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
@@ -79,11 +71,6 @@ pub(super) fn setup_certificates(
         "qpPublicBits": null,
         "qTargetBits": null,
         "publicEvaluationKeyBasis": BgvBasisKind::Data.basis_id(),
-        "largestExposedModulusBitsWithoutQTarget": q_data_bits,
-        "largestExposedBasisClassWithoutQTarget": "Q_data",
-        "largestExposedModulusBits": q_data_bits,
-        "finalSecurityStatus": "acceptedForDirectEvaluatorReplayTargetPending",
-        "specialPrimeExposureStatus": "not-exposed-by-current-direct-evaluator-replay-public-material",
         "collectiveSecretDistributionCertificateHash": collective_secret_distribution_certificate_hash,
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
@@ -92,11 +79,7 @@ pub(super) fn setup_certificates(
         "targetDecryptionProfileHash": target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
-        "heSecurityCertificateHash": he_security_certificate_hash,
         "securityEstimatorInputHash": security_estimator_input_hash()?,
-        "HEStdPostQuantumRow": he_security_certificate["standardRows"]["postQuantumTernary128"],
-        "HEStdClassicalRow": he_security_certificate["standardRows"]["classicalTernary128"],
-        "CurrentEstimatorRow": he_security_certificate["estimatorBinding"],
     });
     let setup_parameter_certificate_hash = derive_protocol_hash(
         "BGVSetupParameterCertificateHash",
@@ -111,8 +94,6 @@ pub(super) fn setup_certificates(
         "keySwitchDecomposition": key_switch_decomposition,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
         "publicRlweSamplesByBasis": public_samples,
-        "heSecurityCertificate": he_security_certificate,
-        "heSecurityCertificateHash": he_security_certificate_hash,
         "setupParameterCertificate": setup_parameter_certificate,
         "setupParameterCertificateHash": setup_parameter_certificate_hash,
         "targetThresholdDecryptabilityCertificate": target_threshold_decryptability_certificate,
@@ -131,128 +112,6 @@ fn modulus_product_decimal(moduli: impl IntoIterator<Item = u64>) -> String {
     }
 
     product.to_str_radix(10)
-}
-
-fn he_security_certificate_for_setup_profile(
-    collective_secret_distribution_certificate: &Value,
-    error_distribution_certificate: &Value,
-    public_samples: &Value,
-) -> CanonicalResult<Value> {
-    let largest_exposed_modulus_bits = data_basis_modulus_bits();
-    let post_quantum_max_logq = 827_usize;
-    let classical_max_logq = 881_usize;
-    let post_quantum_accepted = largest_exposed_modulus_bits <= post_quantum_max_logq;
-    let classical_accepted = largest_exposed_modulus_bits <= classical_max_logq;
-    let global_secret_distribution = value_at_path(
-        collective_secret_distribution_certificate,
-        &["resultingGlobalSecretDistribution"],
-    )?;
-    compare_string_at_path(
-        global_secret_distribution,
-        &["distributionKind"],
-        "standard-ternary-collective-secret",
-        "HE security collective secret distribution",
-    )?;
-    if !bool_at_path(global_secret_distribution, &["isPlainDenseTernary"])? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "HE security certificate requires the setup global secret to match the HE-standard ternary row",
-        ));
-    }
-
-    Ok(json!({
-        "objectType": "BgvHeSecurityCertificate",
-        "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "profileId": PROFILE_ID,
-        "backendProfileId": BACKEND_PROFILE_ID,
-        "reference": {
-            "document": "ACC18 Homomorphic Encryption Standard",
-            "localReferencePath": "reference-documents/ACC18_Homomorphic Encryption Standard.txt",
-            "sections": [
-                "Section 2.1.3 secret key distribution",
-                "Table 1 BKZ.sieve ternary n=32768 row",
-                "Table 2 BKZ.qsieve ternary n=32768 row"
-            ],
-            "tableScope": "power-of-two cyclotomic RLWE parameter table"
-        },
-        "assessedRing": {
-            "polynomialDegree": POLYNOMIAL_DEGREE,
-            "plaintextModulus": PLAINTEXT_MODULUS,
-            "dataBasisId": BgvBasisKind::Data.basis_id(),
-            "dataPrimeCount": DATA_PRIMES.len(),
-            "dataPrimeProductDecimal": modulus_product_decimal(DATA_PRIMES.iter().copied()),
-            "dataPrimeCeilLog2Product": data_basis_modulus_bits(),
-            "specialPrime": SPECIAL_PRIME,
-            "extendedUtilityCeilLog2Product": extended_basis_modulus_bits(),
-            "extendedUtilityExposureStatus": "not-exposed-by-current-direct-evaluator-replay-public-material",
-            "largestExposedBasisClass": "Q_data",
-            "largestExposedModulusBits": largest_exposed_modulus_bits
-        },
-        "secretDistribution": {
-            "certificate": global_secret_distribution,
-            "estimatorModel": collective_secret_distribution_certificate["estimatorSecretModel"],
-            "HEStandardRow": "ternary",
-        },
-        "errorDistribution": {
-            "certificate": error_distribution_certificate["errorDistribution"],
-            "sampler": error_distribution_certificate["errorSampler"],
-            "estimatorNote": "the HE-standard table is the accepted published parameter row for the ring and secret distribution; the implemented centered-binomial eta2 sampler remains separately recorded for noise/correctness analysis"
-        },
-        "publicSampleAccounting": public_samples,
-        "standardRows": {
-            "postQuantumTernary128": {
-                "status": if post_quantum_accepted {
-                    "accepted"
-                } else {
-                    "rejected-largest-exposed-modulus-exceeds-row"
-                },
-                "costModel": "BKZ.qsieve",
-                "secretDistribution": "ternary",
-                "polynomialDegree": 32768,
-                "securityLevelBits": 128,
-                "maximumLogQ": post_quantum_max_logq,
-                "largestExposedModulusBits": largest_exposed_modulus_bits,
-                "marginBits": post_quantum_max_logq.saturating_sub(largest_exposed_modulus_bits),
-                "uSVPBits": "128.1",
-                "decodingBits": "128.7",
-                "dualBits": "128.4"
-            },
-            "classicalTernary128": {
-                "status": if classical_accepted {
-                    "accepted"
-                } else {
-                    "rejected-largest-exposed-modulus-exceeds-row"
-                },
-                "costModel": "BKZ.sieve",
-                "secretDistribution": "ternary",
-                "polynomialDegree": 32768,
-                "securityLevelBits": 128,
-                "maximumLogQ": classical_max_logq,
-                "largestExposedModulusBits": largest_exposed_modulus_bits,
-                "marginBits": classical_max_logq.saturating_sub(largest_exposed_modulus_bits),
-                "uSVPBits": "128.5",
-                "decodingBits": "129.1",
-                "dualBits": "128.5"
-            }
-        },
-        "estimatorBinding": {
-            "status": if post_quantum_accepted && classical_accepted {
-                "accepted-by-local-HE-standard-table-row"
-            } else {
-                "rejected-by-local-HE-standard-table-row"
-            },
-            "tool": "HE-standard published parameter table",
-            "toolVersion": "ACC18 local text reference",
-            "securityEstimatorInputHash": security_estimator_input_hash()?,
-            "secretModel": "standard-ternary",
-            "errorModel": error_distribution_certificate["errorDistribution"]["distributionKind"],
-            "largestExposedModulusBits": largest_exposed_modulus_bits,
-            "publicSamplesBound": true,
-        },
-        "targetModulusStatus": "target-decryption-Q-target-not-part-of-direct-evaluator-replay-closure",
-        "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
-    }))
 }
 
 pub(super) fn collective_secret_distribution_certificate(
@@ -284,7 +143,6 @@ pub(super) fn collective_secret_distribution_certificate(
             "rejectionRule": "reject-candidates-outside-largest-multiple-of-support-width",
             "ownerSelectionRule": "one-deterministic-participant-owner-per-coefficient; owner samples one standard ternary coefficient; non-owner local shares are zero",
             "ownerSelectionParticipantCount": participant_count_u64,
-            "rawShareExported": false
         },
         "localShareDistribution": "owner-routed-standard-ternary-local-share",
         "aggregationRule": "coefficient-wise-owner-routed-share-sum",
@@ -297,13 +155,9 @@ pub(super) fn collective_secret_distribution_certificate(
                 { "secretCoefficientSum": 1, "weight": "1" }
             ],
             "totalWeightExpression": "3",
-            "isPlainDenseTernary": true,
         },
         "estimatorSecretModel": "HE-standard-ternary",
         "noiseModelSecretModel": "standard-ternary",
-        "sparseSecretFlag": false,
-        "fixedHammingSecretFlag": false,
-        "rejectionReasonIfUncertified": null,
     }))
 }
 
@@ -345,7 +199,6 @@ pub(super) fn error_distribution_certificate() -> CanonicalResult<Value> {
             "small-distribution-candidates-outside-largest-multiple-of-support-width-are-rehashed",
             "public-residue-candidates-outside-largest-multiple-of-modulus-are-rehashed"
         ],
-        "uncertifiedSmallSecretRejected": true,
     }))
 }
 
@@ -357,8 +210,6 @@ pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
         "basisId": BgvBasisKind::Data.basis_id(),
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
-        "decompositionStatus": "direct-evaluator-replay-data-basis-key-switch-material",
-        "genericKeySwitchApiExported": false,
     }))
 }
 
@@ -465,15 +316,10 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
     Ok(json!({
         "objectType": "TargetThresholdDecryptabilityCertificate",
         "objectVersion": 1,
-        "certificateScope": "setup-key-ciphertext-profile-and-target-recombination-math",
         "setupBinding": setup_binding,
         "keyBinding": key_binding,
         "ciphertextProfile": ciphertext_profile,
         "thresholdBinding": threshold_binding,
-        "ciphertextCompatibilityStatus": "TargetThresholdDecryptabilityCompatibilityCertified",
-        "semanticDecryptionPolicy": "only an accepted target ciphertext after target finality and evaluator replay may request target decryption",
-        "aggregateCiphertextPolicy": "direct encrypted ballot aggregate ciphertexts are target-key compatible but never authorized semantic decryption targets",
-        "downstreamProtocolStatus": "TargetShareProofAndC1C4CertificationStillDownstream",
     }))
 }
 
@@ -504,8 +350,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "inputLayoutHash": direct_comparison_profile_hash()?,
         "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
         "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
-        "directComparisonClosurePending": true,
-        "noiseCertificateAcceptancePending": true,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
@@ -519,8 +363,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         )?,
         "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
         "packingLayoutHash": direct_comparison_profile_hash()?,
-        "claimUsePendingDirectEvaluatorReplay": true,
-        "noiseCertificateAcceptancePending": true,
     });
     let sparse_target_projection_record = json!({
         "objectType": "EncryptedSparseTargetProjectionBinding",
@@ -529,7 +371,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "targetLayoutHash": target_layout_hash(MAXIMUM_OPTION_COUNT)?,
         "directComparisonProfileHash": direct_comparison_profile_hash()?,
-        "claimUsePendingDirectEvaluatorReplay": true,
     });
 
     let comparison_input_derivation_circuit_hash = derive_protocol_hash(
@@ -554,8 +395,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
         "targetLayoutHash": sparse_target_projection_record["targetLayoutHash"],
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
-        "directComparisonInputDerivationStatus": "active-profile-candidate",
-        "claimUse": "binding-only-until-direct-evaluator-replay-closure",
     });
 
     Ok(json!({
