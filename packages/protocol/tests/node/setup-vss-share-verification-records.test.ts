@@ -155,7 +155,6 @@ describe('VSS share verification record builders', () => {
                     localVerificationRoot: fixtureHash(
                         'local-verification-1-0',
                     ),
-                    verificationStatus: 'accepted',
                     recoveryEpoch: 2,
                     deviceEpoch: 3,
                     signingPublicKeyHash: signer.publicKeyHash,

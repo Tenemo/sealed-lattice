@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "9ec96314d9129bdc99784f95a21afd6daac83ad70aadb64880999693a09a6a36",
+    "reachableDeclarationHash": "450bc46d327a59ce0ce47e3300e5aa0a21e8f370557b727ca8d54d2a033ebca6",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveFrozenRosterProfile",
@@ -46,7 +46,6 @@
         "ActionCurrentForRecoveryEpochInput",
         "ActionCurrentForRecoveryEpochResult",
         "AppendOnlyConsistencyProof",
-        "BaseClaimProfile",
         "BoardConsistencyInput",
         "BoardConsistencyVerification",
         "BoardEntryMerklePathStep",
@@ -142,7 +141,6 @@
         "TranscriptCoreAnalysis",
         "TranscriptCoreFixture",
         "TranscriptCoreFixtureVerification",
-        "TranscriptCoreSecurityClosure",
         "TranscriptCoreVerificationLabel",
         "TranscriptCoreVerificationResult",
         "TransportedEvaluationKeyShareComponentMaterialSet",

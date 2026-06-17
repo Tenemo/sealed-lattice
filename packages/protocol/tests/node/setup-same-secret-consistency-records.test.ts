@@ -205,8 +205,6 @@ describe('same-secret consistency statement builders', () => {
                     firstSourceTrusteeRecord.sourceTrusteeRosterPosition,
                 vssSourceTrusteeCommitmentRoot:
                     firstSourceTrusteeRecord.sourceTrusteeCommitmentRoot,
-                secretCommitmentSource: 'vss-constant-coefficient-commitments',
-                sameSecretRelation,
                 constantCoefficientCommitmentRoots:
                     firstStatementRecord.constantCoefficientCommitmentRoots,
             },
