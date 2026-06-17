@@ -2,10 +2,16 @@ use super::*;
 
 pub(super) fn setup_commitment_security_certificate_fixture(
     profile: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
+    // Mirror the production roster-derived bounds (accepted_certificates.rs):
+    // the decryption threshold and full-roster aggregation count are pure
+    // functions of participantCount, and the verifier recomputes this exact
+    // certificate per roster, so the fixture must match it for every n.
+    let decryption_threshold = participant_count / 3 + 1;
     let max_source_message_modulus = DATA_PRIMES.iter().copied().max().expect("Q_share primes");
-    let recipient_scalar_sum = scalar_power_sum_fixture(4, 10);
-    let threshold_scalar_sum = recipient_scalar_sum * 10;
+    let recipient_scalar_sum = scalar_power_sum_fixture(decryption_threshold, participant_count);
+    let threshold_scalar_sum = recipient_scalar_sum * u128::from(participant_count);
     let recipient_scalar_sum_u64 = u64::try_from(recipient_scalar_sum).expect("recipient bound");
     let threshold_scalar_sum_u64 = u64::try_from(threshold_scalar_sum).expect("threshold bound");
     let commitment_modulus_product =
@@ -62,12 +68,12 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
         "aggregateOpeningBounds": {
-            "shamirCoefficientCount": 4,
-            "maximumTrusteePoint": 10,
+            "shamirCoefficientCount": decryption_threshold,
+            "maximumTrusteePoint": participant_count,
             "recipientScalarPowerSumDecimal": recipient_scalar_sum.to_string(),
             "recipientAggregateOpeningInfinityBound": recipient_scalar_sum_u64,
             "maxRecipientLiftedCoefficientDecimal": max_recipient_lifted_coefficient.to_string(),
-            "sourceTrusteeCountForThresholdAggregation": 10,
+            "sourceTrusteeCountForThresholdAggregation": participant_count,
             "thresholdScalarPowerSumDecimal": threshold_scalar_sum.to_string(),
             "thresholdShareOpeningInfinityBound": threshold_scalar_sum_u64,
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
@@ -78,8 +84,8 @@ pub(super) fn setup_commitment_security_certificate_fixture(
         "multiOpeningLeakage": {
             "recipientAggregateOpeningsArePublic": false,
             "recipientAggregateOpeningsAreMailboxPlaintext": false,
-            "maxCorruptRecipientsBeforeThreshold": 3,
-            "shamirPolynomialDegree": 3,
+            "maxCorruptRecipientsBeforeThreshold": decryption_threshold - 1,
+            "shamirPolynomialDegree": decryption_threshold - 1,
             "rawCoefficientOpeningsExported": false,
             "perCoefficientRandomnessExported": false,
             "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
@@ -188,7 +194,26 @@ pub(in super::super) fn setup_transport_certificate_fixture(
     vss_coefficient_commitment_material: &serde_json::Value,
 ) -> serde_json::Value {
     let chunk_size_bytes = 1_048_576_u64;
-    let total_byte_length = vss_material_binary_total_byte_length(POLYNOMIAL_DEGREE);
+    // The transported VSS object byte length is a function of the material's
+    // roster and ring degree, matching the verifier's roster-and-ring-derived
+    // expectation (transport_policy::setup_transport_vss_material_byte_length_for_roster).
+    // It is read from the material set so a reduced-ring or non-first-closure
+    // material declares a consistent transport object. The streamed path then
+    // overrides byteLength from the actually transported material.
+    let material_participant_count = vss_coefficient_commitment_material["participantCount"]
+        .as_u64()
+        .expect("VSS material participant count");
+    let material_decryption_threshold = vss_coefficient_commitment_material["thresholdDegree"]
+        .as_u64()
+        .expect("VSS material threshold degree");
+    let material_ring_degree = vss_coefficient_commitment_material["ringDegree"]
+        .as_u64()
+        .expect("VSS material ring degree") as usize;
+    let total_byte_length = vss_material_binary_total_byte_length(
+        material_ring_degree,
+        material_participant_count,
+        material_decryption_threshold,
+    );
     let chunk_count = total_byte_length.div_ceil(chunk_size_bytes);
     let vss_full_object_hash = derive_protocol_hash(
         "SetupTransportChunkManifestRoot",

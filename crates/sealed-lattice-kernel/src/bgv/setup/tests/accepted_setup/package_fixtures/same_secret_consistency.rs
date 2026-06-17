@@ -11,7 +11,9 @@ pub(super) fn same_secret_consistency_object(
     commitment_profile_hash: &str,
     setup_epoch: &str,
     vss_coefficient_commitments: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
+    let decryption_threshold = participant_count / 3 + 1;
     let mut statement_records = Vec::new();
     let mut trustee_secret_commitment_roots = Vec::new();
     let same_secret_proof_family_binding_root = derive_protocol_hash(
@@ -35,7 +37,7 @@ pub(super) fn same_secret_consistency_object(
         }),
     )
     .expect("same-secret proof family binding root");
-    for trustee_roster_position in 0..10_u64 {
+    for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let source_trustee_record =
             &vss_coefficient_commitments["sourceTrusteeRecords"][trustee_roster_position as usize];
@@ -146,9 +148,9 @@ pub(super) fn same_secret_consistency_object(
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
-        "thresholdDegree": 4,
+        "thresholdDegree": decryption_threshold,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitments["vssCoefficientCommitmentRoot"],
         "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
         "trusteeSecretCommitmentRoots": trustee_secret_commitment_roots,

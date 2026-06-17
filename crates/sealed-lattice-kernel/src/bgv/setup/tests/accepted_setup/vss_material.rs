@@ -118,9 +118,15 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
         transported_result["currentPhase"],
         "setupPackageVerification"
     );
+    // The transport certificate is assembled from synthetic chunk hashes that do
+    // not match the bytes of the actually transported VSS material, so the binary
+    // transport reference check refuses on the chunk-root/full-object hash. The
+    // byte-length and chunk-count metadata are roster-and-ring consistent (the
+    // certificate derives them from the material), so the earlier metadata check
+    // passes and the hash mismatch is the operative refusal.
     assert_eq!(
         transported_result["refusedObjects"][0]["reasonCode"],
-        "vssMaterialTransportReferenceMetadataMismatch"
+        "vssMaterialTransportReferenceHashMismatch"
     );
 }
 

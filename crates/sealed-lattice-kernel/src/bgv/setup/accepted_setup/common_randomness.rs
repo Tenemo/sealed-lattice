@@ -242,7 +242,7 @@ fn verify_public_derivations(
     Ok(None)
 }
 
-pub(super) fn derive_collective_bgv_setup_public_derivations(
+pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
     public_matrix_seed_hash: &str,
     decryption_threshold: u64,
 ) -> CanonicalResult<Value> {

@@ -8,7 +8,8 @@ use crate::{
 
 use super::{
     accepted_setup::{
-        COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash, accepted_setup_profile_hash,
+        COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash, accepted_roster_from_setup_context,
+        setup_profile_hash_for_roster,
     },
     commitment::setup_commitment_profile_hash,
     sharing::canonical_trustee_point,
@@ -128,10 +129,14 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
     }
     string_field(setup_context, "ceremonyId")?;
     string_field(setup_context, "setupEpoch")?;
+    // The setup profile hash is a roster family, so it must match the hash
+    // derived from this setup context's roster, not the first-closure n = 10
+    // hash.
+    let roster = accepted_roster_from_setup_context(setup_context);
     if setup_context
         .get("setupProfileHash")
         .and_then(Value::as_str)
-        != Some(accepted_setup_profile_hash()?.as_str())
+        != Some(setup_profile_hash_for_roster(&roster)?.as_str())
     {
         return Err(invalid_local_state_input(
             "setupContext.setupProfileHash does not match CollectiveBgvSetup-v1",

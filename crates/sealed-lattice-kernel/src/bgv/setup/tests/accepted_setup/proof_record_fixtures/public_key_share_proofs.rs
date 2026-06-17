@@ -12,6 +12,7 @@ pub(in super::super) fn collective_public_key_object(
     let ring_degree = package["publicKeyShareMaterial"]["ringDegree"]
         .as_u64()
         .expect("ring degree") as usize;
+    let participant_count = participant_count_from_package(package);
     let mut source_roots = Vec::new();
     let mut aggregate_coefficients_by_limb = (0..DATA_PRIMES.len())
         .map(|_| vec![0_u64; ring_degree])
@@ -75,7 +76,7 @@ pub(in super::super) fn collective_public_key_object(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "publicMatrixSeedHash": package["commonRandomness"]["publicMatrixSeedHash"],
@@ -108,7 +109,8 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
         .to_string();
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
-    for trustee_roster_position in 0..10_u64 {
+    let participant_count = participant_count_from_package(package);
+    for trustee_roster_position in 0..participant_count {
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
             &public_matrix_seed_hash,
             trustee_roster_position,
@@ -130,7 +132,7 @@ pub(in super::super) fn replace_public_key_share_hashes_with_material_hashes(
             serde_json::json!(share_hashes);
     }
     rebind_collective_public_key_share_roots(package);
-    for trustee_roster_position in 0..10_usize {
+    for trustee_roster_position in 0..participant_count as usize {
         package["publicKeyShareProofs"]["proofRecords"][trustee_roster_position]
             ["publicKeyShareRoot"] =
             package["publicKeyShares"]["shareRecords"][trustee_roster_position]
@@ -164,9 +166,10 @@ pub(in super::super) fn public_key_share_material_object(
             .expect("public a root");
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let participant_count = participant_count_from_package(package);
     let mut material_records = Vec::new();
     let mut material_roots = Vec::new();
-    for trustee_roster_position in 0..10_u64 {
+    for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let (coefficients_by_limb, _) = public_key_share_coefficients_and_errors_for_fixture(
             public_matrix_seed_hash,
@@ -238,7 +241,7 @@ pub(in super::super) fn public_key_share_material_object(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -360,7 +363,8 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
     let material_records = package["publicKeyShareMaterial"]["shareMaterialRecords"]
         .as_array()
         .expect("public-key material records");
-    let per_trustee_records = (0..10_u64)
+    let participant_count = participant_count_from_package(package);
+    let per_trustee_records = (0..participant_count)
         .into_par_iter()
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
@@ -555,7 +559,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyCrpRoot": public_key_crp_root,

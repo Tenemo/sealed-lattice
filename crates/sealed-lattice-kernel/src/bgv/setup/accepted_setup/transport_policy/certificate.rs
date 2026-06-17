@@ -354,10 +354,27 @@ fn verify_setup_transported_objects(
         "vssCoefficientCommitmentMaterial",
         "vssCoefficientCommitmentMaterialRoot",
     )?;
-    // TODO(dynamic-roster sweep): thread the validated roster from the setup
-    // context so n != 10 transport verifies; first-closure keeps n = 10 exact.
-    let expected_vss_material_byte_length =
-        setup_transport_vss_material_byte_length_for_roster(&first_closure_roster_parameters())?;
+    // The transported VSS material byte length is a function of the validated
+    // roster and the material's ring degree, so the expectation is derived from
+    // this package's roster and VSS material ring degree. The verifier already
+    // validated participantCount and the roster-derived quorums in verify_context
+    // before any transport check runs, and the material ring degree is bound by
+    // the VSS material set the commitment-material root above recomputes.
+    let transport_roster = super::super::accepted_roster_from_package(setup_package);
+    let vss_material_ring_degree = setup_package
+        .get("vssCoefficientCommitmentMaterial")
+        .and_then(|material_set| material_set.get("ringDegree"))
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "vssCoefficientCommitmentMaterial.ringDegree was required before setup transport verification",
+            )
+        })?;
+    let expected_vss_material_byte_length = setup_transport_vss_material_byte_length_for_roster(
+        &transport_roster,
+        vss_material_ring_degree,
+    )?;
     let expected_vss_chunk_count = setup_transport_chunk_count(expected_vss_material_byte_length)?;
     let Some(vss_object) = transported_objects.iter().find(|transported_object| {
         transported_object.object_name == SETUP_TRANSPORTED_VSS_MATERIAL_NAME

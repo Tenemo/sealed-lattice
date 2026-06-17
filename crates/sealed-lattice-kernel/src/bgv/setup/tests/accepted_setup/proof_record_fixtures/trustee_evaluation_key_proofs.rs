@@ -217,7 +217,7 @@ fn trustee_evaluation_key_proofs_object_inner(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],

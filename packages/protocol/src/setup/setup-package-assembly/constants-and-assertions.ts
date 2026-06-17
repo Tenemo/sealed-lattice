@@ -5,9 +5,6 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 import type { JsonRecord } from './types.js';
 
 export const setupProfileId = 'CollectiveBgvSetup-v1';
-export const firstProfileParticipantCount = 10;
-export const firstProfileSetupCompletionQuorum = 10;
-export const firstProfileDecryptionThreshold = 4;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
 export const contextFieldNames = [

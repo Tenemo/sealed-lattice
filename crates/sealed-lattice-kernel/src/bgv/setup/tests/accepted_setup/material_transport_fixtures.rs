@@ -268,24 +268,38 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
     certificate_hash
 }
 
-pub(super) fn append_vss_material_binary_header(output: &mut Vec<u8>, ring_degree: usize) {
+pub(super) fn append_vss_material_binary_header(
+    output: &mut Vec<u8>,
+    ring_degree: usize,
+    participant_count: u64,
+    decryption_threshold: u64,
+) {
     output.extend(b"SLVSSMAT");
     append_varuint(output, 1);
-    append_varuint(output, 10);
-    append_varuint(output, 4);
+    append_varuint(output, participant_count);
+    append_varuint(output, decryption_threshold);
     append_varuint(output, DATA_PRIMES.len() as u64);
     append_varuint(output, ring_degree as u64);
     append_varuint(output, SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64);
     append_varuint(output, SETUP_COMMITMENT_ROW_COUNT as u64);
 }
 
-pub(super) fn vss_material_binary_total_byte_length(ring_degree: usize) -> u64 {
+pub(super) fn vss_material_binary_total_byte_length(
+    ring_degree: usize,
+    participant_count: u64,
+    decryption_threshold: u64,
+) -> u64 {
     let mut header = Vec::new();
-    append_vss_material_binary_header(&mut header, ring_degree);
-    let coordinate_byte_length = (0..10_u64)
+    append_vss_material_binary_header(
+        &mut header,
+        ring_degree,
+        participant_count,
+        decryption_threshold,
+    );
+    let coordinate_byte_length = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             (0..DATA_PRIMES.len()).flat_map(move |rns_limb_index| {
-                (0..4_u64).map(move |shamir_coefficient_index| {
+                (0..decryption_threshold).map(move |shamir_coefficient_index| {
                     let mut coordinate_bytes = Vec::new();
                     append_varuint(&mut coordinate_bytes, source_trustee_roster_position);
                     append_varuint(&mut coordinate_bytes, rns_limb_index as u64);
@@ -305,7 +319,7 @@ pub(super) fn vss_material_binary_total_byte_length(ring_degree: usize) -> u64 {
                 + (SETUP_COMMITMENT_ROW_COUNT as u64 * ring_degree as u64 * 8)
         })
         .sum::<u64>();
-    let material_record_count = 10_u64 * DATA_PRIMES.len() as u64 * 4_u64;
+    let material_record_count = participant_count * DATA_PRIMES.len() as u64 * decryption_threshold;
 
     header.len() as u64
         + coordinate_byte_length
@@ -622,10 +636,35 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     terminal_phase("start profile-ring package fixture");
     let terminal_profile_ring_fixture =
         terminal_profile_ring_minimal_collective_setup_package_fixture();
-    let mut package = terminal_profile_ring_fixture.package;
     terminal_phase("built profile-ring package fixture");
-    let transported_vss_material =
-        terminal_profile_ring_fixture.transported_vss_coefficient_commitment_material;
+    assemble_transported_public_setup_companions(terminal_profile_ring_fixture)
+}
+
+/// Reduced development-ring (128) terminal fixture for roster size n. Builds the
+/// streamed reduced-ring base package, then layers on the same proof families,
+/// evaluation-key records, and transported public companions as the profile-ring
+/// terminal path, so the full accepted-setup verifier exercises every
+/// roster-dependent binding for any supported n without the heavy profile ring.
+/// The terminal profile-ring claim gate then refuses the reduced ring, so this
+/// reaches that gate rather than `accepted`.
+pub(super) fn reduced_ring_setup_package_with_transported_public_setup_companions(
+    participant_count: u64,
+) -> (serde_json::Value, TransportedPublicSetupCompanions) {
+    terminal_phase("start reduced-ring package fixture");
+    let reduced_ring_fixture =
+        reduced_ring_streamed_collective_setup_package_fixture(participant_count);
+    terminal_phase("built reduced-ring package fixture");
+    assemble_transported_public_setup_companions(reduced_ring_fixture)
+}
+
+fn assemble_transported_public_setup_companions(
+    base_fixture: TerminalProfileRingSetupPackageFixture,
+) -> (serde_json::Value, TransportedPublicSetupCompanions) {
+    let terminal_profile_ring_fixture = base_fixture;
+    let mut package = terminal_profile_ring_fixture.package.clone();
+    let transported_vss_material = terminal_profile_ring_fixture
+        .transported_vss_coefficient_commitment_material
+        .clone();
     let profile = describe_collective_bgv_setup_profile().expect("profile");
     let setup_transport_certificate = setup_transport_certificate_for_transported_vss_material(
         &profile,
@@ -1338,15 +1377,13 @@ pub(super) fn move_public_key_share_material_to_transport(
 fn encode_public_key_share_material_transport_chunks(
     material_set: &serde_json::Value,
 ) -> Vec<Vec<u8>> {
+    let participant_count = material_set["participantCount"]
+        .as_u64()
+        .expect("participant count");
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"SLPKSMV1");
     append_varuint(&mut bytes, 1);
-    append_varuint(
-        &mut bytes,
-        material_set["participantCount"]
-            .as_u64()
-            .expect("participant count"),
-    );
+    append_varuint(&mut bytes, participant_count);
     append_varuint(
         &mut bytes,
         material_set["rnsLimbCount"]
@@ -1360,7 +1397,7 @@ fn encode_public_key_share_material_transport_chunks(
     let material_records = material_set["shareMaterialRecords"]
         .as_array()
         .expect("public-key share material records");
-    for expected_roster_position in 0..10_u64 {
+    for expected_roster_position in 0..participant_count {
         let material_record = material_records
             .iter()
             .find(|record| {
@@ -1409,11 +1446,19 @@ pub(super) fn encode_transport_material_from_package(package: &serde_json::Value
     let ring_degree = package["vssCoefficientCommitmentMaterial"]["ringDegree"]
         .as_u64()
         .expect("ring degree");
+    // Roster counts come straight from the package so the re-encoding matches
+    // the package the transport binds, for any supported roster size.
+    let participant_count = package["setupContext"]["participantCount"]
+        .as_u64()
+        .expect("participant count");
+    let decryption_threshold = package["vssCoefficientCommitmentMaterial"]["thresholdDegree"]
+        .as_u64()
+        .expect("threshold degree");
     let mut output = Vec::new();
     output.extend(b"SLVSSMAT");
     crate::encoding::append_varuint(&mut output, 1);
-    crate::encoding::append_varuint(&mut output, 10);
-    crate::encoding::append_varuint(&mut output, 4);
+    crate::encoding::append_varuint(&mut output, participant_count);
+    crate::encoding::append_varuint(&mut output, decryption_threshold);
     crate::encoding::append_varuint(&mut output, DATA_PRIMES.len() as u64);
     crate::encoding::append_varuint(&mut output, ring_degree);
     crate::encoding::append_varuint(
@@ -1422,13 +1467,13 @@ pub(super) fn encode_transport_material_from_package(package: &serde_json::Value
     );
     crate::encoding::append_varuint(&mut output, SETUP_COMMITMENT_ROW_COUNT as u64);
 
-    for source_trustee_roster_position in 0..10_u64 {
+    for source_trustee_roster_position in 0..participant_count {
         for rns_limb_index in 0..DATA_PRIMES.len() {
-            for shamir_coefficient_index in 0..4_u64 {
+            for shamir_coefficient_index in 0..decryption_threshold {
                 let record_index = (((source_trustee_roster_position as usize)
                     * DATA_PRIMES.len()
                     + rns_limb_index)
-                    * 4)
+                    * decryption_threshold as usize)
                     + shamir_coefficient_index as usize;
                 let commitment = &material_records[record_index]["commitment"];
                 crate::encoding::append_varuint(&mut output, source_trustee_roster_position);

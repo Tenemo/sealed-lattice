@@ -12,9 +12,7 @@ use crate::{
 };
 
 use super::{
-    accepted_setup::{
-        COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash, accepted_setup_profile_hash,
-    },
+    accepted_setup::{COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash},
     commitment::{
         SetupCommitmentValue, parse_setup_commitment_full_value, setup_commitment_profile_hash,
         setup_commitment_root,

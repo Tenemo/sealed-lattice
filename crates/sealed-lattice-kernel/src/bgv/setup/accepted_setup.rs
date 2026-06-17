@@ -16,11 +16,16 @@ mod vss_coefficient_commitments;
 mod vss_complaints_and_acceptances;
 
 #[cfg(test)]
+pub(in crate::bgv::setup) use self::accepted_certificates::{
+    accepted_he_security_certificate_hash_for_roster,
+    accepted_he_security_certificate_value_for_roster,
+};
+#[cfg(test)]
 pub(super) use self::accepted_certificates::{
-    accepted_he_security_certificate_hash, accepted_he_security_certificate_value,
-    active_static_setup_theorem_certificate_hash, active_static_setup_theorem_certificate_value,
-    setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
-    setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
+    accepted_he_security_certificate_value, active_static_setup_theorem_certificate_hash,
+    active_static_setup_theorem_certificate_value, setup_key_correctness_certificate_hash,
+    setup_key_correctness_certificate_value, setup_proof_accounting_certificate_hash,
+    setup_proof_accounting_certificate_value,
 };
 #[cfg(test)]
 pub(super) use self::evaluation_key_material_transport::encode_public_evaluation_key_material_manifest;
@@ -48,6 +53,8 @@ use self::accepted_certificates::{
     verify_he_security_certificate, verify_setup_key_correctness_certificate,
     verify_setup_proof_accounting_certificate,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::common_randomness::derive_collective_bgv_setup_public_derivations as derive_collective_bgv_setup_public_derivations_for_roster;
 use self::common_randomness::{
     derive_bgv_public_a_polynomial, derive_collective_bgv_setup_public_derivations,
     verify_common_randomness,
@@ -842,10 +849,6 @@ fn strip_private_vss_encrypted_envelopes_from_package_hash_input(hash_input: &mu
     }
 }
 
-pub(super) fn accepted_setup_profile_hash() -> CanonicalResult<String> {
-    setup_profile_hash()
-}
-
 pub(super) fn accepted_q_share_hash() -> CanonicalResult<String> {
     q_share_hash()
 }
@@ -987,7 +990,13 @@ fn setup_transport_profile_value_for_roster(
             {
                 "objectName": SETUP_TRANSPORTED_VSS_MATERIAL_NAME,
                 "objectRole": SETUP_TRANSPORTED_VSS_MATERIAL_ROLE,
-                "minimumByteLength": setup_transport_vss_material_byte_length_for_roster(roster)?,
+                // The transport profile's minimum is the profile-ring full-material
+                // size, independent of any development-reduced-ring package; this
+                // keeps the transport profile hash a pure function of the roster.
+                "minimumByteLength": setup_transport_vss_material_byte_length_for_roster(
+                    roster,
+                    POLYNOMIAL_DEGREE as u64,
+                )?,
             }
         ],
     }))

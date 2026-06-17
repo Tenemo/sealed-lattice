@@ -30,6 +30,12 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 .find(|entry| entry["level"].as_u64() == Some(level))
                 .and_then(|entry| entry["roundTwoAggregateRoot"].as_str())
                 .expect("round-two aggregate root");
+            // The hash preimage must match the verifier's recompute in
+            // accepted_setup::evaluation_key_material_transport::expected_roots
+            // exactly: object type/version, profile ids, the material encoding
+            // constant, the three binding roots, the rounds root, the level, the
+            // digit/limb counts, and the two aggregate roots. No extra narration
+            // fields are bound.
             let relinearization_key_root = derive_protocol_hash(
                 "RelinearizationKeyRoot",
                 &serde_json::json!({
@@ -37,9 +43,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
                     "objectVersion": 1,
                     "setupProfileId": "CollectiveBgvSetup-v1",
                     "setupProofProfileId": "SealedLattice-SetupProof-v1",
-                    "assemblyStatus": "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
-                    "materialSource": "verified-relinearization-and-galois-proof-records",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
                     "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
@@ -110,6 +114,9 @@ pub(in super::super) fn public_evaluation_key_set_object(
                     })
                 })
                 .collect::<Vec<_>>();
+            // The hash preimage must match the verifier's recompute in
+            // expected_galois_key_roots_for_evaluation_keys exactly; no extra
+            // narration fields are bound.
             let galois_key_root = derive_protocol_hash(
                 "RotationKeyRoot",
                 &serde_json::json!({
@@ -117,9 +124,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
                     "objectVersion": 1,
                     "setupProfileId": "CollectiveBgvSetup-v1",
                     "setupProofProfileId": "SealedLattice-SetupProof-v1",
-                    "assemblyStatus": "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
-                    "materialSource": "verified-relinearization-and-galois-proof-records",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
                     "publicKeyShareSuccinctProofSetRoot": package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofSetRoot"],
@@ -160,7 +165,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": super::participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],

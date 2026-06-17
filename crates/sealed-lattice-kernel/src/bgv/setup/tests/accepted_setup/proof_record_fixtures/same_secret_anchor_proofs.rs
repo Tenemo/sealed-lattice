@@ -12,7 +12,8 @@ pub(in super::super) fn same_secret_proofs_object(
     let statement_records = package["sameSecretConsistency"]["statementRecords"]
         .as_array()
         .expect("same-secret statement records");
-    let per_trustee_records = (0..10_u64)
+    let participant_count = participant_count_from_package(package);
+    let per_trustee_records = (0..participant_count)
         .into_par_iter()
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
@@ -199,7 +200,7 @@ pub(in super::super) fn same_secret_proofs_object(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],

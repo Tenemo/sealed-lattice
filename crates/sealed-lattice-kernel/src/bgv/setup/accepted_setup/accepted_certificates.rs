@@ -99,12 +99,13 @@ pub(super) fn verify_commitment_security_certificate(
         "setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash",
     )?;
 
+    let roster = super::accepted_roster_from_package(setup_package);
     let mut certificate_body = commitment_certificate.clone();
     certificate_body
         .as_object_mut()
         .expect("commitment certificate object was checked")
         .remove("setupCommitmentSecurityCertificateHash");
-    let expected_body = setup_commitment_security_certificate_value()?;
+    let expected_body = setup_commitment_security_certificate_value_for_roster(&roster)?;
     if certificate_body != expected_body {
         return Ok(Some(setup_commitment_certificate_refusal(
             "commitmentSecurityCertificatePayloadMismatch",
@@ -113,7 +114,7 @@ pub(super) fn verify_commitment_security_certificate(
         )?));
     }
 
-    let expected_certificate_hash = setup_commitment_security_certificate_hash()?;
+    let expected_certificate_hash = setup_commitment_security_certificate_hash_for_roster(&roster)?;
     if certificate_hash != expected_certificate_hash {
         return Ok(Some(setup_commitment_certificate_refusal(
             "commitmentSecurityCertificateHashMismatch",
@@ -126,9 +127,15 @@ pub(super) fn verify_commitment_security_certificate(
 }
 
 fn setup_commitment_security_certificate_hash() -> CanonicalResult<String> {
+    setup_commitment_security_certificate_hash_for_roster(&super::first_closure_roster_parameters())
+}
+
+fn setup_commitment_security_certificate_hash_for_roster(
+    roster: &super::AcceptedRosterParameters,
+) -> CanonicalResult<String> {
     derive_protocol_hash(
         "SetupCommitmentSecurityCertificateHash",
-        &setup_commitment_security_certificate_value()?,
+        &setup_commitment_security_certificate_value_for_roster(roster)?,
     )
 }
 
@@ -146,18 +153,22 @@ pub(super) fn setup_commitment_security_certificate_with_hash_value() -> Canonic
 }
 
 fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
+    setup_commitment_security_certificate_value_for_roster(&super::first_closure_roster_parameters())
+}
+
+fn setup_commitment_security_certificate_value_for_roster(
+    roster: &super::AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
     let max_source_message_modulus = DATA_PRIMES.iter().copied().max().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "accepted Q_share prime list must not be empty",
         )
     })?;
-    let recipient_scalar_sum = scalar_power_sum(
-        FIRST_PROFILE_DECRYPTION_THRESHOLD,
-        FIRST_PROFILE_PARTICIPANT_COUNT,
-    )?;
+    let recipient_scalar_sum =
+        scalar_power_sum(roster.decryption_threshold, roster.participant_count)?;
     let threshold_scalar_sum = recipient_scalar_sum
-        .checked_mul(u128::from(FIRST_PROFILE_PARTICIPANT_COUNT))
+        .checked_mul(u128::from(roster.participant_count))
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -242,12 +253,12 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
             "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
         "aggregateOpeningBounds": {
-            "shamirCoefficientCount": FIRST_PROFILE_DECRYPTION_THRESHOLD,
-            "maximumTrusteePoint": FIRST_PROFILE_PARTICIPANT_COUNT,
+            "shamirCoefficientCount": roster.decryption_threshold,
+            "maximumTrusteePoint": roster.participant_count,
             "recipientScalarPowerSumDecimal": recipient_scalar_sum.to_string(),
             "recipientAggregateOpeningInfinityBound": recipient_scalar_sum_u64,
             "maxRecipientLiftedCoefficientDecimal": max_recipient_lifted_coefficient.to_string(),
-            "sourceTrusteeCountForThresholdAggregation": FIRST_PROFILE_PARTICIPANT_COUNT,
+            "sourceTrusteeCountForThresholdAggregation": roster.participant_count,
             "thresholdScalarPowerSumDecimal": threshold_scalar_sum.to_string(),
             "thresholdShareOpeningInfinityBound": threshold_scalar_sum_u64,
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
@@ -258,8 +269,8 @@ fn setup_commitment_security_certificate_value() -> CanonicalResult<Value> {
         "multiOpeningLeakage": {
             "recipientAggregateOpeningsArePublic": false,
             "recipientAggregateOpeningsAreMailboxPlaintext": false,
-            "maxCorruptRecipientsBeforeThreshold": FIRST_PROFILE_DECRYPTION_THRESHOLD - 1,
-            "shamirPolynomialDegree": FIRST_PROFILE_DECRYPTION_THRESHOLD - 1,
+            "maxCorruptRecipientsBeforeThreshold": roster.decryption_threshold - 1,
+            "shamirPolynomialDegree": roster.decryption_threshold - 1,
             "rawCoefficientOpeningsExported": false,
             "perCoefficientRandomnessExported": false,
             "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
@@ -1037,12 +1048,13 @@ pub(super) fn verify_he_security_certificate(
         certificate_hash,
         "heSecurityCertificate.heSecurityCertificateHash",
     )?;
+    let roster = super::accepted_roster_from_package(setup_package);
     let mut certificate_body = certificate.clone();
     certificate_body
         .as_object_mut()
         .expect("HE security certificate object was checked")
         .remove("heSecurityCertificateHash");
-    let expected_body = accepted_he_security_certificate_value()?;
+    let expected_body = accepted_he_security_certificate_value_for_roster(&roster)?;
     if certificate_body != expected_body {
         return Ok(Some(he_security_certificate_refusal(
             "heSecurityCertificateMismatch",
@@ -1050,7 +1062,7 @@ pub(super) fn verify_he_security_certificate(
             "setupPackage.heSecurityCertificate",
         )?));
     }
-    let expected_hash = accepted_he_security_certificate_hash()?;
+    let expected_hash = accepted_he_security_certificate_hash_for_roster(&roster)?;
     if certificate_hash != expected_hash {
         return Ok(Some(he_security_certificate_refusal(
             "heSecurityCertificateHashMismatch",
@@ -1063,9 +1075,15 @@ pub(super) fn verify_he_security_certificate(
 }
 
 pub(in crate::bgv::setup) fn accepted_he_security_certificate_hash() -> CanonicalResult<String> {
+    accepted_he_security_certificate_hash_for_roster(&super::first_closure_roster_parameters())
+}
+
+pub(in crate::bgv::setup) fn accepted_he_security_certificate_hash_for_roster(
+    roster: &super::AcceptedRosterParameters,
+) -> CanonicalResult<String> {
     derive_protocol_hash(
         "BGVHeSecurityCertificateHash",
-        &accepted_he_security_certificate_value()?,
+        &accepted_he_security_certificate_value_for_roster(roster)?,
     )
 }
 
@@ -1083,6 +1101,12 @@ pub(super) fn accepted_he_security_certificate_with_hash_value() -> CanonicalRes
 }
 
 pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> CanonicalResult<Value> {
+    accepted_he_security_certificate_value_for_roster(&super::first_closure_roster_parameters())
+}
+
+pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
+    roster: &super::AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
     let largest_exposed_modulus_bits = data_basis_modulus_bits();
     let extended_basis_bits = extended_basis_modulus_bits();
     let post_quantum_max_logq = 827_usize;
@@ -1138,7 +1162,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
         },
         "publicSampleAccounting": {
             "publicKeyCrpPolynomials": 1,
-            "publicKeyShareCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+            "publicKeyShareCount": roster.participant_count,
             "acceptedRelinearizationKeyPolynomials": accepted_relinearization_key_polynomials,
             "acceptedGaloisKeyPolynomials": accepted_galois_key_polynomials,
             "scheduledRelinearizationLevelCount": scheduled_relinearization_level_count,

@@ -37,6 +37,16 @@ pub(super) struct BuiltTrusteeEvaluationKeyProofRecord {
 // instead of being killed mid-proving.
 const DEFAULT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE: usize = 3;
 
+/// Roster size declared by the package the proof fixtures bind. The proof
+/// records, proof sets, and per-trustee enumeration all follow the package's
+/// own participantCount so the fixtures build the right number of proofs for
+/// any supported roster size.
+pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64 {
+    package["setupContext"]["participantCount"]
+        .as_u64()
+        .expect("participant count")
+}
+
 pub(super) fn trustee_evaluation_key_proof_generation_batch_size() -> usize {
     std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE")
         .ok()

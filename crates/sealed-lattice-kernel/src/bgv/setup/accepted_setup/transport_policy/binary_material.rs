@@ -276,6 +276,7 @@ pub(in super::super) fn setup_transport_chunk_manifest_root(
 
 pub(in super::super) fn setup_transport_vss_material_byte_length_for_roster(
     roster: &AcceptedRosterParameters,
+    ring_degree: u64,
 ) -> CanonicalResult<u64> {
     let participant_count = roster.participant_count;
     let decryption_threshold = roster.decryption_threshold;
@@ -285,7 +286,7 @@ pub(in super::super) fn setup_transport_vss_material_byte_length_for_roster(
     crate::encoding::append_varuint(&mut header, participant_count);
     crate::encoding::append_varuint(&mut header, decryption_threshold);
     crate::encoding::append_varuint(&mut header, DATA_PRIMES.len() as u64);
-    crate::encoding::append_varuint(&mut header, POLYNOMIAL_DEGREE as u64);
+    crate::encoding::append_varuint(&mut header, ring_degree);
     crate::encoding::append_varuint(
         &mut header,
         SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64,
@@ -316,9 +317,7 @@ pub(in super::super) fn setup_transport_vss_material_byte_length_for_roster(
         .map(|commitment_modulus_index| {
             let mut index_bytes = Vec::new();
             crate::encoding::append_varuint(&mut index_bytes, *commitment_modulus_index as u64);
-            index_bytes.len() as u64
-                + 8
-                + (SETUP_COMMITMENT_ROW_COUNT as u64 * POLYNOMIAL_DEGREE as u64 * 8)
+            index_bytes.len() as u64 + 8 + (SETUP_COMMITMENT_ROW_COUNT as u64 * ring_degree * 8)
         })
         .sum::<u64>();
     let material_record_count = participant_count * DATA_PRIMES.len() as u64 * decryption_threshold;

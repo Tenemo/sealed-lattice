@@ -1017,3 +1017,166 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
         error.message
     );
 }
+
+// Genuine end-to-end evidence that a full collective BGV setup package
+// generates and the accepted-setup verifier accepts every roster-dependent
+// binding for a roster size other than the first-closure n = 10. Two reduced
+// development-ring (128) packages are built and verified through the same
+// terminal entry point the profile-ring accept fixture uses: a smallest
+// supported roster (n = 3, q_dec = 2-of-3) and the largest supported roster
+// (n = 20, q_dec = 7-of-20).
+//
+// The reduced development ring keeps each proof-bearing build to seconds-to-low
+// minutes. Terminal `accepted` is deliberately profile-ring only: the terminal
+// claim gate (verify_profile_ring_material) refuses development-reduced-ring
+// material so a reduced-ring package can never be presented as claim-bearing.
+// So the strongest reduced-ring outcome is reaching exactly that profile-ring
+// gate after every roster-dependent phase has passed: setup context + derived
+// quorums, the full phase transcript, common randomness and the roster-derived
+// public matrix derivations, VSS coefficient commitments, the n*n private VSS
+// envelope set, same-secret consistency, public-key shares and succinct proofs,
+// the relinearization/Galois evaluation-key records and their aggregate roots,
+// the public evaluation-key set, the roster-derived commitment-security and HE
+// security certificates, the active-static and key-correctness certificates,
+// and the roster-and-ring-derived transported VSS material metadata. The only
+// remaining refusal is the roster-independent profile-ring claim boundary,
+// which proves the dynamic-roster machinery and the roster-derived certificates
+// accept n != 10 exactly as far as the claim boundary permits. Genuine terminal
+// `accepted` at the profile ring for n != 10 is deferred until the n = 10
+// supported-mobile runtime evidence work; the claim-bearing closure profile
+// remains n = 10 only, so no profile-ring n != 10 fixture runs in any lane.
+//
+// This is prototype, desktop-only, fixture-backed evidence, not benchmarked or
+// mobile-certified. It is deferred from both default test lanes: its name is not
+// the `heavy_accepted_setup` heavy-lane filter, and `#[ignore]` keeps it out of
+// the cheap gate, so it adds no runtime to either lane and runs only on demand.
+//
+// Run with:
+//   cargo test -p sealed-lattice-kernel \
+//     accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate \
+//     -- --ignored --nocapture
+#[test]
+#[ignore = "dynamic-roster reduced-ring evidence; on-demand, deferred from default lanes"]
+fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate",
+    );
+
+    for participant_count in [3_u64, 20_u64] {
+        terminal_phase(&format!(
+            "start reduced-ring terminal fixture for n={participant_count}"
+        ));
+        let (package, companions) =
+            reduced_ring_setup_package_with_transported_public_setup_companions(participant_count);
+
+        // The package must declare the roster it was built for, with the
+        // canonical full-roster quorums and floor(n/3)+1 decryption threshold.
+        assert_eq!(
+            package["setupContext"]["participantCount"].as_u64(),
+            Some(participant_count),
+            "n={participant_count}: package must declare the built roster size",
+        );
+        assert_eq!(
+            package["setupContext"]["qDec"].as_u64(),
+            Some(participant_count / 3 + 1),
+            "n={participant_count}: decryption threshold must be floor(n/3)+1",
+        );
+
+        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": package,
+            "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+            "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+            "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+            "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+            "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+            "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+            "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+            "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+        }))
+        .expect("verification response");
+
+        // Every roster-dependent binding (context + derived quorums, phase
+        // counts, common randomness and roster-derived public matrix
+        // derivations, VSS coefficient commitments, the n*n private VSS envelope
+        // set, same-secret consistency, public-key shares/proofs, evaluation-key
+        // records, the roster-derived commitment-security and HE-security
+        // certificates, and the roster-and-ring-derived transported VSS material
+        // metadata) must have been accepted for both the smallest and the
+        // largest supported roster, so the only refusal is the roster-independent
+        // profile-ring claim gate. A roster-dependent refusal - or a fixture
+        // transport-uniqueness artifact such as a duplicate aggregate transport
+        // chunk hash from two trustees' companions carrying byte-identical chunk
+        // content - would be a real n != 10 regression.
+        let refusal_reason = result["refusedObjects"][0]["reasonCode"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert_eq!(
+            refusal_reason,
+            "vssCoefficientCommitmentMaterialOutsideProfile",
+            "n={participant_count}: the only refusal must be the profile-ring claim gate, got {refusal_reason}.{}",
+            describe_duplicate_transport_chunk_hashes(&package),
+        );
+        assert_eq!(
+            result["refusedObjects"][0]["objectPath"],
+            "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
+            "n={participant_count}: the profile-ring claim gate refuses the reduced ring degree: {}",
+            serde_json::to_string_pretty(&result).expect("verification result JSON")
+        );
+        terminal_phase(&format!(
+            "reduced-ring fixture for n={participant_count} reached the profile-ring claim gate cleanly"
+        ));
+    }
+}
+
+/// Diagnostic for the dynamic-roster reduced-ring evidence test. The setup
+/// transport certificate aggregates every transported companion's chunk hashes,
+/// and the accepted-setup verifier refuses with `transportChunkHashDuplicate`
+/// when two of those chunk hashes are equal. When that happens, report which
+/// transported objects share a chunk hash so a fixture content-uniqueness defect
+/// (two trustees' companions carrying byte-identical chunk content) is easy to
+/// locate. Returns an empty string when every aggregate chunk hash is unique.
+fn describe_duplicate_transport_chunk_hashes(package: &serde_json::Value) -> String {
+    use std::collections::BTreeMap;
+
+    let mut origins_by_chunk_hash: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let transported_objects = package["setupTransportCertificate"]["transportedObjects"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    for (object_index, transported_object) in transported_objects.iter().enumerate() {
+        let object_name = transported_object["objectName"]
+            .as_str()
+            .unwrap_or("<unknown>");
+        let object_root = transported_object["objectRoot"]
+            .as_str()
+            .unwrap_or("<unknown>");
+        let chunk_hashes = transported_object["chunkHashes"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        for (chunk_index, chunk_hash) in chunk_hashes.iter().enumerate() {
+            if let Some(chunk_hash) = chunk_hash.as_str() {
+                origins_by_chunk_hash
+                    .entry(chunk_hash.to_string())
+                    .or_default()
+                    .push(format!(
+                        "{object_name}[object #{object_index}, root {}.., chunk #{chunk_index}]",
+                        &object_root[..object_root.len().min(12)],
+                    ));
+            }
+        }
+    }
+
+    let mut report = String::new();
+    for (chunk_hash, origins) in &origins_by_chunk_hash {
+        if origins.len() > 1 {
+            report.push_str(&format!(
+                "\nduplicate transport chunk hash {}.. shared by {}",
+                &chunk_hash[..chunk_hash.len().min(12)],
+                origins.join(" and "),
+            ));
+        }
+    }
+    report
+}

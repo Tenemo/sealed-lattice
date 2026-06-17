@@ -1,16 +1,18 @@
 use super::*;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn common_randomness_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
     setup_profile_hash: &str,
     setup_epoch: &str,
+    participant_count: u64,
 ) -> serde_json::Value {
     let mut commit_records = Vec::new();
     let mut reveal_records = Vec::new();
     let mut ordered_reveal_hashes = Vec::new();
-    for roster_position in 0..10 {
+    for roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{roster_position}");
         let reveal_source_hash = derive_protocol_hash(
             "CommonRandomnessRevealHash",
@@ -86,11 +88,14 @@ pub(super) fn common_randomness_object(
         }),
     )
     .expect("public matrix seed hash");
-    let public_derivations =
-        derive_collective_bgv_setup_public_derivations_from_request(&serde_json::json!({
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-        }))
-        .expect("public derivations");
+    // The public matrices are derived per roster decryption threshold, so the
+    // fixture must derive them with the same threshold the verifier recomputes
+    // for this roster, not the first-closure default the standalone command uses.
+    let public_derivations = crate::bgv::setup::accepted_setup::derive_collective_bgv_setup_public_derivations_for_roster(
+        &public_matrix_seed_hash,
+        participant_count / 3 + 1,
+    )
+    .expect("public derivations");
     assert_eq!(
         public_derivations["publicMatrices"]["commitmentMatrix"]["matrixKind"],
         "commitment"

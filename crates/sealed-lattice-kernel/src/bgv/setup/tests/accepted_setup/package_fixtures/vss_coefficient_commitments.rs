@@ -13,15 +13,17 @@ pub(super) fn vss_coefficient_commitments_object(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     ring_degree_status: &str,
+    participant_count: u64,
 ) -> (serde_json::Value, serde_json::Value) {
+    let decryption_threshold = participant_count / 3 + 1;
     let mut source_trustee_records = Vec::new();
     let mut coefficient_commitment_material = Vec::new();
 
-    for source_trustee_roster_position in 0..10_u64 {
+    for source_trustee_roster_position in 0..participant_count {
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
-            for shamir_coefficient_index in 0..4_u64 {
+            for shamir_coefficient_index in 0..decryption_threshold {
                 let coefficient_message = accepted_vss_coefficient_message_fixture(
                     source_trustee_roster_position,
                     rns_limb_index,
@@ -171,8 +173,8 @@ pub(super) fn vss_coefficient_commitments_object(
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": commitment_set["vssCoefficientCommitmentRoot"].clone(),
         "materialEncoding": "full-public-setup-commitment-values",
-        "participantCount": 10,
-        "thresholdDegree": 4,
+        "participantCount": participant_count,
+        "thresholdDegree": decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
@@ -200,8 +202,11 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
     public_matrix_seed_hash: &str,
     ring_degree: usize,
     derivation_id: &str,
+    participant_count: u64,
 ) -> VssMaterialPackageComponents {
-    let total_byte_length = vss_material_binary_total_byte_length(ring_degree);
+    let decryption_threshold = participant_count / 3 + 1;
+    let total_byte_length =
+        vss_material_binary_total_byte_length(ring_degree, participant_count, decryption_threshold);
     let chunk_count = total_byte_length.div_ceil(SETUP_TRANSPORT_CHUNK_SIZE_BYTES_FOR_TESTS);
     let transported_material_template = serde_json::json!({
         "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
@@ -220,6 +225,7 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
         carry_aware_vss_relation_profile_hash,
         commitment_profile_hash,
         setup_epoch,
+        participant_count,
     );
     begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
         "derivationId": derivation_id,
@@ -231,20 +237,25 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
     let mut writer =
         StreamingVssMaterialFixtureWriter::new(derivation_id.to_string(), total_byte_length);
     let mut header = Vec::new();
-    append_vss_material_binary_header(&mut header, ring_degree);
+    append_vss_material_binary_header(
+        &mut header,
+        ring_degree,
+        participant_count,
+        decryption_threshold,
+    );
     writer
         .write_bytes(&header)
         .expect("write streamed VSS material header");
 
     let mut source_trustee_records = Vec::new();
-    for source_trustee_roster_position in 0..10_u64 {
+    for source_trustee_roster_position in 0..participant_count {
         terminal_phase(&format!(
             "streaming VSS source trustee {source_trustee_roster_position}"
         ));
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
         let mut coefficient_commitments = Vec::new();
         for (rns_limb_index, rns_prime) in DATA_PRIMES.iter().copied().enumerate() {
-            for shamir_coefficient_index in 0..4_u64 {
+            for shamir_coefficient_index in 0..decryption_threshold {
                 let coefficient_message = accepted_vss_coefficient_message_fixture(
                     source_trustee_roster_position,
                     rns_limb_index,

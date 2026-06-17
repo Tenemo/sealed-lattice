@@ -12,6 +12,7 @@ pub(super) fn public_key_shares_object(
     setup_epoch: &str,
     common_randomness: &serde_json::Value,
     same_secret_consistency: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
@@ -29,7 +30,7 @@ pub(super) fn public_key_shares_object(
         .expect("same-secret statement records");
     let mut share_records = Vec::new();
     let mut public_key_share_roots = Vec::new();
-    for trustee_roster_position in 0..10_u64 {
+    for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let same_secret_statement = &statement_records[trustee_roster_position as usize];
         let share_coefficient_hashes = DATA_PRIMES
@@ -102,7 +103,7 @@ pub(super) fn public_key_shares_object(
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyCrpRoot": public_key_crp_root,
@@ -131,6 +132,7 @@ pub(super) fn public_key_share_proofs_object(
     common_randomness: &serde_json::Value,
     same_secret_consistency: &serde_json::Value,
     public_key_shares: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
@@ -151,7 +153,7 @@ pub(super) fn public_key_share_proofs_object(
         .expect("public-key share records");
     let mut proof_records = Vec::new();
     let mut public_key_share_proof_roots = Vec::new();
-    for trustee_roster_position in 0..10_u64 {
+    for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let same_secret_statement = &statement_records[trustee_roster_position as usize];
         let share_record = &share_records[trustee_roster_position as usize];
@@ -206,7 +208,7 @@ pub(super) fn public_key_share_proofs_object(
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "publicKeyCrpRoot": public_key_crp_root,
@@ -239,6 +241,7 @@ pub(super) fn evaluator_key_schedule_object(
     same_secret_consistency: &serde_json::Value,
     public_key_shares: &serde_json::Value,
     public_key_share_proofs: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
     let public_derivations = &common_randomness["publicDerivations"];
     let crp_roots = &public_derivations["crpRoots"];
@@ -256,7 +259,7 @@ pub(super) fn evaluator_key_schedule_object(
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
-        "participantCount": 10,
+        "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "publicMatrixSeedHash": common_randomness["publicMatrixSeedHash"],
         "relinearizationCrpRoot": crp_roots["relinearizationCrpRoot"],

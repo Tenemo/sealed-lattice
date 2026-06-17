@@ -353,7 +353,7 @@ fn relinearization_key_share_rounds_object_inner(
         "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
         "commitmentProfileHash": setup_context["commitmentProfileHash"],
         "setupEpoch": setup_context["setupEpoch"],
-        "participantCount": 10,
+        "participantCount": participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
         "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
         "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],

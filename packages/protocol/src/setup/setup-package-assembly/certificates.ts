@@ -1,5 +1,6 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
+import { firstProfileRosterSize } from '../../lifecycle/profiles.js';
 import type { GaloisKeyShareBatch } from '../evaluation-key-proof-records.js';
 import type {
     CollectivePublicKey,
@@ -19,9 +20,6 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 import {
     assertObjectRecord,
     contextFieldNames,
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
-    firstProfileSetupCompletionQuorum,
     hashField,
     optionalNestedHashValue,
     optionalTopLevelHashValue,
@@ -361,6 +359,22 @@ const activeStaticSetupTheoremCertificateBody = (
         setupPackage.setupContext,
         'setupPackage.setupContext',
     );
+    // Mirror the kernel's accepted_roster_from_setup_context: an absent or
+    // non-positive-integer participantCount means the first closure roster
+    // (n=10), so n=10 packages that omit the field stay byte-identical; a
+    // present value drives the 3..20 roster. Range enforcement happens at
+    // kernel verification, not at assembly.
+    const declaredParticipantCount = setupContext.participantCount;
+    const participantCount =
+        typeof declaredParticipantCount === 'number' &&
+        Number.isInteger(declaredParticipantCount) &&
+        declaredParticipantCount > 0
+            ? declaredParticipantCount
+            : firstProfileRosterSize;
+    // q_dec = floor(n/3)+1, full-roster quorums = n; mirrors the kernel's
+    // roster-derived ActiveStaticSetupTheoremCertificate so n=10 stays
+    // byte-identical and any 3..20 package assembles to the right values.
+    const decryptionThreshold = Math.floor(participantCount / 3) + 1;
 
     return {
         objectType: 'ActiveStaticSetupTheoremCertificate',
@@ -370,14 +384,13 @@ const activeStaticSetupTheoremCertificateBody = (
             setupContext as unknown as CollectiveBgvSetupContext,
         ),
         adversaryModel: {
-            secretConfidentialityCorruptTrusteeBound:
-                firstProfileDecryptionThreshold - 1,
+            secretConfidentialityCorruptTrusteeBound: decryptionThreshold - 1,
             fullRosterSetupCompletionRequired: true,
         },
         livenessModel: {
             model: 'secure-with-abort',
-            setupCompletionQuorum: firstProfileSetupCompletionQuorum,
-            participantCount: firstProfileParticipantCount,
+            setupCompletionQuorum: participantCount,
+            participantCount,
         },
         dependencyHashes: {
             setupCommitmentSecurityCertificateHash: hashField(

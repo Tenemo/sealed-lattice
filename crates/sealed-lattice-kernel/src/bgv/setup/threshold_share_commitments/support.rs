@@ -22,10 +22,14 @@ pub(super) fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()>
     string_field(setup_context, "ceremonyId")?;
     string_field(setup_context, "setupEpoch")?;
 
+    // The setup profile hash is a roster family (distinct per participant
+    // count), so it must be compared against the hash derived from this setup
+    // context's roster, not the first-closure n = 10 hash.
+    let roster = accepted_roster_from_setup_context(setup_context);
     if setup_context
         .get("setupProfileHash")
         .and_then(Value::as_str)
-        != Some(accepted_setup_profile_hash()?.as_str())
+        != Some(setup_profile_hash_for_roster(&roster)?.as_str())
     {
         return Err(invalid_threshold_commitment_input(
             "setupContext.setupProfileHash does not match CollectiveBgvSetup-v1",

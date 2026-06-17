@@ -12,6 +12,7 @@ pub(super) fn private_vss_envelope_commitments_object(
     setup_epoch: &str,
     common_randomness: &serde_json::Value,
     vss_coefficient_commitments: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
@@ -41,7 +42,7 @@ pub(super) fn private_vss_envelope_commitments_object(
         ]),
     )
     .expect("phase order hash");
-    let envelope_references = (0..10_u64)
+    let envelope_references = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
             let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
@@ -50,9 +51,9 @@ pub(super) fn private_vss_envelope_commitments_object(
                 .expect("source trustee commitment root")
                 .to_string();
             let phase_order_hash = phase_order_hash.clone();
-            (0..10_u64).map(move |recipient_roster_position| {
+            (0..participant_count).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
-                let envelope_sequence_number = source_trustee_roster_position * 10 + recipient_roster_position;
+                let envelope_sequence_number = source_trustee_roster_position * participant_count + recipient_roster_position;
                 let private_envelope_hash = derive_protocol_hash(
                     "PrivateVssShareEnvelopeHash",
                     &serde_json::json!({
@@ -218,8 +219,8 @@ pub(super) fn private_vss_envelope_commitments_object(
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
-        "participantCount": 10,
-        "envelopeCount": 100,
+        "participantCount": participant_count,
+        "envelopeCount": participant_count * participant_count,
         "deliveryPhaseNumber": 6,
         "verificationPhaseNumber": 7,
         "envelopeReferences": envelope_references,
@@ -247,6 +248,7 @@ pub(super) fn vss_share_acceptances_object(
     setup_epoch: &str,
     private_vss_envelope_commitments: &serde_json::Value,
     vss_coefficient_commitments: &serde_json::Value,
+    participant_count: u64,
 ) -> serde_json::Value {
     let private_vss_envelope_commitment_root =
         private_vss_envelope_commitments["privateVssEnvelopeCommitmentRoot"]
@@ -255,7 +257,7 @@ pub(super) fn vss_share_acceptances_object(
     let envelope_references = private_vss_envelope_commitments["envelopeReferences"]
         .as_array()
         .expect("private VSS envelope references");
-    let acceptance_records = (0..10_u64)
+    let acceptance_records = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
             let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
@@ -263,14 +265,14 @@ pub(super) fn vss_share_acceptances_object(
                 .as_str()
                 .expect("source trustee commitment root")
                 .to_string();
-            (0..10_u64).map(move |recipient_roster_position| {
+            (0..participant_count).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
                 let signature_seed_label = format!("{recipient_identity}-accepts-{source_trustee_identity}");
                 let signing_public_key_hash =
                     create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
                         .expect("signature key fixture");
                 let envelope_sequence_number =
-                    (source_trustee_roster_position * 10 + recipient_roster_position) as usize;
+                    (source_trustee_roster_position * participant_count + recipient_roster_position) as usize;
                 let envelope_reference = &envelope_references[envelope_sequence_number];
                 let private_envelope_hash = envelope_reference["privateEnvelopeHash"]
                     .as_str()

@@ -22,7 +22,7 @@ use crate::{
 use super::{
     accepted_setup::{
         AcceptedRosterParameters, COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash,
-        accepted_roster_from_setup_context, accepted_setup_profile_hash,
+        accepted_roster_from_setup_context, setup_profile_hash_for_roster,
     },
     commitment::{
         SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_PROFILE_ID,

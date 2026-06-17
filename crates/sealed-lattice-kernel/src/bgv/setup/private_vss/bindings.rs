@@ -102,10 +102,17 @@ pub(super) fn verify_setup_context(
         )));
     }
 
+    // The setup profile hash is a roster family, so it must match the hash
+    // derived from this setup context's roster, not the first-closure n = 10
+    // hash.
+    let setup_profile_roster =
+        super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     if setup_context
         .get("setupProfileHash")
         .and_then(Value::as_str)
-        != Some(accepted_setup_profile_hash()?.as_str())
+        != Some(
+            super::accepted_setup::setup_profile_hash_for_roster(&setup_profile_roster)?.as_str(),
+        )
     {
         return Ok(Err(PrivateVssRefusal::new(
             "setupProfileHashMismatch",
