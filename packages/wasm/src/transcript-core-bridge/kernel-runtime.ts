@@ -107,7 +107,7 @@ export type TranscriptCoreKernelLoaderOptions = {
     readonly expectedKernelSha256Hex?: string;
 };
 
-export type TranscriptCoreKernelCommandRuntimeEvidence = Readonly<{
+type TranscriptCoreKernelCommandRuntimeEvidence = Readonly<{
     readonly commandWallTimeMilliseconds: string;
     readonly requestByteLength: number;
     readonly responseByteLength: number;
@@ -119,7 +119,7 @@ export type TranscriptCoreKernelCommandRuntimeEvidence = Readonly<{
     readonly measurementBoundary: string;
 }>;
 
-export type TranscriptCoreKernelMeasuredCommandResult<T> = Readonly<{
+type TranscriptCoreKernelMeasuredCommandResult<T> = Readonly<{
     readonly value: T;
     readonly runtimeEvidence: TranscriptCoreKernelCommandRuntimeEvidence;
 }>;

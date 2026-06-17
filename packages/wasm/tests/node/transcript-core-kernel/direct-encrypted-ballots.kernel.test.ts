@@ -82,7 +82,27 @@ describe('direct encrypted ballot kernel command', () => {
                 .zeroKnowledgeShiftSlackBitsAfterResponseUnionBound,
         ).toBeGreaterThanOrEqual(128);
         expect(result.proofAttempt.proofAccounting.decision).toContain(
-            'committed-trace batching records a conservative budget',
+            'QROM soundness is computed at the achieved level',
+        );
+        expect(
+            result.proofAttempt.proofAccounting.fiatShamirAccounting,
+        ).toMatchObject({
+            qromReductionLossComputed: true,
+            qromAccepted: false,
+            meetsConventional128BitQuantumBar: false,
+        });
+        expect(
+            result.proofAttempt.proofAccounting.committedTraceSoundness,
+        ).toMatchObject({
+            lowDegreeSoundness: {
+                entropyCapacityQuerySoundnessPermille: 930,
+                conjecturedQuerySoundnessBits: 267,
+                acceptedUnderNamedFriConjecture: true,
+                acceptedUnderProvenFallback: false,
+            },
+        });
+        expect(result.proofAttempt.proofAccounting.decision).toContain(
+            'named CS25 low-degree budget',
         );
         expect(
             result.encryptedBallots.ballotEncryptionRandomness,

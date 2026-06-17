@@ -139,7 +139,7 @@ fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<[u8; 64]> {
     let half = layer.len() / 2;
     #[cfg(not(target_arch = "wasm32"))]
     {
-        return (0..half)
+        (0..half)
             .into_par_iter()
             .map(|pair_index| {
                 leaf_hash(
@@ -148,7 +148,7 @@ fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<[u8; 64]> {
                     &flatten_extension_pair(&[layer[pair_index], layer[pair_index + half]]),
                 )
             })
-            .collect();
+            .collect()
     }
     #[cfg(target_arch = "wasm32")]
     (0..half)

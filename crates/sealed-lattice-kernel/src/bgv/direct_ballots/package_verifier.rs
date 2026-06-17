@@ -278,7 +278,7 @@ fn verify_voter_signature_envelope(
     let signature = required_object_field(package, "signature")?;
     let signed_payload = encrypted_ballot_package_signed_payload(package)?;
     let byte_length = usize_to_u64(
-        canonical_json(&signed_payload)?.as_bytes().len(),
+        canonical_json(&signed_payload)?.len(),
         "encrypted ballot package signed payload byte length",
     )?;
     let verification = verify_protocol_signature_envelope(

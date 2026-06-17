@@ -49,7 +49,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofSizeBytes"].as_u64(),
-        Some(48_154_664)
+        Some(48_175_208)
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["challengeBits"].as_u64(),
@@ -61,7 +61,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["weakestRelationEffectiveBitsPerCheck"].as_u64(),
-        Some(157)
+        Some(221)
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["targetClassicalSoundnessBits"].as_u64(),
@@ -85,7 +85,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["classicalSoundnessBitsAfterCommittedTraceAccounting"],
-        json!(157)
+        json!(221)
     );
     assert!(
         result["proofAttempt"]["proofAccounting"]
@@ -106,13 +106,46 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         result["proofAttempt"]["proofAccounting"]["decision"]
             .as_str()
             .expect("proof accounting decision")
-            .contains("mask/opening distribution records a zero-knowledge budget")
+            .contains("QROM soundness is computed at the achieved level")
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]
             ["budgetedClassicalBitsAfterReservedLosses"]
             .as_u64(),
-        Some(157)
+        Some(221)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]["lowDegreeSoundness"]
+            ["entropyCapacityQuerySoundnessPermille"],
+        json!(930)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]["lowDegreeSoundness"]
+            ["conjecturedQuerySoundnessBits"],
+        json!(267)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]["lowDegreeSoundness"]
+            ["provenFallbackClassicalBitsAfterStatementQueryLoss"],
+        json!(99)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]["lowDegreeSoundness"]
+            ["acceptedUnderNamedFriConjecture"],
+        json!(true)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]["lowDegreeSoundness"]
+            ["acceptedUnderProvenFallback"],
+        json!(false)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["fiatShamirAccounting"]["achievedQuantumSoundnessAfterStatementQueryBitsApproximate"],
+        json!(110)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["fiatShamirAccounting"]["qromAccepted"],
+        json!(false)
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["projectedBgvProjectionSoundness"]

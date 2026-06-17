@@ -347,7 +347,7 @@ pub(super) fn encrypted_ballot_package_voter_signature_signed_root(
     )?;
     let signed_payload = encrypted_ballot_package_signed_payload(package)?;
     let byte_length = usize_to_u64(
-        canonical_json(&signed_payload)?.as_bytes().len(),
+        canonical_json(&signed_payload)?.len(),
         "encrypted ballot package signed payload byte length",
     )?;
 

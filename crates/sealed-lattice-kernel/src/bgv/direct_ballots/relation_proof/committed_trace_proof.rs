@@ -480,14 +480,15 @@ fn prove_committed_trace_limb(
         &accumulator.shifted_extension_columns,
     )?;
 
-    let mut row_check_extensions =
-        vec![Vec::with_capacity(extension_size); DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT];
+    let mut row_check_extensions = (0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT)
+        .map(|_| Vec::with_capacity(extension_size))
+        .collect::<Vec<_>>();
     let mut row = vec![0_u64; base_witness_columns];
     for position in 0..extension_size {
         for (column_index, column) in commitment.extension_columns.iter().enumerate() {
             row[column_index] = column[position];
         }
-        for row_batch_index in 0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT {
+        for (row_batch_index, row_check_extension) in row_check_extensions.iter_mut().enumerate() {
             let support_alpha_start =
                 row_batch_index * DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT;
             let support_alpha_end =
@@ -503,16 +504,20 @@ fn prove_committed_trace_limb(
             let mut accumulated_linear_value = ChallengeExtensionTower::zero();
             let linear_alpha_start = row_batch_index * DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT;
             for batch_index in 0..DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT {
+                let row_check_input = CommittedTraceLinearAccumulatorRowCheckBaseInput {
+                    position,
+                    accumulator_value: accumulator.extension_columns[batch_index][position],
+                    shifted_accumulator_value: accumulator.shifted_extension_columns[batch_index]
+                        [position],
+                    last_selector_value: linear_claim.last_selector_extension[position],
+                    public_offset: linear_claim.public_offsets[batch_index],
+                    modulus,
+                };
                 let linear_value = committed_trace_linear_accumulator_row_check_value_base_sparse(
                     &row,
                     &linear_claim.coefficient_extension_columns[batch_index],
                     &linear_claim.coefficient_extension_nonzero_column_indices[batch_index],
-                    position,
-                    accumulator.extension_columns[batch_index][position],
-                    accumulator.shifted_extension_columns[batch_index][position],
-                    linear_claim.last_selector_extension[position],
-                    linear_claim.public_offsets[batch_index],
-                    modulus,
+                    &row_check_input,
                 )?;
                 accumulated_linear_value = tower.add(
                     &accumulated_linear_value,
@@ -522,8 +527,7 @@ fn prove_committed_trace_limb(
                     ),
                 );
             }
-            row_check_extensions[row_batch_index]
-                .push(tower.add(&support_value, &accumulated_linear_value));
+            row_check_extension.push(tower.add(&support_value, &accumulated_linear_value));
         }
     }
     let commitment_bound = COMMITMENT_BOUND_FACTOR * trace_size;
@@ -1381,16 +1385,20 @@ fn shifted_extension_position(position: usize, extension_size: usize) -> usize {
     (position + crate::bgv::polynomial_iop::DOMAIN_BLOWUP) % extension_size
 }
 
-fn committed_trace_linear_accumulator_row_check_value_base_sparse(
-    witness_row: &[u64],
-    coefficient_columns: &[Vec<u64>],
-    nonzero_column_indices: &[usize],
+struct CommittedTraceLinearAccumulatorRowCheckBaseInput {
     position: usize,
     accumulator_value: u64,
     shifted_accumulator_value: u64,
     last_selector_value: u64,
     public_offset: u64,
     modulus: u64,
+}
+
+fn committed_trace_linear_accumulator_row_check_value_base_sparse(
+    witness_row: &[u64],
+    coefficient_columns: &[Vec<u64>],
+    nonzero_column_indices: &[usize],
+    input: &CommittedTraceLinearAccumulatorRowCheckBaseInput,
 ) -> CanonicalResult<u64> {
     if witness_row.len() != coefficient_columns.len() {
         return Err(invalid_direct_ballot_relation_proof(
@@ -1409,24 +1417,32 @@ fn committed_trace_linear_accumulator_row_check_value_base_sparse(
                 "direct ballot committed trace linear contribution references a missing coefficient column",
             )
         })?;
-        let coefficient_value = coefficient_column.get(position).ok_or_else(|| {
+        let coefficient_value = coefficient_column.get(input.position).ok_or_else(|| {
             invalid_direct_ballot_relation_proof(
                 "direct ballot committed trace linear contribution references a missing coefficient row",
             )
         })?;
         contribution = add_mod_fast(
             contribution,
-            mul_mod_fast(*witness_value, *coefficient_value, modulus),
-            modulus,
+            mul_mod_fast(*witness_value, *coefficient_value, input.modulus),
+            input.modulus,
         );
     }
-    let transition_difference = sub_mod(shifted_accumulator_value, accumulator_value, modulus)?;
+    let transition_difference = sub_mod(
+        input.shifted_accumulator_value,
+        input.accumulator_value,
+        input.modulus,
+    )?;
     let expected_difference = add_mod(
         contribution,
-        mul_mod(last_selector_value, public_offset, modulus)?,
-        modulus,
+        mul_mod(
+            input.last_selector_value,
+            input.public_offset,
+            input.modulus,
+        )?,
+        input.modulus,
     )?;
-    sub_mod(transition_difference, expected_difference, modulus)
+    sub_mod(transition_difference, expected_difference, input.modulus)
 }
 
 fn committed_trace_linear_accumulator_row_check_value(

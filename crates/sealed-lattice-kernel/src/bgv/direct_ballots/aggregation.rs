@@ -104,7 +104,7 @@ pub(super) fn aggregate_verified_direct_ballot_packages(
         direct_ballot_ciphertext_transport(&aggregate_ciphertext, &aggregate_ciphertext_root)?;
     let aggregate_certificate = direct_ballot_public_aggregate_certificate(
         accepted_public_key_material,
-        &accepted_setup_handoff_root,
+        accepted_setup_handoff_root,
         &package_verifications,
         first_valid_binding.as_ref(),
         &aggregate_ciphertext_root,

@@ -237,6 +237,7 @@ export type DirectEncryptedBallotResult = {
             readonly weakestCheckedRelation: string;
             readonly weakestRelationEffectiveBitsPerCheck: number;
             readonly committedTraceSoundness: unknown;
+            readonly fiatShamirAccounting: unknown;
             readonly outerResponseZeroKnowledge: unknown;
             readonly committedTraceZeroKnowledge: unknown;
             readonly effectiveStatisticalZeroKnowledgeBits: number;
@@ -651,7 +652,7 @@ const directBallotRelationProofProfileHash = (
                 projectedBgvProjectionsPerLimbComponent,
             scoreLinearCommitmentEncoding: 'exact signed integer commitments',
             proofModelStatus:
-                'accepted public verifier definition with exact score linkage, projected-BGV budget accounting, committed-trace soundness accounting, zero-knowledge accounting, accepted creation randomness boundary, and appended committed trace proof',
+                'accepted public verifier definition with exact score linkage, projected-BGV budget accounting, committed-trace soundness under the named CS25 low-degree row, explicit QROM achieved-level accounting, zero-knowledge accounting, accepted creation randomness boundary, and appended committed trace proof',
             relation:
                 'statement-derived projected BGV all-limb encryption rows with projected no-wrap carry scalars, exact score encoding and one-hot linkage, and a salted masked committed trace proof for support rows, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage',
             sourceRingDegree: profile.profile.polynomialDegree,

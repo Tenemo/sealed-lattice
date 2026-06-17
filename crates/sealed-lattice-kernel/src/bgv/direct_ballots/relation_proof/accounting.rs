@@ -302,6 +302,13 @@ pub(crate) fn direct_ballot_soundness_certificate_value() -> CanonicalResult<Val
         "budgetedClassicalBitsAfterReservedLosses",
     )?;
     let effective_soundness_bits = projected_bgv_budgeted_bits.min(committed_trace_budgeted_bits);
+    let projected_bgv_raw_round_bits = required_u32_from_value(
+        &projected_bgv_soundness,
+        "rawProjectionBitsPerLimbComponent",
+    )?;
+    let committed_trace_raw_round_bits =
+        required_u32_from_value(&committed_trace_soundness, "rawCommittedTraceSoundnessBits")?;
+    let weakest_round_bits = projected_bgv_raw_round_bits.min(committed_trace_raw_round_bits);
     let minimum_data_prime_bits = minimum_data_prime_floor_log2_bits()?;
     let challenge_extension_degree = u32::try_from(CHALLENGE_EXTENSION_DEGREE).map_err(|_| {
         CanonicalError::new(
@@ -309,6 +316,9 @@ pub(crate) fn direct_ballot_soundness_certificate_value() -> CanonicalResult<Val
             "direct ballot challenge extension degree does not fit soundness accounting",
         )
     })?;
+    let quantum_soundness_bits = weakest_round_bits / 2;
+    let quantum_soundness_after_statement_query_bits = effective_soundness_bits / 2;
+    let quantum_collision_resistance_bits = DIRECT_BALLOT_QROM_DIGEST_BITS / 3;
 
     Ok(json!({
         "objectType": "BallotProofSoundnessCertificate",
@@ -352,10 +362,46 @@ pub(crate) fn direct_ballot_soundness_certificate_value() -> CanonicalResult<Val
             "status": "the recorded soundness budget clears the target under the verifier-certified proof profile"
         },
         "fiatShamirModel": "random-oracle Fiat-Shamir transcript with explicit domain labels, statement binding, proof-profile binding through the binary header, and Merkle roots absorbed before derived challenges",
+        "fiatShamirAccounting": {
+            "transform": "multi-round Fiat-Shamir over the direct encrypted ballot transcript",
+            "soundnessModel": "classical round-by-round accounting with statement-query loss recorded separately; QROM soundness is computed through the CMS19 state-restoration BCS-in-QROM bound rather than a flat classical loss budget",
+            "weakestRoundSoundnessBits": weakest_round_bits,
+            "effectiveClassicalSoundnessBitsAfterStatementQueryLoss":
+                effective_soundness_bits,
+            "qromModel": "CMS19 state-restoration BCS-in-QROM: for a public-coin round-by-round-sound IOP transformed with Fiat-Shamir, QROM soundness is bounded by O(t^2 * eps + t^3 / 2^lambda) for t quantum random-oracle queries, IOP round-by-round soundness eps, and digest length lambda; the t^2 * eps term halves the classical round-by-round soundness by Grover square-root, while the hash term contributes about lambda/3 bits",
+            "qromSoundnessTermModel": "t^2 * eps: quantum soundness in bits is about half the weakest classical round",
+            "qromHashTermModel": "t^3 / 2^lambda: BHT quantum collision bound on the transcript digest",
+            "digestBits": DIRECT_BALLOT_QROM_DIGEST_BITS,
+            "digestFunction": "SHAKE256 with a 64-byte output through hash512 for transcript roots, Merkle nodes, proof-profile hashes, and Fiat-Shamir challenges",
+            "quantumCollisionResistanceBitsApproximate":
+                quantum_collision_resistance_bits,
+            "classicalCollisionResistanceBitsApproximate":
+                DIRECT_BALLOT_QROM_DIGEST_BITS / 2,
+            "achievedQuantumSoundnessBitsApproximate": quantum_soundness_bits,
+            "achievedQuantumSoundnessAfterStatementQueryBitsApproximate":
+                quantum_soundness_after_statement_query_bits,
+            "achievedQuantumSoundnessCalculation": format!(
+                "the weakest direct ballot round is the committed-trace row at {weakest_round_bits} classical bits under the named CS25 low-degree row; after data-limb and statement-query losses the effective classical row is {effective_soundness_bits} bits, so CMS19 records about {quantum_soundness_after_statement_query_bits}-bit quantum soundness for the accepted statement scope; the 512-bit digest contributes about {quantum_collision_resistance_bits}-bit quantum collision resistance and is not the bottleneck"
+            ),
+            "presentTimeThreatScope": "this is a soundness bound for forged ballot validity proofs at proof-generation or proof-substitution time, not a harvest-now-decrypt-later confidentiality surface; the achieved quantum level is recorded below the conventional 128-bit quantum bar",
+            "pathTo128BitQuantumSoundness": "128-bit quantum soundness for this Fiat-Shamir proof requires every classical round-by-round row to clear about 256 bits after the relevant union and statement-query losses, or a redesigned proof backend with a stronger proximity test and refreshed QROM analysis",
+            "qromReferences": [
+                "CMS19, Succinct arguments in the quantum random-oracle model",
+                "BCS16, Interactive oracle proofs",
+                "DFM20, The measure-and-reprogram technique 2.0: multi-round Fiat-Shamir and more (round-dependent, not the applicable bound at this round count)",
+                "DFMS19, Security of the Fiat-Shamir transformation in the quantum random-oracle model",
+                "DFMS22, Efficient NIZKs and signatures from commit-and-open protocols in the QROM"
+            ],
+            "qromReductionLossComputed": true,
+            "meetsConventional128BitQuantumBar": false,
+            "qromAccepted": false,
+            "qromReductionLossStatus": "computed-cms19-state-restoration-achieved-level-recorded"
+        },
         "qromReductionLossBudgetBits": DIRECT_BALLOT_RELATION_QROM_LOSS_BUDGET_BITS,
+        "qromReductionLossBudgetStatus": "legacy flat budget retained for comparison only; accepted soundness uses fiatShamirAccounting",
         "statementQueryLossBudgetBits": DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS,
         "effectiveSoundnessBits": effective_soundness_bits,
-        "certificateStatus": "soundness budget recorded for the verifier-certified proof profile; accepted package creation refuses fixture randomness"
+        "certificateStatus": "classical soundness budget recorded under the named CS25 low-degree row for the verifier-certified proof profile; QROM achieved level is computed and recorded below the conventional 128-bit quantum bar; accepted package creation refuses fixture randomness"
     }))
 }
 
@@ -663,7 +709,7 @@ pub(crate) fn direct_ballot_relation_proof_profile_hash() -> CanonicalResult<Str
             "projectedBgvRelationProjectionsPerLimbComponent":
                 DIRECT_BALLOT_PROJECTED_BGV_RELATION_PROJECTIONS_PER_LIMB_COMPONENT,
             "scoreLinearCommitmentEncoding": "exact signed integer commitments",
-            "proofModelStatus": "accepted public verifier definition with exact score linkage, projected-BGV budget accounting, committed-trace soundness accounting, zero-knowledge accounting, accepted creation randomness boundary, and appended committed trace proof",
+            "proofModelStatus": "accepted public verifier definition with exact score linkage, projected-BGV budget accounting, committed-trace soundness under the named CS25 low-degree row, explicit QROM achieved-level accounting, zero-knowledge accounting, accepted creation randomness boundary, and appended committed trace proof",
             "relation": "statement-derived projected BGV all-limb encryption rows with projected no-wrap carry scalars, exact score encoding and one-hot linkage, and a salted masked committed trace proof for support rows, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage",
             "sourceRingDegree": POLYNOMIAL_DEGREE,
             "dataPrimeCount": DATA_PRIMES.len(),
@@ -735,7 +781,7 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
             )
         })?;
     Ok(json!({
-        "model": "verifier-certified binary transcript with recorded conservative soundness and zero-knowledge accounting",
+        "model": "verifier-certified binary transcript with named CS25 low-degree soundness, computed QROM achieved level, and zero-knowledge accounting",
         "proofModelAccepted": true,
         "singleProofSizeBytes": proof_size_bytes,
         "totalProofBytes": total_proof_bytes,
@@ -754,17 +800,18 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
         "scoreRelationChallengeUse": "score row sums and score weighted linkage use exact signed integer commitments and the full Fiat-Shamir challenge",
         "projectedBgvProjectionSoundness": projected_bgv_soundness_accounting,
         "committedTraceSoundness": committed_trace_soundness_accounting,
+        "fiatShamirAccounting": soundness_certificate["fiatShamirAccounting"].clone(),
         "outerResponseZeroKnowledge": outer_response_zero_knowledge_accounting,
         "committedTraceZeroKnowledge": committed_trace_zero_knowledge_accounting,
         "effectiveStatisticalZeroKnowledgeBits": effective_zero_knowledge_bits,
-        "weakestCheckedRelation": "committed trace batching is the recorded weakest relation after conservative reserved losses",
+        "weakestCheckedRelation": "committed trace batching is the recorded weakest relation after data-limb and statement-query losses",
         "weakestRelationEffectiveBitsPerCheck": effective_soundness_bits,
         "classicalSoundnessBitsBeforeLosses": raw_committed_trace_soundness_bits,
         "committedTraceSupportRows": "one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary digits, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape",
         "classicalSoundnessBitsAfterCommittedTraceAccounting": effective_soundness_bits,
         "targetClassicalSoundnessBits": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
         "minimumIndependentRepetitionsForTarget": 1,
-        "minimumIndependentRepetitionsStatus": "one proof clears the recorded soundness target under the verifier-certified proof profile",
+        "minimumIndependentRepetitionsStatus": "one proof clears the recorded classical soundness target under the named CS25 low-degree row; QROM achieved level is computed and remains below the conventional 128-bit quantum bar",
         "estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses": 1,
         "estimatedRepeatedProofSizeBytes": proof_size_bytes,
         "estimatedRepeatedTotalProofBytes": total_proof_bytes,
@@ -774,9 +821,9 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
             DIRECT_BALLOT_PROJECTED_BGV_NO_WRAP_CARRY_RESPONSE_BYTES,
         "witnessBoundBitsForMaskShiftAccounting": DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS,
         "zeroKnowledgeShiftSlackBitsAfterResponseUnionBound": zero_knowledge_shift_slack_bits,
-        "supportAccounting": "Support is carried by the salted masked committed trace, which also verifies encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage publicly. The recorded conservative soundness and zero-knowledge budgets clear their targets under the verifier-certified proof profile, and accepted package creation refuses fixture randomness.",
+        "supportAccounting": "Support is carried by the salted masked committed trace, which also verifies encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage publicly. The recorded classical soundness and zero-knowledge budgets clear their targets under the verifier-certified proof profile, QROM achieved level is recorded separately, and accepted package creation refuses fixture randomness.",
         "zeroKnowledgeAccounting": zero_knowledge_certificate,
-        "decision": "The verifier-certified proof verifies the implemented relation, score-linkage checks use exact integer commitments with the full challenge, projected BGV rows record a random-projection budget above the target, committed-trace batching records a conservative budget above the target, the mask/opening distribution records a zero-knowledge budget above the target, and accepted package creation refuses fixture randomness. The path remains non-claim-bearing until mobile-compatible runtime evidence and target-decryption gates are closed."
+        "decision": "The verifier-certified proof verifies the implemented relation, score-linkage checks use exact integer commitments with the full challenge, projected BGV rows record a random-projection budget above the classical target, committed-trace batching records a named CS25 low-degree budget above the classical target, QROM soundness is computed at the achieved level below the conventional 128-bit quantum bar, the mask/opening distribution records a zero-knowledge budget above the target, and accepted package creation refuses fixture randomness. The path remains non-claim-bearing until mobile-compatible runtime evidence and target-decryption gates are closed."
     }))
 }
 
@@ -869,16 +916,8 @@ fn direct_ballot_projected_bgv_soundness_accounting() -> CanonicalResult<Value> 
     let limb_component_union_loss_bits = ceil_log2_usize(limb_component_count);
     let classical_bits_after_union =
         raw_projection_bits.saturating_sub(limb_component_union_loss_bits);
-    let reserved_loss_bits = DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS
-        .checked_add(DIRECT_BALLOT_RELATION_QROM_LOSS_BUDGET_BITS)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "direct ballot projected BGV reserved loss budget overflowed",
-            )
-        })?;
-    let budgeted_bits_after_reserved_losses =
-        classical_bits_after_union.saturating_sub(reserved_loss_bits);
+    let classical_bits_after_statement_query_loss = classical_bits_after_union
+        .saturating_sub(DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS);
 
     Ok(json!({
         "model": "random linear projection of each nonzero BGV residual vector over its RNS data prime",
@@ -893,14 +932,15 @@ fn direct_ballot_projected_bgv_soundness_accounting() -> CanonicalResult<Value> 
         "classicalBitsAfterLimbComponentUnion": classical_bits_after_union,
         "statementQueryLossBudgetBits":
             DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS,
-        "qromLossBudgetBits": DIRECT_BALLOT_RELATION_QROM_LOSS_BUDGET_BITS,
-        "reservedLossBits": reserved_loss_bits,
+        "qromAccounting": "QROM loss is computed separately in the soundness certificate fiatShamirAccounting row; no flat QROM loss is subtracted from the classical projection row",
+        "classicalBitsAfterStatementQueryLoss":
+            classical_bits_after_statement_query_loss,
         "budgetedClassicalBitsAfterReservedLosses":
-            budgeted_bits_after_reserved_losses,
+            classical_bits_after_statement_query_loss,
         "targetClassicalSoundnessBits":
             DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
         "budgetClearsTargetBeforeCommittedTraceReduction":
-            budgeted_bits_after_reserved_losses
+            classical_bits_after_statement_query_loss
                 >= DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
         "claimBoundary": "records the projected BGV random-projection budget; the combined soundness certificate also accounts for the committed trace and reserved reduction losses"
     }))
@@ -1006,12 +1046,29 @@ fn direct_ballot_committed_trace_soundness_accounting() -> CanonicalResult<Value
                 "direct ballot committed trace DEEP identity budget overflowed",
             )
         })?;
-    let low_degree_query_bits = u32::try_from(LOW_DEGREE_QUERY_COUNT).map_err(|_| {
+    let low_degree_query_count = u32::try_from(LOW_DEGREE_QUERY_COUNT).map_err(|_| {
         CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "direct ballot committed trace low-degree query count does not fit soundness accounting",
         )
     })?;
+    let low_degree_query_bits = low_degree_query_count
+        .checked_mul(DIRECT_BALLOT_FRI_ENTROPY_CAPACITY_QUERY_SOUNDNESS_PERMILLE)
+        .and_then(|scaled_bits| scaled_bits.checked_div(1000))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "direct ballot committed trace low-degree query soundness overflowed",
+            )
+        })?;
+    let proven_fallback_query_bits = low_degree_query_count / 2;
+    let proven_fallback_classical_bits_after_statement_query_loss = proven_fallback_query_bits
+        .saturating_sub(ceil_log2_usize(DATA_PRIMES.len()))
+        .saturating_sub(DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS);
+    let proven_fallback_query_count_for_target = 2
+        * (DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
+            + ceil_log2_usize(DATA_PRIMES.len())
+            + DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS);
     let raw_committed_trace_bits = [
         independent_linear_batch_bits,
         independent_row_combination_bits,
@@ -1029,16 +1086,8 @@ fn direct_ballot_committed_trace_soundness_accounting() -> CanonicalResult<Value
     let limb_union_loss_bits = ceil_log2_usize(DATA_PRIMES.len());
     let classical_bits_after_limb_union =
         raw_committed_trace_bits.saturating_sub(limb_union_loss_bits);
-    let reserved_loss_bits = DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS
-        .checked_add(DIRECT_BALLOT_RELATION_QROM_LOSS_BUDGET_BITS)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "direct ballot committed trace reserved loss budget overflowed",
-            )
-        })?;
-    let budgeted_bits_after_reserved_losses =
-        classical_bits_after_limb_union.saturating_sub(reserved_loss_bits);
+    let classical_bits_after_statement_query_loss = classical_bits_after_limb_union
+        .saturating_sub(DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS);
 
     Ok(json!({
         "model": "committed-column trace with independent base-field linear batching, independent extension-field row-check batching, DEEP out-of-domain checks, and a batched low-degree IOP",
@@ -1067,18 +1116,37 @@ fn direct_ballot_committed_trace_soundness_accounting() -> CanonicalResult<Value
         "deepIdentityBits": deep_identity_bits,
         "lowDegreeQueryCount": LOW_DEGREE_QUERY_COUNT,
         "lowDegreeQuerySoundnessBits": low_degree_query_bits,
+        "lowDegreeSoundness": {
+            "queryCount": LOW_DEGREE_QUERY_COUNT,
+            "perQueryBoundModel": "claim-bearing under the named CS25 mutual-correlated-agreement FRI conjecture up to the q-ary list-decoding entropy capacity for prime fields, the admissible repair of the disproved up-to-capacity proximity-gap conjecture; at rate one half over the base limb field this records about 0.938 bit per query, floored to 0.930 bit",
+            "entropyCapacityQuerySoundnessPermille":
+                DIRECT_BALLOT_FRI_ENTROPY_CAPACITY_QUERY_SOUNDNESS_PERMILLE,
+            "conjecturedQuerySoundnessBits": low_degree_query_bits,
+            "conjectureStatement": "re-based onto CS25 'Our Conjecture 3': the proximity-gap radius this batched DEEP-FRI row relies on is the q-ary list-decoding entropy-capacity mutual-correlated-agreement bound for prime fields, strictly below the 1 - rho up-to-capacity radius that Crites-Stewart and BCHKS26 disproved; this is the same repaired below-capacity assumption family used by the accepted setup proof accounting",
+            "namedConjectureReference": "Crites, Stewart, On Reed-Solomon proximity gaps conjectures (CS25), Our Conjecture 3",
+            "provenBoundReference": "Ben-Sasson, Carmon, Ishai, Kopparty, Saraf, Proximity gaps for Reed-Solomon codes (BCIKS20)",
+            "provenFallbackQuerySoundnessBits": proven_fallback_query_bits,
+            "provenFallbackClassicalBitsAfterStatementQueryLoss":
+                proven_fallback_classical_bits_after_statement_query_loss,
+            "provenFallbackQueryCountFor128BitsAfterStatementQueryLoss":
+                proven_fallback_query_count_for_target,
+            "acceptedUnderNamedFriConjecture": true,
+            "acceptedUnderProvenFallback": false,
+            "acceptanceBar": "the named CS25 entropy-capacity low-degree row is not the bottleneck at this query count; the unconditional Johnson fallback does not clear the direct ballot classical target after data-limb and statement-query losses without increasing the query count or changing the backend"
+        },
         "rawCommittedTraceSoundnessBits": raw_committed_trace_bits,
         "limbUnionLossBits": limb_union_loss_bits,
         "classicalBitsAfterLimbUnion": classical_bits_after_limb_union,
         "statementQueryLossBudgetBits":
             DIRECT_BALLOT_RELATION_STATEMENT_QUERY_LOSS_BUDGET_BITS,
-        "qromLossBudgetBits": DIRECT_BALLOT_RELATION_QROM_LOSS_BUDGET_BITS,
-        "reservedLossBits": reserved_loss_bits,
+        "qromAccounting": "QROM loss is computed separately in the soundness certificate fiatShamirAccounting row; no flat QROM loss is subtracted from the classical committed-trace row",
+        "classicalBitsAfterStatementQueryLoss":
+            classical_bits_after_statement_query_loss,
         "budgetedClassicalBitsAfterReservedLosses":
-            budgeted_bits_after_reserved_losses,
+            classical_bits_after_statement_query_loss,
         "targetClassicalSoundnessBits":
             DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
-        "status": "committed-trace soundness budget clears the target under the recorded conservative reduction budget"
+        "status": "committed-trace classical soundness clears the target under the named CS25 entropy-capacity low-degree row; QROM achieved level is recorded separately"
     }))
 }
 
@@ -1572,11 +1640,16 @@ mod tests {
             direct_ballot_soundness_certificate_value().expect("soundness certificate");
 
         assert_eq!(certificate["objectType"], "BallotProofSoundnessCertificate");
-        assert_eq!(certificate["effectiveSoundnessBits"], 157);
+        assert_eq!(certificate["effectiveSoundnessBits"], 221);
         assert_eq!(
             certificate["projectedBgvProjectionSoundness"]["budgetedClassicalBitsAfterReservedLosses"],
-            166
+            230
         );
+        assert_eq!(
+            certificate["fiatShamirAccounting"]["achievedQuantumSoundnessAfterStatementQueryBitsApproximate"],
+            110
+        );
+        assert_eq!(certificate["fiatShamirAccounting"]["qromAccepted"], false);
         assert_eq!(
             certificate["committedTraceSoundness"]["linearBatchCount"],
             7
@@ -1591,7 +1664,23 @@ mod tests {
         );
         assert_eq!(
             certificate["committedTraceSoundness"]["budgetedClassicalBitsAfterReservedLosses"],
-            157
+            221
+        );
+        assert_eq!(
+            certificate["committedTraceSoundness"]["lowDegreeSoundness"]["conjecturedQuerySoundnessBits"],
+            267
+        );
+        assert_eq!(
+            certificate["committedTraceSoundness"]["lowDegreeSoundness"]["provenFallbackClassicalBitsAfterStatementQueryLoss"],
+            99
+        );
+        assert_eq!(
+            certificate["committedTraceSoundness"]["lowDegreeSoundness"]["acceptedUnderNamedFriConjecture"],
+            true
+        );
+        assert_eq!(
+            certificate["committedTraceSoundness"]["lowDegreeSoundness"]["acceptedUnderProvenFallback"],
+            false
         );
     }
 

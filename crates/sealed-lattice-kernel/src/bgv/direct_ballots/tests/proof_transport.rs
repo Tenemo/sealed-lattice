@@ -171,13 +171,13 @@ fn direct_ballot_package_schema_roots_match_stable_fixture_vectors() {
             transport.encrypted_ballot_package_root.as_str(),
         ),
         (
-            48_154_664,
-            48_154_664,
+            48_226_792,
+            48_226_792,
             46,
-            "4c0101bb5b819f5b9f08a45029dfb2e5282e51f95815ac6c373bc8567c7f027273466252977ba0f52a45ff1a63069c750f2b505d81d7a3ba469b96aa833ec36b",
-            "191c264e5661e2f55e23b5c72cee10a894cc482d5b4ce106bdf25f4c5967357bd7e293d07d1c3ce751d5d055fde0d44a4333505cc49e0567c61c28ab625d79eb",
-            "8e940a71492f470170148febfc64eb87a83263c2110c40ff5953371afc9a58cd6b23939a9477347aa27325239bf5ed7abdb810b4191798fdd07442ca9291f673",
-            "e64d711211e61dedf9375d392e1e251b425bad5e9ab958415a216873230ed3643620aac99f586167d61a8ff81e37062abf3044796f6c4ca03dccedbaa79bdaff",
+            "f31ac50626ce66fae31bba212a18c44a99b1c16e22855ff8a6c446235eca596fa86f6bd25f23854eedad62f5dc9366b8dc8f7e8227a64de0bdeada35b2e751af",
+            "cb72d198383c655396b5293ace5352292897af671df5a0926d720eff6498a4c1503e655b13c0c6a54c3ae7c69378b8912f9245e5352c2b63e9cefbc90e96bbfa",
+            "b755760e4696582128f95c005269626df5e22111f1c25af6caeaa9c0a8ea08c0b1b6e9f8c4345eac6050c8699314a942713f498b7defb5eb8c83ebb3fbd088eb",
+            "757f8925f2d6f50958e1e53906ec611fd7b64e387a356299486e909f827262650dfdcc5b8eff3ab10fb908aaa5e08b10f091f2dab85374ceccb945d0d617c413",
         )
     );
 }
@@ -635,7 +635,11 @@ fn direct_ballot_package_verifier_rejects_tampered_voter_signature_bytes() {
     .expect_err("tampered voter signature bytes must reject");
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(error.message.contains("ML-DSA signature"));
+    assert!(
+        error
+            .message
+            .contains("Signature hash does not verify for the canonical signed root")
+    );
 }
 
 #[test]
