@@ -417,11 +417,12 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
 
     // Recompute the disclosed clear claim bound from the witnesses that actually
     // carry a masked consistency claim. The message (Shamir coefficient) columns
-    // do NOT carry one: their cross-field consistency is argued GLOBALLY (carry
+    // do not carry one: their cross-field consistency is argued globally (carry
     // consistency + the public range-checked share pin the evaluation per
     // recipient, and >= t honest recipients pin the polynomial; see
     // consistency_vector_count in relation/column_layout.rs and
-    // SL2-private-vss-zero-knowledge-closure.md section 4), NOT by the per-field
+    // implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md
+    // section 4), not by the per-field
     // opening rows. So the published masked claims range only over the carry and
     // the ternary opening-randomness columns. The lifted carry bound dominates
     // the magnitude-one randomness, so the clear bound is the worst-case carry

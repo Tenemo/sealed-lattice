@@ -1483,7 +1483,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "setupPackageHash": value_string(setup_package, "setupPackageHash")?,
         "directBallotEncryptionHandoff": {
-            "status": "accepted-collective-public-key-root-bound-for-direct-ballot-encryption",
             "collectivePublicKeyRoot": package_nested_hash(
                 setup_package,
                 "collectivePublicKey",
@@ -1501,7 +1500,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             )?,
         },
         "publicAggregationHandoff": {
-            "status": "accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root",
             "thresholdShareCommitmentRoot": package_nested_hash(
                 setup_package,
                 "thresholdShareCommitments",
@@ -1509,7 +1507,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             )?,
         },
         "boundedEvaluatorReplayHandoff": {
-            "status": "accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule",
             "evaluatorKeyScheduleRoot": package_nested_hash(
                 setup_package,
                 "evaluatorKeySchedule",
@@ -1537,12 +1534,10 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             )?,
         },
         "futureTargetDecryptionHandoff": {
-            "status": value_string(target_decryption_status, "targetDecryptionReadiness")?,
             "targetDecryptionProfileId": value_string(
                 target_decryption_status,
                 "targetDecryptionProfileId",
             )?,
-            "claimBoundary": "target decryption remains downstream and any target-decryption readiness claim is refused until Q_target, smudging, C1-C4, and decryption-share proof closure exist",
         },
         "certificateRoots": {
             "setupCommitmentSecurityCertificateHash": value_string(

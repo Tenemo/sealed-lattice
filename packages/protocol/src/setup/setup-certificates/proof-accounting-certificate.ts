@@ -101,8 +101,6 @@ const setupProofSuccinctLeakageAccounting = (
         privateVssShare: privateVssShareProofAccountingHash,
         trusteeEvaluationKey: trusteeEvaluationKeyProofAccountingHash,
     },
-    zeroKnowledgeScope:
-        'bounded-leakage succinct-family accounting only; the setup certificate does not claim 128-bit zero-knowledge for these families',
 });
 
 const setupProofFiatShamirTranscriptAccounting = (

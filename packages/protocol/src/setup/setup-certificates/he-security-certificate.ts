@@ -31,11 +31,6 @@ const bgvHeSecurityCertificateBody = (
     ]);
     const postQuantumMaximumLogQ = 827;
     const classicalMaximumLogQ = 881;
-    const postQuantumAccepted =
-        largestExposedModulusBits <= postQuantumMaximumLogQ;
-    const classicalAccepted = largestExposedModulusBits <= classicalMaximumLogQ;
-    const acceptedForDirectEvaluatorReplay =
-        postQuantumAccepted && classicalAccepted;
     const acceptedRelinearizationKeyPolynomials =
         keySwitchComponentPolynomialCount(
             relinearizationScheduleEntries(setupProfile),
@@ -67,8 +62,6 @@ const bgvHeSecurityCertificateBody = (
             qShareCeilLog2Product: largestExposedModulusBits,
             specialPrime: bgvProfile.profile.specialPrime,
             extendedUtilityCeilLog2Product,
-            extendedUtilityExposureStatus:
-                'not-exposed-by-current-accepted-direct-evaluator-replay-material',
             largestExposedBasisClass: 'Q_data',
             largestExposedModulusBits,
         },
@@ -92,10 +85,6 @@ const bgvHeSecurityCertificateBody = (
             scheduledRelinearizationLevelCount:
                 relinearizationScheduleEntries(setupProfile).length,
             scheduledGaloisKeyCount: galoisScheduleEntries(setupProfile).length,
-            evaluationKeyExposureStatus:
-                'root-bound-relinearization-and-galois-key-material-counted-for-direct-evaluator-replay-HE-boundary',
-            commitmentAndSetupProofPublicMatrices:
-                'covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples',
         },
         standardRows: {
             postQuantumTernary128: {
@@ -140,20 +129,7 @@ const bgvHeSecurityCertificateBody = (
         },
         targetDecryptionStatus: {
             targetDecryptionProfileId,
-            qTargetKnown: false,
-            qTargetCoveredByCertificate: false,
-            targetC1ThroughC4Covered: false,
-            targetDecryptionReadiness:
-                'refused-until-q-target-certificate-closes',
         },
-        parameterBoundary: {
-            acceptedScope:
-                'current Q_data/Q_share direct evaluator replay and accepted setup public key/evaluation-key exposure',
-            excludedScope:
-                'Q_target, target decryption, smudging, C1-C4, and downstream decryption-share proof material',
-        },
-        acceptedForDirectEvaluatorReplay,
-        acceptedForTargetDecryption: false,
     };
 };
 

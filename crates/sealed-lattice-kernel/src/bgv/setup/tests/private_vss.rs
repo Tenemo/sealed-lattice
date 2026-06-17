@@ -246,10 +246,11 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
 }
 
 // Multi-recipient consistency is what actually makes Option A sound (see
-// implementation-plan/SL2-private-vss-zero-knowledge-closure.md section 4): with
-// the message consistency claims removed, a single recipient's proof does NOT pin
-// the Shamir coefficients across the RNS commitment fields, so soundness comes
-// from >= t honest recipients each verifying the SAME source commitment. This
+// implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md
+// section 4): with the message consistency claims removed, a single recipient's
+// proof does not pin the Shamir coefficients across the RNS commitment fields,
+// so soundness comes from >= t honest recipients each verifying the same source
+// commitment. This
 // test exercises that structure: one committed degree-(t-1) polynomial, verified
 // at the four distinct recipient points of the first-profile decryption threshold
 // (t_secret = 4), all accepting. The shares differ per recipient (distinct

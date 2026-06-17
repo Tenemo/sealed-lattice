@@ -282,17 +282,14 @@ export type AcceptedSetupHandoff = Readonly<{
     readonly setupEpoch: string;
     readonly setupPackageHash: ProtocolHash;
     readonly directBallotEncryptionHandoff: Readonly<{
-        readonly status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption';
         readonly collectivePublicKeyRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     }>;
     readonly publicAggregationHandoff: Readonly<{
-        readonly status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root';
         readonly thresholdShareCommitmentRoot: ProtocolHash;
     }>;
     readonly boundedEvaluatorReplayHandoff: Readonly<{
-        readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
         readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
@@ -300,9 +297,7 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     }>;
     readonly futureTargetDecryptionHandoff: Readonly<{
-        readonly status: string;
         readonly targetDecryptionProfileId: string;
-        readonly claimBoundary: string;
     }>;
     readonly certificateRoots: Readonly<{
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;

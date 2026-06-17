@@ -587,17 +587,14 @@ export type BgvAcceptedSetupHandoff = {
     readonly setupEpoch: string;
     readonly setupPackageHash: ProtocolHash;
     readonly directBallotEncryptionHandoff: {
-        readonly status: 'accepted-collective-public-key-root-bound-for-direct-ballot-encryption';
         readonly collectivePublicKeyRoot: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
     };
     readonly publicAggregationHandoff: {
-        readonly status: 'accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root';
         readonly thresholdShareCommitmentRoot: ProtocolHash;
     };
     readonly boundedEvaluatorReplayHandoff: {
-        readonly status: 'accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule';
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
         readonly relinearizationKeyShareRoundsRoot: ProtocolHash;
         readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
@@ -605,9 +602,7 @@ export type BgvAcceptedSetupHandoff = {
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     };
     readonly futureTargetDecryptionHandoff: {
-        readonly status: string;
         readonly targetDecryptionProfileId: string;
-        readonly claimBoundary: string;
     };
     readonly certificateRoots: {
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;

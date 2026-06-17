@@ -9,6 +9,15 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     )
 }
 
+// Binds the operative shape of the internal direct-ballot validity relation proof: profile
+// id, statement version, encoding, challenge size and domain, proof-bytes domain, relation
+// shape, ring degree, and data prime count.
+//
+// Scope, kept in prose rather than a bound field: this is an internal relation-shape proof.
+// Its claim soundness and support zero-knowledge are not established. The weakest checked
+// subrelation runs modulo the about 16-bit plaintext modulus 65537, so a single transcript
+// yields only about 16 soundness bits against the 192-bit nominal challenge. See the README
+// safety boundaries for the full scope statement.
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_profile_hash()
 -> CanonicalResult<String> {
     derive_protocol_hash(
@@ -20,7 +29,6 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_profile_hash(
             "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
             "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
             "proofBytesDomain": DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
-            "proofModelStatus": "internal relation proof; claim soundness and support zero-knowledge are not accepted",
             "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
             "sourceRingDegree": POLYNOMIAL_DEGREE,
             "dataPrimeCount": DATA_PRIMES.len(),
@@ -28,10 +36,13 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_profile_hash(
     )
 }
 
-pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
-    proof_size_bytes: usize,
-    total_proof_bytes: usize,
-) -> CanonicalResult<Value> {
+// Reports the operative and computed accounting for the internal relation proof. The honest
+// weakness figure (weakestRelationEffectiveBitsPerCheck: the about 16 soundness bits per
+// transcript on the weakest subrelation, against the 192-bit nominal challenge) is reported
+// as a computed value. The scope it implies (claim soundness not established) lives in prose
+// docs, not in a bound status field, and no speculative repeated-proof projection is emitted.
+pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting()
+-> CanonicalResult<Value> {
     let support_check_count = direct_ballot_support_check_count();
     let support_union_loss_bits =
         ceil_log2_usize(support_check_count * direct_ballot_support_maximum_degree());
@@ -41,21 +52,8 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
             DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
             response_union_loss_bits,
         )?;
-    // The weakest subrelation is checked mod the about 16-bit plaintext modulus 65537, so each check yields only about 16 soundness bits despite the 192-bit nominal challenge; this is why claim soundness is not accepted.
     let weakest_relation_bits_per_check = 16_u32;
     let support_modulus_bits = 64 - direct_ballot_support_modulus().leading_zeros();
-    let repeated_proof_size_bytes = checked_repeated_byte_count(
-        proof_size_bytes,
-        DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
-            .div_ceil(weakest_relation_bits_per_check),
-        "direct ballot repeated proof size",
-    )?;
-    let repeated_total_proof_bytes = checked_repeated_byte_count(
-        total_proof_bytes,
-        DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS
-            .div_ceil(weakest_relation_bits_per_check),
-        "direct ballot repeated total proof size",
-    )?;
 
     Ok(json!({
         "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
@@ -64,16 +62,10 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_accounting(
         "weakestCheckedRelation": "score and one-hot linear relation over the plaintext modulus 65537",
         "weakestRelationEffectiveBitsPerCheck": weakest_relation_bits_per_check,
         "supportRelationModulusBits": support_modulus_bits,
-        "classicalSoundnessBitsBeforeLosses": Value::Null,
         "supportCheckCount": support_check_count,
         "supportMaximumDegree": direct_ballot_support_maximum_degree(),
         "supportUnionLossBits": support_union_loss_bits,
-        "classicalSoundnessBitsAfterSupportUnionBound": Value::Null,
         "targetClassicalSoundnessBits": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS,
-        "minimumIndependentRepetitionsForTarget": Value::Null,
-        "estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses": DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS.div_ceil(weakest_relation_bits_per_check),
-        "estimatedRepeatedProofSizeBytes": repeated_proof_size_bytes,
-        "estimatedRepeatedTotalProofBytes": repeated_total_proof_bytes,
         "maskCoefficientBits": DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS,
         "responseCoefficientBytes": DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES,
         "witnessBoundBitsForMaskShiftAccounting": DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS,

@@ -213,16 +213,17 @@ pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
     }))
 }
 
+// Identity of the target-decryption profile: its profile id, the bound BGV profile
+// hash, the secret-share domain, and the async-Lagrange target direction. Implementation
+// and certification state (partial/final decryption maturity, C1-C4 certification, whether
+// Q_target is known) is not asserted as bound flags here; that scope lives in the README
+// safety boundaries and the target-decryption implementation notes.
 pub(super) fn target_decryption_profile(profile_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
         "profileId": TARGET_DECRYPTION_PROFILE_ID,
         "bgvProfileHash": profile_hash,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "asyncLagrangeTargetDirection": true,
-        "partDecImplemented": true,
-        "finDecImplemented": true,
-        "c1ThroughC4Certified": false,
-        "qTargetKnown": false,
     }))
 }
 

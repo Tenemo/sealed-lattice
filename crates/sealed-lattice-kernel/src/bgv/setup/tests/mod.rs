@@ -66,7 +66,7 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "a0b7af2ca88c70310b0bfdfb2551b15f718d5ef306df331394d27f59b3e16db9808a3d1fb74d90637f92716ea7208d1fe269e70610082bf5bba3eca2f2180fc6";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "522c793a8b82dcb2993863ffbf0e474d3c15986a60be9a0dd4293d73a0324daf8cd3f05e03e049b43b1c6df61e2efe72a68466d34b2e34ca86c2518ca9b4d6cf";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();

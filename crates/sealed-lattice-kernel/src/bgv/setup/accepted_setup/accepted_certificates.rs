@@ -515,7 +515,6 @@ fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
             "privateVssShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
             "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         },
-        "zeroKnowledgeScope": "bounded-leakage succinct-family accounting only; the setup certificate does not claim 128-bit zero-knowledge for these families",
     }))
 }
 pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> CanonicalResult<Value> {
@@ -1088,8 +1087,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
     let extended_basis_bits = extended_basis_modulus_bits();
     let post_quantum_max_logq = 827_usize;
     let classical_max_logq = 881_usize;
-    let post_quantum_accepted = largest_exposed_modulus_bits <= post_quantum_max_logq;
-    let classical_accepted = largest_exposed_modulus_bits <= classical_max_logq;
     let required_galois_key_count = expected_required_galois_key_schedule()?
         .as_array()
         .map(Vec::len)
@@ -1124,7 +1121,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
             "qShareCeilLog2Product": largest_exposed_modulus_bits,
             "specialPrime": SPECIAL_PRIME,
             "extendedUtilityCeilLog2Product": extended_basis_bits,
-            "extendedUtilityExposureStatus": "not-exposed-by-current-accepted-direct-evaluator-replay-material",
             "largestExposedBasisClass": "Q_data",
             "largestExposedModulusBits": largest_exposed_modulus_bits
         },
@@ -1146,9 +1142,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
             "acceptedRelinearizationKeyPolynomials": accepted_relinearization_key_polynomials,
             "acceptedGaloisKeyPolynomials": accepted_galois_key_polynomials,
             "scheduledRelinearizationLevelCount": scheduled_relinearization_level_count,
-            "scheduledGaloisKeyCount": required_galois_key_count,
-            "evaluationKeyExposureStatus": "root-bound-relinearization-and-galois-key-material-counted-for-direct-evaluator-replay-HE-boundary",
-            "commitmentAndSetupProofPublicMatrices": "covered-by-setup-commitment-and-setup-proof profiles, not counted as HE RLWE public-key samples"
+            "scheduledGaloisKeyCount": required_galois_key_count
         },
         "standardRows": {
             "postQuantumTernary128": {
@@ -1186,18 +1180,8 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value() -> Canonic
             "publicSamplesBound": true
         },
         "targetDecryptionStatus": {
-            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-            "qTargetKnown": false,
-            "qTargetCoveredByCertificate": false,
-            "targetC1ThroughC4Covered": false,
-            "targetDecryptionReadiness": "refused-until-q-target-certificate-closes"
-        },
-        "parameterBoundary": {
-            "acceptedScope": "current Q_data/Q_share direct evaluator replay and accepted setup public key/evaluation-key exposure",
-            "excludedScope": "Q_target, target decryption, smudging, C1-C4, and downstream decryption-share proof material",
-        },
-        "acceptedForDirectEvaluatorReplay": post_quantum_accepted && classical_accepted,
-        "acceptedForTargetDecryption": false,
+            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID
+        }
     }))
 }
 

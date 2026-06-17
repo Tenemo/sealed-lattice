@@ -52,24 +52,6 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         result["proofAttempt"]["proofAccounting"]["targetClassicalSoundnessBits"].as_u64(),
         Some(128)
     );
-    assert_eq!(
-        result["proofAttempt"]["proofAccounting"]["minimumIndependentRepetitionsForTarget"],
-        Value::Null
-    );
-    assert_eq!(
-        result["proofAttempt"]["proofAccounting"]
-            ["estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses"]
-            .as_u64(),
-        Some(8)
-    );
-    assert_eq!(
-        result["proofAttempt"]["proofAccounting"]["estimatedRepeatedProofSizeBytes"].as_u64(),
-        Some(18_626_400 * 8)
-    );
-    assert_eq!(
-        result["proofAttempt"]["proofAccounting"]["classicalSoundnessBitsAfterSupportUnionBound"],
-        Value::Null
-    );
     assert!(
         result["proofAttempt"]["proofAccounting"]
             ["zeroKnowledgeShiftSlackBitsAfterResponseUnionBound"]

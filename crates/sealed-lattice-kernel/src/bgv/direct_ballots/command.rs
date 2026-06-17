@@ -168,7 +168,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "verifiedRelationCommitmentHash": first_proof.verified_relation_commitment_hash_hex,
             "challenge": first_proof.challenge.to_string(),
             "verifiedChallenge": first_proof.verified_challenge.to_string(),
-            "proofAccounting": direct_ballot_relation_proof_accounting(first_proof.proof_size_bytes, total_proof_bytes)?,
+            "proofAccounting": direct_ballot_relation_proof_accounting()?,
             "proofTransport": {
                 "encoding": "binary proof chunks",
                 "chunkSizeBytes": DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,

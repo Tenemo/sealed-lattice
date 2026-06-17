@@ -152,7 +152,7 @@ impl LimbColumnLayout {
             // weakening the carry/share range checks, breaks the argument.
             // private_vss_logical_columns() still counts the message columns
             // because they remain witnesses for the opening and share linchecks.
-            // See implementation-plan/SL2-private-vss-zero-knowledge-closure.md.
+            // See implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md.
             1 + self.private_vss_randomness_columns
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()

@@ -610,20 +610,6 @@ pub(super) fn usize_to_u64_bytes(value: usize) -> CanonicalResult<[u8; 8]> {
         .to_le_bytes())
 }
 
-pub(super) fn checked_repeated_byte_count(
-    byte_count: usize,
-    repetitions: u32,
-    label: &str,
-) -> CanonicalResult<usize> {
-    let repetitions = usize::try_from(repetitions).map_err(|_| {
-        invalid_direct_ballot_relation_proof(format!("{label} repetition count does not fit usize"))
-    })?;
-
-    byte_count
-        .checked_mul(repetitions)
-        .ok_or_else(|| invalid_direct_ballot_relation_proof(format!("{label} overflowed")))
-}
-
 pub(super) fn ceil_log2_usize(value: usize) -> u32 {
     if value <= 1 {
         0

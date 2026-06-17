@@ -27,7 +27,6 @@ describe('direct encrypted ballot kernel command', () => {
         });
         expect(result.proofAttempt.proofAccounting).toMatchObject({
             targetClassicalSoundnessBits: 128,
-            minimumIndependentRepetitionsForTarget: null,
         });
         expect(result.proofAttempt.proofAccounting.challengeBits).toBe(
             result.proofAttempt.proofAccounting.nominalChallengeBits,
@@ -42,21 +41,6 @@ describe('direct encrypted ballot kernel command', () => {
         expect(
             result.proofAttempt.proofAccounting.supportRelationModulusBits,
         ).toBeGreaterThan(0);
-        expect(
-            result.proofAttempt.proofAccounting
-                .estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses,
-        ).toBeGreaterThan(0);
-        expect(
-            result.proofAttempt.proofAccounting.estimatedRepeatedProofSizeBytes,
-        ).toBe(result.proofAttempt.proofSizeBytes * 8);
-        expect(
-            result.proofAttempt.proofAccounting
-                .estimatedRepeatedTotalProofBytes,
-        ).toBe(result.proofAttempt.totalProofBytes * 8);
-        expect(
-            result.proofAttempt.proofAccounting
-                .classicalSoundnessBitsAfterSupportUnionBound,
-        ).toBeNull();
         expect(
             result.proofAttempt.proofAccounting
                 .zeroKnowledgeShiftSlackBitsAfterResponseUnionBound,

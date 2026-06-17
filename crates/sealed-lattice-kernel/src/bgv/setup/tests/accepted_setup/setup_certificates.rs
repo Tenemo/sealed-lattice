@@ -196,11 +196,10 @@ fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
             },
         ),
         (
-            "upgraded succinct leakage zero-knowledge scope",
+            "tampered succinct leakage family accounting hash",
             |package| {
-                package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] = serde_json::json!(
-                    "128-bit zero-knowledge accepted for every setup proof family"
-                );
+                package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["familyAccountingHashes"]
+                    ["trusteeEvaluationKey"] = serde_json::json!("0".repeat(128));
             },
         ),
     ];
@@ -233,24 +232,28 @@ fn collective_setup_verifier_checks_he_security_certificate() {
 }
 
 #[test]
-fn he_security_certificate_accepts_direct_setup_evaluator_parameter_boundary() {
+fn he_security_certificate_records_direct_evaluator_parameter_margins() {
     let certificate = accepted_he_security_certificate_value().expect("HE security certificate");
 
-    // The operative accept/reject decision is carried by the recomputed
-    // boolean verdicts, not by a self-attested status string: direct evaluator
-    // replay is accepted while target decryption stays refused.
-    assert_eq!(certificate["acceptedForDirectEvaluatorReplay"], true);
-    assert_eq!(certificate["acceptedForTargetDecryption"], false);
-    assert_eq!(
-        certificate["targetDecryptionStatus"]["targetDecryptionReadiness"],
-        "refused-until-q-target-certificate-closes"
-    );
-    // The parameter boundary still records the excluded target-decryption scope
-    // even though the self-attested verdict string was dropped.
+    // Security here is the recomputed parameter margin against the published HE
+    // standard rows, not a self-attested verdict string: every standard row must
+    // leave a positive margin between the accepted modulus and the secure bound.
+    for standard_row in ["postQuantumTernary128", "classicalTernary128"] {
+        let margin_bits = certificate["standardRows"][standard_row]["marginBits"]
+            .as_u64()
+            .expect("standard row margin bits");
+        assert!(
+            margin_bits > 0,
+            "standard row {standard_row} must leave a positive modulus margin"
+        );
+    }
+
+    // The forward-looking target-decryption profile identifier stays bound; the
+    // self-attested readiness/coverage flags around it were dropped.
     assert!(
-        certificate["parameterBoundary"]["excludedScope"]
+        certificate["targetDecryptionStatus"]["targetDecryptionProfileId"]
             .as_str()
-            .is_some_and(|text| text.contains("target decryption"))
+            .is_some_and(|profile_id| !profile_id.is_empty())
     );
 }
 
