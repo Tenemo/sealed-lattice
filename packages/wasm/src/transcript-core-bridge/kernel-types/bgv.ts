@@ -2,6 +2,18 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 type BgvJsonRecord = Readonly<Record<string, unknown>>;
 
+export type DirectBallotWasmRuntimeEvidence = Readonly<{
+    readonly commandWallTimeMilliseconds: string;
+    readonly requestByteLength: number;
+    readonly responseByteLength: number;
+    readonly jsWasmCopyCount: number;
+    readonly largestJsWasmCopiedBufferBytes: number;
+    readonly wasmMemoryByteLengthBefore: number;
+    readonly wasmMemoryByteLengthAfter: number;
+    readonly wasmMemoryByteLengthPeak: number;
+    readonly measurementBoundary: string;
+}>;
+
 type BgvTransportedMaterialObject<ObjectType extends string> = Readonly<
     BgvJsonRecord & {
         readonly objectType: ObjectType;
@@ -175,6 +187,12 @@ export type BgvRnsProfileDescription = {
     readonly directBallotEncoderMatrixRoot: ProtocolHash;
     readonly directBallotArithmeticCertificate: unknown;
     readonly directBallotArithmeticCertificateHash: ProtocolHash;
+    readonly directBallotSoundnessCertificate: unknown;
+    readonly directBallotSoundnessCertificateHash: ProtocolHash;
+    readonly directBallotZeroKnowledgeCertificate: unknown;
+    readonly directBallotZeroKnowledgeCertificateHash: ProtocolHash;
+    readonly directBallotVerifierCertificate: unknown;
+    readonly directBallotVerifierCertificateHash: ProtocolHash;
     readonly encryptedBallotAggregateProfileHash: ProtocolHash;
     readonly directAggregateLayoutHash: ProtocolHash;
     readonly directComparisonProfileHash: ProtocolHash;
@@ -649,6 +667,9 @@ export type BgvAcceptedSetupHandoff = {
         readonly directBallotEncoderMatrixRoot: ProtocolHash;
         readonly witnessPartitionProfileHash: ProtocolHash;
         readonly arithmeticCertificateHash: ProtocolHash;
+        readonly soundnessCertificateHash: ProtocolHash;
+        readonly zeroKnowledgeCertificateHash: ProtocolHash;
+        readonly verifierCertificateHash: ProtocolHash;
         readonly ballotValidityProofProfileHash: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
@@ -676,6 +697,9 @@ export type BgvAcceptedSetupHandoff = {
             readonly directBallotEncoderMatrixRoot: ProtocolHash;
             readonly witnessPartitionProfileHash: ProtocolHash;
             readonly arithmeticCertificateHash: ProtocolHash;
+            readonly soundnessCertificateHash: ProtocolHash;
+            readonly zeroKnowledgeCertificateHash: ProtocolHash;
+            readonly verifierCertificateHash: ProtocolHash;
             readonly optionCount: 20;
             readonly scoreDomain: Readonly<{
                 readonly minimum: 1;
@@ -741,6 +765,9 @@ export type DirectBallotAcceptedPublicKeyMaterial = {
     readonly directBallotReservedSlotRuleHash: ProtocolHash;
     readonly directBallotEncoderMatrixRoot: ProtocolHash;
     readonly arithmeticCertificateHash: ProtocolHash;
+    readonly soundnessCertificateHash: ProtocolHash;
+    readonly zeroKnowledgeCertificateHash: ProtocolHash;
+    readonly verifierCertificateHash: ProtocolHash;
     readonly ballotValidityProofProfileHash: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
     readonly bgvPublicKeyRoot: ProtocolHash;
@@ -770,6 +797,62 @@ export type DirectBallotAcceptedPublicKeyMaterial = {
                     readonly coefficientsLeHex: string;
                 }>)[];
         }>;
+};
+
+export type DirectEncryptedBallotInput = {
+    readonly voterIdentity: string;
+    readonly voterRosterPosition: number;
+    readonly actionContextHash: ProtocolHash;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
+    readonly scores: readonly number[];
+    readonly oneHotWitnesses?: readonly (readonly number[])[];
+};
+
+export type DirectEncryptedBallotProofChunk = {
+    readonly chunkIndex: number;
+    readonly byteLength: number;
+    readonly chunkHash: ProtocolHash;
+    readonly bytesHex: string;
+};
+
+export type DirectEncryptedBallotPackageVerificationInput = {
+    readonly voterSigningPublicKeyHash: ProtocolHash;
+    readonly encryptedBallotPackage: unknown;
+    readonly proofChunks: readonly DirectEncryptedBallotProofChunk[];
+};
+
+export type DirectEncryptedBallotPackageCreation = Readonly<
+    Record<string, unknown>
+> & {
+    readonly operation: 'createDirectEncryptedBallotPackages';
+    readonly encryptedBallotPackages: readonly unknown[];
+    readonly wasmRuntimeEvidence?: DirectBallotWasmRuntimeEvidence;
+};
+
+export type DirectEncryptedBallotPackageVerification = Readonly<
+    Record<string, unknown>
+> & {
+    readonly operation: 'verifyDirectEncryptedBallotPackage';
+    readonly verificationStatus: string;
+    readonly packageRoot: ProtocolHash;
+    readonly ciphertextRoot: ProtocolHash;
+    readonly packageVerificationCertificateHash: ProtocolHash;
+    readonly packageVerificationCertificate: unknown;
+    readonly wasmRuntimeEvidence?: DirectBallotWasmRuntimeEvidence;
+};
+
+export type DirectEncryptedBallotPackageAggregation = Readonly<
+    Record<string, unknown>
+> & {
+    readonly operation: 'aggregateDirectEncryptedBallotPackages';
+    readonly aggregationStatus: string;
+    readonly ballotCount: number;
+    readonly aggregateCiphertextRoot: ProtocolHash;
+    readonly aggregateCiphertextTransport: unknown;
+    readonly aggregateCertificateHash: ProtocolHash;
+    readonly aggregateCertificate: unknown;
+    readonly wasmRuntimeEvidence?: DirectBallotWasmRuntimeEvidence;
 };
 
 export type BgvCollectiveSetupVerification = {

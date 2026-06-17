@@ -177,7 +177,7 @@ use crate::bgv::direct_ballots::{
     DIRECT_BALLOT_SCORE_BUCKET_COUNT, direct_ballot_arithmetic_certificate_hash,
     direct_ballot_encoder_matrix_root, direct_ballot_relation_proof_profile_hash,
     direct_ballot_reserved_slot_rule_hash, direct_ballot_reserved_slot_rule_value,
-    direct_ballot_witness_partition_profile_hash,
+    direct_ballot_soundness_certificate_hash, direct_ballot_witness_partition_profile_hash,
 };
 use crate::bgv::evaluator::top_k::{
     SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
@@ -1539,6 +1539,9 @@ pub(crate) fn direct_ballot_creation_policy_value() -> CanonicalResult<Value> {
         "directBallotEncoderMatrixRoot": direct_ballot_encoder_matrix_root()?,
         "witnessPartitionProfileHash": direct_ballot_witness_partition_profile_hash()?,
         "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
+        "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()?,
+        "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()?,
+        "verifierCertificateHash": direct_ballot_verifier_certificate_hash()?,
         "optionCount": DIRECT_BALLOT_OPTION_COUNT,
         "scoreDomain": {
             "minimum": DIRECT_BALLOT_MINIMUM_SCORE,
@@ -1615,6 +1618,9 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "directBallotEncoderMatrixRoot": direct_ballot_encoder_matrix_root()?,
             "witnessPartitionProfileHash": direct_ballot_witness_partition_profile_hash()?,
             "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
+            "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()?,
+            "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()?,
+            "verifierCertificateHash": direct_ballot_verifier_certificate_hash()?,
             "ballotValidityProofProfileHash": direct_ballot_relation_proof_profile_hash()?,
             "publicKeyShareMaterialSetRoot": package_nested_hash(
                 setup_package,

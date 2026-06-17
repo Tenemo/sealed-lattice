@@ -38,6 +38,9 @@ import type {
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
     BgvVerifiedTransportedVssMaterialRelease,
+    DirectEncryptedBallotPackageAggregation,
+    DirectEncryptedBallotPackageCreation,
+    DirectEncryptedBallotPackageVerification,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -53,6 +56,7 @@ import {
     resolveMemory,
     resolveNumberExport,
     runKernelCommand,
+    runMeasuredKernelCommand,
     verifyKernelIntegrity,
 } from './kernel-runtime.js';
 
@@ -132,6 +136,25 @@ export const createTranscriptCoreKernelLoader = (
                         request,
                     ),
                 );
+            const executeMeasuredCommand = <
+                Result extends Readonly<Record<string, unknown>>,
+            >(
+                request: TranscriptCoreKernelCommand,
+            ): Result =>
+                runExclusiveKernelOperation('command', () => {
+                    const measuredCommand = runMeasuredKernelCommand<Result>(
+                        memory,
+                        allocate,
+                        deallocate,
+                        transcriptCoreCommandWithLength,
+                        request,
+                    );
+
+                    return {
+                        ...measuredCommand.value,
+                        wasmRuntimeEvidence: measuredCommand.runtimeEvidence,
+                    };
+                });
             // Accepted setup is claim-bearing protocol input, not a fixture, so a fixture-shaped rejection is surfaced as a rejected protocol object rather than leaking the kernel fixture error code.
             const executeAcceptedSetupCommand = <
                 Result extends BgvCollectiveSetupVerification,
@@ -331,6 +354,53 @@ export const createTranscriptCoreKernelLoader = (
                         targetShareProfile: input.targetShareProfile,
                         decryptionShares: input.decryptionShares,
                     }),
+                createDirectEncryptedBallotPackages: (
+                    input,
+                ): DirectEncryptedBallotPackageCreation =>
+                    executeMeasuredCommand<DirectEncryptedBallotPackageCreation>(
+                        {
+                            command: 'CreateDirectEncryptedBallotPackages',
+                            acceptedPublicKeyMaterial:
+                                input.acceptedPublicKeyMaterial,
+                            acceptedSetupHandoff: input.acceptedSetupHandoff,
+                            ballotEncryptionRandomness:
+                                input.ballotEncryptionRandomness,
+                            proofMaskRandomness: input.proofMaskRandomness,
+                            ballots: input.ballots,
+                        },
+                    ),
+                verifyDirectEncryptedBallotPackage: (
+                    input,
+                ): DirectEncryptedBallotPackageVerification =>
+                    executeMeasuredCommand<DirectEncryptedBallotPackageVerification>(
+                        {
+                            command: 'VerifyDirectEncryptedBallotPackage',
+                            acceptedPublicKeyMaterial:
+                                input.acceptedPublicKeyMaterial,
+                            acceptedSetupHandoff: input.acceptedSetupHandoff,
+                            voterSigningPublicKeyHash:
+                                input.voterSigningPublicKeyHash,
+                            encryptedBallotPackage:
+                                input.encryptedBallotPackage,
+                            proofChunks: input.proofChunks,
+                        },
+                    ),
+                aggregateDirectEncryptedBallotPackages: (
+                    input,
+                ): DirectEncryptedBallotPackageAggregation =>
+                    executeMeasuredCommand<DirectEncryptedBallotPackageAggregation>(
+                        {
+                            command: 'AggregateDirectEncryptedBallotPackages',
+                            acceptedPublicKeyMaterial:
+                                input.acceptedPublicKeyMaterial,
+                            acceptedSetupHandoff: input.acceptedSetupHandoff,
+                            encryptedBallotPackages:
+                                input.encryptedBallotPackages,
+                            firstValidOrderHash: input.firstValidOrderHash,
+                            firstValidPackageRoots:
+                                input.firstValidPackageRoots,
+                        },
+                    ),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',

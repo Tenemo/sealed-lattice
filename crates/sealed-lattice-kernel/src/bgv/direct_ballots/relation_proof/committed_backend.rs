@@ -1,4 +1,6 @@
 use super::*;
+use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
+use std::sync::Arc;
 
 pub(super) const DIRECT_BALLOT_COMMITTED_RANDOMIZER_COLUMN: usize = 0;
 pub(super) const DIRECT_BALLOT_COMMITTED_FIRST_ERROR_COLUMN: usize = 1;
@@ -49,13 +51,13 @@ enum DirectBallotCommittedLinearClaimPlan {
     },
     ProjectedBgv {
         row_index: usize,
-        row: DirectBallotProjectedBgvRelationRow,
+        row: Arc<DirectBallotProjectedBgvRelationRow>,
     },
     ProjectedBgvNoWrap {
         verifier_limb_index: usize,
         verifier_modulus: u64,
         row_index: usize,
-        row: DirectBallotProjectedBgvRelationRow,
+        row: Arc<DirectBallotProjectedBgvRelationRow>,
     },
 }
 
@@ -117,11 +119,10 @@ fn direct_ballot_committed_linear_claim_plans(
     public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<Vec<DirectBallotCommittedLinearClaimPlan>> {
-    let projected_bgv_rows = compile_direct_ballot_projected_bgv_relation_rows(
+    let projected_bgv_rows = direct_ballot_committed_projected_bgv_rows_for_linear_claims(
         statement_hash,
         public_key,
         ballot,
-        DIRECT_BALLOT_PROJECTED_BGV_RELATION_PROJECTIONS_PER_LIMB_COMPONENT,
     )?;
     let mut plans = Vec::with_capacity(
         DATA_PRIMES.len() * DIRECT_BALLOT_OPTION_COUNT * 2 + projected_bgv_rows.len(),
@@ -160,56 +161,164 @@ fn direct_ballot_committed_linear_claim_plans(
     Ok(plans)
 }
 
-pub(super) fn direct_ballot_committed_batched_linear_claim_challenge_count(
+pub(super) fn direct_ballot_committed_projected_bgv_rows_for_linear_claims(
     statement_hash: &[u8; 64],
     public_key: &BgvPublicKey,
     ballot: &DirectEncryptedBallot,
-    verifier_limb_index: usize,
-) -> CanonicalResult<usize> {
-    Ok(
-        direct_ballot_committed_linear_claim_plans(statement_hash, public_key, ballot)?
-            .into_iter()
-            .filter(|claim_plan| claim_plan.limb_index() == verifier_limb_index)
-            .count(),
-    )
+) -> CanonicalResult<Vec<Arc<DirectBallotProjectedBgvRelationRow>>> {
+    Ok(compile_direct_ballot_projected_bgv_relation_rows(
+        statement_hash,
+        public_key,
+        ballot,
+        DIRECT_BALLOT_PROJECTED_BGV_RELATION_PROJECTIONS_PER_LIMB_COMPONENT,
+    )?
+    .into_iter()
+    .map(Arc::new)
+    .collect())
 }
 
-pub(super) fn direct_ballot_committed_batched_linear_claim(
-    statement_hash: &[u8; 64],
-    public_key: &BgvPublicKey,
-    ballot: &DirectEncryptedBallot,
+pub(super) fn direct_ballot_committed_batched_linear_claim_challenge_count(
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
+    verifier_limb_index: usize,
+) -> CanonicalResult<usize> {
+    if verifier_limb_index >= DATA_PRIMES.len() {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim references a missing limb",
+        ));
+    }
+    if projected_bgv_rows
+        .iter()
+        .any(|row| row.limb_index >= DATA_PRIMES.len())
+    {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim references a projected BGV row outside the profile",
+        ));
+    }
+    DIRECT_BALLOT_OPTION_COUNT
+        .checked_mul(2)
+        .and_then(|option_claim_count| option_claim_count.checked_add(projected_bgv_rows.len()))
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim count overflowed",
+            )
+        })
+}
+
+pub(super) fn direct_ballot_committed_batched_linear_claims(
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
     verifier_limb_index: usize,
     verifier_modulus: u64,
+    single_batch_challenge_count: usize,
     batching_challenges: &[u64],
-) -> CanonicalResult<DirectBallotCommittedBatchedLinearClaim> {
-    let claim_plans =
-        direct_ballot_committed_linear_claim_plans(statement_hash, public_key, ballot)?
-            .into_iter()
-            .filter(|claim_plan| claim_plan.limb_index() == verifier_limb_index)
-            .collect::<Vec<_>>();
-    if claim_plans.len() != batching_challenges.len() {
+) -> CanonicalResult<Vec<DirectBallotCommittedBatchedLinearClaim>> {
+    let claim_plans = direct_ballot_committed_linear_claim_plans_for_limb(
+        projected_bgv_rows,
+        verifier_limb_index,
+        verifier_modulus,
+    )?;
+    if claim_plans.len() != single_batch_challenge_count {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot committed linear claim challenge count does not match the profile",
         ));
     }
+    if single_batch_challenge_count == 0 {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim batch must not be empty",
+        ));
+    }
+    if !batching_challenges
+        .len()
+        .is_multiple_of(single_batch_challenge_count)
+    {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim batch challenge count does not match the profile",
+        ));
+    }
 
-    let mut coefficient_columns =
-        vec![vec![0_u64; POLYNOMIAL_DEGREE]; DIRECT_BALLOT_COMMITTED_COLUMN_COUNT];
-    let mut public_offset = 0_u64;
-    for (claim_plan, batching_challenge) in claim_plans.iter().zip(batching_challenges.iter()) {
-        accumulate_direct_ballot_committed_linear_claim(
+    let batch_count = batching_challenges.len() / single_batch_challenge_count;
+    if batch_count == 0 {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim batch count must not be empty",
+        ));
+    }
+    let mut coefficient_columns_by_batch =
+        vec![
+            vec![vec![0_u64; POLYNOMIAL_DEGREE]; DIRECT_BALLOT_COMMITTED_COLUMN_COUNT];
+            batch_count
+        ];
+    let mut public_offsets = vec![0_u64; batch_count];
+    for (claim_index, claim_plan) in claim_plans.iter().enumerate() {
+        accumulate_direct_ballot_committed_linear_claim_batches(
+            claim_index,
             claim_plan,
             verifier_modulus,
-            *batching_challenge,
-            &mut coefficient_columns,
-            &mut public_offset,
+            single_batch_challenge_count,
+            batching_challenges,
+            &mut coefficient_columns_by_batch,
+            &mut public_offsets,
         )?;
     }
 
-    Ok(DirectBallotCommittedBatchedLinearClaim {
-        coefficient_columns,
-        public_offset,
-    })
+    Ok(coefficient_columns_by_batch
+        .into_iter()
+        .zip(public_offsets)
+        .map(
+            |(coefficient_columns, public_offset)| DirectBallotCommittedBatchedLinearClaim {
+                coefficient_columns,
+                public_offset,
+            },
+        )
+        .collect())
+}
+
+fn direct_ballot_committed_linear_claim_plans_for_limb(
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
+    verifier_limb_index: usize,
+    verifier_modulus: u64,
+) -> CanonicalResult<Vec<DirectBallotCommittedLinearClaimPlan>> {
+    if verifier_limb_index >= DATA_PRIMES.len() {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim references a missing limb",
+        ));
+    }
+
+    let mut plans = Vec::with_capacity(DIRECT_BALLOT_OPTION_COUNT * 2 + projected_bgv_rows.len());
+    for option_index in 0..DIRECT_BALLOT_OPTION_COUNT {
+        plans.push(DirectBallotCommittedLinearClaimPlan::OneHotRowSum {
+            limb_index: verifier_limb_index,
+            modulus: verifier_modulus,
+            option_index,
+        });
+        plans.push(DirectBallotCommittedLinearClaimPlan::ScoreLinkage {
+            limb_index: verifier_limb_index,
+            modulus: verifier_modulus,
+            option_index,
+        });
+    }
+    for (row_index, row) in projected_bgv_rows.iter().cloned().enumerate() {
+        if row.limb_index >= DATA_PRIMES.len() {
+            return Err(invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim references a projected BGV row outside the profile",
+            ));
+        }
+        if row.limb_index == verifier_limb_index {
+            if row.modulus != verifier_modulus {
+                return Err(invalid_direct_ballot_relation_proof(
+                    "direct ballot committed linear claim modulus does not match the verifier limb",
+                ));
+            }
+            plans.push(DirectBallotCommittedLinearClaimPlan::ProjectedBgv { row_index, row });
+        } else {
+            plans.push(DirectBallotCommittedLinearClaimPlan::ProjectedBgvNoWrap {
+                verifier_limb_index,
+                verifier_modulus,
+                row_index,
+                row,
+            });
+        }
+    }
+
+    Ok(plans)
 }
 
 pub(super) fn direct_ballot_committed_witness_columns(
@@ -1061,30 +1170,41 @@ fn verify_direct_ballot_committed_linear_claim(
     Ok(())
 }
 
-fn accumulate_direct_ballot_committed_linear_claim(
+fn accumulate_direct_ballot_committed_linear_claim_batches(
+    claim_index: usize,
     claim_plan: &DirectBallotCommittedLinearClaimPlan,
     verifier_modulus: u64,
-    batching_challenge: u64,
-    coefficient_columns: &mut [Vec<u64>],
-    public_offset: &mut u64,
+    single_batch_challenge_count: usize,
+    batching_challenges: &[u64],
+    coefficient_columns_by_batch: &mut [Vec<Vec<u64>>],
+    public_offsets: &mut [u64],
 ) -> CanonicalResult<()> {
+    if coefficient_columns_by_batch.len() != public_offsets.len() {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim batch shapes do not match",
+        ));
+    }
     match claim_plan {
         DirectBallotCommittedLinearClaimPlan::OneHotRowSum { option_index, .. } => {
             for bucket_index in 0..DIRECT_BALLOT_SCORE_BUCKET_COUNT {
                 let packed_index = direct_ballot_one_hot_packed_index(*option_index, bucket_index)?;
-                add_batched_linear_coefficient(
-                    coefficient_columns,
+                add_batched_linear_coefficient_batches(
+                    coefficient_columns_by_batch,
                     DIRECT_BALLOT_COMMITTED_ONE_HOT_COLUMN,
                     packed_index,
                     1,
-                    batching_challenge,
+                    claim_index,
+                    single_batch_challenge_count,
+                    batching_challenges,
                     verifier_modulus,
                 )?;
             }
-            add_batched_linear_public_offset(
-                public_offset,
+            add_batched_linear_public_offset_batches(
+                public_offsets,
                 sub_mod(0, 1, verifier_modulus)?,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 verifier_modulus,
             )?;
         }
@@ -1096,40 +1216,48 @@ fn accumulate_direct_ballot_committed_linear_claim(
                         "direct ballot score bucket index does not fit a field element",
                     )
                 })?;
-                add_batched_linear_coefficient(
-                    coefficient_columns,
+                add_batched_linear_coefficient_batches(
+                    coefficient_columns_by_batch,
                     DIRECT_BALLOT_COMMITTED_ONE_HOT_COLUMN,
                     packed_index,
                     bucket_weight % verifier_modulus,
-                    batching_challenge,
+                    claim_index,
+                    single_batch_challenge_count,
+                    batching_challenges,
                     verifier_modulus,
                 )?;
             }
-            add_batched_linear_coefficient(
-                coefficient_columns,
+            add_batched_linear_coefficient_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_SCORE_COLUMN,
                 *option_index,
                 sub_mod(0, 1, verifier_modulus)?,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 verifier_modulus,
             )?;
         }
         DirectBallotCommittedLinearClaimPlan::ProjectedBgv { row, .. } => {
-            accumulate_direct_ballot_committed_projected_bgv_field_claim(
+            accumulate_direct_ballot_committed_projected_bgv_field_claim_batches(
                 row,
-                batching_challenge,
-                coefficient_columns,
-                public_offset,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
+                coefficient_columns_by_batch,
+                public_offsets,
             )?;
         }
         DirectBallotCommittedLinearClaimPlan::ProjectedBgvNoWrap { row_index, row, .. } => {
-            accumulate_direct_ballot_committed_projected_bgv_no_wrap_claim(
+            accumulate_direct_ballot_committed_projected_bgv_no_wrap_claim_batches(
                 *row_index,
                 row,
                 verifier_modulus,
-                batching_challenge,
-                coefficient_columns,
-                public_offset,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
+                coefficient_columns_by_batch,
+                public_offsets,
             )?;
         }
     }
@@ -1137,152 +1265,184 @@ fn accumulate_direct_ballot_committed_linear_claim(
     Ok(())
 }
 
-fn accumulate_direct_ballot_committed_projected_bgv_field_claim(
+fn accumulate_direct_ballot_committed_projected_bgv_field_claim_batches(
     row: &DirectBallotProjectedBgvRelationRow,
-    batching_challenge: u64,
-    coefficient_columns: &mut [Vec<u64>],
-    public_offset: &mut u64,
+    claim_index: usize,
+    single_batch_challenge_count: usize,
+    batching_challenges: &[u64],
+    coefficient_columns_by_batch: &mut [Vec<Vec<u64>>],
+    public_offsets: &mut [u64],
 ) -> CanonicalResult<()> {
-    add_batched_polynomial_coefficients(
-        coefficient_columns,
+    add_batched_polynomial_coefficients_batches(
+        coefficient_columns_by_batch,
         DIRECT_BALLOT_COMMITTED_RANDOMIZER_COLUMN,
         &row.public_key_projection_coefficients,
         1,
-        batching_challenge,
+        claim_index,
+        single_batch_challenge_count,
+        batching_challenges,
         row.modulus,
     )?;
     match row.component {
         DirectBallotProjectedBgvComponent::ComponentZero => {
             let plaintext_scale = PLAINTEXT_MODULUS % row.modulus;
-            add_batched_polynomial_coefficients(
-                coefficient_columns,
+            add_batched_polynomial_coefficients_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_FIRST_ERROR_COLUMN,
                 &row.projection_coefficients,
                 plaintext_scale,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 row.modulus,
             )?;
-            add_batched_polynomial_coefficients(
-                coefficient_columns,
+            add_batched_polynomial_coefficients_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_ENCODING_CARRY_COLUMN,
                 &row.projection_coefficients,
                 sub_mod(0, plaintext_scale, row.modulus)?,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 row.modulus,
             )?;
             for (option_index, score_coefficient) in row.score_coefficients.iter().enumerate() {
-                add_batched_linear_coefficient(
-                    coefficient_columns,
+                add_batched_linear_coefficient_batches(
+                    coefficient_columns_by_batch,
                     DIRECT_BALLOT_COMMITTED_SCORE_COLUMN,
                     option_index,
                     *score_coefficient,
-                    batching_challenge,
+                    claim_index,
+                    single_batch_challenge_count,
+                    batching_challenges,
                     row.modulus,
                 )?;
             }
         }
         DirectBallotProjectedBgvComponent::ComponentOne => {
-            add_batched_polynomial_coefficients(
-                coefficient_columns,
+            add_batched_polynomial_coefficients_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_SECOND_ERROR_COLUMN,
                 &row.projection_coefficients,
                 PLAINTEXT_MODULUS % row.modulus,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 row.modulus,
             )?;
         }
     }
-    add_batched_linear_public_offset(
-        public_offset,
+    add_batched_linear_public_offset_batches(
+        public_offsets,
         row.public_offset,
-        batching_challenge,
+        claim_index,
+        single_batch_challenge_count,
+        batching_challenges,
         row.modulus,
     )
 }
 
-fn accumulate_direct_ballot_committed_projected_bgv_no_wrap_claim(
+fn accumulate_direct_ballot_committed_projected_bgv_no_wrap_claim_batches(
     row_index: usize,
     row: &DirectBallotProjectedBgvRelationRow,
     verifier_modulus: u64,
-    batching_challenge: u64,
-    coefficient_columns: &mut [Vec<u64>],
-    public_offset: &mut u64,
+    claim_index: usize,
+    single_batch_challenge_count: usize,
+    batching_challenges: &[u64],
+    coefficient_columns_by_batch: &mut [Vec<Vec<u64>>],
+    public_offsets: &mut [u64],
 ) -> CanonicalResult<()> {
-    add_batched_polynomial_coefficients(
-        coefficient_columns,
+    add_batched_polynomial_coefficients_batches(
+        coefficient_columns_by_batch,
         DIRECT_BALLOT_COMMITTED_RANDOMIZER_COLUMN,
         &row.public_key_projection_coefficients,
         1,
-        batching_challenge,
+        claim_index,
+        single_batch_challenge_count,
+        batching_challenges,
         verifier_modulus,
     )?;
     match row.component {
         DirectBallotProjectedBgvComponent::ComponentZero => {
             let plaintext_scale = PLAINTEXT_MODULUS % verifier_modulus;
-            add_batched_polynomial_coefficients(
-                coefficient_columns,
+            add_batched_polynomial_coefficients_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_FIRST_ERROR_COLUMN,
                 &row.projection_coefficients,
                 plaintext_scale,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 verifier_modulus,
             )?;
-            add_batched_polynomial_coefficients(
-                coefficient_columns,
+            add_batched_polynomial_coefficients_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_ENCODING_CARRY_COLUMN,
                 &row.projection_coefficients,
                 sub_mod(0, plaintext_scale, verifier_modulus)?,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 verifier_modulus,
             )?;
             for (option_index, score_coefficient) in row.score_coefficients.iter().enumerate() {
-                add_batched_linear_coefficient(
-                    coefficient_columns,
+                add_batched_linear_coefficient_batches(
+                    coefficient_columns_by_batch,
                     DIRECT_BALLOT_COMMITTED_SCORE_COLUMN,
                     option_index,
                     *score_coefficient % verifier_modulus,
-                    batching_challenge,
+                    claim_index,
+                    single_batch_challenge_count,
+                    batching_challenges,
                     verifier_modulus,
                 )?;
             }
         }
         DirectBallotProjectedBgvComponent::ComponentOne => {
-            add_batched_polynomial_coefficients(
-                coefficient_columns,
+            add_batched_polynomial_coefficients_batches(
+                coefficient_columns_by_batch,
                 DIRECT_BALLOT_COMMITTED_SECOND_ERROR_COLUMN,
                 &row.projection_coefficients,
                 PLAINTEXT_MODULUS % verifier_modulus,
-                batching_challenge,
+                claim_index,
+                single_batch_challenge_count,
+                batching_challenges,
                 verifier_modulus,
             )?;
         }
     }
-    add_batched_linear_coefficient(
-        coefficient_columns,
+    add_batched_linear_coefficient_batches(
+        coefficient_columns_by_batch,
         DIRECT_BALLOT_COMMITTED_PROJECTED_BGV_CARRY_COLUMN,
         row_index,
         sub_mod(0, row.modulus % verifier_modulus, verifier_modulus)?,
-        batching_challenge,
+        claim_index,
+        single_batch_challenge_count,
+        batching_challenges,
         verifier_modulus,
     )?;
-    add_batched_linear_public_offset(
-        public_offset,
+    add_batched_linear_public_offset_batches(
+        public_offsets,
         sub_mod(
             0,
             row.ciphertext_projection % verifier_modulus,
             verifier_modulus,
         )?,
-        batching_challenge,
+        claim_index,
+        single_batch_challenge_count,
+        batching_challenges,
         verifier_modulus,
     )
 }
 
-fn add_batched_polynomial_coefficients(
-    coefficient_columns: &mut [Vec<u64>],
+fn add_batched_polynomial_coefficients_batches(
+    coefficient_columns_by_batch: &mut [Vec<Vec<u64>>],
     column_index: usize,
     coefficients: &[u64],
     scalar: u64,
-    batching_challenge: u64,
+    claim_index: usize,
+    single_batch_challenge_count: usize,
+    batching_challenges: &[u64],
     modulus: u64,
 ) -> CanonicalResult<()> {
     if coefficients.len() != POLYNOMIAL_DEGREE {
@@ -1291,55 +1451,154 @@ fn add_batched_polynomial_coefficients(
         ));
     }
     let scalar_residue = scalar % modulus;
+    let combined_scalars = (0..coefficient_columns_by_batch.len())
+        .map(|batch_index| {
+            let challenge_residue = batched_claim_challenge_residue(
+                batching_challenges,
+                single_batch_challenge_count,
+                batch_index,
+                claim_index,
+                modulus,
+            )?;
+            Ok(mul_mod_fast(scalar_residue, challenge_residue, modulus))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    if combined_scalars
+        .iter()
+        .all(|combined_scalar| *combined_scalar == 0)
+    {
+        return Ok(());
+    }
+
+    for coefficient_columns in coefficient_columns_by_batch.iter() {
+        let column = coefficient_columns.get(column_index).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim references an unknown column",
+            )
+        })?;
+        if column.len() != POLYNOMIAL_DEGREE {
+            return Err(invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim column shape does not match the ring degree",
+            ));
+        }
+    }
+
+    let mut columns = coefficient_columns_by_batch
+        .iter_mut()
+        .map(|coefficient_columns| {
+            coefficient_columns.get_mut(column_index).ok_or_else(|| {
+                invalid_direct_ballot_relation_proof(
+                    "direct ballot committed linear claim references an unknown column",
+                )
+            })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
     for (coefficient_index, coefficient) in coefficients.iter().enumerate() {
-        let scaled_coefficient = mul_mod(*coefficient % modulus, scalar_residue, modulus)?;
-        add_batched_linear_coefficient(
-            coefficient_columns,
-            column_index,
-            coefficient_index,
-            scaled_coefficient,
-            batching_challenge,
-            modulus,
-        )?;
+        let coefficient_residue = *coefficient % modulus;
+        if coefficient_residue == 0 {
+            continue;
+        }
+        for (column, combined_scalar) in columns.iter_mut().zip(combined_scalars.iter()) {
+            if *combined_scalar == 0 {
+                continue;
+            }
+            let contribution = mul_mod_fast(coefficient_residue, *combined_scalar, modulus);
+            column[coefficient_index] =
+                add_mod_fast(column[coefficient_index], contribution, modulus);
+        }
     }
 
     Ok(())
 }
 
-fn add_batched_linear_coefficient(
-    coefficient_columns: &mut [Vec<u64>],
+fn add_batched_linear_coefficient_batches(
+    coefficient_columns_by_batch: &mut [Vec<Vec<u64>>],
     column_index: usize,
     coefficient_index: usize,
     coefficient: u64,
-    batching_challenge: u64,
+    claim_index: usize,
+    single_batch_challenge_count: usize,
+    batching_challenges: &[u64],
     modulus: u64,
 ) -> CanonicalResult<()> {
-    let column = coefficient_columns.get_mut(column_index).ok_or_else(|| {
-        invalid_direct_ballot_relation_proof(
-            "direct ballot committed linear claim references an unknown column",
-        )
-    })?;
-    let slot = column.get_mut(coefficient_index).ok_or_else(|| {
-        invalid_direct_ballot_relation_proof(
-            "direct ballot committed linear claim references a row outside the trace",
-        )
-    })?;
-    let contribution = mul_mod(coefficient % modulus, batching_challenge, modulus)?;
-    *slot = add_mod(*slot, contribution, modulus)?;
+    let coefficient_residue = coefficient % modulus;
+    for (batch_index, coefficient_columns) in coefficient_columns_by_batch.iter_mut().enumerate() {
+        let column = coefficient_columns.get_mut(column_index).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim references an unknown column",
+            )
+        })?;
+        let slot = column.get_mut(coefficient_index).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim references a row outside the trace",
+            )
+        })?;
+        let challenge_residue = batched_claim_challenge_residue(
+            batching_challenges,
+            single_batch_challenge_count,
+            batch_index,
+            claim_index,
+            modulus,
+        )?;
+        let contribution = mul_mod_fast(coefficient_residue, challenge_residue, modulus);
+        *slot = add_mod_fast(*slot, contribution, modulus);
+    }
 
     Ok(())
 }
 
-fn add_batched_linear_public_offset(
-    public_offset: &mut u64,
+fn add_batched_linear_public_offset_batches(
+    public_offsets: &mut [u64],
     offset: u64,
-    batching_challenge: u64,
+    claim_index: usize,
+    single_batch_challenge_count: usize,
+    batching_challenges: &[u64],
     modulus: u64,
 ) -> CanonicalResult<()> {
-    let contribution = mul_mod(offset % modulus, batching_challenge, modulus)?;
-    *public_offset = add_mod(*public_offset, contribution, modulus)?;
+    let offset_residue = offset % modulus;
+    for (batch_index, public_offset) in public_offsets.iter_mut().enumerate() {
+        let challenge_residue = batched_claim_challenge_residue(
+            batching_challenges,
+            single_batch_challenge_count,
+            batch_index,
+            claim_index,
+            modulus,
+        )?;
+        let contribution = mul_mod_fast(offset_residue, challenge_residue, modulus);
+        *public_offset = add_mod_fast(*public_offset, contribution, modulus);
+    }
 
     Ok(())
+}
+
+fn batched_claim_challenge_residue(
+    batching_challenges: &[u64],
+    single_batch_challenge_count: usize,
+    batch_index: usize,
+    claim_index: usize,
+    modulus: u64,
+) -> CanonicalResult<u64> {
+    if single_batch_challenge_count == 0 || claim_index >= single_batch_challenge_count {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim challenge index is invalid",
+        ));
+    }
+    let challenge_index = batch_index
+        .checked_mul(single_batch_challenge_count)
+        .and_then(|batch_offset| batch_offset.checked_add(claim_index))
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed linear claim challenge index overflowed",
+            )
+        })?;
+    let challenge = batching_challenges.get(challenge_index).ok_or_else(|| {
+        invalid_direct_ballot_relation_proof(
+            "direct ballot committed linear claim challenge count does not match the profile",
+        )
+    })?;
+
+    Ok(*challenge % modulus)
 }
 
 fn evaluate_direct_ballot_committed_projected_bgv_linear_part(

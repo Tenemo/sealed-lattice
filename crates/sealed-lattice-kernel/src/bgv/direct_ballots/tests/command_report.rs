@@ -34,14 +34,14 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     assert_eq!(
         result["proofAttempt"]["coverage"].as_str(),
         Some(
-            "projected BGV rows and projected no-wrap carry rows for every RNS limb component, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, and statement-derived random-projected support are checked by the projected response transcript; an appended committed trace proof also binds one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score row sums, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape to salted masked columns; claim soundness, Fiat-Shamir/QROM accounting, and zero-knowledge are not accepted"
+            "projected BGV rows and projected no-wrap carry rows for every RNS limb component are checked by the projected response transcript; score row sums and score weighted-sum constraints are checked as exact signed integer relations against the full Fiat-Shamir challenge; the appended committed trace proof binds one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score row sums, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape to salted masked columns; conservative projected-BGV, committed-trace soundness, zero-knowledge budgets, the accepted verifier certificate, accepted randomness boundary, and package verification certificates are recorded"
         )
     );
     assert!(
         result["proofAttempt"]["generation"]
             .as_str()
             .expect("proof generation assessment")
-            .starts_with("Generated and verified one internal binary proof")
+            .starts_with("Generated and verified one binary proof")
     );
     assert_eq!(
         result["proofAttempt"]["proofSizeBytes"],
@@ -49,7 +49,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofSizeBytes"].as_u64(),
-        Some(31_570_776)
+        Some(48_154_664)
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["challengeBits"].as_u64(),
@@ -57,15 +57,11 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["proofModelAccepted"].as_bool(),
-        Some(false)
+        Some(true)
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["weakestRelationEffectiveBitsPerCheck"].as_u64(),
-        Some(16)
-    );
-    assert_eq!(
-        result["proofAttempt"]["proofAccounting"]["supportRelationModulusBits"].as_u64(),
-        Some(141)
+        Some(157)
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["targetClassicalSoundnessBits"].as_u64(),
@@ -73,21 +69,23 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofAccounting"]["minimumIndependentRepetitionsForTarget"],
-        Value::Null
+        json!(1)
     );
     assert_eq!(
-        result["proofAttempt"]["proofAccounting"]
-            ["estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses"]
-            .as_u64(),
-        Some(8)
+        result["proofAttempt"]["proofAccounting"]["estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses"],
+        json!(1)
     );
     assert_eq!(
-        result["proofAttempt"]["proofAccounting"]["estimatedRepeatedProofSizeBytes"].as_u64(),
-        Some(31_570_776 * 8)
+        result["proofAttempt"]["proofAccounting"]["estimatedRepeatedProofSizeBytes"],
+        result["proofAttempt"]["proofSizeBytes"]
     );
     assert_eq!(
-        result["proofAttempt"]["proofAccounting"]["classicalSoundnessBitsAfterSupportUnionBound"],
-        Value::Null
+        result["proofAttempt"]["proofAccounting"]["estimatedRepeatedTotalProofBytes"],
+        result["proofAttempt"]["totalProofBytes"]
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["classicalSoundnessBitsAfterCommittedTraceAccounting"],
+        json!(157)
     );
     assert!(
         result["proofAttempt"]["proofAccounting"]
@@ -96,11 +94,31 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
             .expect("zero-knowledge shift slack bits")
             >= 128
     );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["effectiveStatisticalZeroKnowledgeBits"],
+        json!(143)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceZeroKnowledge"]["minimumUnopenedMaskDimensionPerColumn"],
+        json!(222)
+    );
     assert!(
         result["proofAttempt"]["proofAccounting"]["decision"]
             .as_str()
             .expect("proof accounting decision")
-            .contains("claim soundness is not accepted")
+            .contains("mask/opening distribution records a zero-knowledge budget")
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["committedTraceSoundness"]
+            ["budgetedClassicalBitsAfterReservedLosses"]
+            .as_u64(),
+        Some(157)
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofAccounting"]["projectedBgvProjectionSoundness"]
+            ["budgetClearsTargetBeforeCommittedTraceReduction"]
+            .as_bool(),
+        Some(true)
     );
     assert_eq!(
         result["proofAttempt"]["proofTransport"]["encoding"].as_str(),
@@ -120,7 +138,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["proofTransport"]["chunksPerProof"].as_u64(),
-        Some(31)
+        Some(46)
     );
     assert_eq!(
         result["proofAttempt"]["proofTransport"]["transportedProofSizeBytes"],
@@ -142,7 +160,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
             .as_array()
             .expect("first proof chunk hashes")
             .len(),
-        31
+        46
     );
     assert_eq!(
         result["proofAttempt"]["proofTransport"]["firstProofChunkManifestRoot"]
@@ -175,6 +193,14 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         result["proofAttempt"]["proofTransport"]["firstEncryptedBallotPackage"]["proofChunkRoot"],
         result["proofAttempt"]["proofTransport"]["firstProofChunkManifestRoot"]
     );
+    assert_eq!(
+        result["proofAttempt"]["proofTransport"]["firstEncryptedBallotPackage"]["signature"],
+        Value::Null
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofTransport"]["firstVoterSignatureSignedRoot"]["objectRoot"],
+        result["proofAttempt"]["proofTransport"]["firstEncryptedBallotPackageRoot"]
+    );
     let package_json =
         canonical_json(&result["proofAttempt"]["proofTransport"]["firstEncryptedBallotPackage"])
             .expect("package should serialize canonically");
@@ -202,6 +228,27 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         128
     );
     assert_eq!(
+        result["proofAttempt"]["proofTransport"]["soundnessCertificateHash"]
+            .as_str()
+            .expect("soundness certificate hash")
+            .len(),
+        128
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofTransport"]["zeroKnowledgeCertificateHash"]
+            .as_str()
+            .expect("zero-knowledge certificate hash")
+            .len(),
+        128
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofTransport"]["verifierCertificateHash"]
+            .as_str()
+            .expect("verifier certificate hash")
+            .len(),
+        128
+    );
+    assert_eq!(
         result["proofAttempt"]["proofMaskRandomness"]["source"].as_str(),
         Some(DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_DEVELOPMENT_FIXTURE)
     );
@@ -212,13 +259,13 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     assert_eq!(
         result["proofAttempt"]["blocker"].as_str(),
         Some(
-            "Next missing pieces are accepted weakest-relation soundness accounting, committed-trace zero-knowledge accounting, Fiat-Shamir/QROM accounting, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, accepted package verifier closure for the proof profile, public accepted randomness API boundaries, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
+            "Next missing pieces are mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
         )
     );
     assert_eq!(
         result["proofAttempt"]["responseSharing"].as_str(),
         Some(
-            "one binary response vector is checked against statement-derived projected BGV rows, projected no-wrap carry rows, score-linear constraints, and support constraints; response bytes are not duplicated per limb"
+            "one binary response vector is checked against statement-derived projected BGV rows, projected no-wrap carry rows, and score-linear constraints; support rows are checked by the appended committed trace proof; response bytes are not duplicated per limb"
         )
     );
     assert_eq!(
@@ -244,7 +291,7 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
     );
     assert_eq!(
         result["proofAttempt"]["projectedBgvRelationProjectionsPerLimbComponent"].as_u64(),
-        Some(3)
+        Some(6)
     );
     assert_eq!(
         result["proofAttempt"]["responsePolynomialDegree"].as_u64(),
@@ -317,8 +364,8 @@ fn direct_encrypted_ballot_public_package_command_reports_package_artifacts() {
     let result = create_direct_encrypted_ballot_packages(&json!({
         "acceptedPublicKeyMaterial": public_material_fixture.accepted_public_key_material,
         "acceptedSetupHandoff": public_material_fixture.accepted_setup_handoff.clone(),
-        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
-        "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
+        "ballotEncryptionRandomness": direct_ballot_test_fresh_labelled_ballot_encryption_randomness(1),
+        "proofMaskRandomness": direct_ballot_test_fresh_labelled_proof_mask_randomness(1),
         "ballots": [
             direct_ballot_test_ballot_json("voter-public-package", 0)
         ]
@@ -431,6 +478,53 @@ fn direct_encrypted_ballot_public_package_command_reports_package_artifacts() {
     assert_eq!(
         package_record["encryptedBallotPackage"]["proofStatementHash"],
         package_record["statementHash"]
+    );
+    assert_eq!(
+        package_record["encryptedBallotPackage"]["signature"],
+        Value::Null
+    );
+    assert_eq!(
+        package_record["voterSignatureSignedRoot"],
+        proof_transport["firstVoterSignatureSignedRoot"]
+    );
+    assert_eq!(
+        package_record["voterSignatureSignedRoot"]["objectRoot"],
+        package_record["encryptedBallotPackageRoot"]
+    );
+    assert!(
+        result["packageCreation"]["signatureBoundary"]
+            .as_str()
+            .expect("signature boundary")
+            .contains("ML-DSA protocol signature envelope")
+    );
+
+    assert_eq!(
+        result["proofAttempt"]["proofCostEvidence"]["evidencePath"].as_str(),
+        Some("accepted public encrypted ballot package creation")
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofCostEvidence"]["proofSizeBytes"],
+        result["proofAttempt"]["proofSizeBytes"]
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofCostEvidence"]["proofChunkCount"],
+        proof_transport["chunksPerProof"]
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofCostEvidence"]["proofChunkSizeBytes"].as_u64(),
+        Some(
+            u64::try_from(DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES).expect("chunk size fits u64")
+        )
+    );
+    assert_eq!(
+        result["proofAttempt"]["proofCostEvidence"]["totalProofBytes"],
+        result["proofAttempt"]["totalProofBytes"]
+    );
+    assert!(
+        result["proofAttempt"]["proofCostEvidence"]["wasmRuntimeEvidence"]
+            .as_str()
+            .expect("WASM runtime evidence boundary")
+            .contains("largest copied buffer")
     );
 
     let package_json = canonical_json(&package_record["encryptedBallotPackage"])

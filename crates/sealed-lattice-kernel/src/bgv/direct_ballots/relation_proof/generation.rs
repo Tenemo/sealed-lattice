@@ -42,12 +42,9 @@ pub(in crate::bgv::direct_ballots) fn generate_direct_ballot_relation_proof(
         &mask_vector,
     )?;
     let score_linear_commitment = evaluate_direct_ballot_score_linear_commitment(&mask_vector)?;
-    let support_commitment =
-        evaluate_direct_ballot_support_commitment(&statement_hash, &mask_vector, &witness_vector)?;
     let encoded_commitments = encode_direct_ballot_relation_commitments(
         &bgv_relation_commitments,
         &score_linear_commitment,
-        &support_commitment,
     )?;
     let relation_commitment_bytes = encoded_commitments.len();
     let relation_commitment_hash =
@@ -75,8 +72,7 @@ pub(in crate::bgv::direct_ballots) fn generate_direct_ballot_relation_proof(
         relation_commitment_bytes,
         response_bytes: direct_ballot_relation_response_bytes(),
         relation_commitment_scalar_count: direct_ballot_projected_bgv_commitment_scalar_count()
-            + direct_ballot_score_linear_commitment_scalar_count()
-            + direct_ballot_support_commitment_scalar_count(),
+            + direct_ballot_score_linear_commitment_scalar_count(),
         shared_response_polynomial_count: DIRECT_BALLOT_RELATION_WITNESS_POLYNOMIALS,
         shared_response_scalar_count: direct_ballot_relation_response_scalar_count(),
         proof_gate: direct_ballot_relation_proof_gate(proof_size_bytes),

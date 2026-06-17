@@ -81,7 +81,8 @@ use crate::{
         },
         direct_ballots::{
             direct_ballot_arithmetic_certificate_hash, direct_ballot_encoder_matrix_root,
-            direct_ballot_reserved_slot_rule_hash,
+            direct_ballot_reserved_slot_rule_hash, direct_ballot_soundness_certificate_hash,
+            direct_ballot_verifier_certificate_hash, direct_ballot_zero_knowledge_certificate_hash,
         },
         encoding::encode_batch_plaintext_slots,
         evaluator::{

@@ -33,6 +33,7 @@ export type ProtocolObjectType =
 /** Object type that is signed as a canonical signed root. */
 export type SignedObjectType =
     | 'EncryptedBallot'
+    | 'EncryptedBallotPackage'
     | 'EncryptedBallotAggregate'
     | 'BallotValidityProofRecord'
     | 'BoardHead'

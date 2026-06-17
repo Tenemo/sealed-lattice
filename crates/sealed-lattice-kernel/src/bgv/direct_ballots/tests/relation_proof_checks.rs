@@ -86,7 +86,7 @@ fn direct_ballot_shared_rns_relation_proof_rejects_single_bit_proof_mutations() 
         (
             "randomizer response",
             direct_ballot_relation_response_offset(proof_bytes),
-            "randomizer projected support check failed",
+            "direct ballot projected BGV relation limb 0",
         ),
         (
             "score response",

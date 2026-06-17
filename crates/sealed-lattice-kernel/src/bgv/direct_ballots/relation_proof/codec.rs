@@ -4,8 +4,7 @@ pub(super) fn parse_direct_ballot_relation_proof(
     proof_bytes: &[u8],
     expected_statement_hash: &[u8; 64],
 ) -> CanonicalResult<ParsedDirectBallotRelationProof> {
-    let expected_size = DIRECT_BALLOT_RELATION_PROOF_MAGIC.len()
-        + expected_statement_hash.len()
+    let expected_size = direct_ballot_relation_proof_header_bytes()?
         + DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES
         + direct_ballot_relation_commitment_bytes()
         + direct_ballot_relation_response_bytes()
@@ -16,16 +15,8 @@ pub(super) fn parse_direct_ballot_relation_proof(
         ));
     }
     let mut cursor = 0_usize;
-    if &proof_bytes[..DIRECT_BALLOT_RELATION_PROOF_MAGIC.len()]
-        != DIRECT_BALLOT_RELATION_PROOF_MAGIC
-    {
-        return Err(invalid_direct_ballot_relation_proof(
-            "direct ballot relation proof has the wrong format marker",
-        ));
-    }
-    cursor += DIRECT_BALLOT_RELATION_PROOF_MAGIC.len();
-    let statement_hash = read_hash(proof_bytes, &mut cursor)?;
-    if &statement_hash != expected_statement_hash {
+    let proof_header = read_direct_ballot_relation_proof_header(proof_bytes, &mut cursor)?;
+    if &proof_header.statement_hash_bytes != expected_statement_hash {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot relation proof is not bound to this statement",
         ));
@@ -36,12 +27,11 @@ pub(super) fn parse_direct_ballot_relation_proof(
             "direct ballot relation proof challenge is outside the expected range",
         ));
     }
-    let (bgv_relation_commitments, score_linear_commitment, support_commitment) =
+    let (bgv_relation_commitments, score_linear_commitment) =
         read_direct_ballot_relation_commitments(proof_bytes, &mut cursor)?;
     let encoded_commitments = encode_direct_ballot_relation_commitments(
         &bgv_relation_commitments,
         &score_linear_commitment,
-        &support_commitment,
     )?;
     let relation_commitment_hash =
         direct_ballot_relation_commitment_hash(expected_statement_hash, &encoded_commitments);
@@ -83,7 +73,6 @@ pub(super) fn parse_direct_ballot_relation_proof(
         challenge,
         bgv_relation_commitments,
         score_linear_commitment,
-        support_commitment,
         response_vector,
         committed_trace_proof_bytes,
         relation_commitment_hash,
@@ -98,14 +87,14 @@ pub(super) fn encode_direct_ballot_relation_proof(
     committed_trace_proof_bytes: &[u8],
 ) -> CanonicalResult<Vec<u8>> {
     let mut proof_bytes = Vec::with_capacity(
-        DIRECT_BALLOT_RELATION_PROOF_MAGIC.len()
-            + statement_hash.len()
+        direct_ballot_relation_proof_header_bytes()?
             + DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES
             + encoded_commitments.len()
-            + direct_ballot_relation_response_bytes(),
+            + direct_ballot_relation_response_bytes()
+            + 8
+            + committed_trace_proof_bytes.len(),
     );
-    proof_bytes.extend_from_slice(DIRECT_BALLOT_RELATION_PROOF_MAGIC);
-    proof_bytes.extend_from_slice(statement_hash);
+    encode_direct_ballot_relation_proof_header(&mut proof_bytes, statement_hash)?;
     append_challenge(&mut proof_bytes, challenge)?;
     proof_bytes.extend_from_slice(encoded_commitments);
     encode_direct_ballot_relation_response(&mut proof_bytes, response_vector)?;
@@ -122,10 +111,121 @@ pub(super) fn encode_direct_ballot_relation_proof(
     Ok(proof_bytes)
 }
 
+pub(in crate::bgv::direct_ballots) struct DirectBallotRelationProofPublicHeader {
+    pub(in crate::bgv::direct_ballots) proof_profile_hash: String,
+    pub(in crate::bgv::direct_ballots) statement_hash: String,
+    statement_hash_bytes: [u8; 64],
+}
+
+pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_header_bytes()
+-> CanonicalResult<usize> {
+    Ok(DIRECT_BALLOT_RELATION_PROOF_MAGIC.len()
+        + size_of::<u64>()
+        + 64
+        + 64
+        + direct_ballot_relation_proof_dimension_words()?
+            .len()
+            .checked_mul(size_of::<u64>())
+            .ok_or_else(|| {
+                invalid_direct_ballot_relation_proof(
+                    "direct ballot relation proof dimension byte count overflowed",
+                )
+            })?)
+}
+
+pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_public_header(
+    proof_bytes: &[u8],
+) -> CanonicalResult<DirectBallotRelationProofPublicHeader> {
+    let mut cursor = 0_usize;
+    read_direct_ballot_relation_proof_header(proof_bytes, &mut cursor)
+}
+
+fn encode_direct_ballot_relation_proof_header(
+    proof_bytes: &mut Vec<u8>,
+    statement_hash: &[u8; 64],
+) -> CanonicalResult<()> {
+    proof_bytes.extend_from_slice(DIRECT_BALLOT_RELATION_PROOF_MAGIC);
+    append_u64(proof_bytes, DIRECT_BALLOT_RELATION_PROOF_FORMAT_VERSION);
+    append_hash_hex_bytes(
+        proof_bytes,
+        &direct_ballot_relation_proof_profile_hash()?,
+        "direct ballot relation proof profile hash",
+    )?;
+    proof_bytes.extend_from_slice(statement_hash);
+    for dimension_word in direct_ballot_relation_proof_dimension_words()? {
+        append_u64(proof_bytes, dimension_word);
+    }
+
+    Ok(())
+}
+
+fn read_direct_ballot_relation_proof_header(
+    proof_bytes: &[u8],
+    cursor: &mut usize,
+) -> CanonicalResult<DirectBallotRelationProofPublicHeader> {
+    let magic = read_fixed_bytes::<8>(proof_bytes, cursor)?;
+    if &magic != DIRECT_BALLOT_RELATION_PROOF_MAGIC {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation proof has the wrong format marker",
+        ));
+    }
+
+    let format_version = read_u64(proof_bytes, cursor)?;
+    if format_version != DIRECT_BALLOT_RELATION_PROOF_FORMAT_VERSION {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation proof has an unsupported format version",
+        ));
+    }
+
+    let proof_profile_hash_bytes = read_hash(proof_bytes, cursor)?;
+    let proof_profile_hash = to_hex(&proof_profile_hash_bytes);
+    let expected_proof_profile_hash = direct_ballot_relation_proof_profile_hash()?;
+    if proof_profile_hash != expected_proof_profile_hash {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation proof profile hash does not match the selected profile",
+        ));
+    }
+
+    let statement_hash_bytes = read_hash(proof_bytes, cursor)?;
+    let statement_hash = to_hex(&statement_hash_bytes);
+    let expected_dimension_words = direct_ballot_relation_proof_dimension_words()?;
+    let mut relation_dimension_words = Vec::with_capacity(expected_dimension_words.len());
+    for _ in 0..expected_dimension_words.len() {
+        relation_dimension_words.push(read_u64(proof_bytes, cursor)?);
+    }
+    if relation_dimension_words != expected_dimension_words {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot relation proof dimensions do not match the selected profile",
+        ));
+    }
+
+    Ok(DirectBallotRelationProofPublicHeader {
+        proof_profile_hash,
+        statement_hash,
+        statement_hash_bytes,
+    })
+}
+
+fn append_hash_hex_bytes(output: &mut Vec<u8>, hash_hex: &str, label: &str) -> CanonicalResult<()> {
+    let hash_bytes = crate::transcript_core::decode_hex(hash_hex).map_err(|error| {
+        CanonicalError::new(
+            error.code,
+            format!("{label} must be encoded as lowercase hexadecimal bytes"),
+        )
+    })?;
+    if hash_bytes.len() != 64 {
+        return Err(invalid_direct_ballot_relation_proof(format!(
+            "{label} must be a 64-byte hash"
+        )));
+    }
+    output.extend_from_slice(&hash_bytes);
+
+    Ok(())
+}
+
 pub(super) fn encode_direct_ballot_relation_commitments(
     bgv_relation_commitments: &[DirectBallotBgvRelationCommitment],
     score_linear_commitment: &DirectBallotScoreLinearCommitment,
-    support_commitment: &DirectBallotSupportCommitment,
 ) -> CanonicalResult<Vec<u8>> {
     if bgv_relation_commitments.len() != DATA_PRIMES.len() {
         return Err(invalid_direct_ballot_relation_proof(
@@ -154,7 +254,6 @@ pub(super) fn encode_direct_ballot_relation_commitments(
         )?;
     }
     encode_score_linear_commitment(&mut encoded, score_linear_commitment)?;
-    encode_support_commitment(&mut encoded, support_commitment)?;
 
     Ok(encoded)
 }
@@ -175,30 +274,7 @@ pub(super) fn encode_score_linear_commitment(
         .iter()
         .chain(commitment.weighted_differences.iter())
     {
-        if *value >= PLAINTEXT_MODULUS {
-            return Err(invalid_direct_ballot_relation_proof(
-                "direct ballot score linear commitment is not canonical",
-            ));
-        }
-        append_u64(output, *value);
-    }
-
-    Ok(())
-}
-
-pub(super) fn encode_support_commitment(
-    output: &mut Vec<u8>,
-    commitment: &DirectBallotSupportCommitment,
-) -> CanonicalResult<()> {
-    validate_direct_ballot_support_commitment_shape(commitment)?;
-    for value in commitment
-        .one_hot_booleanity
-        .iter()
-        .chain(commitment.randomizer_support.iter())
-        .chain(commitment.error_zero_support.iter())
-        .chain(commitment.error_one_support.iter())
-    {
-        append_u64(output, *value);
+        append_signed_bigint_fixed(output, value)?;
     }
 
     Ok(())
@@ -236,7 +312,6 @@ pub(super) fn read_direct_ballot_relation_commitments(
 ) -> CanonicalResult<(
     Vec<DirectBallotBgvRelationCommitment>,
     DirectBallotScoreLinearCommitment,
-    DirectBallotSupportCommitment,
 )> {
     let bgv_commitments = DATA_PRIMES
         .iter()
@@ -259,81 +334,22 @@ pub(super) fn read_direct_ballot_relation_commitments(
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let score_linear_commitment = read_score_linear_commitment(proof_bytes, cursor)?;
-    let support_commitment = read_support_commitment(proof_bytes, cursor)?;
 
-    Ok((bgv_commitments, score_linear_commitment, support_commitment))
+    Ok((bgv_commitments, score_linear_commitment))
 }
 
 pub(super) fn read_score_linear_commitment(
     proof_bytes: &[u8],
     cursor: &mut usize,
 ) -> CanonicalResult<DirectBallotScoreLinearCommitment> {
-    let bucket_sums = read_residue_scalars(
-        proof_bytes,
-        cursor,
-        PLAINTEXT_MODULUS,
-        DIRECT_BALLOT_OPTION_COUNT,
-    )?;
-    let weighted_differences = read_residue_scalars(
-        proof_bytes,
-        cursor,
-        PLAINTEXT_MODULUS,
-        DIRECT_BALLOT_OPTION_COUNT,
-    )?;
+    let bucket_sums = read_signed_scalars(proof_bytes, cursor, DIRECT_BALLOT_OPTION_COUNT)?;
+    let weighted_differences =
+        read_signed_scalars(proof_bytes, cursor, DIRECT_BALLOT_OPTION_COUNT)?;
 
     Ok(DirectBallotScoreLinearCommitment {
         bucket_sums,
         weighted_differences,
     })
-}
-
-pub(super) fn read_support_commitment(
-    proof_bytes: &[u8],
-    cursor: &mut usize,
-) -> CanonicalResult<DirectBallotSupportCommitment> {
-    Ok(DirectBallotSupportCommitment {
-        one_hot_booleanity: read_projected_support_commitment(
-            proof_bytes,
-            cursor,
-            DirectBallotSupportKind::OneHot,
-        )?,
-        randomizer_support: read_projected_support_commitment(
-            proof_bytes,
-            cursor,
-            DirectBallotSupportKind::Randomizer,
-        )?,
-        error_zero_support: read_projected_support_commitment(
-            proof_bytes,
-            cursor,
-            DirectBallotSupportKind::Error,
-        )?,
-        error_one_support: read_projected_support_commitment(
-            proof_bytes,
-            cursor,
-            DirectBallotSupportKind::Error,
-        )?,
-    })
-}
-
-fn read_projected_support_commitment(
-    proof_bytes: &[u8],
-    cursor: &mut usize,
-    support_kind: DirectBallotSupportKind,
-) -> CanonicalResult<Vec<u64>> {
-    let scalar_count_per_modulus = DIRECT_BALLOT_SUPPORT_PROJECTIONS_PER_PARTITION
-        * support_kind.expansion_coefficient_count();
-    let mut scalars =
-        Vec::with_capacity(direct_ballot_support_moduli().len() * scalar_count_per_modulus);
-    for modulus in direct_ballot_support_moduli() {
-        scalars.extend(read_residue_scalars(
-            proof_bytes,
-            cursor,
-            *modulus,
-            scalar_count_per_modulus,
-        )?);
-    }
-
-    Ok(scalars)
 }
 
 pub(super) fn read_residue_scalars(
@@ -459,79 +475,6 @@ pub(super) fn direct_ballot_relation_commitment_hash(
         "sealed-lattice/direct-encrypted-ballot/relation-commitment-v1",
         &[statement_hash, encoded_commitments],
     )
-}
-
-pub(super) fn validate_direct_ballot_support_commitment_shape(
-    commitment: &DirectBallotSupportCommitment,
-) -> CanonicalResult<()> {
-    let expected_one_hot_scalars =
-        projected_support_commitment_scalar_count_for_kind(DirectBallotSupportKind::OneHot);
-    let expected_randomizer_scalars =
-        projected_support_commitment_scalar_count_for_kind(DirectBallotSupportKind::Randomizer);
-    let expected_error_scalars =
-        projected_support_commitment_scalar_count_for_kind(DirectBallotSupportKind::Error);
-    if commitment.one_hot_booleanity.len() != expected_one_hot_scalars
-        || commitment.randomizer_support.len() != expected_randomizer_scalars
-        || commitment.error_zero_support.len() != expected_error_scalars
-        || commitment.error_one_support.len() != expected_error_scalars
-    {
-        return Err(invalid_direct_ballot_relation_proof(
-            "direct ballot support commitment has the wrong shape",
-        ));
-    }
-    validate_projected_support_commitment_scalars(
-        DirectBallotSupportKind::OneHot,
-        &commitment.one_hot_booleanity,
-    )?;
-    validate_projected_support_commitment_scalars(
-        DirectBallotSupportKind::Randomizer,
-        &commitment.randomizer_support,
-    )?;
-    validate_projected_support_commitment_scalars(
-        DirectBallotSupportKind::Error,
-        &commitment.error_zero_support,
-    )?;
-    validate_projected_support_commitment_scalars(
-        DirectBallotSupportKind::Error,
-        &commitment.error_one_support,
-    )?;
-
-    Ok(())
-}
-
-fn projected_support_commitment_scalar_count_for_kind(
-    support_kind: DirectBallotSupportKind,
-) -> usize {
-    direct_ballot_support_moduli().len()
-        * DIRECT_BALLOT_SUPPORT_PROJECTIONS_PER_PARTITION
-        * support_kind.expansion_coefficient_count()
-}
-
-fn validate_projected_support_commitment_scalars(
-    support_kind: DirectBallotSupportKind,
-    scalars: &[u64],
-) -> CanonicalResult<()> {
-    let scalar_count_per_modulus = DIRECT_BALLOT_SUPPORT_PROJECTIONS_PER_PARTITION
-        * support_kind.expansion_coefficient_count();
-    if scalars.len() != direct_ballot_support_moduli().len() * scalar_count_per_modulus {
-        return Err(invalid_direct_ballot_relation_proof(
-            "direct ballot support commitment has the wrong shape",
-        ));
-    }
-    for (support_modulus_index, modulus) in direct_ballot_support_moduli().iter().enumerate() {
-        let start = support_modulus_index * scalar_count_per_modulus;
-        let end = start + scalar_count_per_modulus;
-        if scalars[start..end]
-            .iter()
-            .any(|coefficient| *coefficient >= *modulus)
-        {
-            return Err(invalid_direct_ballot_relation_proof(
-                "direct ballot support commitment is not canonical",
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
@@ -727,20 +670,6 @@ pub(super) fn usize_to_u64_bytes(value: usize) -> CanonicalResult<[u8; 8]> {
             )
         })?
         .to_le_bytes())
-}
-
-pub(super) fn checked_repeated_byte_count(
-    byte_count: usize,
-    repetitions: u32,
-    label: &str,
-) -> CanonicalResult<usize> {
-    let repetitions = usize::try_from(repetitions).map_err(|_| {
-        invalid_direct_ballot_relation_proof(format!("{label} repetition count does not fit usize"))
-    })?;
-
-    byte_count
-        .checked_mul(repetitions)
-        .ok_or_else(|| invalid_direct_ballot_relation_proof(format!("{label} overflowed")))
 }
 
 pub(super) fn ceil_log2_usize(value: usize) -> u32 {

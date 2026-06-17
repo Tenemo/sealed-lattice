@@ -1,5 +1,10 @@
 use super::*;
 
+use crate::protocol_signatures::create_protocol_signature_fixture;
+
+const DIRECT_BALLOT_VOTER_SIGNATURE_FIXTURE_SEED: &str =
+    "direct-encrypted-ballot-voter-signature-fixture";
+
 #[test]
 fn direct_ballot_public_proof_transport_rejects_wrong_chunk_hash() {
     let fixture = direct_ballot_relation_proof_fixture();
@@ -130,13 +135,14 @@ fn direct_ballot_proof_chunk_manifest_binds_statement_and_package_roots() {
         transport.encrypted_ballot_package["proofChunkRoot"].as_str(),
         Some(transport.proof_chunk_manifest_root.as_str())
     );
+    assert_eq!(transport.encrypted_ballot_package["signature"], Value::Null);
     assert_eq!(
-        transport.encrypted_ballot_package["signature"]["objectType"].as_str(),
-        Some("DevelopmentEncryptedBallotPackageSignaturePlaceholder")
+        transport.voter_signature_signed_root["objectRoot"].as_str(),
+        Some(transport.encrypted_ballot_package_root.as_str())
     );
     assert_eq!(
-        transport.encrypted_ballot_package["signature"]["proofStatementHash"].as_str(),
-        Some(fixture.proof_generation.statement_hash_hex.as_str())
+        transport.voter_signature_signed_root["contextHash"].as_str(),
+        Some(fixture.encrypted_ballot.input.action_context_hash.as_str())
     );
 }
 
@@ -155,20 +161,24 @@ fn direct_ballot_package_schema_roots_match_stable_fixture_vectors() {
     .expect("proof transport");
 
     assert_eq!(
-        fixture.proof_generation.statement_hash_hex,
-        "44ff914c86e91b5496382adde44c62671678e1b7a002cadb44fb25ed57d992ed930fec58a93c66eaa68f63d9202289fadd9a04dd14fb5cd06333b69c958d9b9c"
-    );
-    assert_eq!(
-        fixture.proof_generation.proof_bytes_hash,
-        "258ffe33b6d62ffd6a460edf3ca4ed8fc9cb63c2fa9bf0fe58066d0c7c4024c696ea198739220fc21162b7d5682cfe3ad80f7629c4eeab452082963917fada90"
-    );
-    assert_eq!(
-        transport.proof_chunk_manifest_root,
-        "3778c7bbab9f94fc711eba9bdb91646d57671ee95891c272c42ba3a81d2e35256fe3c0706276c510c1291d571033bf19101a3f61a88785239b883e19a3f009fc"
-    );
-    assert_eq!(
-        transport.encrypted_ballot_package_root,
-        "dd061170efba8981c1e1eddc0abdf075bc705fb8063cb90996ed35b0928649122b58478c2123a4cb3e2213cd4c9ec8feaad9918e05672a8e3d01d905704689a6"
+        (
+            fixture.proof_generation.proof_size_bytes,
+            transport.proof_size_bytes,
+            transport.chunk_count,
+            fixture.proof_generation.statement_hash_hex.as_str(),
+            fixture.proof_generation.proof_bytes_hash.as_str(),
+            transport.proof_chunk_manifest_root.as_str(),
+            transport.encrypted_ballot_package_root.as_str(),
+        ),
+        (
+            48_154_664,
+            48_154_664,
+            46,
+            "4c0101bb5b819f5b9f08a45029dfb2e5282e51f95815ac6c373bc8567c7f027273466252977ba0f52a45ff1a63069c750f2b505d81d7a3ba469b96aa833ec36b",
+            "191c264e5661e2f55e23b5c72cee10a894cc482d5b4ce106bdf25f4c5967357bd7e293d07d1c3ce751d5d055fde0d44a4333505cc49e0567c61c28ab625d79eb",
+            "8e940a71492f470170148febfc64eb87a83263c2110c40ff5953371afc9a58cd6b23939a9477347aa27325239bf5ed7abdb810b4191798fdd07442ca9291f673",
+            "e64d711211e61dedf9375d392e1e251b425bad5e9ab958415a216873230ed3643620aac99f586167d61a8ff81e37062abf3044796f6c4ca03dccedbaa79bdaff",
+        )
     );
 }
 
@@ -185,11 +195,13 @@ fn direct_ballot_package_verifier_accepts_public_package_and_chunks() {
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
+    let (package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
 
     let result = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
-        "encryptedBallotPackage": transport.encrypted_ballot_package,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+        "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
     .expect("package verifier accepts public artifacts");
@@ -201,7 +213,7 @@ fn direct_ballot_package_verifier_accepts_public_package_and_chunks() {
     assert_eq!(
         result["verificationStatus"].as_str(),
         Some(
-            "setup handoff, public package artifacts, and internal direct ballot relation proof verified"
+            "setup handoff, voter signature, public package artifacts, verifier-certified proof profile, and direct ballot relation proof verified"
         )
     );
     assert_eq!(
@@ -232,11 +244,50 @@ fn direct_ballot_package_verifier_accepts_public_package_and_chunks() {
         result["proofChunkCount"].as_u64(),
         Some(u64::try_from(transport.chunk_count).expect("chunk count fits u64"))
     );
+    assert_eq!(
+        result["signatureStatus"].as_str(),
+        Some(
+            "voter ML-DSA protocol signature verified against the supplied voter signing public-key hash and encrypted ballot package root"
+        )
+    );
+    let certificate = &result["packageVerificationCertificate"];
+    assert_eq!(
+        certificate["objectType"].as_str(),
+        Some("DirectEncryptedBallotPackageVerificationCertificate")
+    );
+    assert_eq!(certificate["packageRoot"], result["packageRoot"]);
+    assert_eq!(certificate["signatureHash"], result["signatureHash"]);
+    assert_eq!(
+        certificate["publicAggregationInput"]["packageRoot"],
+        result["packageRoot"]
+    );
+    assert_eq!(
+        certificate["publicAggregationInput"]["ciphertextRoot"],
+        result["ciphertextRoot"]
+    );
+    assert_eq!(
+        certificate["packageVerificationCertificateHash"],
+        result["packageVerificationCertificateHash"]
+    );
+    let mut certificate_hash_input = certificate.clone();
+    certificate_hash_input
+        .as_object_mut()
+        .expect("certificate object")
+        .remove("packageVerificationCertificateHash");
+    let expected_certificate_hash = derive_protocol_hash(
+        "DirectEncryptedBallotPackageVerificationCertificateHash",
+        &certificate_hash_input,
+    )
+    .expect("certificate hash");
+    assert_eq!(
+        result["packageVerificationCertificateHash"].as_str(),
+        Some(expected_certificate_hash.as_str())
+    );
     assert!(
         result["claimBoundary"]
             .as_str()
             .expect("claim boundary")
-            .contains("development evidence")
+            .contains("cannot recover consumed randomness")
     );
 }
 
@@ -253,6 +304,7 @@ fn direct_ballot_package_verifier_rejects_tampered_public_chunk_bytes() {
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
+    let (package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
     let mut proof_chunks = transport.proof_chunks.clone();
     let chunk_bytes_hex = proof_chunks[0]["bytesHex"]
         .as_str()
@@ -268,7 +320,8 @@ fn direct_ballot_package_verifier_rejects_tampered_public_chunk_bytes() {
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
-        "encryptedBallotPackage": transport.encrypted_ballot_package,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+        "encryptedBallotPackage": package,
         "proofChunks": proof_chunks,
     }))
     .expect_err("tampered chunk bytes must reject");
@@ -290,12 +343,13 @@ fn direct_ballot_package_verifier_rejects_forbidden_package_fields() {
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
-    let mut package = transport.encrypted_ballot_package.clone();
+    let (mut package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
     package["plaintextScores"] = json!([1, 2, 3]);
 
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
         "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
@@ -324,10 +378,12 @@ fn direct_ballot_package_verifier_rejects_unexpected_package_fields_after_root_r
         "statementHash": fixture.proof_generation.statement_hash_hex,
     });
     rebind_encrypted_ballot_package_root(&mut package);
+    let voter_signing_public_key_hash = sign_encrypted_ballot_package(&mut package);
 
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
         "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
@@ -353,10 +409,12 @@ fn direct_ballot_package_verifier_rejects_package_context_drift_after_root_rebin
     let mut package = transport.encrypted_ballot_package.clone();
     package["manifestHash"] = json!("0".repeat(128));
     rebind_encrypted_ballot_package_root(&mut package);
+    let voter_signing_public_key_hash = sign_encrypted_ballot_package(&mut package);
 
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
         "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
@@ -389,14 +447,19 @@ fn direct_ballot_package_verifier_rejects_layout_and_encoder_drift_after_root_re
         "directBallotEncoderMatrixRoot",
         "witnessPartitionProfileHash",
         "arithmeticCertificateHash",
+        "soundnessCertificateHash",
+        "zeroKnowledgeCertificateHash",
+        "verifierCertificateHash",
     ] {
         let mut package = transport.encrypted_ballot_package.clone();
         package[field_name] = json!("0".repeat(128));
         rebind_encrypted_ballot_package_root(&mut package);
+        let voter_signing_public_key_hash = sign_encrypted_ballot_package(&mut package);
 
         let error = verify_direct_encrypted_ballot_package(&json!({
             "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
             "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+            "voterSigningPublicKeyHash": voter_signing_public_key_hash,
             "encryptedBallotPackage": package,
             "proofChunks": transport.proof_chunks,
         }))
@@ -430,10 +493,12 @@ fn direct_ballot_package_verifier_rejects_unexpected_chunk_manifest_fields() {
     .expect("manifest root");
     package["proofChunkRoot"] = json!(proof_chunk_root);
     rebind_encrypted_ballot_package_root(&mut package);
+    let voter_signing_public_key_hash = sign_encrypted_ballot_package(&mut package);
 
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
         "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
@@ -461,13 +526,15 @@ fn direct_ballot_package_verifier_rejects_unexpected_public_chunk_fields() {
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
+    let (package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
     let mut proof_chunks = transport.proof_chunks.clone();
     proof_chunks[0]["legacyBytes"] = json!("00");
 
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
-        "encryptedBallotPackage": transport.encrypted_ballot_package,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+        "encryptedBallotPackage": package,
         "proofChunks": proof_chunks,
     }))
     .expect_err("proof chunk with an unexpected field must reject");
@@ -478,7 +545,7 @@ fn direct_ballot_package_verifier_rejects_unexpected_public_chunk_fields() {
 }
 
 #[test]
-fn direct_ballot_package_verifier_rejects_under_bound_signature_placeholder() {
+fn direct_ballot_package_verifier_rejects_unsigned_package() {
     let fixture = direct_ballot_accepted_package_fixture();
     let transport = transport_direct_ballot_binary_proof(
         &fixture.accepted_public_key_material,
@@ -490,19 +557,85 @@ fn direct_ballot_package_verifier_rejects_under_bound_signature_placeholder() {
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
-    let mut package = transport.encrypted_ballot_package.clone();
-    package["signature"]["proofChunkRoot"] = json!("0".repeat(128));
+    let (_, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
 
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
         "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+        "encryptedBallotPackage": transport.encrypted_ballot_package,
+        "proofChunks": transport.proof_chunks,
+    }))
+    .expect_err("unsigned package must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("signature"));
+}
+
+#[test]
+fn direct_ballot_package_verifier_rejects_wrong_voter_signing_key() {
+    let fixture = direct_ballot_accepted_package_fixture();
+    let transport = transport_direct_ballot_binary_proof(
+        &fixture.accepted_public_key_material,
+        &fixture.public_key,
+        &fixture.encrypted_ballot,
+        &fixture.proof_generation.statement_hash_hex,
+        &fixture.proof_generation.proof_bytes,
+        &fixture.proof_generation.proof_bytes_hash,
+        direct_ballot_relation_proof_bytes_hash,
+    )
+    .expect("proof transport");
+    let (package, _voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
+
+    let error = verify_direct_encrypted_ballot_package(&json!({
+        "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
+        "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": "0".repeat(128),
         "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
-    .expect_err("signature placeholder with a wrong proof chunk root must reject");
+    .expect_err("signature under a different expected voter key must reject");
 
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
-    assert!(error.message.contains("proofChunkRoot"));
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("expected key"));
+}
+
+#[test]
+fn direct_ballot_package_verifier_rejects_tampered_voter_signature_bytes() {
+    let fixture = direct_ballot_accepted_package_fixture();
+    let transport = transport_direct_ballot_binary_proof(
+        &fixture.accepted_public_key_material,
+        &fixture.public_key,
+        &fixture.encrypted_ballot,
+        &fixture.proof_generation.statement_hash_hex,
+        &fixture.proof_generation.proof_bytes,
+        &fixture.proof_generation.proof_bytes_hash,
+        direct_ballot_relation_proof_bytes_hash,
+    )
+    .expect("proof transport");
+    let (mut package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
+    let signature_bytes_hex = package["signature"]["signatureBytesHex"]
+        .as_str()
+        .expect("signature bytes hex");
+    let replacement_prefix = if signature_bytes_hex.starts_with('0') {
+        "1"
+    } else {
+        "0"
+    };
+    package["signature"]["signatureBytesHex"] =
+        json!(format!("{replacement_prefix}{}", &signature_bytes_hex[1..]));
+
+    let error = verify_direct_encrypted_ballot_package(&json!({
+        "acceptedPublicKeyMaterial": fixture.accepted_public_key_material,
+        "acceptedSetupHandoff": fixture.accepted_setup_handoff,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+        "encryptedBallotPackage": package,
+        "proofChunks": transport.proof_chunks,
+    }))
+    .expect_err("tampered voter signature bytes must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("ML-DSA signature"));
 }
 
 #[test]
@@ -518,6 +651,7 @@ fn direct_ballot_package_verifier_rejects_rebound_handoff_for_wrong_setup_root()
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
+    let (package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
     let mut accepted_setup_handoff = fixture.accepted_setup_handoff.clone();
     accepted_setup_handoff["setupPackageHash"] = json!("0".repeat(128));
     rebind_accepted_setup_handoff_root(&mut accepted_setup_handoff);
@@ -528,7 +662,8 @@ fn direct_ballot_package_verifier_rejects_rebound_handoff_for_wrong_setup_root()
     let error = verify_direct_encrypted_ballot_package(&json!({
         "acceptedPublicKeyMaterial": accepted_public_key_material,
         "acceptedSetupHandoff": accepted_setup_handoff,
-        "encryptedBallotPackage": transport.encrypted_ballot_package,
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+        "encryptedBallotPackage": package,
         "proofChunks": transport.proof_chunks,
     }))
     .expect_err("setup root mismatch must reject");
@@ -554,6 +689,7 @@ fn direct_ballot_package_verifier_rejects_rebound_handoff_layout_and_encoder_dri
         direct_ballot_relation_proof_bytes_hash,
     )
     .expect("proof transport");
+    let (package, voter_signing_public_key_hash) = signed_encrypted_ballot_package(&transport);
 
     for field_name in [
         "batchLayoutBindingHash",
@@ -563,6 +699,9 @@ fn direct_ballot_package_verifier_rejects_rebound_handoff_layout_and_encoder_dri
         "directBallotEncoderMatrixRoot",
         "witnessPartitionProfileHash",
         "arithmeticCertificateHash",
+        "soundnessCertificateHash",
+        "zeroKnowledgeCertificateHash",
+        "verifierCertificateHash",
     ] {
         let mut accepted_setup_handoff = fixture.accepted_setup_handoff.clone();
         accepted_setup_handoff["directBallotEncryptionHandoff"][field_name] =
@@ -575,7 +714,8 @@ fn direct_ballot_package_verifier_rejects_rebound_handoff_layout_and_encoder_dri
         let error = verify_direct_encrypted_ballot_package(&json!({
             "acceptedPublicKeyMaterial": accepted_public_key_material,
             "acceptedSetupHandoff": accepted_setup_handoff,
-            "encryptedBallotPackage": transport.encrypted_ballot_package,
+            "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+            "encryptedBallotPackage": package,
             "proofChunks": transport.proof_chunks,
         }))
         .expect_err("rebound handoff layout and encoder drift must reject");
@@ -609,14 +749,34 @@ fn direct_ballot_proof_chunk_manifest_rejects_statement_tampering() {
     assert!(error.message.contains("statementHash"));
 }
 
+#[test]
+fn direct_ballot_proof_chunk_manifest_rejects_proof_profile_tampering() {
+    let fixture = direct_ballot_relation_proof_fixture();
+    let transport = transport_direct_ballot_binary_proof(
+        &fixture.setup_package,
+        &fixture.public_key,
+        &fixture.encrypted_ballot,
+        &fixture.proof_generation.statement_hash_hex,
+        &fixture.proof_generation.proof_bytes,
+        &fixture.proof_generation.proof_bytes_hash,
+        direct_ballot_relation_proof_bytes_hash,
+    )
+    .expect("proof transport");
+    let mut tampered_manifest = transport.proof_chunk_manifest.clone();
+    tampered_manifest["proofProfileHash"] = json!("0".repeat(128));
+
+    let error =
+        verify_direct_ballot_proof_chunk_manifest(&tampered_manifest, &transport.proof_bytes)
+            .expect_err("tampered proof profile hash must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("proofProfileHash"));
+}
+
 fn rebind_encrypted_ballot_package_root(package: &mut Value) {
     let package_object = package
         .as_object()
         .expect("encrypted ballot package object")
-        .clone();
-    let signature = package_object
-        .get("signature")
-        .expect("signature placeholder")
         .clone();
     let mut unsigned_package = package_object;
     unsigned_package.remove("packageRoot");
@@ -626,16 +786,31 @@ fn rebind_encrypted_ballot_package_root(package: &mut Value) {
         &Value::Object(unsigned_package),
     )
     .expect("package root");
-    package["packageRoot"] = json!(package_root.clone());
-    package["signature"] = signature;
-    package["signature"]["signedObjectRoot"] = json!(package_root);
-    if let Some(proof_chunk_root) = package["proofChunkRoot"].as_str().map(ToString::to_string) {
-        package["signature"]["proofChunkRoot"] = json!(proof_chunk_root);
-    }
-    if let Some(proof_statement_hash) = package["proofStatementHash"]
+    package["packageRoot"] = json!(package_root);
+    package["signature"] = Value::Null;
+}
+
+fn signed_encrypted_ballot_package(
+    transport: &DirectBallotBinaryProofTransport,
+) -> (Value, String) {
+    let mut package = transport.encrypted_ballot_package.clone();
+    let voter_signing_public_key_hash = sign_encrypted_ballot_package(&mut package);
+
+    (package, voter_signing_public_key_hash)
+}
+
+fn sign_encrypted_ballot_package(package: &mut Value) -> String {
+    let signed_root =
+        encrypted_ballot_package_voter_signature_signed_root(package).expect("signed root");
+    let voter_identity = package["voterIdentity"]
         .as_str()
-        .map(ToString::to_string)
-    {
-        package["signature"]["proofStatementHash"] = json!(proof_statement_hash);
-    }
+        .expect("voter identity in package");
+    let signature_fixture = create_protocol_signature_fixture(
+        &format!("{DIRECT_BALLOT_VOTER_SIGNATURE_FIXTURE_SEED}-{voter_identity}"),
+        signed_root,
+    )
+    .expect("voter signature fixture");
+    package["signature"] = signature_fixture.envelope;
+
+    signature_fixture.public_key_hash
 }

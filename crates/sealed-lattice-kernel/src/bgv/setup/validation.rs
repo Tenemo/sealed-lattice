@@ -107,6 +107,24 @@ pub(super) fn validate_setup_package_internal_bindings(
         &direct_ballot_arithmetic_certificate_hash()?,
         "direct ballot arithmetic certificate hash",
     )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "soundnessCertificateHash"],
+        &direct_ballot_soundness_certificate_hash()?,
+        "direct ballot soundness certificate hash",
+    )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "zeroKnowledgeCertificateHash"],
+        &direct_ballot_zero_knowledge_certificate_hash()?,
+        "direct ballot zero-knowledge certificate hash",
+    )?;
+    compare_hash_at_path(
+        setup_package,
+        &["profileBindings", "verifierCertificateHash"],
+        &direct_ballot_verifier_certificate_hash()?,
+        "direct ballot verifier certificate hash",
+    )?;
     let expected_evaluator_bindings =
         passive_setup_evaluator_context_bindings(value_at_path(setup_package, &["setupInputs"])?)?;
     for (field_name, description) in [

@@ -3,7 +3,7 @@ use super::*;
 const DIRECT_BALLOT_PROJECTED_BGV_RELATION_PROJECTION_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/projected-bgv-relation-projection-v1";
 pub(in crate::bgv::direct_ballots) const DIRECT_BALLOT_PROJECTED_BGV_RELATION_PROJECTIONS_PER_LIMB_COMPONENT: usize =
-    3;
+    6;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum DirectBallotProjectedBgvComponent {

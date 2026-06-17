@@ -71,7 +71,7 @@ impl DirectBallotProofMaskRandomness {
     pub(super) fn report_value(&self) -> Value {
         let source_statement = match self.source {
             DirectBallotProofMaskRandomnessSource::FreshCsprng => {
-                "proof masks use caller-supplied fresh CSPRNG randomness; the Rust command validates shape and records only the source and counts"
+                "proof masks use fresh platform CSPRNG randomness; the accepted package command refuses fixture-labelled sources, validates shape, and records only the source and counts"
             }
             DirectBallotProofMaskRandomnessSource::DevelopmentDeterministicFixture => {
                 "proof masks use caller-supplied deterministic fixture randomness; this is development evidence only"
@@ -128,7 +128,7 @@ impl DirectBallotEncryptionRandomness {
     pub(super) fn report_value(&self) -> Value {
         let source_statement = match self.source {
             DirectBallotEncryptionRandomnessSource::FreshCsprng => {
-                "ballot encryption randomness uses caller-supplied fresh CSPRNG seed material; the Rust command validates shape and records only the source and count"
+                "ballot encryption randomness uses fresh platform CSPRNG seed material; the accepted package command refuses fixture-labelled sources, validates shape, and records only the source and count"
             }
             DirectBallotEncryptionRandomnessSource::DevelopmentDeterministicFixture => {
                 "ballot encryption randomness uses caller-supplied deterministic fixture seed material; this is development evidence only"

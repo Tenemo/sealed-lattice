@@ -209,6 +209,24 @@ fn verify_handoff_direct_ballot_binding(
     )?;
     compare_handoff_hash(
         direct_ballot_handoff,
+        "soundnessCertificateHash",
+        &direct_ballot_soundness_certificate_hash()?,
+        "directBallotEncryptionHandoff.soundnessCertificateHash",
+    )?;
+    compare_handoff_hash(
+        direct_ballot_handoff,
+        "zeroKnowledgeCertificateHash",
+        &direct_ballot_zero_knowledge_certificate_hash()?,
+        "directBallotEncryptionHandoff.zeroKnowledgeCertificateHash",
+    )?;
+    compare_handoff_hash(
+        direct_ballot_handoff,
+        "verifierCertificateHash",
+        &direct_ballot_verifier_certificate_hash()?,
+        "directBallotEncryptionHandoff.verifierCertificateHash",
+    )?;
+    compare_handoff_hash(
+        direct_ballot_handoff,
         "ballotValidityProofProfileHash",
         &direct_ballot_relation_proof_profile_hash()?,
         "directBallotEncryptionHandoff.ballotValidityProofProfileHash",
@@ -407,6 +425,24 @@ fn verify_accepted_public_key_material_shape(
         "arithmeticCertificateHash",
         &direct_ballot_arithmetic_certificate_hash()?,
         "acceptedPublicKeyMaterial.arithmeticCertificateHash",
+    )?;
+    compare_material_hash(
+        accepted_public_key_material,
+        "soundnessCertificateHash",
+        &direct_ballot_soundness_certificate_hash()?,
+        "acceptedPublicKeyMaterial.soundnessCertificateHash",
+    )?;
+    compare_material_hash(
+        accepted_public_key_material,
+        "zeroKnowledgeCertificateHash",
+        &direct_ballot_zero_knowledge_certificate_hash()?,
+        "acceptedPublicKeyMaterial.zeroKnowledgeCertificateHash",
+    )?;
+    compare_material_hash(
+        accepted_public_key_material,
+        "verifierCertificateHash",
+        &direct_ballot_verifier_certificate_hash()?,
+        "acceptedPublicKeyMaterial.verifierCertificateHash",
     )?;
     compare_material_hash(
         accepted_public_key_material,

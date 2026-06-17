@@ -166,7 +166,16 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
-import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
+import type {
+    BgvAcceptedSetupHandoff,
+    DirectBallotAcceptedPublicKeyMaterial,
+    DirectEncryptedBallotInput,
+    DirectEncryptedBallotPackageAggregation,
+    DirectEncryptedBallotPackageCreation,
+    DirectEncryptedBallotPackageVerification,
+    DirectEncryptedBallotPackageVerificationInput,
+    TranscriptCoreKernel,
+} from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 
@@ -281,6 +290,8 @@ export type {
     WitnessCheckpoint,
     WitnessPolicy,
 } from '@sealed-lattice/types';
+
+export type { DirectBallotWasmRuntimeEvidence } from '@sealed-lattice/wasm';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1049,6 +1060,9 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly directBallotEncoderMatrixRoot: ProtocolHash;
         readonly witnessPartitionProfileHash: ProtocolHash;
         readonly arithmeticCertificateHash: ProtocolHash;
+        readonly soundnessCertificateHash: ProtocolHash;
+        readonly zeroKnowledgeCertificateHash: ProtocolHash;
+        readonly verifierCertificateHash: ProtocolHash;
         readonly ballotValidityProofProfileHash: ProtocolHash;
         readonly publicKeyShareMaterialSetRoot: ProtocolHash;
         readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
@@ -1076,6 +1090,9 @@ export type AcceptedSetupHandoff = Readonly<{
             readonly directBallotEncoderMatrixRoot: ProtocolHash;
             readonly witnessPartitionProfileHash: ProtocolHash;
             readonly arithmeticCertificateHash: ProtocolHash;
+            readonly soundnessCertificateHash: ProtocolHash;
+            readonly zeroKnowledgeCertificateHash: ProtocolHash;
+            readonly verifierCertificateHash: ProtocolHash;
             readonly optionCount: 20;
             readonly scoreDomain: Readonly<{
                 readonly minimum: 1;
@@ -1141,6 +1158,35 @@ export type SetupPackageVerification = Readonly<{
         readonly objectPath?: string;
     }>[];
 }>;
+
+export type CreateDirectEncryptedBallotPackagesInput = Readonly<{
+    readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+    readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+    readonly ballots: readonly DirectEncryptedBallotInput[];
+}>;
+
+export type CreateDirectEncryptedBallotPackagesResult =
+    DirectEncryptedBallotPackageCreation;
+
+export type VerifyDirectEncryptedBallotPackageInput =
+    DirectEncryptedBallotPackageVerificationInput &
+        Readonly<{
+            readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+            readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+        }>;
+
+export type VerifyDirectEncryptedBallotPackageResult =
+    DirectEncryptedBallotPackageVerification;
+
+export type AggregateDirectEncryptedBallotPackagesInput = Readonly<{
+    readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+    readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+    readonly encryptedBallotPackages: readonly DirectEncryptedBallotPackageVerificationInput[];
+    readonly firstValidOrdering?: FirstValidOrderingInput;
+}>;
+
+export type AggregateDirectEncryptedBallotPackagesResult =
+    DirectEncryptedBallotPackageAggregation;
 
 /** Derives threshold, quorum, and warning parameters for a roster profile. */
 export const deriveThresholdProfile = (
@@ -1921,6 +1967,114 @@ export const restoreLocalTrusteeSetupState = async (
         storageAadHash: decryptedState.storageAadHash,
         localStateVerification,
     };
+};
+
+const directEncryptedBallotRandomnessByteLength = 32;
+
+const directEncryptedBallotRandomnessHex = (): string => {
+    const cryptoProvider = globalThis.crypto;
+    if (
+        cryptoProvider === undefined ||
+        typeof cryptoProvider.getRandomValues !== 'function'
+    ) {
+        throw new Error(
+            'createDirectEncryptedBallotPackages requires Web Crypto getRandomValues.',
+        );
+    }
+
+    const bytes = new Uint8Array(directEncryptedBallotRandomnessByteLength);
+    cryptoProvider.getRandomValues(bytes);
+
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+        '',
+    );
+};
+
+const directEncryptedBallotRandomnessHexes = (count: number): string[] =>
+    Array.from({ length: count }, () => directEncryptedBallotRandomnessHex());
+
+export const createDirectEncryptedBallotPackages = async (
+    input: CreateDirectEncryptedBallotPackagesInput,
+): Promise<CreateDirectEncryptedBallotPackagesResult> => {
+    const kernel = await loadTranscriptCoreKernel();
+    const ballotCount = input.ballots.length;
+
+    return kernel.createDirectEncryptedBallotPackages({
+        acceptedPublicKeyMaterial: input.acceptedPublicKeyMaterial,
+        acceptedSetupHandoff: input.acceptedSetupHandoff,
+        ballotEncryptionRandomness: {
+            source: 'fresh-csprng',
+            encryptionSeedHexes:
+                directEncryptedBallotRandomnessHexes(ballotCount),
+        },
+        proofMaskRandomness: {
+            source: 'fresh-csprng',
+            ballotProofRandomnessHexes:
+                directEncryptedBallotRandomnessHexes(ballotCount),
+        },
+        ballots: input.ballots,
+    });
+};
+
+export const verifyDirectEncryptedBallotPackage = async (
+    input: VerifyDirectEncryptedBallotPackageInput,
+): Promise<VerifyDirectEncryptedBallotPackageResult> => {
+    const kernel = await loadTranscriptCoreKernel();
+
+    return kernel.verifyDirectEncryptedBallotPackage({
+        acceptedPublicKeyMaterial: input.acceptedPublicKeyMaterial,
+        acceptedSetupHandoff: input.acceptedSetupHandoff,
+        voterSigningPublicKeyHash: input.voterSigningPublicKeyHash,
+        encryptedBallotPackage: input.encryptedBallotPackage,
+        proofChunks: input.proofChunks,
+    });
+};
+
+const deriveDirectEncryptedBallotFirstValidBinding = (
+    firstValidOrdering: FirstValidOrderingInput | undefined,
+):
+    | Readonly<{
+          readonly firstValidOrderHash: ProtocolHash;
+          readonly firstValidPackageRoots: readonly ProtocolHash[];
+      }>
+    | Record<string, never> => {
+    if (firstValidOrdering === undefined) {
+        return {};
+    }
+
+    const firstValidVerification =
+        deriveValidatedFirstValidOrderInternal(firstValidOrdering);
+    if (
+        !firstValidVerification.ok ||
+        firstValidVerification.firstValidOrderHash === undefined
+    ) {
+        throw new Error(
+            'aggregateDirectEncryptedBallotPackages requires accepted first-valid ordering evidence.',
+        );
+    }
+
+    return {
+        firstValidOrderHash: firstValidVerification.firstValidOrderHash,
+        firstValidPackageRoots: firstValidVerification.orderedObjects.map(
+            (orderedObject) => orderedObject.objectHash,
+        ),
+    };
+};
+
+export const aggregateDirectEncryptedBallotPackages = async (
+    input: AggregateDirectEncryptedBallotPackagesInput,
+): Promise<AggregateDirectEncryptedBallotPackagesResult> => {
+    const kernel = await loadTranscriptCoreKernel();
+    const firstValidBinding = deriveDirectEncryptedBallotFirstValidBinding(
+        input.firstValidOrdering,
+    );
+
+    return kernel.aggregateDirectEncryptedBallotPackages({
+        acceptedPublicKeyMaterial: input.acceptedPublicKeyMaterial,
+        acceptedSetupHandoff: input.acceptedSetupHandoff,
+        encryptedBallotPackages: input.encryptedBallotPackages,
+        ...firstValidBinding,
+    });
 };
 
 /** Verifies an accepted setup package with the packaged Rust/WASM kernel. */

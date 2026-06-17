@@ -15,6 +15,13 @@ export type {
     BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
     BgvThresholdShareCommitmentDerivation,
+    DirectBallotAcceptedPublicKeyMaterial,
+    DirectBallotWasmRuntimeEvidence,
+    DirectEncryptedBallotInput,
+    DirectEncryptedBallotPackageAggregation,
+    DirectEncryptedBallotPackageCreation,
+    DirectEncryptedBallotPackageVerification,
+    DirectEncryptedBallotPackageVerificationInput,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

@@ -457,6 +457,58 @@ fn direct_encrypted_ballot_public_package_command_rejects_passive_setup_material
 }
 
 #[test]
+fn direct_encrypted_ballot_public_package_command_rejects_fixture_encryption_randomness() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+
+    let error = create_direct_encrypted_ballot_packages(&json!({
+        "acceptedPublicKeyMaterial": public_material_fixture.accepted_public_key_material,
+        "acceptedSetupHandoff": public_material_fixture.accepted_setup_handoff,
+        "ballotEncryptionRandomness": direct_ballot_test_ballot_encryption_randomness(1),
+        "proofMaskRandomness": direct_ballot_test_fresh_labelled_proof_mask_randomness(1),
+        "ballots": [
+            direct_ballot_test_ballot_json("voter-public-package-fixture-encryption-rejection", 0)
+        ]
+    }))
+    .expect_err("public package command must reject fixture encryption randomness");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("ballotEncryptionRandomness.source"));
+    assert!(error.message.contains("fresh-csprng"));
+    assert!(
+        error
+            .message
+            .contains("accepted only by runDirectEncryptedBallot")
+    );
+}
+
+#[test]
+fn direct_encrypted_ballot_public_package_command_rejects_fixture_proof_randomness() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+
+    let error = create_direct_encrypted_ballot_packages(&json!({
+        "acceptedPublicKeyMaterial": public_material_fixture.accepted_public_key_material,
+        "acceptedSetupHandoff": public_material_fixture.accepted_setup_handoff,
+        "ballotEncryptionRandomness": direct_ballot_test_fresh_labelled_ballot_encryption_randomness(1),
+        "proofMaskRandomness": direct_ballot_test_proof_mask_randomness(1),
+        "ballots": [
+            direct_ballot_test_ballot_json("voter-public-package-fixture-proof-rejection", 0)
+        ]
+    }))
+    .expect_err("public package command must reject fixture proof randomness");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("proofMaskRandomness.source"));
+    assert!(error.message.contains("fresh-csprng"));
+    assert!(
+        error
+            .message
+            .contains("accepted only by runDirectEncryptedBallot")
+    );
+}
+
+#[test]
 fn direct_encrypted_ballot_public_package_command_rejects_mismatched_handoff_root() {
     let setup_package = setup_package();
     let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
@@ -477,6 +529,67 @@ fn direct_encrypted_ballot_public_package_command_rejects_mismatched_handoff_roo
 
     assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
     assert!(error.message.contains("acceptedSetupHandoffRoot"));
+}
+
+#[test]
+fn direct_encrypted_ballot_public_aggregation_rejects_private_development_fields() {
+    for field_name in [
+        "setupPackage",
+        "setupPublicMaterial",
+        "setupPrivateWitness",
+        "ballots",
+        "scores",
+        "ballotEncryptionRandomness",
+        "proofMaskRandomness",
+        "topCount",
+        "topCounts",
+        "publicEvaluationKeyMaterial",
+        "targetFinalityPolicyHash",
+    ] {
+        let mut request = json!({});
+        request[field_name] = match field_name {
+            "setupPackage" | "setupPublicMaterial" => setup_package_not_reached(),
+            "setupPrivateWitness" => json!({ "setupSeed": DIRECT_BALLOT_TEST_SETUP_SEED }),
+            "ballots" => json!([direct_ballot_test_ballot_json(
+                "voter-public-aggregation-rejection",
+                0
+            )]),
+            "scores" | "topCounts" => json!([1, 2]),
+            "ballotEncryptionRandomness" => direct_ballot_test_ballot_encryption_randomness(1),
+            "proofMaskRandomness" => direct_ballot_test_proof_mask_randomness(1),
+            "topCount" => json!(1),
+            "publicEvaluationKeyMaterial" => json!({ "material": "not accepted here" }),
+            "targetFinalityPolicyHash" => json!("a".repeat(128)),
+            _ => unreachable!("all public aggregation rejection fields are covered"),
+        };
+
+        let error = aggregate_direct_encrypted_ballot_packages(&request)
+            .expect_err("public aggregation command must reject private development field");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error
+                .message
+                .contains(&format!("does not accept {field_name}")),
+            "unexpected error message: {}",
+            error.message
+        );
+    }
+}
+
+#[test]
+fn direct_encrypted_ballot_public_aggregation_rejects_incomplete_first_valid_binding_early() {
+    let error = aggregate_direct_encrypted_ballot_packages(&json!({
+        "firstValidOrderHash": "0".repeat(128)
+    }))
+    .expect_err("incomplete first-valid binding must reject before package verification");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(
+        error
+            .message
+            .contains("requires firstValidOrderHash and firstValidPackageRoots together")
+    );
 }
 
 #[test]

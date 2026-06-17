@@ -48,6 +48,7 @@ enum TranscriptCoreCommand {
     RunDirectEncryptedBallot,
     CreateDirectEncryptedBallotPackages,
     VerifyDirectEncryptedBallotPackage,
+    AggregateDirectEncryptedBallotPackages,
     GenerateBgvTargetDecryptionShare,
     RecombineBgvTargetDecryptionShares,
 }
@@ -242,6 +243,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::RunDirectEncryptedBallot
         | TranscriptCoreCommand::CreateDirectEncryptedBallotPackages
         | TranscriptCoreCommand::VerifyDirectEncryptedBallotPackage
+        | TranscriptCoreCommand::AggregateDirectEncryptedBallotPackages
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
         | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
             run_bgv_command(command, &request)
@@ -360,6 +362,9 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyDirectEncryptedBallotPackage => {
             crate::bgv::direct_ballots::verify_direct_encrypted_ballot_package(request)
+        }
+        TranscriptCoreCommand::AggregateDirectEncryptedBallotPackages => {
+            crate::bgv::direct_ballots::aggregate_direct_encrypted_ballot_packages(request)
         }
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShare => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_request(

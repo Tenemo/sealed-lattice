@@ -27,8 +27,6 @@ const DIRECT_BALLOT_CIPHERTEXT_LIMB_ROOT_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/ciphertext-limb-root-v1";
 const DIRECT_BALLOT_PUBLIC_KEY_LIMB_ROOT_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/public-key-limb-root-v1";
-const DIRECT_BALLOT_RELATION_PROOF_STATEMENT_HASH_OFFSET: usize = 8;
-const DIRECT_BALLOT_RELATION_PROOF_STATEMENT_HASH_BYTES: usize = 64;
 
 pub(super) struct DirectBallotValidityStatement {
     pub(super) hash: [u8; 64],
@@ -44,6 +42,7 @@ pub(super) struct DirectBallotProofChunkManifest {
 pub(super) struct DirectBallotEncryptedPackage {
     pub(super) root: String,
     pub(super) value: Value,
+    pub(super) voter_signature_signed_root: Value,
 }
 
 pub(super) fn direct_ballot_validity_statement(
@@ -56,6 +55,9 @@ pub(super) fn direct_ballot_validity_statement(
     let proof_profile_hash = direct_ballot_relation_proof_profile_hash()?;
     let witness_partition_profile_hash = direct_ballot_witness_partition_profile_hash()?;
     let arithmetic_certificate_hash = direct_ballot_arithmetic_certificate_hash()?;
+    let soundness_certificate_hash = direct_ballot_soundness_certificate_hash()?;
+    let zero_knowledge_certificate_hash = direct_ballot_zero_knowledge_certificate_hash()?;
+    let verifier_certificate_hash = profile_binding.verifier_certificate_hash.clone();
     let ciphertext_limb_roots = direct_ballot_ciphertext_limb_roots(ballot)?;
     let public_key_limb_roots = direct_ballot_public_key_limb_roots(public_key)?;
     let canonical_bytes =
@@ -66,6 +68,9 @@ pub(super) fn direct_ballot_validity_statement(
             proof_profile_hash: &proof_profile_hash,
             witness_partition_profile_hash: &witness_partition_profile_hash,
             arithmetic_certificate_hash: &arithmetic_certificate_hash,
+            soundness_certificate_hash: &soundness_certificate_hash,
+            zero_knowledge_certificate_hash: &zero_knowledge_certificate_hash,
+            verifier_certificate_hash: &verifier_certificate_hash,
             ciphertext_limb_roots: &ciphertext_limb_roots,
             public_key_limb_roots: &public_key_limb_roots,
         })?;
@@ -101,6 +106,9 @@ pub(super) fn direct_ballot_validity_statement(
         "ciphertextRoot": ballot.ciphertext_root.as_str(),
         "witnessPartitionProfileHash": witness_partition_profile_hash,
         "arithmeticCertificateHash": arithmetic_certificate_hash,
+        "soundnessCertificateHash": soundness_certificate_hash,
+        "zeroKnowledgeCertificateHash": zero_knowledge_certificate_hash,
+        "verifierCertificateHash": verifier_certificate_hash,
         "proofProfileHash": proof_profile_hash,
         "ciphertextLimbRoots": ciphertext_limb_roots,
         "publicKeyLimbRoots": public_key_limb_roots,
@@ -219,11 +227,19 @@ pub(super) fn verify_direct_ballot_proof_chunk_manifest(
     let chunk_merkle_root = required_string_field(manifest, "chunkMerkleRoot")?;
     let statement_hash = required_string_field(manifest, "statementHash")?;
     validate_direct_ballot_hash_hex(statement_hash, "proofChunkManifest.statementHash")?;
-    let proof_statement_hash = statement_hash_from_proof_bytes(proof_bytes)?;
-    if statement_hash != proof_statement_hash {
+    let proof_profile_hash = required_string_field(manifest, "proofProfileHash")?;
+    validate_direct_ballot_hash_hex(proof_profile_hash, "proofChunkManifest.proofProfileHash")?;
+    let proof_header = direct_ballot_relation_proof_public_header(proof_bytes)?;
+    if statement_hash != proof_header.statement_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "proof chunk manifest statementHash does not match proof bytes",
+        ));
+    }
+    if proof_profile_hash != proof_header.proof_profile_hash {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "proof chunk manifest proofProfileHash does not match proof bytes",
         ));
     }
     validate_direct_ballot_hash_hex(
@@ -238,10 +254,6 @@ pub(super) fn verify_direct_ballot_proof_chunk_manifest(
         required_string_field(manifest, "setupPackageRoot")?,
         "proofChunkManifest.setupPackageRoot",
     )?;
-    validate_direct_ballot_hash_hex(
-        required_string_field(manifest, "proofProfileHash")?,
-        "proofChunkManifest.proofProfileHash",
-    )?;
     verify_direct_ballot_public_proof_transport(
         proof_bytes,
         proof_full_bytes_hash,
@@ -249,26 +261,6 @@ pub(super) fn verify_direct_ballot_proof_chunk_manifest(
         chunk_size_bytes,
         chunk_merkle_root,
     )
-}
-
-fn statement_hash_from_proof_bytes(proof_bytes: &[u8]) -> CanonicalResult<String> {
-    let start = DIRECT_BALLOT_RELATION_PROOF_STATEMENT_HASH_OFFSET;
-    let end = start
-        .checked_add(DIRECT_BALLOT_RELATION_PROOF_STATEMENT_HASH_BYTES)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "proof statement hash offset overflowed",
-            )
-        })?;
-    let statement_hash_bytes = proof_bytes.get(start..end).ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "proof bytes are too short to contain a statement hash",
-        )
-    })?;
-
-    Ok(to_hex(statement_hash_bytes))
 }
 
 pub(super) fn direct_ballot_encrypted_package(
@@ -282,7 +274,12 @@ pub(super) fn direct_ballot_encrypted_package(
     let witness_partition_profile_hash = direct_ballot_witness_partition_profile_hash()?;
     let arithmetic_certificate_hash =
         required_string_field(&proof_statement.value, "arithmeticCertificateHash")?;
-    let ciphertext_canonical_bytes_hex = ciphertext_canonical_bytes_hex(&ballot.ciphertext)?;
+    let soundness_certificate_hash =
+        required_string_field(&proof_statement.value, "soundnessCertificateHash")?;
+    let zero_knowledge_certificate_hash =
+        required_string_field(&proof_statement.value, "zeroKnowledgeCertificateHash")?;
+    let verifier_certificate_hash =
+        required_string_field(&proof_statement.value, "verifierCertificateHash")?;
     let unsigned_package = json!({
         "objectType": ENCRYPTED_BALLOT_PACKAGE_OBJECT_TYPE,
         "objectVersion": ENCRYPTED_BALLOT_PACKAGE_OBJECT_VERSION,
@@ -307,15 +304,12 @@ pub(super) fn direct_ballot_encrypted_package(
         "collectivePublicKeyRoot": setup_context.collective_public_key_root.as_str(),
         "bgvPublicKeyRoot": setup_context.bgv_public_key_root.as_str(),
         "ciphertextRoot": ballot.ciphertext_root.as_str(),
-        "ciphertextTransport": {
-            "encoding": "sealed-lattice-bgv-rns-canonical-ciphertext-v1",
-            "canonicalByteLength": ballot.ciphertext_canonical_byte_length,
-            "canonicalBytesHex": ciphertext_canonical_bytes_hex,
-            "ciphertextRoot": ballot.ciphertext_root.as_str(),
-            "ciphertextLimbRoots": direct_ballot_ciphertext_limb_roots(ballot)?,
-        },
+        "ciphertextTransport": direct_ballot_ciphertext_transport(&ballot.ciphertext, &ballot.ciphertext_root)?,
         "witnessPartitionProfileHash": witness_partition_profile_hash,
         "arithmeticCertificateHash": arithmetic_certificate_hash,
+        "soundnessCertificateHash": soundness_certificate_hash,
+        "zeroKnowledgeCertificateHash": zero_knowledge_certificate_hash,
+        "verifierCertificateHash": verifier_certificate_hash,
         "proofProfileHash": required_string_field(&proof_statement.value, "proofProfileHash")?,
         "proofStatementHash": proof_statement.hash_hex.as_str(),
         "proofChunkManifest": proof_manifest.value.clone(),
@@ -325,20 +319,9 @@ pub(super) fn direct_ballot_encrypted_package(
     let package_root = derive_protocol_hash("EncryptedBallotPackageRoot", &unsigned_package)?;
     let mut package = unsigned_package;
     package["packageRoot"] = json!(package_root.clone());
-    package["signature"] = json!({
-        "objectType": "DevelopmentEncryptedBallotPackageSignaturePlaceholder",
-        "objectVersion": 1,
-        "status": "not supplied in the internal development command",
-        "expectedSignerRole": "Voter",
-        "signedObjectRoot": package_root.as_str(),
-        "voterIdentity": ballot.input.voter_identity.as_str(),
-        "voterRosterPosition": ballot.input.voter_roster_position,
-        "contextHash": ballot.input.action_context_hash.as_str(),
-        "setupPackageRoot": setup_context.setup_package_root.as_str(),
-        "ciphertextRoot": ballot.ciphertext_root.as_str(),
-        "proofStatementHash": proof_statement.hash_hex.as_str(),
-        "proofChunkRoot": proof_manifest.root.as_str(),
-    });
+    package["signature"] = Value::Null;
+    let voter_signature_signed_root =
+        encrypted_ballot_package_voter_signature_signed_root(&package)?;
 
     Ok(DirectBallotEncryptedPackage {
         root: package["packageRoot"]
@@ -346,7 +329,58 @@ pub(super) fn direct_ballot_encrypted_package(
             .expect("package root was inserted")
             .to_string(),
         value: package,
+        voter_signature_signed_root,
     })
+}
+
+pub(super) fn encrypted_ballot_package_voter_signature_signed_root(
+    package: &Value,
+) -> CanonicalResult<Value> {
+    let package_root = required_string_field(package, "packageRoot")?;
+    validate_direct_ballot_hash_hex(package_root, "encryptedBallotPackage.packageRoot")?;
+    let manifest_hash = required_string_field(package, "manifestHash")?;
+    validate_direct_ballot_hash_hex(manifest_hash, "encryptedBallotPackage.manifestHash")?;
+    let action_context_hash = required_string_field(package, "actionContextHash")?;
+    validate_direct_ballot_hash_hex(
+        action_context_hash,
+        "encryptedBallotPackage.actionContextHash",
+    )?;
+    let signed_payload = encrypted_ballot_package_signed_payload(package)?;
+    let byte_length = usize_to_u64(
+        canonical_json(&signed_payload)?.as_bytes().len(),
+        "encrypted ballot package signed payload byte length",
+    )?;
+
+    Ok(json!({
+        "objectType": ENCRYPTED_BALLOT_PACKAGE_OBJECT_TYPE,
+        "objectVersion": ENCRYPTED_BALLOT_PACKAGE_OBJECT_VERSION,
+        "ceremonyId": required_string_field(package, "ceremonyId")?,
+        "manifestHash": manifest_hash,
+        "boardHeadHash": null,
+        "objectRoot": package_root,
+        "chunkMerkleRoot": null,
+        "byteLength": byte_length,
+        "signerRole": "Voter",
+        "signerIdentity": required_string_field(package, "voterIdentity")?,
+        "recoveryEpoch": required_u64_field(package, "recoveryEpoch")?,
+        "deviceEpoch": required_u64_field(package, "deviceEpoch")?,
+        "contextHash": action_context_hash,
+    }))
+}
+
+pub(super) fn encrypted_ballot_package_signed_payload(package: &Value) -> CanonicalResult<Value> {
+    let mut signed_payload = package
+        .as_object()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "encrypted ballot package must be an object",
+            )
+        })?
+        .clone();
+    signed_payload.remove("signature");
+
+    Ok(Value::Object(signed_payload))
 }
 
 pub(super) struct DirectBallotSetupContext {
@@ -368,6 +402,7 @@ pub(super) struct DirectBallotProfileBinding {
     pub(super) encrypted_ballot_layout_hash: String,
     pub(super) direct_ballot_reserved_slot_rule_hash: String,
     pub(super) direct_ballot_encoder_matrix_root: String,
+    pub(super) verifier_certificate_hash: String,
 }
 
 struct DirectBallotValidityStatementBytesInput<'a> {
@@ -377,6 +412,9 @@ struct DirectBallotValidityStatementBytesInput<'a> {
     proof_profile_hash: &'a str,
     witness_partition_profile_hash: &'a str,
     arithmetic_certificate_hash: &'a str,
+    soundness_certificate_hash: &'a str,
+    zero_knowledge_certificate_hash: &'a str,
+    verifier_certificate_hash: &'a str,
     ciphertext_limb_roots: &'a [Value],
     public_key_limb_roots: &'a [Value],
 }
@@ -517,6 +555,21 @@ pub(super) fn direct_ballot_profile_binding(
         &["profileBindings", "directBallotEncoderMatrixRoot"],
     )?
     .to_string();
+    let package_soundness_certificate_hash = required_string_path(
+        setup_package,
+        &["profileBindings", "soundnessCertificateHash"],
+    )?
+    .to_string();
+    let package_zero_knowledge_certificate_hash = required_string_path(
+        setup_package,
+        &["profileBindings", "zeroKnowledgeCertificateHash"],
+    )?
+    .to_string();
+    let package_verifier_certificate_hash = required_string_path(
+        setup_package,
+        &["profileBindings", "verifierCertificateHash"],
+    )?
+    .to_string();
     for (label, hash) in [
         ("bgvProfileHash", package_bgv_profile_hash.as_str()),
         ("batchEncoderHash", package_batch_encoder_hash.as_str()),
@@ -539,6 +592,18 @@ pub(super) fn direct_ballot_profile_binding(
         (
             "directBallotEncoderMatrixRoot",
             package_direct_ballot_encoder_matrix_root.as_str(),
+        ),
+        (
+            "soundnessCertificateHash",
+            package_soundness_certificate_hash.as_str(),
+        ),
+        (
+            "zeroKnowledgeCertificateHash",
+            package_zero_knowledge_certificate_hash.as_str(),
+        ),
+        (
+            "verifierCertificateHash",
+            package_verifier_certificate_hash.as_str(),
         ),
     ] {
         validate_direct_ballot_hash_hex(hash, label)?;
@@ -585,6 +650,24 @@ pub(super) fn direct_ballot_profile_binding(
             "direct ballot package encoder matrix root does not match the selected profile",
         ));
     }
+    if package_soundness_certificate_hash != direct_ballot_soundness_certificate_hash()? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "direct ballot package soundness certificate hash does not match the selected profile",
+        ));
+    }
+    if package_zero_knowledge_certificate_hash != direct_ballot_zero_knowledge_certificate_hash()? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "direct ballot package zero-knowledge certificate hash does not match the selected profile",
+        ));
+    }
+    if package_verifier_certificate_hash != direct_ballot_verifier_certificate_hash()? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "direct ballot package verifier certificate hash does not match the selected profile",
+        ));
+    }
 
     Ok(DirectBallotProfileBinding {
         bgv_profile_hash: package_bgv_profile_hash,
@@ -594,6 +677,7 @@ pub(super) fn direct_ballot_profile_binding(
         encrypted_ballot_layout_hash: package_encrypted_ballot_layout_hash,
         direct_ballot_reserved_slot_rule_hash: package_direct_ballot_reserved_slot_rule_hash,
         direct_ballot_encoder_matrix_root: package_direct_ballot_encoder_matrix_root,
+        verifier_certificate_hash: package_verifier_certificate_hash,
     })
 }
 
@@ -629,6 +713,14 @@ fn direct_ballot_profile_binding_from_accepted_public_key_material(
         "ballotValidityProofProfileHash",
     )?
     .to_string();
+    let package_soundness_certificate_hash =
+        required_string_field(accepted_public_key_material, "soundnessCertificateHash")?
+            .to_string();
+    let package_zero_knowledge_certificate_hash =
+        required_string_field(accepted_public_key_material, "zeroKnowledgeCertificateHash")?
+            .to_string();
+    let package_verifier_certificate_hash =
+        required_string_field(accepted_public_key_material, "verifierCertificateHash")?.to_string();
     for (label, hash) in [
         ("bgvProfileHash", package_bgv_profile_hash.as_str()),
         ("batchEncoderHash", package_batch_encoder_hash.as_str()),
@@ -655,6 +747,18 @@ fn direct_ballot_profile_binding_from_accepted_public_key_material(
         (
             "ballotValidityProofProfileHash",
             package_ballot_validity_proof_profile_hash.as_str(),
+        ),
+        (
+            "soundnessCertificateHash",
+            package_soundness_certificate_hash.as_str(),
+        ),
+        (
+            "zeroKnowledgeCertificateHash",
+            package_zero_knowledge_certificate_hash.as_str(),
+        ),
+        (
+            "verifierCertificateHash",
+            package_verifier_certificate_hash.as_str(),
         ),
     ] {
         validate_direct_ballot_hash_hex(hash, label)?;
@@ -707,6 +811,24 @@ fn direct_ballot_profile_binding_from_accepted_public_key_material(
             "accepted public key material ballot validity proof profile hash does not match the selected profile",
         ));
     }
+    if package_soundness_certificate_hash != direct_ballot_soundness_certificate_hash()? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "accepted public key material soundness certificate hash does not match the selected profile",
+        ));
+    }
+    if package_zero_knowledge_certificate_hash != direct_ballot_zero_knowledge_certificate_hash()? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "accepted public key material zero-knowledge certificate hash does not match the selected profile",
+        ));
+    }
+    if package_verifier_certificate_hash != direct_ballot_verifier_certificate_hash()? {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "accepted public key material verifier certificate hash does not match the selected profile",
+        ));
+    }
 
     Ok(DirectBallotProfileBinding {
         bgv_profile_hash: package_bgv_profile_hash,
@@ -716,6 +838,7 @@ fn direct_ballot_profile_binding_from_accepted_public_key_material(
         encrypted_ballot_layout_hash: package_encrypted_ballot_layout_hash,
         direct_ballot_reserved_slot_rule_hash: package_direct_ballot_reserved_slot_rule_hash,
         direct_ballot_encoder_matrix_root: package_direct_ballot_encoder_matrix_root,
+        verifier_certificate_hash: package_verifier_certificate_hash,
     })
 }
 
@@ -748,6 +871,9 @@ fn direct_ballot_validity_statement_bytes(
         proof_profile_hash,
         witness_partition_profile_hash,
         arithmetic_certificate_hash,
+        soundness_certificate_hash,
+        zero_knowledge_certificate_hash,
+        verifier_certificate_hash,
         ciphertext_limb_roots,
         public_key_limb_roots,
     } = statement_inputs;
@@ -839,6 +965,21 @@ fn direct_ballot_validity_statement_bytes(
         arithmetic_certificate_hash,
         "arithmeticCertificateHash",
     )?;
+    append_hash_string(
+        &mut bytes,
+        soundness_certificate_hash,
+        "soundnessCertificateHash",
+    )?;
+    append_hash_string(
+        &mut bytes,
+        zero_knowledge_certificate_hash,
+        "zeroKnowledgeCertificateHash",
+    )?;
+    append_hash_string(
+        &mut bytes,
+        verifier_certificate_hash,
+        "verifierCertificateHash",
+    )?;
     append_hash_string(&mut bytes, proof_profile_hash, "proofProfileHash")?;
     append_root_records(&mut bytes, ciphertext_limb_roots, "ciphertextLimbRoots")?;
     append_root_records(&mut bytes, public_key_limb_roots, "publicKeyLimbRoots")?;
@@ -910,14 +1051,43 @@ pub(super) fn reject_unexpected_direct_ballot_object_fields(
 pub(super) fn direct_ballot_ciphertext_limb_roots(
     ballot: &DirectEncryptedBallot,
 ) -> CanonicalResult<Vec<Value>> {
-    if ballot.ciphertext.components.len() != 2 {
+    direct_ballot_ciphertext_limb_roots_from_ciphertext(&ballot.ciphertext)
+}
+
+pub(super) fn direct_ballot_ciphertext_transport(
+    ciphertext: &Ciphertext,
+    expected_ciphertext_root: &str,
+) -> CanonicalResult<Value> {
+    validate_direct_ballot_hash_hex(expected_ciphertext_root, "ciphertextRoot")?;
+    let ciphertext_root = ciphertext_object_root(ciphertext)?;
+    if ciphertext_root != expected_ciphertext_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "ciphertext transport root does not match the supplied ciphertext",
+        ));
+    }
+    let canonical_bytes_hex = ciphertext_canonical_bytes_hex(ciphertext)?;
+
+    Ok(json!({
+        "encoding": "sealed-lattice-bgv-rns-canonical-ciphertext-v1",
+        "canonicalByteLength": canonical_bytes_hex.len() / 2,
+        "canonicalBytesHex": canonical_bytes_hex,
+        "ciphertextRoot": expected_ciphertext_root,
+        "ciphertextLimbRoots": direct_ballot_ciphertext_limb_roots_from_ciphertext(ciphertext)?,
+    }))
+}
+
+pub(super) fn direct_ballot_ciphertext_limb_roots_from_ciphertext(
+    ciphertext: &Ciphertext,
+) -> CanonicalResult<Vec<Value>> {
+    if ciphertext.components.len() != 2 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "direct ballot package ciphertext must have two components",
         ));
     }
     let mut limb_roots = Vec::with_capacity(2 * DATA_PRIMES.len());
-    for (component_index, component) in ballot.ciphertext.components.iter().enumerate() {
+    for (component_index, component) in ciphertext.components.iter().enumerate() {
         if component.len() != DATA_PRIMES.len() {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,

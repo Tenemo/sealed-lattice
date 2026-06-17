@@ -132,11 +132,29 @@ fn direct_ballot_test_proof_mask_randomness(ballot_count: usize) -> Value {
     })
 }
 
+fn direct_ballot_test_fresh_labelled_proof_mask_randomness(ballot_count: usize) -> Value {
+    json!({
+        "source": DIRECT_BALLOT_PROOF_MASK_RANDOMNESS_FRESH_CSPRNG,
+        "ballotProofRandomnessHexes": (0..ballot_count)
+            .map(|index| direct_ballot_test_randomness_hex("accepted-package-ballot-proof", index))
+            .collect::<Vec<_>>()
+    })
+}
+
 fn direct_ballot_test_ballot_encryption_randomness(ballot_count: usize) -> Value {
     json!({
         "source": DIRECT_BALLOT_ENCRYPTION_RANDOMNESS_DEVELOPMENT_FIXTURE,
         "encryptionSeedHexes": (0..ballot_count)
             .map(|index| direct_ballot_test_randomness_hex("ballot-encryption", index))
+            .collect::<Vec<_>>()
+    })
+}
+
+fn direct_ballot_test_fresh_labelled_ballot_encryption_randomness(ballot_count: usize) -> Value {
+    json!({
+        "source": DIRECT_BALLOT_ENCRYPTION_RANDOMNESS_FRESH_CSPRNG,
+        "encryptionSeedHexes": (0..ballot_count)
+            .map(|index| direct_ballot_test_randomness_hex("accepted-package-ballot-encryption", index))
             .collect::<Vec<_>>()
     })
 }
@@ -287,6 +305,12 @@ fn accepted_public_key_material_for_setup_public_material(setup_public_material:
             .expect("direct ballot encoder matrix root"),
         "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()
             .expect("direct ballot arithmetic certificate hash"),
+        "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()
+            .expect("direct ballot soundness certificate hash"),
+        "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()
+            .expect("direct ballot zero-knowledge certificate hash"),
+        "verifierCertificateHash": direct_ballot_verifier_certificate_hash()
+            .expect("direct ballot verifier certificate hash"),
         "ballotValidityProofProfileHash": direct_ballot_relation_proof_profile_hash()
             .expect("direct ballot relation proof profile hash"),
         "collectivePublicKeyRoot": collective_public_key["collectivePublicKeyRoot"],
@@ -370,6 +394,12 @@ fn accepted_setup_handoff_for_accepted_public_key_material(
                 .expect("direct ballot witness partition profile hash"),
             "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()
                 .expect("direct ballot arithmetic certificate hash"),
+            "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()
+                .expect("direct ballot soundness certificate hash"),
+            "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()
+                .expect("direct ballot zero-knowledge certificate hash"),
+            "verifierCertificateHash": direct_ballot_verifier_certificate_hash()
+                .expect("direct ballot verifier certificate hash"),
             "ballotValidityProofProfileHash": direct_ballot_relation_proof_profile_hash()
                 .expect("direct ballot relation proof profile hash"),
             "publicKeyShareMaterialSetRoot": required_string_field(
@@ -475,7 +505,9 @@ fn direct_ballot_relation_response_offset(_proof_bytes: &[u8]) -> usize {
 }
 
 fn direct_ballot_relation_commitment_offset(_proof_bytes: &[u8]) -> usize {
-    8 + 64 + 24
+    super::relation_proof::direct_ballot_relation_proof_header_bytes()
+        .expect("relation proof header byte count")
+        + 24
 }
 
 fn direct_ballot_response_coefficient_bytes() -> usize {

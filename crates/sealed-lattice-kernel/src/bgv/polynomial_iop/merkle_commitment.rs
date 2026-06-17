@@ -1,5 +1,7 @@
 use super::*;
 use crate::hashing::hash512;
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
 
 const LEAF_DOMAIN: &str = "sealed-lattice/internal/polynomial-iop/merkle-leaf-v1";
 const NODE_DOMAIN: &str = "sealed-lattice/internal/polynomial-iop/merkle-node-v1";
@@ -36,10 +38,19 @@ impl MerkleTree {
         let mut levels = vec![leaf_hashes];
         while levels.last().expect("levels are non-empty").len() > 1 {
             let previous = levels.last().expect("levels are non-empty");
-            let mut next = Vec::with_capacity(previous.len() / 2);
-            for pair in previous.chunks_exact(2) {
-                next.push(hash512(NODE_DOMAIN, &[&pair[0], &pair[1]]));
-            }
+            #[cfg(not(target_arch = "wasm32"))]
+            let next = previous
+                .par_chunks_exact(2)
+                .map(|pair| hash512(NODE_DOMAIN, &[&pair[0], &pair[1]]))
+                .collect();
+            #[cfg(target_arch = "wasm32")]
+            let next = {
+                let mut next = Vec::with_capacity(previous.len() / 2);
+                for pair in previous.chunks_exact(2) {
+                    next.push(hash512(NODE_DOMAIN, &[&pair[0], &pair[1]]));
+                }
+                next
+            };
             levels.push(next);
         }
 

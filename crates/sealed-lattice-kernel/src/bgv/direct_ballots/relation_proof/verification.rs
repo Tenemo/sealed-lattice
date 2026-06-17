@@ -16,7 +16,6 @@ pub(in crate::bgv::direct_ballots) fn verify_direct_ballot_relation_proof(
         challenge: &parsed_proof.challenge,
         bgv_relation_commitments: &parsed_proof.bgv_relation_commitments,
         score_linear_commitment: &parsed_proof.score_linear_commitment,
-        support_commitment: &parsed_proof.support_commitment,
         response_vector: &parsed_proof.response_vector,
     })?;
     verify_direct_ballot_committed_trace_proof_bytes(

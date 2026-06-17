@@ -130,6 +130,7 @@ pub(super) fn transport_direct_ballot_binary_proof(
         proof_chunk_manifest: proof_chunk_manifest.value,
         encrypted_ballot_package_root: encrypted_ballot_package.root,
         encrypted_ballot_package: encrypted_ballot_package.value,
+        voter_signature_signed_root: encrypted_ballot_package.voter_signature_signed_root,
     })
 }
 

@@ -6,9 +6,15 @@ import {
     createDirectBallotInputs,
     createDirectBallotSetupPackage,
     runDirectEncryptedBallot,
+    runInternalKernelCommand,
     verifyDirectEncryptedBallotPackage,
 } from './direct-encrypted-ballot';
 
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#packages/crypto/tests/support/protocol-signature-fixtures';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
@@ -36,12 +42,12 @@ describe('direct encrypted ballot kernel command', () => {
             'projected BGV rows and projected no-wrap carry rows for every RNS limb component',
         );
         expect(result.proofAttempt.challengeSoundness).toContain(
-            'claim soundness is not accepted',
+            'committed-trace rows record a conservative soundness budget',
         );
         expect(result.proofAttempt.proofAccounting).toMatchObject({
-            proofModelAccepted: false,
+            proofModelAccepted: true,
             targetClassicalSoundnessBits: 128,
-            minimumIndependentRepetitionsForTarget: null,
+            minimumIndependentRepetitionsForTarget: 1,
         });
         expect(result.proofAttempt.proofAccounting.challengeBits).toBe(
             result.proofAttempt.proofAccounting.nominalChallengeBits,
@@ -52,31 +58,31 @@ describe('direct encrypted ballot kernel command', () => {
         expect(
             result.proofAttempt.proofAccounting
                 .weakestRelationEffectiveBitsPerCheck,
-        ).toBeGreaterThan(0);
+        ).toBeGreaterThanOrEqual(128);
         expect(
-            result.proofAttempt.proofAccounting.supportRelationModulusBits,
-        ).toBeGreaterThan(0);
+            result.proofAttempt.proofAccounting.committedTraceSupportRows,
+        ).toContain('one-hot Booleanity');
         expect(
             result.proofAttempt.proofAccounting
                 .estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses,
-        ).toBeGreaterThan(0);
+        ).toBe(1);
         expect(
             result.proofAttempt.proofAccounting.estimatedRepeatedProofSizeBytes,
-        ).toBe(result.proofAttempt.proofSizeBytes * 8);
+        ).toBe(result.proofAttempt.proofSizeBytes);
         expect(
             result.proofAttempt.proofAccounting
                 .estimatedRepeatedTotalProofBytes,
-        ).toBe(result.proofAttempt.totalProofBytes * 8);
+        ).toBe(result.proofAttempt.totalProofBytes);
         expect(
             result.proofAttempt.proofAccounting
-                .classicalSoundnessBitsAfterSupportUnionBound,
-        ).toBeNull();
+                .classicalSoundnessBitsAfterCommittedTraceAccounting,
+        ).toBeGreaterThanOrEqual(128);
         expect(
             result.proofAttempt.proofAccounting
                 .zeroKnowledgeShiftSlackBitsAfterResponseUnionBound,
         ).toBeGreaterThanOrEqual(128);
         expect(result.proofAttempt.proofAccounting.decision).toContain(
-            'claim soundness is not accepted',
+            'committed-trace batching records a conservative budget',
         );
         expect(
             result.encryptedBallots.ballotEncryptionRandomness,
@@ -134,6 +140,16 @@ describe('direct encrypted ballot kernel command', () => {
         ).toBe('EncryptedBallotPackage');
         expect(
             result.proofAttempt.proofTransport.firstEncryptedBallotPackage
+                .signature,
+        ).toBeNull();
+        expect(
+            result.proofAttempt.proofTransport.firstVoterSignatureSignedRoot
+                .objectRoot,
+        ).toBe(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackageRoot,
+        );
+        expect(
+            result.proofAttempt.proofTransport.firstEncryptedBallotPackage
                 .proofChunkRoot,
         ).toBe(result.proofAttempt.proofTransport.firstProofChunkManifestRoot);
         expect(
@@ -149,6 +165,15 @@ describe('direct encrypted ballot kernel command', () => {
         expect(
             result.proofAttempt.proofTransport.arithmeticCertificateHash,
         ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.soundnessCertificateHash,
+        ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.zeroKnowledgeCertificateHash,
+        ).toHaveLength(128);
+        expect(
+            result.proofAttempt.proofTransport.verifierCertificateHash,
+        ).toHaveLength(128);
         expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
             source: 'fresh-csprng',
             ballotProofRandomnessCount: 1,
@@ -158,12 +183,12 @@ describe('direct encrypted ballot kernel command', () => {
             'not returned',
         );
         expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(
-            result.proofAttempt.proofTransport.chunkSizeBytes * 30,
+            result.proofAttempt.proofTransport.chunkSizeBytes * 45,
         );
         expect(result.proofAttempt.proofSizeBytes).toBeLessThanOrEqual(
-            result.proofAttempt.proofTransport.chunkSizeBytes * 31,
+            result.proofAttempt.proofTransport.chunkSizeBytes * 46,
         );
-        expect(result.proofAttempt.proofTransport.chunksPerProof).toBe(31);
+        expect(result.proofAttempt.proofTransport.chunksPerProof).toBe(46);
         expect(result.proofAttempt.verifiedProofSizeBytes).toBe(
             result.proofAttempt.proofSizeBytes,
         );
@@ -178,7 +203,7 @@ describe('direct encrypted ballot kernel command', () => {
         );
         expect(
             result.proofAttempt.projectedBgvRelationProjectionsPerLimbComponent,
-        ).toBe(3);
+        ).toBe(6);
         expect(result.proofAttempt.responsePolynomialDegree).toBeGreaterThan(
             64,
         );
@@ -260,6 +285,18 @@ describe('direct encrypted ballot kernel command', () => {
         ).toBe(acceptedPublicKeyMaterial.arithmeticCertificateHash);
         expect(
             acceptedSetupHandoff.directBallotEncryptionHandoff
+                .soundnessCertificateHash,
+        ).toBe(acceptedPublicKeyMaterial.soundnessCertificateHash);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .zeroKnowledgeCertificateHash,
+        ).toBe(acceptedPublicKeyMaterial.zeroKnowledgeCertificateHash);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .verifierCertificateHash,
+        ).toBe(acceptedPublicKeyMaterial.verifierCertificateHash);
+        expect(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
                 .ballotValidityProofProfileHash,
         ).toBe(acceptedPublicKeyMaterial.ballotValidityProofProfileHash);
 
@@ -320,6 +357,24 @@ describe('direct encrypted ballot kernel command', () => {
             acceptedSetupHandoff.directBallotEncryptionHandoff
                 .arithmeticCertificateHash,
         );
+        expect(
+            packageRecord.encryptedBallotPackage.soundnessCertificateHash,
+        ).toBe(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .soundnessCertificateHash,
+        );
+        expect(
+            packageRecord.encryptedBallotPackage.zeroKnowledgeCertificateHash,
+        ).toBe(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .zeroKnowledgeCertificateHash,
+        );
+        expect(
+            packageRecord.encryptedBallotPackage.verifierCertificateHash,
+        ).toBe(
+            acceptedSetupHandoff.directBallotEncryptionHandoff
+                .verifierCertificateHash,
+        );
         expect(packageRecord.encryptedBallotPackage.proofProfileHash).toBe(
             acceptedSetupHandoff.directBallotEncryptionHandoff
                 .ballotValidityProofProfileHash,
@@ -327,12 +382,20 @@ describe('direct encrypted ballot kernel command', () => {
         expect(packageRecord.encryptedBallotPackage).not.toHaveProperty(
             'proofStatement',
         );
-        expect(packageRecord.encryptedBallotPackage.signature).toMatchObject({
-            objectType: 'DevelopmentEncryptedBallotPackageSignaturePlaceholder',
-            signedObjectRoot: packageRecord.encryptedBallotPackageRoot,
-            proofStatementHash: packageRecord.statementHash,
-            proofChunkRoot: packageRecord.proofChunkManifestRoot,
+        expect(packageRecord.encryptedBallotPackage.signature).toBeNull();
+        expect(packageRecord.voterSignatureSignedRoot).toEqual(
+            result.proofAttempt.proofTransport.firstVoterSignatureSignedRoot,
+        );
+        expect(packageRecord.voterSignatureSignedRoot).toMatchObject({
+            objectType: 'EncryptedBallotPackage',
+            signerRole: 'Voter',
+            signerIdentity: packageRecord.voterIdentity,
+            objectRoot: packageRecord.encryptedBallotPackageRoot,
+            contextHash: packageRecord.actionContextHash,
         });
+        expect(result.packageCreation.signatureBoundary).toContain(
+            'ML-DSA protocol signature envelope',
+        );
         expect(
             result.encryptedBallots.ballotEncryptionRandomness,
         ).toMatchObject({
@@ -353,10 +416,26 @@ describe('direct encrypted ballot kernel command', () => {
             packageRecord.proofChunkManifest.chunkSizeBytes * 2,
         );
 
+        const voterKeyPair = createMlDsaKeyPairFixture(
+            `${packageRecord.voterIdentity}-direct-ballot`,
+        );
+        const voterSignature = createProtocolSignatureFixture({
+            profile: createMlDsaSignatureProfileFixture(),
+            publicKeyBytesHex: voterKeyPair.publicKeyBytesHex,
+            publicKeyHash: voterKeyPair.publicKeyHash,
+            secretKeyBytesHex: voterKeyPair.secretKeyBytesHex,
+            signedRoot: packageRecord.voterSignatureSignedRoot,
+        });
+        const signedPackage = {
+            ...packageRecord.encryptedBallotPackage,
+            signature: voterSignature,
+        };
+
         const verification = await verifyDirectEncryptedBallotPackage({
             acceptedPublicKeyMaterial,
             acceptedSetupHandoff,
-            encryptedBallotPackage: packageRecord.encryptedBallotPackage,
+            voterSigningPublicKeyHash: voterKeyPair.publicKeyHash,
+            encryptedBallotPackage: signedPackage,
             proofChunks: packageRecord.proofChunks,
         });
 
@@ -383,7 +462,49 @@ describe('direct encrypted ballot kernel command', () => {
         expect(verification.proofChunkCount).toBe(
             packageRecord.proofChunkManifest.chunkCount,
         );
-        expect(verification.claimBoundary).toContain('development evidence');
+        expect(verification.signatureHash).toBe(voterSignature.signatureHash);
+        expect(verification.signatureStatus).toContain(
+            'voter ML-DSA protocol signature verified',
+        );
+        expect(verification.packageVerificationCertificate).toMatchObject({
+            objectType: 'DirectEncryptedBallotPackageVerificationCertificate',
+            packageRoot: packageRecord.encryptedBallotPackageRoot,
+            signatureHash: voterSignature.signatureHash,
+            proofStatementHash: packageRecord.statementHash,
+            proofChunkRoot: packageRecord.proofChunkManifestRoot,
+            verifierCertificateHash:
+                packageRecord.encryptedBallotPackage.verifierCertificateHash,
+        });
+        expect(
+            verification.packageVerificationCertificate.publicAggregationInput,
+        ).toMatchObject({
+            packageRoot: packageRecord.encryptedBallotPackageRoot,
+            ciphertextRoot: packageRecord.ciphertextRoot,
+            proofStatementHash: packageRecord.statementHash,
+            proofChunkRoot: packageRecord.proofChunkManifestRoot,
+            acceptedSetupHandoffRoot:
+                acceptedSetupHandoff.acceptedSetupHandoffRoot,
+            verifierCertificateHash:
+                packageRecord.encryptedBallotPackage.verifierCertificateHash,
+        });
+        const certificateHashInput = {
+            ...verification.packageVerificationCertificate,
+        } as Record<string, unknown>;
+        delete certificateHashInput.packageVerificationCertificateHash;
+        expect(
+            kernel.deriveProtocolHash({
+                namespace:
+                    'DirectEncryptedBallotPackageVerificationCertificateHash',
+                value: certificateHashInput,
+            }),
+        ).toBe(verification.packageVerificationCertificateHash);
+        expect(
+            verification.packageVerificationCertificate
+                .packageVerificationCertificateHash,
+        ).toBe(verification.packageVerificationCertificateHash);
+        expect(verification.claimBoundary).toContain(
+            'does not and cannot recover consumed randomness',
+        );
     });
 
     it('rejects duplicate voter identities before proof generation through Node/WASM', async () => {
@@ -400,6 +521,62 @@ describe('direct encrypted ballot kernel command', () => {
                 setupPackage,
             }),
         ).rejects.toThrow('duplicate voter identity');
+    });
+
+    it('rejects private public-aggregation fields before package verification through Node/WASM', async () => {
+        await expect(
+            runInternalKernelCommand({
+                command: 'AggregateDirectEncryptedBallotPackages',
+                scores: [1],
+            }),
+        ).rejects.toThrow(
+            'aggregateDirectEncryptedBallotPackages does not accept scores',
+        );
+    });
+
+    it('rejects fixture-labelled randomness in accepted package creation through Node/WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const setupPublicMaterial = createDirectBallotSetupPackage(kernel);
+        const { acceptedPublicKeyMaterial, acceptedSetupHandoff } =
+            acceptedDirectBallotPublicMaterialForSetupPublicMaterial(
+                kernel,
+                setupPublicMaterial,
+            );
+        const ballots = createDirectBallotInputs(1);
+
+        await expect(
+            runInternalKernelCommand({
+                command: 'CreateDirectEncryptedBallotPackages',
+                acceptedPublicKeyMaterial,
+                acceptedSetupHandoff,
+                ballotEncryptionRandomness: {
+                    source: 'development-deterministic-fixture',
+                    encryptionSeedHexes: ['11'.repeat(32)],
+                },
+                proofMaskRandomness: {
+                    source: 'fresh-csprng',
+                    ballotProofRandomnessHexes: ['22'.repeat(32)],
+                },
+                ballots,
+            }),
+        ).rejects.toThrow('ballotEncryptionRandomness.source');
+
+        await expect(
+            runInternalKernelCommand({
+                command: 'CreateDirectEncryptedBallotPackages',
+                acceptedPublicKeyMaterial,
+                acceptedSetupHandoff,
+                ballotEncryptionRandomness: {
+                    source: 'fresh-csprng',
+                    encryptionSeedHexes: ['33'.repeat(32)],
+                },
+                proofMaskRandomness: {
+                    source: 'development-deterministic-fixture',
+                    ballotProofRandomnessHexes: ['44'.repeat(32)],
+                },
+                ballots,
+            }),
+        ).rejects.toThrow('proofMaskRandomness.source');
     });
 
     it('rejects out-of-order voter identities before proof generation through Node/WASM', async () => {

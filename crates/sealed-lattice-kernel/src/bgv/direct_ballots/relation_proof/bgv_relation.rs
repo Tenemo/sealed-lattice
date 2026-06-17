@@ -7,7 +7,6 @@ pub(super) struct DirectBallotRelationResponseVerificationInput<'a> {
     pub(super) challenge: &'a BigInt,
     pub(super) bgv_relation_commitments: &'a [DirectBallotBgvRelationCommitment],
     pub(super) score_linear_commitment: &'a DirectBallotScoreLinearCommitment,
-    pub(super) support_commitment: &'a DirectBallotSupportCommitment,
     pub(super) response_vector: &'a DirectBallotWitnessVector,
 }
 
@@ -31,12 +30,6 @@ pub(super) fn verify_direct_ballot_relation_response(
     verify_direct_ballot_score_linear_response(
         input.challenge,
         input.score_linear_commitment,
-        input.response_vector,
-    )?;
-    verify_direct_ballot_support_response(
-        input.statement_hash,
-        input.challenge,
-        input.support_commitment,
         input.response_vector,
     )?;
     verify_direct_ballot_projected_bgv_relation_response(

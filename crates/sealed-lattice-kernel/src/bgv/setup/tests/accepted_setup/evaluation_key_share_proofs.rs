@@ -444,6 +444,21 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
             .expect("direct ballot arithmetic certificate hash")
     );
     assert_eq!(
+        direct_ballot_handoff["soundnessCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_soundness_certificate_hash()
+            .expect("direct ballot soundness certificate hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["zeroKnowledgeCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_zero_knowledge_certificate_hash()
+            .expect("direct ballot zero-knowledge certificate hash")
+    );
+    assert_eq!(
+        direct_ballot_handoff["verifierCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_verifier_certificate_hash()
+            .expect("direct ballot verifier certificate hash")
+    );
+    assert_eq!(
         direct_ballot_handoff["acceptedPublicKeyMaterial"]["publicKeyShareMaterialSetRoot"],
         package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
     );
@@ -460,6 +475,21 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         ballot_creation_policy["arithmeticCertificateHash"],
         crate::bgv::direct_ballots::direct_ballot_arithmetic_certificate_hash()
             .expect("direct ballot arithmetic certificate hash")
+    );
+    assert_eq!(
+        ballot_creation_policy["soundnessCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_soundness_certificate_hash()
+            .expect("direct ballot soundness certificate hash")
+    );
+    assert_eq!(
+        ballot_creation_policy["zeroKnowledgeCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_zero_knowledge_certificate_hash()
+            .expect("direct ballot zero-knowledge certificate hash")
+    );
+    assert_eq!(
+        ballot_creation_policy["verifierCertificateHash"],
+        crate::bgv::direct_ballots::direct_ballot_verifier_certificate_hash()
+            .expect("direct ballot verifier certificate hash")
     );
     assert_eq!(ballot_creation_policy["optionCount"], 20);
     assert_eq!(ballot_creation_policy["scoreDomain"]["minimum"], 1);

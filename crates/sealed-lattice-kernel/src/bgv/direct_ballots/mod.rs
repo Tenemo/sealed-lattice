@@ -23,6 +23,9 @@ pub(crate) use layout::{
 };
 use package::*;
 pub(crate) use package_verifier::verify_direct_encrypted_ballot_package;
+use package_verifier::{
+    DirectBallotPackageVerification, verify_direct_encrypted_ballot_package_request,
+};
 use proof_summary::*;
 use proof_transport::*;
 use randomness::*;
@@ -39,12 +42,15 @@ use relation_proof::{
     DIRECT_BALLOT_PROJECTED_BGV_RELATION_PROJECTIONS_PER_LIMB_COMPONENT,
     DirectBallotRelationProofGeneration, DirectBallotRelationProofVerification,
     direct_ballot_relation_challenge_bits, direct_ballot_relation_proof_accounting,
-    direct_ballot_relation_proof_bytes_hash, generate_direct_ballot_relation_proof,
-    verify_direct_ballot_relation_proof,
+    direct_ballot_relation_proof_bytes_hash, direct_ballot_relation_proof_public_header,
+    generate_direct_ballot_relation_proof, verify_direct_ballot_relation_proof,
 };
 pub(crate) use relation_proof::{
     direct_ballot_arithmetic_certificate_hash, direct_ballot_arithmetic_certificate_value,
-    direct_ballot_relation_proof_profile_hash, direct_ballot_witness_partition_profile_hash,
+    direct_ballot_relation_proof_profile_hash, direct_ballot_soundness_certificate_hash,
+    direct_ballot_soundness_certificate_value, direct_ballot_verifier_certificate_hash,
+    direct_ballot_verifier_certificate_value, direct_ballot_witness_partition_profile_hash,
+    direct_ballot_zero_knowledge_certificate_hash, direct_ballot_zero_knowledge_certificate_value,
 };
 
 use crate::{
@@ -92,6 +98,8 @@ use crate::{
 const DIRECT_BALLOT_OPERATION: &str = "runDirectEncryptedBallot";
 const DIRECT_BALLOT_PUBLIC_PACKAGE_OPERATION: &str = "createDirectEncryptedBallotPackages";
 const VERIFY_DIRECT_BALLOT_PACKAGE_OPERATION: &str = "verifyDirectEncryptedBallotPackage";
+const DIRECT_BALLOT_PUBLIC_AGGREGATE_OPERATION: &str = "aggregateDirectEncryptedBallotPackages";
+pub(crate) use aggregation::aggregate_direct_encrypted_ballot_packages;
 pub(crate) const DIRECT_BALLOT_OPTION_COUNT: usize = 20;
 pub(crate) const DIRECT_BALLOT_MINIMUM_SCORE: u64 = 1;
 pub(crate) const DIRECT_BALLOT_MAXIMUM_SCORE: u64 = 10;

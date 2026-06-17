@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::protocol_signatures::{
+    ProtocolSignatureExpectation, verify_protocol_signature_envelope,
+};
+
 const ENCRYPTED_BALLOT_PACKAGE_FIELDS: &[&str] = &[
     "objectType",
     "objectVersion",
@@ -27,6 +31,9 @@ const ENCRYPTED_BALLOT_PACKAGE_FIELDS: &[&str] = &[
     "ciphertextTransport",
     "witnessPartitionProfileHash",
     "arithmeticCertificateHash",
+    "soundnessCertificateHash",
+    "zeroKnowledgeCertificateHash",
+    "verifierCertificateHash",
     "proofProfileHash",
     "proofStatementHash",
     "proofChunkManifest",
@@ -47,23 +54,32 @@ const ENCRYPTED_BALLOT_CIPHERTEXT_TRANSPORT_FIELDS: &[&str] = &[
 const DIRECT_BALLOT_PUBLIC_PROOF_CHUNK_FIELDS: &[&str] =
     &["chunkIndex", "byteLength", "chunkHash", "bytesHex"];
 
-const DEVELOPMENT_SIGNATURE_PLACEHOLDER_FIELDS: &[&str] = &[
-    "objectType",
-    "objectVersion",
-    "status",
-    "expectedSignerRole",
-    "signedObjectRoot",
-    "voterIdentity",
-    "voterRosterPosition",
-    "contextHash",
-    "setupPackageRoot",
-    "ciphertextRoot",
-    "proofStatementHash",
-    "proofChunkRoot",
-];
-
 pub(crate) fn verify_direct_encrypted_ballot_package(request: &Value) -> CanonicalResult<Value> {
+    verify_direct_encrypted_ballot_package_request(request).map(|verification| verification.report)
+}
+
+pub(super) struct DirectBallotPackageVerification {
+    pub(super) report: Value,
+    pub(super) accepted_setup_handoff_root: String,
+    pub(super) package_root: String,
+    pub(super) ciphertext_root: String,
+    pub(super) proof_statement_hash: String,
+    pub(super) proof_chunk_root: String,
+    pub(super) package_verification_certificate_hash: String,
+    pub(super) public_aggregation_input: Value,
+    pub(super) voter_identity: String,
+    pub(super) voter_roster_position: usize,
+    pub(super) signature_hash: String,
+    pub(super) ballot: DirectEncryptedBallot,
+}
+
+pub(super) fn verify_direct_encrypted_ballot_package_request(
+    request: &Value,
+) -> CanonicalResult<DirectBallotPackageVerification> {
     reject_package_verifier_private_fields(request)?;
+    let voter_signing_public_key_hash =
+        required_string_field(request, "voterSigningPublicKeyHash")?;
+    validate_direct_ballot_hash_hex(voter_signing_public_key_hash, "voterSigningPublicKeyHash")?;
     let accepted_public_key_material = required_object_field(request, "acceptedPublicKeyMaterial")?;
     let accepted_setup_handoff = required_object_field(request, "acceptedSetupHandoff")?;
     let accepted_setup_handoff_root =
@@ -77,7 +93,8 @@ pub(crate) fn verify_direct_encrypted_ballot_package(request: &Value) -> Canonic
     )?;
     verify_direct_ballot_package_type(package)?;
     let package_root = verify_direct_ballot_package_root(package)?;
-    verify_development_signature_placeholder(package, &package_root)?;
+    let signature_hash =
+        verify_voter_signature_envelope(package, &package_root, voter_signing_public_key_hash)?;
     let proof_manifest = required_object_field(package, "proofChunkManifest")?;
     let proof_chunk_root = verify_package_proof_manifest_root(package, proof_manifest)?;
     let proof_bytes = read_ordered_public_proof_chunks(request, proof_manifest)?;
@@ -95,30 +112,94 @@ pub(crate) fn verify_direct_encrypted_ballot_package(request: &Value) -> Canonic
         &ballot,
         &proof_bytes,
     )?;
+    let proof_bytes_hash = direct_ballot_relation_proof_bytes_hash(&proof_bytes);
+    let package_verification_certificate = direct_ballot_package_verification_certificate(
+        DirectBallotPackageVerificationCertificateInput {
+            accepted_setup_handoff_root: &accepted_setup_handoff_root,
+            voter_signing_public_key_hash,
+            signature_hash: &signature_hash,
+            package,
+            package_root: &package_root,
+            proof_manifest,
+            proof_chunk_root: &proof_chunk_root,
+            proof_bytes_hash: &proof_bytes_hash,
+            ballot: &ballot,
+            proof_statement: &proof_statement,
+            proof_verification: &proof_verification,
+        },
+    )?;
 
-    Ok(json!({
+    let package_verification_certificate_hash = package_verification_certificate.hash;
+    let package_verification_certificate_value = package_verification_certificate.value;
+    let public_aggregation_input = required_object_field(
+        &package_verification_certificate_value,
+        "publicAggregationInput",
+    )?
+    .clone();
+    let ciphertext_root = ballot.ciphertext_root.clone();
+    let proof_statement_hash = proof_statement.hash_hex.clone();
+    let voter_identity = required_string_field(package, "voterIdentity")?.to_string();
+    let voter_roster_position = required_usize_field(package, "voterRosterPosition")?;
+    let report = json!({
         "operation": VERIFY_DIRECT_BALLOT_PACKAGE_OPERATION,
-        "verificationStatus": "setup handoff, public package artifacts, and internal direct ballot relation proof verified",
-        "acceptedSetupHandoffRoot": accepted_setup_handoff_root,
-        "packageRoot": package_root,
-        "ciphertextRoot": ballot.ciphertext_root,
-        "proofStatementHash": proof_statement.hash_hex,
+        "verificationStatus": "setup handoff, voter signature, public package artifacts, verifier-certified proof profile, and direct ballot relation proof verified",
+        "acceptedSetupHandoffRoot": accepted_setup_handoff_root.as_str(),
+        "packageRoot": package_root.as_str(),
+        "ciphertextRoot": ballot.ciphertext_root.as_str(),
+        "proofStatementHash": proof_statement.hash_hex.as_str(),
         "verifiedStatementHash": proof_verification.statement_hash_hex,
-        "proofBytesHash": direct_ballot_relation_proof_bytes_hash(&proof_bytes),
-        "proofChunkRoot": proof_chunk_root,
+        "proofBytesHash": proof_bytes_hash.as_str(),
+        "proofChunkRoot": proof_chunk_root.as_str(),
         "proofSizeBytes": proof_verification.proof_size_bytes,
         "proofChunkCount": required_usize_field(proof_manifest, "chunkCount")?,
         "relationCommitmentHash": proof_verification.relation_commitment_hash_hex,
         "challenge": proof_verification.challenge,
-        "signatureStatus": "development package signature placeholder checked for root and action-context binding; no voter signature verification is accepted yet",
-        "claimBoundary": "Accepted public-key material is checked against the accepted setup handoff, and package structure, canonical ciphertext bytes, proof chunk manifest, public proof chunks, statement binding, the projected response transcript, and the appended committed trace proof are verified from public artifacts. This remains development evidence because signature verification, soundness, zero-knowledge, and Fiat-Shamir/QROM accounting are not closed.",
-    }))
+        "signatureHash": signature_hash.as_str(),
+        "packageVerificationCertificateHash": package_verification_certificate_hash.as_str(),
+        "packageVerificationCertificate": package_verification_certificate_value.clone(),
+        "signatureStatus": "voter ML-DSA protocol signature verified against the supplied voter signing public-key hash and encrypted ballot package root",
+        "claimBoundary": "Accepted public-key material is checked against the accepted setup handoff, and package structure, voter signature, canonical ciphertext bytes, proof chunk manifest, public proof chunks, statement binding, verifier certificate binding, the projected response transcript, and the appended committed trace proof are verified from public artifacts and bound into a package verification certificate. Accepted creation refuses fixture randomness; public package verification does not and cannot recover consumed randomness from a package.",
+    });
+
+    Ok(DirectBallotPackageVerification {
+        report,
+        accepted_setup_handoff_root,
+        package_root,
+        ciphertext_root,
+        proof_statement_hash,
+        proof_chunk_root,
+        package_verification_certificate_hash,
+        public_aggregation_input,
+        voter_identity,
+        voter_roster_position,
+        signature_hash,
+        ballot,
+    })
 }
 
 struct DirectBallotPublicProofChunk {
     chunk_index: usize,
     bytes: Vec<u8>,
     chunk_hash: String,
+}
+
+struct DirectBallotPackageVerificationCertificate {
+    hash: String,
+    value: Value,
+}
+
+struct DirectBallotPackageVerificationCertificateInput<'a> {
+    accepted_setup_handoff_root: &'a str,
+    voter_signing_public_key_hash: &'a str,
+    signature_hash: &'a str,
+    package: &'a Value,
+    package_root: &'a str,
+    proof_manifest: &'a Value,
+    proof_chunk_root: &'a str,
+    proof_bytes_hash: &'a str,
+    ballot: &'a DirectEncryptedBallot,
+    proof_statement: &'a DirectBallotValidityStatement,
+    proof_verification: &'a DirectBallotRelationProofVerification,
 }
 
 fn reject_package_verifier_private_fields(request: &Value) -> CanonicalResult<()> {
@@ -189,64 +270,133 @@ fn verify_direct_ballot_package_root(package: &Value) -> CanonicalResult<String>
     Ok(package_root.to_string())
 }
 
-fn verify_development_signature_placeholder(
+fn verify_voter_signature_envelope(
     package: &Value,
     package_root: &str,
-) -> CanonicalResult<()> {
+    voter_signing_public_key_hash: &str,
+) -> CanonicalResult<String> {
     let signature = required_object_field(package, "signature")?;
-    reject_unexpected_direct_ballot_object_fields(
-        signature,
-        "encryptedBallotPackage.signature",
-        DEVELOPMENT_SIGNATURE_PLACEHOLDER_FIELDS,
+    let signed_payload = encrypted_ballot_package_signed_payload(package)?;
+    let byte_length = usize_to_u64(
+        canonical_json(&signed_payload)?.as_bytes().len(),
+        "encrypted ballot package signed payload byte length",
     )?;
-    if required_string_field(signature, "objectType")?
-        != "DevelopmentEncryptedBallotPackageSignaturePlaceholder"
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::UnsupportedObjectType,
-            "encrypted ballot package signature placeholder has an unsupported object type",
-        ));
-    }
-    if signature.get("objectVersion").and_then(Value::as_u64) != Some(1) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::UnsupportedObjectVersion,
-            "encrypted ballot package signature placeholder has an unsupported version",
-        ));
-    }
-    if required_string_field(signature, "status")?
-        != "not supplied in the internal development command"
-    {
-        return Err(CanonicalError::new(
+    let verification = verify_protocol_signature_envelope(
+        signature,
+        &ProtocolSignatureExpectation {
+            object_type: "EncryptedBallotPackage",
+            object_version: 1,
+            signer_role: "Voter",
+            signer_identity: required_string_field(package, "voterIdentity")?,
+            ceremony_id: required_string_field(package, "ceremonyId")?,
+            public_key_hash: voter_signing_public_key_hash,
+            manifest_hash: Some(required_string_field(package, "manifestHash")?),
+            object_root: Some(package_root),
+            chunk_merkle_root: None,
+            board_head_hash: None,
+            context_hash: required_string_field(package, "actionContextHash")?,
+            byte_length,
+            recovery_epoch: required_u64_field(package, "recoveryEpoch")?,
+            device_epoch: required_u64_field(package, "deviceEpoch")?,
+        },
+    )?;
+    match verification {
+        Ok(signature_hash) => Ok(signature_hash),
+        Err(failure) => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "development encrypted ballot package verifier does not accept an unverified signature object",
-        ));
+            format!(
+                "encrypted ballot package voter signature rejected: {}",
+                failure.message
+            ),
+        )),
     }
-    if required_string_field(signature, "signedObjectRoot")? != package_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "encrypted ballot package signature placeholder does not bind the package root",
-        ));
-    }
-    for (signature_field_name, package_field_name) in [
-        ("voterIdentity", "voterIdentity"),
-        ("voterRosterPosition", "voterRosterPosition"),
-        ("contextHash", "actionContextHash"),
-        ("setupPackageRoot", "setupPackageRoot"),
-        ("ciphertextRoot", "ciphertextRoot"),
-        ("proofStatementHash", "proofStatementHash"),
-        ("proofChunkRoot", "proofChunkRoot"),
-    ] {
-        if signature.get(signature_field_name) != package.get(package_field_name) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                format!(
-                    "encrypted ballot package signature placeholder does not bind {package_field_name}"
-                ),
-            ));
-        }
-    }
+}
 
-    Ok(())
+fn direct_ballot_package_verification_certificate(
+    input: DirectBallotPackageVerificationCertificateInput<'_>,
+) -> CanonicalResult<DirectBallotPackageVerificationCertificate> {
+    let proof_profile_hash = required_string_field(input.package, "proofProfileHash")?;
+    let arithmetic_certificate_hash =
+        required_string_field(input.package, "arithmeticCertificateHash")?;
+    let soundness_certificate_hash =
+        required_string_field(input.package, "soundnessCertificateHash")?;
+    let zero_knowledge_certificate_hash =
+        required_string_field(input.package, "zeroKnowledgeCertificateHash")?;
+    let verifier_certificate_hash =
+        required_string_field(input.package, "verifierCertificateHash")?;
+    let chunk_count = required_usize_field(input.proof_manifest, "chunkCount")?;
+    let chunk_size_bytes = required_usize_field(input.proof_manifest, "chunkSizeBytes")?;
+
+    let mut certificate = json!({
+        "objectType": "DirectEncryptedBallotPackageVerificationCertificate",
+        "objectVersion": 1,
+        "verification": "package schema, voter signature, accepted setup handoff, accepted public-key material, ciphertext transport, statement rebuilding, proof chunk transport, and relation proof bytes were verified from public artifacts",
+        "claimBoundary": "this certificate binds public verifier evidence for the verifier-certified proof profile; accepted randomness is a creation-time boundary and is not recovered from public package bytes",
+        "ceremonyId": required_string_field(input.package, "ceremonyId")?,
+        "manifestHash": required_string_field(input.package, "manifestHash")?,
+        "rosterHash": required_string_field(input.package, "rosterHash")?,
+        "thresholdProfileHash": required_string_field(input.package, "thresholdProfileHash")?,
+        "acceptedSetupHandoffRoot": input.accepted_setup_handoff_root,
+        "setupPackageRoot": required_string_field(input.package, "setupPackageRoot")?,
+        "setupProfileHash": required_string_field(input.package, "setupProfileHash")?,
+        "collectivePublicKeyRoot": required_string_field(input.package, "collectivePublicKeyRoot")?,
+        "bgvPublicKeyRoot": required_string_field(input.package, "bgvPublicKeyRoot")?,
+        "voterIdentity": required_string_field(input.package, "voterIdentity")?,
+        "voterRosterPosition": required_usize_field(input.package, "voterRosterPosition")?,
+        "voterSigningPublicKeyHash": input.voter_signing_public_key_hash,
+        "signatureHash": input.signature_hash,
+        "actionContextHash": required_string_field(input.package, "actionContextHash")?,
+        "recoveryEpoch": required_u64_field(input.package, "recoveryEpoch")?,
+        "deviceEpoch": required_u64_field(input.package, "deviceEpoch")?,
+        "packageRoot": input.package_root,
+        "ciphertextRoot": input.ballot.ciphertext_root.as_str(),
+        "ciphertextCanonicalByteLength": input.ballot.ciphertext_canonical_byte_length,
+        "proofStatementHash": input.proof_statement.hash_hex.as_str(),
+        "verifiedStatementHash": input.proof_verification.statement_hash_hex.as_str(),
+        "proofProfileHash": proof_profile_hash,
+        "arithmeticCertificateHash": arithmetic_certificate_hash,
+        "soundnessCertificateHash": soundness_certificate_hash,
+        "zeroKnowledgeCertificateHash": zero_knowledge_certificate_hash,
+        "verifierCertificateHash": verifier_certificate_hash,
+        "proofFullBytesHash": input.proof_bytes_hash,
+        "proofChunkRoot": input.proof_chunk_root,
+        "proofChunkCount": chunk_count,
+        "proofChunkSizeBytes": chunk_size_bytes,
+        "proofSizeBytes": input.proof_verification.proof_size_bytes,
+        "relationCommitmentHash": input.proof_verification.relation_commitment_hash_hex.as_str(),
+        "challenge": input.proof_verification.challenge.as_str(),
+        "publicAggregationInput": {
+            "packageRoot": input.package_root,
+            "ciphertextRoot": input.ballot.ciphertext_root.as_str(),
+            "proofStatementHash": input.proof_statement.hash_hex.as_str(),
+            "proofChunkRoot": input.proof_chunk_root,
+            "acceptedSetupHandoffRoot": input.accepted_setup_handoff_root,
+            "setupPackageRoot": required_string_field(input.package, "setupPackageRoot")?,
+            "collectivePublicKeyRoot": required_string_field(input.package, "collectivePublicKeyRoot")?,
+            "bgvPublicKeyRoot": required_string_field(input.package, "bgvPublicKeyRoot")?,
+            "proofProfileHash": proof_profile_hash,
+            "arithmeticCertificateHash": arithmetic_certificate_hash,
+            "soundnessCertificateHash": soundness_certificate_hash,
+            "zeroKnowledgeCertificateHash": zero_knowledge_certificate_hash,
+            "verifierCertificateHash": verifier_certificate_hash
+        }
+    });
+    let certificate_hash = derive_protocol_hash(
+        "DirectEncryptedBallotPackageVerificationCertificateHash",
+        &certificate,
+    )?;
+    certificate
+        .as_object_mut()
+        .expect("direct encrypted ballot package verification certificate is an object")
+        .insert(
+            "packageVerificationCertificateHash".to_string(),
+            json!(certificate_hash.clone()),
+        );
+
+    Ok(DirectBallotPackageVerificationCertificate {
+        hash: certificate_hash,
+        value: certificate,
+    })
 }
 
 fn verify_package_proof_manifest_root(
@@ -559,6 +709,9 @@ fn verify_package_statement_binding(
         "ciphertextRoot",
         "witnessPartitionProfileHash",
         "arithmeticCertificateHash",
+        "soundnessCertificateHash",
+        "zeroKnowledgeCertificateHash",
+        "verifierCertificateHash",
         "proofProfileHash",
     ] {
         if package.get(field_name) != proof_statement.value.get(field_name) {

@@ -19,6 +19,9 @@ use crate::bgv::{
         },
     },
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+use std::sync::Arc;
 
 const DIRECT_BALLOT_COMMITTED_TRACE_PROOF_MAGIC: &[u8; 8] = b"SLDCTP02";
 const DIRECT_BALLOT_COMMITTED_TRACE_TRANSCRIPT_LABEL: &str =
@@ -28,11 +31,16 @@ const DIRECT_BALLOT_COMMITTED_TRACE_COLUMN_MASK_DOMAIN: &str =
 const DIRECT_BALLOT_COMMITTED_TRACE_LEAF_SALT_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/committed-trace-leaf-salt-v1";
 const DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINTS_PER_HALF: usize = 108;
-const DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT: usize =
+pub(super) const DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT: usize =
     DIRECT_BALLOT_COMMITTED_TRACE_SPLIT * DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINTS_PER_HALF;
-const DIRECT_BALLOT_COMMITTED_LINEAR_ACCUMULATOR_COLUMNS: usize = 1;
-const DIRECT_BALLOT_COMMITTED_SHIFTED_LINEAR_ACCUMULATOR_COLUMNS: usize = 1;
-const DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_COLUMNS: usize = 2;
+pub(super) const DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT: usize = 7;
+const DIRECT_BALLOT_COMMITTED_LINEAR_ACCUMULATOR_COLUMNS: usize =
+    DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT;
+const DIRECT_BALLOT_COMMITTED_SHIFTED_LINEAR_ACCUMULATOR_COLUMNS: usize =
+    DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT;
+pub(super) const DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT: usize = 2;
+const DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_COLUMNS: usize =
+    DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT * 2;
 const DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_PHYSICAL_COLUMNS: usize =
     DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_COLUMNS * CHALLENGE_EXTENSION_DEGREE;
 
@@ -70,12 +78,13 @@ struct DirectBallotCommittedTraceLimbCommitment {
 }
 
 struct DirectBallotCommittedTraceLinearClaim {
-    coefficient_trace_columns: Vec<Vec<u64>>,
-    coefficient_coefficients: Vec<Vec<u64>>,
-    coefficient_extension_columns: Vec<Vec<u64>>,
+    coefficient_trace_columns: Vec<Vec<Vec<u64>>>,
+    coefficient_coefficients: Vec<Vec<Vec<u64>>>,
+    coefficient_extension_columns: Vec<Vec<Vec<u64>>>,
+    coefficient_extension_nonzero_column_indices: Vec<Vec<usize>>,
     last_selector_coefficients: Vec<u64>,
     last_selector_extension: Vec<u64>,
-    public_offset: u64,
+    public_offsets: Vec<u64>,
 }
 
 struct DirectBallotCommittedTraceAccumulatorCommitment {
@@ -112,6 +121,62 @@ pub(super) fn generate_direct_ballot_committed_trace_proof_bytes(
     witness_vector: &DirectBallotWitnessVector,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<Vec<u8>> {
+    let projected_bgv_rows = direct_ballot_committed_projected_bgv_rows_for_linear_claims(
+        statement_hash,
+        public_key,
+        ballot,
+    )?;
+    let witness_tree_roots = direct_ballot_committed_trace_witness_tree_roots(
+        witness_vector,
+        proof_randomness_seed_hex,
+    )?;
+
+    let mut transcript = FiatShamirTranscript::new(DIRECT_BALLOT_COMMITTED_TRACE_TRANSCRIPT_LABEL);
+    transcript.absorb("statement", statement_hash);
+    for witness_tree_root in &witness_tree_roots {
+        transcript.absorb("witness-tree-root", witness_tree_root);
+    }
+
+    let limb_proofs = prove_direct_ballot_committed_trace_limbs(
+        witness_vector,
+        proof_randomness_seed_hex,
+        &projected_bgv_rows,
+        &witness_tree_roots,
+        &transcript,
+    )?;
+
+    encode_direct_ballot_committed_trace_proof(
+        &DirectBallotCommittedTraceProof { limb_proofs },
+        &DATA_PRIMES,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn direct_ballot_committed_trace_witness_tree_roots(
+    witness_vector: &DirectBallotWitnessVector,
+    proof_randomness_seed_hex: &str,
+) -> CanonicalResult<Vec<[u8; 64]>> {
+    DATA_PRIMES
+        .par_iter()
+        .copied()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            build_committed_trace_limb_commitment(
+                witness_vector,
+                limb_index,
+                modulus,
+                proof_randomness_seed_hex,
+            )
+            .map(|commitment| commitment.salted.tree.root())
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn direct_ballot_committed_trace_witness_tree_roots(
+    witness_vector: &DirectBallotWitnessVector,
+    proof_randomness_seed_hex: &str,
+) -> CanonicalResult<Vec<[u8; 64]>> {
     let mut witness_tree_roots = Vec::with_capacity(DATA_PRIMES.len());
     for (limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let commitment = build_committed_trace_limb_commitment(
@@ -123,12 +188,52 @@ pub(super) fn generate_direct_ballot_committed_trace_proof_bytes(
         witness_tree_roots.push(commitment.salted.tree.root());
     }
 
-    let mut transcript = FiatShamirTranscript::new(DIRECT_BALLOT_COMMITTED_TRACE_TRANSCRIPT_LABEL);
-    transcript.absorb("statement", statement_hash);
-    for witness_tree_root in &witness_tree_roots {
-        transcript.absorb("witness-tree-root", witness_tree_root);
-    }
+    Ok(witness_tree_roots)
+}
 
+#[cfg(not(target_arch = "wasm32"))]
+fn prove_direct_ballot_committed_trace_limbs(
+    witness_vector: &DirectBallotWitnessVector,
+    proof_randomness_seed_hex: &str,
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
+    witness_tree_roots: &[[u8; 64]],
+    transcript: &FiatShamirTranscript,
+) -> CanonicalResult<Vec<DirectBallotCommittedTraceLimbProof>> {
+    DATA_PRIMES
+        .par_iter()
+        .copied()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            let commitment = build_committed_trace_limb_commitment(
+                witness_vector,
+                limb_index,
+                modulus,
+                proof_randomness_seed_hex,
+            )?;
+            if commitment.salted.tree.root() != witness_tree_roots[limb_index] {
+                return Err(invalid_direct_ballot_relation_proof(
+                    "direct ballot committed trace witness root is not deterministic",
+                ));
+            }
+            prove_committed_trace_limb(
+                projected_bgv_rows,
+                limb_index,
+                &commitment,
+                proof_randomness_seed_hex,
+                transcript,
+            )
+        })
+        .collect()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn prove_direct_ballot_committed_trace_limbs(
+    witness_vector: &DirectBallotWitnessVector,
+    proof_randomness_seed_hex: &str,
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
+    witness_tree_roots: &[[u8; 64]],
+    transcript: &FiatShamirTranscript,
+) -> CanonicalResult<Vec<DirectBallotCommittedTraceLimbProof>> {
     let mut limb_proofs = Vec::with_capacity(DATA_PRIMES.len());
     for (limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         let commitment = build_committed_trace_limb_commitment(
@@ -143,20 +248,15 @@ pub(super) fn generate_direct_ballot_committed_trace_proof_bytes(
             ));
         }
         limb_proofs.push(prove_committed_trace_limb(
-            statement_hash,
-            public_key,
-            ballot,
+            projected_bgv_rows,
             limb_index,
             &commitment,
             proof_randomness_seed_hex,
-            &transcript,
+            transcript,
         )?);
     }
 
-    encode_direct_ballot_committed_trace_proof(
-        &DirectBallotCommittedTraceProof { limb_proofs },
-        &DATA_PRIMES,
-    )
+    Ok(limb_proofs)
 }
 
 pub(super) fn verify_direct_ballot_committed_trace_proof_bytes(
@@ -171,6 +271,11 @@ pub(super) fn verify_direct_ballot_committed_trace_proof_bytes(
             "direct ballot committed trace proof limb count does not match the profile",
         ));
     }
+    let projected_bgv_rows = direct_ballot_committed_projected_bgv_rows_for_linear_claims(
+        statement_hash,
+        public_key,
+        ballot,
+    )?;
 
     let mut transcript = FiatShamirTranscript::new(DIRECT_BALLOT_COMMITTED_TRACE_TRANSCRIPT_LABEL);
     transcript.absorb("statement", statement_hash);
@@ -180,9 +285,7 @@ pub(super) fn verify_direct_ballot_committed_trace_proof_bytes(
 
     for (limb_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
         verify_committed_trace_limb(
-            statement_hash,
-            public_key,
-            ballot,
+            &projected_bgv_rows,
             limb_index,
             modulus,
             &proof.limb_proofs[limb_index],
@@ -247,7 +350,7 @@ fn masked_trace_coefficients(
     mask_sampler: &mut DeterministicSampler,
 ) -> Vec<u64> {
     let trace_size = plan.trace_size;
-    let mask_degree = column_mask_degree(trace_size);
+    let mask_degree = direct_ballot_committed_trace_column_mask_degree(trace_size);
     let mut coefficients = plan.coefficients_from_trace_values(trace_values);
     coefficients.resize(trace_size + mask_degree, 0);
     let mask = mask_sampler.uniform_residues(plan.modulus, mask_degree);
@@ -260,7 +363,7 @@ fn masked_trace_coefficients(
     coefficients
 }
 
-fn column_mask_degree(trace_size: usize) -> usize {
+pub(super) fn direct_ballot_committed_trace_column_mask_degree(trace_size: usize) -> usize {
     512.min(trace_size / 4)
 }
 
@@ -270,18 +373,37 @@ fn commit_salted_extension_rows(
     salt_sampler: &mut DeterministicSampler,
 ) -> CanonicalResult<SaltedTree> {
     let salts = salt_sampler.bytes(extension_size * LEAF_SALT_BYTES);
-    let mut row = vec![0_u64; extension_columns.len()];
-    let mut leaf_hashes = Vec::with_capacity(extension_size);
-    for position in 0..extension_size {
-        for (column_index, column) in extension_columns.iter().enumerate() {
-            row[column_index] = column[position];
+    #[cfg(not(target_arch = "wasm32"))]
+    let leaf_hashes = (0..extension_size)
+        .into_par_iter()
+        .map(|position| {
+            let row = extension_columns
+                .iter()
+                .map(|column| column[position])
+                .collect::<Vec<_>>();
+            leaf_hash(
+                position,
+                &salts[position * LEAF_SALT_BYTES..(position + 1) * LEAF_SALT_BYTES],
+                &row,
+            )
+        })
+        .collect();
+    #[cfg(target_arch = "wasm32")]
+    let leaf_hashes = {
+        let mut row = vec![0_u64; extension_columns.len()];
+        let mut leaf_hashes = Vec::with_capacity(extension_size);
+        for position in 0..extension_size {
+            for (column_index, column) in extension_columns.iter().enumerate() {
+                row[column_index] = column[position];
+            }
+            leaf_hashes.push(leaf_hash(
+                position,
+                &salts[position * LEAF_SALT_BYTES..(position + 1) * LEAF_SALT_BYTES],
+                &row,
+            ));
         }
-        leaf_hashes.push(leaf_hash(
-            position,
-            &salts[position * LEAF_SALT_BYTES..(position + 1) * LEAF_SALT_BYTES],
-            &row,
-        ));
-    }
+        leaf_hashes
+    };
 
     Ok(SaltedTree {
         tree: MerkleTree::from_leaf_hashes(leaf_hashes)?,
@@ -290,9 +412,7 @@ fn commit_salted_extension_rows(
 }
 
 fn prove_committed_trace_limb(
-    statement_hash: &[u8; 64],
-    public_key: &BgvPublicKey,
-    ballot: &DirectEncryptedBallot,
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
     limb_index: usize,
     commitment: &DirectBallotCommittedTraceLimbCommitment,
     proof_randomness_seed_hex: &str,
@@ -312,20 +432,27 @@ fn prove_committed_trace_limb(
         direct_ballot_projected_bgv_no_wrap_committed_carry_maximum_abs()?;
     verify_direct_ballot_committed_projected_bgv_carry_bound(projected_bgv_carry_bound, modulus)?;
     let linear_challenge_count = direct_ballot_committed_batched_linear_claim_challenge_count(
-        statement_hash,
-        public_key,
-        ballot,
+        projected_bgv_rows,
         limb_index,
     )?;
-    let linear_claim_challenges =
-        transcript.challenge_field_elements("linear-claim-alpha", modulus, linear_challenge_count);
+    let total_linear_challenge_count = linear_challenge_count
+        .checked_mul(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT)
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace linear challenge count overflowed",
+            )
+        })?;
+    let linear_claim_challenges = transcript.challenge_field_elements(
+        "linear-claim-alpha",
+        modulus,
+        total_linear_challenge_count,
+    );
     let linear_claim = build_committed_trace_linear_claim(
         plan,
-        statement_hash,
-        public_key,
-        ballot,
+        projected_bgv_rows,
         limb_index,
         modulus,
+        linear_challenge_count,
         &linear_claim_challenges,
     )?;
     let accumulator = build_committed_trace_accumulator_commitment(
@@ -339,102 +466,127 @@ fn prove_committed_trace_limb(
     let row_check_alpha = transcript.challenge_extension_elements(
         "support-row-alpha",
         modulus,
-        DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT,
+        DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT
+            * DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT,
     );
-    let linear_row_alpha =
-        transcript.challenge_extension_elements("linear-row-alpha", modulus, 1)[0];
+    let linear_row_alpha = transcript.challenge_extension_elements(
+        "linear-row-alpha",
+        modulus,
+        DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT * DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT,
+    );
     let phase_one_extension_columns = committed_trace_phase_one_extension_columns(
         &commitment.extension_columns,
         &accumulator.extension_columns,
         &accumulator.shifted_extension_columns,
     )?;
 
-    let mut row_check_extension = Vec::with_capacity(extension_size);
+    let mut row_check_extensions =
+        vec![Vec::with_capacity(extension_size); DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT];
     let mut row = vec![0_u64; base_witness_columns];
-    let mut coefficient_row = vec![0_u64; base_witness_columns];
     for position in 0..extension_size {
         for (column_index, column) in commitment.extension_columns.iter().enumerate() {
             row[column_index] = column[position];
         }
-        for (column_index, column) in linear_claim
-            .coefficient_extension_columns
-            .iter()
-            .enumerate()
-        {
-            coefficient_row[column_index] = column[position];
+        for row_batch_index in 0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT {
+            let support_alpha_start =
+                row_batch_index * DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT;
+            let support_alpha_end =
+                support_alpha_start + DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT;
+            let support_value = committed_support_row_check_value_base(
+                &tower,
+                &row,
+                &row_check_alpha[support_alpha_start..support_alpha_end],
+                modulus,
+                encoder_carry_bound,
+                projected_bgv_carry_bound,
+            )?;
+            let mut accumulated_linear_value = ChallengeExtensionTower::zero();
+            let linear_alpha_start = row_batch_index * DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT;
+            for batch_index in 0..DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT {
+                let linear_value = committed_trace_linear_accumulator_row_check_value_base_sparse(
+                    &row,
+                    &linear_claim.coefficient_extension_columns[batch_index],
+                    &linear_claim.coefficient_extension_nonzero_column_indices[batch_index],
+                    position,
+                    accumulator.extension_columns[batch_index][position],
+                    accumulator.shifted_extension_columns[batch_index][position],
+                    linear_claim.last_selector_extension[position],
+                    linear_claim.public_offsets[batch_index],
+                    modulus,
+                )?;
+                accumulated_linear_value = tower.add(
+                    &accumulated_linear_value,
+                    &tower.scale_base(
+                        &linear_row_alpha[linear_alpha_start + batch_index],
+                        linear_value,
+                    ),
+                );
+            }
+            row_check_extensions[row_batch_index]
+                .push(tower.add(&support_value, &accumulated_linear_value));
         }
-        let support_value = committed_support_row_check_value_base(
-            &tower,
-            &row,
-            &row_check_alpha,
-            modulus,
-            encoder_carry_bound,
-            projected_bgv_carry_bound,
-        )?;
-        let linear_value = committed_trace_linear_accumulator_row_check_value_base(
-            &row,
-            &coefficient_row,
-            accumulator.extension_columns[0][position],
-            accumulator.shifted_extension_columns[0][position],
-            linear_claim.last_selector_extension[position],
-            linear_claim.public_offset,
-            modulus,
-        )?;
-        row_check_extension.push(tower.add(
-            &support_value,
-            &tower.scale_base(&linear_row_alpha, linear_value),
-        ));
     }
-
     let commitment_bound = COMMITMENT_BOUND_FACTOR * trace_size;
-    let mut row_quotient_low = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
-    let mut row_quotient_high = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+    let mut row_quotient_low = vec![
+        vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+        DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT
+    ];
+    let mut row_quotient_high = vec![
+        vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+        DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT
+    ];
     let mut coordinate_evaluations = vec![0_u64; extension_size];
-    for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
-        for (slot, value) in coordinate_evaluations
-            .iter_mut()
-            .zip(row_check_extension.iter())
-        {
-            *slot = value[coordinate];
+    for row_batch_index in 0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT {
+        for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+            for (slot, value) in coordinate_evaluations
+                .iter_mut()
+                .zip(row_check_extensions[row_batch_index].iter())
+            {
+                *slot = value[coordinate];
+            }
+            let coordinate_coefficients =
+                plan.coefficients_from_extension_evaluations(&coordinate_evaluations)?;
+            let (quotient, remainder) =
+                divide_by_trace_vanishing(&coordinate_coefficients, trace_size, modulus);
+            let quotient = trim_trailing_zeros(quotient);
+            if let Some((remainder_index, remainder_value)) = remainder
+                .iter()
+                .enumerate()
+                .find(|(_index, value)| **value != 0)
+            {
+                return Err(invalid_direct_ballot_relation_proof(format!(
+                    "direct ballot committed trace witness does not satisfy the committed row constraints at row batch {row_batch_index} coordinate {coordinate} remainder {remainder_index} value {remainder_value}",
+                )));
+            }
+            let mut low = quotient.clone();
+            low.truncate(commitment_bound);
+            let high = if quotient.len() > commitment_bound {
+                quotient[commitment_bound..].to_vec()
+            } else {
+                Vec::new()
+            };
+            if high.len() > commitment_bound {
+                return Err(invalid_direct_ballot_relation_proof(
+                    "direct ballot committed trace row quotient exceeds the commitment bound",
+                ));
+            }
+            row_quotient_low[row_batch_index][coordinate] = low;
+            row_quotient_high[row_batch_index][coordinate] = high;
         }
-        let coordinate_coefficients =
-            plan.coefficients_from_extension_evaluations(&coordinate_evaluations)?;
-        let (quotient, remainder) =
-            divide_by_trace_vanishing(&coordinate_coefficients, trace_size, modulus);
-        let quotient = trim_trailing_zeros(quotient);
-        if let Some((remainder_index, remainder_value)) = remainder
-            .iter()
-            .enumerate()
-            .find(|(_index, value)| **value != 0)
-        {
-            return Err(invalid_direct_ballot_relation_proof(format!(
-                "direct ballot committed trace witness does not satisfy the committed row constraints at coordinate {coordinate} remainder {remainder_index} value {remainder_value}",
-            )));
-        }
-        let mut low = quotient.clone();
-        low.truncate(commitment_bound);
-        let high = if quotient.len() > commitment_bound {
-            quotient[commitment_bound..].to_vec()
-        } else {
-            Vec::new()
-        };
-        if high.len() > commitment_bound {
-            return Err(invalid_direct_ballot_relation_proof(
-                "direct ballot committed trace row quotient exceeds the commitment bound",
-            ));
-        }
-        row_quotient_low[coordinate] = low;
-        row_quotient_high[coordinate] = high;
     }
-
     let mut quotient_columns =
         vec![Vec::new(); DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_PHYSICAL_COLUMNS];
-    for (coordinate, coefficients) in row_quotient_low.iter().enumerate() {
-        quotient_columns[coordinate] = plan.extension_evaluations_from_coefficients(coefficients);
-    }
-    for (coordinate, coefficients) in row_quotient_high.iter().enumerate() {
-        quotient_columns[CHALLENGE_EXTENSION_DEGREE + coordinate] =
-            plan.extension_evaluations_from_coefficients(coefficients);
+    for row_batch_index in 0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT {
+        let low_offset = row_batch_index * 2 * CHALLENGE_EXTENSION_DEGREE;
+        let high_offset = low_offset + CHALLENGE_EXTENSION_DEGREE;
+        for (coordinate, coefficients) in row_quotient_low[row_batch_index].iter().enumerate() {
+            quotient_columns[low_offset + coordinate] =
+                plan.extension_evaluations_from_coefficients(coefficients);
+        }
+        for (coordinate, coefficients) in row_quotient_high[row_batch_index].iter().enumerate() {
+            quotient_columns[high_offset + coordinate] =
+                plan.extension_evaluations_from_coefficients(coefficients);
+        }
     }
     let mut quotient_salt_sampler = DeterministicSampler::new(
         DIRECT_BALLOT_COMMITTED_TRACE_LEAF_SALT_DOMAIN,
@@ -450,7 +602,6 @@ fn prove_committed_trace_limb(
         &mut quotient_salt_sampler,
     )?;
     transcript.absorb("quotient-tree-root", &quotient_salted.tree.root());
-
     let deep_points = sample_deep_points(&mut transcript, plan)?;
     let mut deep_evaluations = Vec::with_capacity(DEEP_POINT_COUNT);
     let coefficient_length = commitment
@@ -459,8 +610,16 @@ fn prove_committed_trace_limb(
         .chain(accumulator.masked_coefficients.iter())
         .chain(accumulator.shifted_masked_coefficients.iter())
         .map(Vec::len)
-        .chain(row_quotient_low.iter().map(Vec::len))
-        .chain(row_quotient_high.iter().map(Vec::len))
+        .chain(
+            row_quotient_low
+                .iter()
+                .flat_map(|batch| batch.iter().map(Vec::len)),
+        )
+        .chain(
+            row_quotient_high
+                .iter()
+                .flat_map(|batch| batch.iter().map(Vec::len)),
+        )
         .max()
         .unwrap_or(0);
     for point in &deep_points {
@@ -484,18 +643,23 @@ fn prove_committed_trace_limb(
         for coefficients in &accumulator.shifted_masked_coefficients {
             evaluations.push(evaluate_base(coefficients));
         }
-        for quotient_coordinates in [&row_quotient_low, &row_quotient_high] {
-            let mut quotient_value = ChallengeExtensionTower::zero();
-            for (coordinate, coefficients) in quotient_coordinates.iter().enumerate() {
-                let coordinate_evaluation = evaluate_base(coefficients);
-                let mut basis_element = ChallengeExtensionTower::zero();
-                basis_element[coordinate] = 1;
-                quotient_value = tower.add(
-                    &quotient_value,
-                    &tower.mul(&basis_element, &coordinate_evaluation),
-                );
+        for row_batch_index in 0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT {
+            for quotient_coordinates in [
+                &row_quotient_low[row_batch_index],
+                &row_quotient_high[row_batch_index],
+            ] {
+                let mut quotient_value = ChallengeExtensionTower::zero();
+                for (coordinate, coefficients) in quotient_coordinates.iter().enumerate() {
+                    let coordinate_evaluation = evaluate_base(coefficients);
+                    let mut basis_element = ChallengeExtensionTower::zero();
+                    basis_element[coordinate] = 1;
+                    quotient_value = tower.add(
+                        &quotient_value,
+                        &tower.mul(&basis_element, &coordinate_evaluation),
+                    );
+                }
+                evaluations.push(quotient_value);
             }
-            evaluations.push(quotient_value);
         }
         deep_evaluations.push(evaluations);
     }
@@ -522,7 +686,6 @@ fn prove_committed_trace_limb(
         &phase_one_extension_columns,
         &quotient_columns,
     )?;
-
     let low_degree_parameters = LowDegreeParameters {
         modulus,
         initial_domain_size: extension_size,
@@ -532,7 +695,6 @@ fn prove_committed_trace_limb(
     };
     let (low_degree, query_positions) =
         prove_low_degree(&mut transcript, &low_degree_parameters, &batch_codeword)?;
-
     let collect_row = |columns: &[Vec<u64>], position: usize| -> Vec<u64> {
         columns.iter().map(|column| column[position]).collect()
     };
@@ -609,9 +771,7 @@ fn prove_committed_trace_limb(
 }
 
 fn verify_committed_trace_limb(
-    statement_hash: &[u8; 64],
-    public_key: &BgvPublicKey,
-    ballot: &DirectEncryptedBallot,
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
     limb_index: usize,
     modulus: u64,
     limb_proof: &DirectBallotCommittedTraceLimbProof,
@@ -646,83 +806,115 @@ fn verify_committed_trace_limb(
 
     let mut transcript = global_transcript.fork("limb", limb_index as u64);
     let linear_challenge_count = direct_ballot_committed_batched_linear_claim_challenge_count(
-        statement_hash,
-        public_key,
-        ballot,
+        projected_bgv_rows,
         limb_index,
     )?;
-    let linear_claim_challenges =
-        transcript.challenge_field_elements("linear-claim-alpha", modulus, linear_challenge_count);
+    let total_linear_challenge_count = linear_challenge_count
+        .checked_mul(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT)
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace linear challenge count overflowed",
+            )
+        })?;
+    let linear_claim_challenges = transcript.challenge_field_elements(
+        "linear-claim-alpha",
+        modulus,
+        total_linear_challenge_count,
+    );
     let linear_claim = build_committed_trace_linear_claim(
         &plan,
-        statement_hash,
-        public_key,
-        ballot,
+        projected_bgv_rows,
         limb_index,
         modulus,
+        linear_challenge_count,
         &linear_claim_challenges,
     )?;
     transcript.absorb("accumulator-tree-root", &limb_proof.accumulator_tree_root);
     let row_check_alpha = transcript.challenge_extension_elements(
         "support-row-alpha",
         modulus,
-        DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT,
+        DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT
+            * DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT,
     );
-    let linear_row_alpha =
-        transcript.challenge_extension_elements("linear-row-alpha", modulus, 1)[0];
+    let linear_row_alpha = transcript.challenge_extension_elements(
+        "linear-row-alpha",
+        modulus,
+        DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT * DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT,
+    );
     transcript.absorb("quotient-tree-root", &limb_proof.quotient_tree_root);
     let deep_points = sample_deep_points(&mut transcript, &plan)?;
     let bound_power = (COMMITMENT_BOUND_FACTOR * trace_size) as u64;
     for (point_index, point) in deep_points.iter().enumerate() {
         let evaluations = &limb_proof.deep_evaluations[point_index];
         let base_witness_values = &evaluations[..base_witness_columns];
-        let accumulator_value = &evaluations[base_witness_columns];
-        let shifted_accumulator_value = &evaluations[base_witness_columns + 1];
-        let quotient_low = &evaluations[phase_one_columns];
-        let quotient_high = &evaluations[phase_one_columns + 1];
-        let shifted_quotient = tower.add(
-            quotient_low,
-            &tower.mul(&tower.pow(point, bound_power), quotient_high),
-        );
-        let coefficient_values = evaluate_public_coefficients_at_extension_point(
-            &tower,
-            point,
-            &linear_claim.coefficient_coefficients,
-        );
+        let coefficient_values = linear_claim
+            .coefficient_coefficients
+            .iter()
+            .map(|coefficient_columns| {
+                evaluate_public_coefficients_at_extension_point(&tower, point, coefficient_columns)
+            })
+            .collect::<Vec<_>>();
         let last_selector_value = evaluate_public_coefficients_at_extension_point(
             &tower,
             point,
             std::slice::from_ref(&linear_claim.last_selector_coefficients),
         )
         .remove(0);
-        let support_value = committed_support_row_check_value(
-            &tower,
-            base_witness_values,
-            &row_check_alpha,
-            modulus,
-            encoder_carry_bound,
-            projected_bgv_carry_bound,
-        )?;
-        let linear_value = committed_trace_linear_accumulator_row_check_value(
-            &tower,
-            base_witness_values,
-            &coefficient_values,
-            accumulator_value,
-            shifted_accumulator_value,
-            &last_selector_value,
-            linear_claim.public_offset,
-        )?;
-        let row_check_value =
-            tower.add(&support_value, &tower.mul(&linear_row_alpha, &linear_value));
-        if row_check_value
-            != tower.mul(
-                &trace_vanishing_at_extension(&plan, &tower, point),
-                &shifted_quotient,
-            )
-        {
-            return Err(invalid_direct_ballot_relation_proof(
-                "direct ballot committed trace row identity failed at an out-of-domain point",
-            ));
+        for row_batch_index in 0..DIRECT_BALLOT_COMMITTED_ROW_CHECK_BATCH_COUNT {
+            let quotient_offset = phase_one_columns + row_batch_index * 2;
+            let quotient_low = &evaluations[quotient_offset];
+            let quotient_high = &evaluations[quotient_offset + 1];
+            let shifted_quotient = tower.add(
+                quotient_low,
+                &tower.mul(&tower.pow(point, bound_power), quotient_high),
+            );
+            let support_alpha_start =
+                row_batch_index * DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT;
+            let support_alpha_end =
+                support_alpha_start + DIRECT_BALLOT_COMMITTED_SUPPORT_CONSTRAINT_COUNT;
+            let support_value = committed_support_row_check_value(
+                &tower,
+                base_witness_values,
+                &row_check_alpha[support_alpha_start..support_alpha_end],
+                modulus,
+                encoder_carry_bound,
+                projected_bgv_carry_bound,
+            )?;
+            let mut accumulated_linear_value = ChallengeExtensionTower::zero();
+            let linear_alpha_start = row_batch_index * DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT;
+            for batch_index in 0..DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT {
+                let accumulator_value = &evaluations[base_witness_columns + batch_index];
+                let shifted_accumulator_value = &evaluations[base_witness_columns
+                    + DIRECT_BALLOT_COMMITTED_LINEAR_ACCUMULATOR_COLUMNS
+                    + batch_index];
+                let linear_value = committed_trace_linear_accumulator_row_check_value(
+                    &tower,
+                    base_witness_values,
+                    &coefficient_values[batch_index],
+                    accumulator_value,
+                    shifted_accumulator_value,
+                    &last_selector_value,
+                    linear_claim.public_offsets[batch_index],
+                )?;
+                accumulated_linear_value = tower.add(
+                    &accumulated_linear_value,
+                    &tower.mul(
+                        &linear_row_alpha[linear_alpha_start + batch_index],
+                        &linear_value,
+                    ),
+                );
+            }
+            let row_check_value = tower.add(&support_value, &accumulated_linear_value);
+            if row_check_value
+                != tower.mul(
+                    &trace_vanishing_at_extension(&plan, &tower, point),
+                    &shifted_quotient,
+                )
+            {
+                return Err(invalid_direct_ballot_relation_proof(
+                    "direct ballot committed trace row identity failed at an out-of-domain point",
+                ));
+            }
         }
     }
     for evaluations in &limb_proof.deep_evaluations {
@@ -904,30 +1096,76 @@ fn validate_query_opening_shape(
 
 fn build_committed_trace_linear_claim(
     plan: &EvaluationDomainPlan,
-    statement_hash: &[u8; 64],
-    public_key: &BgvPublicKey,
-    ballot: &DirectEncryptedBallot,
+    projected_bgv_rows: &[Arc<DirectBallotProjectedBgvRelationRow>],
     limb_index: usize,
     modulus: u64,
+    single_batch_challenge_count: usize,
     batching_challenges: &[u64],
 ) -> CanonicalResult<DirectBallotCommittedTraceLinearClaim> {
-    let batched_claim = direct_ballot_committed_batched_linear_claim(
-        statement_hash,
-        public_key,
-        ballot,
+    let expected_challenge_count = single_batch_challenge_count
+        .checked_mul(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT)
+        .ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace linear challenge count overflowed",
+            )
+        })?;
+    if batching_challenges.len() != expected_challenge_count {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed trace linear challenge count does not match the batched profile",
+        ));
+    }
+    let batched_claims = direct_ballot_committed_batched_linear_claims(
+        projected_bgv_rows,
         limb_index,
         modulus,
+        single_batch_challenge_count,
         batching_challenges,
     )?;
-    let coefficient_trace_columns =
-        direct_ballot_committed_physical_columns(&batched_claim.coefficient_columns, modulus)?;
-    let mut coefficient_coefficients = Vec::with_capacity(coefficient_trace_columns.len());
-    let mut coefficient_extension_columns = Vec::with_capacity(coefficient_trace_columns.len());
-    for trace_column in &coefficient_trace_columns {
-        let coefficients = plan.coefficients_from_trace_values(trace_column);
-        coefficient_extension_columns
-            .push(plan.extension_evaluations_from_coefficients(&coefficients));
-        coefficient_coefficients.push(coefficients);
+    if batched_claims.len() != DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed trace linear batch count does not match the profile",
+        ));
+    }
+
+    let mut coefficient_trace_columns =
+        Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut coefficient_coefficients =
+        Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut coefficient_extension_columns =
+        Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut coefficient_extension_nonzero_column_indices =
+        Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut public_offsets = Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    for batched_claim in batched_claims {
+        let batch_coefficient_trace_columns =
+            direct_ballot_committed_physical_columns(&batched_claim.coefficient_columns, modulus)?;
+        let mut batch_sparse_coefficient_trace_columns =
+            Vec::with_capacity(batch_coefficient_trace_columns.len());
+        let mut batch_coefficient_coefficients =
+            Vec::with_capacity(batch_coefficient_trace_columns.len());
+        let mut batch_coefficient_extension_columns =
+            Vec::with_capacity(batch_coefficient_trace_columns.len());
+        let mut batch_nonzero_column_indices = Vec::new();
+        for (column_index, trace_column) in batch_coefficient_trace_columns.into_iter().enumerate()
+        {
+            if trace_column.iter().all(|value| *value == 0) {
+                batch_sparse_coefficient_trace_columns.push(Vec::new());
+                batch_coefficient_coefficients.push(Vec::new());
+                batch_coefficient_extension_columns.push(Vec::new());
+            } else {
+                let coefficients = plan.coefficients_from_trace_values(&trace_column);
+                batch_coefficient_extension_columns
+                    .push(plan.extension_evaluations_from_coefficients(&coefficients));
+                batch_coefficient_coefficients.push(coefficients);
+                batch_sparse_coefficient_trace_columns.push(trace_column);
+                batch_nonzero_column_indices.push(column_index);
+            }
+        }
+        coefficient_trace_columns.push(batch_sparse_coefficient_trace_columns);
+        coefficient_coefficients.push(batch_coefficient_coefficients);
+        coefficient_extension_columns.push(batch_coefficient_extension_columns);
+        coefficient_extension_nonzero_column_indices.push(batch_nonzero_column_indices);
+        public_offsets.push(batched_claim.public_offset);
     }
     let mut last_selector_trace = vec![0_u64; plan.trace_size];
     let Some(last_selector) = last_selector_trace.last_mut() else {
@@ -944,9 +1182,10 @@ fn build_committed_trace_linear_claim(
         coefficient_trace_columns,
         coefficient_coefficients,
         coefficient_extension_columns,
+        coefficient_extension_nonzero_column_indices,
         last_selector_coefficients,
         last_selector_extension,
-        public_offset: batched_claim.public_offset,
+        public_offsets,
     })
 }
 
@@ -957,38 +1196,63 @@ fn build_committed_trace_accumulator_commitment(
     limb_index: usize,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<DirectBallotCommittedTraceAccumulatorCommitment> {
-    let contribution_trace_values = committed_trace_linear_contribution_trace_values(
-        witness_trace_columns,
-        &linear_claim.coefficient_trace_columns,
-        plan.modulus,
-    )?;
-    let mut accumulator_trace_values = Vec::with_capacity(plan.trace_size);
-    let mut running_sum = 0_u64;
-    for contribution in contribution_trace_values {
-        accumulator_trace_values.push(running_sum);
-        running_sum = add_mod(running_sum, contribution, plan.modulus)?;
-    }
-    if add_mod(running_sum, linear_claim.public_offset, plan.modulus)? != 0 {
+    if linear_claim.coefficient_trace_columns.len() != DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT
+        || linear_claim.public_offsets.len() != DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT
+    {
         return Err(invalid_direct_ballot_relation_proof(
-            "direct ballot committed trace accumulator does not close the batched linear claims",
+            "direct ballot committed trace linear batch count does not match the profile",
         ));
     }
 
-    let mut mask_sampler = DeterministicSampler::new(
-        DIRECT_BALLOT_COMMITTED_TRACE_COLUMN_MASK_DOMAIN,
-        &[
-            proof_randomness_seed_hex.as_bytes(),
-            b"linear-accumulator",
-            &(limb_index as u64).to_le_bytes(),
-        ],
-    );
-    let masked_coefficients =
-        masked_trace_coefficients(plan, &accumulator_trace_values, &mut mask_sampler);
-    let shifted_masked_coefficients = shifted_trace_coefficients(plan, &masked_coefficients)?;
-    let extension_columns =
-        vec![plan.extension_evaluations_from_coefficients(&masked_coefficients)];
-    let shifted_extension_columns =
-        vec![plan.extension_evaluations_from_coefficients(&shifted_masked_coefficients)];
+    let mut masked_coefficients = Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut shifted_masked_coefficients =
+        Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut extension_columns = Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    let mut shifted_extension_columns =
+        Vec::with_capacity(DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT);
+    for batch_index in 0..DIRECT_BALLOT_COMMITTED_LINEAR_BATCH_COUNT {
+        let contribution_trace_values = committed_trace_linear_contribution_trace_values(
+            witness_trace_columns,
+            &linear_claim.coefficient_trace_columns[batch_index],
+            plan.modulus,
+        )?;
+        let mut accumulator_trace_values = Vec::with_capacity(plan.trace_size);
+        let mut running_sum = 0_u64;
+        for contribution in contribution_trace_values {
+            accumulator_trace_values.push(running_sum);
+            running_sum = add_mod(running_sum, contribution, plan.modulus)?;
+        }
+        if add_mod(
+            running_sum,
+            linear_claim.public_offsets[batch_index],
+            plan.modulus,
+        )? != 0
+        {
+            return Err(invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace accumulator does not close the batched linear claims",
+            ));
+        }
+
+        let mut mask_sampler = DeterministicSampler::new(
+            DIRECT_BALLOT_COMMITTED_TRACE_COLUMN_MASK_DOMAIN,
+            &[
+                proof_randomness_seed_hex.as_bytes(),
+                b"linear-accumulator",
+                &(limb_index as u64).to_le_bytes(),
+                &(batch_index as u64).to_le_bytes(),
+            ],
+        );
+        let batch_masked_coefficients =
+            masked_trace_coefficients(plan, &accumulator_trace_values, &mut mask_sampler);
+        let batch_shifted_masked_coefficients =
+            shifted_trace_coefficients(plan, &batch_masked_coefficients)?;
+        extension_columns
+            .push(plan.extension_evaluations_from_coefficients(&batch_masked_coefficients));
+        shifted_extension_columns
+            .push(plan.extension_evaluations_from_coefficients(&batch_shifted_masked_coefficients));
+        masked_coefficients.push(batch_masked_coefficients);
+        shifted_masked_coefficients.push(batch_shifted_masked_coefficients);
+    }
     let mut salt_sampler = DeterministicSampler::new(
         DIRECT_BALLOT_COMMITTED_TRACE_LEAF_SALT_DOMAIN,
         &[
@@ -1001,8 +1265,8 @@ fn build_committed_trace_accumulator_commitment(
         commit_salted_extension_rows(&extension_columns, plan.extension_size, &mut salt_sampler)?;
 
     Ok(DirectBallotCommittedTraceAccumulatorCommitment {
-        masked_coefficients: vec![masked_coefficients],
-        shifted_masked_coefficients: vec![shifted_masked_coefficients],
+        masked_coefficients,
+        shifted_masked_coefficients,
         extension_columns,
         shifted_extension_columns,
         salted,
@@ -1017,8 +1281,10 @@ fn committed_trace_linear_contribution_trace_values(
     if witness_trace_columns.len() != coefficient_trace_columns.len()
         || witness_trace_columns
             .iter()
-            .chain(coefficient_trace_columns.iter())
             .any(|column| column.len() != witness_trace_columns[0].len())
+        || coefficient_trace_columns
+            .iter()
+            .any(|column| !column.is_empty() && column.len() != witness_trace_columns[0].len())
     {
         return Err(invalid_direct_ballot_relation_proof(
             "direct ballot committed trace linear contribution shape does not match the witness columns",
@@ -1030,13 +1296,16 @@ fn committed_trace_linear_contribution_trace_values(
         .iter()
         .zip(coefficient_trace_columns.iter())
     {
+        if coefficient_column.is_empty() {
+            continue;
+        }
         for position in 0..trace_size {
-            let product = mul_mod(
+            let product = mul_mod_fast(
                 witness_column[position],
                 coefficient_column[position],
                 modulus,
-            )?;
-            contributions[position] = add_mod(contributions[position], product, modulus)?;
+            );
+            contributions[position] = add_mod_fast(contributions[position], product, modulus);
         }
     }
 
@@ -1112,17 +1381,45 @@ fn shifted_extension_position(position: usize, extension_size: usize) -> usize {
     (position + crate::bgv::polynomial_iop::DOMAIN_BLOWUP) % extension_size
 }
 
-fn committed_trace_linear_accumulator_row_check_value_base(
+fn committed_trace_linear_accumulator_row_check_value_base_sparse(
     witness_row: &[u64],
-    coefficient_row: &[u64],
+    coefficient_columns: &[Vec<u64>],
+    nonzero_column_indices: &[usize],
+    position: usize,
     accumulator_value: u64,
     shifted_accumulator_value: u64,
     last_selector_value: u64,
     public_offset: u64,
     modulus: u64,
 ) -> CanonicalResult<u64> {
-    let contribution =
-        committed_trace_linear_contribution_value_base(witness_row, coefficient_row, modulus)?;
+    if witness_row.len() != coefficient_columns.len() {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed trace linear contribution row shape does not match the coefficients",
+        ));
+    }
+    let mut contribution = 0_u64;
+    for column_index in nonzero_column_indices {
+        let witness_value = witness_row.get(*column_index).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace linear contribution references a missing witness column",
+            )
+        })?;
+        let coefficient_column = coefficient_columns.get(*column_index).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace linear contribution references a missing coefficient column",
+            )
+        })?;
+        let coefficient_value = coefficient_column.get(position).ok_or_else(|| {
+            invalid_direct_ballot_relation_proof(
+                "direct ballot committed trace linear contribution references a missing coefficient row",
+            )
+        })?;
+        contribution = add_mod_fast(
+            contribution,
+            mul_mod_fast(*witness_value, *coefficient_value, modulus),
+            modulus,
+        );
+    }
     let transition_difference = sub_mod(shifted_accumulator_value, accumulator_value, modulus)?;
     let expected_difference = add_mod(
         contribution,
@@ -1130,28 +1427,6 @@ fn committed_trace_linear_accumulator_row_check_value_base(
         modulus,
     )?;
     sub_mod(transition_difference, expected_difference, modulus)
-}
-
-fn committed_trace_linear_contribution_value_base(
-    witness_row: &[u64],
-    coefficient_row: &[u64],
-    modulus: u64,
-) -> CanonicalResult<u64> {
-    if witness_row.len() != coefficient_row.len() {
-        return Err(invalid_direct_ballot_relation_proof(
-            "direct ballot committed trace linear contribution row shape does not match the coefficients",
-        ));
-    }
-    let mut contribution = 0_u64;
-    for (witness_value, coefficient_value) in witness_row.iter().zip(coefficient_row.iter()) {
-        contribution = add_mod(
-            contribution,
-            mul_mod(*witness_value, *coefficient_value, modulus)?,
-            modulus,
-        )?;
-    }
-
-    Ok(contribution)
 }
 
 fn committed_trace_linear_accumulator_row_check_value(
@@ -1625,29 +1900,87 @@ fn committed_trace_batch_codeword(
     witness_columns: &[Vec<u64>],
     quotient_columns: &[Vec<u64>],
 ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
-    let reconstruction_input = CommittedTraceBatchReconstructionInput {
-        plan,
-        tower,
-        deep_points,
-        deep_evaluations,
-        lambda,
+    let total_column_count = witness_columns.len() + DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_COLUMNS;
+    if quotient_columns.len() != DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_PHYSICAL_COLUMNS
+        || lambda.len() != total_column_count * DEEP_POINT_COUNT
+        || deep_evaluations.len() != DEEP_POINT_COUNT
+        || deep_evaluations
+            .iter()
+            .any(|evaluations| evaluations.len() != total_column_count)
+    {
+        return Err(invalid_direct_ballot_relation_proof(
+            "direct ballot committed trace low-degree reconstruction shape is invalid",
+        ));
+    }
+
+    let mut extension_points = Vec::with_capacity(plan.extension_size);
+    let mut extension_point = plan.coset_offset;
+    for _ in 0..plan.extension_size {
+        extension_points.push(extension_point);
+        extension_point = mul_mod_fast(extension_point, plan.extension_root, plan.modulus);
+    }
+    let mut inverted_differences_by_point = Vec::with_capacity(DEEP_POINT_COUNT);
+    for deep_point in deep_points {
+        let differences = extension_points
+            .iter()
+            .map(|extension_point| tower.sub(&tower.embed_base(*extension_point), deep_point))
+            .collect::<Vec<_>>();
+        inverted_differences_by_point.push(tower.batch_inverse(&differences)?);
+    }
+
+    let mut lambda_evaluation_sums = [ChallengeExtensionTower::zero(); DEEP_POINT_COUNT];
+    let mut lambda_by_point =
+        vec![vec![ChallengeExtensionTower::zero(); total_column_count]; DEEP_POINT_COUNT];
+    for column_index in 0..total_column_count {
+        for (point_index, evaluations) in deep_evaluations.iter().enumerate() {
+            let lambda_value = &lambda[column_index * DEEP_POINT_COUNT + point_index];
+            lambda_evaluation_sums[point_index] = tower.add(
+                &lambda_evaluation_sums[point_index],
+                &tower.mul(lambda_value, &evaluations[column_index]),
+            );
+            lambda_by_point[point_index][column_index] = *lambda_value;
+        }
+    }
+    let quotient_logical_value = |position: usize, logical_index: usize| {
+        let mut value = ChallengeExtensionTower::zero();
+        let row_offset = logical_index * CHALLENGE_EXTENSION_DEGREE;
+        for (coordinate, slot) in value.iter_mut().enumerate() {
+            *slot = quotient_columns[row_offset + coordinate][position];
+        }
+
+        value
     };
     let mut codeword = vec![ChallengeExtensionTower::zero(); plan.extension_size];
     for (position, value) in codeword.iter_mut().enumerate() {
-        let witness_row = witness_columns
-            .iter()
-            .map(|column| column[position])
-            .collect::<Vec<_>>();
-        let quotient_row = quotient_columns
-            .iter()
-            .map(|column| column[position])
-            .collect::<Vec<_>>();
-        *value = reconstruct_committed_trace_batch_value(
-            &reconstruction_input,
-            &witness_row,
-            &quotient_row,
-            position,
-        )?;
+        let mut accumulated = ChallengeExtensionTower::zero();
+        for (point_index, lambda_row) in lambda_by_point.iter().enumerate() {
+            let mut point_sum = ChallengeExtensionTower::zero();
+            for (column_index, column) in witness_columns.iter().enumerate() {
+                point_sum = tower.add(
+                    &point_sum,
+                    &tower.scale_base(&lambda_row[column_index], column[position]),
+                );
+            }
+            for logical_index in 0..DIRECT_BALLOT_COMMITTED_TRACE_QUOTIENT_COLUMNS {
+                let column_index = witness_columns.len() + logical_index;
+                point_sum = tower.add(
+                    &point_sum,
+                    &tower.mul(
+                        &lambda_row[column_index],
+                        &quotient_logical_value(position, logical_index),
+                    ),
+                );
+            }
+            point_sum = tower.sub(&point_sum, &lambda_evaluation_sums[point_index]);
+            accumulated = tower.add(
+                &accumulated,
+                &tower.mul(
+                    &point_sum,
+                    &inverted_differences_by_point[point_index][position],
+                ),
+            );
+        }
+        *value = accumulated;
     }
 
     Ok(codeword)

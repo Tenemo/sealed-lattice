@@ -26,6 +26,7 @@ pub(super) struct DirectBallotRelationProofSummary {
     pub(super) proof_chunk_manifest: Value,
     pub(super) encrypted_ballot_package_root: String,
     pub(super) encrypted_ballot_package: Value,
+    pub(super) voter_signature_signed_root: Value,
 }
 
 pub(super) struct DirectBallotBinaryProofTransport {
@@ -40,6 +41,7 @@ pub(super) struct DirectBallotBinaryProofTransport {
     pub(super) proof_chunk_manifest: Value,
     pub(super) encrypted_ballot_package_root: String,
     pub(super) encrypted_ballot_package: Value,
+    pub(super) voter_signature_signed_root: Value,
 }
 
 impl DirectBallotRelationProofSummary {
@@ -74,6 +76,7 @@ impl DirectBallotRelationProofSummary {
             proof_chunk_manifest: proof_transport.proof_chunk_manifest,
             encrypted_ballot_package_root: proof_transport.encrypted_ballot_package_root,
             encrypted_ballot_package: proof_transport.encrypted_ballot_package,
+            voter_signature_signed_root: proof_transport.voter_signature_signed_root,
         }
     }
 }

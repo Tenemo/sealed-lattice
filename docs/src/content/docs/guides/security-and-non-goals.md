@@ -13,6 +13,7 @@ sidebar:
 - the published package identity is stable
 - the public runtime facade remains intentionally narrow while the final direct API is built
 - the election foundation component helpers verify signed-root envelopes for the current board, finality, roster-manifest, cast receipt, close record, and recovery helpers
+- public encrypted ballot package creation, package verification, and public ciphertext aggregation are exposed as development evidence from accepted public-key material and an accepted setup handoff
 - the Rust transcript-core builds, the published SDK loader verifies the packaged kernel hash before instantiation, and unpinned local WASM loader use requires an explicit test-only opt-in
 - docs, smoke checks, browser coverage, vector manifest verification, and release workflow continue to verify the current boundary
 
@@ -23,7 +24,7 @@ sidebar:
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
 - active-static setup is not claim-bearing until the `CollectiveBgvSetup-v1` public verifier accepts a full-profile setup with repo-owned setup proof accounting, per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and downstream integration bindings
 - independent external validation is not a prerequisite for the active-static setup prototype claim, but production use would still require separate production hardening and review
-- the internal direct encrypted ballot proof is not claim-bearing until the accepted encrypted ballot package verifier, soundness, zero-knowledge, Fiat-Shamir/QROM, public proof transport, and mobile-compatible proof readiness close; supported-phone evidence remains a later runtime target
+- the direct encrypted ballot package path is not claim-bearing until setup closure, final evidence capture, soundness and zero-knowledge review, public proof transport evidence, and mobile-compatible proof readiness close; supported-phone evidence remains a later runtime target
 - bounded-domain encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule
 - no caller should rely on private package names or future public subpaths becoming stable

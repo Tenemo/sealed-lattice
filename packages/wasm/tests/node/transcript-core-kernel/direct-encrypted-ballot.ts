@@ -1,3 +1,9 @@
+import type {
+    CanonicalSignedRootObject,
+    ProtocolHash,
+    ProtocolSignatureEnvelope,
+} from '@sealed-lattice/types';
+
 import { deriveProtocolHash, hash512Hex } from '#packages/crypto/src/index';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 import type {
@@ -134,21 +140,6 @@ export type DirectEncryptedBallotCiphertextTransport = {
     readonly ciphertextLimbRoots: readonly DirectEncryptedBallotCiphertextLimbRoot[];
 };
 
-export type DirectEncryptedBallotSignaturePlaceholder = {
-    readonly objectType: 'DevelopmentEncryptedBallotPackageSignaturePlaceholder';
-    readonly objectVersion: 1;
-    readonly status: 'not supplied in the internal development command';
-    readonly expectedSignerRole: 'Voter';
-    readonly signedObjectRoot: string;
-    readonly voterIdentity: string;
-    readonly voterRosterPosition: number;
-    readonly contextHash: string;
-    readonly setupPackageRoot: string;
-    readonly ciphertextRoot: string;
-    readonly proofStatementHash: string;
-    readonly proofChunkRoot: string;
-};
-
 export type DirectEncryptedBallotPackage = {
     readonly objectType: 'EncryptedBallotPackage';
     readonly objectVersion: 1;
@@ -172,6 +163,9 @@ export type DirectEncryptedBallotPackage = {
     readonly directBallotEncoderMatrixRoot: string;
     readonly witnessPartitionProfileHash: string;
     readonly arithmeticCertificateHash: string;
+    readonly soundnessCertificateHash: string;
+    readonly zeroKnowledgeCertificateHash: string;
+    readonly verifierCertificateHash: string;
     readonly collectivePublicKeyRoot: string;
     readonly bgvPublicKeyRoot: string;
     readonly ciphertextRoot: string;
@@ -182,7 +176,7 @@ export type DirectEncryptedBallotPackage = {
     readonly proofFullBytesHash: string;
     readonly proofChunkRoot: string;
     readonly packageRoot: string;
-    readonly signature: DirectEncryptedBallotSignaturePlaceholder;
+    readonly signature: ProtocolSignatureEnvelope | null;
 };
 
 export type DirectEncryptedBallotProofChunk = {
@@ -231,6 +225,9 @@ export type DirectEncryptedBallotResult = {
         readonly timingStatus: string;
         readonly challengeSoundness: string;
         readonly proofAccounting: {
+            readonly soundnessCertificateHash: string;
+            readonly zeroKnowledgeCertificateHash: string;
+            readonly verifierCertificateHash: string;
             readonly challengeBits: number;
             readonly nominalChallengeBits: number;
             readonly proofModelAccepted: boolean;
@@ -239,19 +236,17 @@ export type DirectEncryptedBallotResult = {
             readonly projectedBgvNoWrapCarryResponseScalars: number;
             readonly weakestCheckedRelation: string;
             readonly weakestRelationEffectiveBitsPerCheck: number;
-            readonly supportRelationModulusBits: number;
-            readonly supportProjectionCountPerPartition: number;
-            readonly classicalSoundnessBitsAfterSupportUnionBound:
-                | number
-                | null;
+            readonly committedTraceSoundness: unknown;
+            readonly outerResponseZeroKnowledge: unknown;
+            readonly committedTraceZeroKnowledge: unknown;
+            readonly effectiveStatisticalZeroKnowledgeBits: number;
+            readonly committedTraceSupportRows: string;
+            readonly classicalSoundnessBitsAfterCommittedTraceAccounting: number;
             readonly maskCoefficientBits: number;
             readonly responseCoefficientBytes: number;
             readonly projectedBgvNoWrapCarryResponseBytes: number;
-            readonly supportCheckCount: number;
-            readonly supportMaximumDegree: number;
-            readonly supportUnionLossBits: number;
             readonly targetClassicalSoundnessBits: number;
-            readonly minimumIndependentRepetitionsForTarget: number | null;
+            readonly minimumIndependentRepetitionsForTarget: number;
             readonly minimumIndependentRepetitionsStatus: string;
             readonly estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses: number;
             readonly estimatedRepeatedProofSizeBytes: number;
@@ -275,9 +270,13 @@ export type DirectEncryptedBallotResult = {
             readonly firstProofChunkManifest: DirectEncryptedBallotProofChunkManifest;
             readonly firstEncryptedBallotPackageRoot: string;
             readonly firstEncryptedBallotPackage: DirectEncryptedBallotPackage;
+            readonly firstVoterSignatureSignedRoot: CanonicalSignedRootObject;
             readonly firstProofStatementHash: string;
             readonly proofProfileHash: string;
             readonly arithmeticCertificateHash: string;
+            readonly soundnessCertificateHash: string;
+            readonly zeroKnowledgeCertificateHash: string;
+            readonly verifierCertificateHash: string;
         };
         readonly proofMaskRandomness: {
             readonly source:
@@ -323,12 +322,14 @@ export type DirectEncryptedBallotPackageCreationResult = {
         readonly proofChunkManifest: DirectEncryptedBallotProofChunkManifest;
         readonly proofChunks: readonly DirectEncryptedBallotProofChunk[];
         readonly encryptedBallotPackage: DirectEncryptedBallotPackage;
+        readonly voterSignatureSignedRoot: CanonicalSignedRootObject;
     }[];
     readonly packageCreation: {
         readonly setupHandoffRoot: string;
         readonly setupBoundary: string;
         readonly witnessBoundary: string;
         readonly proofBytesRetention: string;
+        readonly signatureBoundary: string;
         readonly claimBoundary: string;
     };
     readonly proofAttempt: DirectEncryptedBallotResult['proofAttempt'];
@@ -349,8 +350,67 @@ export type DirectEncryptedBallotPackageVerificationResult = {
     readonly proofChunkCount: number;
     readonly relationCommitmentHash: string;
     readonly challenge: string;
+    readonly signatureHash: string;
+    readonly packageVerificationCertificateHash: ProtocolHash;
+    readonly packageVerificationCertificate: DirectEncryptedBallotPackageVerificationCertificate;
     readonly signatureStatus: string;
     readonly claimBoundary: string;
+};
+
+export type DirectEncryptedBallotPackageVerificationCertificate = {
+    readonly objectType: 'DirectEncryptedBallotPackageVerificationCertificate';
+    readonly objectVersion: 1;
+    readonly verification: string;
+    readonly claimBoundary: string;
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly thresholdProfileHash: ProtocolHash;
+    readonly acceptedSetupHandoffRoot: ProtocolHash;
+    readonly setupPackageRoot: ProtocolHash;
+    readonly setupProfileHash: ProtocolHash;
+    readonly collectivePublicKeyRoot: ProtocolHash;
+    readonly bgvPublicKeyRoot: ProtocolHash;
+    readonly voterIdentity: string;
+    readonly voterRosterPosition: number;
+    readonly voterSigningPublicKeyHash: ProtocolHash;
+    readonly signatureHash: ProtocolHash;
+    readonly actionContextHash: ProtocolHash;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
+    readonly packageRoot: ProtocolHash;
+    readonly ciphertextRoot: ProtocolHash;
+    readonly ciphertextCanonicalByteLength: number;
+    readonly proofStatementHash: ProtocolHash;
+    readonly verifiedStatementHash: ProtocolHash;
+    readonly proofProfileHash: ProtocolHash;
+    readonly arithmeticCertificateHash: ProtocolHash;
+    readonly soundnessCertificateHash: ProtocolHash;
+    readonly zeroKnowledgeCertificateHash: ProtocolHash;
+    readonly verifierCertificateHash: ProtocolHash;
+    readonly proofFullBytesHash: ProtocolHash;
+    readonly proofChunkRoot: ProtocolHash;
+    readonly proofChunkCount: number;
+    readonly proofChunkSizeBytes: number;
+    readonly proofSizeBytes: number;
+    readonly relationCommitmentHash: ProtocolHash;
+    readonly challenge: string;
+    readonly publicAggregationInput: {
+        readonly packageRoot: ProtocolHash;
+        readonly ciphertextRoot: ProtocolHash;
+        readonly proofStatementHash: ProtocolHash;
+        readonly proofChunkRoot: ProtocolHash;
+        readonly acceptedSetupHandoffRoot: ProtocolHash;
+        readonly setupPackageRoot: ProtocolHash;
+        readonly collectivePublicKeyRoot: ProtocolHash;
+        readonly bgvPublicKeyRoot: ProtocolHash;
+        readonly proofProfileHash: ProtocolHash;
+        readonly arithmeticCertificateHash: ProtocolHash;
+        readonly soundnessCertificateHash: ProtocolHash;
+        readonly zeroKnowledgeCertificateHash: ProtocolHash;
+        readonly verifierCertificateHash: ProtocolHash;
+    };
+    readonly packageVerificationCertificateHash: ProtocolHash;
 };
 
 export const createDirectBallotSetupPackage = (
@@ -498,7 +558,7 @@ function directBallotWitnessPartitionProfileHash(
                     partitionId: 'projectedBgvNoWrapCarryScalars',
                     valueKind:
                         'signed integer carry scalar per statement-derived projected BGV row',
-                    scalarCount: profile.profile.dataPrimes.length * 2 * 3,
+                    scalarCount: profile.profile.dataPrimes.length * 2 * 6,
                     responseOrder: 6,
                     responseCoefficientBytes: 64,
                     relation:
@@ -522,12 +582,50 @@ const directBallotRelationProofProfileHash = (
     kernel: TranscriptCoreKernel,
 ): string => {
     const profile = kernel.describeBgvRnsProfile();
+    const projectedBgvProjectionsPerLimbComponent = 6;
+    const projectedBgvCommitmentScalarCount =
+        profile.profile.dataPrimes.length *
+        2 *
+        projectedBgvProjectionsPerLimbComponent;
+    const scoreLinearCommitmentScalarCount = 20 * 2;
+    const scoreLinearCommitmentBytes = scoreLinearCommitmentScalarCount * 48;
+    const relationCommitmentBytes =
+        projectedBgvCommitmentScalarCount * 8 + scoreLinearCommitmentBytes;
+    const relationResponseScalarCount =
+        20 + 20 * 10 + projectedBgvCommitmentScalarCount;
+    const relationDimensionWords = [
+        profile.profile.polynomialDegree,
+        profile.profile.plaintextModulus,
+        profile.profile.dataPrimes.length,
+        20,
+        10,
+        4,
+        projectedBgvProjectionsPerLimbComponent,
+        projectedBgvCommitmentScalarCount,
+        scoreLinearCommitmentScalarCount,
+        scoreLinearCommitmentBytes,
+        relationCommitmentBytes,
+        relationResponseScalarCount,
+        4 * profile.profile.polynomialDegree * 48 +
+            (20 + 20 * 10) * 48 +
+            projectedBgvCommitmentScalarCount * 64,
+        192,
+        48,
+        64,
+        107,
+        2,
+    ];
     const witnessPartitionProfileHash = directBallotWitnessPartitionProfileHash(
         kernel,
         profile,
     );
     const arithmeticCertificateHash =
         profile.directBallotArithmeticCertificateHash;
+    const soundnessCertificateHash =
+        profile.directBallotSoundnessCertificateHash;
+    const zeroKnowledgeCertificateHash =
+        profile.directBallotZeroKnowledgeCertificateHash;
+    const verifierCertificateHash = profile.directBallotVerifierCertificateHash;
 
     return kernel.deriveProtocolHash({
         namespace: 'BallotValidityProofProfileHash',
@@ -536,17 +634,26 @@ const directBallotRelationProofProfileHash = (
             statementVersion: 3,
             witnessPartitionProfileHash,
             arithmeticCertificateHash,
-            proofEncoding: 'binary relation transcript',
+            soundnessCertificateHash,
+            zeroKnowledgeCertificateHash,
+            verifierCertificateHash,
+            proofEncoding:
+                'binary relation transcript with explicit profile and dimension header',
+            proofFormatMagic: 'SLDBP003',
+            proofFormatVersion: 3,
+            relationDimensionWords,
             challengeBits: 192,
             challengeDomain:
                 'sealed-lattice/direct-encrypted-ballot/relation-challenge-v1',
             proofBytesDomain:
                 'sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1',
-            projectedBgvRelationProjectionsPerLimbComponent: 3,
+            projectedBgvRelationProjectionsPerLimbComponent:
+                projectedBgvProjectionsPerLimbComponent,
+            scoreLinearCommitmentEncoding: 'exact signed integer commitments',
             proofModelStatus:
-                'internal relation proof with appended committed trace proof; claim soundness and zero-knowledge accounting are not accepted',
+                'accepted public verifier definition with exact score linkage, projected-BGV budget accounting, committed-trace soundness accounting, zero-knowledge accounting, accepted creation randomness boundary, and appended committed trace proof',
             relation:
-                'statement-derived projected BGV all-limb encryption rows with projected no-wrap carry scalars, score encoding, one-hot constraints, random-projected support checks, and a salted masked committed trace proof for support rows, encoder carry bit/slack range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage',
+                'statement-derived projected BGV all-limb encryption rows with projected no-wrap carry scalars, exact score encoding and one-hot linkage, and a salted masked committed trace proof for support rows, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score rows, projected BGV field rows, and cross-prime no-wrap carry linkage',
             sourceRingDegree: profile.profile.polynomialDegree,
             dataPrimeCount: profile.profile.dataPrimes.length,
         },
@@ -572,6 +679,11 @@ const directBallotCreationPolicy = (
     );
     const arithmeticCertificateHash =
         profile.directBallotArithmeticCertificateHash;
+    const soundnessCertificateHash =
+        profile.directBallotSoundnessCertificateHash;
+    const zeroKnowledgeCertificateHash =
+        profile.directBallotZeroKnowledgeCertificateHash;
+    const verifierCertificateHash = profile.directBallotVerifierCertificateHash;
 
     return {
         objectType: 'DirectEncryptedBallotCreationPolicy',
@@ -592,6 +704,9 @@ const directBallotCreationPolicy = (
         directBallotEncoderMatrixRoot: profile.directBallotEncoderMatrixRoot,
         witnessPartitionProfileHash,
         arithmeticCertificateHash,
+        soundnessCertificateHash,
+        zeroKnowledgeCertificateHash,
+        verifierCertificateHash,
         optionCount: 20,
         scoreDomain: {
             minimum: 1,
@@ -753,6 +868,12 @@ const acceptedSetupHandoffForAcceptedPublicKeyMaterial = (
             witnessPartitionProfileHash,
             arithmeticCertificateHash:
                 profile.directBallotArithmeticCertificateHash,
+            soundnessCertificateHash:
+                profile.directBallotSoundnessCertificateHash,
+            zeroKnowledgeCertificateHash:
+                profile.directBallotZeroKnowledgeCertificateHash,
+            verifierCertificateHash:
+                profile.directBallotVerifierCertificateHash,
             ballotValidityProofProfileHash:
                 directBallotRelationProofProfileHash(kernel),
             publicKeyShareMaterialSetRoot:
@@ -991,6 +1112,10 @@ export const acceptedDirectBallotPublicMaterialForSetupPublicMaterial = (
         directBallotEncoderMatrixRoot: profile.directBallotEncoderMatrixRoot,
         arithmeticCertificateHash:
             profile.directBallotArithmeticCertificateHash,
+        soundnessCertificateHash: profile.directBallotSoundnessCertificateHash,
+        zeroKnowledgeCertificateHash:
+            profile.directBallotZeroKnowledgeCertificateHash,
+        verifierCertificateHash: profile.directBallotVerifierCertificateHash,
         ballotValidityProofProfileHash,
         collectivePublicKeyRoot: collectivePublicKey.collectivePublicKeyRoot,
         publicKeyShareMaterialSetRoot,
@@ -1282,9 +1407,6 @@ export const runDirectEncryptedBallot = (input: {
 
 export const createDirectEncryptedBallotPackages = (input: {
     readonly ballots?: readonly DirectEncryptedBallotInput[];
-    readonly ballotEncryptionSeedHexes?: readonly string[];
-    readonly ballotProofRandomnessHexes?: readonly string[];
-    readonly developmentRandomnessOverrideAcknowledged?: boolean;
     readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
     readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
 }): Promise<DirectEncryptedBallotPackageCreationResult> => {
@@ -1297,15 +1419,9 @@ export const createDirectEncryptedBallotPackages = (input: {
             acceptedSetupHandoff: input.acceptedSetupHandoff,
             ballotEncryptionRandomness: createBallotEncryptionRandomness({
                 ballotCount: ballots.length,
-                ballotEncryptionSeedHexes: input.ballotEncryptionSeedHexes,
-                developmentRandomnessOverrideAcknowledged:
-                    input.developmentRandomnessOverrideAcknowledged,
             }),
             proofMaskRandomness: createProofMaskRandomness({
                 ballotCount: ballots.length,
-                ballotProofRandomnessHexes: input.ballotProofRandomnessHexes,
-                developmentRandomnessOverrideAcknowledged:
-                    input.developmentRandomnessOverrideAcknowledged,
             }),
             ballots,
         },
@@ -1317,11 +1433,13 @@ export const verifyDirectEncryptedBallotPackage = (input: {
     readonly proofChunks: readonly DirectEncryptedBallotProofChunk[];
     readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
     readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+    readonly voterSigningPublicKeyHash: string;
 }): Promise<DirectEncryptedBallotPackageVerificationResult> =>
     runInternalKernelCommand<DirectEncryptedBallotPackageVerificationResult>({
         command: 'VerifyDirectEncryptedBallotPackage',
         acceptedPublicKeyMaterial: input.acceptedPublicKeyMaterial,
         acceptedSetupHandoff: input.acceptedSetupHandoff,
+        voterSigningPublicKeyHash: input.voterSigningPublicKeyHash,
         encryptedBallotPackage: input.encryptedBallotPackage,
         proofChunks: input.proofChunks,
     });

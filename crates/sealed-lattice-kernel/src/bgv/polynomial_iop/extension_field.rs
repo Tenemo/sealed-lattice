@@ -267,6 +267,37 @@ impl ChallengeExtensionTower {
 
         result
     }
+
+    // Montgomery batch inversion: one extension inverse plus three extension
+    // multiplications per element. Rejects any zero element.
+    pub(in crate::bgv) fn batch_inverse(
+        &self,
+        elements: &[ChallengeExtensionElement],
+    ) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+        if elements.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut running_products = Vec::with_capacity(elements.len());
+        let mut accumulated = Self::one();
+        for element in elements {
+            if Self::is_zero(element) {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "challenge extension batch inversion requires nonzero elements",
+                ));
+            }
+            running_products.push(accumulated);
+            accumulated = self.mul(&accumulated, element);
+        }
+        let mut suffix_inverse = self.inverse(&accumulated)?;
+        let mut inverses = vec![Self::zero(); elements.len()];
+        for index in (0..elements.len()).rev() {
+            inverses[index] = self.mul(&suffix_inverse, &running_products[index]);
+            suffix_inverse = self.mul(&suffix_inverse, &elements[index]);
+        }
+
+        Ok(inverses)
+    }
 }
 
 #[cfg(test)]

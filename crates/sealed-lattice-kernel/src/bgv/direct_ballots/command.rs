@@ -82,7 +82,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
         },
         "proofAttempt": {
             "relation": "statement-derived projected BGV data-prime encryption rows for c0=b*u+p*e0+encode(score) and c1=a*u+p*e1, with score-to-encoding carry linkage",
-            "coverage": "projected BGV rows and projected no-wrap carry rows for every RNS limb component, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, and statement-derived random-projected support are checked by the projected response transcript; an appended committed trace proof also binds one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score row sums, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape to salted masked columns; claim soundness, Fiat-Shamir/QROM accounting, and zero-knowledge are not accepted",
+            "coverage": "projected BGV rows and projected no-wrap carry rows for every RNS limb component are checked by the projected response transcript; score row sums and score weighted-sum constraints are checked as exact signed integer relations against the full Fiat-Shamir challenge; the appended committed trace proof binds one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score row sums, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape to salted masked columns; conservative projected-BGV, committed-trace soundness, zero-knowledge budgets, the accepted verifier certificate, accepted randomness boundary, and package verification certificates are recorded",
             "proofEncoding": "internal binary feasibility encoding with appended committed trace proof",
             "sourceRingDegree": POLYNOMIAL_DEGREE,
             "rnsLimbCount": DATA_PRIMES.len(),
@@ -103,7 +103,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
             "verifiedRelationCommitmentHash": first_proof.verified_relation_commitment_hash_hex,
             "challenge": first_proof.challenge.to_string(),
             "verifiedChallenge": first_proof.verified_challenge.to_string(),
-            "challengeSoundness": format!("single nominal {}-bit challenge; claim soundness is not accepted because the projected response transcript still checks score and BGV rows modulo smaller rings, and the committed trace still needs accepted soundness, Fiat-Shamir/QROM, and zero-knowledge accounting", direct_ballot_relation_challenge_bits()),
+            "challengeSoundness": format!("single nominal {}-bit outer challenge plus independent committed-trace batching; score linkage uses exact signed integer commitments and the full challenge, projected BGV rows record a random-projection budget, committed-trace rows record a conservative soundness budget, mask/opening distributions record zero-knowledge slack, and accepted package creation refuses fixture randomness. This development command remains fixture evidence when fixture-labelled randomness is supplied", direct_ballot_relation_challenge_bits()),
             "proofAccounting": direct_ballot_relation_proof_accounting(first_proof.proof_size_bytes, total_proof_bytes)?,
             "proofTransport": {
                 "encoding": "binary proof chunks",
@@ -120,26 +120,30 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
                 "firstProofChunkManifest": first_proof.proof_chunk_manifest,
                 "firstEncryptedBallotPackageRoot": first_proof.encrypted_ballot_package_root,
                 "firstEncryptedBallotPackage": first_proof.encrypted_ballot_package,
+                "firstVoterSignatureSignedRoot": first_proof.voter_signature_signed_root,
                 "firstProofStatementHash": first_proof.statement_hash_hex,
                 "proofProfileHash": direct_ballot_relation_proof_profile_hash()?,
-                "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?
+                "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
+                "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()?,
+                "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()?,
+                "verifierCertificateHash": direct_ballot_verifier_certificate_hash()?
             },
             "proofMaskRandomness": package_run.proof_mask_randomness.report_value(),
             "relationCommitmentScalarCount": first_proof.relation_commitment_scalar_count,
             "sharedResponsePolynomialCount": first_proof.shared_response_polynomial_count,
             "sharedResponseScalarCount": first_proof.shared_response_scalar_count,
-            "responseSharing": "one binary response vector is checked against statement-derived projected BGV rows, projected no-wrap carry rows, score-linear constraints, and support constraints; response bytes are not duplicated per limb",
+            "responseSharing": "one binary response vector is checked against statement-derived projected BGV rows, projected no-wrap carry rows, and score-linear constraints; support rows are checked by the appended committed trace proof; response bytes are not duplicated per limb",
             "timingStatus": direct_ballot_timing_status(),
             "provingTimeMilliseconds": package_run.total_proving_time_milliseconds.report_value(),
             "verificationTimeMilliseconds": package_run.total_verification_time_milliseconds.report_value(),
             "proofGate": first_proof.proof_gate,
-            "generation": "Generated and verified one internal binary proof with projected all-limb BGV encryption rows, score-linear constraints, random-projected support constraints, and an appended committed trace proof for support, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score, projected BGV field, and cross-prime no-wrap carry rows. This is internal relation evidence only; the proof model is not claim-bearing until accepted soundness, Fiat-Shamir/QROM accounting, and zero-knowledge accounting are complete.",
-            "projectedRnsCoverage": "The proof derives projected rows for all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector.",
-            "blocker": "Next missing pieces are accepted weakest-relation soundness accounting, committed-trace zero-knowledge accounting, Fiat-Shamir/QROM accounting, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, accepted package verifier closure for the proof profile, public accepted randomness API boundaries, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
+            "generation": "Generated and verified one binary proof with projected all-limb BGV encryption rows, exact integer score-linear constraints, and an appended committed trace proof for support, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score, projected BGV field, and cross-prime no-wrap carry rows. Conservative soundness, zero-knowledge accounting, the accepted verifier certificate, and the accepted randomness boundary are recorded for this proof profile; this development command remains fixture evidence when fixture-labelled randomness is supplied.",
+            "projectedRnsCoverage": "The proof derives projected rows for all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector, while score linkage uses exact integer commitments outside the plaintext modulus.",
+            "blocker": "Next missing pieces are mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
         },
         "aggregation": aggregation_result.report,
         "evaluatorReplay": evaluator_replay,
-        "decision": "Direct BGV ballot encryption, all-limb public-key preflight, development decrypt preflight, one widened shared-response internal proof with an appended committed trace proof, direct ciphertext aggregation, package-level binary proof chunk manifests, and requested-top-count encrypted sparse target projection are the active path. They are not claim-bearing because proof soundness, committed-trace zero-knowledge accounting, mobile evidence, accepted package verifier closure, public accepted randomness API boundaries, target share proof/C1-C4, and public target-decryption gates are not closed."
+        "decision": "Direct BGV ballot encryption, all-limb public-key preflight, development decrypt preflight, one widened shared-response proof with exact integer score linkage, recorded projected-BGV soundness, committed-trace soundness, zero-knowledge budgets, accepted verifier certification, accepted randomness boundaries, direct ciphertext aggregation, package-level binary proof chunk manifests, and requested-top-count encrypted sparse target projection are the active path. They are not claim-bearing because mobile evidence, target share proof/C1-C4, and public target-decryption gates are not closed, and this development command can still run with fixture-labelled randomness."
     }))
 }
 
@@ -234,7 +238,10 @@ fn read_direct_ballot_public_package_input(
 ) -> CanonicalResult<DirectBallotPublicPackageInput<'_>> {
     let ballot_input = read_direct_ballot_public_ballot_input(request)?;
 
-    attach_direct_ballot_proof_mask_randomness(request, ballot_input)
+    let package_input = attach_direct_ballot_proof_mask_randomness(request, ballot_input)?;
+    validate_accepted_direct_ballot_package_randomness(&package_input)?;
+
+    Ok(package_input)
 }
 
 fn read_direct_ballot_public_ballot_input(
@@ -415,6 +422,7 @@ fn direct_ballot_public_package_report(
                 "proofChunkManifest": proof_summary.proof_chunk_manifest.clone(),
                 "proofChunks": proof_summary.proof_chunks.clone(),
                 "encryptedBallotPackage": proof_summary.encrypted_ballot_package.clone(),
+                "voterSignatureSignedRoot": proof_summary.voter_signature_signed_root.clone(),
             })
         })
         .collect::<Vec<_>>();
@@ -448,13 +456,14 @@ fn direct_ballot_public_package_report(
         "packageCreation": {
             "setupHandoffRoot": package_run.accepted_setup_handoff_root,
             "setupBoundary": "This command requires acceptedPublicKeyMaterial plus an accepted setup handoff that binds the setup root, public-key roots, direct ballot profile hashes, and direct ballot creation policy.",
-            "witnessBoundary": "This command does not accept setupPackage, setupPublicMaterial, setupPrivateWitness, top-count evaluator requests, or public evaluation-key material; it creates encrypted ballot packages from accepted public-key material and caller-supplied ballot/proof randomness only.",
+            "witnessBoundary": "This command does not accept setupPackage, setupPublicMaterial, setupPrivateWitness, top-count evaluator requests, public evaluation-key material, fixture randomness, or development randomness overrides; it creates encrypted ballot packages from accepted public-key material and fresh platform randomness only.",
             "proofBytesRetention": "Proof bytes are generated, framed as public proof chunks, chunk-hash checked, reassembled, verified, and returned as chunk records for package verification. The report still does not return witness material or randomness.",
-            "claimBoundary": "The package format and public-key relation preflight are active, but the proof model remains internal evidence until soundness and zero-knowledge are closed."
+            "signatureBoundary": "The package material is unsigned until a voter attaches an ML-DSA protocol signature envelope over voterSignatureSignedRoot. The accepted package verifier requires that envelope and an expected voter signing public-key hash.",
+            "claimBoundary": "The package format, public-key relation preflight, conservative proof soundness accounting, zero-knowledge accounting, accepted verifier certificate, accepted randomness boundary, and package verification certificate are active. The package remains non-claim-bearing until mobile-compatible runtime evidence and target-decryption gates are closed."
         },
         "proofAttempt": {
             "relation": "statement-derived projected BGV data-prime encryption rows for c0=b*u+p*e0+encode(score) and c1=a*u+p*e1, with score-to-encoding carry linkage",
-            "coverage": "projected BGV rows and projected no-wrap carry rows for every RNS limb component, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, and statement-derived random-projected support are checked by the projected response transcript; an appended committed trace proof also binds one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score row sums, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape to salted masked columns; claim soundness, Fiat-Shamir/QROM accounting, and zero-knowledge are not accepted",
+            "coverage": "projected BGV rows and projected no-wrap carry rows for every RNS limb component are checked by the projected response transcript; score row sums and score weighted-sum constraints are checked as exact signed integer relations against the full Fiat-Shamir challenge; the appended committed trace proof binds one-hot Booleanity, ternary randomizer support, centered-binomial error support, helper-square consistency, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score row sums, score linkage, projected BGV field rows, cross-prime no-wrap carry linkage, and packed-column shape to salted masked columns; conservative projected-BGV, committed-trace soundness, zero-knowledge budgets, the accepted verifier certificate, accepted randomness boundary, and package verification certificates are recorded",
             "proofEncoding": "internal binary feasibility encoding with appended committed trace proof",
             "sourceRingDegree": POLYNOMIAL_DEGREE,
             "rnsLimbCount": DATA_PRIMES.len(),
@@ -475,7 +484,7 @@ fn direct_ballot_public_package_report(
             "verifiedRelationCommitmentHash": first_proof.verified_relation_commitment_hash_hex,
             "challenge": first_proof.challenge.to_string(),
             "verifiedChallenge": first_proof.verified_challenge.to_string(),
-            "challengeSoundness": format!("single nominal {}-bit challenge; claim soundness is not accepted because the projected response transcript still checks score and BGV rows modulo smaller rings, and the committed trace still needs accepted soundness, Fiat-Shamir/QROM, and zero-knowledge accounting", direct_ballot_relation_challenge_bits()),
+            "challengeSoundness": format!("single nominal {}-bit outer challenge plus independent committed-trace batching; score linkage uses exact signed integer commitments and the full challenge, projected BGV rows record a random-projection budget, committed-trace rows record a conservative soundness budget, mask/opening distributions record zero-knowledge slack, and accepted package creation refuses fixture randomness. The proof remains non-claim-bearing until mobile-compatible runtime evidence and target-decryption gates are closed", direct_ballot_relation_challenge_bits()),
             "proofAccounting": direct_ballot_relation_proof_accounting(first_proof.proof_size_bytes, total_proof_bytes)?,
             "proofTransport": {
                 "encoding": "binary proof chunks",
@@ -492,25 +501,63 @@ fn direct_ballot_public_package_report(
                 "firstProofChunkManifest": first_proof.proof_chunk_manifest,
                 "firstEncryptedBallotPackageRoot": first_proof.encrypted_ballot_package_root,
                 "firstEncryptedBallotPackage": first_proof.encrypted_ballot_package,
+                "firstVoterSignatureSignedRoot": first_proof.voter_signature_signed_root,
                 "firstProofStatementHash": first_proof.statement_hash_hex,
                 "proofProfileHash": direct_ballot_relation_proof_profile_hash()?,
-                "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?
+                "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()?,
+                "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()?,
+                "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()?,
+                "verifierCertificateHash": direct_ballot_verifier_certificate_hash()?
+            },
+            "proofCostEvidence": {
+                "evidencePath": "accepted public encrypted ballot package creation",
+                "proofSizeBytes": first_proof.proof_size_bytes,
+                "proofChunkSizeBytes": DIRECT_BALLOT_PROTOTYPE_PROOF_CHUNK_BYTES,
+                "proofChunkCount": first_proof.proof_chunk_count,
+                "totalProofBytes": total_proof_bytes,
+                "kernelTimingStatus": direct_ballot_timing_status(),
+                "kernelProvingTimeMilliseconds": package_run.total_proving_time_milliseconds.report_value(),
+                "kernelVerificationTimeMilliseconds": package_run.total_verification_time_milliseconds.report_value(),
+                "wasmRuntimeEvidence": "When invoked through the WASM bridge, the top-level wasmRuntimeEvidence field records command wall time, request and response byte lengths, JS/WASM copy count, largest copied buffer, and linear-memory peak for the command. The wasm32-unknown-unknown kernel does not expose separate internal prove and verify phase timers."
             },
             "proofMaskRandomness": package_run.proof_mask_randomness.report_value(),
             "relationCommitmentScalarCount": first_proof.relation_commitment_scalar_count,
             "sharedResponsePolynomialCount": first_proof.shared_response_polynomial_count,
             "sharedResponseScalarCount": first_proof.shared_response_scalar_count,
-            "responseSharing": "one binary response vector is checked against statement-derived projected BGV rows, projected no-wrap carry rows, score-linear constraints, and support constraints; response bytes are not duplicated per limb",
+            "responseSharing": "one binary response vector is checked against statement-derived projected BGV rows, projected no-wrap carry rows, and score-linear constraints; support rows are checked by the appended committed trace proof; response bytes are not duplicated per limb",
             "timingStatus": direct_ballot_timing_status(),
             "provingTimeMilliseconds": package_run.total_proving_time_milliseconds.report_value(),
             "verificationTimeMilliseconds": package_run.total_verification_time_milliseconds.report_value(),
             "proofGate": first_proof.proof_gate,
-            "generation": "Generated and verified one internal binary proof with projected all-limb BGV encryption rows, score-linear constraints, random-projected support constraints, and an appended committed trace proof for support, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score, projected BGV field, and cross-prime no-wrap carry rows. This is internal relation evidence only; the proof model is not claim-bearing until accepted soundness, Fiat-Shamir/QROM accounting, and zero-knowledge accounting are complete.",
-            "projectedRnsCoverage": "The proof derives projected rows for all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector.",
-            "blocker": "Next missing pieces are accepted weakest-relation soundness accounting, committed-trace zero-knowledge accounting, Fiat-Shamir/QROM accounting, mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, accepted package verifier closure for the proof profile, public accepted randomness API boundaries, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. Runs using development-deterministic-fixture proof masks or ballot-encryption randomness remain fixture evidence only."
+            "generation": "Generated and verified one binary proof with projected all-limb BGV encryption rows, exact integer score-linear constraints, and an appended committed trace proof for support, encoder carry bit/slack range, projected no-wrap carry ternary-digit range, score, projected BGV field, and cross-prime no-wrap carry rows. Conservative soundness, zero-knowledge accounting, the accepted verifier certificate, and the accepted randomness boundary are recorded for this proof profile; the proof model is not claim-bearing until mobile-compatible runtime evidence and target-decryption gates are closed.",
+            "projectedRnsCoverage": "The proof derives projected rows for all 17 BGV RNS limbs with one shared randomizer, error, encoding-carry, score, and one-hot response vector, while score linkage uses exact integer commitments outside the plaintext modulus.",
+            "blocker": "Next missing pieces are mobile runtime evidence, browser/mobile proof-copy measurement, mobile memory evidence, target share proof certification, smudging/noise C1-C4 closure, and public target-decryption integration. The development command may still use development-deterministic-fixture proof masks or ballot-encryption randomness, and those runs remain fixture evidence only."
         },
-        "decision": "Direct BGV ballot encryption, all-limb public-key preflight, one widened shared-response internal proof with an appended committed trace proof, package-level binary proof chunk manifests, and internal public-artifact package verification are the public package creation path. They are not claim-bearing because proof soundness, committed-trace zero-knowledge accounting, mobile evidence, accepted package verifier closure, public accepted randomness boundaries, target share proof/C1-C4, and public target-decryption gates are not closed."
+        "decision": "Direct BGV ballot encryption, all-limb public-key preflight, one widened shared-response proof with exact integer score linkage, recorded projected-BGV soundness, committed-trace soundness, zero-knowledge budgets, accepted verifier certification, accepted randomness boundaries, package-level binary proof chunk manifests, and internal public-artifact package verification are the public package creation path. They are not claim-bearing because mobile evidence, target share proof/C1-C4, and public target-decryption gates are not closed."
     }))
+}
+
+fn validate_accepted_direct_ballot_package_randomness(
+    package_input: &DirectBallotPublicPackageInput<'_>,
+) -> CanonicalResult<()> {
+    if package_input.ballot_encryption_randomness.source
+        != DirectBallotEncryptionRandomnessSource::FreshCsprng
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "createDirectEncryptedBallotPackages requires ballotEncryptionRandomness.source to be fresh-csprng; development-deterministic-fixture is accepted only by runDirectEncryptedBallot",
+        ));
+    }
+    if package_input.proof_mask_randomness.source
+        != DirectBallotProofMaskRandomnessSource::FreshCsprng
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "createDirectEncryptedBallotPackages requires proofMaskRandomness.source to be fresh-csprng; development-deterministic-fixture is accepted only by runDirectEncryptedBallot",
+        ));
+    }
+
+    Ok(())
 }
 
 fn reject_public_package_private_fields(request: &Value) -> CanonicalResult<()> {

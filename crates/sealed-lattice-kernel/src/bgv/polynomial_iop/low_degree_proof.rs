@@ -7,6 +7,8 @@ use merkle_commitment::{
     BatchedMerkleOpening, MerkleTree, consistent_sorted_leaves, leaf_hash, sorted_unique_indices,
     verify_merkle_batch,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
 
 // Batched FRI low-degree argument at rate 1/2. The initial layer is the
 // lambda-batched DEEP quotient codeword over the extension coset; it is not
@@ -87,21 +89,43 @@ fn fold_layer(
         point = mul_mod_fast(point, root, modulus);
     }
     let inverted_points = batch_inverse(&points, modulus)?;
-    let mut folded = Vec::with_capacity(half);
-    for position in 0..half {
-        let even_part = tower.scale_base(
-            &tower.add(&layer[position], &layer[position + half]),
-            inverse_two,
-        );
-        let odd_part = tower.scale_base(
-            &tower.scale_base(
-                &tower.sub(&layer[position], &layer[position + half]),
+    #[cfg(not(target_arch = "wasm32"))]
+    let folded = (0..half)
+        .into_par_iter()
+        .map(|position| {
+            let even_part = tower.scale_base(
+                &tower.add(&layer[position], &layer[position + half]),
                 inverse_two,
-            ),
-            inverted_points[position],
-        );
-        folded.push(tower.add(&even_part, &tower.mul(challenge, &odd_part)));
-    }
+            );
+            let odd_part = tower.scale_base(
+                &tower.scale_base(
+                    &tower.sub(&layer[position], &layer[position + half]),
+                    inverse_two,
+                ),
+                inverted_points[position],
+            );
+            tower.add(&even_part, &tower.mul(challenge, &odd_part))
+        })
+        .collect();
+    #[cfg(target_arch = "wasm32")]
+    let folded = {
+        let mut folded = Vec::with_capacity(half);
+        for position in 0..half {
+            let even_part = tower.scale_base(
+                &tower.add(&layer[position], &layer[position + half]),
+                inverse_two,
+            );
+            let odd_part = tower.scale_base(
+                &tower.scale_base(
+                    &tower.sub(&layer[position], &layer[position + half]),
+                    inverse_two,
+                ),
+                inverted_points[position],
+            );
+            folded.push(tower.add(&even_part, &tower.mul(challenge, &odd_part)));
+        }
+        folded
+    };
 
     Ok(folded)
 }
@@ -113,6 +137,20 @@ fn fold_layer(
 // intentional.
 fn pair_leaf_hashes(layer: &[ChallengeExtensionElement]) -> Vec<[u8; 64]> {
     let half = layer.len() / 2;
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        return (0..half)
+            .into_par_iter()
+            .map(|pair_index| {
+                leaf_hash(
+                    pair_index,
+                    &[],
+                    &flatten_extension_pair(&[layer[pair_index], layer[pair_index + half]]),
+                )
+            })
+            .collect();
+    }
+    #[cfg(target_arch = "wasm32")]
     (0..half)
         .map(|pair_index| {
             leaf_hash(

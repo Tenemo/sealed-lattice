@@ -107,6 +107,23 @@ export type TranscriptCoreKernelLoaderOptions = {
     readonly expectedKernelSha256Hex?: string;
 };
 
+export type TranscriptCoreKernelCommandRuntimeEvidence = Readonly<{
+    readonly commandWallTimeMilliseconds: string;
+    readonly requestByteLength: number;
+    readonly responseByteLength: number;
+    readonly jsWasmCopyCount: number;
+    readonly largestJsWasmCopiedBufferBytes: number;
+    readonly wasmMemoryByteLengthBefore: number;
+    readonly wasmMemoryByteLengthAfter: number;
+    readonly wasmMemoryByteLengthPeak: number;
+    readonly measurementBoundary: string;
+}>;
+
+export type TranscriptCoreKernelMeasuredCommandResult<T> = Readonly<{
+    readonly value: T;
+    readonly runtimeEvidence: TranscriptCoreKernelCommandRuntimeEvidence;
+}>;
+
 const requireKernelIntegrityExpectation = (
     options: TranscriptCoreKernelLoaderOptions,
 ): string | undefined => {
@@ -303,7 +320,15 @@ const parseKernelResponse = <T>(bytes: Uint8Array): T => {
     );
 };
 
-const runKernelCommand = <T>(
+const currentMilliseconds = (): number => {
+    const performance = globalThis.performance;
+
+    return typeof performance?.now === 'function'
+        ? performance.now()
+        : Date.now();
+};
+
+const runMeasuredKernelCommand = <T>(
     memory: WebAssembly.Memory,
     allocate: (length: number) => number,
     deallocate: (pointer: number, length: number) => void,
@@ -313,8 +338,10 @@ const runKernelCommand = <T>(
         outputLengthPointer: number,
     ) => number,
     request: TranscriptCoreKernelCommand,
-): T => {
+): TranscriptCoreKernelMeasuredCommandResult<T> => {
     const requestBytes = textEncoder.encode(JSON.stringify(request));
+    const wasmMemoryByteLengthBefore = memory.buffer.byteLength;
+    const startedMilliseconds = currentMilliseconds();
     let inputPointer = 0;
     let outputPointer = 0;
     let outputLengthPointer = 0;
@@ -342,7 +369,34 @@ const runKernelCommand = <T>(
             'transcript-core command',
         );
 
-        return parseKernelResponse<T>(outputBytes);
+        const finishedMilliseconds = currentMilliseconds();
+        const commandWallTimeMilliseconds = Math.max(
+            0,
+            finishedMilliseconds - startedMilliseconds,
+        );
+        const responseByteLength = outputBytes.length;
+
+        return {
+            value: parseKernelResponse<T>(outputBytes),
+            runtimeEvidence: {
+                commandWallTimeMilliseconds:
+                    commandWallTimeMilliseconds.toFixed(3),
+                requestByteLength: requestBytes.length,
+                responseByteLength,
+                jsWasmCopyCount:
+                    (requestBytes.length > 0 ? 1 : 0) +
+                    (responseByteLength > 0 ? 1 : 0),
+                largestJsWasmCopiedBufferBytes: Math.max(
+                    requestBytes.length,
+                    responseByteLength,
+                ),
+                wasmMemoryByteLengthBefore,
+                wasmMemoryByteLengthAfter: memory.buffer.byteLength,
+                wasmMemoryByteLengthPeak: memory.buffer.byteLength,
+                measurementBoundary:
+                    'Measured by the JavaScript WASM loader around one synchronous transcript-core command. It covers request copy into linear memory, kernel execution, response copy out of linear memory, JSON parse, and the peak linear-memory length after the command; WASM internal prove/verify phase timing remains unavailable on wasm32-unknown-unknown.',
+            },
+        };
     } finally {
         // The kernel may alias the input buffer as the output or otherwise reuse
         // pointers, so each distinct region is freed exactly once: the equality
@@ -364,6 +418,25 @@ const runKernelCommand = <T>(
     }
 };
 
+const runKernelCommand = <T>(
+    memory: WebAssembly.Memory,
+    allocate: (length: number) => number,
+    deallocate: (pointer: number, length: number) => void,
+    commandWithLength: (
+        pointer: number,
+        length: number,
+        outputLengthPointer: number,
+    ) => number,
+    request: TranscriptCoreKernelCommand,
+): T =>
+    runMeasuredKernelCommand<T>(
+        memory,
+        allocate,
+        deallocate,
+        commandWithLength,
+        request,
+    ).value;
+
 export {
     verifyKernelIntegrity,
     requireKernelIntegrityExpectation,
@@ -372,5 +445,6 @@ export {
     resolveNumberExport,
     copyIntoKernelMemory,
     copyFromKernelMemory,
+    runMeasuredKernelCommand,
     runKernelCommand,
 };

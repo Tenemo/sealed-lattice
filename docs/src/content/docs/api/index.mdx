@@ -10,8 +10,10 @@ Use the root package name for every supported public import.
 
 ```typescript
 import {
+    aggregateDirectEncryptedBallotPackages,
     createSetupContribution,
     createSetupPackageVerificationInput,
+    createDirectEncryptedBallotPackages,
     createVssShareAcceptance,
     deriveThresholdProfile,
     validatePollSpec,
@@ -19,6 +21,7 @@ import {
     verifyFoundationTranscript,
     verifyPrivateVssShare,
     verifySetupPackage,
+    verifyDirectEncryptedBallotPackage,
     verifyTargetFinality,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
@@ -31,6 +34,7 @@ import {
 - lifecycle label, lifecycle transition, and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
 - narrow accepted-setup helpers for setup intent records, setup phase records, common-randomness records, private VSS share verification, signed VSS acceptance and complaint records, roots-only setup contributions, proof-material records, binary setup-material transports, public-only setup package verification input construction, setup package verification, encrypted local trustee setup state export, and restore-after-restart validation
+- accepted encrypted ballot package creation, package verification, and public ciphertext aggregation from accepted public-key material plus an accepted setup handoff, with proof-cost and WASM runtime evidence returned by the package path
 - transcript-core fixture verification through the bundled Rust/WASM kernel
 - generated reference pages for the exported runtime functions and public types
 
@@ -39,8 +43,8 @@ import {
 - no public subpaths are supported
 - no complete active-static direct encrypted ballot voting API is available yet
 - no production ballot generation or casting API is available yet
-- no public proof construction API is available yet
-- no public aggregation or bounded-domain evaluator replay API is available yet
+- encrypted ballot package creation, verification, proof transport, and public aggregation are development evidence only, not production or supported-phone evidence
+- no public bounded-domain evaluator replay API is available yet
 - no production target-bound decryption or result release API is available yet
 - reserved complete-protocol entry points fail closed with `OperationUnavailable`
 

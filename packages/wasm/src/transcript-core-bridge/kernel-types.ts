@@ -51,6 +51,11 @@ import type {
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
     BgvVerifiedTransportedVssMaterialRelease,
     DirectBallotAcceptedPublicKeyMaterial,
+    DirectEncryptedBallotInput,
+    DirectEncryptedBallotPackageAggregation,
+    DirectEncryptedBallotPackageCreation,
+    DirectEncryptedBallotPackageVerification,
+    DirectEncryptedBallotPackageVerificationInput,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -95,6 +100,12 @@ export type {
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
     BgvVerifiedTransportedVssMaterialRelease,
     DirectBallotAcceptedPublicKeyMaterial,
+    DirectBallotWasmRuntimeEvidence,
+    DirectEncryptedBallotInput,
+    DirectEncryptedBallotPackageAggregation,
+    DirectEncryptedBallotPackageCreation,
+    DirectEncryptedBallotPackageVerification,
+    DirectEncryptedBallotPackageVerificationInput,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -182,6 +193,33 @@ export type TranscriptCoreKernel = {
         readonly targetShareProfile: unknown;
         readonly decryptionShares: readonly BgvTargetDecryptionShare[];
     }): BgvTargetDecryptionResult;
+    createDirectEncryptedBallotPackages(input: {
+        readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+        readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+        readonly ballotEncryptionRandomness: {
+            readonly source: 'fresh-csprng';
+            readonly encryptionSeedHexes: readonly string[];
+        };
+        readonly proofMaskRandomness: {
+            readonly source: 'fresh-csprng';
+            readonly ballotProofRandomnessHexes: readonly string[];
+        };
+        readonly ballots: readonly DirectEncryptedBallotInput[];
+    }): DirectEncryptedBallotPackageCreation;
+    verifyDirectEncryptedBallotPackage(input: {
+        readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+        readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+        readonly voterSigningPublicKeyHash: ProtocolHash;
+        readonly encryptedBallotPackage: unknown;
+        readonly proofChunks: DirectEncryptedBallotPackageVerificationInput['proofChunks'];
+    }): DirectEncryptedBallotPackageVerification;
+    aggregateDirectEncryptedBallotPackages(input: {
+        readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+        readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+        readonly encryptedBallotPackages: readonly DirectEncryptedBallotPackageVerificationInput[];
+        readonly firstValidOrderHash?: ProtocolHash;
+        readonly firstValidPackageRoots?: readonly ProtocolHash[];
+    }): DirectEncryptedBallotPackageAggregation;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -669,15 +707,11 @@ type TranscriptCoreKernelCommand =
           readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
           readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
           readonly ballotEncryptionRandomness: {
-              readonly source:
-                  | 'fresh-csprng'
-                  | 'development-deterministic-fixture';
+              readonly source: 'fresh-csprng';
               readonly encryptionSeedHexes: readonly string[];
           };
           readonly proofMaskRandomness: {
-              readonly source:
-                  | 'fresh-csprng'
-                  | 'development-deterministic-fixture';
+              readonly source: 'fresh-csprng';
               readonly ballotProofRandomnessHexes: readonly string[];
           };
           readonly ballots: readonly {
@@ -694,12 +728,30 @@ type TranscriptCoreKernelCommand =
           readonly command: 'VerifyDirectEncryptedBallotPackage';
           readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
           readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+          readonly voterSigningPublicKeyHash: string;
           readonly encryptedBallotPackage: unknown;
           readonly proofChunks: readonly {
               readonly chunkIndex: number;
               readonly byteLength: number;
               readonly chunkHash: string;
               readonly bytesHex: string;
+          }[];
+      }
+    | {
+          readonly command: 'AggregateDirectEncryptedBallotPackages';
+          readonly acceptedPublicKeyMaterial: DirectBallotAcceptedPublicKeyMaterial;
+          readonly acceptedSetupHandoff: BgvAcceptedSetupHandoff;
+          readonly firstValidOrderHash?: string;
+          readonly firstValidPackageRoots?: readonly string[];
+          readonly encryptedBallotPackages: readonly {
+              readonly voterSigningPublicKeyHash: string;
+              readonly encryptedBallotPackage: unknown;
+              readonly proofChunks: readonly {
+                  readonly chunkIndex: number;
+                  readonly byteLength: number;
+                  readonly chunkHash: string;
+                  readonly bytesHex: string;
+              }[];
           }[];
       };
 
