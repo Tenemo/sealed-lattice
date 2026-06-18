@@ -205,6 +205,13 @@ pub(super) fn read_target_share_profile(
     let minimum_shares_for_interpolation = usize_field(value, "minimumSharesForInterpolation")?;
     let decryption_share_quorum = usize_field(value, "decryptionShareQuorum")?;
     let participant_count = setup_binding.participants.len();
+    let expected_decryption_threshold = participant_count / 3 + 1;
+    if decryption_threshold != expected_decryption_threshold {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "targetShareProfile.decryptionThreshold must match the setup roster-derived threshold",
+        ));
+    }
     if decryption_threshold == 0
         || decryption_threshold > participant_count
         || minimum_shares_for_interpolation < decryption_threshold

@@ -82,10 +82,11 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "recipientRosterPosition must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    if recipient_roster_position >= 10 {
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    if recipient_roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "recipientRosterPosition is outside the first accepted profile roster",
+            "recipientRosterPosition is outside the setup roster",
         ));
     }
     let rns_limb_index = usize_field(
@@ -146,11 +147,10 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "coefficientCommitmentRoots must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     if coefficient_commitment_roots.len() != roster.decryption_threshold as usize {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "coefficientCommitmentRoots must bind every first-profile Shamir coefficient",
+            "coefficientCommitmentRoots must bind every setup Shamir coefficient",
         ));
     }
     let mut coefficient_commitment_values =
@@ -482,7 +482,7 @@ fn derive_private_vss_carry_witnesses(
     if coefficient_messages_by_shamir_index.len() != decryption_threshold {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "coefficientMessagesByShamirIndex must contain every first-profile Shamir coefficient",
+            "coefficientMessagesByShamirIndex must contain every setup Shamir coefficient",
         ));
     }
     if coefficient_messages_by_shamir_index.iter().any(|messages| {

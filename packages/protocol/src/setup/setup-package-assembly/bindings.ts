@@ -269,8 +269,7 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
         publicDerivations.objectType !== 'SetupPublicDerivations' ||
         publicDerivations.objectVersion !== 1 ||
         publicDerivations.setupProfileId !== setupProfileId ||
-        publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash ||
-        publicDerivations.status !== 'deterministic-public-derivations-bound'
+        publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
             'commonRandomness.publicDerivations must match the accepted setup public derivation profile.',

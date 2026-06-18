@@ -401,7 +401,6 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly fullMaterialCoefficientMebibytes: number;
         readonly jsonOverheadStatus: string;
         readonly streamingRequirement: string;
-        readonly mobileClosureStatus: string;
     };
     readonly publicVssCommitmentMaterialSizeProfileHash: ProtocolHash;
     readonly setupProofProfile: {
@@ -468,8 +467,6 @@ export type BgvCollectiveSetupProfileDescription = {
         }[];
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly genericKeySwitchPolicy: 'refused-unless-explicitly-required';
-        readonly genericKeySwitchProofStatus: 'not-required-for-first-profile';
-        readonly scheduleBindingStatus: 'relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting';
     };
     readonly evaluatorKeyScheduleProfileHash: ProtocolHash;
     readonly verifierStatuses: readonly [
@@ -488,8 +485,6 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly requiredFinalObjects: readonly string[];
     readonly genericKeySwitchPolicy: string;
     readonly transportProfileId: string;
-    readonly forbiddenAcceptedPathFields: readonly string[];
-    readonly topLevelForbiddenAcceptedPathFields: readonly string[];
 };
 
 export type BgvCollectiveSetupPublicDerivations = {
@@ -523,7 +518,6 @@ export type BgvCollectiveSetupPublicDerivations = {
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly commitmentMatrix: BgvCollectiveSetupPublicMatrix;
-        readonly materializationStatus: 'deterministic-entry-streams-bound';
         readonly publicMatricesRoot: ProtocolHash;
     };
     readonly crpRoots: {
@@ -532,7 +526,6 @@ export type BgvCollectiveSetupPublicDerivations = {
         readonly galoisKeyCrpRoot: ProtocolHash;
         readonly commitmentMatrixCrpRoot: ProtocolHash;
     };
-    readonly status: 'deterministic-public-derivations-bound';
     readonly publicDerivationRoot: ProtocolHash;
 };
 
@@ -542,9 +535,6 @@ export type BgvCollectiveSetupPublicMatrix = {
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly matrixKind: 'commitment' | 'setupProof';
     readonly profileId: string;
-    readonly profileStatus:
-        | 'commitment-profile-bound'
-        | 'setup-proof-profile-bound';
     readonly commitmentProfileHash?: ProtocolHash;
     readonly setupProofProfileHash?: ProtocolHash;
     readonly challengeDomainHash?: ProtocolHash;

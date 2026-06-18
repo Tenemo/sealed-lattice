@@ -27,6 +27,7 @@ sys_path.insert(0, "/estimator")
 
 from estimator import LWE, ND, RC
 from estimator.lwe_parameters import LWEParameters
+from estimator.reduction import ADPS16
 from sage.all import RR, log, oo
 
 DATA_PRIMES = [
@@ -79,11 +80,11 @@ def copy_log2(result, row, source_key, target_key):
         row[target_key] = log2_value(result[source_key])
 
 
-def estimate_attack_rows(parameters):
-    bdd = LWE.primal_bdd(parameters, red_cost_model=RC.MATZOV)
-    dual = LWE.dual(parameters, red_cost_model=RC.MATZOV)
-    dual_hybrid = LWE.dual_hybrid(parameters, red_cost_model=RC.MATZOV)
-    usvp = LWE.primal_usvp(parameters, red_cost_model=RC.MATZOV)
+def estimate_attack_rows(parameters, reduction_cost_model):
+    bdd = LWE.primal_bdd(parameters, red_cost_model=reduction_cost_model)
+    dual = LWE.dual(parameters, red_cost_model=reduction_cost_model)
+    dual_hybrid = LWE.dual_hybrid(parameters, red_cost_model=reduction_cost_model)
+    usvp = LWE.primal_usvp(parameters, red_cost_model=reduction_cost_model)
 
     rows = {}
 
@@ -122,7 +123,13 @@ def estimate_attack_rows(parameters):
     return rows
 
 
-def estimate_parameter_set(modulus, secret_distribution, error_distribution, tag):
+def estimate_parameter_set(
+    modulus,
+    secret_distribution,
+    error_distribution,
+    tag,
+    reduction_cost_model=RC.MATZOV,
+):
     parameters = LWEParameters(
         n=32768,
         q=modulus,
@@ -131,7 +138,7 @@ def estimate_parameter_set(modulus, secret_distribution, error_distribution, tag
         m=oo,
         tag=tag,
     )
-    rows = estimate_attack_rows(parameters)
+    rows = estimate_attack_rows(parameters, reduction_cost_model)
     weakest_attack, weakest_row = min(
         rows.items(),
         key=lambda row: row[1]["ropLog2"],
@@ -145,6 +152,31 @@ def estimate_parameter_set(modulus, secret_distribution, error_distribution, tag
         "marginTo128Bits": weakest_cost - TARGET_CLASSICAL_SECURITY_BITS,
         "rows": rows,
     }
+
+
+def estimate_quantum_context_parameter_set(
+    modulus,
+    secret_distribution,
+    error_distribution,
+    tag,
+):
+    row = estimate_parameter_set(
+        modulus,
+        secret_distribution,
+        error_distribution,
+        tag,
+        ADPS16(mode="quantum"),
+    )
+    row["costModel"] = "ADPS16(mode=quantum)"
+    row["rowScope"] = (
+        "quantum-leaning context only; setup/evaluator closure remains the "
+        "currentQDataCenteredBinomialEta2 RC.MATZOV classical row"
+    )
+    row["marginToConventional128Bits"] = (
+        row["weakestAttackCostLog2"] - TARGET_CLASSICAL_SECURITY_BITS
+    )
+    del row["marginTo128Bits"]
+    return row
 
 
 q_data = product(DATA_PRIMES)
@@ -166,6 +198,7 @@ output = {
         "secretDistribution": "ND.Ternary",
         "currentErrorDistribution": "ND.CenteredBinomial(2)",
         "referenceErrorDistribution": "ND.DiscreteGaussian(3.19)",
+        "quantumLeaningContextCostModel": "ADPS16(mode=quantum)",
         "sampleModel": "m=+Infinity",
     },
     "results": {
@@ -192,6 +225,12 @@ output = {
             ND.Ternary,
             ND.CenteredBinomial(2),
             "current-q-data-centered-binomial-eta2",
+        ),
+        "currentQDataCenteredBinomialEta2Adps16QuantumSieveContext": estimate_quantum_context_parameter_set(
+            q_data,
+            ND.Ternary,
+            ND.CenteredBinomial(2),
+            "current-q-data-centered-binomial-eta2-adps16-quantum-sieve-context",
         ),
         "qExtendedIfExposedCenteredBinomialEta2": estimate_parameter_set(
             q_extended,

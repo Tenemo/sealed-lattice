@@ -1,8 +1,3 @@
-/** Top-level transcript-core verification label for accepted and rejected fixtures. */
-export type TranscriptCoreVerificationLabel =
-    | 'TranscriptCoreVerified'
-    | 'TranscriptCoreRejected';
-
 export const canonicalErrorCodeValues = [
     'DuplicateField',
     'FieldOrder',
@@ -109,12 +104,17 @@ export type TranscriptCoreFixtureVerification =
     | MalformedObjectFixtureVerification;
 
 /** Public transcript-core fixture verifier result. */
-export type TranscriptCoreVerificationResult = {
-    readonly caseName: string;
-    readonly label: TranscriptCoreVerificationLabel;
-    readonly objectHash512?: string;
-    readonly chunkRoot?: string;
-    readonly rejection?: {
-        readonly code: CanonicalErrorCode;
-    };
-};
+export type TranscriptCoreVerificationResult =
+    | {
+          readonly ok: true;
+          readonly caseName: string;
+          readonly objectHash512: string;
+          readonly chunkRoot: string;
+      }
+    | {
+          readonly ok: false;
+          readonly caseName: string;
+          readonly rejection: {
+              readonly code: CanonicalErrorCode;
+          };
+      };

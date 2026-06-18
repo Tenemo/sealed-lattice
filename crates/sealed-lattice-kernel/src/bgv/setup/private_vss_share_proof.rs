@@ -195,11 +195,16 @@ fn validate_private_vss_share_statement_material(
             "private VSS share values must be canonical Q_share residues",
         ));
     }
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(input.setup_context);
+    let expected_coefficient_count =
+        usize::try_from(roster.decryption_threshold).map_err(|_| {
+            invalid_private_vss_share_proof("setup decryption threshold does not fit usize")
+        })?;
     if input.coefficient_commitment_roots.len() != input.coefficient_commitments.len()
-        || input.coefficient_commitments.len() != 4
+        || input.coefficient_commitments.len() != expected_coefficient_count
     {
         return Err(invalid_private_vss_share_proof(
-            "private VSS share proof requires the four first-profile Shamir coefficient commitments",
+            "private VSS share proof requires every setup Shamir coefficient commitment",
         ));
     }
     for (coefficient_index, (commitment_root, commitment)) in input

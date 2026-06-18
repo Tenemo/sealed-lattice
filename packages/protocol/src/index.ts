@@ -56,8 +56,6 @@ export {
     createRelinearizationLevelSchedule,
     createRequiredGaloisSet,
     evaluatorKeyGenericSwitchPolicy,
-    evaluatorKeyGenericSwitchProofStatus,
-    evaluatorKeyScheduleBindingStatus,
 } from './setup/evaluator-key-schedule.js';
 export {
     acceptedBgvProfileRingDegree,

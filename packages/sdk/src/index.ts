@@ -164,7 +164,6 @@ export type {
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
-    TranscriptCoreVerificationLabel,
     TranscriptCoreVerificationResult,
     TrusteeSetupEntry,
     ValidatedFirstValidObject,
@@ -698,8 +697,8 @@ export const verifyTranscriptCoreFixture = async (
 
     if ('expectedErrorCode' in verification) {
         return {
+            ok: false,
             caseName: verification.caseName,
-            label: 'TranscriptCoreRejected',
             rejection: {
                 code: verification.expectedErrorCode,
             },
@@ -707,8 +706,8 @@ export const verifyTranscriptCoreFixture = async (
     }
 
     return {
+        ok: true,
         caseName: verification.caseName,
-        label: 'TranscriptCoreVerified',
         objectHash512: verification.objectHash512,
         chunkRoot: verification.chunkRoot,
     };

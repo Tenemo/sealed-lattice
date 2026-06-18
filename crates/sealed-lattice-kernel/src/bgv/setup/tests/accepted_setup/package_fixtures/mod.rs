@@ -59,6 +59,35 @@ fn private_vss_mailbox_public_key_bytes_hash(roster_position: u64) -> String {
     .expect("recipient mailbox public key bytes hash")
 }
 
+fn setup_trustee_signature_seed_label(trustee_identity: &str) -> String {
+    format!("{trustee_identity}-setup-signing")
+}
+
+fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
+    let roster_entries = (0..participant_count)
+        .map(|roster_position| {
+            let trustee_identity = format!("trustee-{roster_position}");
+            let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(
+                &setup_trustee_signature_seed_label(&trustee_identity),
+            )
+            .expect("setup trustee signing public-key hash");
+            serde_json::json!({
+                "objectType": "CollectiveBgvSetupRosterEntry",
+                "objectVersion": 1,
+                "rosterPosition": roster_position,
+                "trusteeIdentity": trustee_identity,
+                "signingPublicKeyHash": signing_public_key_hash,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    derive_protocol_hash(
+        "CollectiveBgvSetupRosterHash",
+        &serde_json::Value::Array(roster_entries),
+    )
+    .expect("collective setup roster hash")
+}
+
 /// The first-closure roster size (n = 10). The minimal package and every
 /// historical fixture path use this, so its bytes stay identical.
 const FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT: u64 = 10;
@@ -204,11 +233,7 @@ fn build_collective_setup_package_fixture_parts(
         &serde_json::json!({ "manifest": "collective-bgv-setup-test" }),
     )
     .expect("manifest hash");
-    let roster_hash = derive_protocol_hash(
-        "RosterHash",
-        &serde_json::json!({ "roster": "collective-bgv-setup-test" }),
-    )
-    .expect("roster hash");
+    let roster_hash = collective_setup_roster_hash_fixture(participant_count);
     // The setup profile hash is a roster family: distinct per n, byte-identical
     // to the historical first-profile binding at n = 10. The verifier checks
     // setupContext.setupProfileHash against setup_profile_hash_for_roster, so the
@@ -252,7 +277,8 @@ fn build_collective_setup_package_fixture_parts(
             let participant_phase_objects = (0..participant_count)
                 .map(|roster_position| {
                     let trustee_identity = format!("trustee-{roster_position}");
-                    let signature_seed_label = format!("{trustee_identity}-{phase_identifier}");
+                    let signature_seed_label =
+                        setup_trustee_signature_seed_label(&trustee_identity);
                     let signing_public_key_hash =
                         create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
                             .expect("signature key fixture");

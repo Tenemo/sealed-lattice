@@ -267,7 +267,8 @@ pub(super) fn vss_share_acceptances_object(
                 .to_string();
             (0..participant_count).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
-                let signature_seed_label = format!("{recipient_identity}-accepts-{source_trustee_identity}");
+                let signature_seed_label =
+                    setup_trustee_signature_seed_label(&recipient_identity);
                 let signing_public_key_hash =
                     create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
                         .expect("signature key fixture");
@@ -442,8 +443,7 @@ pub(in super::super) fn vss_complaints_object(
         }),
     )
     .expect("complaint evidence root");
-    let signature_seed_label =
-        format!("{recipient_identity}-complains-about-{source_trustee_identity}");
+    let signature_seed_label = setup_trustee_signature_seed_label(&recipient_identity);
     let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
         .expect("signature key fixture");
     let complaint_payload = serde_json::json!({

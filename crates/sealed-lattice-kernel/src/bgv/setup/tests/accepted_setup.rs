@@ -124,8 +124,8 @@ use super::super::setup_proof::{
     setup_proof_material_transport_hashes,
 };
 use super::super::trustee_evaluation_key_proof::{
-    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyWitness,
-    encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
+    EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
+    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
     public_key_share_succinct_proof_bytes_hash, succinct_evaluation_key_proof_accounting_hash,
     trustee_evaluation_key_proof_bytes_hash,
 };
@@ -180,6 +180,53 @@ fn accepted_setup_test_timing(test_name: &'static str) -> AcceptedSetupTestTimin
 // fold-count offset self-check below guards against this drifting from the codec.
 const PROOF_CODEC_FIELD_RESIDUE_BYTES: usize = 6;
 
+struct FirstLimbProofCodecLayout {
+    ring_degree: usize,
+    total_error_columns: usize,
+    linkage_randomness_columns: usize,
+}
+
+impl FirstLimbProofCodecLayout {
+    fn from_statement(statement: &TrusteeEvaluationKeyStatement) -> Self {
+        let first_limb_index = 0;
+        let total_error_columns = statement
+            .active_key_indices(first_limb_index)
+            .iter()
+            .map(|key_index| statement.keys[*key_index].digit_count())
+            .sum();
+
+        Self {
+            ring_degree: statement.ring_degree,
+            total_error_columns,
+            linkage_randomness_columns: statement.linkage_randomness_count(first_limb_index),
+        }
+    }
+
+    fn public_key_share(ring_degree: usize) -> Self {
+        Self::with_same_secret_linkage(ring_degree, 1, 1)
+    }
+
+    fn same_secret_anchor(ring_degree: usize, linkage_commitment_count: usize) -> Self {
+        Self::with_same_secret_linkage(ring_degree, 0, linkage_commitment_count)
+    }
+
+    fn with_same_secret_linkage(
+        ring_degree: usize,
+        total_error_columns: usize,
+        linkage_commitment_count: usize,
+    ) -> Self {
+        let linkage_randomness_columns = linkage_commitment_count
+            .checked_mul(SETUP_COMMITMENT_RANDOMNESS_WIDTH)
+            .expect("linkage randomness column count");
+
+        Self {
+            ring_degree,
+            total_error_columns,
+            linkage_randomness_columns,
+        }
+    }
+}
+
 fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut [u8]) {
     // Header (magic plus limb count) and the two commitment roots precede the
     // first masked consistency claim, which is a six-byte base-field residue.
@@ -198,38 +245,35 @@ fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut 
 
 fn set_first_limb_low_degree_fold_count_to_wrong_value(
     proof_bytes: &mut [u8],
-    ring_degree: usize,
-    total_error_columns: usize,
-    linkage_commitment_count: usize,
+    layout: FirstLimbProofCodecLayout,
 ) {
     const PROOF_CODEC_TRACE_SPLIT: usize = 2;
     const PROOF_CODEC_DOMAIN_BLOWUP: usize = 4;
-    const PROOF_CODEC_DEEP_POINT_COUNT: usize = 2;
+    const PROOF_CODEC_COMMITMENT_BOUND_FACTOR: usize = 2;
+    const PROOF_CODEC_DEEP_EVALUATION_POINT_COUNT: usize = 3;
     const PROOF_CODEC_CONSISTENCY_REPETITIONS: usize = 20;
     const PROOF_CODEC_CLAIM_MASK_DIGIT_COUNT: usize = 92;
     const PROOF_CODEC_CHALLENGE_EXTENSION_DEGREE: usize = 4;
     const PROOF_CODEC_PHASE_TWO_COLUMN_COUNT: usize = 4;
+    const PROOF_CODEC_LOW_DEGREE_FINAL_COEFFICIENT_COUNT: usize = 8;
     const PROOF_CODEC_ROOT_BYTES_PER_LIMB: usize = 64 + 64;
     const PROOF_CODEC_HEADER_BYTES: usize = 8 + 8;
 
-    let linkage_randomness_columns = linkage_commitment_count
-        .checked_mul(SETUP_COMMITMENT_RANDOMNESS_WIDTH)
-        .expect("linkage randomness column count");
-    let linkage_logical_columns = if linkage_randomness_columns == 0 {
+    let linkage_logical_columns = if layout.linkage_randomness_columns == 0 {
         0
     } else {
-        1 + linkage_randomness_columns
+        1 + layout.linkage_randomness_columns
     };
-    let consistency_vector_count = 1 + total_error_columns + linkage_logical_columns;
+    let consistency_vector_count = 1 + layout.total_error_columns + linkage_logical_columns;
     let claim_count = consistency_vector_count
         .checked_mul(PROOF_CODEC_CONSISTENCY_REPETITIONS)
         .expect("claim count");
     let mask_slot_count = claim_count
         .checked_mul(PROOF_CODEC_CLAIM_MASK_DIGIT_COUNT)
         .expect("mask slot count");
-    let mask_column_count = mask_slot_count.div_ceil(ring_degree);
+    let mask_column_count = mask_slot_count.div_ceil(layout.ring_degree);
     let phase_one_logical_columns = 1_usize
-        .checked_add(2 * total_error_columns)
+        .checked_add(2 * layout.total_error_columns)
         .and_then(|count| count.checked_add(linkage_logical_columns))
         .and_then(|count| count.checked_add(mask_column_count))
         .expect("phase-one logical column count");
@@ -237,7 +281,7 @@ fn set_first_limb_low_degree_fold_count_to_wrong_value(
         .checked_mul(phase_one_logical_columns)
         .expect("phase-one physical count");
     let total_column_count = phase_one_physical_count + PROOF_CODEC_PHASE_TWO_COLUMN_COUNT;
-    let deep_evaluation_bytes = PROOF_CODEC_DEEP_POINT_COUNT
+    let deep_evaluation_bytes = PROOF_CODEC_DEEP_EVALUATION_POINT_COUNT
         .checked_mul(total_column_count)
         .and_then(|count| count.checked_mul(PROOF_CODEC_CHALLENGE_EXTENSION_DEGREE))
         .and_then(|count| count.checked_mul(PROOF_CODEC_FIELD_RESIDUE_BYTES))
@@ -265,12 +309,18 @@ fn set_first_limb_low_degree_fold_count_to_wrong_value(
     proof_bytes[low_degree_fold_count_offset..low_degree_fold_count_end]
         .copy_from_slice(&wrong_committed_fold_count.to_le_bytes());
 
-    let trace_size = ring_degree / PROOF_CODEC_TRACE_SPLIT;
+    let trace_size = layout.ring_degree / PROOF_CODEC_TRACE_SPLIT;
     let extension_size = trace_size * PROOF_CODEC_DOMAIN_BLOWUP;
-    let expected_degree_bound = extension_size / 2;
-    let final_coefficient_count = 8;
-    let expected_committed_fold_count =
-        (expected_degree_bound / final_coefficient_count).trailing_zeros() as u64 - 1;
+    let expected_degree_bound = PROOF_CODEC_COMMITMENT_BOUND_FACTOR * trace_size;
+    assert_eq!(
+        expected_degree_bound,
+        extension_size / 2,
+        "test helper assumes the main low-degree proof uses the rate-one-half commitment bound"
+    );
+    let expected_committed_fold_count = (expected_degree_bound
+        / PROOF_CODEC_LOW_DEGREE_FINAL_COEFFICIENT_COUNT)
+        .trailing_zeros() as u64
+        - 1;
     assert_eq!(
         committed_fold_count, expected_committed_fold_count,
         "test offset must point at the first low-degree committed fold count"

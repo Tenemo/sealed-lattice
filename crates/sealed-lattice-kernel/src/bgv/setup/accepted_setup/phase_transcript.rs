@@ -13,6 +13,12 @@ struct PhaseParticipantPayloadInput<'a> {
     private_vss_mailbox_public_key_bytes_hash: Option<&'a str>,
 }
 
+#[derive(Clone)]
+pub(super) struct SetupIntentTrusteeRegistration {
+    pub(super) trustee_identity: String,
+    pub(super) signing_public_key_hash: String,
+}
+
 pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(phase_transcript) = setup_package
         .get("phaseTranscript")
@@ -31,6 +37,8 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
     let mut seen_phase_numbers = BTreeSet::<u64>::new();
     let mut required_phase_index = 0_usize;
     let mut previous_phase_root: Option<String> = None;
+    let mut setup_intent_registrations: Option<BTreeMap<u64, SetupIntentTrusteeRegistration>> =
+        None;
 
     for phase_value in phase_transcript {
         let phase_object_hash = derive_protocol_hash("SetupPhaseObjectHash", phase_value)?;
@@ -128,6 +136,7 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
             phase_identifier,
             phase_number,
             previous_phase_root.as_deref(),
+            setup_intent_registrations.as_ref(),
         )? {
             return Ok(Some(response));
         }
@@ -137,6 +146,11 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
             .expect("phase root was checked");
         seen_phase_hashes.insert(phase_identifier.to_string(), phase_object_hash);
         previous_phase_root = Some(phase_root.to_string());
+        if phase_identifier == "setupIntent" {
+            setup_intent_registrations = Some(setup_intent_trustee_registrations_from_phase_value(
+                phase_value,
+            )?);
+        }
         required_phase_index += 1;
     }
 
@@ -160,6 +174,7 @@ fn verify_phase_object_binding(
     phase_identifier: &str,
     phase_number: u64,
     previous_phase_root: Option<&str>,
+    setup_intent_registrations: Option<&BTreeMap<u64, SetupIntentTrusteeRegistration>>,
 ) -> CanonicalResult<Option<Value>> {
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
@@ -282,6 +297,7 @@ fn verify_phase_object_binding(
             phase_identifier,
             phase_number,
             setup_context,
+            setup_intent_registrations,
         )? {
             return Ok(Some(response));
         }
@@ -306,6 +322,7 @@ fn verify_participant_phase_object(
     phase_identifier: &str,
     phase_number: u64,
     setup_context: &Value,
+    setup_intent_registrations: Option<&BTreeMap<u64, SetupIntentTrusteeRegistration>>,
 ) -> CanonicalResult<Option<Value>> {
     let roster = super::accepted_roster_from_setup_context(setup_context);
     if !participant_phase_object.is_object() {
@@ -461,6 +478,36 @@ fn verify_participant_phase_object(
         signing_public_key_hash,
         &format!("phaseTranscript.{phase_identifier}.participantPhaseObjects.signingPublicKeyHash"),
     )?;
+    if let Some(registrations) = setup_intent_registrations {
+        let Some(registration) = registrations.get(&roster_position) else {
+            return Ok(Some(phase_refusal(
+                phase_identifier,
+                "phaseParticipantRegistrationMissing",
+                "participant phase object rosterPosition is missing from setupIntent registrations",
+                format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
+            )?));
+        };
+        if registration.trustee_identity != trustee_identity {
+            return Ok(Some(phase_refusal(
+                phase_identifier,
+                "phaseParticipantRegistrationIdentityMismatch",
+                "participant phase object trusteeIdentity must match setupIntent registration",
+                format!(
+                    "setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects.trusteeIdentity"
+                ),
+            )?));
+        }
+        if registration.signing_public_key_hash != signing_public_key_hash {
+            return Ok(Some(phase_refusal(
+                phase_identifier,
+                "phaseParticipantSigningKeyMismatch",
+                "participant phase object signingPublicKeyHash must match setupIntent registration",
+                format!(
+                    "setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects.signingPublicKeyHash"
+                ),
+            )?));
+        }
+    }
     let (private_vss_mailbox_public_key_hash, private_vss_mailbox_public_key_bytes_hash) =
         if phase_identifier == "setupIntent" {
             let Some(public_key_hash) = participant_phase_object
@@ -764,6 +811,143 @@ pub(super) fn setup_context_string<'a>(
                 format!("setupContext.{field_name} must be a string"),
             )
         })
+}
+
+pub(super) fn setup_intent_trustee_registrations_from_phase_transcript(
+    setup_package: &Value,
+) -> CanonicalResult<BTreeMap<u64, SetupIntentTrusteeRegistration>> {
+    let phase_transcript = setup_package
+        .get("phaseTranscript")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "phaseTranscript was required before setupIntent registration extraction",
+            )
+        })?;
+    let setup_intent_phase = phase_transcript
+        .iter()
+        .find(|phase| phase.get("phaseId").and_then(Value::as_str) == Some("setupIntent"))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupIntent phase was required before setupIntent registration extraction",
+            )
+        })?;
+
+    setup_intent_trustee_registrations_from_phase_value(setup_intent_phase)
+}
+
+pub(super) fn verify_setup_intent_roster_hash(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before setup roster hash verification",
+        )
+    })?;
+    let roster_hash = setup_context_string(setup_context, "rosterHash")?;
+    let registrations = setup_intent_trustee_registrations_from_phase_transcript(setup_package)?;
+    let expected_roster_hash = setup_intent_roster_hash_from_registrations(&registrations)?;
+    if roster_hash != expected_roster_hash {
+        return Ok(Some(verification_response(
+            VerifierStatus::Refused,
+            Some("setupIntent"),
+            Vec::new(),
+            vec![Refusal::new(
+                "setupRosterHashMismatch",
+                "setupContext.rosterHash must match the setupIntent trustee identity and signing-key registrations",
+                "setupPackage.setupContext.rosterHash".to_string(),
+            )],
+            Vec::new(),
+        )?));
+    }
+
+    Ok(None)
+}
+
+pub(super) fn setup_intent_roster_hash_from_registrations(
+    registrations: &BTreeMap<u64, SetupIntentTrusteeRegistration>,
+) -> CanonicalResult<String> {
+    let roster_entries = registrations
+        .iter()
+        .map(|(roster_position, registration)| {
+            json!({
+                "objectType": "CollectiveBgvSetupRosterEntry",
+                "objectVersion": 1,
+                "rosterPosition": roster_position,
+                "trusteeIdentity": registration.trustee_identity,
+                "signingPublicKeyHash": registration.signing_public_key_hash,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    derive_protocol_hash(
+        "CollectiveBgvSetupRosterHash",
+        &Value::Array(roster_entries),
+    )
+}
+
+fn setup_intent_trustee_registrations_from_phase_value(
+    setup_intent_phase: &Value,
+) -> CanonicalResult<BTreeMap<u64, SetupIntentTrusteeRegistration>> {
+    let participants = setup_intent_phase
+        .get("participantPhaseObjects")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupIntent participant objects were required before setupIntent registration extraction",
+            )
+        })?;
+    let mut registrations = BTreeMap::new();
+    for participant in participants {
+        let roster_position = participant
+            .get("rosterPosition")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "setupIntent participant object must bind rosterPosition",
+                )
+            })?;
+        let trustee_identity = participant
+            .get("trusteeIdentity")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "setupIntent participant object must bind trusteeIdentity",
+                )
+            })?;
+        let signing_public_key_hash = participant
+            .get("signingPublicKeyHash")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "setupIntent participant object must bind signingPublicKeyHash",
+                )
+            })?;
+        if registrations
+            .insert(
+                roster_position,
+                SetupIntentTrusteeRegistration {
+                    trustee_identity: trustee_identity.to_string(),
+                    signing_public_key_hash: signing_public_key_hash.to_string(),
+                },
+            )
+            .is_some()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupIntent participant objects contain a duplicate rosterPosition",
+            ));
+        }
+    }
+
+    Ok(registrations)
 }
 
 pub(super) fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Option<Value>> {

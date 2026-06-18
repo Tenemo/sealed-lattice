@@ -31,10 +31,10 @@ export {
 export type PublicSetupApi = {
     readonly createCommonRandomnessCommit: (
         input: unknown,
-    ) => Record<string, unknown>;
+    ) => Promise<Record<string, unknown>>;
     readonly createCommonRandomnessReveal: (
         input: unknown,
-    ) => Record<string, unknown>;
+    ) => Promise<Record<string, unknown>>;
     readonly createEvaluatorKeySchedule: (
         input: unknown,
     ) => Record<string, unknown>;

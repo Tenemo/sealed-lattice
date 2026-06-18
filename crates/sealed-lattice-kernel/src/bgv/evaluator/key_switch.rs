@@ -138,18 +138,7 @@ impl KeySwitchComponent {
                 "retained public key-switch component-a material is unavailable",
             ));
         };
-        let digit_bytes = (self.digit_index as u64).to_le_bytes();
-        let modulus_bytes = modulus.to_le_bytes();
-        let public_sample = DeterministicSampler::new(
-            KEY_SWITCH_SAMPLE_DOMAIN,
-            &[
-                domain.as_bytes(),
-                seed_hex.as_bytes(),
-                &digit_bytes,
-                &modulus_bytes,
-            ],
-        )
-        .uniform_residues(modulus, POLYNOMIAL_DEGREE);
+        let public_sample = public_component_a_limb(domain, seed_hex, self.digit_index, modulus);
 
         forward_negacyclic_ntt(&public_sample, modulus)
     }
@@ -274,41 +263,16 @@ fn generate_key_switch_component_for_digit(
         .par_iter()
         .enumerate()
         .map(|(limb_index, modulus)| {
-            let modulus_bytes = modulus.to_le_bytes();
-            let public_sample = DeterministicSampler::new(
-                KEY_SWITCH_SAMPLE_DOMAIN,
-                &[
-                    domain.as_bytes(),
-                    seed_hex.as_bytes(),
-                    &digit_bytes,
-                    &modulus_bytes,
-                ],
-            )
-            .uniform_residues(*modulus, POLYNOMIAL_DEGREE);
-            let public_sample_secret_product =
-                negacyclic_mul(&public_sample, &secret_residues[limb_index], *modulus)?;
-            let component_b_limb = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    // Noise is scaled by the plaintext modulus t so it lies in
-                    // t*Z and vanishes under the final mod-t reduction (the
-                    // least-significant-residue BGV convention: message
-                    // unscaled, error times t).
-                    let scaled_error =
-                        signed_residue(error[coefficient_index] * PLAINTEXT_MODULUS_I64, *modulus);
-                    let mut value = sub_mod(
-                        scaled_error,
-                        public_sample_secret_product[coefficient_index],
-                        *modulus,
-                    )?;
-                    // src * gadget_j contributes src's limb j into component j only.
-                    if limb_index == digit_index {
-                        value = add_mod(value, source_limb[coefficient_index], *modulus)?;
-                    }
-                    Ok(value)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-
-            Ok((component_b_limb, public_sample))
+            generate_key_switch_component_limb_for_digit(KeySwitchComponentLimbInput {
+                secret_residue_limb: &secret_residues[limb_index],
+                source_limb,
+                error: &error,
+                limb_index,
+                modulus: *modulus,
+                digit_index,
+                domain,
+                seed_hex,
+            })
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     #[cfg(target_arch = "wasm32")]
@@ -316,41 +280,16 @@ fn generate_key_switch_component_for_digit(
         .iter()
         .enumerate()
         .map(|(limb_index, modulus)| {
-            let modulus_bytes = modulus.to_le_bytes();
-            let public_sample = DeterministicSampler::new(
-                KEY_SWITCH_SAMPLE_DOMAIN,
-                &[
-                    domain.as_bytes(),
-                    seed_hex.as_bytes(),
-                    &digit_bytes,
-                    &modulus_bytes,
-                ],
-            )
-            .uniform_residues(*modulus, POLYNOMIAL_DEGREE);
-            let public_sample_secret_product =
-                negacyclic_mul(&public_sample, &secret_residues[limb_index], *modulus)?;
-            let component_b_limb = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    // Noise is scaled by the plaintext modulus t so it lies in
-                    // t*Z and vanishes under the final mod-t reduction (the
-                    // least-significant-residue BGV convention: message
-                    // unscaled, error times t).
-                    let scaled_error =
-                        signed_residue(error[coefficient_index] * PLAINTEXT_MODULUS_I64, *modulus);
-                    let mut value = sub_mod(
-                        scaled_error,
-                        public_sample_secret_product[coefficient_index],
-                        *modulus,
-                    )?;
-                    // src * gadget_j contributes src's limb j into component j only.
-                    if limb_index == digit_index {
-                        value = add_mod(value, source_limb[coefficient_index], *modulus)?;
-                    }
-                    Ok(value)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-
-            Ok((component_b_limb, public_sample))
+            generate_key_switch_component_limb_for_digit(KeySwitchComponentLimbInput {
+                secret_residue_limb: &secret_residues[limb_index],
+                source_limb,
+                error: &error,
+                limb_index,
+                modulus: *modulus,
+                digit_index,
+                domain,
+                seed_hex,
+            })
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let (component_b, component_a) = limbs.into_iter().unzip();
@@ -363,6 +302,51 @@ fn generate_key_switch_component_for_digit(
         seed_hex,
         digit_index,
     )
+}
+
+struct KeySwitchComponentLimbInput<'a> {
+    secret_residue_limb: &'a [u64],
+    source_limb: &'a [u64],
+    error: &'a [i64],
+    limb_index: usize,
+    modulus: u64,
+    digit_index: usize,
+    domain: &'a str,
+    seed_hex: &'a str,
+}
+
+fn generate_key_switch_component_limb_for_digit(
+    input: KeySwitchComponentLimbInput<'_>,
+) -> CanonicalResult<(Vec<u64>, Vec<u64>)> {
+    let public_sample = public_component_a_limb(
+        input.domain,
+        input.seed_hex,
+        input.digit_index,
+        input.modulus,
+    );
+    let public_sample_secret_product =
+        negacyclic_mul(&public_sample, input.secret_residue_limb, input.modulus)?;
+    let component_b_limb = (0..POLYNOMIAL_DEGREE)
+        .map(|coefficient_index| {
+            // Noise is scaled by the plaintext modulus t so it lies in t*Z and
+            // vanishes under the final mod-t reduction.
+            let scaled_error = signed_residue(
+                input.error[coefficient_index] * PLAINTEXT_MODULUS_I64,
+                input.modulus,
+            );
+            let mut value = sub_mod(
+                scaled_error,
+                public_sample_secret_product[coefficient_index],
+                input.modulus,
+            )?;
+            if input.limb_index == input.digit_index {
+                value = add_mod(value, input.source_limb[coefficient_index], input.modulus)?;
+            }
+            Ok(value)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok((component_b_limb, public_sample))
 }
 
 pub(crate) fn key_switch_key_from_public_component_b(
@@ -483,45 +467,40 @@ fn public_component_a_for_digit(
     seed_hex: &str,
     digit_index: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    let digit_bytes = (digit_index as u64).to_le_bytes();
     #[cfg(not(target_arch = "wasm32"))]
     {
         Ok(primes
             .par_iter()
-            .map(|modulus| {
-                let modulus_bytes = modulus.to_le_bytes();
-                DeterministicSampler::new(
-                    KEY_SWITCH_SAMPLE_DOMAIN,
-                    &[
-                        domain.as_bytes(),
-                        seed_hex.as_bytes(),
-                        &digit_bytes,
-                        &modulus_bytes,
-                    ],
-                )
-                .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
-            })
+            .map(|modulus| public_component_a_limb(domain, seed_hex, digit_index, *modulus))
             .collect::<Vec<_>>())
     }
     #[cfg(target_arch = "wasm32")]
     {
         Ok(primes
             .iter()
-            .map(|modulus| {
-                let modulus_bytes = modulus.to_le_bytes();
-                DeterministicSampler::new(
-                    KEY_SWITCH_SAMPLE_DOMAIN,
-                    &[
-                        domain.as_bytes(),
-                        seed_hex.as_bytes(),
-                        &digit_bytes,
-                        &modulus_bytes,
-                    ],
-                )
-                .uniform_residues(*modulus, POLYNOMIAL_DEGREE)
-            })
+            .map(|modulus| public_component_a_limb(domain, seed_hex, digit_index, *modulus))
             .collect::<Vec<_>>())
     }
+}
+
+fn public_component_a_limb(
+    domain: &str,
+    seed_hex: &str,
+    digit_index: usize,
+    modulus: u64,
+) -> Vec<u64> {
+    let digit_bytes = (digit_index as u64).to_le_bytes();
+    let modulus_bytes = modulus.to_le_bytes();
+    DeterministicSampler::new(
+        KEY_SWITCH_SAMPLE_DOMAIN,
+        &[
+            domain.as_bytes(),
+            seed_hex.as_bytes(),
+            &digit_bytes,
+            &modulus_bytes,
+        ],
+    )
+    .uniform_residues(modulus, POLYNOMIAL_DEGREE)
 }
 
 // Apply a key-switching key to a single ciphertext component (the term that

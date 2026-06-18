@@ -75,31 +75,33 @@ describe('accepted setup public package API in Node', () => {
         const commitRecords: Record<string, unknown>[] = [];
         for (let rosterPosition = 0; rosterPosition < 10; rosterPosition += 1) {
             const recordTrusteeIdentity = `trustee-${String(rosterPosition)}`;
-            const signatureEnvelopeHash = hashFromKernel(
-                kernel,
-                `common-randomness-signature-${String(rosterPosition)}`,
+            const { keyFixture, signRoot } = setupIntentSigner(
+                `common-randomness-${String(rosterPosition)}`,
             );
-            const revealRecord = publicSetupApi.createCommonRandomnessReveal({
-                setupContext,
-                trusteeIdentity: recordTrusteeIdentity,
-                rosterPosition,
-                recoveryEpoch: 0,
-                deviceEpoch: 2,
-                signatureEnvelopeHash,
-                revealHex: hashFromKernel(
-                    kernel,
-                    `common-randomness-reveal-${String(rosterPosition)}`,
-                ).slice(0, 64),
-            });
-            revealRecords.push(revealRecord);
-            commitRecords.push(
-                publicSetupApi.createCommonRandomnessCommit({
+            const revealRecord =
+                await publicSetupApi.createCommonRandomnessReveal({
                     setupContext,
                     trusteeIdentity: recordTrusteeIdentity,
                     rosterPosition,
                     recoveryEpoch: 0,
                     deviceEpoch: 2,
-                    signatureEnvelopeHash,
+                    signingPublicKeyHash: keyFixture.publicKeyHash,
+                    signRoot,
+                    revealHex: hashFromKernel(
+                        kernel,
+                        `common-randomness-reveal-${String(rosterPosition)}`,
+                    ).slice(0, 64),
+                });
+            revealRecords.push(revealRecord);
+            commitRecords.push(
+                await publicSetupApi.createCommonRandomnessCommit({
+                    setupContext,
+                    trusteeIdentity: recordTrusteeIdentity,
+                    rosterPosition,
+                    recoveryEpoch: 0,
+                    deviceEpoch: 2,
+                    signingPublicKeyHash: keyFixture.publicKeyHash,
+                    signRoot,
                     revealHash: revealRecord.revealHash,
                 }),
             );
@@ -138,13 +140,15 @@ describe('accepted setup public package API in Node', () => {
             /setupSeed|shareValues|coefficientMessage|randomnessByColumn/u,
         );
 
-        const staleCommit = publicSetupApi.createCommonRandomnessCommit({
+        const staleSigner = setupIntentSigner('common-randomness-stale');
+        const staleCommit = await publicSetupApi.createCommonRandomnessCommit({
             setupContext,
             trusteeIdentity,
             rosterPosition: 0,
             recoveryEpoch: 0,
             deviceEpoch: 2,
-            signatureEnvelopeHash: hashFromKernel(kernel, 'stale-signature'),
+            signingPublicKeyHash: staleSigner.keyFixture.publicKeyHash,
+            signRoot: staleSigner.signRoot,
             revealHash: revealRecords[1]?.revealHash,
         });
 

@@ -66,9 +66,21 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
     }
 
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
+    let trustee_registrations =
+        super::phase_transcript::setup_intent_trustee_registrations_from_phase_transcript(
+            setup_package,
+        )?;
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     let private_vss_envelope_bindings = private_vss_envelope_bindings_from_package(setup_package)?;
+    let verification_context = VssRecordVerificationContext {
+        setup_context,
+        expected_trustees: &expected_trustees,
+        trustee_registrations: &trustee_registrations,
+        source_trustee_commitment_roots: &source_trustee_commitment_roots,
+        private_vss_envelope_commitment_root,
+        private_vss_envelope_bindings: &private_vss_envelope_bindings,
+    };
     let Some(complaint_records) = complaint_set
         .get("complaintRecords")
         .and_then(Value::as_array)
@@ -91,11 +103,7 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
     for complaint_record in complaint_records {
         if let Some(response) = verify_vss_complaint_record(
             complaint_record,
-            setup_context,
-            &expected_trustees,
-            &source_trustee_commitment_roots,
-            private_vss_envelope_commitment_root,
-            &private_vss_envelope_bindings,
+            &verification_context,
             &mut seen_complaints,
         )? {
             return Ok(Some(response));
@@ -137,7 +145,7 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
             "a valid VSS complaint aborts the first-profile setup ceremony",
             "setupPackage.vssComplaints",
         )],
-        vec![complaint_root.to_string()],
+        Vec::new(),
     )?))
 }
 
@@ -166,13 +174,19 @@ fn verify_vss_complaint_context(
     Ok(())
 }
 
+struct VssRecordVerificationContext<'a> {
+    setup_context: &'a Value,
+    expected_trustees: &'a BTreeMap<u64, String>,
+    trustee_registrations:
+        &'a BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+    source_trustee_commitment_roots: &'a BTreeMap<u64, String>,
+    private_vss_envelope_commitment_root: &'a str,
+    private_vss_envelope_bindings: &'a PrivateVssEnvelopeBindingMap,
+}
+
 fn verify_vss_complaint_record(
     complaint_record: &Value,
-    setup_context: &Value,
-    expected_trustees: &BTreeMap<u64, String>,
-    source_trustee_commitment_roots: &BTreeMap<u64, String>,
-    private_vss_envelope_commitment_root: &str,
-    private_vss_envelope_bindings: &PrivateVssEnvelopeBindingMap,
+    verification_context: &VssRecordVerificationContext<'_>,
     seen_complaints: &mut BTreeSet<(u64, u64)>,
 ) -> CanonicalResult<Option<Value>> {
     if complaint_record.get("objectType").and_then(Value::as_str) != Some("VssShareComplaint") {
@@ -203,7 +217,7 @@ fn verify_vss_complaint_record(
         "commitmentProfileHash",
         "setupEpoch",
     ] {
-        if complaint_record.get(field_name) != setup_context.get(field_name) {
+        if complaint_record.get(field_name) != verification_context.setup_context.get(field_name) {
             return Ok(Some(vss_complaint_refusal(
                 "vssComplaintContextMismatch",
                 format!("VSS complaint {field_name} must match setupContext"),
@@ -214,7 +228,7 @@ fn verify_vss_complaint_record(
     if complaint_record
         .get("privateVssEnvelopeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(private_vss_envelope_commitment_root)
+        != Some(verification_context.private_vss_envelope_commitment_root)
     {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintPrivateEnvelopeRootMismatch",
@@ -243,7 +257,8 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.sourceTrusteeRosterPosition",
         )?));
     };
-    if expected_trustees
+    if verification_context
+        .expected_trustees
         .get(&source_trustee_roster_position)
         .map(String::as_str)
         != Some(source_trustee_identity)
@@ -275,7 +290,8 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.recipientRosterPosition",
         )?));
     };
-    if expected_trustees
+    if verification_context
+        .expected_trustees
         .get(&recipient_roster_position)
         .map(String::as_str)
         != Some(recipient_identity)
@@ -294,7 +310,8 @@ fn verify_vss_complaint_record(
         )?));
     }
 
-    let expected_source_trustee_commitment_root = source_trustee_commitment_roots
+    let expected_source_trustee_commitment_root = verification_context
+        .source_trustee_commitment_roots
         .get(&source_trustee_roster_position)
         .map(String::as_str)
         .ok_or_else(|| {
@@ -314,7 +331,8 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
-    let Some(private_vss_envelope_binding) = private_vss_envelope_bindings
+    let Some(private_vss_envelope_binding) = verification_context
+        .private_vss_envelope_bindings
         .get(&(source_trustee_roster_position, recipient_roster_position))
     else {
         return Ok(Some(vss_complaint_refusal(
@@ -416,6 +434,23 @@ fn verify_vss_complaint_record(
         signing_public_key_hash,
         "vssComplaints.complaintRecords.signingPublicKeyHash",
     )?;
+    let Some(recipient_registration) = verification_context
+        .trustee_registrations
+        .get(&recipient_roster_position)
+    else {
+        return Ok(Some(vss_complaint_refusal(
+            "vssComplaintSigningKeyRegistrationMissing",
+            "VSS complaint recipient is missing from setupIntent registrations",
+            "setupPackage.vssComplaints.complaintRecords.recipientRosterPosition",
+        )?));
+    };
+    if recipient_registration.signing_public_key_hash != signing_public_key_hash {
+        return Ok(Some(vss_complaint_refusal(
+            "vssComplaintSigningKeyMismatch",
+            "VSS complaint signingPublicKeyHash must match setupIntent registration for the recipient",
+            "setupPackage.vssComplaints.complaintRecords.signingPublicKeyHash",
+        )?));
+    }
 
     let complaint_payload = vss_complaint_payload_value(complaint_record)?;
     let expected_complaint_root = derive_protocol_hash("VssComplaintRoot", &complaint_payload)?;
@@ -511,8 +546,8 @@ fn verify_vss_complaint_record(
             "setupPackage.vssComplaints.complaintRecords.signatureEnvelope",
         )?));
     };
-    let manifest_hash = setup_context_string(setup_context, "manifestHash")?;
-    let ceremony_id = setup_context_string(setup_context, "ceremonyId")?;
+    let manifest_hash = setup_context_string(verification_context.setup_context, "manifestHash")?;
+    let ceremony_id = setup_context_string(verification_context.setup_context, "ceremonyId")?;
     let verification = verify_protocol_signature_envelope(
         signature_envelope,
         &ProtocolSignatureExpectation {
@@ -522,7 +557,7 @@ fn verify_vss_complaint_record(
             // The recipient is the signer of both complaints and acceptances, since only the share recipient can attest whether the dealt share opened correctly.
             signer_identity: recipient_identity,
             ceremony_id,
-            public_key_hash: signing_public_key_hash,
+            public_key_hash: &recipient_registration.signing_public_key_hash,
             manifest_hash: Some(manifest_hash),
             object_root: Some(complaint_root),
             chunk_merkle_root: None,
@@ -707,9 +742,21 @@ pub(super) fn verify_vss_share_acceptances(
     }
 
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
+    let trustee_registrations =
+        super::phase_transcript::setup_intent_trustee_registrations_from_phase_transcript(
+            setup_package,
+        )?;
     let source_trustee_commitment_roots =
         source_trustee_commitment_roots_from_vss_commitments(setup_package)?;
     let private_vss_envelope_bindings = private_vss_envelope_bindings_from_package(setup_package)?;
+    let verification_context = VssRecordVerificationContext {
+        setup_context,
+        expected_trustees: &expected_trustees,
+        trustee_registrations: &trustee_registrations,
+        source_trustee_commitment_roots: &source_trustee_commitment_roots,
+        private_vss_envelope_commitment_root,
+        private_vss_envelope_bindings: &private_vss_envelope_bindings,
+    };
     let Some(acceptance_records) = acceptance_set
         .get("acceptanceRecords")
         .and_then(Value::as_array)
@@ -736,11 +783,7 @@ pub(super) fn verify_vss_share_acceptances(
     for acceptance_record in acceptance_records {
         if let Some(response) = verify_vss_share_acceptance_record(
             acceptance_record,
-            setup_context,
-            &expected_trustees,
-            &source_trustee_commitment_roots,
-            private_vss_envelope_commitment_root,
-            &private_vss_envelope_bindings,
+            &verification_context,
             &mut seen_acceptances,
         )? {
             return Ok(Some(response));
@@ -849,11 +892,7 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
 
 fn verify_vss_share_acceptance_record(
     acceptance_record: &Value,
-    setup_context: &Value,
-    expected_trustees: &BTreeMap<u64, String>,
-    source_trustee_commitment_roots: &BTreeMap<u64, String>,
-    private_vss_envelope_commitment_root: &str,
-    private_vss_envelope_bindings: &PrivateVssEnvelopeBindingMap,
+    verification_context: &VssRecordVerificationContext<'_>,
     seen_acceptances: &mut BTreeSet<(u64, u64)>,
 ) -> CanonicalResult<Option<Value>> {
     if acceptance_record.get("objectType").and_then(Value::as_str) != Some("VssShareAcceptance") {
@@ -884,7 +923,7 @@ fn verify_vss_share_acceptance_record(
         "commitmentProfileHash",
         "setupEpoch",
     ] {
-        if acceptance_record.get(field_name) != setup_context.get(field_name) {
+        if acceptance_record.get(field_name) != verification_context.setup_context.get(field_name) {
             return Ok(Some(vss_share_acceptance_refusal(
                 "vssShareAcceptanceContextMismatch",
                 format!("VSS share acceptance {field_name} must match setupContext"),
@@ -895,7 +934,7 @@ fn verify_vss_share_acceptance_record(
     if acceptance_record
         .get("privateVssEnvelopeCommitmentRoot")
         .and_then(Value::as_str)
-        != Some(private_vss_envelope_commitment_root)
+        != Some(verification_context.private_vss_envelope_commitment_root)
     {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptancePrivateEnvelopeRootMismatch",
@@ -924,7 +963,8 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeRosterPosition",
         )?));
     };
-    if expected_trustees
+    if verification_context
+        .expected_trustees
         .get(&source_trustee_roster_position)
         .map(String::as_str)
         != Some(source_trustee_identity)
@@ -956,7 +996,8 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.recipientRosterPosition",
         )?));
     };
-    if expected_trustees
+    if verification_context
+        .expected_trustees
         .get(&recipient_roster_position)
         .map(String::as_str)
         != Some(recipient_identity)
@@ -975,7 +1016,8 @@ fn verify_vss_share_acceptance_record(
         )?));
     }
 
-    let expected_source_trustee_commitment_root = source_trustee_commitment_roots
+    let expected_source_trustee_commitment_root = verification_context
+        .source_trustee_commitment_roots
         .get(&source_trustee_roster_position)
         .map(String::as_str)
         .ok_or_else(|| {
@@ -995,7 +1037,8 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.sourceTrusteeCommitmentRoot",
         )?));
     }
-    let Some(private_vss_envelope_binding) = private_vss_envelope_bindings
+    let Some(private_vss_envelope_binding) = verification_context
+        .private_vss_envelope_bindings
         .get(&(source_trustee_roster_position, recipient_roster_position))
     else {
         return Ok(Some(vss_share_acceptance_refusal(
@@ -1104,6 +1147,23 @@ fn verify_vss_share_acceptance_record(
         signing_public_key_hash,
         "vssShareAcceptances.acceptanceRecords.signingPublicKeyHash",
     )?;
+    let Some(recipient_registration) = verification_context
+        .trustee_registrations
+        .get(&recipient_roster_position)
+    else {
+        return Ok(Some(vss_share_acceptance_refusal(
+            "vssShareAcceptanceSigningKeyRegistrationMissing",
+            "VSS share acceptance recipient is missing from setupIntent registrations",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.recipientRosterPosition",
+        )?));
+    };
+    if recipient_registration.signing_public_key_hash != signing_public_key_hash {
+        return Ok(Some(vss_share_acceptance_refusal(
+            "vssShareAcceptanceSigningKeyMismatch",
+            "VSS share acceptance signingPublicKeyHash must match setupIntent registration for the recipient",
+            "setupPackage.vssShareAcceptances.acceptanceRecords.signingPublicKeyHash",
+        )?));
+    }
 
     let acceptance_payload = vss_share_acceptance_payload_value(acceptance_record)?;
     let expected_acceptance_root =
@@ -1208,8 +1268,8 @@ fn verify_vss_share_acceptance_record(
             "setupPackage.vssShareAcceptances.acceptanceRecords.signatureEnvelope",
         )?));
     };
-    let manifest_hash = setup_context_string(setup_context, "manifestHash")?;
-    let ceremony_id = setup_context_string(setup_context, "ceremonyId")?;
+    let manifest_hash = setup_context_string(verification_context.setup_context, "manifestHash")?;
+    let ceremony_id = setup_context_string(verification_context.setup_context, "ceremonyId")?;
     let verification = verify_protocol_signature_envelope(
         signature_envelope,
         &ProtocolSignatureExpectation {
@@ -1218,7 +1278,7 @@ fn verify_vss_share_acceptance_record(
             signer_role: "Trustee",
             signer_identity: recipient_identity,
             ceremony_id,
-            public_key_hash: signing_public_key_hash,
+            public_key_hash: &recipient_registration.signing_public_key_hash,
             manifest_hash: Some(manifest_hash),
             object_root: Some(acceptance_root),
             chunk_merkle_root: None,

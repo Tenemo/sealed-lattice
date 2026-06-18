@@ -250,7 +250,6 @@ fn setup_commitment_security_certificate_value_for_roster(
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "freshMessageNoWrap": BigUint::from(max_source_message_modulus - 1)
                 < commitment_modulus_product,
-            "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
         "aggregateOpeningBounds": {
             "shamirCoefficientCount": roster.decryption_threshold,
@@ -264,7 +263,6 @@ fn setup_commitment_security_certificate_value_for_roster(
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "recipientAndThresholdNoWrap": true,
-            "boundStatus": "claim-accounting-first-profile-homomorphic-opening-bounds-recorded",
         },
         "multiOpeningLeakage": {
             "recipientAggregateOpeningsArePublic": false,
@@ -274,7 +272,6 @@ fn setup_commitment_security_certificate_value_for_roster(
             "rawCoefficientOpeningsExported": false,
             "perCoefficientRandomnessExported": false,
             "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
-            "status": "claim-accounting-active-static-threshold-leakage-bound-recorded",
         },
         "bindingAssumption": {
             "assumption": "Module-SIS",
@@ -283,15 +280,12 @@ fn setup_commitment_security_certificate_value_for_roster(
             "randomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
             "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
             "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
-            "estimatorStatus": "repo-owned-module-sis-parameter-accounting-accepted",
         },
         "hidingAssumption": {
             "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
             "openingDistribution": "coefficientwise-centered-ternary",
             "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
             "lowEntropySecretHiding": true,
-            "statisticalLeakageStatus": "repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-accepted",
-            "estimatorStatus": "repo-owned-module-lwe-parameter-accounting-accepted",
         },
         "estimatorRows": [
             {
@@ -302,7 +296,6 @@ fn setup_commitment_security_certificate_value_for_roster(
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "status": "claim-accounting-accepted",
                 "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
@@ -313,7 +306,6 @@ fn setup_commitment_security_certificate_value_for_roster(
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "status": "claim-accounting-accepted",
                 "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
@@ -707,7 +699,6 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
             "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
         },
         "collectivePublicKey": {
-            "status": "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots",
             "collectivePublicKeyRoot": collective_public_key_root,
             "sourceRoots": {
                 "publicKeyShareSetRoot": package_nested_hash(setup_package, "publicKeyShares", "publicKeyShareSetRoot")?,
@@ -717,7 +708,6 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
             }
         },
         "publicEvaluationKeys": {
-            "status": "public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records",
             "evaluationKeySetHash": package_nested_hash(setup_package, "evaluationKeys", "evaluationKeySetHash")?,
             "evaluatorKeyScheduleRoot": package_nested_hash(setup_package, "evaluatorKeySchedule", "evaluatorKeyScheduleRoot")?,
             "relinearizationKeyShareRoundsRoot": package_nested_hash(setup_package, "relinearizationKeyShareRounds", "relinearizationKeyShareRoundsRoot")?,
@@ -1256,6 +1246,53 @@ fn he_lattice_estimator_rows_value(
                     "d": 63501,
                     "redLog2": "139.40549445792695",
                     "ropLog2": "139.40549445792695"
+                }
+            }
+        },
+        "currentQDataCenteredBinomialEta2Adps16QuantumSieveContext": {
+            "modulusCeilLog2": largest_exposed_modulus_bits,
+            "modulusLog2": "798.9999986033129",
+            "secretDistribution": "ND.Ternary",
+            "errorDistribution": "ND.CenteredBinomial(2)",
+            "sampleModel": "m=+Infinity",
+            "costModel": "ADPS16(mode=quantum)",
+            "rowScope": "quantum-leaning context only; setup/evaluator closure remains the currentQDataCenteredBinomialEta2 RC.MATZOV classical row",
+            "weakestAttack": "usvp",
+            "weakestAttackCostLog2": "96.99000000000001",
+            "marginToConventional128Bits": "-31.00999999999999",
+            "attackRows": {
+                "bdd": {
+                    "beta": 366,
+                    "d": 65430,
+                    "eta": 300,
+                    "redLog2": "96.99000000000001",
+                    "ropLog2": "96.99000941740931",
+                    "svpLog2": "79.765"
+                },
+                "dual": {
+                    "beta": 366,
+                    "d": 65530,
+                    "m": 32762,
+                    "memLog2": "84.46069989939393",
+                    "ropLog2": "96.99000000001034"
+                },
+                "dualHybrid": {
+                    "NLog2": "48.16476026937466",
+                    "beta": 366,
+                    "betaPrime": 366,
+                    "guessLog2": "58.94118627285865",
+                    "m": 32768,
+                    "p": 4,
+                    "redLog2": "96.99000000000001",
+                    "ropLog2": "96.99000000000508",
+                    "t": 20,
+                    "zeta": 0
+                },
+                "usvp": {
+                    "beta": 366,
+                    "d": 63501,
+                    "redLog2": "96.99000000000001",
+                    "ropLog2": "96.99000000000001"
                 }
             }
         },

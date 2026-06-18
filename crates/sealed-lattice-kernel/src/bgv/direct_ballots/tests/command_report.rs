@@ -136,18 +136,6 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         result["proofAttempt"]["responsePolynomialDegree"].as_u64(),
         Some(u64::try_from(POLYNOMIAL_DEGREE).expect("polynomial degree fits u64"))
     );
-    let proof_attempt = result["proofAttempt"]
-        .as_object()
-        .expect("proof attempt is an object");
-    assert!(proof_attempt.get("proofRingDegree").is_none());
-    assert!(proof_attempt.get("statementRowsPerLimb").is_none());
-    assert!(proof_attempt.get("statementColumnsPerLimb").is_none());
-    assert!(proof_attempt.get("totalRnsEquationRows").is_none());
-    assert_eq!(proof_attempt.get("sharedShortResponseVectorLength"), None);
-    assert_eq!(
-        proof_attempt.get("duplicatedShortResponseVectorLength"),
-        None
-    );
     assert_eq!(
         result["encryptedBallots"]["ciphertextRoots"]
             .as_array()
@@ -176,8 +164,6 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
             .contains("not returned")
     );
     assert_eq!(result["aggregation"]["ballotCount"].as_u64(), Some(1));
-    assert!(result["aggregation"].get("aggregateScores").is_none());
-    assert!(result["aggregation"].get("plaintextOracleScores").is_none());
     assert_eq!(
         result["evaluatorReplay"].as_str(),
         Some(

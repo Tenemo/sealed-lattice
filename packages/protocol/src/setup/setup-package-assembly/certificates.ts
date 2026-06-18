@@ -280,7 +280,6 @@ const setupKeyCorrectnessCertificateBody = (
                 'malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading',
         },
         collectivePublicKey: {
-            status: 'collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots',
             collectivePublicKeyRoot,
             sourceRoots: {
                 publicKeyShareSetRoot: hashField(
@@ -298,7 +297,6 @@ const setupKeyCorrectnessCertificateBody = (
             },
         },
         publicEvaluationKeys: {
-            status: 'public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records',
             evaluationKeySetHash,
             evaluatorKeyScheduleRoot: hashField(
                 input.evaluatorKeySchedule,

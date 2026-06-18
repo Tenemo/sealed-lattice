@@ -249,7 +249,6 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.chunk_root.as_str(),
     )?;
     Ok(json!({
-        "verified": true,
         "caseName": fixture.case_name,
         "objectHash512": analysis.object_hash512,
         "chunkRoot": analysis.chunk_root,
@@ -285,7 +284,6 @@ fn verify_malformed_fixture(fixture: &MalformedObjectFixture) -> CanonicalResult
     }
 
     Ok(json!({
-        "verified": true,
         "caseName": fixture.case_name,
         "expectedErrorCode": error.code.as_str(),
     }))

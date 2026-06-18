@@ -497,14 +497,14 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
     let ring_degree = low_degree_shape_package["sameSecretProofs"]["proofRecords"][0]["ringDegree"]
         .as_u64()
         .expect("same-secret proof ring degree") as usize;
-    let same_secret_error_column_count = 0;
     let same_secret_linkage_commitment_count = DATA_PRIMES.len();
     mutate_first_same_secret_proof_bytes_and_rebind(&mut low_degree_shape_package, |proof_bytes| {
         set_first_limb_low_degree_fold_count_to_wrong_value(
             proof_bytes,
-            ring_degree,
-            same_secret_error_column_count,
-            same_secret_linkage_commitment_count,
+            FirstLimbProofCodecLayout::same_secret_anchor(
+                ring_degree,
+                same_secret_linkage_commitment_count,
+            ),
         );
     });
     let low_degree_shape_result =

@@ -6,7 +6,7 @@
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace.
 
-The published npm package is intentionally narrow while the protocol implementation is still being built and verified. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy.
+The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy.
 
 ## Selected direction
 
@@ -29,11 +29,13 @@ mobile-compatible runtime evidence fails to close.
 
 The first claim-bearing mobile profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. That profile is not closed yet.
 
-The implementation is parameterized for any roster size `3 <= n <= 20` (deriving `q_dec = floor(n/3) + 1` and full-roster quorums `= n`), but `n = 10` is the only benchmarked, mobile-certified, claim-bearing profile. No runtime, security, or mobile evidence is claimed for `n != 10` until those profiles receive their own certificates and measurements.
+The setup and target-decryption code derive roster parameters for `3 <= n <= 20` (`q_dec = floor(n/3) + 1` and full-roster quorums `= n`), but `n = 10` is the only profile with current benchmark and certificate work. No runtime, security, or mobile evidence is claimed for `n != 10` until those profiles receive their own certificates and measurements.
+
+Current HE certificate evidence for that first setup/evaluator profile records `Q_data` at about 139.4 classical bits under the pinned `RC.MATZOV` Lattice Estimator row and a labelled `ADPS16(mode=quantum)` context row at about 97.0 bits. That context row is not a conventional 128-bit quantum-safety claim and does not close `Q_target` or target decryption.
 
 ## Current package boundary
 
-The public package currently exposes development verification helpers while the full voting API is being built and verified. These cover poll specification and threshold derivation, lifecycle and transcript checks, foundation transcript verification through the bundled Rust/WASM kernel, and a set of narrow development helpers for the collective BGV setup ceremony (setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification). Reserved complete-protocol entry points fail closed until their claim gates are actually implemented.
+The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll specification and threshold derivation, lifecycle transition and capability checks, foundation transcript verification through the bundled Rust/WASM kernel, and a set of narrow development helpers for the collective BGV setup ceremony (setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification). Reserved complete-protocol entry points fail closed until their claim gates are actually implemented.
 
 Foundation helpers include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. Browser and mobile-emulated browser coverage is useful package evidence, but it is not supported-phone evidence.
 
@@ -76,7 +78,7 @@ const thresholdProfile = deriveThresholdProfile({
 
 - poll specification validation and canonical hash derivation;
 - threshold and frozen roster profile derivation;
-- lifecycle label, lifecycle transition, and action capability checks;
+- lifecycle transition and action capability checks;
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
 - development helpers for the collective BGV setup ceremony: setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification;
 - transcript-core fixture verification through the bundled Rust/WASM kernel;

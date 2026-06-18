@@ -12,6 +12,7 @@ import {
 } from './accepted-setup-package-fixtures.js';
 import {
     cloneJsonRecord,
+    collectiveSetupRosterHash,
     firstProfileDecryptionThreshold,
     firstProfileParticipantCount,
     protocolHashPattern,
@@ -175,7 +176,9 @@ describe('collective BGV setup kernel commands', () => {
         const setupContext = {
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
+            rosterHash: collectiveSetupRosterHash((input) =>
+                kernel.deriveProtocolHash(input),
+            ),
             setupProfileHash: profile.setupProfileHash,
             qShareHash: profile.qShareHash,
             carryAwareVssShareRelationProfileHash:

@@ -53,10 +53,6 @@ pub(in super::super) fn setup_commitment_profile_value() -> CanonicalResult<Valu
         "assumptions": {
             "hiding": "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings",
             "binding": "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix",
-            "fullWidthMessageStatus": "claim-accounting-recorded-by-setup-commitment-security-certificate",
-            "aggregateOpeningNormStatus": "claim-accounting-recorded-by-setup-commitment-security-certificate",
-            "parameterAcceptanceStatus": "claim-bearing-setup-commitment-parameter-accounting-accepted",
-            "reviewStatus": "commitment-parameter-certificate-accepted-and-bound-to-accepted-proof-family-verifiers",
             "requiredCertificates": [
                 "SetupCommitmentSecurityCertificate",
                 "SetupProofAccountingCertificate"

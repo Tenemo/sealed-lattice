@@ -38,7 +38,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &json!({
             "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "profileStatus": "target-decryption-profile-binding",
         }),
     )?;
     let public_common_random_polynomial_root = public_common_random_polynomial_root(input)?;

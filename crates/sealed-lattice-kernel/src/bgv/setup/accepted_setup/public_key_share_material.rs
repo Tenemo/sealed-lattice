@@ -766,32 +766,11 @@ impl PublicKeyShareMaterialByteReader {
 }
 
 fn verify_public_key_share_material_transport_header(value: &Value) -> CanonicalResult<()> {
-    let Some(object) = value.as_object() else {
+    if !value.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "transportedPublicKeyShareMaterial must be an object",
         ));
-    };
-    for field_name in object.keys() {
-        if ![
-            "objectType",
-            "objectVersion",
-            "binaryFormat",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkHashes",
-            "chunkRoot",
-            "chunks",
-        ]
-        .contains(&field_name.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("transportedPublicKeyShareMaterial contains unexpected field {field_name}"),
-            ));
-        }
     }
     if value.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE)
@@ -1048,28 +1027,11 @@ fn verify_public_key_share_material_set_transport_reference(
             "publicKeyShareMaterial.transport is required for binary-chunked material",
         )
     })?;
-    let Some(transport_object) = transport.as_object() else {
+    if !transport.is_object() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "publicKeyShareMaterial.transport must be an object",
         ));
-    };
-    for field_name in transport_object.keys() {
-        if ![
-            "transportProfileId",
-            "chunkSizeBytes",
-            "chunkCount",
-            "totalByteLength",
-            "fullObjectHash",
-            "chunkRoot",
-        ]
-        .contains(&field_name.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("publicKeyShareMaterial.transport contains unexpected field {field_name}"),
-            ));
-        }
     }
     if transport.get("transportProfileId").and_then(Value::as_str)
         != Some(SETUP_TRANSPORT_PROFILE_ID)

@@ -19,7 +19,10 @@ pub(super) fn threshold_share_commitment_set(
 ) -> CanonicalResult<Value> {
     let mut recipient_records = Vec::with_capacity(roster.participant_count as usize);
     for recipient_roster_position in 0..roster.participant_count {
-        let recipient_identity = format!("trustee-{recipient_roster_position}");
+        let recipient_identity = recipient_identity_from_source_bindings(
+            source_trustee_bindings,
+            recipient_roster_position,
+        )?;
         let recipient_record = threshold_share_recipient_record(
             setup_context,
             public_matrix_seed_hash,
@@ -54,6 +57,20 @@ pub(super) fn threshold_share_commitment_set(
     commitment_set["thresholdShareCommitmentRoot"] = json!(commitment_set_root);
 
     Ok(commitment_set)
+}
+
+pub(super) fn recipient_identity_from_source_bindings(
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
+    roster_position: u64,
+) -> CanonicalResult<String> {
+    source_trustee_bindings
+        .get(&roster_position)
+        .map(|binding| binding.source_trustee_identity.clone())
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input(
+                "threshold derivation is missing a source trustee identity for a roster position",
+            )
+        })
 }
 
 #[allow(clippy::too_many_arguments)]

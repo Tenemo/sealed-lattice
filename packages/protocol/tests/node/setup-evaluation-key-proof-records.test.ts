@@ -92,9 +92,6 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
         requiredGaloisKeySchedule,
         requiredGaloisSetHash,
         genericKeySwitchPolicy: 'refused-unless-explicitly-required',
-        genericKeySwitchProofStatus: 'not-required-for-first-profile',
-        scheduleBindingStatus:
-            'relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting',
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {

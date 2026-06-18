@@ -2,19 +2,16 @@ use super::*;
 
 #[test]
 fn first_profile_setup_profile_hash_is_byte_stable() {
-    // Byte-identity guard for the n=10 closure profile. Parameterizing the
-    // collective setup profile for dynamic roster sizes (3..20) must keep the
-    // n=10 CollectiveBgvSetupProfileHash unchanged, so the accepted n=10 proof
-    // corpus stays valid without re-proving. A drift here means a binding shape
-    // or value changed for n=10.
-    // This pin tracks the full n=10 binding, which includes the proof-accounting
-    // sub-hashes; if those certificates change, re-pin to the new n=10 value.
+    // Byte-identity guard for the current n=10 closure profile. This pin tracks
+    // the full n=10 binding, including proof-accounting sub-hashes and profile
+    // certificate roots; if those binding inputs intentionally change, re-pin to
+    // the new n=10 value and treat stale proof corpora as invalid.
     let profile = describe_collective_bgv_setup_profile().expect("profile");
     assert_eq!(
         profile["setupProfileHash"]
             .as_str()
             .expect("setup profile hash"),
-        "05e75edb3e56dcc3078f63eb1fe2f6f99d19bf22f667facfcbb82ddd50cfb7273ab06ae34eaeff7dda9db885148ed61538bb8416024d04b94608364692d4e493",
+        "65468c7fa358d8d9acbb86e1986daf009ab11f0f01ad0078eb22c9c4aeac4fba0cd3fcd5d0539d323c26258d0dae8fa50e4cc87f660b6348b4fd4c96aaf8d3a9",
     );
 }
 
@@ -54,8 +51,19 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         "BdlopCommitmentProfile"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["parameterAcceptanceStatus"],
-        "claim-bearing-setup-commitment-parameter-accounting-accepted"
+        profile["commitmentProfile"]["assumptions"]["hiding"],
+        "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings"
+    );
+    assert_eq!(
+        profile["commitmentProfile"]["assumptions"]["binding"],
+        "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix"
+    );
+    assert_eq!(
+        profile["commitmentProfile"]["assumptions"]["requiredCertificates"],
+        serde_json::json!([
+            "SetupCommitmentSecurityCertificate",
+            "SetupProofAccountingCertificate"
+        ])
     );
     assert!(profile["commitmentProfileHash"].as_str().is_some());
     assert_eq!(
@@ -247,6 +255,10 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later
             .expect("package object")
             .remove("phaseTranscript");
         rebind_collective_setup_package_hash(&mut package);
+        package
+            .as_object_mut()
+            .expect("package object")
+            .remove("setupPackageHash");
 
         let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
             "setupPackage": package,

@@ -303,6 +303,25 @@ mod tests {
         u64::try_from(result).expect("modular exponentiation result fits in u64")
     }
 
+    fn prime_factor_bases(mut value: u64) -> Vec<u64> {
+        let mut factors = Vec::new();
+        let mut divisor = 2_u64;
+        while divisor <= value / divisor {
+            if value.is_multiple_of(divisor) {
+                factors.push(divisor);
+                while value.is_multiple_of(divisor) {
+                    value /= divisor;
+                }
+            }
+            divisor += if divisor == 2 { 1 } else { 2 };
+        }
+        if value > 1 {
+            factors.push(value);
+        }
+
+        factors
+    }
+
     #[test]
     fn selected_moduli_are_ntt_ready_primes() {
         assert_eq!(POLYNOMIAL_DEGREE, 32_768);
@@ -313,6 +332,37 @@ mod tests {
             assert!(root_parameters_for_modulus(modulus).is_some());
         }
         assert!(root_parameters_for_modulus(PLAINTEXT_MODULUS).is_some());
+    }
+
+    #[test]
+    fn primitive_generators_have_full_multiplicative_order() {
+        for parameters in super::ROOT_PARAMETERS {
+            let group_order = parameters.modulus - 1;
+            assert!(parameters.primitive_generator > 1);
+            assert!(parameters.primitive_generator < parameters.modulus);
+            assert_eq!(
+                pow_mod(
+                    parameters.primitive_generator,
+                    group_order,
+                    parameters.modulus
+                ),
+                1,
+                "primitive generator must be in the multiplicative group for modulus {}",
+                parameters.modulus
+            );
+            for prime_factor in prime_factor_bases(group_order) {
+                assert_ne!(
+                    pow_mod(
+                        parameters.primitive_generator,
+                        group_order / prime_factor,
+                        parameters.modulus
+                    ),
+                    1,
+                    "primitive generator must not lie in the subgroup of index {prime_factor} for modulus {}",
+                    parameters.modulus
+                );
+            }
+        }
     }
 
     #[test]

@@ -876,22 +876,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
             trustee_roster_position,
         })
         .expect("trustee evaluation-key statement");
-    let total_error_column_count = statement.keys.iter().map(|key| key.level + 1).sum();
-    let linkage_commitment_count = statement
-        .same_secret_linkage
-        .as_ref()
-        .expect("trustee evaluation-key same-secret linkage")
-        .commitments
-        .len();
+    let proof_layout = FirstLimbProofCodecLayout::from_statement(&statement);
     mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
         &mut low_degree_shape_package,
         |proof_bytes| {
-            set_first_limb_low_degree_fold_count_to_wrong_value(
-                proof_bytes,
-                statement.ring_degree,
-                total_error_column_count,
-                linkage_commitment_count,
-            );
+            set_first_limb_low_degree_fold_count_to_wrong_value(proof_bytes, proof_layout);
         },
     );
     let low_degree_shape_result =

@@ -176,7 +176,8 @@ export type CommonRandomnessRevealInput = Readonly<{
     readonly rosterPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
-    readonly signatureEnvelopeHash: ProtocolHash;
+    readonly signingPublicKeyHash: ProtocolHash;
+    readonly signRoot: ProtocolRootSigner;
     readonly revealHex: string;
 }>;
 
@@ -196,6 +197,7 @@ export type CommonRandomnessReveal = Readonly<
         readonly deviceEpoch: number;
         readonly revealHex: string;
         readonly signatureEnvelopeHash: ProtocolHash;
+        readonly signatureEnvelope: ProtocolSignatureEnvelope;
         readonly revealHash: ProtocolHash;
     }
 >;
@@ -206,7 +208,8 @@ export type CommonRandomnessCommitInput = Readonly<{
     readonly rosterPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
-    readonly signatureEnvelopeHash: ProtocolHash;
+    readonly signingPublicKeyHash: ProtocolHash;
+    readonly signRoot: ProtocolRootSigner;
     readonly revealHash: ProtocolHash;
 }>;
 
@@ -226,6 +229,7 @@ export type CommonRandomnessCommit = Readonly<
         readonly deviceEpoch: number;
         readonly revealHash: ProtocolHash;
         readonly signatureEnvelopeHash: ProtocolHash;
+        readonly signatureEnvelope: ProtocolSignatureEnvelope;
         readonly commitHash: ProtocolHash;
     }
 >;
@@ -752,12 +756,14 @@ export const createSetupPhaseRecord = (
 /** Creates a public common-randomness reveal record for one trustee. */
 export const createCommonRandomnessReveal = (
     input: CommonRandomnessRevealInput,
-): CommonRandomnessReveal => createCommonRandomnessRevealInternal(input);
+): Promise<CommonRandomnessReveal> =>
+    createCommonRandomnessRevealInternal(input);
 
 /** Creates a public common-randomness commit record for one trustee. */
 export const createCommonRandomnessCommit = (
     input: CommonRandomnessCommitInput,
-): CommonRandomnessCommit => createCommonRandomnessCommitInternal(input);
+): Promise<CommonRandomnessCommit> =>
+    createCommonRandomnessCommitInternal(input);
 
 /** Assembles full-roster common randomness and accepted public derivations. */
 export const createSetupCommonRandomness = async (

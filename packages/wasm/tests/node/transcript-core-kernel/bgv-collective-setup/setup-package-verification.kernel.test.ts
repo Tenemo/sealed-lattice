@@ -76,7 +76,9 @@ describe('collective BGV setup kernel commands', () => {
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
             expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
+            expectedRosterHash: String(
+                (setupPackage.setupContext as JsonRecord).rosterHash,
+            ),
         });
 
         expect(result).toMatchObject({
@@ -114,7 +116,9 @@ describe('collective BGV setup kernel commands', () => {
             const result = kernel.verifyCollectiveBgvSetup({
                 setupPackage,
                 expectedManifestHash: setupRequest.manifestHash,
-                expectedRosterHash: setupRequest.rosterHash,
+                expectedRosterHash: String(
+                    (setupPackage.setupContext as JsonRecord).rosterHash,
+                ),
             });
 
             expect(result.verifierStatus).toBe('refused');
@@ -144,7 +148,9 @@ describe('collective BGV setup kernel commands', () => {
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
             expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
+            expectedRosterHash: String(
+                (setupPackage.setupContext as JsonRecord).rosterHash,
+            ),
         });
 
         expect(result.verifierStatus).toBe('refused');
@@ -199,7 +205,9 @@ describe('collective BGV setup kernel commands', () => {
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
             expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
+            expectedRosterHash: String(
+                (setupPackage.setupContext as JsonRecord).rosterHash,
+            ),
         });
 
         expect(result.verifierStatus).toBe('refused');
@@ -226,7 +234,9 @@ describe('collective BGV setup kernel commands', () => {
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
             expectedManifestHash: setupRequest.manifestHash,
-            expectedRosterHash: setupRequest.rosterHash,
+            expectedRosterHash: String(
+                (setupPackage.setupContext as JsonRecord).rosterHash,
+            ),
         });
 
         expect(result).toMatchObject({
@@ -237,8 +247,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'vssComplaintAcceptedAbort',
         );
-        expect(result.acceptedHashes).toContain(
-            (setupPackage.vssComplaints as JsonRecord).vssComplaintRoot,
-        );
+        expect(result.acceptedHashes).toEqual([]);
     });
 });

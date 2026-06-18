@@ -38,9 +38,6 @@ describe('collective BGV setup kernel commands', () => {
         });
         expect(profile.qShare.primes.length).toBeGreaterThan(0);
         expect(profile.qShareHash).toHaveLength(128);
-        expect(
-            profile.commitmentProfile.assumptions.parameterAcceptanceStatus,
-        ).toBe('claim-bearing-setup-commitment-parameter-accounting-accepted');
         expect(profile.publicVssCommitmentMaterialSizeProfile).toMatchObject({
             objectType: 'PublicVssCommitmentMaterialSizeProfile',
             ringDegree: 32768,
@@ -76,11 +73,19 @@ describe('collective BGV setup kernel commands', () => {
         expect(profile.commitmentProfile.messageEncoding).toMatchObject({
             integerEncoding: 'crt-lifted-integer-coefficients',
         });
+        expect(profile.commitmentProfile.assumptions).toMatchObject({
+            hiding: 'Module-LWE over the selected commitment modulus limbs with short centered-ternary openings',
+            binding:
+                'Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix',
+            requiredCertificates: [
+                'SetupCommitmentSecurityCertificate',
+                'SetupProofAccountingCertificate',
+            ],
+        });
         expect(profile.commitmentProfileHash).toHaveLength(128);
         expect(profile.evaluatorKeyScheduleProfile).toMatchObject({
             objectType: 'EvaluatorKeyScheduleProfile',
             genericKeySwitchPolicy: 'refused-unless-explicitly-required',
-            genericKeySwitchProofStatus: 'not-required-for-first-profile',
         });
         expect(
             profile.evaluatorKeyScheduleProfile.relinearizationLevelSchedule,

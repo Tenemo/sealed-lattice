@@ -427,13 +427,7 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
         result["refusedObjects"][0]["reasonCode"],
         "vssComplaintAcceptedAbort"
     );
-    assert!(
-        result["acceptedHashes"]
-            .as_array()
-            .expect("accepted hashes")[0]
-            .as_str()
-            .is_some_and(|hash| hash.len() == 128)
-    );
+    assert_eq!(result["acceptedHashes"], serde_json::json!([]));
 }
 
 #[test]

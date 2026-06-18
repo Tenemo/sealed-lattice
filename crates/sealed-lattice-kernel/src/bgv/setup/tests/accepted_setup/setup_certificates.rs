@@ -248,6 +248,19 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
     assert!(log2_string_field(current_q_data_row, "weakestAttackCostLog2") >= 128.0);
     assert!(log2_string_field(current_q_data_row, "marginTo128Bits") > 11.0);
 
+    let quantum_context_row =
+        &estimator_rows["currentQDataCenteredBinomialEta2Adps16QuantumSieveContext"];
+    assert_eq!(quantum_context_row["costModel"], "ADPS16(mode=quantum)");
+    assert_eq!(quantum_context_row["weakestAttack"], "usvp");
+    assert!(
+        quantum_context_row["rowScope"]
+            .as_str()
+            .expect("quantum context row scope")
+            .contains("context only")
+    );
+    assert!(log2_string_field(quantum_context_row, "weakestAttackCostLog2") < 128.0);
+    assert!(log2_string_field(quantum_context_row, "marginToConventional128Bits") < 0.0);
+
     let extended_boundary_row = &estimator_rows["qExtendedIfExposedCenteredBinomialEta2"];
     assert_eq!(
         extended_boundary_row["modulusCeilLog2"],
@@ -368,12 +381,12 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
         .expect("setup key correctness certificate");
 
     assert_eq!(
-        certificate["collectivePublicKey"]["status"],
-        "collective-public-key-coefficients-recomputed-from-public-key-share-material-and-succinct-proof-roots"
+        certificate["collectivePublicKey"]["collectivePublicKeyRoot"],
+        package["collectivePublicKey"]["collectivePublicKeyRoot"]
     );
     assert_eq!(
-        certificate["publicEvaluationKeys"]["status"],
-        "public-evaluation-key-roots-recomputed-from-frozen-schedule-and-proof-bearing-relinearization-and-galois-records"
+        certificate["publicEvaluationKeys"]["evaluationKeySetHash"],
+        package["evaluationKeys"]["evaluationKeySetHash"]
     );
     // The certificate binds its dependency certificate hashes straight from the
     // setup package, so the verifier-recomputed body cannot drift from the

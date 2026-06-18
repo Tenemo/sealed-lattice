@@ -1,12 +1,89 @@
 import { expect } from 'vitest';
 
 import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
-import { type JsonRecord } from '../setup-fixture-primitives.js';
+import {
+    collectiveSetupRosterHash,
+    setupTrusteeSignatureSeedLabel,
+    textEncoder,
+    type JsonRecord,
+} from '../setup-fixture-primitives.js';
 
+import { canonicalJson } from '#packages/crypto/src/index';
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#packages/crypto/tests/support/protocol-signature-fixtures';
 import type {
     BgvCollectiveSetupProfileDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
+
+const canonicalByteLength = (value: unknown): number =>
+    textEncoder.encode(canonicalJson(value)).byteLength;
+
+function commonRandomnessSignatureContextHash(input: {
+    readonly kernel: TranscriptCoreKernel;
+    readonly objectType: 'CommonRandomnessCommit' | 'CommonRandomnessReveal';
+    readonly purpose:
+        | 'common-randomness-commit-signature-context'
+        | 'common-randomness-reveal-signature-context';
+    readonly payload: JsonRecord;
+    readonly objectRoot: string;
+}): string {
+    return input.kernel.deriveProtocolHash({
+        namespace: `${input.objectType}Hash`,
+        value: {
+            purpose: input.purpose,
+            ceremonyId: input.payload.ceremonyId,
+            manifestHash: input.payload.manifestHash,
+            rosterHash: input.payload.rosterHash,
+            setupProfileHash: input.payload.setupProfileHash,
+            setupEpoch: input.payload.setupEpoch,
+            trusteeIdentity: input.payload.trusteeIdentity,
+            rosterPosition: input.payload.rosterPosition,
+            objectRoot: input.objectRoot,
+        },
+    });
+}
+
+function commonRandomnessSignatureEnvelope(input: {
+    readonly kernel: TranscriptCoreKernel;
+    readonly objectType: 'CommonRandomnessCommit' | 'CommonRandomnessReveal';
+    readonly purpose:
+        | 'common-randomness-commit-signature-context'
+        | 'common-randomness-reveal-signature-context';
+    readonly payload: JsonRecord;
+    readonly objectRoot: string;
+    readonly trusteeIdentity: string;
+}): JsonRecord {
+    const keyFixture = createMlDsaKeyPairFixture(
+        setupTrusteeSignatureSeedLabel(input.trusteeIdentity),
+    );
+    const signatureContextHash = commonRandomnessSignatureContextHash(input);
+
+    return createProtocolSignatureFixture({
+        profile: createMlDsaSignatureProfileFixture(),
+        publicKeyBytesHex: keyFixture.publicKeyBytesHex,
+        publicKeyHash: keyFixture.publicKeyHash,
+        secretKeyBytesHex: keyFixture.secretKeyBytesHex,
+        signedRoot: {
+            objectType: input.objectType,
+            objectVersion: 1,
+            ceremonyId: String(input.payload.ceremonyId),
+            manifestHash: String(input.payload.manifestHash),
+            boardHeadHash: null,
+            objectRoot: input.objectRoot,
+            chunkMerkleRoot: null,
+            byteLength: canonicalByteLength(input.payload),
+            signerRole: 'Trustee',
+            signerIdentity: input.trusteeIdentity,
+            recoveryEpoch: Number(input.payload.recoveryEpoch),
+            deviceEpoch: Number(input.payload.deviceEpoch),
+            contextHash: signatureContextHash,
+        },
+    });
+}
 
 export function acceptedCommonRandomness(
     kernel: TranscriptCoreKernel,
@@ -15,6 +92,9 @@ export function acceptedCommonRandomness(
     const commitRecords: JsonRecord[] = [];
     const revealRecords: JsonRecord[] = [];
     const orderedRevealHashes: string[] = [];
+    const rosterHash = collectiveSetupRosterHash((input) =>
+        kernel.deriveProtocolHash(input),
+    );
     for (let rosterPosition = 0; rosterPosition < 10; rosterPosition += 1) {
         const trusteeIdentity = `trustee-${String(rosterPosition)}`;
         const revealHex = kernel
@@ -26,19 +106,12 @@ export function acceptedCommonRandomness(
                 },
             })
             .slice(0, 64);
-        const signatureEnvelopeHash = kernel.deriveProtocolHash({
-            namespace: 'ProtocolSignatureEnvelopeHash',
-            value: {
-                fixture: 'common-randomness-signature',
-                rosterPosition,
-            },
-        });
-        const revealRecord: JsonRecord = {
+        const revealPayload: JsonRecord = {
             objectType: 'CommonRandomnessReveal',
             objectVersion: 1,
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
+            rosterHash,
             setupProfileHash: profile.setupProfileHash,
             setupEpoch: 'setup-epoch-1',
             signerRole: 'Trustee',
@@ -47,22 +120,34 @@ export function acceptedCommonRandomness(
             recoveryEpoch: 0,
             deviceEpoch: 0,
             revealHex,
-            signatureEnvelopeHash,
         };
         const revealHash = kernel.deriveProtocolHash({
             namespace: 'CommonRandomnessRevealHash',
-            value: revealRecord,
+            value: revealPayload,
         });
-        revealRecord.revealHash = revealHash;
+        const revealSignatureEnvelope = commonRandomnessSignatureEnvelope({
+            kernel,
+            objectType: 'CommonRandomnessReveal',
+            purpose: 'common-randomness-reveal-signature-context',
+            payload: revealPayload,
+            objectRoot: revealHash,
+            trusteeIdentity,
+        });
+        const revealRecord: JsonRecord = {
+            ...revealPayload,
+            signatureEnvelopeHash: revealSignatureEnvelope.signatureHash,
+            signatureEnvelope: revealSignatureEnvelope,
+            revealHash,
+        };
         revealRecords.push(revealRecord);
         orderedRevealHashes.push(revealHash);
 
-        const commitRecord: JsonRecord = {
+        const commitPayload: JsonRecord = {
             objectType: 'CommonRandomnessCommit',
             objectVersion: 1,
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
+            rosterHash,
             setupProfileHash: profile.setupProfileHash,
             setupEpoch: 'setup-epoch-1',
             signerRole: 'Trustee',
@@ -71,12 +156,25 @@ export function acceptedCommonRandomness(
             recoveryEpoch: 0,
             deviceEpoch: 0,
             revealHash,
-            signatureEnvelopeHash,
         };
-        commitRecord.commitHash = kernel.deriveProtocolHash({
+        const commitHash = kernel.deriveProtocolHash({
             namespace: 'CommonRandomnessCommitHash',
-            value: commitRecord,
+            value: commitPayload,
         });
+        const commitSignatureEnvelope = commonRandomnessSignatureEnvelope({
+            kernel,
+            objectType: 'CommonRandomnessCommit',
+            purpose: 'common-randomness-commit-signature-context',
+            payload: commitPayload,
+            objectRoot: commitHash,
+            trusteeIdentity,
+        });
+        const commitRecord: JsonRecord = {
+            ...commitPayload,
+            signatureEnvelopeHash: commitSignatureEnvelope.signatureHash,
+            signatureEnvelope: commitSignatureEnvelope,
+            commitHash,
+        };
         commitRecords.push(commitRecord);
     }
 
@@ -86,7 +184,7 @@ export function acceptedCommonRandomness(
             setupProfileId: 'CollectiveBgvSetup-v1',
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
-            rosterHash: setupRequest.rosterHash,
+            rosterHash,
             setupProfileHash: String(profile.setupProfileHash),
             setupEpoch: 'setup-epoch-1',
             orderedRevealHashes,
@@ -96,9 +194,6 @@ export function acceptedCommonRandomness(
         publicMatrixSeedHash,
     });
     expect(
-        publicDerivations.publicMatrices.commitmentMatrix.profileStatus,
-    ).toBe('commitment-profile-bound');
-    expect(
         publicDerivations.publicMatrices.commitmentMatrix.sampledEntries[0]
             ?.coefficientValue,
     ).toEqual(expect.any(Number));
@@ -107,7 +202,7 @@ export function acceptedCommonRandomness(
         objectVersion: 1,
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
-        rosterHash: setupRequest.rosterHash,
+        rosterHash,
         setupProfileHash: profile.setupProfileHash,
         setupEpoch: 'setup-epoch-1',
         commitRecords,

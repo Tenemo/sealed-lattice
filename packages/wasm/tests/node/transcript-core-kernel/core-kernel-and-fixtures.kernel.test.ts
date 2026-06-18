@@ -507,14 +507,12 @@ describe('transcript-core kernel in Node', () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
-            verified: true,
             caseName: 'foundation-transcript-roots',
             objectHash512:
                 foundationTranscriptCoreFixture.expectedObjectHash512,
             chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
-            verified: true,
             caseName: 'invalid-enum',
             expectedErrorCode: 'InvalidEnum',
         });

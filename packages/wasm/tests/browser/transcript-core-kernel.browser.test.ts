@@ -37,7 +37,6 @@ describe('transcript-core kernel in browsers', () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
-            verified: true,
             caseName: 'foundation-transcript-roots',
             objectHash512:
                 foundationTranscriptCoreFixture.expectedObjectHash512,

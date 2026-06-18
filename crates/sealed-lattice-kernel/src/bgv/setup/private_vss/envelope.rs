@@ -110,10 +110,11 @@ pub(super) fn verify_private_envelope_header(
         Ok(recipient_roster_position) => recipient_roster_position,
         Err(refusal) => return Ok(Err(refusal)),
     };
-    if recipient_roster_position >= 10 {
+    let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
+    if recipient_roster_position >= roster.participant_count {
         return Ok(Err(PrivateVssRefusal::new(
             "privateEnvelopeRecipientPositionInvalid",
-            "privateEnvelope.recipientRosterPosition is outside the first accepted profile roster",
+            "privateEnvelope.recipientRosterPosition is outside the setup roster",
             "privateEnvelope.recipientRosterPosition",
         )));
     }

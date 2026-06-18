@@ -1,7 +1,18 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import {
+    canonicalJson,
+    deriveProtocolHash,
+    verifySignedObjectSignature,
+} from '@sealed-lattice/crypto';
+import type {
+    CanonicalSignedRootObject,
+    ProtocolHash,
+    ProtocolSignatureEnvelope,
+} from '@sealed-lattice/types';
 
-import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
+import type {
+    CollectiveBgvSetupContext,
+    ProtocolRootSigner,
+} from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -19,7 +30,8 @@ export type CommonRandomnessParticipantInput = Readonly<{
     readonly rosterPosition: number;
     readonly recoveryEpoch: number;
     readonly deviceEpoch: number;
-    readonly signatureEnvelopeHash: ProtocolHash;
+    readonly signingPublicKeyHash: ProtocolHash;
+    readonly signRoot: ProtocolRootSigner;
 }>;
 
 export type CommonRandomnessRevealInput = CommonRandomnessParticipantInput &
@@ -39,6 +51,7 @@ export type CommonRandomnessReveal = Readonly<
             readonly deviceEpoch: number;
             readonly revealHex: string;
             readonly signatureEnvelopeHash: ProtocolHash;
+            readonly signatureEnvelope: ProtocolSignatureEnvelope;
             readonly revealHash: ProtocolHash;
         }
 >;
@@ -60,6 +73,7 @@ export type CommonRandomnessCommit = Readonly<
             readonly deviceEpoch: number;
             readonly revealHash: ProtocolHash;
             readonly signatureEnvelopeHash: ProtocolHash;
+            readonly signatureEnvelope: ProtocolSignatureEnvelope;
             readonly commitHash: ProtocolHash;
         }
 >;
@@ -94,7 +108,6 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
             readonly galoisKeyCrpRoot: ProtocolHash;
             readonly commitmentMatrixCrpRoot: ProtocolHash;
         }>;
-        readonly status: 'deterministic-public-derivations-bound';
         readonly publicDerivationRoot: ProtocolHash;
     }
 >;
@@ -125,6 +138,7 @@ export type SetupCommonRandomness = Readonly<
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 // Each reveal contributes exactly 32 bytes (256 bits) of entropy to the joint public matrix seed.
 const revealHexPattern = /^[0-9a-f]{64}$/u;
+const textEncoder = new TextEncoder();
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
@@ -204,8 +218,11 @@ const assertParticipantInput = (
     assertNonNegativeSafeInteger(input.rosterPosition, 'rosterPosition');
     assertNonNegativeSafeInteger(input.recoveryEpoch, 'recoveryEpoch');
     assertNonNegativeSafeInteger(input.deviceEpoch, 'deviceEpoch');
-    assertProtocolHash(input.signatureEnvelopeHash, 'signatureEnvelopeHash');
+    assertProtocolHash(input.signingPublicKeyHash, 'signingPublicKeyHash');
 };
+
+const canonicalByteLength = (value: unknown): number =>
+    textEncoder.encode(canonicalJson(value)).byteLength;
 
 const commonRandomnessParticipantFields = (
     input: CommonRandomnessParticipantInput,
@@ -217,7 +234,6 @@ const commonRandomnessParticipantFields = (
         rosterPosition: input.rosterPosition,
         recoveryEpoch: input.recoveryEpoch,
         deviceEpoch: input.deviceEpoch,
-        signatureEnvelopeHash: input.signatureEnvelopeHash,
     }) as const;
 
 const withoutHashField = <RecordType extends JsonRecord>(
@@ -283,6 +299,10 @@ const assertRecordShape = (
         record.signatureEnvelopeHash,
         `${objectPath}.signatureEnvelopeHash`,
     );
+    assertJsonRecord(
+        record.signatureEnvelope,
+        `${objectPath}.signatureEnvelope`,
+    );
 };
 
 const assertRecordHashMatches = (
@@ -290,9 +310,18 @@ const assertRecordHashMatches = (
     objectPath: string,
 ): void => {
     if (record.objectType === 'CommonRandomnessCommit') {
+        const {
+            commitHash: removedCommitHash,
+            signatureEnvelopeHash: removedSignatureEnvelopeHash,
+            signatureEnvelope: removedSignatureEnvelope,
+            ...hashInput
+        } = record;
+        void removedCommitHash;
+        void removedSignatureEnvelopeHash;
+        void removedSignatureEnvelope;
         const expectedCommitHash = deriveProtocolHash(
             'CommonRandomnessCommitHash',
-            withoutHashField(record, 'commitHash'),
+            hashInput,
         );
         if (record.commitHash !== expectedCommitHash) {
             throw new Error(
@@ -303,9 +332,18 @@ const assertRecordHashMatches = (
         return;
     }
 
+    const {
+        revealHash: removedRevealHash,
+        signatureEnvelopeHash: removedSignatureEnvelopeHash,
+        signatureEnvelope: removedSignatureEnvelope,
+        ...hashInput
+    } = record;
+    void removedRevealHash;
+    void removedSignatureEnvelopeHash;
+    void removedSignatureEnvelope;
     const expectedRevealHash = deriveProtocolHash(
         'CommonRandomnessRevealHash',
-        withoutHashField(record, 'revealHash'),
+        hashInput,
     );
     if (record.revealHash !== expectedRevealHash) {
         throw new Error(
@@ -442,9 +480,66 @@ const assertPublicDerivationsMatchKernelShape = (
     }
 };
 
-export const createCommonRandomnessReveal = (
+const commonRandomnessSignatureContextHash = (
+    objectType: 'CommonRandomnessCommit' | 'CommonRandomnessReveal',
+    purpose:
+        | 'common-randomness-commit-signature-context'
+        | 'common-randomness-reveal-signature-context',
+    payload: JsonRecord,
+    objectRoot: ProtocolHash,
+): ProtocolHash =>
+    deriveProtocolHash(`${objectType}Hash`, {
+        purpose,
+        ceremonyId: payload.ceremonyId,
+        manifestHash: payload.manifestHash,
+        rosterHash: payload.rosterHash,
+        setupProfileHash: payload.setupProfileHash,
+        setupEpoch: payload.setupEpoch,
+        trusteeIdentity: payload.trusteeIdentity,
+        rosterPosition: payload.rosterPosition,
+        objectRoot,
+    });
+
+const verifyGeneratedSignatureEnvelope = (
+    recordLabel: string,
+    signatureEnvelope: ProtocolSignatureEnvelope,
+    signedRoot: CanonicalSignedRootObject,
+    signingPublicKeyHash: ProtocolHash,
+): void => {
+    const result = verifySignedObjectSignature(signatureEnvelope, {
+        objectType: signedRoot.objectType,
+        objectVersion: signedRoot.objectVersion,
+        signerRole: signedRoot.signerRole,
+        signerIdentity: signedRoot.signerIdentity,
+        ceremonyId: signedRoot.ceremonyId,
+        publicKeyHash: signingPublicKeyHash,
+        manifestHash: signedRoot.manifestHash,
+        objectRoot: signedRoot.objectRoot,
+        chunkMerkleRoot: signedRoot.chunkMerkleRoot,
+        boardHeadHash: signedRoot.boardHeadHash,
+        contextHash: signedRoot.contextHash,
+        byteLength: signedRoot.byteLength,
+        recoveryEpoch: signedRoot.recoveryEpoch,
+        deviceEpoch: signedRoot.deviceEpoch,
+    });
+    if (!result.ok) {
+        const refusedObject = result.refusedObjects[0];
+        throw new Error(
+            refusedObject === undefined
+                ? `${recordLabel} signature envelope failed verification.`
+                : `${recordLabel} signature envelope failed verification: ${refusedObject.code}: ${refusedObject.message}`,
+        );
+    }
+    if (signatureEnvelope.signatureHash !== result.acceptedHashes[0]) {
+        throw new Error(
+            `${recordLabel} signature envelope hash does not match the verified signature hash.`,
+        );
+    }
+};
+
+export const createCommonRandomnessReveal = async (
     input: CommonRandomnessRevealInput,
-): CommonRandomnessReveal => {
+): Promise<CommonRandomnessReveal> => {
     assertParticipantInput(input);
     assertRevealHex(input.revealHex, 'revealHex');
 
@@ -453,20 +548,51 @@ export const createCommonRandomnessReveal = (
         objectVersion: 1,
         ...commonRandomnessParticipantFields(input),
         revealHex: input.revealHex,
-    } as const satisfies Omit<CommonRandomnessReveal, 'revealHash'>;
+    } as const satisfies JsonRecord;
+    const revealHash = deriveProtocolHash(
+        'CommonRandomnessRevealHash',
+        revealWithoutHash,
+    );
+    const revealContextHash = commonRandomnessSignatureContextHash(
+        'CommonRandomnessReveal',
+        'common-randomness-reveal-signature-context',
+        revealWithoutHash,
+        revealHash,
+    );
+    const signedRoot = {
+        objectType: 'CommonRandomnessReveal',
+        objectVersion: 1,
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        boardHeadHash: null,
+        objectRoot: revealHash,
+        chunkMerkleRoot: null,
+        byteLength: canonicalByteLength(revealWithoutHash),
+        signerRole: 'Trustee',
+        signerIdentity: input.trusteeIdentity,
+        recoveryEpoch: input.recoveryEpoch,
+        deviceEpoch: input.deviceEpoch,
+        contextHash: revealContextHash,
+    } as const satisfies CanonicalSignedRootObject;
+    const signatureEnvelope = await input.signRoot(signedRoot);
+    verifyGeneratedSignatureEnvelope(
+        'Common-randomness reveal',
+        signatureEnvelope,
+        signedRoot,
+        input.signingPublicKeyHash,
+    );
 
     return {
         ...revealWithoutHash,
-        revealHash: deriveProtocolHash(
-            'CommonRandomnessRevealHash',
-            revealWithoutHash,
-        ),
+        signatureEnvelopeHash: signatureEnvelope.signatureHash,
+        signatureEnvelope,
+        revealHash,
     } satisfies CommonRandomnessReveal;
 };
 
-export const createCommonRandomnessCommit = (
+export const createCommonRandomnessCommit = async (
     input: CommonRandomnessCommitInput,
-): CommonRandomnessCommit => {
+): Promise<CommonRandomnessCommit> => {
     assertParticipantInput(input);
     assertProtocolHash(input.revealHash, 'revealHash');
 
@@ -475,14 +601,45 @@ export const createCommonRandomnessCommit = (
         objectVersion: 1,
         ...commonRandomnessParticipantFields(input),
         revealHash: input.revealHash,
-    } as const satisfies Omit<CommonRandomnessCommit, 'commitHash'>;
+    } as const satisfies JsonRecord;
+    const commitHash = deriveProtocolHash(
+        'CommonRandomnessCommitHash',
+        commitWithoutHash,
+    );
+    const commitContextHash = commonRandomnessSignatureContextHash(
+        'CommonRandomnessCommit',
+        'common-randomness-commit-signature-context',
+        commitWithoutHash,
+        commitHash,
+    );
+    const signedRoot = {
+        objectType: 'CommonRandomnessCommit',
+        objectVersion: 1,
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        boardHeadHash: null,
+        objectRoot: commitHash,
+        chunkMerkleRoot: null,
+        byteLength: canonicalByteLength(commitWithoutHash),
+        signerRole: 'Trustee',
+        signerIdentity: input.trusteeIdentity,
+        recoveryEpoch: input.recoveryEpoch,
+        deviceEpoch: input.deviceEpoch,
+        contextHash: commitContextHash,
+    } as const satisfies CanonicalSignedRootObject;
+    const signatureEnvelope = await input.signRoot(signedRoot);
+    verifyGeneratedSignatureEnvelope(
+        'Common-randomness commit',
+        signatureEnvelope,
+        signedRoot,
+        input.signingPublicKeyHash,
+    );
 
     return {
         ...commitWithoutHash,
-        commitHash: deriveProtocolHash(
-            'CommonRandomnessCommitHash',
-            commitWithoutHash,
-        ),
+        signatureEnvelopeHash: signatureEnvelope.signatureHash,
+        signatureEnvelope,
+        commitHash,
     } satisfies CommonRandomnessCommit;
 };
 

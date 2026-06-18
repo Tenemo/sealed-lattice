@@ -731,12 +731,9 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_lo
     )
     .expect("public-key succinct proof bytes");
     let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
-    let public_key_share_error_column_count = 1;
     set_first_limb_low_degree_fold_count_to_wrong_value(
         &mut proof_bytes,
-        ring_degree,
-        public_key_share_error_column_count,
-        1,
+        FirstLimbProofCodecLayout::public_key_share(ring_degree),
     );
     proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
     proof_record["proofBytesHash"] =

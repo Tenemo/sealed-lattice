@@ -47,6 +47,7 @@ export const protocolHashNamespaceValues = [
     'WorstCaseInterpolationCoefficientReportHash',
     'SparseTopKTargetHash',
     'CollectiveBgvSetupProfileHash',
+    'CollectiveBgvSetupRosterHash',
     'CollectiveBgvSetupPhaseOrderHash',
     'QSharePrimeListHash',
     'CarryAwareVssShareRelationProfileHash',

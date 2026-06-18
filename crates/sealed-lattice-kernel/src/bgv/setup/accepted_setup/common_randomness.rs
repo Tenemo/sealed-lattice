@@ -1,4 +1,5 @@
 use super::*;
+use crate::hashing::canonical_json;
 
 pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(common_randomness) = setup_package.get("commonRandomness") else {
@@ -47,6 +48,10 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         return Ok(Some(response));
     }
     let roster = super::accepted_roster_from_package(setup_package);
+    let trustee_registrations =
+        super::phase_transcript::setup_intent_trustee_registrations_from_phase_transcript(
+            setup_package,
+        )?;
 
     let Some(commit_records) = common_randomness
         .get("commitRecords")
@@ -89,8 +94,11 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
 
     let mut commit_reveal_hashes_by_position = BTreeMap::<u64, String>::new();
     for commit_record in commit_records {
-        let (roster_position, reveal_hash) =
-            verify_common_randomness_commit_record(commit_record, setup_context)?;
+        let (roster_position, reveal_hash) = verify_common_randomness_commit_record(
+            commit_record,
+            setup_context,
+            &trustee_registrations,
+        )?;
         if commit_reveal_hashes_by_position
             .insert(roster_position, reveal_hash)
             .is_some()
@@ -105,8 +113,11 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
 
     let mut ordered_reveal_hashes = BTreeMap::<u64, String>::new();
     for reveal_record in reveal_records {
-        let (roster_position, reveal_hash) =
-            verify_common_randomness_reveal_record(reveal_record, setup_context)?;
+        let (roster_position, reveal_hash) = verify_common_randomness_reveal_record(
+            reveal_record,
+            setup_context,
+            &trustee_registrations,
+        )?;
         let Some(committed_reveal_hash) = commit_reveal_hashes_by_position.get(&roster_position)
         else {
             return Ok(Some(common_randomness_refusal(
@@ -262,7 +273,6 @@ pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
             "galoisKeyCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "galois-key-crp")?,
             "commitmentMatrixCrpRoot": setup_public_derivation_root(public_matrix_seed_hash, "commitment-matrix-crp")?,
         },
-        "status": "deterministic-public-derivations-bound",
     });
     let derivation_root = derive_protocol_hash("SetupPublicDerivationRoot", &derivations)?;
     derivations["publicDerivationRoot"] = Value::String(derivation_root);
@@ -324,7 +334,6 @@ fn derive_setup_public_matrices(
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "commitmentMatrix": commitment_matrix,
-        "materializationStatus": "deterministic-entry-streams-bound",
     });
     let public_matrices_root = derive_protocol_hash("SetupPublicDerivationRoot", &public_matrices)?;
     public_matrices["publicMatricesRoot"] = Value::String(public_matrices_root);
@@ -344,7 +353,6 @@ fn derive_setup_commitment_matrix(
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "matrixKind": "commitment",
         "profileId": SETUP_COMMITMENT_PROFILE_ID,
-        "profileStatus": "commitment-profile-bound",
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
         "commitmentModuleRank": SETUP_COMMITMENT_MODULE_RANK,
@@ -422,12 +430,14 @@ fn verify_common_randomness_context(
 fn verify_common_randomness_commit_record(
     commit_record: &Value,
     setup_context: &Value,
+    trustee_registrations: &BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
 ) -> CanonicalResult<(u64, String)> {
     verify_common_randomness_participant_record_shape(
         commit_record,
         setup_context,
         "CommonRandomnessCommit",
         "commonRandomness.commitRecords",
+        trustee_registrations,
     )?;
     let Some(reveal_hash) = commit_record.get("revealHash").and_then(Value::as_str) else {
         return Err(CanonicalError::new(
@@ -443,18 +453,26 @@ fn verify_common_randomness_commit_record(
         ));
     };
     validate_hash_string(commit_hash, "CommonRandomnessCommit.commitHash")?;
-    let mut hash_input = commit_record.clone();
-    hash_input
-        .as_object_mut()
-        .expect("common-randomness commit object was checked")
-        .remove("commitHash");
-    let expected_commit_hash = derive_protocol_hash("CommonRandomnessCommitHash", &hash_input)?;
+    let commit_payload = common_randomness_commit_payload_value(commit_record)?;
+    let expected_commit_hash = derive_protocol_hash("CommonRandomnessCommitHash", &commit_payload)?;
     if commit_hash != expected_commit_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "CommonRandomnessCommit.commitHash does not match its canonical payload",
         ));
     }
+    verify_common_randomness_signature(
+        commit_record,
+        setup_context,
+        &CommonRandomnessSignatureExpectation {
+            object_type: "CommonRandomnessCommit",
+            context_purpose: "common-randomness-commit-signature-context",
+            object_root: commit_hash,
+            payload: &commit_payload,
+            object_path: "commonRandomness.commitRecords",
+            trustee_registrations,
+        },
+    )?;
 
     Ok((
         commit_record["rosterPosition"]
@@ -467,12 +485,14 @@ fn verify_common_randomness_commit_record(
 fn verify_common_randomness_reveal_record(
     reveal_record: &Value,
     setup_context: &Value,
+    trustee_registrations: &BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
 ) -> CanonicalResult<(u64, String)> {
     verify_common_randomness_participant_record_shape(
         reveal_record,
         setup_context,
         "CommonRandomnessReveal",
         "commonRandomness.revealRecords",
+        trustee_registrations,
     )?;
     let Some(reveal_hex) = reveal_record.get("revealHex").and_then(Value::as_str) else {
         return Err(CanonicalError::new(
@@ -488,18 +508,26 @@ fn verify_common_randomness_reveal_record(
         ));
     };
     validate_hash_string(reveal_hash, "CommonRandomnessReveal.revealHash")?;
-    let mut hash_input = reveal_record.clone();
-    hash_input
-        .as_object_mut()
-        .expect("common-randomness reveal object was checked")
-        .remove("revealHash");
-    let expected_reveal_hash = derive_protocol_hash("CommonRandomnessRevealHash", &hash_input)?;
+    let reveal_payload = common_randomness_reveal_payload_value(reveal_record)?;
+    let expected_reveal_hash = derive_protocol_hash("CommonRandomnessRevealHash", &reveal_payload)?;
     if reveal_hash != expected_reveal_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "CommonRandomnessReveal.revealHash does not match its canonical payload",
         ));
     }
+    verify_common_randomness_signature(
+        reveal_record,
+        setup_context,
+        &CommonRandomnessSignatureExpectation {
+            object_type: "CommonRandomnessReveal",
+            context_purpose: "common-randomness-reveal-signature-context",
+            object_root: reveal_hash,
+            payload: &reveal_payload,
+            object_path: "commonRandomness.revealRecords",
+            trustee_registrations,
+        },
+    )?;
 
     Ok((
         reveal_record["rosterPosition"]
@@ -514,6 +542,7 @@ fn verify_common_randomness_participant_record_shape(
     setup_context: &Value,
     object_type: &str,
     object_path: &str,
+    trustee_registrations: &BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
 ) -> CanonicalResult<()> {
     let roster = super::accepted_roster_from_setup_context(setup_context);
     if !record.is_object() {
@@ -579,6 +608,18 @@ fn verify_common_randomness_participant_record_shape(
             format!("{object_type}.rosterPosition is outside the first accepted profile"),
         ));
     }
+    let Some(registration) = trustee_registrations.get(&roster_position) else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{object_type}.rosterPosition is missing from setupIntent registrations"),
+        ));
+    };
+    if registration.trustee_identity != trustee_identity {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{object_type}.trusteeIdentity must match setupIntent registration"),
+        ));
+    }
     for field_name in ["recoveryEpoch", "deviceEpoch"] {
         if record.get(field_name).and_then(Value::as_u64).is_none() {
             return Err(CanonicalError::new(
@@ -600,6 +641,152 @@ fn verify_common_randomness_participant_record_shape(
     )?;
 
     Ok(())
+}
+
+fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Value> {
+    Ok(json!({
+        "objectType": "CommonRandomnessCommit",
+        "objectVersion": 1,
+        "ceremonyId": value_string(record, "ceremonyId")?,
+        "manifestHash": value_string(record, "manifestHash")?,
+        "rosterHash": value_string(record, "rosterHash")?,
+        "setupProfileHash": value_string(record, "setupProfileHash")?,
+        "setupEpoch": value_string(record, "setupEpoch")?,
+        "signerRole": "Trustee",
+        "trusteeIdentity": value_string(record, "trusteeIdentity")?,
+        "rosterPosition": value_u64(record, "rosterPosition")?,
+        "recoveryEpoch": value_u64(record, "recoveryEpoch")?,
+        "deviceEpoch": value_u64(record, "deviceEpoch")?,
+        "revealHash": value_string(record, "revealHash")?,
+    }))
+}
+
+fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Value> {
+    Ok(json!({
+        "objectType": "CommonRandomnessReveal",
+        "objectVersion": 1,
+        "ceremonyId": value_string(record, "ceremonyId")?,
+        "manifestHash": value_string(record, "manifestHash")?,
+        "rosterHash": value_string(record, "rosterHash")?,
+        "setupProfileHash": value_string(record, "setupProfileHash")?,
+        "setupEpoch": value_string(record, "setupEpoch")?,
+        "signerRole": "Trustee",
+        "trusteeIdentity": value_string(record, "trusteeIdentity")?,
+        "rosterPosition": value_u64(record, "rosterPosition")?,
+        "recoveryEpoch": value_u64(record, "recoveryEpoch")?,
+        "deviceEpoch": value_u64(record, "deviceEpoch")?,
+        "revealHex": value_string(record, "revealHex")?,
+    }))
+}
+
+struct CommonRandomnessSignatureExpectation<'a> {
+    object_type: &'static str,
+    context_purpose: &'static str,
+    object_root: &'a str,
+    payload: &'a Value,
+    object_path: &'static str,
+    trustee_registrations:
+        &'a BTreeMap<u64, super::phase_transcript::SetupIntentTrusteeRegistration>,
+}
+
+fn verify_common_randomness_signature(
+    record: &Value,
+    setup_context: &Value,
+    expectation: &CommonRandomnessSignatureExpectation<'_>,
+) -> CanonicalResult<()> {
+    let roster_position = value_u64(record, "rosterPosition")?;
+    let trustee_identity = value_string(record, "trusteeIdentity")?;
+    let registration = expectation
+        .trustee_registrations
+        .get(&roster_position)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{}.rosterPosition is missing from setupIntent registrations",
+                    expectation.object_type,
+                ),
+            )
+        })?;
+    let payload_byte_length =
+        u64::try_from(canonical_json(expectation.payload)?.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{} payload byte length does not fit u64",
+                    expectation.object_type,
+                ),
+            )
+        })?;
+    let context_hash = derive_protocol_hash(
+        &format!("{}Hash", expectation.object_type),
+        &json!({
+            "purpose": expectation.context_purpose,
+            "ceremonyId": value_string(record, "ceremonyId")?,
+            "manifestHash": value_string(record, "manifestHash")?,
+            "rosterHash": value_string(record, "rosterHash")?,
+            "setupProfileHash": value_string(record, "setupProfileHash")?,
+            "setupEpoch": value_string(record, "setupEpoch")?,
+            "trusteeIdentity": trustee_identity,
+            "rosterPosition": roster_position,
+            "objectRoot": expectation.object_root,
+        }),
+    )?;
+    let Some(signature_envelope_hash) = record.get("signatureEnvelopeHash").and_then(Value::as_str)
+    else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{}.signatureEnvelopeHash is required",
+                expectation.object_type,
+            ),
+        ));
+    };
+    validate_hash_string(
+        signature_envelope_hash,
+        &format!("{}.signatureEnvelopeHash", expectation.object_type),
+    )?;
+    let signature_envelope = record.get("signatureEnvelope").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{}.signatureEnvelope is required", expectation.object_type),
+        )
+    })?;
+    let manifest_hash = setup_context_string(setup_context, "manifestHash")?;
+    let ceremony_id = setup_context_string(setup_context, "ceremonyId")?;
+    let verification = verify_protocol_signature_envelope(
+        signature_envelope,
+        &ProtocolSignatureExpectation {
+            object_type: expectation.object_type,
+            object_version: 1,
+            signer_role: "Trustee",
+            signer_identity: trustee_identity,
+            ceremony_id,
+            public_key_hash: &registration.signing_public_key_hash,
+            manifest_hash: Some(manifest_hash),
+            object_root: Some(expectation.object_root),
+            chunk_merkle_root: None,
+            board_head_hash: None,
+            context_hash: &context_hash,
+            byte_length: payload_byte_length,
+            recovery_epoch: value_u64(record, "recoveryEpoch")?,
+            device_epoch: value_u64(record, "deviceEpoch")?,
+        },
+    )?;
+    match verification {
+        Ok(verified_signature_hash) if verified_signature_hash == signature_envelope_hash => Ok(()),
+        Ok(_) => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{} signature envelope hash does not match the verified envelope",
+                expectation.object_path,
+            ),
+        )),
+        Err(failure) => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            failure.message,
+        )),
+    }
 }
 
 fn validate_common_randomness_reveal_hex(reveal_hex: &str) -> CanonicalResult<()> {

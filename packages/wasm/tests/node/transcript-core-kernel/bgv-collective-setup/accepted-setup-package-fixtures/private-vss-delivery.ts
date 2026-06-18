@@ -4,6 +4,7 @@ import {
     firstProfileParticipantCount,
     minimumSuccinctProofFixtureRingDegree,
     privateVssMailboxKeyPairForRosterPosition,
+    setupTrusteeSignatureSeedLabel,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
@@ -404,14 +405,14 @@ export async function acceptedVssShareAcceptances(
         sourceTrusteeRosterPosition < 10;
         sourceTrusteeRosterPosition += 1
     ) {
-        const sourceTrusteeIdentity = `trustee-${String(sourceTrusteeRosterPosition)}`;
         for (
             let recipientRosterPosition = 0;
             recipientRosterPosition < 10;
             recipientRosterPosition += 1
         ) {
             const recipientIdentity = `trustee-${String(recipientRosterPosition)}`;
-            const signatureSeedLabel = `${recipientIdentity}-accepts-${sourceTrusteeIdentity}`;
+            const signatureSeedLabel =
+                setupTrusteeSignatureSeedLabel(recipientIdentity);
             const keyFixture = createMlDsaKeyPairFixture(signatureSeedLabel);
             const envelopeReference =
                 envelopeReferences[
@@ -468,7 +469,7 @@ export async function acceptedVssComplaintSet(
         );
     }
     const keyFixture = createMlDsaKeyPairFixture(
-        'trustee-0-complains-trustee-0',
+        setupTrusteeSignatureSeedLabel('trustee-0'),
     );
     const signRoot: ProtocolRootSigner = (signedRoot) =>
         createProtocolSignatureFixture({

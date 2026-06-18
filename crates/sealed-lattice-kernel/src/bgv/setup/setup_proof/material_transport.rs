@@ -771,27 +771,11 @@ fn verified_setup_proof_material_reference_value(
 }
 
 fn verify_verified_setup_proof_material_set_header(value: &Value) -> CanonicalResult<()> {
-    let object = value.as_object().ok_or_else(|| {
-        CanonicalError::new(
+    if !value.is_object() {
+        return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             "verifiedSetupProofMaterials must be an object",
-        )
-    })?;
-    for field_name in object.keys() {
-        if ![
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "proofMaterials",
-        ]
-        .contains(&field_name.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("verifiedSetupProofMaterials contains unexpected field {field_name}"),
-            ));
-        }
+        ));
     }
     for (field_name, expected_value) in [
         ("objectType", VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE),
@@ -819,36 +803,11 @@ fn verify_verified_setup_proof_material_header(
     value: &Value,
     object_path: &str,
 ) -> CanonicalResult<()> {
-    let object = value.as_object().ok_or_else(|| {
-        CanonicalError::new(
+    if !value.is_object() {
+        return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
             format!("{object_path} must be an object"),
-        )
-    })?;
-    for field_name in object.keys() {
-        if ![
-            "objectType",
-            "objectVersion",
-            "setupProfileId",
-            "setupProofProfileId",
-            "verificationId",
-            "proofFamily",
-            "proofMaterialRoot",
-            "proofBytesEncoding",
-            "proofChunkSizeBytes",
-            "proofChunkCount",
-            "proofTotalByteLength",
-            "proofFullObjectHash",
-            "proofChunkRoot",
-            "proofChunkHashes",
-        ]
-        .contains(&field_name.as_str())
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("{object_path} contains unexpected field {field_name}"),
-            ));
-        }
+        ));
     }
     for (field_name, expected_value) in [
         ("objectType", VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE),

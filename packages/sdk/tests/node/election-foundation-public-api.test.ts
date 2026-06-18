@@ -176,8 +176,8 @@ describe('election foundation public package API in Node', () => {
         );
 
         expect(transcriptCoreVerification).toMatchObject({
+            ok: true,
             caseName: 'foundation-transcript-roots',
-            label: 'TranscriptCoreVerified',
             objectHash512: transcriptCoreFixture.expectedObjectHash512,
             chunkRoot: transcriptCoreFixture.expectedChunkRoot,
         });

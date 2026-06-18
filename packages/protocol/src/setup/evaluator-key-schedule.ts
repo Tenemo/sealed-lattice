@@ -15,10 +15,6 @@ type JsonRecord = Record<string, unknown>;
 
 export const evaluatorKeyGenericSwitchPolicy =
     'refused-unless-explicitly-required';
-export const evaluatorKeyGenericSwitchProofStatus =
-    'not-required-for-first-profile';
-export const evaluatorKeyScheduleBindingStatus =
-    'relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting';
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;
@@ -63,8 +59,6 @@ export type EvaluatorKeySchedule = Readonly<
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly genericKeySwitchPolicy: typeof evaluatorKeyGenericSwitchPolicy;
-        readonly genericKeySwitchProofStatus: typeof evaluatorKeyGenericSwitchProofStatus;
-        readonly scheduleBindingStatus: typeof evaluatorKeyScheduleBindingStatus;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
     }
 >;
@@ -307,8 +301,6 @@ export const createEvaluatorKeySchedule = (
         requiredGaloisKeySchedule: requiredGaloisSet.entries,
         requiredGaloisSetHash,
         genericKeySwitchPolicy: evaluatorKeyGenericSwitchPolicy,
-        genericKeySwitchProofStatus: evaluatorKeyGenericSwitchProofStatus,
-        scheduleBindingStatus: evaluatorKeyScheduleBindingStatus,
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {

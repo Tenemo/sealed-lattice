@@ -126,7 +126,6 @@ pub(super) fn validate_setup_package_internal_bindings(
         &json!({
             "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "profileStatus": "target-decryption-profile-binding",
         }),
     )?;
     compare_string_at_path(

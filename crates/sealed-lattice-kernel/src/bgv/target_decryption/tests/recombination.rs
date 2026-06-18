@@ -144,3 +144,42 @@ fn target_recombination_rejects_wrong_target_and_duplicate_trustee() {
         .is_err()
     );
 }
+
+#[test]
+fn target_share_profile_rejects_threshold_downgrade() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let mut downgraded_profile = target_share_profile(&setup_package);
+    downgraded_profile["decryptionThreshold"] = json!(1);
+    downgraded_profile["minimumSharesForInterpolation"] = json!(1);
+    downgraded_profile["decryptionShareQuorum"] = json!(1);
+    let mut hash_input = downgraded_profile.clone();
+    hash_input
+        .as_object_mut()
+        .expect("target share profile object")
+        .remove("targetShareProfileHash");
+    downgraded_profile["targetShareProfileHash"] = json!(
+        derive_protocol_hash("TargetDecryptionShareProfileHash", &hash_input)
+            .expect("downgraded profile hash")
+    );
+
+    let result = generate_bgv_target_decryption_share_from_request(&json!({
+        "setupPackage": setup_package,
+        "setupPrivateWitness": {
+            "setupSeed": "target-decryption-setup-seed",
+        },
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+        "targetShareProfile": downgraded_profile,
+        "trusteeIdentity": "trustee-1",
+    }));
+
+    let error = result.expect_err("downgraded target share profile must be refused");
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(
+        error
+            .message
+            .contains("decryptionThreshold must match the setup roster-derived threshold")
+    );
+}

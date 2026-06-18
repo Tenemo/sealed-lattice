@@ -84,7 +84,10 @@ use self::evaluator_key_schedule::{
     verify_context_fields_match, verify_evaluator_key_schedule, verify_generic_key_switch_policy,
     verify_pending_evaluation_key_material_boundary,
 };
-use self::phase_transcript::{setup_context_string, verify_abort_absence, verify_phase_transcript};
+use self::phase_transcript::{
+    setup_context_string, verify_abort_absence, verify_phase_transcript,
+    verify_setup_intent_roster_hash,
+};
 use self::private_vss_envelopes::{
     PrivateVssEnvelopeBindingMap, private_vss_envelope_bindings_from_package,
     verify_private_vss_envelope_commitments,
@@ -343,7 +346,6 @@ const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
     "ActiveStaticSetupTheoremCertificate";
 const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE: &str =
     "ActiveStaticSetupTheoremCertificateHash";
-const SETUP_PROOF_BYTES_ACCEPTED_STATUS: &str = "private-vss-public-key-share-same-secret-linkage-anchor-and-trustee-evaluation-key-proof-bytes-accepted-for-setup-proof-accounting";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -645,9 +647,6 @@ fn verify_collective_setup_package(
             "setupPackage.setupProfileId",
         );
     }
-    if let Some(response) = verify_setup_package_hash(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
     if let Some(response) = verify_context(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -657,10 +656,16 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_phase_transcript(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    if let Some(response) = verify_setup_intent_roster_hash(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     if let Some(response) = verify_common_randomness(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_abort_absence(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_setup_package_hash(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_vss_coefficient_commitments(setup_package)? {
@@ -961,7 +966,6 @@ fn public_vss_commitment_material_size_profile_value() -> CanonicalResult<Value>
         "fullMaterialCoefficientMebibytes": full_material_coefficient_bytes / bytes_per_mebibyte,
         "jsonOverheadStatus": "excluded-from-lower-bound",
         "streamingRequirement": "binary-chunked-stream-verification-with-one-commitment-resident",
-        "mobileClosureStatus": "not-accepted-until-transport-and-memory-certificate",
     }))
 }
 
@@ -1026,8 +1030,6 @@ fn evaluator_key_schedule_profile_value_for_roster(
         "requiredGaloisKeySchedule": required_galois_key_schedule,
         "requiredGaloisSetHash": required_galois_set_hash,
         "genericKeySwitchPolicy": "refused-unless-explicitly-required",
-        "genericKeySwitchProofStatus": "not-required-for-first-profile",
-        "scheduleBindingStatus": "relinearization-and-galois-proof-verifiers-bound-by-accepted-setup-proof-accounting",
     }))
 }
 
@@ -1167,8 +1169,7 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
                 "missing witness bounds",
                 "modulo-only relation check",
                 "generic or undeclared proof family"
-            ],
-            "proofBytesAcceptedStatus": SETUP_PROOF_BYTES_ACCEPTED_STATUS
+            ]
         }
     }))
 }
@@ -1218,7 +1219,6 @@ fn setup_proof_family_profiles() -> CanonicalResult<Vec<Value>> {
                 "noWrapRule": no_wrap_rule,
                 "profileId": SETUP_PROOF_PROFILE_ID,
                 "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "verificationStatus": "family-verifier-required-before-proof-bytes-acceptance",
                 "proofAccountingHash": proof_accounting_hash,
             }))
         })
@@ -1605,6 +1605,12 @@ fn verification_response(
     refused_objects: Vec<Refusal>,
     accepted_hashes: Vec<String>,
 ) -> CanonicalResult<Value> {
+    let accepted_hashes = if verifier_status == VerifierStatus::Accepted {
+        accepted_hashes
+    } else {
+        Vec::new()
+    };
+
     Ok(json!({
         "ok": verifier_status == VerifierStatus::Accepted,
         "operation": "verifyCollectiveBgvSetupPackage",

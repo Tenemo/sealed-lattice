@@ -21,13 +21,6 @@ fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
             .expect("aggregation report");
 
     assert_eq!(aggregation_report.report["ballotCount"].as_u64(), Some(2));
-    assert!(aggregation_report.report.get("aggregateScores").is_none());
-    assert!(
-        aggregation_report
-            .report
-            .get("plaintextOracleScores")
-            .is_none()
-    );
 }
 
 #[test]

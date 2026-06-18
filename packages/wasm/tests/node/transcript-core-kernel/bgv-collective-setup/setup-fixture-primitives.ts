@@ -2,6 +2,7 @@ import {
     createPrivateVssMailboxKeyPair,
     hash512Hex,
 } from '#packages/crypto/src/index';
+import { createMlDsaKeyPairFixture } from '#packages/crypto/tests/support/protocol-signature-fixtures';
 import { publicKeyShareCoefficientVectorHashDomain } from '#packages/protocol/src/setup/public-key-share-records';
 import { binaryVssCoefficientCommitmentMaterialByteLength } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import { type VssOpeningRandomByteSource } from '#packages/protocol/src/setup/vss-coefficient-commitments';
@@ -27,18 +28,52 @@ export const firstProfileParticipantCount = 10;
 export const firstProfileDecryptionThreshold = 4;
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
 export const setupTransportChunkSizeBytes = 1_048_576;
-// The accepted transport certificate must bind the exact first-profile binary
-// VSS coefficient commitment material byte length the kernel recomputes.
+// The accepted transport certificate must bind the exact binary VSS coefficient
+// commitment material byte length the kernel recomputes for the reduced-ring
+// fixture material.
 export const setupTransportTotalByteLength =
     binaryVssCoefficientCommitmentMaterialByteLength({
         participantCount: firstProfileParticipantCount,
         thresholdDegree: firstProfileDecryptionThreshold,
         rnsLimbCount: 17,
-        ringDegree: 32_768,
+        ringDegree: minimumSuccinctProofFixtureRingDegree,
     });
 export const setupTransportChunkCount = Math.ceil(
     setupTransportTotalByteLength / setupTransportChunkSizeBytes,
 );
+export const setupTrusteeSignatureSeedLabel = (
+    trusteeIdentity: string,
+): string => `${trusteeIdentity}-setup-signing`;
+
+type ProtocolHashDeriver = (input: {
+    readonly namespace: string;
+    readonly value: unknown;
+}) => string;
+
+export const collectiveSetupRosterHash = (
+    deriveProtocolHashForValue: ProtocolHashDeriver,
+    participantCount = firstProfileParticipantCount,
+): string =>
+    deriveProtocolHashForValue({
+        namespace: 'CollectiveBgvSetupRosterHash',
+        value: Array.from(
+            { length: participantCount },
+            (_unusedSlot, rosterPosition) => {
+                const trusteeIdentity = `trustee-${String(rosterPosition)}`;
+                const signingPublicKeyHash = createMlDsaKeyPairFixture(
+                    setupTrusteeSignatureSeedLabel(trusteeIdentity),
+                ).publicKeyHash;
+
+                return {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition,
+                    trusteeIdentity,
+                    signingPublicKeyHash,
+                };
+            },
+        ),
+    });
 
 export const hexToBytes = (hexValue: string): Uint8Array =>
     Uint8Array.from(

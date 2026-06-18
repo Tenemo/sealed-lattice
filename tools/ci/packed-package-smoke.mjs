@@ -60,7 +60,7 @@ const verification = await verifyTranscriptCoreFixture({
     expectedErrorCode: 'MalformedMagic',
 });
 assert(
-    verification.label === 'TranscriptCoreRejected' &&
+    verification.ok === false &&
         verification.rejection?.code === 'MalformedMagic',
     'Packed transcript-core verifier did not reject malformed bytes as expected',
 );

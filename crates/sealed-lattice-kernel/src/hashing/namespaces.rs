@@ -55,6 +55,7 @@ reserved_root_namespaces! {
     SPARSE_TOP_K_TARGET_HASH_NAMESPACE => "sealed-lattice-root/sparse-top-k-target-hash-v1",
     COLLECTIVE_BGV_SETUP_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/collective-bgv-setup-profile-hash-v1",
     COLLECTIVE_BGV_SETUP_PHASE_ORDER_HASH_NAMESPACE => "sealed-lattice-root/collective-bgv-setup-phase-order-hash-v1",
+    COLLECTIVE_BGV_SETUP_ROSTER_HASH_NAMESPACE => "sealed-lattice-root/collective-bgv-setup-roster-hash-v1",
     Q_SHARE_PRIME_LIST_HASH_NAMESPACE => "sealed-lattice-root/q-share-prime-list-hash-v1",
     CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/carry-aware-vss-share-relation-profile-hash-v1",
     SETUP_COMMITMENT_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/setup-commitment-profile-hash-v1",

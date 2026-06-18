@@ -65,7 +65,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "maxFreshMessageCoefficientDecimal": (max_source_message_modulus - 1).to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "freshMessageNoWrap": fresh_message_no_wrap,
-            "status": "claim-accounting-full-width-per-rns-message-bound-recorded",
         },
         "aggregateOpeningBounds": {
             "shamirCoefficientCount": decryption_threshold,
@@ -79,7 +78,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "recipientAndThresholdNoWrap": true,
-            "boundStatus": "claim-accounting-first-profile-homomorphic-opening-bounds-recorded",
         },
         "multiOpeningLeakage": {
             "recipientAggregateOpeningsArePublic": false,
@@ -89,7 +87,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "rawCoefficientOpeningsExported": false,
             "perCoefficientRandomnessExported": false,
             "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
-            "status": "claim-accounting-active-static-threshold-leakage-bound-recorded",
         },
         "bindingAssumption": {
             "assumption": "Module-SIS",
@@ -98,15 +95,12 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "randomnessWidth": 5,
             "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
             "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
-            "estimatorStatus": "repo-owned-module-sis-parameter-accounting-accepted",
         },
         "hidingAssumption": {
             "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
             "openingDistribution": "coefficientwise-centered-ternary",
             "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
             "lowEntropySecretHiding": true,
-            "statisticalLeakageStatus": "repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-accepted",
-            "estimatorStatus": "repo-owned-module-lwe-parameter-accounting-accepted",
         },
         "estimatorRows": [
             {
@@ -117,7 +111,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
                 "moduleRank": 2,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "status": "claim-accounting-accepted",
                 "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
@@ -128,7 +121,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
                 "moduleRank": 2,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "status": "claim-accounting-accepted",
                 "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],

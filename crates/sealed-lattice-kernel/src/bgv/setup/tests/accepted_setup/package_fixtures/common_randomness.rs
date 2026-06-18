@@ -23,14 +23,6 @@ pub(super) fn common_randomness_object(
         )
         .expect("reveal source hash");
         let reveal_hex = reveal_source_hash[..64].to_string();
-        let signature_envelope_hash = derive_protocol_hash(
-            "ProtocolSignatureEnvelopeHash",
-            &serde_json::json!({
-                "fixture": "common-randomness-signature",
-                "rosterPosition": roster_position,
-            }),
-        )
-        .expect("signature envelope hash");
         let mut reveal_record = serde_json::json!({
             "objectType": "CommonRandomnessReveal",
             "objectVersion": 1,
@@ -45,11 +37,51 @@ pub(super) fn common_randomness_object(
             "recoveryEpoch": 0,
             "deviceEpoch": 0,
             "revealHex": reveal_hex,
-            "signatureEnvelopeHash": signature_envelope_hash.clone(),
         });
         let reveal_hash = derive_protocol_hash("CommonRandomnessRevealHash", &reveal_record)
             .expect("reveal hash");
+        let reveal_byte_length =
+            u64::try_from(canonical_json(&reveal_record).expect("reveal record").len())
+                .expect("reveal record length");
+        let reveal_context_hash = derive_protocol_hash(
+            "CommonRandomnessRevealHash",
+            &serde_json::json!({
+                "purpose": "common-randomness-reveal-signature-context",
+                "ceremonyId": ceremony_id,
+                "manifestHash": manifest_hash,
+                "rosterHash": roster_hash,
+                "setupProfileHash": setup_profile_hash,
+                "setupEpoch": setup_epoch,
+                "trusteeIdentity": trustee_identity.as_str(),
+                "rosterPosition": roster_position,
+                "objectRoot": reveal_hash.as_str(),
+            }),
+        )
+        .expect("reveal signature context hash");
+        let signature_seed_label = setup_trustee_signature_seed_label(&trustee_identity);
+        let reveal_signature_fixture = create_protocol_signature_fixture(
+            &signature_seed_label,
+            serde_json::json!({
+                "objectType": "CommonRandomnessReveal",
+                "objectVersion": 1,
+                "ceremonyId": ceremony_id,
+                "manifestHash": manifest_hash,
+                "boardHeadHash": null,
+                "objectRoot": reveal_hash.as_str(),
+                "chunkMerkleRoot": null,
+                "byteLength": reveal_byte_length,
+                "signerRole": "Trustee",
+                "signerIdentity": trustee_identity.as_str(),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
+                "contextHash": reveal_context_hash,
+            }),
+        )
+        .expect("reveal signature fixture");
         reveal_record["revealHash"] = serde_json::json!(reveal_hash.clone());
+        reveal_record["signatureEnvelopeHash"] =
+            reveal_signature_fixture.envelope["signatureHash"].clone();
+        reveal_record["signatureEnvelope"] = reveal_signature_fixture.envelope;
         ordered_reveal_hashes.push(reveal_hash.clone());
         reveal_records.push(reveal_record);
 
@@ -62,16 +94,55 @@ pub(super) fn common_randomness_object(
             "setupProfileHash": setup_profile_hash,
             "setupEpoch": setup_epoch,
             "signerRole": "Trustee",
-            "trusteeIdentity": trustee_identity,
+            "trusteeIdentity": trustee_identity.as_str(),
             "rosterPosition": roster_position,
             "recoveryEpoch": 0,
             "deviceEpoch": 0,
-            "revealHash": reveal_hash,
-            "signatureEnvelopeHash": signature_envelope_hash,
+            "revealHash": reveal_hash.as_str(),
         });
         let commit_hash = derive_protocol_hash("CommonRandomnessCommitHash", &commit_record)
             .expect("commit hash");
+        let commit_byte_length =
+            u64::try_from(canonical_json(&commit_record).expect("commit record").len())
+                .expect("commit record length");
+        let commit_context_hash = derive_protocol_hash(
+            "CommonRandomnessCommitHash",
+            &serde_json::json!({
+                "purpose": "common-randomness-commit-signature-context",
+                "ceremonyId": ceremony_id,
+                "manifestHash": manifest_hash,
+                "rosterHash": roster_hash,
+                "setupProfileHash": setup_profile_hash,
+                "setupEpoch": setup_epoch,
+                "trusteeIdentity": trustee_identity.as_str(),
+                "rosterPosition": roster_position,
+                "objectRoot": commit_hash.as_str(),
+            }),
+        )
+        .expect("commit signature context hash");
+        let commit_signature_fixture = create_protocol_signature_fixture(
+            &signature_seed_label,
+            serde_json::json!({
+                "objectType": "CommonRandomnessCommit",
+                "objectVersion": 1,
+                "ceremonyId": ceremony_id,
+                "manifestHash": manifest_hash,
+                "boardHeadHash": null,
+                "objectRoot": commit_hash.as_str(),
+                "chunkMerkleRoot": null,
+                "byteLength": commit_byte_length,
+                "signerRole": "Trustee",
+                "signerIdentity": trustee_identity.as_str(),
+                "recoveryEpoch": 0,
+                "deviceEpoch": 0,
+                "contextHash": commit_context_hash,
+            }),
+        )
+        .expect("commit signature fixture");
         commit_record["commitHash"] = serde_json::json!(commit_hash);
+        commit_record["signatureEnvelopeHash"] =
+            commit_signature_fixture.envelope["signatureHash"].clone();
+        commit_record["signatureEnvelope"] = commit_signature_fixture.envelope;
         commit_records.push(commit_record);
     }
 

@@ -142,13 +142,16 @@ jobs:
         timeout-minutes: 5
         needs:
             - rust
+            - rust-kernel-heavy
             - wasm
             - verify-static
             - node-fast
             - node-protocol
             - node-kernel
+            - node-kernel-heavy
             - browser
             - docs
+            - release-smoke
         if: ${{ always() }}
         steps:
             - name: Check verify jobs

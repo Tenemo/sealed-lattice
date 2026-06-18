@@ -325,9 +325,11 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
         };
         compare_transport_manifest_hashes(expected_manifest, &observed_hashes)?;
     }
-    let derivation = session
-        .parser
-        .finish(&session.setup_context, &session.public_matrix_seed_hash)?;
+    let derivation = session.parser.finish(
+        &session.setup_context,
+        &session.public_matrix_seed_hash,
+        &source_trustee_bindings,
+    )?;
     verify_observed_transport_commitment_roots(
         &roster,
         &source_trustee_bindings,
@@ -527,6 +529,7 @@ impl StreamingVssThresholdMaterialParser {
         mut self,
         setup_context: &Value,
         public_matrix_seed_hash: &str,
+        source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     ) -> CanonicalResult<TransportThresholdDerivation> {
         self.process_available(setup_context, public_matrix_seed_hash)?;
         let ring_degree = self.ring_degree.ok_or_else(|| {
@@ -573,6 +576,7 @@ impl StreamingVssThresholdMaterialParser {
                 ring_degree,
                 ring_degree_status,
                 &self.roster,
+                source_trustee_bindings,
                 &self.accumulators,
             )?;
 
@@ -1014,6 +1018,7 @@ pub(super) fn derive_threshold_share_commitment_set_from_transport_bytes(
         ring_degree,
         ring_degree_status,
         roster,
+        source_trustee_bindings,
         &accumulators,
     )?;
 
@@ -1085,11 +1090,15 @@ fn threshold_share_commitment_set_from_transport_accumulators(
     ring_degree: usize,
     ring_degree_status: &str,
     roster: &AcceptedRosterParameters,
+    source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     accumulators: &BTreeMap<(u64, usize), TransportThresholdAccumulator>,
 ) -> CanonicalResult<Value> {
     let mut recipient_records = Vec::with_capacity(roster.participant_count as usize);
     for recipient_roster_position in 0..roster.participant_count {
-        let recipient_identity = format!("trustee-{recipient_roster_position}");
+        let recipient_identity = recipient_identity_from_source_bindings(
+            source_trustee_bindings,
+            recipient_roster_position,
+        )?;
         let recipient_roster_position_usize =
             usize::try_from(recipient_roster_position).map_err(|_| {
                 invalid_threshold_commitment_input("recipient roster position does not fit usize")

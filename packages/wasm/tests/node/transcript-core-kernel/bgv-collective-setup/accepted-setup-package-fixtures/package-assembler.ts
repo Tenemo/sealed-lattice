@@ -1,10 +1,12 @@
 import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
 import {
     cloneJsonRecord,
+    collectiveSetupRosterHash,
     firstProfileDecryptionThreshold,
     firstProfileParticipantCount,
     privateVssMailboxKeyPairForRosterPosition,
     privateVssMailboxPublicKeyBytesHash,
+    setupTrusteeSignatureSeedLabel,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
@@ -80,7 +82,9 @@ async function buildAcceptedShapedSetupPackage(
     const setupContext = {
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
-        rosterHash: setupRequest.rosterHash,
+        rosterHash: collectiveSetupRosterHash((input) =>
+            kernel.deriveProtocolHash(input),
+        ),
         setupProfileHash: profile.setupProfileHash,
         qShareHash: profile.qShareHash,
         carryAwareVssShareRelationProfileHash:
@@ -98,7 +102,8 @@ async function buildAcceptedShapedSetupPackage(
         const participantPhaseObjects = await Promise.all(
             Array.from({ length: 10 }, async (_unusedSlot, rosterPosition) => {
                 const trusteeIdentity = `trustee-${String(rosterPosition)}`;
-                const signatureSeedLabel = `${trusteeIdentity}-${phase.phaseId}`;
+                const signatureSeedLabel =
+                    setupTrusteeSignatureSeedLabel(trusteeIdentity);
                 const keyFixture =
                     createMlDsaKeyPairFixture(signatureSeedLabel);
                 const mailboxKeyPair =

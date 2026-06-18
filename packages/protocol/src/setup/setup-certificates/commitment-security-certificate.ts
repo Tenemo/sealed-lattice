@@ -87,7 +87,6 @@ const setupCommitmentSecurityCertificateBody = (
                 commitmentModulusProduct.toString(),
             freshMessageNoWrap:
                 BigInt(maxSourceMessageModulus - 1) < commitmentModulusProduct,
-            status: 'claim-accounting-full-width-per-rns-message-bound-recorded',
         },
         aggregateOpeningBounds: {
             shamirCoefficientCount: setupProfile.qDec,
@@ -105,8 +104,6 @@ const setupCommitmentSecurityCertificateBody = (
             commitmentModulusProductDecimal:
                 commitmentModulusProduct.toString(),
             recipientAndThresholdNoWrap: true,
-            boundStatus:
-                'claim-accounting-first-profile-homomorphic-opening-bounds-recorded',
         },
         multiOpeningLeakage: {
             recipientAggregateOpeningsArePublic: false,
@@ -117,7 +114,6 @@ const setupCommitmentSecurityCertificateBody = (
             perCoefficientRandomnessExported: false,
             thresholdBoundary:
                 'recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses',
-            status: 'claim-accounting-active-static-threshold-leakage-bound-recorded',
         },
         bindingAssumption: {
             assumption: 'Module-SIS',
@@ -127,8 +123,6 @@ const setupCommitmentSecurityCertificateBody = (
             randomnessWidth: 5,
             commitmentModulusProductCeilBits: commitmentModulusProductBits,
             extractedOpeningInfinityBound: Number(thresholdScalarSum),
-            estimatorStatus:
-                'repo-owned-module-sis-parameter-accounting-accepted',
         },
         hidingAssumption: {
             assumption:
@@ -136,10 +130,6 @@ const setupCommitmentSecurityCertificateBody = (
             openingDistribution: 'coefficientwise-centered-ternary',
             publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
             lowEntropySecretHiding: true,
-            statisticalLeakageStatus:
-                'repo-owned-recipient-hidden-aggregate-opening-proof-witness-accounting-accepted',
-            estimatorStatus:
-                'repo-owned-module-lwe-parameter-accounting-accepted',
         },
         estimatorRows: [
             {
@@ -150,7 +140,6 @@ const setupCommitmentSecurityCertificateBody = (
                 moduleRank: 2,
                 modulusCeilBits: commitmentModulusProductBits,
                 shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
-                status: 'claim-accounting-accepted',
                 accountingBasis:
                     'accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds',
             },
@@ -162,7 +151,6 @@ const setupCommitmentSecurityCertificateBody = (
                 moduleRank: 2,
                 secretDistribution: 'centered-ternary-opening',
                 modulusCeilBits: commitmentModulusProductBits,
-                status: 'claim-accounting-accepted',
                 accountingBasis:
                     'accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary',
             },
