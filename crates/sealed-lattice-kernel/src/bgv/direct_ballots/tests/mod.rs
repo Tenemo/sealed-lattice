@@ -10,7 +10,10 @@ use serde_json::json;
 
 use crate::bgv::{
     coefficient_codec::{coefficient_vector_hash512, coefficient_vector_le_hex},
-    setup::derive_collective_bgv_setup_public_derivations_from_request,
+    setup::{
+        accepted_setup_verification_response_for_test,
+        derive_collective_bgv_setup_public_derivations_from_request,
+    },
 };
 use crate::hashing::derive_protocol_hash;
 
@@ -72,14 +75,16 @@ fn direct_ballot_relation_proof_fixture() -> &'static DirectBallotRelationProofF
 fn accepted_direct_ballot_public_material_fixture(
     setup_public_material: &Value,
 ) -> AcceptedDirectBallotPublicMaterialFixture {
-    let mut accepted_public_key_material =
+    let accepted_public_key_material_seed =
         accepted_public_key_material_for_setup_public_material(setup_public_material);
-    let accepted_setup_handoff =
-        accepted_setup_handoff_for_accepted_public_key_material(&accepted_public_key_material);
-    accepted_public_key_material["acceptedSetupHandoffRoot"] = json!(
-        required_string_field(&accepted_setup_handoff, "acceptedSetupHandoffRoot")
-            .expect("accepted setup handoff root")
-    );
+    let accepted_setup_response_package =
+        accepted_setup_response_package_for_public_key_material(&accepted_public_key_material_seed);
+    let accepted_setup_response =
+        accepted_setup_verification_response_for_test(&accepted_setup_response_package)
+            .expect("accepted setup response");
+    assert_eq!(accepted_setup_response["verifierStatus"], "accepted");
+    let accepted_public_key_material = accepted_setup_response["acceptedPublicKeyMaterial"].clone();
+    let accepted_setup_handoff = accepted_setup_response["acceptedSetupHandoff"].clone();
     let public_key =
         public_bgv_key_from_accepted_setup_public_key_material(&accepted_public_key_material)
             .expect("accepted public key");
@@ -89,6 +94,99 @@ fn accepted_direct_ballot_public_material_fixture(
         accepted_setup_handoff,
         public_key,
     }
+}
+
+fn accepted_setup_response_package_for_public_key_material(
+    accepted_public_key_material: &Value,
+) -> Value {
+    json!({
+        "objectType": "CollectiveBgvSetupPackage",
+        "setupContext": {
+            "ceremonyId": required_string_field(accepted_public_key_material, "ceremonyId")
+                .expect("ceremony id"),
+            "manifestHash": required_string_field(accepted_public_key_material, "manifestHash")
+                .expect("manifest hash"),
+            "rosterHash": required_string_field(accepted_public_key_material, "rosterHash")
+                .expect("roster hash"),
+            "setupProfileHash": required_string_field(accepted_public_key_material, "setupProfileHash")
+                .expect("setup profile hash"),
+            "qShareHash": required_string_field(accepted_public_key_material, "qShareHash")
+                .expect("Q share hash"),
+            "commitmentProfileHash": required_string_field(
+                accepted_public_key_material,
+                "commitmentProfileHash",
+            ).expect("commitment profile hash"),
+            "setupEpoch": required_string_field(accepted_public_key_material, "setupEpoch")
+                .expect("setup epoch"),
+            "participantCount": 10,
+            "qSetupComplete": 10,
+            "qBallotRelease": 10,
+            "qFinal": 10,
+            "qDec": 4,
+        },
+        "setupPackageHash": required_string_field(accepted_public_key_material, "setupPackageHash")
+            .expect("setup package hash"),
+        "commonRandomness": accepted_public_key_material["commonRandomness"].clone(),
+        "collectivePublicKey": accepted_public_key_material["collectivePublicKey"].clone(),
+        "publicKeyShareMaterial": {
+            "publicKeyShareMaterialSetRoot": required_string_field(
+                accepted_public_key_material,
+                "publicKeyShareMaterialSetRoot",
+            ).expect("public key share material set root"),
+        },
+        "publicKeyShareSuccinctProofs": {
+            "publicKeyShareSuccinctProofSetRoot": required_string_field(
+                accepted_public_key_material,
+                "publicKeyShareSuccinctProofSetRoot",
+            ).expect("public key share succinct proof set root"),
+        },
+        "thresholdShareCommitments": {
+            "thresholdShareCommitmentRoot": direct_ballot_test_hash(
+                "threshold share commitment root",
+            ),
+        },
+        "evaluatorKeySchedule": {
+            "evaluatorKeyScheduleRoot": direct_ballot_test_hash("evaluator key schedule root"),
+        },
+        "relinearizationKeyShareRounds": {
+            "relinearizationKeyShareRoundsRoot": direct_ballot_test_hash(
+                "relinearization key share rounds root",
+            ),
+        },
+        "trusteeEvaluationKeyProofs": {
+            "trusteeEvaluationKeyProofSetRoot": direct_ballot_test_hash(
+                "trustee evaluation key proof set root",
+            ),
+        },
+        "evaluationKeys": {
+            "evaluationKeySetHash": direct_ballot_test_hash("evaluation key set hash"),
+            "publicEvaluationKeyMaterialRoot": direct_ballot_test_hash(
+                "public evaluation key material root",
+            ),
+        },
+        "heSecurityCertificate": {
+            "targetDecryptionStatus": {
+                "targetDecryptionReadiness": "downstream",
+                "targetDecryptionProfileId": crate::bgv::setup::TARGET_DECRYPTION_PROFILE_ID,
+            },
+        },
+        "setupCommitmentSecurityCertificateHash": direct_ballot_test_hash(
+            "setup commitment security certificate hash",
+        ),
+        "setupTransportCertificateHash": direct_ballot_test_hash(
+            "setup transport certificate hash",
+        ),
+        "setupProofAccountingCertificateHash": direct_ballot_test_hash(
+            "setup proof accounting certificate hash",
+        ),
+        "setupKeyCorrectnessCertificateHash": direct_ballot_test_hash(
+            "setup key correctness certificate hash",
+        ),
+        "activeStaticSetupTheoremCertificateHash": direct_ballot_test_hash(
+            "active static setup theorem certificate hash",
+        ),
+        "heSecurityCertificateHash": direct_ballot_test_hash("HE security certificate hash"),
+    })
 }
 
 fn direct_ballot_accepted_package_fixture() -> &'static DirectBallotAcceptedPackageFixture {
@@ -328,140 +426,6 @@ fn accepted_public_key_material_for_setup_public_material(setup_public_material:
     );
 
     accepted_public_key_material
-}
-
-fn accepted_setup_handoff_for_accepted_public_key_material(
-    accepted_public_key_material: &Value,
-) -> Value {
-    let direct_ballot_creation_policy =
-        direct_ballot_creation_policy_value().expect("direct ballot creation policy");
-    let direct_ballot_creation_policy_hash =
-        direct_ballot_creation_policy_hash().expect("direct ballot creation policy hash");
-
-    let mut handoff = json!({
-        "objectType": "CollectiveBgvAcceptedSetupHandoff",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "ceremonyId": required_string_field(accepted_public_key_material, "ceremonyId")
-            .expect("ceremony id"),
-        "manifestHash": required_string_field(accepted_public_key_material, "manifestHash")
-            .expect("manifest hash"),
-        "rosterHash": required_string_field(accepted_public_key_material, "rosterHash")
-            .expect("roster hash"),
-        "thresholdProfileHash": required_string_field(
-            accepted_public_key_material,
-            "thresholdProfileHash",
-        ).expect("threshold profile hash"),
-        "setupProfileHash": required_string_field(
-            accepted_public_key_material,
-            "setupProfileHash",
-        ).expect("setup profile hash"),
-        "qShareHash": required_string_field(accepted_public_key_material, "qShareHash")
-            .expect("Q share hash"),
-        "commitmentProfileHash": required_string_field(
-            accepted_public_key_material,
-            "commitmentProfileHash",
-        ).expect("commitment profile hash"),
-        "setupEpoch": required_string_field(accepted_public_key_material, "setupEpoch")
-            .expect("setup epoch"),
-        "setupPackageHash": required_string_field(accepted_public_key_material, "setupPackageHash")
-            .expect("setup package hash"),
-        "directBallotEncryptionHandoff": {
-            "status": "accepted-collective-public-key-root-bound-for-direct-ballot-encryption",
-            "collectivePublicKeyRoot": required_string_field(
-                accepted_public_key_material,
-                "collectivePublicKeyRoot",
-            ).expect("collective public key root"),
-            "bgvPublicKeyRoot": required_string_field(
-                accepted_public_key_material,
-                "bgvPublicKeyRoot",
-            ).expect("BGV public key root"),
-            "bgvProfileHash": profile_hash().expect("profile hash"),
-            "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()
-                .expect("canonical ciphertext convention hash"),
-            "batchEncoderHash": batch_encoder_hash().expect("batch encoder hash"),
-            "batchLayoutBindingHash": batch_layout_binding_hash()
-                .expect("batch layout binding hash"),
-            "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()
-                .expect("ballot score encoding profile hash"),
-            "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()
-                .expect("encrypted ballot layout hash"),
-            "directBallotReservedSlotRuleHash": direct_ballot_reserved_slot_rule_hash()
-                .expect("direct ballot reserved slot rule hash"),
-            "directBallotEncoderMatrixRoot": direct_ballot_encoder_matrix_root()
-                .expect("direct ballot encoder matrix root"),
-            "witnessPartitionProfileHash": direct_ballot_witness_partition_profile_hash()
-                .expect("direct ballot witness partition profile hash"),
-            "arithmeticCertificateHash": direct_ballot_arithmetic_certificate_hash()
-                .expect("direct ballot arithmetic certificate hash"),
-            "soundnessCertificateHash": direct_ballot_soundness_certificate_hash()
-                .expect("direct ballot soundness certificate hash"),
-            "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()
-                .expect("direct ballot zero-knowledge certificate hash"),
-            "verifierCertificateHash": direct_ballot_verifier_certificate_hash()
-                .expect("direct ballot verifier certificate hash"),
-            "ballotValidityProofProfileHash": direct_ballot_relation_proof_profile_hash()
-                .expect("direct ballot relation proof profile hash"),
-            "publicKeyShareMaterialSetRoot": required_string_field(
-                accepted_public_key_material,
-                "publicKeyShareMaterialSetRoot",
-            ).expect("public key share material set root"),
-            "publicKeyShareSuccinctProofSetRoot": required_string_field(
-                accepted_public_key_material,
-                "publicKeyShareSuccinctProofSetRoot",
-            ).expect("public key share succinct proof set root"),
-            "acceptedPublicKeyMaterial": {
-                "materialSource": "accepted public-key share material with accepted public-key share proofs",
-                "collectivePublicKeyRoot": required_string_field(
-                    accepted_public_key_material,
-                    "collectivePublicKeyRoot",
-                ).expect("collective public key root"),
-                "bgvPublicKeyRoot": required_string_field(
-                    accepted_public_key_material,
-                    "bgvPublicKeyRoot",
-                ).expect("BGV public key root"),
-                "publicKeyShareMaterialSetRoot": required_string_field(
-                    accepted_public_key_material,
-                    "publicKeyShareMaterialSetRoot",
-                ).expect("public key share material set root"),
-                "publicKeyShareSuccinctProofSetRoot": required_string_field(
-                    accepted_public_key_material,
-                    "publicKeyShareSuccinctProofSetRoot",
-                ).expect("public key share succinct proof set root"),
-            },
-            "supportedBallotCreationPolicy": direct_ballot_creation_policy,
-            "supportedBallotCreationPolicyHash": direct_ballot_creation_policy_hash,
-        },
-        "publicAggregationHandoff": {
-            "status": "accepted-public-ciphertext-aggregation-bound-to-setup-context-and-collective-public-key-root",
-            "thresholdShareCommitmentRoot": direct_ballot_test_hash("threshold share commitment root"),
-        },
-        "boundedEvaluatorReplayHandoff": {
-            "status": "accepted-public-evaluation-keys-bound-to-frozen-evaluator-schedule",
-            "evaluatorKeyScheduleRoot": direct_ballot_test_hash("evaluator key schedule root"),
-            "relinearizationKeyShareRoundsRoot": direct_ballot_test_hash("relinearization key share rounds root"),
-            "trusteeEvaluationKeyProofSetRoot": direct_ballot_test_hash("trustee evaluation key proof set root"),
-            "evaluationKeySetHash": direct_ballot_test_hash("evaluation key set hash"),
-        },
-        "futureTargetDecryptionHandoff": {
-            "status": "target decryption remains downstream",
-            "targetDecryptionProfileId": crate::bgv::setup::TARGET_DECRYPTION_PROFILE_ID,
-            "claimBoundary": "target decryption remains downstream and any target-decryption readiness claim is refused until Q_target, smudging, C1-C4, and decryption-share proof closure exist",
-        },
-        "certificateRoots": {
-            "setupCommitmentSecurityCertificateHash": direct_ballot_test_hash("setup commitment security certificate hash"),
-            "setupTransportCertificateHash": direct_ballot_test_hash("setup transport certificate hash"),
-            "setupProofAccountingCertificateHash": direct_ballot_test_hash("setup proof accounting certificate hash"),
-            "setupKeyCorrectnessCertificateHash": direct_ballot_test_hash("setup key correctness certificate hash"),
-            "activeStaticSetupTheoremCertificateHash": direct_ballot_test_hash("active static setup theorem certificate hash"),
-            "heSecurityCertificateHash": direct_ballot_test_hash("HE security certificate hash"),
-        },
-    });
-    let accepted_setup_handoff_root =
-        derive_protocol_hash("AcceptedSetupHandoffRoot", &handoff).expect("handoff root");
-    handoff["acceptedSetupHandoffRoot"] = json!(accepted_setup_handoff_root);
-
-    handoff
 }
 
 fn rebind_accepted_setup_handoff_root(accepted_setup_handoff: &mut Value) {

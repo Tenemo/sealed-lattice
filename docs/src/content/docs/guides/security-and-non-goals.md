@@ -24,7 +24,7 @@ sidebar:
 - no voting correctness or secrecy claim is added by transcript-core fixture verification
 - active-static setup is not claim-bearing until the `CollectiveBgvSetup-v1` public verifier accepts a full-profile setup with repo-owned setup proof accounting, per-RNS-prime VSS package integration, same-secret proof verification, public-key proofs, evaluation-key proofs, key transport, and downstream integration bindings
 - independent external validation is not a prerequisite for the active-static setup prototype claim, but production use would still require separate production hardening and review
-- the direct encrypted ballot package path is not claim-bearing until setup closure, final evidence capture, soundness and zero-knowledge review, public proof transport evidence, and mobile-compatible proof readiness close; supported-phone evidence remains a later runtime target
+- the direct encrypted ballot package path is not claim-bearing until setup closure, final evidence capture, soundness and zero-knowledge review, public proof transport evidence, and current QROM accounting metadata are recorded for the selected proof profile; QROM-strength closure, mobile-compatible proof readiness, and supported-phone evidence remain later targets rather than direct ballot proof closure requirements
 - bounded-domain encrypted sparse target projection is not complete for every supported top count
 - target-bound decryption is not implemented as an accepted direct-path rule
 - no caller should rely on private package names or future public subpaths becoming stable

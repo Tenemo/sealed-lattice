@@ -509,6 +509,63 @@ fn direct_encrypted_ballot_public_package_command_rejects_fixture_proof_randomne
 }
 
 #[test]
+fn direct_encrypted_ballot_setup_handoff_accepts_hash_only_policy_binding() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+    let mut accepted_setup_handoff = public_material_fixture.accepted_setup_handoff;
+    accepted_setup_handoff["directBallotEncryptionHandoff"]
+        .as_object_mut()
+        .expect("direct ballot handoff is an object")
+        .remove("supportedBallotCreationPolicy");
+    rebind_accepted_setup_handoff_root(&mut accepted_setup_handoff);
+    let mut accepted_public_key_material = public_material_fixture.accepted_public_key_material;
+    accepted_public_key_material["acceptedSetupHandoffRoot"] =
+        accepted_setup_handoff["acceptedSetupHandoffRoot"].clone();
+
+    let accepted_setup_handoff_root = validate_direct_ballot_setup_handoff(
+        &accepted_public_key_material,
+        &accepted_setup_handoff,
+    )
+    .expect("hash-only direct ballot policy binding must be accepted");
+
+    assert_eq!(
+        accepted_setup_handoff_root,
+        accepted_setup_handoff["acceptedSetupHandoffRoot"]
+            .as_str()
+            .expect("handoff root")
+    );
+}
+
+#[test]
+fn direct_encrypted_ballot_setup_handoff_rejects_mismatched_optional_policy_body() {
+    let setup_package = setup_package();
+    let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);
+    let mut accepted_setup_handoff = public_material_fixture.accepted_setup_handoff;
+    accepted_setup_handoff["directBallotEncryptionHandoff"]["supportedBallotCreationPolicy"] = json!({
+        "objectType": "DirectBallotCreationPolicy",
+        "objectVersion": 1,
+        "profileStatus": "mismatched-policy-body"
+    });
+    rebind_accepted_setup_handoff_root(&mut accepted_setup_handoff);
+    let mut accepted_public_key_material = public_material_fixture.accepted_public_key_material;
+    accepted_public_key_material["acceptedSetupHandoffRoot"] =
+        accepted_setup_handoff["acceptedSetupHandoffRoot"].clone();
+
+    let error = validate_direct_ballot_setup_handoff(
+        &accepted_public_key_material,
+        &accepted_setup_handoff,
+    )
+    .expect_err("mismatched optional direct ballot policy body must reject");
+
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(
+        error.message.contains("supportedBallotCreationPolicy"),
+        "unexpected policy mismatch refusal: {}",
+        error.message
+    );
+}
+
+#[test]
 fn direct_encrypted_ballot_public_package_command_rejects_mismatched_handoff_root() {
     let setup_package = setup_package();
     let public_material_fixture = accepted_direct_ballot_public_material_fixture(&setup_package);

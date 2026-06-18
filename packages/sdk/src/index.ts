@@ -1073,7 +1073,7 @@ export type AcceptedSetupHandoff = Readonly<{
             readonly publicKeyShareMaterialSetRoot: ProtocolHash;
             readonly publicKeyShareSuccinctProofSetRoot: ProtocolHash;
         }>;
-        readonly supportedBallotCreationPolicy: Readonly<{
+        readonly supportedBallotCreationPolicy?: Readonly<{
             readonly objectType: 'DirectEncryptedBallotCreationPolicy';
             readonly objectVersion: 1;
             readonly setupProfileId: 'CollectiveBgvSetup-v1';
@@ -1151,6 +1151,7 @@ export type SetupPackageVerification = Readonly<{
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly acceptedSetupHandoff?: AcceptedSetupHandoff;
+    readonly acceptedPublicKeyMaterial?: DirectBallotAcceptedPublicKeyMaterial;
     readonly missingObjects: readonly string[];
     readonly refusedObjects: readonly Readonly<{
         readonly reasonCode: string;

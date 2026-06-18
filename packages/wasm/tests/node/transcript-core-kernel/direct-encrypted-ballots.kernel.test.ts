@@ -15,8 +15,13 @@ import {
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
 } from '#packages/crypto/tests/support/protocol-signature-fixtures';
+import { verifyFoundationTranscript } from '#packages/protocol/src/foundation/index';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
+import {
+    createFoundationTranscriptFixture,
+    foundationParticipantCount,
+} from '#tests/support/foundation-transcript-fixture';
 
 describe('direct encrypted ballot kernel command', () => {
     it('generates and verifies one full direct ballot proof through Node/WASM', async () => {
@@ -202,13 +207,40 @@ describe('direct encrypted ballot kernel command', () => {
         expect(result.proofAttempt.proofMaskRandomness.retention).toContain(
             'not returned',
         );
+        const proofChunkSizeBytes =
+            result.proofAttempt.proofTransport.chunkSizeBytes;
+        const proofChunkCount =
+            result.proofAttempt.proofTransport.chunksPerProof;
         expect(result.proofAttempt.proofSizeBytes).toBeGreaterThan(
-            result.proofAttempt.proofTransport.chunkSizeBytes * 45,
+            proofChunkSizeBytes * (proofChunkCount - 1),
         );
         expect(result.proofAttempt.proofSizeBytes).toBeLessThanOrEqual(
-            result.proofAttempt.proofTransport.chunkSizeBytes * 46,
+            proofChunkSizeBytes * proofChunkCount,
         );
-        expect(result.proofAttempt.proofTransport.chunksPerProof).toBe(46);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .proofByteLength,
+        ).toBe(result.proofAttempt.proofSizeBytes);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .chunkSizeBytes,
+        ).toBe(proofChunkSizeBytes);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .chunkCount,
+        ).toBe(proofChunkCount);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .chunkHashList,
+        ).toHaveLength(proofChunkCount);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .proofFullBytesHash,
+        ).toBe(result.proofAttempt.proofBytesHash);
+        expect(
+            result.proofAttempt.proofTransport.firstProofChunkManifest
+                .chunkMerkleRoot,
+        ).toBe(result.proofAttempt.proofTransport.firstProofChunkMerkleRoot);
         expect(result.proofAttempt.verifiedProofSizeBytes).toBe(
             result.proofAttempt.proofSizeBytes,
         );
@@ -262,12 +294,41 @@ describe('direct encrypted ballot kernel command', () => {
 
     it('creates public encrypted ballot packages without setup private witness through Node/WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const setupPublicMaterial = createDirectBallotSetupPackage(kernel);
+        const foundationFixture = createFoundationTranscriptFixture();
+        const foundationVerification = verifyFoundationTranscript(
+            foundationFixture.input,
+        );
+        expect(foundationVerification.ok).toBe(true);
+        expect(foundationVerification.electionManifestHash).toBe(
+            foundationFixture.expectedHashes.electionManifestHash,
+        );
+        expect(foundationVerification.rosterHash).toBe(
+            foundationFixture.expectedHashes.rosterHash,
+        );
+        const setupPublicMaterial = createDirectBallotSetupPackage(kernel, {
+            ceremonyId:
+                foundationFixture.input.rosterExternalAcceptance
+                    .expectedCeremonyId,
+            manifestHash: foundationFixture.expectedHashes.electionManifestHash,
+            rosterHash: foundationFixture.expectedHashes.rosterHash,
+            thresholdProfileHash:
+                foundationFixture.expectedHashes.thresholdProfileHash,
+            trusteeCount: foundationParticipantCount,
+        });
         const { acceptedPublicKeyMaterial, acceptedSetupHandoff } =
             acceptedDirectBallotPublicMaterialForSetupPublicMaterial(
                 kernel,
                 setupPublicMaterial,
             );
+        expect(acceptedPublicKeyMaterial.manifestHash).toBe(
+            foundationVerification.electionManifestHash,
+        );
+        expect(acceptedPublicKeyMaterial.rosterHash).toBe(
+            foundationVerification.rosterHash,
+        );
+        expect(acceptedPublicKeyMaterial.thresholdProfileHash).toBe(
+            foundationFixture.expectedHashes.thresholdProfileHash,
+        );
         const result = await createDirectEncryptedBallotPackages({
             acceptedPublicKeyMaterial,
             acceptedSetupHandoff,

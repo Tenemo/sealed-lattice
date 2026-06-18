@@ -24,15 +24,13 @@ struct BuiltTrusteeEvaluationKeyProofRecord {
     transported_proof_material: Option<serde_json::Value>,
 }
 
-// Maximum number of trustee evaluation-key provers that run concurrently while
-// assembling the first-profile package fixture. Each first-profile prover holds
-// its statement, witness, and proof working set, which is several gigabytes, so
-// proving all ten trustees at once needs far more than physical memory and
-// forces heavy paging. Generating the proofs in batches of this size keeps
-// per-trustee proving parallel (each batch member still uses the shared work
-// pool for its internal parallelism) while capping concurrent prover memory to
-// fit a workstation-class machine.
+// Default concurrent trustee evaluation-key prover count for non-transported
+// fixture paths. Terminal transported setup defaults to one prover at a time
+// below because each first-profile prover holds a multi-gigabyte working set.
 const TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE: usize = 3;
+const TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE: usize = 1;
+const TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_BATCH_SIZE_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_TERMINAL_TRANSPORT_TRUSTEE_PROOF_BATCH_SIZE";
 
 // Build one key share's public component material so the trustee
 // evaluation-key relation holds: for digit j and limb l,
@@ -1755,20 +1753,10 @@ fn trustee_evaluation_key_proofs_object_inner(
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     let checkpoint_resume_enabled =
         terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
-    let trustee_proof_batch_size = if terminal_transport.is_some() {
-        // Full-ring terminal proving: run several provers at once to fill a
-        // modern multi-core workstation instead of strictly one at a time. Each
-        // prover only saturates a few cores through the shared work pool, so size
-        // concurrency to roughly a quarter of the available cores, capped by the
-        // participant count, so concurrent multi-gigabyte prover working sets
-        // scale with (and stay within) the machine's memory.
-        std::thread::available_parallelism()
-            .map(|cores| (cores.get() / 4).max(1))
-            .unwrap_or(TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE)
-            .min(same_secret_proofs.len())
-    } else {
-        TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
-    };
+    let trustee_proof_batch_size = trustee_evaluation_key_proof_generation_batch_size(
+        terminal_transport.is_some(),
+        same_secret_proofs.len(),
+    );
     let mut built_records: Vec<BuiltTrusteeEvaluationKeyProofRecord> =
         Vec::with_capacity(same_secret_proofs.len());
     for proof_record_batch in same_secret_proofs.chunks(trustee_proof_batch_size) {
@@ -1924,6 +1912,30 @@ fn trustee_evaluation_key_proofs_object_inner(
     proof_set
 }
 
+fn trustee_evaluation_key_proof_generation_batch_size(
+    terminal_transport_enabled: bool,
+    proof_count: usize,
+) -> usize {
+    let default_batch_size = if terminal_transport_enabled {
+        TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+    } else {
+        TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+    };
+    let configured_batch_size = if terminal_transport_enabled {
+        std::env::var(
+            TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_BATCH_SIZE_ENVIRONMENT_VARIABLE,
+        )
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+    } else {
+        None
+    };
+    configured_batch_size
+        .unwrap_or(default_batch_size)
+        .min(proof_count.max(1))
+}
+
 fn build_trustee_evaluation_key_proof_record(
     work_item: TrusteeEvaluationKeyProofWorkItem,
     resumed_records: &BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord>,
@@ -1991,7 +2003,7 @@ fn build_trustee_evaluation_key_proof_record(
     }
 }
 
-fn terminal_accepted_setup_checkpoint_resume_enabled() -> bool {
+pub(super) fn terminal_accepted_setup_checkpoint_resume_enabled() -> bool {
     matches!(
         std::env::var("SEALED_LATTICE_RESUME_TEST_CHECKPOINTS").as_deref(),
         Ok("1")
@@ -2012,13 +2024,50 @@ const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str = "public-key-share-proo
 const TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
     "trustee-evaluation-key-anchor-proof-material";
 
+fn repository_test_checkpoint_root() -> std::path::PathBuf {
+    let crate_directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let crates_directory = crate_directory
+        .parent()
+        .expect("kernel crate directory has a parent");
+    let repository_root = crates_directory
+        .parent()
+        .expect("kernel crate lives under the repository crates directory");
+    repository_root.join("temp").join("test-checkpoints")
+}
+
+fn terminal_accepted_setup_material_store_directory() -> std::path::PathBuf {
+    repository_test_checkpoint_root().join("terminal-accepted-setup-material-store")
+}
+
+fn legacy_terminal_accepted_setup_material_store_directory() -> Option<std::path::PathBuf> {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store");
+    if directory == terminal_accepted_setup_material_store_directory() {
+        None
+    } else {
+        Some(directory)
+    }
+}
+
+fn terminal_accepted_setup_material_store_read_directories() -> Vec<std::path::PathBuf> {
+    let mut directories = vec![terminal_accepted_setup_material_store_directory()];
+    if let Some(legacy_directory) = legacy_terminal_accepted_setup_material_store_directory()
+        && legacy_directory.exists()
+    {
+        directories.push(legacy_directory);
+    }
+
+    directories
+}
+
 fn anchor_proof_checkpoint_path(
+    material_store_directory: &std::path::Path,
     family_directory: &str,
     statement_hash_hex: &str,
 ) -> std::path::PathBuf {
-    std::path::PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
+    material_store_directory
         .join(family_directory)
         .join(format!("{statement_hash_hex}.bin"))
 }
@@ -2038,15 +2087,30 @@ fn checkpointed_anchor_proof_bytes(
     if !terminal_accepted_setup_checkpoint_resume_enabled() {
         return generate_proof_bytes();
     }
-    let path = anchor_proof_checkpoint_path(family_directory, statement_hash_hex);
-    if let Ok(proof_bytes) = std::fs::read(&path) {
-        terminal_phase(&format!(
-            "resumed {family_directory} proof checkpoint {statement_hash_hex}"
-        ));
-        return proof_bytes;
+    let primary_path = anchor_proof_checkpoint_path(
+        &terminal_accepted_setup_material_store_directory(),
+        family_directory,
+        statement_hash_hex,
+    );
+    for material_store_directory in terminal_accepted_setup_material_store_read_directories() {
+        let path = anchor_proof_checkpoint_path(
+            &material_store_directory,
+            family_directory,
+            statement_hash_hex,
+        );
+        if let Ok(proof_bytes) = std::fs::read(&path) {
+            terminal_phase(&format!(
+                "resumed {family_directory} proof checkpoint {statement_hash_hex}"
+            ));
+            return proof_bytes;
+        }
     }
     let proof_bytes = generate_proof_bytes();
-    persist_anchor_proof_checkpoint(&path, statement_hash_hex, &proof_bytes);
+    persist_anchor_proof_checkpoint(&primary_path, statement_hash_hex, &proof_bytes);
+    terminal_phase(&format!(
+        "persisted {family_directory} proof checkpoint {statement_hash_hex} ({} bytes)",
+        proof_bytes.len()
+    ));
 
     proof_bytes
 }
@@ -2090,84 +2154,91 @@ fn trustee_evaluation_key_record_with_embedded_proof_bytes(
 fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
     work_items: &[TrusteeEvaluationKeyProofWorkItem],
 ) -> BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord> {
-    let directory = std::path::PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
-        .join("trustee-evaluation-key-proof-material");
-    let Ok(entries) = std::fs::read_dir(&directory) else {
-        return BTreeMap::new();
-    };
     let mut resumed_records = BTreeMap::new();
-    for entry in entries {
-        let entry = entry.expect("terminal proof checkpoint directory entry");
-        let path = entry.path();
-        if path.extension().and_then(std::ffi::OsStr::to_str) != Some("bin") {
-            continue;
-        }
-        let Some(stored_material_root) = path.file_stem().and_then(std::ffi::OsStr::to_str) else {
-            continue;
-        };
-        if stored_material_root.len() != 128
-            || !stored_material_root
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
-        {
-            continue;
-        }
-        let proof_bytes = std::fs::read(&path).expect("terminal trustee proof checkpoint bytes");
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-        let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-        let chunks = proof_bytes_transport_chunks(proof_bytes);
-        let transport_hashes = setup_proof_material_transport_hashes(
-            TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &chunks,
-            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        )
-        .expect("checkpointed trustee proof transport hashes");
-        let mut matched_trustee = None;
-        for work_item in work_items {
-            if resumed_records.contains_key(&work_item.trustee_roster_position) {
-                continue;
-            }
-            let mut record = work_item.record.clone();
-            apply_trustee_evaluation_key_proof_transport_fields(
-                &mut record,
-                proof_size_bytes,
-                &proof_bytes_hash,
-                &transport_hashes,
-            );
-            let proof_material_root =
-                trustee_evaluation_key_proof_material_root(&record, &transport_hashes)
-                    .expect("checkpointed trustee proof material root");
-            if proof_material_root != stored_material_root {
-                continue;
-            }
-            record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
-            record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-                derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
-                    .expect("transported trustee evaluation-key proof root")
-            );
-            let proof_material =
-                transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
-            register_verified_trustee_evaluation_key_proof_material_chunks(
-                &proof_material_root,
-                chunks,
-            )
-            .expect("verified trustee evaluation-key proof material chunks");
-            resumed_records.insert(
-                work_item.trustee_roster_position,
-                BuiltTrusteeEvaluationKeyProofRecord {
-                    record,
-                    transported_proof_material: Some(proof_material),
-                },
-            );
-            matched_trustee = Some(work_item.trustee_roster_position);
+    for material_store_directory in terminal_accepted_setup_material_store_read_directories() {
+        if resumed_records.len() == work_items.len() {
             break;
         }
-        if let Some(trustee_roster_position) = matched_trustee {
-            terminal_phase(&format!(
-                "matched trustee evaluation-key proof checkpoint for trustee {trustee_roster_position}"
-            ));
+        let directory = material_store_directory.join("trustee-evaluation-key-proof-material");
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries {
+            if resumed_records.len() == work_items.len() {
+                break;
+            }
+            let entry = entry.expect("terminal proof checkpoint directory entry");
+            let path = entry.path();
+            if path.extension().and_then(std::ffi::OsStr::to_str) != Some("bin") {
+                continue;
+            }
+            let Some(stored_material_root) = path.file_stem().and_then(std::ffi::OsStr::to_str)
+            else {
+                continue;
+            };
+            if stored_material_root.len() != 128
+                || !stored_material_root
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            {
+                continue;
+            }
+            let proof_bytes =
+                std::fs::read(&path).expect("terminal trustee proof checkpoint bytes");
+            let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
+            let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
+            let chunks = proof_bytes_transport_chunks(proof_bytes);
+            let transport_hashes = setup_proof_material_transport_hashes(
+                TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+                &chunks,
+                SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            )
+            .expect("checkpointed trustee proof transport hashes");
+            let mut matched_trustee = None;
+            for work_item in work_items {
+                if resumed_records.contains_key(&work_item.trustee_roster_position) {
+                    continue;
+                }
+                let mut record = work_item.record.clone();
+                apply_trustee_evaluation_key_proof_transport_fields(
+                    &mut record,
+                    proof_size_bytes,
+                    &proof_bytes_hash,
+                    &transport_hashes,
+                );
+                let proof_material_root =
+                    trustee_evaluation_key_proof_material_root(&record, &transport_hashes)
+                        .expect("checkpointed trustee proof material root");
+                if proof_material_root != stored_material_root {
+                    continue;
+                }
+                record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
+                record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+                    derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+                        .expect("transported trustee evaluation-key proof root")
+                );
+                let proof_material =
+                    transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
+                register_verified_trustee_evaluation_key_proof_material_chunks(
+                    &proof_material_root,
+                    chunks,
+                )
+                .expect("verified trustee evaluation-key proof material chunks");
+                resumed_records.insert(
+                    work_item.trustee_roster_position,
+                    BuiltTrusteeEvaluationKeyProofRecord {
+                        record,
+                        transported_proof_material: Some(proof_material),
+                    },
+                );
+                matched_trustee = Some(work_item.trustee_roster_position);
+                break;
+            }
+            if let Some(trustee_roster_position) = matched_trustee {
+                terminal_phase(&format!(
+                    "matched trustee evaluation-key proof checkpoint for trustee {trustee_roster_position}"
+                ));
+            }
         }
     }
 

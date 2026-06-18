@@ -1,8 +1,5 @@
 use super::*;
 
-#[cfg(not(target_arch = "wasm32"))]
-use rayon::prelude::*;
-
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
@@ -277,17 +274,32 @@ fn verify_trustee_evaluation_key_proof_set(
     }
 
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
+    accepted_setup_verifier_phase(
+        "prepared same-secret bindings for trustee evaluation-key proofs",
+    );
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    accepted_setup_verifier_phase(
+        "loaded transported constant commitments for trustee evaluation-key proofs",
+    );
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
     let transported_key_switch_component_material = request
         .get("transportedEvaluationKeyShareComponentMaterial")
         .or(transported_key_switch_component_material.as_ref());
-    let round_one_aggregate_diagonals_by_level = round_one_public_aggregate_diagonals_from_package(
-        setup_package,
-        transported_key_switch_component_material,
-    )?;
+    accepted_setup_verifier_phase(
+        "loaded transported key-switch component material for trustee evaluation-key proofs",
+    );
+    let mut component_material_cache = EvaluationKeyShareComponentMaterialCache::default();
+    let round_one_aggregate_diagonals_by_level =
+        round_one_public_aggregate_diagonals_from_package_with_component_material_cache(
+            setup_package,
+            transported_key_switch_component_material,
+            &mut component_material_cache,
+        )?;
+    accepted_setup_verifier_phase(
+        "rebuilt round-one public aggregate diagonals for trustee evaluation-key proofs",
+    );
 
     let proof_records = array_value(proof_set, "proofRecords")?;
     if proof_records.len() != FIRST_PROFILE_PARTICIPANT_COUNT as usize {
@@ -296,17 +308,17 @@ fn verify_trustee_evaluation_key_proof_set(
             "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
         ));
     }
-    // The ten trustee proofs are independent given the read-only shared inputs
-    // above, and each verifies a multi-megabyte succinct argument, so they run
-    // concurrently on native targets. Outcomes are collected in roster order, so
-    // the first failure reported is identical to sequential verification. wasm32
-    // has no shared-memory threads and stays sequential.
-    //
     // Index-equals-position enforces a single canonical ordering and full dense
     // coverage 0..n, so a proof set cannot be reshuffled or have a trustee
-    // silently dropped or duplicated.
-    let verify_record = |record_position: usize, proof_record: &Value| -> CanonicalResult<()> {
+    // silently dropped or duplicated. Statement rebuilding is intentionally
+    // sequential because each statement streams large transported key-switch
+    // material through a shared root index.
+    accepted_setup_verifier_phase("checking all trustee evaluation-key proof records");
+    for (record_position, proof_record) in proof_records.iter().enumerate() {
         let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
+        accepted_setup_verifier_phase(&format!(
+            "checking trustee evaluation-key proof record {trustee_roster_position}"
+        ));
         if trustee_roster_position != record_position as u64 {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -314,36 +326,31 @@ fn verify_trustee_evaluation_key_proof_set(
             ));
         }
         let statement =
-            trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
-                setup_package,
-                transported_key_switch_component_material,
-                transported_constant_commitments: &transported_constant_commitments,
-                round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
-                trustee_roster_position,
-            })?;
+            trustee_evaluation_key_statement_from_package_with_component_material_cache(
+                &TrusteeEvaluationKeyStatementInputs {
+                    setup_package,
+                    transported_key_switch_component_material,
+                    transported_constant_commitments: &transported_constant_commitments,
+                    round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
+                    trustee_roster_position,
+                },
+                &mut component_material_cache,
+            )?;
+        accepted_setup_verifier_phase(&format!(
+            "rebuilt trustee evaluation-key proof statement {trustee_roster_position}"
+        ));
         verify_trustee_evaluation_key_proof_record(
             proof_record,
             setup_context,
             &same_secret_proof_bindings,
             &statement,
             request,
-        )
-    };
-    #[cfg(not(target_arch = "wasm32"))]
-    let record_verifications: Vec<CanonicalResult<()>> = proof_records
-        .par_iter()
-        .enumerate()
-        .map(|(record_position, proof_record)| verify_record(record_position, proof_record))
-        .collect();
-    #[cfg(target_arch = "wasm32")]
-    let record_verifications: Vec<CanonicalResult<()>> = proof_records
-        .iter()
-        .enumerate()
-        .map(|(record_position, proof_record)| verify_record(record_position, proof_record))
-        .collect();
-    record_verifications
-        .into_iter()
-        .collect::<CanonicalResult<Vec<()>>>()?;
+        )?;
+        accepted_setup_verifier_phase(&format!(
+            "verified trustee evaluation-key proof record {trustee_roster_position}"
+        ));
+    }
+    accepted_setup_verifier_phase("verified all trustee evaluation-key proof records");
 
     let supplied_root = value_string(proof_set, "trusteeEvaluationKeyProofSetRoot")?;
     let mut root_input = proof_set.clone();
@@ -483,8 +490,17 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proofBytesHash must match supplied proof bytes",
         ));
     }
+    accepted_setup_verifier_phase(&format!(
+        "loaded trustee evaluation-key proof bytes for trustee {trustee_roster_position} ({proof_size_bytes} bytes)"
+    ));
     let proof = decode_trustee_evaluation_key_proof(statement, &proof_bytes)?;
+    accepted_setup_verifier_phase(&format!(
+        "decoded trustee evaluation-key proof for trustee {trustee_roster_position}"
+    ));
     verify_evaluation_key_share(statement, &proof)?;
+    accepted_setup_verifier_phase(&format!(
+        "verified trustee evaluation-key relation proof for trustee {trustee_roster_position}"
+    ));
     let supplied_root = value_string(proof_record, "trusteeEvaluationKeyProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
@@ -528,8 +544,20 @@ pub(in crate::bgv::setup) struct TrusteeEvaluationKeyStatementInputs<'a> {
 // keys in frozen schedule order, anchored to the same-secret commitments.
 // The proof generator assembles the identical statement, so a proof only
 // verifies against the exact records, aggregates, and ceremony context.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     inputs: &TrusteeEvaluationKeyStatementInputs<'_>,
+) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
+    let mut component_material_cache = EvaluationKeyShareComponentMaterialCache::default();
+    trustee_evaluation_key_statement_from_package_with_component_material_cache(
+        inputs,
+        &mut component_material_cache,
+    )
+}
+
+fn trustee_evaluation_key_statement_from_package_with_component_material_cache<'a>(
+    inputs: &TrusteeEvaluationKeyStatementInputs<'a>,
+    component_material_cache: &mut EvaluationKeyShareComponentMaterialCache<'a>,
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let setup_package = inputs.setup_package;
     let binding = evaluation_key_proof_common_binding(setup_package)?;
@@ -597,14 +625,17 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             inputs.trustee_roster_position,
             *level,
         )?;
-        keys.push(evaluation_key_descriptor_from_record(
-            EvaluationKeyShareKind::RelinearizationRoundOne,
-            EvaluationKeyShareProofFamily::Relinearization,
-            record,
-            inputs.transported_key_switch_component_material,
-            Vec::new(),
-            &mut ring_degree,
-        )?);
+        keys.push(
+            evaluation_key_descriptor_from_record_with_component_material_cache(
+                EvaluationKeyShareKind::RelinearizationRoundOne,
+                EvaluationKeyShareProofFamily::Relinearization,
+                record,
+                inputs.transported_key_switch_component_material,
+                Vec::new(),
+                &mut ring_degree,
+                component_material_cache,
+            )?,
+        );
     }
     for level in &scheduled_levels {
         let record = relinearization_record_for_trustee_and_level(
@@ -623,14 +654,17 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
                 )
             })?
             .clone();
-        keys.push(evaluation_key_descriptor_from_record(
-            EvaluationKeyShareKind::RelinearizationRoundTwo,
-            EvaluationKeyShareProofFamily::Relinearization,
-            record,
-            inputs.transported_key_switch_component_material,
-            aggregate_diagonal,
-            &mut ring_degree,
-        )?);
+        keys.push(
+            evaluation_key_descriptor_from_record_with_component_material_cache(
+                EvaluationKeyShareKind::RelinearizationRoundTwo,
+                EvaluationKeyShareProofFamily::Relinearization,
+                record,
+                inputs.transported_key_switch_component_material,
+                aggregate_diagonal,
+                &mut ring_degree,
+                component_material_cache,
+            )?,
+        );
     }
     let batches = setup_package
         .get("galoisKeyShareBatches")
@@ -667,14 +701,17 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
                 "Galois rotation does not fit usize",
             )
         })?;
-        keys.push(evaluation_key_descriptor_from_record(
-            EvaluationKeyShareKind::GaloisRotation { galois_element },
-            EvaluationKeyShareProofFamily::Galois,
-            material_record,
-            inputs.transported_key_switch_component_material,
-            Vec::new(),
-            &mut ring_degree,
-        )?);
+        keys.push(
+            evaluation_key_descriptor_from_record_with_component_material_cache(
+                EvaluationKeyShareKind::GaloisRotation { galois_element },
+                EvaluationKeyShareProofFamily::Galois,
+                material_record,
+                inputs.transported_key_switch_component_material,
+                Vec::new(),
+                &mut ring_degree,
+                component_material_cache,
+            )?,
+        );
     }
     let ring_degree = ring_degree.ok_or_else(|| {
         CanonicalError::new(
@@ -723,13 +760,14 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     Ok(statement)
 }
 
-fn evaluation_key_descriptor_from_record(
+fn evaluation_key_descriptor_from_record_with_component_material_cache<'a>(
     kind: EvaluationKeyShareKind,
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
-    transported_key_switch_component_material: Option<&Value>,
+    transported_key_switch_component_material: Option<&'a Value>,
     round_one_aggregate_diagonal: Vec<Vec<u64>>,
     ring_degree: &mut Option<usize>,
+    component_material_cache: &mut EvaluationKeyShareComponentMaterialCache<'a>,
 ) -> CanonicalResult<EvaluationKeyShareDescriptor> {
     let level = usize::try_from(value_u64(record, "level")?).map_err(|_| {
         CanonicalError::new(
@@ -753,10 +791,11 @@ fn evaluation_key_descriptor_from_record(
         Some(_) => {}
         None => *ring_degree = Some(record_ring_degree),
     }
-    let component_b_by_digit = component_b_vectors_from_record(
+    let component_b_by_digit = component_b_vectors_from_record_with_cache(
         proof_family,
         record,
         transported_key_switch_component_material,
+        component_material_cache,
     )?;
 
     Ok(EvaluationKeyShareDescriptor {
@@ -798,9 +837,23 @@ fn relinearization_record_for_trustee_and_level<'a>(
 // trustee's round-two source multiplies its secret by this public aggregate,
 // and the verifier recomputes it here from the same records the statements
 // are rebuilt from, so a substituted aggregate cannot verify.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
     setup_package: &Value,
     transported_key_switch_component_material: Option<&Value>,
+) -> CanonicalResult<BTreeMap<u64, Vec<Vec<u64>>>> {
+    let mut component_material_cache = EvaluationKeyShareComponentMaterialCache::default();
+    round_one_public_aggregate_diagonals_from_package_with_component_material_cache(
+        setup_package,
+        transported_key_switch_component_material,
+        &mut component_material_cache,
+    )
+}
+
+fn round_one_public_aggregate_diagonals_from_package_with_component_material_cache<'a>(
+    setup_package: &Value,
+    transported_key_switch_component_material: Option<&'a Value>,
+    component_material_cache: &mut EvaluationKeyShareComponentMaterialCache<'a>,
 ) -> CanonicalResult<BTreeMap<u64, Vec<Vec<u64>>>> {
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
@@ -820,10 +873,11 @@ pub(in crate::bgv::setup) fn round_one_public_aggregate_diagonals_from_package(
                 "relinearization level does not fit usize",
             )
         })? + 1;
-        let components = component_b_vectors_from_record(
+        let components = component_b_vectors_from_record_with_cache(
             EvaluationKeyShareProofFamily::Relinearization,
             record,
             transported_key_switch_component_material,
+            component_material_cache,
         )?;
         let ring_degree = components
             .first()
@@ -1223,11 +1277,70 @@ fn stored_verified_trustee_evaluation_key_proof_material_chunks(
 }
 
 #[cfg(test)]
-fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
-    PathBuf::from("temp")
+fn accepted_setup_material_store_root_directory() -> PathBuf {
+    let crate_directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let crates_directory = crate_directory
+        .parent()
+        .expect("kernel crate directory has a parent");
+    let repository_root = crates_directory
+        .parent()
+        .expect("kernel crate lives under the repository crates directory");
+    repository_root
+        .join("temp")
         .join("test-checkpoints")
         .join("terminal-accepted-setup-material-store")
-        .join("trustee-evaluation-key-proof-material")
+}
+
+#[cfg(test)]
+fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
+    accepted_setup_material_store_root_directory().join("trustee-evaluation-key-proof-material")
+}
+
+#[cfg(test)]
+fn legacy_verified_trustee_evaluation_key_proof_material_store_directory() -> Option<PathBuf> {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join("trustee-evaluation-key-proof-material");
+    if directory == verified_trustee_evaluation_key_proof_material_store_directory() {
+        None
+    } else {
+        Some(directory)
+    }
+}
+
+#[cfg(test)]
+fn existing_verified_trustee_evaluation_key_proof_material_store_entry(
+    path: &std::path::Path,
+    total_byte_length: u64,
+) -> CanonicalResult<Option<VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let observed_byte_length = fs::metadata(path)
+        .map_err(|error| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "verified trustee evaluation-key proof material store entry could not be read: {error}",
+                ),
+            )
+        })?
+        .len();
+    if observed_byte_length != total_byte_length {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "verified trustee evaluation-key proof material store entry length does not match the registered chunks",
+        ));
+    }
+
+    Ok(Some(
+        VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry {
+            path: path.to_path_buf(),
+            total_byte_length,
+        },
+    ))
 }
 
 #[cfg(test)]
@@ -1251,6 +1364,26 @@ fn write_verified_trustee_evaluation_key_proof_material_chunks(
             })
     })?;
     let directory = verified_trustee_evaluation_key_proof_material_store_directory();
+    let path = directory.join(format!("{proof_material_root}.bin"));
+    if let Some(store_entry) = existing_verified_trustee_evaluation_key_proof_material_store_entry(
+        &path,
+        total_byte_length,
+    )? {
+        return Ok(store_entry);
+    }
+    if let Some(legacy_directory) =
+        legacy_verified_trustee_evaluation_key_proof_material_store_directory()
+    {
+        let legacy_path = legacy_directory.join(format!("{proof_material_root}.bin"));
+        if let Some(store_entry) =
+            existing_verified_trustee_evaluation_key_proof_material_store_entry(
+                &legacy_path,
+                total_byte_length,
+            )?
+        {
+            return Ok(store_entry);
+        }
+    }
     fs::create_dir_all(&directory).map_err(|error| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1259,43 +1392,23 @@ fn write_verified_trustee_evaluation_key_proof_material_chunks(
             ),
         )
     })?;
-    let path = directory.join(format!("{proof_material_root}.bin"));
-    if path.exists() {
-        let observed_byte_length = fs::metadata(&path)
-            .map_err(|error| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "verified trustee evaluation-key proof material store entry could not be read: {error}",
-                    ),
-                )
-            })?
-            .len();
-        if observed_byte_length != total_byte_length {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "verified trustee evaluation-key proof material store entry length does not match the registered chunks",
-            ));
-        }
-    } else {
-        let mut file = File::create(&path).map_err(|error| {
+    let mut file = File::create(&path).map_err(|error| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "verified trustee evaluation-key proof material store entry could not be created: {error}",
+            ),
+        )
+    })?;
+    for chunk in chunks {
+        file.write_all(chunk).map_err(|error| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "verified trustee evaluation-key proof material store entry could not be created: {error}",
+                    "verified trustee evaluation-key proof material store entry could not be written: {error}",
                 ),
             )
         })?;
-        for chunk in chunks {
-            file.write_all(chunk).map_err(|error| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "verified trustee evaluation-key proof material store entry could not be written: {error}",
-                    ),
-                )
-            })?;
-        }
     }
 
     Ok(VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry {

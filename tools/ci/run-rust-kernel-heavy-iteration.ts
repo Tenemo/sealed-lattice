@@ -103,7 +103,7 @@ const main = async (): Promise<void> => {
             ...testFilters,
             '--',
             '--ignored',
-            '--show-output',
+            '--nocapture',
             '--test-threads',
             String(heavyAcceptedSetupTestThreadCount),
         ],

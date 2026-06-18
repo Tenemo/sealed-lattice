@@ -31,6 +31,15 @@ const textEncoder = new TextEncoder();
 const publicKeyShareCoefficientVectorHashDomain =
     'sealed-lattice-bgv-rns/public-key-share-coefficient-vector-v1';
 
+export type DirectBallotSetupPackageOptions = {
+    readonly ceremonyId?: string;
+    readonly manifestHash?: ProtocolHash;
+    readonly rosterHash?: ProtocolHash;
+    readonly setupSeed?: string;
+    readonly thresholdProfileHash?: ProtocolHash;
+    readonly trusteeCount?: number;
+};
+
 const hexToBytes = (hexValue: string): Uint8Array => {
     if (hexValue.length % 2 !== 0 || /[^0-9a-f]/u.test(hexValue)) {
         throw new Error('hex value must be lowercase and byte-aligned.');
@@ -416,36 +425,35 @@ export type DirectEncryptedBallotPackageVerificationCertificate = {
 
 export const createDirectBallotSetupPackage = (
     kernel: TranscriptCoreKernel,
+    options: DirectBallotSetupPackageOptions = {},
 ): BgvPassiveSetupPackage =>
     kernel.generateBgvPassiveSetup({
-        ceremonyId: 'direct-encrypted-ballot-node-wasm-ceremony',
-        manifestHash: deriveProtocolHash('ElectionManifestHash', {
-            manifest: 'direct encrypted ballot node wasm smoke',
-        }),
-        rosterHash: deriveProtocolHash('RosterHash', {
-            roster: 'direct encrypted ballot node wasm smoke',
-        }),
-        thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
-            threshold: 'direct encrypted ballot node wasm smoke',
-        }),
-        participants: [
-            {
-                trusteeIdentity: 'trustee-1',
-                rosterPosition: 0,
-                boardPosition: 0,
-            },
-            {
-                trusteeIdentity: 'trustee-2',
-                rosterPosition: 1,
-                boardPosition: 1,
-            },
-            {
-                trusteeIdentity: 'trustee-3',
-                rosterPosition: 2,
-                boardPosition: 2,
-            },
-        ],
-        setupSeed: directBallotSetupSeed,
+        ceremonyId:
+            options.ceremonyId ?? 'direct-encrypted-ballot-node-wasm-ceremony',
+        manifestHash:
+            options.manifestHash ??
+            deriveProtocolHash('ElectionManifestHash', {
+                manifest: 'direct encrypted ballot node wasm smoke',
+            }),
+        rosterHash:
+            options.rosterHash ??
+            deriveProtocolHash('RosterHash', {
+                roster: 'direct encrypted ballot node wasm smoke',
+            }),
+        thresholdProfileHash:
+            options.thresholdProfileHash ??
+            deriveProtocolHash('ThresholdProfileHash', {
+                threshold: 'direct encrypted ballot node wasm smoke',
+            }),
+        participants: Array.from(
+            { length: options.trusteeCount ?? 3 },
+            (_unusedParticipant, trusteeIndex) => ({
+                trusteeIdentity: `trustee-${trusteeIndex + 1}`,
+                rosterPosition: trusteeIndex,
+                boardPosition: trusteeIndex,
+            }),
+        ),
+        setupSeed: options.setupSeed ?? directBallotSetupSeed,
     });
 
 function directBallotWitnessPartitionProfileHash(

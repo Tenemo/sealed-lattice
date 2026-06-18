@@ -154,7 +154,8 @@ use super::{
     evaluation_key_share_material::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
-        EvaluationKeyShareProofFamily, component_b_vectors_from_record,
+        EvaluationKeyShareComponentMaterialCache, EvaluationKeyShareProofFamily,
+        component_b_vectors_from_record_with_cache,
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID,
@@ -630,10 +631,30 @@ pub(crate) fn public_bgv_key_from_accepted_setup_public_key_material(
     accepted_setup_collective_public_key_from_material(common_randomness, collective_public_key)
 }
 
+#[cfg(test)]
+fn accepted_setup_verifier_phase(message: &str) {
+    if !matches!(
+        std::env::var("SEALED_LATTICE_TRACE_ACCEPTED_SETUP_VERIFIER").as_deref(),
+        Ok("1")
+    ) {
+        return;
+    }
+    static ACCEPTED_SETUP_VERIFIER_PHASE_CLOCK: OnceLock<std::time::Instant> = OnceLock::new();
+    let started = ACCEPTED_SETUP_VERIFIER_PHASE_CLOCK.get_or_init(std::time::Instant::now);
+    println!(
+        "accepted-setup-verifier-phase [+{}s] {message}",
+        started.elapsed().as_secs()
+    );
+}
+
+#[cfg(not(test))]
+fn accepted_setup_verifier_phase(_message: &str) {}
+
 fn verify_collective_setup_package(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<VerificationFlow> {
+    accepted_setup_verifier_phase("start collective setup package verification");
     let Some(object_type) = setup_package.get("objectType").and_then(Value::as_str) else {
         return outside_profile(
             "setupPackage.objectType is required",
@@ -701,6 +722,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_setup_package_hash(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified setup package hash");
     if let Some(response) = verify_context(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -737,12 +759,14 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_threshold_share_commitments(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified threshold share commitments");
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_optional_same_secret_proofs(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified optional same-secret proofs");
     if let Some(response) = verify_public_key_shares(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -754,19 +778,27 @@ fn verify_collective_setup_package(
     {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified optional public-key share proofs");
     if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified collective public-key material");
+    accepted_setup_verifier_phase("checking public-key material acceptance boundary");
     if let Some(response) = verify_public_key_material_acceptance_boundary(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified public-key material acceptance boundary");
+    accepted_setup_verifier_phase("checking evaluator key schedule");
     if let Some(response) = verify_evaluator_key_schedule(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified evaluator key schedule");
+    accepted_setup_verifier_phase("checking pending evaluation-key material boundary");
     if let Some(response) = verify_pending_evaluation_key_material_boundary(setup_package, request)?
     {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified evaluation-key schedule boundary");
     if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -788,13 +820,16 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_active_static_setup_theorem_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified setup certificates");
     let declares_public_runtime_material =
         setup_package_declares_public_runtime_material(setup_package);
+    accepted_setup_verifier_phase("checking profile-ring material");
     if declares_public_runtime_material
         && let Some(response) = verify_profile_ring_material(setup_package)?
     {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified first profile-ring material check");
     if let Some(response) = verify_required_final_objects(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -803,15 +838,21 @@ fn verify_collective_setup_package(
     {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified final-object and profile-ring boundaries");
+    accepted_setup_verifier_phase("checking terminal setup transport policy");
     if let Some(response) = verify_terminal_setup_transport_policy(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified terminal setup transport policy");
+    accepted_setup_verifier_phase("checking required public evaluation-key set");
     if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("verified required public evaluation-key set");
     if let Some(response) = verify_required_final_objects(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    accepted_setup_verifier_phase("completed collective setup package verification");
     Ok(VerificationFlow::Continue)
 }
 
@@ -1496,6 +1537,9 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
 }
 
 fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResult<Value> {
+    let accepted_setup_handoff = accepted_setup_handoff_value(setup_package)?;
+    let accepted_public_key_material =
+        direct_ballot_accepted_public_key_material_value(setup_package, &accepted_setup_handoff)?;
     let mut response = verification_response(
         VerifierStatus::Accepted,
         Some("setupPackageVerification"),
@@ -1503,15 +1547,23 @@ fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResul
         Vec::new(),
         accepted_hashes_from_package(setup_package),
     )?;
-    response
+    let response_object = response
         .as_object_mut()
-        .expect("verification response is a JSON object")
-        .insert(
-            "acceptedSetupHandoff".to_string(),
-            accepted_setup_handoff_value(setup_package)?,
-        );
+        .expect("verification response is a JSON object");
+    response_object.insert("acceptedSetupHandoff".to_string(), accepted_setup_handoff);
+    response_object.insert(
+        "acceptedPublicKeyMaterial".to_string(),
+        accepted_public_key_material,
+    );
 
     Ok(response)
+}
+
+#[cfg(test)]
+pub(crate) fn accepted_setup_verification_response_for_test(
+    setup_package: &Value,
+) -> CanonicalResult<Value> {
+    accepted_setup_verification_response(setup_package)
 }
 
 pub(crate) fn direct_ballot_creation_policy_hash() -> CanonicalResult<String> {
@@ -1583,6 +1635,22 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 "heSecurityCertificate.targetDecryptionStatus was required before accepted setup handoff construction",
             )
         })?;
+    let collective_public_key_root = package_nested_hash(
+        setup_package,
+        "collectivePublicKey",
+        "collectivePublicKeyRoot",
+    )?;
+    let bgv_public_key_root = direct_ballot_bgv_public_key_root_from_setup_package(setup_package)?;
+    let public_key_share_material_set_root = package_nested_hash(
+        setup_package,
+        "publicKeyShareMaterial",
+        "publicKeyShareMaterialSetRoot",
+    )?;
+    let public_key_share_succinct_proof_set_root = package_nested_hash(
+        setup_package,
+        "publicKeyShareSuccinctProofs",
+        "publicKeyShareSuccinctProofSetRoot",
+    )?;
     let mut handoff = json!({
         "objectType": "CollectiveBgvAcceptedSetupHandoff",
         "objectVersion": 1,
@@ -1598,16 +1666,8 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
         "setupPackageHash": value_string(setup_package, "setupPackageHash")?,
         "directBallotEncryptionHandoff": {
             "status": "accepted-collective-public-key-root-bound-for-direct-ballot-encryption",
-            "collectivePublicKeyRoot": package_nested_hash(
-                setup_package,
-                "collectivePublicKey",
-                "collectivePublicKeyRoot",
-            )?,
-            "bgvPublicKeyRoot": package_nested_hash(
-                setup_package,
-                "collectivePublicKey",
-                "bgvPublicKeyRoot",
-            )?,
+            "collectivePublicKeyRoot": collective_public_key_root.as_str(),
+            "bgvPublicKeyRoot": bgv_public_key_root.as_str(),
             "bgvProfileHash": profile_hash()?,
             "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
             "batchEncoderHash": batch_encoder_hash()?,
@@ -1622,40 +1682,15 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "zeroKnowledgeCertificateHash": direct_ballot_zero_knowledge_certificate_hash()?,
             "verifierCertificateHash": direct_ballot_verifier_certificate_hash()?,
             "ballotValidityProofProfileHash": direct_ballot_relation_proof_profile_hash()?,
-            "publicKeyShareMaterialSetRoot": package_nested_hash(
-                setup_package,
-                "publicKeyShareMaterial",
-                "publicKeyShareMaterialSetRoot",
-            )?,
-            "publicKeyShareSuccinctProofSetRoot": package_nested_hash(
-                setup_package,
-                "publicKeyShareSuccinctProofs",
-                "publicKeyShareSuccinctProofSetRoot",
-            )?,
+            "publicKeyShareMaterialSetRoot": public_key_share_material_set_root.as_str(),
+            "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root.as_str(),
             "acceptedPublicKeyMaterial": {
                 "materialSource": "accepted public-key share material with accepted public-key share proofs",
-                "collectivePublicKeyRoot": package_nested_hash(
-                    setup_package,
-                    "collectivePublicKey",
-                    "collectivePublicKeyRoot",
-                )?,
-                "bgvPublicKeyRoot": package_nested_hash(
-                    setup_package,
-                    "collectivePublicKey",
-                    "bgvPublicKeyRoot",
-                )?,
-                "publicKeyShareMaterialSetRoot": package_nested_hash(
-                    setup_package,
-                    "publicKeyShareMaterial",
-                    "publicKeyShareMaterialSetRoot",
-                )?,
-                "publicKeyShareSuccinctProofSetRoot": package_nested_hash(
-                    setup_package,
-                    "publicKeyShareSuccinctProofs",
-                    "publicKeyShareSuccinctProofSetRoot",
-                )?,
+                "collectivePublicKeyRoot": collective_public_key_root.as_str(),
+                "bgvPublicKeyRoot": bgv_public_key_root.as_str(),
+                "publicKeyShareMaterialSetRoot": public_key_share_material_set_root.as_str(),
+                "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root.as_str(),
             },
-            "supportedBallotCreationPolicy": direct_ballot_creation_policy_value()?,
             "supportedBallotCreationPolicyHash": direct_ballot_creation_policy_hash()?,
         },
         "publicAggregationHandoff": {
@@ -1733,6 +1768,158 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
         .insert("acceptedSetupHandoffRoot".to_string(), json!(handoff_root));
 
     Ok(handoff)
+}
+
+fn direct_ballot_accepted_public_key_material_value(
+    setup_package: &Value,
+    accepted_setup_handoff: &Value,
+) -> CanonicalResult<Value> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before accepted public-key material construction",
+        )
+    })?;
+    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "commonRandomness was required before accepted public-key material construction",
+        )
+    })?;
+    let collective_public_key = setup_package.get("collectivePublicKey").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "collectivePublicKey was required before accepted public-key material construction",
+        )
+    })?;
+    let direct_ballot_handoff = accepted_setup_handoff
+        .get("directBallotEncryptionHandoff")
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "directBallotEncryptionHandoff was required before accepted public-key material construction",
+            )
+        })?;
+
+    Ok(json!({
+        "objectType": "DirectBallotAcceptedPublicKeyMaterial",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "ceremonyId": value_string(setup_context, "ceremonyId")?,
+        "manifestHash": value_string(setup_context, "manifestHash")?,
+        "rosterHash": value_string(setup_context, "rosterHash")?,
+        "thresholdProfileHash": accepted_setup_threshold_profile_hash()?,
+        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
+        "qShareHash": value_string(setup_context, "qShareHash")?,
+        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupEpoch": value_string(setup_context, "setupEpoch")?,
+        "setupPackageHash": value_string(setup_package, "setupPackageHash")?,
+        "acceptedSetupHandoffRoot": value_string(accepted_setup_handoff, "acceptedSetupHandoffRoot")?,
+        "bgvProfileHash": value_string(direct_ballot_handoff, "bgvProfileHash")?,
+        "batchEncoderHash": value_string(direct_ballot_handoff, "batchEncoderHash")?,
+        "batchLayoutBindingHash": value_string(direct_ballot_handoff, "batchLayoutBindingHash")?,
+        "ballotScoreEncodingProfileHash": value_string(
+            direct_ballot_handoff,
+            "ballotScoreEncodingProfileHash",
+        )?,
+        "encryptedBallotLayoutHash": value_string(direct_ballot_handoff, "encryptedBallotLayoutHash")?,
+        "directBallotReservedSlotRuleHash": value_string(
+            direct_ballot_handoff,
+            "directBallotReservedSlotRuleHash",
+        )?,
+        "directBallotEncoderMatrixRoot": value_string(
+            direct_ballot_handoff,
+            "directBallotEncoderMatrixRoot",
+        )?,
+        "arithmeticCertificateHash": value_string(direct_ballot_handoff, "arithmeticCertificateHash")?,
+        "soundnessCertificateHash": value_string(direct_ballot_handoff, "soundnessCertificateHash")?,
+        "zeroKnowledgeCertificateHash": value_string(
+            direct_ballot_handoff,
+            "zeroKnowledgeCertificateHash",
+        )?,
+        "verifierCertificateHash": value_string(direct_ballot_handoff, "verifierCertificateHash")?,
+        "ballotValidityProofProfileHash": value_string(
+            direct_ballot_handoff,
+            "ballotValidityProofProfileHash",
+        )?,
+        "collectivePublicKeyRoot": value_string(direct_ballot_handoff, "collectivePublicKeyRoot")?,
+        "bgvPublicKeyRoot": value_string(direct_ballot_handoff, "bgvPublicKeyRoot")?,
+        "publicKeyShareMaterialSetRoot": value_string(
+            direct_ballot_handoff,
+            "publicKeyShareMaterialSetRoot",
+        )?,
+        "publicKeyShareSuccinctProofSetRoot": value_string(
+            direct_ballot_handoff,
+            "publicKeyShareSuccinctProofSetRoot",
+        )?,
+        "commonRandomness": common_randomness,
+        "collectivePublicKey": collective_public_key,
+    }))
+}
+
+fn direct_ballot_bgv_public_key_root_from_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupPackage.commonRandomness is required",
+        )
+    })?;
+    let collective_public_key = setup_package.get("collectivePublicKey").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupPackage.collectivePublicKey is required",
+        )
+    })?;
+    let aggregate_limb_hashes = collective_public_key
+        .get("aggregateCoefficientVectorsByLimb")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage.collectivePublicKey.aggregateCoefficientVectorsByLimb is required",
+            )
+        })?
+        .iter()
+        .map(|aggregate_limb| {
+            Ok(json!({
+                "rnsLimbIndex": value_u64(aggregate_limb, "rnsLimbIndex")?,
+                "rnsPrime": value_u64(aggregate_limb, "rnsPrime")?,
+                "component": value_string(aggregate_limb, "component")?,
+                "coefficientByteLength": value_u64(aggregate_limb, "coefficientByteLength")?,
+                "coefficientVectorHash512": value_string(
+                    aggregate_limb,
+                    "coefficientVectorHash512",
+                )?,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    derive_protocol_hash(
+        "BGVPublicKeyRoot",
+        &json!({
+            "objectType": "AcceptedBgvPublicKeyRootBinding",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "bgvProfileHash": profile_hash()?,
+            "collectivePublicKeyRoot": value_string(
+                collective_public_key,
+                "collectivePublicKeyRoot",
+            )?,
+            "publicMatrixSeedHash": value_string(common_randomness, "publicMatrixSeedHash")?,
+            "publicAPolynomialRoot": value_string(collective_public_key, "publicAPolynomialRoot")?,
+            "publicKeyShareMaterialSetRoot": value_string(
+                collective_public_key,
+                "publicKeyShareMaterialSetRoot",
+            )?,
+            "publicKeyShareSuccinctProofSetRoot": value_string(
+                collective_public_key,
+                "publicKeyShareSuccinctProofSetRoot",
+            )?,
+            "aggregateCoefficientVectorHashesByLimb": aggregate_limb_hashes,
+        }),
+    )
 }
 
 fn outside_profile(
@@ -1854,4 +2041,182 @@ fn reject_accepted_setup_forbidden_request_fields(request: &Value) -> CanonicalR
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod accepted_setup_response_tests {
+    use super::*;
+
+    #[test]
+    fn accepted_setup_response_returns_direct_ballot_material_bound_to_handoff() {
+        let public_key_share_material_set_root =
+            unit_hash("public key share material set root").expect("material root");
+        let public_key_share_succinct_proof_set_root =
+            unit_hash("public key share succinct proof set root").expect("proof root");
+        let public_matrix_seed_hash =
+            unit_hash("public matrix seed hash").expect("public matrix seed hash");
+        let public_a_polynomial_root =
+            unit_hash("public A polynomial root").expect("public A polynomial root");
+
+        let mut collective_public_key = json!({
+            "objectType": "CollectivePublicKey",
+            "objectVersion": 1,
+            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+            "publicMatrixSeedHash": public_matrix_seed_hash,
+            "publicAPolynomialRoot": public_a_polynomial_root,
+            "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
+            "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root,
+            "aggregateCoefficientVectorsByLimb": [{
+                "rnsLimbIndex": 0,
+                "rnsPrime": 65537,
+                "component": "b",
+                "coefficientByteLength": 8,
+                "coefficientVectorHash512": unit_hash("aggregate coefficient vector")
+                    .expect("aggregate coefficient vector hash"),
+            }],
+        });
+        let collective_public_key_root =
+            derive_protocol_hash("CollectivePublicKeyRoot", &collective_public_key)
+                .expect("collective public key root");
+        collective_public_key["collectivePublicKeyRoot"] = json!(collective_public_key_root);
+
+        let package = json!({
+            "objectType": SETUP_PACKAGE_OBJECT_TYPE,
+            "setupContext": {
+                "ceremonyId": "accepted-setup-response-test",
+                "manifestHash": unit_hash("manifest").expect("manifest hash"),
+                "rosterHash": unit_hash("roster").expect("roster hash"),
+                "setupProfileHash": unit_hash("setup profile").expect("setup profile hash"),
+                "qShareHash": unit_hash("Q share").expect("Q share hash"),
+                "commitmentProfileHash": unit_hash("commitment profile")
+                    .expect("commitment profile hash"),
+                "setupEpoch": "0",
+            },
+            "setupPackageHash": unit_hash("setup package").expect("setup package hash"),
+            "commonRandomness": {
+                "objectType": "SetupCommonRandomness",
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "publicDerivations": {},
+            },
+            "collectivePublicKey": collective_public_key,
+            "publicKeyShareMaterial": {
+                "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
+            },
+            "publicKeyShareSuccinctProofs": {
+                "publicKeyShareSuccinctProofSetRoot": public_key_share_succinct_proof_set_root,
+            },
+            "thresholdShareCommitments": {
+                "thresholdShareCommitmentRoot": unit_hash("threshold share commitments")
+                    .expect("threshold share commitment root"),
+            },
+            "evaluatorKeySchedule": {
+                "evaluatorKeyScheduleRoot": unit_hash("evaluator key schedule")
+                    .expect("evaluator key schedule root"),
+            },
+            "relinearizationKeyShareRounds": {
+                "relinearizationKeyShareRoundsRoot": unit_hash("relinearization key share rounds")
+                    .expect("relinearization key share rounds root"),
+            },
+            "trusteeEvaluationKeyProofs": {
+                "trusteeEvaluationKeyProofSetRoot": unit_hash("trustee evaluation-key proofs")
+                    .expect("trustee evaluation-key proof set root"),
+            },
+            "evaluationKeys": {
+                "evaluationKeySetHash": unit_hash("evaluation keys")
+                    .expect("evaluation key set hash"),
+            },
+            "heSecurityCertificate": {
+                "targetDecryptionStatus": {
+                    "targetDecryptionReadiness": "downstream",
+                    "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+                },
+            },
+            "setupCommitmentSecurityCertificateHash": unit_hash("setup commitment certificate")
+                .expect("setup commitment certificate hash"),
+            "setupTransportCertificateHash": unit_hash("setup transport certificate")
+                .expect("setup transport certificate hash"),
+            "setupProofAccountingCertificateHash": unit_hash("setup proof accounting certificate")
+                .expect("setup proof accounting certificate hash"),
+            "setupKeyCorrectnessCertificateHash": unit_hash("setup key correctness certificate")
+                .expect("setup key correctness certificate hash"),
+            "activeStaticSetupTheoremCertificateHash": unit_hash("active static theorem certificate")
+                .expect("active static theorem certificate hash"),
+            "heSecurityCertificateHash": unit_hash("HE security certificate")
+                .expect("HE security certificate hash"),
+        });
+
+        let response =
+            accepted_setup_verification_response(&package).expect("accepted setup response");
+        let accepted_setup_handoff = &response["acceptedSetupHandoff"];
+        let accepted_public_key_material = &response["acceptedPublicKeyMaterial"];
+        let expected_bgv_public_key_root =
+            direct_ballot_bgv_public_key_root_from_setup_package(&package)
+                .expect("direct ballot BGV public key root");
+
+        assert_eq!(response["verifierStatus"], "accepted");
+        assert_eq!(
+            accepted_public_key_material["objectType"],
+            "DirectBallotAcceptedPublicKeyMaterial"
+        );
+        assert_eq!(
+            accepted_public_key_material["acceptedSetupHandoffRoot"],
+            accepted_setup_handoff["acceptedSetupHandoffRoot"]
+        );
+        assert_eq!(
+            accepted_public_key_material["setupPackageHash"],
+            package["setupPackageHash"]
+        );
+        assert_eq!(
+            accepted_public_key_material["commonRandomness"],
+            package["commonRandomness"]
+        );
+        assert_eq!(
+            accepted_public_key_material["collectivePublicKey"],
+            package["collectivePublicKey"]
+        );
+        assert_eq!(
+            accepted_public_key_material["bgvPublicKeyRoot"],
+            expected_bgv_public_key_root
+        );
+        assert_eq!(
+            accepted_setup_handoff["directBallotEncryptionHandoff"]["bgvPublicKeyRoot"],
+            expected_bgv_public_key_root
+        );
+        assert!(
+            accepted_setup_handoff["directBallotEncryptionHandoff"]
+                .get("supportedBallotCreationPolicy")
+                .is_none(),
+            "accepted setup handoff must bind the direct ballot creation policy by hash, not embed the policy body"
+        );
+        assert_eq!(
+            accepted_setup_handoff["directBallotEncryptionHandoff"]["supportedBallotCreationPolicyHash"],
+            direct_ballot_creation_policy_hash().expect("direct ballot creation policy hash")
+        );
+        let accepted_setup_handoff_json =
+            serde_json::to_string(accepted_setup_handoff).expect("accepted setup handoff JSON");
+        for forbidden_fragment in [
+            "setupSeed",
+            "setupPrivateWitness",
+            "proofRandomnessSeedHex",
+            "developmentPlaintext",
+        ] {
+            assert!(
+                !accepted_setup_handoff_json.contains(forbidden_fragment),
+                "accepted setup handoff must not contain {forbidden_fragment}"
+            );
+        }
+        assert!(
+            package["collectivePublicKey"]
+                .get("bgvPublicKeyRoot")
+                .is_none(),
+            "accepted setup response must derive the direct ballot BGV public-key root instead of requiring a package field"
+        );
+    }
+
+    fn unit_hash(label: &str) -> CanonicalResult<String> {
+        Ok(crate::hashing::hash512_hex(
+            "sealed-lattice/accepted-setup-response-test-hash-v1",
+            &[label.as_bytes()],
+        ))
+    }
 }

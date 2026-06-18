@@ -1,4 +1,8 @@
 use super::*;
+use crate::bgv::direct_ballots::{
+    aggregate_direct_encrypted_ballot_packages, create_direct_encrypted_ballot_packages,
+    verify_direct_encrypted_ballot_package,
+};
 
 #[test]
 fn collective_setup_verifier_refuses_forbidden_accepted_path_material() {
@@ -419,7 +423,15 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
     );
     assert_eq!(
         direct_ballot_handoff["bgvPublicKeyRoot"],
-        package["collectivePublicKey"]["bgvPublicKeyRoot"]
+        result["acceptedPublicKeyMaterial"]["bgvPublicKeyRoot"]
+    );
+    assert_eq!(
+        result["acceptedPublicKeyMaterial"]["objectType"],
+        "DirectBallotAcceptedPublicKeyMaterial"
+    );
+    assert_eq!(
+        result["acceptedPublicKeyMaterial"]["acceptedSetupHandoffRoot"],
+        accepted_handoff["acceptedSetupHandoffRoot"]
     );
     assert_eq!(
         direct_ballot_handoff["bgvProfileHash"],
@@ -462,7 +474,18 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         direct_ballot_handoff["acceptedPublicKeyMaterial"]["publicKeyShareMaterialSetRoot"],
         package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
     );
-    let ballot_creation_policy = &direct_ballot_handoff["supportedBallotCreationPolicy"];
+    assert!(
+        direct_ballot_handoff
+            .get("supportedBallotCreationPolicy")
+            .is_none(),
+        "accepted setup handoff must bind the direct ballot creation policy by hash, not embed the policy body"
+    );
+    assert_eq!(
+        direct_ballot_handoff["supportedBallotCreationPolicyHash"],
+        direct_ballot_creation_policy_hash().expect("direct ballot creation policy hash")
+    );
+    let ballot_creation_policy =
+        direct_ballot_creation_policy_value().expect("direct ballot creation policy");
     assert_eq!(
         ballot_creation_policy["acceptedPackageObjectType"],
         "EncryptedBallotPackage"
@@ -526,6 +549,274 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
             "accepted setup handoff must not contain {forbidden_fragment}"
         );
     }
+}
+
+#[test]
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow",
+    );
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+
+    let setup_verification = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+        "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+        "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+    }))
+    .expect("accepted setup verification response");
+
+    assert_eq!(
+        setup_verification["verifierStatus"],
+        "accepted",
+        "terminal setup verification result: {}",
+        serde_json::to_string_pretty(&setup_verification)
+            .expect("terminal setup verification JSON")
+    );
+    terminal_phase("verified accepted setup package");
+
+    let accepted_setup_handoff = setup_verification["acceptedSetupHandoff"].clone();
+    let accepted_public_key_material = setup_verification["acceptedPublicKeyMaterial"].clone();
+    let setup_context = &package["setupContext"];
+    assert_eq!(
+        setup_context["participantCount"],
+        serde_json::json!(10),
+        "direct-route setup fixture must use the first-profile roster size"
+    );
+    assert_eq!(setup_context["qSetupComplete"], serde_json::json!(10));
+    assert_eq!(setup_context["qBallotRelease"], serde_json::json!(10));
+    assert_eq!(setup_context["qFinal"], serde_json::json!(10));
+    assert_eq!(setup_context["qDec"], serde_json::json!(4));
+    assert_eq!(
+        accepted_public_key_material["objectType"],
+        "DirectBallotAcceptedPublicKeyMaterial"
+    );
+    assert_eq!(
+        accepted_setup_handoff["ceremonyId"],
+        setup_context["ceremonyId"]
+    );
+    assert_eq!(
+        accepted_setup_handoff["manifestHash"],
+        setup_context["manifestHash"]
+    );
+    assert_eq!(
+        accepted_setup_handoff["rosterHash"],
+        setup_context["rosterHash"]
+    );
+    assert_eq!(
+        accepted_setup_handoff["setupProfileHash"],
+        setup_context["setupProfileHash"]
+    );
+    assert_eq!(
+        accepted_public_key_material["ceremonyId"],
+        setup_context["ceremonyId"]
+    );
+    assert_eq!(
+        accepted_public_key_material["manifestHash"],
+        setup_context["manifestHash"]
+    );
+    assert_eq!(
+        accepted_public_key_material["rosterHash"],
+        setup_context["rosterHash"]
+    );
+    assert_eq!(
+        accepted_public_key_material["setupPackageHash"],
+        package["setupPackageHash"]
+    );
+    assert_eq!(
+        accepted_public_key_material["thresholdProfileHash"],
+        accepted_setup_handoff["thresholdProfileHash"]
+    );
+    assert_eq!(
+        accepted_public_key_material["acceptedSetupHandoffRoot"],
+        accepted_setup_handoff["acceptedSetupHandoffRoot"]
+    );
+    assert_eq!(
+        accepted_public_key_material["collectivePublicKeyRoot"],
+        package["collectivePublicKey"]["collectivePublicKeyRoot"]
+    );
+    assert_eq!(
+        accepted_public_key_material["bgvPublicKeyRoot"],
+        accepted_setup_handoff["directBallotEncryptionHandoff"]["bgvPublicKeyRoot"]
+    );
+    assert_eq!(
+        direct_ballot_creation_policy_value().expect("direct ballot creation policy")["optionCount"],
+        serde_json::json!(20)
+    );
+    assert_eq!(
+        direct_ballot_creation_policy_value().expect("direct ballot creation policy")["scoreDomain"]
+            ["minimum"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        direct_ballot_creation_policy_value().expect("direct ballot creation policy")["scoreDomain"]
+            ["maximum"],
+        serde_json::json!(10)
+    );
+    terminal_phase("checked direct ballot setup-output bindings");
+
+    let ballot_encryption_seed_hex = "11".repeat(32);
+    let proof_mask_seed_hex = "22".repeat(32);
+    let action_context_hash = derive_protocol_hash(
+        "ActionContextHash",
+        &serde_json::json!({
+            "action": "accepted setup output direct encrypted ballot package flow",
+            "ballotIndex": 0
+        }),
+    )
+    .expect("action context hash");
+    let ballots = serde_json::json!([{
+        "voterIdentity": "voter-accepted-setup-output",
+        "voterRosterPosition": 0,
+        "actionContextHash": action_context_hash,
+        "recoveryEpoch": 0,
+        "deviceEpoch": 0,
+        "scores": [
+            10, 9, 8, 7, 6,
+            5, 4, 3, 2, 1,
+            1, 2, 3, 4, 5,
+            6, 7, 8, 9, 10
+        ]
+    }]);
+
+    let mut drifted_public_key_material = accepted_public_key_material.clone();
+    drifted_public_key_material["acceptedSetupHandoffRoot"] = serde_json::json!("0".repeat(128));
+    let drift_error = create_direct_encrypted_ballot_packages(&serde_json::json!({
+        "acceptedPublicKeyMaterial": drifted_public_key_material,
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "ballotEncryptionRandomness": {
+            "source": "fresh-csprng",
+            "encryptionSeedHexes": [ballot_encryption_seed_hex.clone()]
+        },
+        "proofMaskRandomness": {
+            "source": "fresh-csprng",
+            "ballotProofRandomnessHexes": [proof_mask_seed_hex.clone()]
+        },
+        "ballots": ballots.clone()
+    }))
+    .expect_err("direct ballot creation must reject material that is not bound to the accepted setup handoff");
+
+    assert_eq!(
+        drift_error.code,
+        CanonicalErrorCode::ProfileComponentMismatch
+    );
+    assert!(
+        drift_error
+            .message
+            .contains("acceptedPublicKeyMaterial.acceptedSetupHandoffRoot"),
+        "unexpected drift refusal: {}",
+        drift_error.message
+    );
+
+    let package_creation = create_direct_encrypted_ballot_packages(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "ballotEncryptionRandomness": {
+            "source": "fresh-csprng",
+            "encryptionSeedHexes": [ballot_encryption_seed_hex]
+        },
+        "proofMaskRandomness": {
+            "source": "fresh-csprng",
+            "ballotProofRandomnessHexes": [proof_mask_seed_hex]
+        },
+        "ballots": ballots
+    }))
+    .expect("direct ballot package creation consumes accepted setup verifier output");
+    terminal_phase("created direct encrypted ballot package");
+
+    assert_eq!(
+        package_creation["operation"],
+        "createDirectEncryptedBallotPackages"
+    );
+    assert_eq!(
+        package_creation["packageCreation"]["setupHandoffRoot"],
+        accepted_setup_handoff["acceptedSetupHandoffRoot"]
+    );
+    assert_eq!(
+        package_creation["proofAttempt"]["proofTransport"]["chunksPerProof"],
+        package_creation["encryptedBallotPackages"][0]["proofChunkManifest"]["chunkCount"]
+    );
+    assert_eq!(
+        package_creation["proofAttempt"]["proofCostEvidence"]["proofSizeBytes"],
+        package_creation["proofAttempt"]["proofSizeBytes"]
+    );
+    assert_eq!(
+        package_creation["proofAttempt"]["proofCostEvidence"]["proofChunkCount"],
+        package_creation["proofAttempt"]["proofTransport"]["chunksPerProof"]
+    );
+
+    let package_record = package_creation["encryptedBallotPackages"][0].clone();
+    let signature_fixture = create_protocol_signature_fixture(
+        "accepted-setup-output-direct-ballot-voter",
+        package_record["voterSignatureSignedRoot"].clone(),
+    )
+    .expect("voter signature fixture");
+    let mut signed_package = package_record["encryptedBallotPackage"].clone();
+    signed_package["signature"] = signature_fixture.envelope.clone();
+    let voter_signing_public_key_hash = signature_fixture.public_key_hash.clone();
+
+    let package_verification = verify_direct_encrypted_ballot_package(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash.clone(),
+        "encryptedBallotPackage": signed_package.clone(),
+        "proofChunks": package_record["proofChunks"].clone(),
+    }))
+    .expect("direct ballot package verification consumes accepted setup verifier output");
+    terminal_phase("verified direct encrypted ballot package");
+
+    assert_eq!(
+        package_verification["operation"],
+        "verifyDirectEncryptedBallotPackage"
+    );
+    assert_eq!(
+        package_verification["acceptedSetupHandoffRoot"],
+        accepted_setup_handoff["acceptedSetupHandoffRoot"]
+    );
+    assert_eq!(
+        package_verification["packageVerificationCertificate"]["publicAggregationInput"]["acceptedSetupHandoffRoot"],
+        accepted_setup_handoff["acceptedSetupHandoffRoot"]
+    );
+    assert_eq!(
+        package_verification["packageVerificationCertificate"]["publicAggregationInput"]["proofProfileHash"],
+        package_record["encryptedBallotPackage"]["proofProfileHash"]
+    );
+    assert_eq!(
+        package_verification["packageVerificationCertificate"]["publicAggregationInput"]["proofChunkRoot"],
+        package_record["proofChunkManifestRoot"]
+    );
+
+    let aggregate = aggregate_direct_encrypted_ballot_packages(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material,
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "encryptedBallotPackages": [{
+            "voterSigningPublicKeyHash": voter_signing_public_key_hash,
+            "encryptedBallotPackage": signed_package,
+            "proofChunks": package_record["proofChunks"].clone(),
+        }]
+    }))
+    .expect("direct ballot aggregation consumes accepted setup verifier output");
+    terminal_phase("aggregated direct encrypted ballot package");
+
+    assert_eq!(
+        aggregate["operation"],
+        "aggregateDirectEncryptedBallotPackages"
+    );
+    assert_eq!(
+        aggregate["acceptedSetupHandoffRoot"],
+        accepted_setup_handoff["acceptedSetupHandoffRoot"]
+    );
+    assert_eq!(aggregate["ballotCount"], 1);
+    assert_eq!(
+        aggregate["aggregateCertificate"]["packageVerificationInputs"][0]["packageRoot"],
+        package_record["encryptedBallotPackageRoot"]
+    );
 }
 
 #[test]

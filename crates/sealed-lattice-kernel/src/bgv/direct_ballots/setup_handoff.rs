@@ -237,8 +237,9 @@ fn verify_handoff_direct_ballot_binding(
         &direct_ballot_creation_policy_hash()?,
         "directBallotEncryptionHandoff.supportedBallotCreationPolicyHash",
     )?;
-    if direct_ballot_handoff.get("supportedBallotCreationPolicy")
-        != Some(&direct_ballot_creation_policy_value()?)
+    if let Some(supported_ballot_creation_policy) =
+        direct_ballot_handoff.get("supportedBallotCreationPolicy")
+        && supported_ballot_creation_policy != &direct_ballot_creation_policy_value()?
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,

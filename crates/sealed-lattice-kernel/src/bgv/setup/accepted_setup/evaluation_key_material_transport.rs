@@ -1514,12 +1514,14 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<usize, KeySwitchKey>> {
+    accepted_setup_verifier_phase("loading accepted public relinearization key material");
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
     let transported_key_switch_component_material = request
         .get("transportedEvaluationKeyShareComponentMaterial")
         .or(transported_key_switch_component_material.as_ref());
+    let mut component_material_cache = EvaluationKeyShareComponentMaterialCache::default();
     let rounds = setup_package
         .get("relinearizationKeyShareRounds")
         .ok_or_else(|| {
@@ -1599,10 +1601,11 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
                     "accepted public relinearization key runtime material requires profile-ring component vectors",
                 ));
             }
-            let component_b = component_b_vectors_from_record(
+            let component_b = component_b_vectors_from_record_with_cache(
                 EvaluationKeyShareProofFamily::Relinearization,
                 proof_record,
                 transported_key_switch_component_material,
+                &mut component_material_cache,
             )?;
             add_accepted_key_switch_component_b(
                 &mut aggregate_component_b,
@@ -1623,7 +1626,11 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
             aggregate_component_b,
         )?;
         relinearization_keys.insert(level_usize, key_switch_key);
+        accepted_setup_verifier_phase(&format!(
+            "loaded accepted public relinearization key level {level}"
+        ));
     }
+    accepted_setup_verifier_phase("loaded accepted public relinearization key material");
 
     Ok(relinearization_keys)
 }
@@ -1632,12 +1639,14 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<BTreeMap<(usize, usize), KeySwitchKey>> {
+    accepted_setup_verifier_phase("loading accepted public Galois key material");
     let binding = evaluation_key_proof_common_binding(setup_package)?;
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
     let transported_key_switch_component_material = request
         .get("transportedEvaluationKeyShareComponentMaterial")
         .or(transported_key_switch_component_material.as_ref());
+    let mut component_material_cache = EvaluationKeyShareComponentMaterialCache::default();
     let batches = setup_package
         .get("galoisKeyShareBatches")
         .and_then(Value::as_array)
@@ -1702,10 +1711,11 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
                     "accepted public Galois key runtime material requires profile-ring component vectors",
                 ));
             }
-            let component_b = component_b_vectors_from_record(
+            let component_b = component_b_vectors_from_record_with_cache(
                 EvaluationKeyShareProofFamily::Galois,
                 proof_record,
                 transported_key_switch_component_material,
+                &mut component_material_cache,
             )?;
             add_accepted_key_switch_component_b(
                 &mut aggregate_component_b,
@@ -1726,7 +1736,11 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
             aggregate_component_b,
         )?;
         rotation_keys.insert((rotation_usize, level_usize), key_switch_key);
+        accepted_setup_verifier_phase(&format!(
+            "loaded accepted public Galois key rotation {rotation} level {level}"
+        ));
     }
+    accepted_setup_verifier_phase("loaded accepted public Galois key material");
 
     Ok(rotation_keys)
 }

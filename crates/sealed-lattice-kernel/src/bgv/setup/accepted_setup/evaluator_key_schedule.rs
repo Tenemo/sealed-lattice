@@ -324,19 +324,27 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
     setup_package: &Value,
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
+    accepted_setup_verifier_phase("checking relinearization key share rounds");
     if let Some(response) = verify_relinearization_key_share_rounds(setup_package, request)? {
         return Ok(Some(response));
     }
+    accepted_setup_verifier_phase("verified relinearization key share rounds");
+    accepted_setup_verifier_phase("checking Galois key share batches");
     if let Some(response) = verify_galois_key_share_batches(setup_package, request)? {
         return Ok(Some(response));
     }
+    accepted_setup_verifier_phase("verified Galois key share batches");
+    accepted_setup_verifier_phase("checking trustee evaluation-key proofs");
     if let Some(response) = verify_trustee_evaluation_key_proofs(setup_package, request)? {
         return Ok(Some(response));
     }
+    accepted_setup_verifier_phase("verified trustee evaluation-key proofs");
 
+    accepted_setup_verifier_phase("checking optional public evaluation-key set");
     if let Some(response) = verify_public_evaluation_key_set(setup_package, request, false)? {
         return Ok(Some(response));
     }
+    accepted_setup_verifier_phase("verified optional public evaluation-key set");
 
     Ok(None)
 }

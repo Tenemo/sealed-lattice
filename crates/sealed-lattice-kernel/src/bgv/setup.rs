@@ -31,6 +31,8 @@ mod vss;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+pub(crate) use accepted_setup::accepted_setup_verification_response_for_test;
 pub(crate) use accepted_setup::{
     COLLECTIVE_BGV_SETUP_PROFILE_ID, derive_collective_bgv_setup_public_derivations_from_request,
     describe_collective_bgv_setup_profile, direct_ballot_creation_policy_hash,

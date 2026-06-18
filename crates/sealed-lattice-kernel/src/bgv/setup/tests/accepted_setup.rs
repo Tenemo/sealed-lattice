@@ -56,7 +56,7 @@ use self::proof_record_fixtures::{
     replace_public_key_share_hashes_with_material_hashes,
     round_one_aggregate_diagonals_from_fixture_package,
     same_secret_constant_commitments_from_fixture_package, same_secret_proofs_object,
-    trustee_evaluation_key_proofs_object,
+    terminal_accepted_setup_checkpoint_resume_enabled, trustee_evaluation_key_proofs_object,
     trustee_evaluation_key_proofs_object_with_terminal_transport,
     trustee_evaluation_key_witness_for_fixture,
 };
@@ -93,6 +93,7 @@ use super::super::accepted_setup::{
     accepted_setup_public_galois_keys_from_transport,
     accepted_setup_public_relinearization_keys_from_transport,
     active_static_setup_theorem_certificate_hash, active_static_setup_theorem_certificate_value,
+    direct_ballot_creation_policy_hash, direct_ballot_creation_policy_value,
     encode_public_evaluation_key_material_manifest, public_evaluation_key_material_manifest,
     public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
     public_key_share_coefficient_vector_hash, public_key_share_material_transport_hashes,

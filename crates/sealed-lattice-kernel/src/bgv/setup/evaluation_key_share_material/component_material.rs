@@ -300,11 +300,37 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
 }
 
 #[cfg(test)]
-fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf {
-    PathBuf::from("temp")
+fn accepted_setup_material_store_root_directory() -> PathBuf {
+    let crate_directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let crates_directory = crate_directory
+        .parent()
+        .expect("kernel crate directory has a parent");
+    let repository_root = crates_directory
+        .parent()
+        .expect("kernel crate lives under the repository crates directory");
+    repository_root
+        .join("temp")
         .join("test-checkpoints")
         .join("terminal-accepted-setup-material-store")
-        .join("evaluation-key-component-material")
+}
+
+#[cfg(test)]
+fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf {
+    accepted_setup_material_store_root_directory().join("evaluation-key-component-material")
+}
+
+#[cfg(test)]
+fn legacy_verified_evaluation_key_share_component_material_store_directory() -> Option<PathBuf> {
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join("evaluation-key-component-material");
+    if directory == verified_evaluation_key_share_component_material_store_directory() {
+        None
+    } else {
+        Some(directory)
+    }
 }
 
 #[cfg(test)]
@@ -327,56 +353,75 @@ fn write_verified_evaluation_key_share_component_material_chunks(
             })
     })?;
     let directory = verified_evaluation_key_share_component_material_store_directory();
-    fs::create_dir_all(&directory).map_err(|error| {
-        invalid_evaluation_key_share_material(format!(
-            "verified evaluation-key component material store could not be created: {error}",
-        ))
-    })?;
     let path = directory.join(format!("{material_root}.bin"));
     let metadata_path = path.with_extension("metadata.json");
     let metadata = verified_evaluation_key_share_component_material_store_metadata(
         material_root,
         transport_hashes,
     );
-    let cache_entry_matches =
-        verified_evaluation_key_share_component_material_store_metadata_matches(
-            &path,
-            &metadata_path,
+    if verified_evaluation_key_share_component_material_store_metadata_matches(
+        &path,
+        &metadata_path,
+        total_byte_length,
+        &metadata,
+    )? {
+        return Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+            path,
+            total_byte_length,
+        });
+    }
+    if let Some(legacy_directory) =
+        legacy_verified_evaluation_key_share_component_material_store_directory()
+    {
+        let legacy_path = legacy_directory.join(format!("{material_root}.bin"));
+        let legacy_metadata_path = legacy_path.with_extension("metadata.json");
+        if verified_evaluation_key_share_component_material_store_metadata_matches(
+            &legacy_path,
+            &legacy_metadata_path,
             total_byte_length,
             &metadata,
-        )?;
-    if !cache_entry_matches {
-        if metadata_path.exists() {
-            fs::remove_file(&metadata_path).map_err(|error| {
-                invalid_evaluation_key_share_material(format!(
-                    "verified evaluation-key component material store metadata could not be refreshed: {error}",
-                ))
-            })?;
+        )? {
+            return Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+                path: legacy_path,
+                total_byte_length,
+            });
         }
-        let mut file = File::create(&path).map_err(|error| {
+    }
+    fs::create_dir_all(&directory).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store could not be created: {error}",
+        ))
+    })?;
+    if metadata_path.exists() {
+        fs::remove_file(&metadata_path).map_err(|error| {
             invalid_evaluation_key_share_material(format!(
-                "verified evaluation-key component material store entry could not be created: {error}",
-            ))
-        })?;
-        for chunk in chunks {
-            file.write_all(chunk).map_err(|error| {
-                invalid_evaluation_key_share_material(format!(
-                    "verified evaluation-key component material store entry could not be written: {error}",
-                ))
-            })?;
-        }
-        drop(file);
-        let metadata_bytes = serde_json::to_vec(&metadata).map_err(|error| {
-            invalid_evaluation_key_share_material(format!(
-                "verified evaluation-key component material store metadata could not be encoded: {error}",
-            ))
-        })?;
-        fs::write(&metadata_path, metadata_bytes).map_err(|error| {
-            invalid_evaluation_key_share_material(format!(
-                "verified evaluation-key component material store metadata could not be written: {error}",
+                "verified evaluation-key component material store metadata could not be refreshed: {error}",
             ))
         })?;
     }
+    let mut file = File::create(&path).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store entry could not be created: {error}",
+        ))
+    })?;
+    for chunk in chunks {
+        file.write_all(chunk).map_err(|error| {
+            invalid_evaluation_key_share_material(format!(
+                "verified evaluation-key component material store entry could not be written: {error}",
+            ))
+        })?;
+    }
+    drop(file);
+    let metadata_bytes = serde_json::to_vec(&metadata).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata could not be encoded: {error}",
+        ))
+    })?;
+    fs::write(&metadata_path, metadata_bytes).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata could not be written: {error}",
+        ))
+    })?;
 
     Ok(VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
         path,
@@ -567,10 +612,11 @@ fn evaluation_key_share_component_material_chunk_hash(
     ))
 }
 
-pub(in crate::bgv::setup) fn component_b_vectors_from_record(
+pub(in crate::bgv::setup) fn component_b_vectors_from_record_with_cache<'a>(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
-    transported_key_switch_component_material: Option<&Value>,
+    transported_key_switch_component_material: Option<&'a Value>,
+    component_material_cache: &mut EvaluationKeyShareComponentMaterialCache<'a>,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     match string_field(record, "keySwitchMaterialEncoding")? {
         "embedded-full-key-switch-component-vectors" => {
@@ -604,6 +650,7 @@ pub(in crate::bgv::setup) fn component_b_vectors_from_record(
                 proof_family,
                 record,
                 transported_material_set,
+                component_material_cache,
             )
         }
         _ => Err(invalid_evaluation_key_share_material(
@@ -718,10 +765,11 @@ fn component_b_vectors_from_embedded_record(
     Ok(component_b_by_digit)
 }
 
-fn component_b_vectors_from_transported_material(
+fn component_b_vectors_from_transported_material<'a>(
     proof_family: EvaluationKeyShareProofFamily,
     record: &Value,
-    material_set: &Value,
+    material_set: &'a Value,
+    component_material_cache: &mut EvaluationKeyShareComponentMaterialCache<'a>,
 ) -> CanonicalResult<Vec<Vec<Vec<u64>>>> {
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
@@ -738,26 +786,23 @@ fn component_b_vectors_from_transported_material(
         ));
     }
     let expected_material_root = string_field(record, "keySwitchComponentMaterialRoot")?;
-    let component_materials = array_field(material_set, "componentMaterials")?;
-    let mut matching_component_material = None;
-    for component_material in component_materials {
-        if string_field(component_material, "keySwitchComponentMaterialRoot")?
-            != expected_material_root
-        {
-            continue;
+    let component_materials_by_root =
+        component_material_cache.transported_materials_by_root(material_set)?;
+    let component_material = match component_materials_by_root.get(expected_material_root) {
+        Some(TransportedEvaluationKeyShareComponentMaterialEntry::Single(component_material)) => {
+            *component_material
         }
-        if matching_component_material.is_some() {
+        Some(TransportedEvaluationKeyShareComponentMaterialEntry::Duplicate) => {
             return Err(invalid_evaluation_key_share_material(
                 "transported evaluation-key component material contains duplicate keySwitchComponentMaterialRoot entries",
             ));
         }
-        matching_component_material = Some(component_material);
-    }
-    let component_material = matching_component_material.ok_or_else(|| {
-        invalid_evaluation_key_share_material(
-            "transported evaluation-key component material is missing the requested keySwitchComponentMaterialRoot",
-        )
-    })?;
+        None => {
+            return Err(invalid_evaluation_key_share_material(
+                "transported evaluation-key component material is missing the requested keySwitchComponentMaterialRoot",
+            ));
+        }
+    };
     verify_evaluation_key_share_component_material_header(
         proof_family,
         record,

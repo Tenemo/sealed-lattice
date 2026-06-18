@@ -8,7 +8,7 @@ mod component_material;
 #[cfg(test)]
 mod ring_algebra;
 
-pub(super) use self::component_material::component_b_vectors_from_record;
+pub(super) use self::component_material::component_b_vectors_from_record_with_cache;
 #[cfg(test)]
 pub(super) use self::component_material::{
     KeySwitchComponentBFixtureInput, encode_evaluation_key_share_component_vectors,
@@ -64,6 +64,50 @@ pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TY
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedEvaluationKeyShareComponentMaterial";
 const EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_MAGIC: &[u8; 8] = b"SLEKCMV1";
+
+#[derive(Default)]
+pub(super) struct EvaluationKeyShareComponentMaterialCache<'a> {
+    transported_materials_by_root:
+        Option<BTreeMap<String, TransportedEvaluationKeyShareComponentMaterialEntry<'a>>>,
+}
+
+pub(super) enum TransportedEvaluationKeyShareComponentMaterialEntry<'a> {
+    Single(&'a Value),
+    Duplicate,
+}
+
+impl<'a> EvaluationKeyShareComponentMaterialCache<'a> {
+    fn transported_materials_by_root(
+        &mut self,
+        material_set: &'a Value,
+    ) -> CanonicalResult<&BTreeMap<String, TransportedEvaluationKeyShareComponentMaterialEntry<'a>>>
+    {
+        if self.transported_materials_by_root.is_none() {
+            let component_materials = array_field(material_set, "componentMaterials")?;
+            let mut transported_materials_by_root = BTreeMap::new();
+            for component_material in component_materials {
+                let material_root =
+                    string_field(component_material, "keySwitchComponentMaterialRoot")?.to_string();
+                let previous_entry = transported_materials_by_root.insert(
+                    material_root.clone(),
+                    TransportedEvaluationKeyShareComponentMaterialEntry::Single(component_material),
+                );
+                if previous_entry.is_some() {
+                    transported_materials_by_root.insert(
+                        material_root,
+                        TransportedEvaluationKeyShareComponentMaterialEntry::Duplicate,
+                    );
+                }
+            }
+            self.transported_materials_by_root = Some(transported_materials_by_root);
+        }
+
+        Ok(self
+            .transported_materials_by_root
+            .as_ref()
+            .expect("transported material index was initialized"))
+    }
+}
 
 // Key-share families whose component material this module encodes; the family
 // string scopes the component hash domains and the transported material

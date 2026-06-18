@@ -644,6 +644,14 @@ const PROOF_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
 pub(super) fn setup_package_with_transported_public_setup_companions()
 -> (serde_json::Value, TransportedPublicSetupCompanions) {
     terminal_phase("start profile-ring package fixture");
+    terminal_phase(&format!(
+        "checkpoint resume {}",
+        if terminal_accepted_setup_checkpoint_resume_enabled() {
+            "enabled"
+        } else {
+            "disabled"
+        },
+    ));
     let terminal_profile_ring_fixture =
         terminal_profile_ring_minimal_collective_setup_package_fixture();
     let mut package = terminal_profile_ring_fixture.package;
