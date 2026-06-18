@@ -527,17 +527,18 @@ describe('integrated election foundation transcript', () => {
                 },
             },
         };
-        const legacyObjectBaseInput = createInput();
-        const legacyObjectInput = {
-            ...legacyObjectBaseInput,
+        const wrongObjectTypeBaseInput = createInput();
+        const wrongObjectTypeInput = {
+            ...wrongObjectTypeBaseInput,
             firstValidOrdering: {
-                ...legacyObjectBaseInput.firstValidOrdering,
+                ...wrongObjectTypeBaseInput.firstValidOrdering,
                 objects: [
                     {
-                        ...legacyObjectBaseInput.firstValidOrdering.objects[0],
+                        ...wrongObjectTypeBaseInput.firstValidOrdering
+                            .objects[0],
                         objectType: 'TargetFinalityRecord' as const,
                     },
-                    ...legacyObjectBaseInput.firstValidOrdering.objects.slice(
+                    ...wrongObjectTypeBaseInput.firstValidOrdering.objects.slice(
                         1,
                     ),
                 ],
@@ -593,7 +594,7 @@ describe('integrated election foundation transcript', () => {
             [wrongWitnessProposalInput, 'TargetFinalityPolicyMismatch'],
             [wrongBoardPolicyInput, 'TargetFinalityPolicyMismatch'],
             [proposalNotIncludedInput, 'EvaluatorReplayRecordNotIncluded'],
-            [legacyObjectInput, 'WrongObjectType'],
+            [wrongObjectTypeInput, 'WrongObjectType'],
             [manifestBindingInput, 'ManifestHashMismatch'],
             [ballotProofProfileInput, 'ManifestHashMismatch'],
             [encryptedBallotLayoutInput, 'ManifestHashMismatch'],

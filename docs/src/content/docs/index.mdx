@@ -19,7 +19,7 @@ hero:
                   <li>Install <code>sealed-lattice</code>.</li>
                   <li>Use the current verification helpers for development and integration work.</li>
                   <li>Track the active-static path: setup, proof, aggregation, replay, finality, and target decryption.</li>
-                  <li>Keep production election use out of scope until the complete direct path is implemented, measured, audited, and certified.</li>
+                  <li>Keep production election use out of scope until the complete direct path is implemented.</li>
                 </ol>
               </div>
               <div class="landing-hero-panel__facts">
@@ -39,9 +39,9 @@ hero:
                   <small>One supported npm import path</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Status</span>
-                  <strong>not production-audited</strong>
-                  <small>Use for development and verification tooling</small>
+                  <span class="landing-hero-panel__label">Boundary</span>
+                  <strong>development only</strong>
+                  <small>Read the security guide before relying on evidence</small>
                 </div>
               </div>
             </div>
@@ -92,15 +92,12 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Current limits">
       <div class="landing-card-copy">
         <p>
-          The setup, direct proof, aggregation, and browser evidence are internal
-          development evidence. They are not supported-phone evidence, production
-          readiness, or a complete public voting API.
+          The current package is for development verification and integration
+          work. The complete public voting API is not available yet.
         </p>
         <p>
-          Active-static setup, VSS, accepted ballot package verification, proof
-          soundness, zero-knowledge accounting, public proof transport,
-          bounded-domain evaluator replay, mobile evidence, and target-bound
-          decryption remain open.
+          The security guide points to the canonical threat model, open security
+          ledger, retry policy, audit statement, and cryptographic caveats.
         </p>
       </div>
     </Card>
@@ -155,7 +152,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Security and non-goals"
       href="./guides/security-and-non-goals/"
-      description="Read what the current package does and does not claim."
+      description="Find the canonical repository security policy."
     />
     <LinkCard
       title="Development workflow"

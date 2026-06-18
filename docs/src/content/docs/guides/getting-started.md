@@ -9,7 +9,7 @@ sidebar:
 
 The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, ballot validity proofs for the fixed encrypted-ballot relation, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
 
-The package is under active implementation and has not been independently audited. Use it for development, integration experiments, and verification tooling, not production elections.
+The package is under active implementation. Use it for development, integration experiments, and verification tooling, not production elections, and read the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md) before treating any verification result as security evidence.
 
 ## Install
 
@@ -81,12 +81,12 @@ These helpers are useful for current development verification and package integr
 - public encrypted ballot aggregation APIs
 - public bounded-domain mobile evaluator replay APIs
 - production target-bound decryption or result release
-- production-readiness, audit, certification, or supported-phone claims
+- production security claims; see the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md)
 
 Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching direct-path layer exists.
 
 ## Next reads
 
 - [API reference](../../api/) for the public function and type surface
-- [Security and non-goals](../security-and-non-goals/) for current safety boundaries
+- [Security and non-goals](../security-and-non-goals/) for the canonical security policy pointer
 - [Development workflow](../development-workflow/) for local build and verification commands

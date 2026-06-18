@@ -47,11 +47,20 @@ pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64
         .expect("participant count")
 }
 
-pub(super) fn trustee_evaluation_key_proof_generation_batch_size() -> usize {
+/// An explicit `SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE` override when the
+/// memory-aware heavy test runner (or an operator) set one. When present it is
+/// authoritative for terminal proving concurrency, so a memory-constrained
+/// runner serializes provers regardless of how many cores it reports; absent,
+/// the terminal proving path derives concurrency from the core count instead.
+pub(super) fn explicit_trustee_proof_batch_size_override() -> Option<usize> {
     std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE")
         .ok()
         .and_then(|configured_batch_size| configured_batch_size.parse::<usize>().ok())
         .filter(|configured_batch_size| *configured_batch_size >= 1)
+}
+
+pub(super) fn trustee_evaluation_key_proof_generation_batch_size() -> usize {
+    explicit_trustee_proof_batch_size_override()
         .unwrap_or(DEFAULT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE)
 }
 

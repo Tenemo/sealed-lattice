@@ -79,15 +79,23 @@ fn trustee_evaluation_key_proofs_object_inner(
     let checkpoint_resume_enabled =
         terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
     let trustee_proof_batch_size = if terminal_transport.is_some() {
-        // Full-ring terminal proving: run several provers at once to fill a
-        // modern multi-core workstation instead of strictly one at a time. Each
-        // prover only saturates a few cores through the shared work pool, so size
-        // concurrency to roughly a quarter of the available cores, capped by the
-        // participant count, so concurrent multi-gigabyte prover working sets
-        // scale with (and stay within) the machine's memory.
-        std::thread::available_parallelism()
-            .map(|cores| (cores.get() / 4).max(1))
-            .unwrap_or_else(|_| trustee_evaluation_key_proof_generation_batch_size())
+        // Full-ring terminal proving. An explicit
+        // SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE (set by the memory-aware heavy
+        // test runner from available RAM) is authoritative, so a memory-constrained
+        // runner serializes provers and the build is not killed mid-proving no
+        // matter how many cores the runner reports. Without an explicit override,
+        // run several provers at once to fill a modern multi-core workstation: each
+        // prover only saturates a few cores through the shared work pool, so derive
+        // concurrency from roughly a quarter of the available cores. Either way,
+        // cap by the participant count so the batch never exceeds the trustees
+        // being proved.
+        explicit_trustee_proof_batch_size_override()
+            .or_else(|| {
+                std::thread::available_parallelism()
+                    .ok()
+                    .map(|cores| (cores.get() / 4).max(1))
+            })
+            .unwrap_or_else(trustee_evaluation_key_proof_generation_batch_size)
             .min(same_secret_proofs.len())
     } else {
         trustee_evaluation_key_proof_generation_batch_size()

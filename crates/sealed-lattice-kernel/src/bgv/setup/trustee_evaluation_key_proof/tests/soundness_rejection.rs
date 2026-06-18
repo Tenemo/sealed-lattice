@@ -113,7 +113,7 @@ fn forged_secret_inconsistent_across_limbs_is_rejected() {
 
 #[test]
 fn round_two_proving_rejects_round_one_source_material() {
-    // The confirmed legacy soundness gap: round-two material whose source is
+    // Soundness invariant: round-two material whose source is
     // not secret * (round-one aggregate) must not prove. Build a round-two
     // descriptor whose component material was formed with the round-one
     // source by copying the round-one components under a round-two kind.

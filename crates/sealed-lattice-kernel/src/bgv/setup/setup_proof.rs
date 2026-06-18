@@ -31,7 +31,7 @@ const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte
 // Families whose proof bytes ride the chunked setup proof-material transport:
 // private VSS plus the same-secret linkage anchor, public-key share, and
 // trustee evaluation-key succinct arguments. Their theorem accounting is bound
-// per family rather than through the legacy LNP/tbox profile.
+// per family rather than through one shared profile.
 pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
     "vss-opening-carry",
     "public-key-share",

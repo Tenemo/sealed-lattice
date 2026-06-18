@@ -321,6 +321,25 @@ fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_duplicate_setup_transport_object_root() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_duplicate_setup_transport_object_root",
+    );
+    assert_minimal_collective_setup_package_refused(
+        "setup transport manifest with a duplicate transported object root",
+        |package| {
+            let duplicate_object =
+                package["setupTransportCertificate"]["transportedObjects"][0].clone();
+            package["setupTransportCertificate"]["transportedObjects"]
+                .as_array_mut()
+                .expect("transported objects")
+                .push(duplicate_object);
+        },
+        "transportedObjectRootDuplicate",
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object",

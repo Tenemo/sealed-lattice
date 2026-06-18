@@ -393,6 +393,10 @@ const bgvHeSecurityCertificateBody = (
             command: 'pnpm exec tsx ./tools/ci/run-he-lattice-estimator.ts',
             resultsArtifact:
                 'implementation-documentation/setup-proof-decisions/he-lattice-estimator-results.json',
+            resultsArtifactCanonicalization:
+                'recursively sorted JSON object keys, two-space indentation, trailing newline',
+            resultsArtifactCanonicalSha256:
+                '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399',
             securityEstimatorInputHash: bgvProfile.securityEstimatorInputHash,
             secretModel: 'ND.Ternary',
             errorModel: 'ND.CenteredBinomial(2)',

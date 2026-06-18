@@ -35,12 +35,11 @@ fn galois_transpose_matches_forward_automorphism_inner_product() {
 }
 
 #[test]
-fn legacy_sumcheck_shift_requires_degree_t_residual() {
-    // The old linear-column formulation allowed a false constant to be hidden
-    // by shifting the quotient and adding a term that vanishes on the trace
-    // subgroup. In the residual formulation the same forged slack is zero at
-    // X = 0 but has degree exactly T, so it is rejected only if the residual
-    // column has its own degree-below-T proof.
+fn degree_t_sumcheck_residual_shifts_subgroup_constant() {
+    // A sumcheck residual of degree exactly T can hide a false constant by
+    // adding a term that vanishes on the trace subgroup: the forged slack is
+    // zero at X = 0 but has degree exactly T. This is why the residual column
+    // carries its own degree-below-T low-degree proof, which rejects it.
     let modulus = DATA_PRIMES[0];
     let trace_size = 64_usize;
     let trace_root = pow_mod(

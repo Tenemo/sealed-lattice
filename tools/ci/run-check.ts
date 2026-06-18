@@ -154,8 +154,9 @@ const createPackageManagerLane = (
 
 // The gating lanes run first, in series. The workspace build emits every
 // `dist/` artifact and compiles the Rust kernel to WebAssembly (holding the
-// cargo build lock); the type-check also emits declarations. Keeping both ahead
-// of the parallel phase means no lane writes `dist/` while the test lanes import
+// cargo build lock); the type-check also emits declarations; the smoke package
+// lane stages and hashes the built public package. Keeping these ahead of the
+// parallel phase means no lane writes or stages `dist/` while test lanes import
 // it, and no `cargo` lane competes with the WebAssembly build for `target/`. A
 // failure here makes the rest pointless, so the run stops immediately.
 const buildGatingLanes = (
@@ -172,6 +173,18 @@ const buildGatingLanes = (
         'Type-check workspace',
         'tsc',
         ['run', 'tsc'],
+    ),
+    createPackageManagerLane(
+        packageManagerRunner,
+        'Smoke npm package',
+        'smoke-pack-npm',
+        [
+            'exec',
+            'tsx',
+            './tools/ci/verify-packed-package.ts',
+            '--package-manager',
+            'npm',
+        ],
     ),
 ];
 
@@ -207,13 +220,11 @@ const buildRustKernelLane = (): ValidationLane => ({
 // Independent checks run concurrently against the built output. The docs lane
 // runs the post-build docs commands directly instead of `pnpm run docs:build`,
 // because the standalone docs script rebuilds the workspace and would write
-// `dist/` during the parallel phase. The pack smoke lane still calls its
-// underlying tool directly because its package script rebuilds for standalone
-// use. The commit gate runs the fast Node test project, the non-heavy kernel
-// Node project, and the fast Rust kernel tests. The heavier protocol,
-// kernel-heavy Node project, ignored Rust kernel heavy tests, and the
-// Playwright browser projects stay in their standalone lanes for pre-push
-// verification.
+// `dist/` during the parallel phase. The commit gate runs the fast Node test
+// project, the non-heavy kernel Node project, and the fast Rust kernel tests.
+// The heavier protocol, kernel-heavy Node project, ignored Rust kernel heavy
+// tests, and the Playwright browser projects stay in their standalone lanes for
+// pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -299,13 +310,6 @@ const buildParallelLanes = (
             ],
             name: 'Verify docs',
         },
-        lane('Smoke npm package', 'smoke-pack-npm', [
-            'exec',
-            'tsx',
-            './tools/ci/verify-packed-package.ts',
-            '--package-manager',
-            'npm',
-        ]),
         lane('Verify public package policy', 'package-policy', [
             'exec',
             'tsx',

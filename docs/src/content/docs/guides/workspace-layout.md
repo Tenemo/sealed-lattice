@@ -27,7 +27,7 @@ The repo is a private workspace with one published package, four private TypeScr
 
 ## Why the public facade stays narrow
 
-The goal of the current release is to keep package boundaries safe while the active-static direct encrypted ballot API is still being built. The final public surface will expose direct-path voting and verification operations only after setup/VSS, proof, aggregation, bounded-domain replay, target finality, decryption, and supported-phone mobile evidence gates close.
+The goal of the current release is to keep package boundaries safe while the active-static direct encrypted ballot API is still being built. The final public surface will expose direct-path voting and verification operations only after the matching package APIs are implemented; the security-evidence boundary is maintained in the repository security policy.
 
 ## Enforcement
 

@@ -120,6 +120,8 @@ export default defineConfig(
         'tmp.*/**',
         'node_modules',
         'node_modules/**',
+        'reference-projects',
+        'reference-projects/**',
         'dist',
         'dist/**',
         '**/dist',

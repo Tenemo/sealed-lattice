@@ -6,7 +6,7 @@
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace.
 
-The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy.
+The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
 
 ## Selected direction
 
@@ -27,17 +27,13 @@ profile. The public ballot package boundary is relation-fixed so that the proof
 backend can be replaced if soundness, zero-knowledge, QROM, proof size, or
 mobile-compatible runtime evidence fails to close.
 
-The first claim-bearing mobile profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. That profile is not closed yet.
-
-The setup and target-decryption code derive roster parameters for `3 <= n <= 20` (`q_dec = floor(n/3) + 1` and full-roster quorums `= n`), but `n = 10` is the only profile with current benchmark and certificate work. No runtime, security, or mobile evidence is claimed for `n != 10` until those profiles receive their own certificates and measurements.
-
-Current HE certificate evidence for that first setup/evaluator profile records `Q_data` at about 139.4 classical bits under the pinned `RC.MATZOV` Lattice Estimator row and a labelled `ADPS16(mode=quantum)` context row at about 97.0 bits. That context row is not a conventional 128-bit quantum-safety claim and does not close `Q_target` or target decryption.
+The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. Current security limitations, profile caveats, HE evidence, and target-decryption boundaries are not repeated here; see [SECURITY.md](SECURITY.md).
 
 ## Current package boundary
 
 The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll specification and threshold derivation, lifecycle transition and capability checks, foundation transcript verification through the bundled Rust/WASM kernel, and a set of narrow development helpers for the collective BGV setup ceremony (setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification). Reserved complete-protocol entry points fail closed until their claim gates are actually implemented.
 
-Foundation helpers include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. Browser and mobile-emulated browser coverage is useful package evidence, but it is not supported-phone evidence.
+Foundation helpers include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. The distinction between package evidence and supported-phone evidence is maintained in [SECURITY.md](SECURITY.md).
 
 ## Installation
 
@@ -87,23 +83,19 @@ const thresholdProfile = deriveThresholdProfile({
 ## What is not available yet
 
 - a complete threshold voting workflow;
-- claim-bearing accepted setup for `CollectiveBgvSetup-v1`;
+- production-ready setup ceremony or real-election setup claim;
 - production setup ceremony, VSS, ballot generation, or casting APIs;
 - public encrypted ballot package creation, verification, or accepted proof transport APIs;
 - public encrypted ballot aggregation APIs;
 - public bounded-domain mobile evaluator replay APIs;
 - production target-bound decryption, target recombination, or result release APIs;
-- production-readiness, audit, certification, or supported-phone claims.
+- production security claims; see [SECURITY.md](SECURITY.md).
 
 The public package must not expose raw BGV decryption, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
 
-## Safety boundaries
+## Security
 
-All current setup, ballot, aggregation, evaluator, and target-decryption code is development evidence only. The package must not be used for real ballots or ballot secrecy, and nothing in it is supported-phone, production, audited, or certified.
-
-In particular, the accepted collective BGV setup for `CollectiveBgvSetup-v1` is not claim-complete: a profile-scale Rust terminal setup-package lane now passes, but cross-runtime/public-package confirmation, transport/profile measurement rows, final adversarial package coverage, and final verification gates are still pending. The accepted ballot package path still needs the accepted setup handoff consumer, canonical package and statement schemas, soundness, zero-knowledge, and Fiat-Shamir/QROM accounting, accepted binary proof transport, accepted randomness boundaries, and mobile-compatible proof readiness; supported-phone evidence remains a later runtime target. The evaluator and target-decryption paths still need bounded-domain all-`K_top` replay, target share proof certification, C1-C4 closure, public recombination, and supported-phone evidence.
-
-Development runs on native, Node, desktop browser, or mobile-emulated browser do not count as supported-phone or production evidence. Internal package names, private workspace commands, and fixture evidence are not stable public APIs.
+Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the threat model, open security ledger, retry policy, audit status, and cryptographic caveats.
 
 ## Repository layout
 

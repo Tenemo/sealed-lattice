@@ -27,6 +27,13 @@ import {
     vssSourceTrusteeOpeningState,
 } from './support.js';
 
+const heEstimatorArtifactCanonicalSha256 =
+    '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
+const heEstimatorArtifactPath =
+    'implementation-documentation/setup-proof-decisions/he-lattice-estimator-results.json';
+const heEstimatorArtifactCanonicalization =
+    'recursively sorted JSON object keys, two-space indentation, trailing newline';
+
 describe('accepted setup public package API in Node', () => {
     it('creates a roots-only setup contribution and refuses raw fields in the public record', async () => {
         const kernel = await loadPublicTranscriptCoreKernel();
@@ -389,6 +396,72 @@ describe('accepted setup public package API in Node', () => {
                     .fullMaterialCoefficientBytes,
             ) / setupTransportChunkSizeBytes,
         );
+        const transportedCompanionObjects = [
+            {
+                objectName: 'sameSecretProofMaterial',
+                objectRole: 'same-secret-proof-material',
+                objectRoot: sameSecretProofs.sameSecretProofSetRoot,
+            },
+            {
+                objectName: 'publicKeyShareMaterial',
+                objectRole: 'public-key-share-material',
+                objectRoot:
+                    publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
+            },
+            {
+                objectName: 'publicKeyShareProofMaterial',
+                objectRole: 'public-key-share-proof-material',
+                objectRoot:
+                    publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
+            },
+            {
+                objectName: 'evaluationKeyShareComponentMaterial',
+                objectRole: 'evaluation-key-share-component-material',
+                objectRoot:
+                    relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+            },
+            {
+                objectName: 'evaluationKeyShareProofMaterial',
+                objectRole: 'evaluation-key-share-proof-material',
+                objectRoot:
+                    trusteeEvaluationKeyProofs.trusteeEvaluationKeyProofSetRoot,
+            },
+            {
+                objectName: 'publicEvaluationKeyMaterial',
+                objectRole: 'public-evaluation-key-material',
+                objectRoot: hashFromKernel(
+                    kernel,
+                    'public-evaluation-key-material-root',
+                ),
+            },
+        ].map((transportedObject, transportedObjectIndex) => ({
+            ...transportedObject,
+            byteLength: 4 + transportedObjectIndex,
+            fullObjectHash: hashFromKernel(
+                kernel,
+                `transported-companion-full-object-${String(transportedObjectIndex)}`,
+            ),
+            chunkRoot: hashFromKernel(
+                kernel,
+                `transported-companion-chunk-root-${String(transportedObjectIndex)}`,
+            ),
+            chunkHashes: [
+                hashFromKernel(
+                    kernel,
+                    `transported-companion-chunk-${String(transportedObjectIndex)}`,
+                ),
+            ],
+        }));
+        const transportedCompanionChunkHashes =
+            transportedCompanionObjects.flatMap(
+                (transportedObject) => transportedObject.chunkHashes,
+            );
+        const transportedCompanionByteLength =
+            transportedCompanionObjects.reduce(
+                (totalByteLength, transportedObject) =>
+                    totalByteLength + transportedObject.byteLength,
+                0,
+            );
         const setupTransport = {
             fullObjectHash: hashFromKernel(
                 kernel,
@@ -402,6 +475,7 @@ describe('accepted setup public package API in Node', () => {
                         `setup-transport-chunk-${String(chunkIndex)}`,
                     ),
             ),
+            transportedObjects: transportedCompanionObjects,
         };
         const setupCertificates = publicSetupApi.createSetupCertificates({
             setupProfile,
@@ -424,6 +498,76 @@ describe('accepted setup public package API in Node', () => {
                 fixture: 'sdk-trustee-evaluation-key-accounting',
             },
         });
+        expect(() =>
+            publicSetupApi.createSetupCertificates({
+                setupProfile,
+                bgvProfile,
+                vssCoefficientCommitmentMaterial,
+                transport: {
+                    ...setupTransport,
+                    transportedObjects: [
+                        transportedCompanionObjects[0],
+                        {
+                            ...transportedCompanionObjects[1],
+                            objectRoot:
+                                transportedCompanionObjects[0].objectRoot,
+                        },
+                    ],
+                },
+                sameSecretLinkageAnchorProofAccounting: {
+                    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-duplicate-transport-root-same-secret-accounting',
+                },
+                publicKeyShareProofAccounting: {
+                    objectType: 'SuccinctPublicKeyShareAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-duplicate-transport-root-public-key-accounting',
+                },
+                trusteeEvaluationKeyProofAccounting: {
+                    objectType: 'SuccinctEvaluationKeyProofAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-duplicate-transport-root-evaluation-key-accounting',
+                },
+            }),
+        ).toThrow(/duplicate object roots/u);
+        expect(() =>
+            publicSetupApi.createSetupCertificates({
+                setupProfile,
+                bgvProfile,
+                vssCoefficientCommitmentMaterial,
+                transport: {
+                    ...setupTransport,
+                    transportedObjects: [
+                        {
+                            ...transportedCompanionObjects[0],
+                            byteLength: setupTransportChunkSizeBytes + 1,
+                        },
+                    ],
+                },
+                sameSecretLinkageAnchorProofAccounting: {
+                    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-mismatched-transport-chunks-same-secret-accounting',
+                },
+                publicKeyShareProofAccounting: {
+                    objectType: 'SuccinctPublicKeyShareAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-mismatched-transport-chunks-public-key-accounting',
+                },
+                trusteeEvaluationKeyProofAccounting: {
+                    objectType: 'SuccinctEvaluationKeyProofAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-mismatched-transport-chunks-evaluation-key-accounting',
+                },
+            }),
+        ).toThrow(/chunkHashes length/u);
         const setupCommitmentSecurityCertificate =
             setupCertificates.setupCommitmentSecurityCertificate as Record<
                 string,
@@ -436,6 +580,30 @@ describe('accepted setup public package API in Node', () => {
             >;
         const heSecurityCertificate =
             setupCertificates.heSecurityCertificate as Record<string, unknown>;
+        const heAssessedRing = heSecurityCertificate.assessedRing as Record<
+            string,
+            unknown
+        >;
+        const heEstimatorBinding =
+            heSecurityCertificate.estimatorBinding as Record<string, unknown>;
+
+        expect(heAssessedRing.largestExposedBasisClass).toBe('Q_data');
+        expect(heAssessedRing.largestExposedModulusBits).toBe(
+            heAssessedRing.dataPrimeCeilLog2Product,
+        );
+        expect(heAssessedRing.largestExposedModulusBits).not.toBe(
+            heAssessedRing.extendedUtilityCeilLog2Product,
+        );
+        expect(heEstimatorBinding).toMatchObject({
+            estimatorCommit: '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5',
+            estimatorDefaultCostModel: 'RC.MATZOV',
+            resultsArtifact: heEstimatorArtifactPath,
+            resultsArtifactCanonicalization:
+                heEstimatorArtifactCanonicalization,
+            resultsArtifactCanonicalSha256: heEstimatorArtifactCanonicalSha256,
+            largestExposedBasisClass: 'Q_data',
+            largestExposedModulusBits: heAssessedRing.dataPrimeCeilLog2Product,
+        });
         const commonRandomnessWithoutRoot = {
             objectType: 'SetupCommonRandomness',
             objectVersion: 1,
@@ -579,9 +747,44 @@ describe('accepted setup public package API in Node', () => {
         );
         expect(setupPackage.setupTransportCertificate).toMatchObject({
             chunkSizeBytes: setupTransportChunkSizeBytes,
-            chunkCount: setupTransportChunkCount,
-            chunkHashes: setupTransport.chunkHashes,
+            chunkCount:
+                setupTransportChunkCount + transportedCompanionObjects.length,
+            totalByteLength:
+                Number(
+                    setupProfile.publicVssCommitmentMaterialSizeProfile
+                        .fullMaterialCoefficientBytes,
+                ) + transportedCompanionByteLength,
+            chunkHashes: [
+                ...setupTransport.chunkHashes,
+                ...transportedCompanionChunkHashes,
+            ],
         });
+        expect(
+            (setupPackage.setupTransportCertificate as Record<string, unknown>)
+                .transportedObjects,
+        ).toMatchObject([
+            {
+                objectName: 'vssCoefficientCommitmentMaterial',
+                objectRole: 'public-vss-coefficient-commitment-material',
+                chunkStartIndex: 0,
+                chunkCount: setupTransportChunkCount,
+            },
+            ...transportedCompanionObjects.map(
+                (transportedObject, transportedObjectIndex) => ({
+                    objectName: transportedObject.objectName,
+                    objectRole: transportedObject.objectRole,
+                    objectRoot: transportedObject.objectRoot,
+                    byteLength: transportedObject.byteLength,
+                    chunkStartIndex:
+                        setupTransportChunkCount + transportedObjectIndex,
+                    chunkCount: 1,
+                    chunkHashes: transportedObject.chunkHashes,
+                    fullObjectHash: transportedObject.fullObjectHash,
+                    encoding: 'binary',
+                    loadingPolicy: 'stream-verified-before-object-use',
+                }),
+            ),
+        ]);
         expect(setupPackage.setupCommitmentSecurityCertificateHash).toBe(
             setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash,
         );

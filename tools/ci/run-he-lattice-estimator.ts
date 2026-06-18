@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,8 @@ const estimatorDirectoryPath = path.resolve(
     'lattice-estimator',
 );
 const expectedEstimatorCommit = '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5';
+const expectedEstimatorArtifactCanonicalSha256 =
+    '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
 const estimatorResultArtifactPath = path.resolve(
     repoRoot,
     'implementation-documentation',
@@ -342,6 +345,9 @@ const parseJson = (jsonText: string): JsonValue =>
 const normalizeJsonText = (jsonText: string): string =>
     `${JSON.stringify(sortJsonValue(parseJson(jsonText)), null, 2)}\n`;
 
+const sha256Hex = (text: string): string =>
+    createHash('sha256').update(text, 'utf8').digest('hex');
+
 const main = (): void => {
     assertPinnedEstimatorCheckout();
     const output = normalizeJsonText(runEstimator());
@@ -353,6 +359,13 @@ const main = (): void => {
         if (output !== expected) {
             throw new Error(
                 `${estimatorResultArtifactPath} does not match the estimator output`,
+            );
+        }
+
+        const outputHash = sha256Hex(output);
+        if (outputHash !== expectedEstimatorArtifactCanonicalSha256) {
+            throw new Error(
+                `${estimatorResultArtifactPath} canonical SHA-256 mismatch: expected ${expectedEstimatorArtifactCanonicalSha256}, got ${outputHash}`,
             );
         }
     }
