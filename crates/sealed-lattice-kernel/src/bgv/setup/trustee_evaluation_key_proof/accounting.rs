@@ -37,24 +37,135 @@ use crate::hashing::derive_protocol_hash;
 // framework): the achieved quantum soundness is the Grover square-root of the
 // classical round-by-round soundness, about seventy bits after the instance
 // union, recorded with the present-time-threat scope and kept below the
-// conventional 128-bit-quantum bar, so qromAccepted stays false. The smudging
-// row is a bounded-leakage statement rather than a 128-bit zero-knowledge claim.
+// conventional 128-bit-quantum bar. The smudging row is a bounded-leakage
+// statement rather than a 128-bit zero-knowledge claim.
 // The accounting hash is bound into the generate and verify command responses,
 // and package integration binds it into the setup proof accounting certificate.
-pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResult<Value> {
-    let trace_size = POLYNOMIAL_DEGREE / TRACE_SPLIT;
-    let extension_size = trace_size * DOMAIN_BLOWUP;
-    let commitment_bound = COMMITMENT_BOUND_FACTOR * trace_size;
-    let mask_degree = column_mask_degree(trace_size);
-    let opened_evaluations_per_column = 2 * LOW_DEGREE_QUERY_COUNT + DEEP_POINT_COUNT;
+#[derive(Clone, Copy, Debug)]
+pub(super) struct SuccinctProofSoundnessReport {
+    pub(super) trace_size: usize,
+    pub(super) extension_size: usize,
+    pub(super) commitment_bound: usize,
+    pub(super) sumcheck_residual_degree_bound: usize,
+    pub(super) opened_masked_evaluations_per_column: usize,
+    pub(super) base_field_bits: i64,
+    pub(super) challenge_field_bits: i64,
+    pub(super) fold_round_bits: i64,
+    pub(super) out_of_domain_round_bits: i64,
+    pub(super) lincheck_round_bits: i64,
+    pub(super) consistency_round_bits: i64,
+    pub(super) query_round_bits: i64,
+    pub(super) proven_fallback_query_bits: i64,
+    pub(super) proven_fallback_effective_soundness_bits: i64,
+    pub(super) proven_fallback_query_count_for_128_bits: i64,
+    pub(super) union_budget_bits: i64,
+    pub(super) weakest_round_bits: i64,
+    pub(super) effective_soundness_bits: i64,
+    pub(super) achieved_quantum_soundness_bits: i64,
+    pub(super) achieved_quantum_soundness_after_union_bits: i64,
+    pub(super) quantum_collision_resistance_bits: i64,
+}
+
+pub(super) fn succinct_proof_soundness_report(
+    trace_size: usize,
+) -> CanonicalResult<SuccinctProofSoundnessReport> {
+    if trace_size == 0 || !trace_size.is_power_of_two() {
+        return Err(invalid_succinct_setup_proof(
+            "succinct proof soundness policy requires a power-of-two trace size",
+        ));
+    }
+    let extension_size = trace_size
+        .checked_mul(DOMAIN_BLOWUP)
+        .ok_or_else(|| invalid_succinct_setup_proof("soundness extension size overflowed"))?;
+    let commitment_bound = COMMITMENT_BOUND_FACTOR
+        .checked_mul(trace_size)
+        .ok_or_else(|| invalid_succinct_setup_proof("soundness commitment bound overflowed"))?;
+    let opened_masked_evaluations_per_column =
+        2 * LOW_DEGREE_QUERY_COUNT + DEEP_EVALUATION_POINT_COUNT;
     let smallest_limb_prime = *DATA_PRIMES
         .iter()
         .min()
         .expect("the data basis is non-empty");
-    // Conservative floor of the field sizes: bits(p) - 1, so every stated
-    // bound understates rather than overstates the challenge space.
     let base_field_bits = i64::from(smallest_limb_prime.ilog2());
     let challenge_field_bits = base_field_bits * CHALLENGE_EXTENSION_DEGREE as i64;
+    let union_budget_bits = 16_i64;
+    let fold_round_bits = challenge_field_bits - i64::from(extension_size.ilog2());
+    let out_of_domain_round_bits =
+        challenge_field_bits - (i64::from((3 * commitment_bound).ilog2()) + 1);
+    let lincheck_round_bits =
+        (challenge_field_bits - i64::from(trace_size.ilog2())) * LINCHECK_REPETITIONS as i64;
+    let consistency_round_bits =
+        CONSISTENCY_COEFFICIENT_BITS as i64 * CONSISTENCY_REPETITIONS as i64;
+    let entropy_capacity_query_soundness_permille = 930_i64;
+    let query_round_bits =
+        LOW_DEGREE_QUERY_COUNT as i64 * entropy_capacity_query_soundness_permille / 1000;
+    let proven_fallback_query_bits = LOW_DEGREE_QUERY_COUNT as i64 / 2;
+    let proven_fallback_effective_soundness_bits = proven_fallback_query_bits - union_budget_bits;
+    let proven_fallback_query_count_for_128_bits =
+        2 * (MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS + union_budget_bits);
+    let weakest_round_bits = [
+        fold_round_bits,
+        out_of_domain_round_bits,
+        lincheck_round_bits,
+        consistency_round_bits,
+        query_round_bits,
+    ]
+    .into_iter()
+    .min()
+    .expect("round list is non-empty");
+    let effective_soundness_bits = weakest_round_bits - union_budget_bits;
+    let achieved_quantum_soundness_bits = weakest_round_bits / 2;
+    let achieved_quantum_soundness_after_union_bits = effective_soundness_bits / 2;
+    let digest_bits = 512_i64;
+    let quantum_collision_resistance_bits = digest_bits / 3;
+
+    Ok(SuccinctProofSoundnessReport {
+        trace_size,
+        extension_size,
+        commitment_bound,
+        sumcheck_residual_degree_bound: trace_size,
+        opened_masked_evaluations_per_column,
+        base_field_bits,
+        challenge_field_bits,
+        fold_round_bits,
+        out_of_domain_round_bits,
+        lincheck_round_bits,
+        consistency_round_bits,
+        query_round_bits,
+        proven_fallback_query_bits,
+        proven_fallback_effective_soundness_bits,
+        proven_fallback_query_count_for_128_bits,
+        union_budget_bits,
+        weakest_round_bits,
+        effective_soundness_bits,
+        achieved_quantum_soundness_bits,
+        achieved_quantum_soundness_after_union_bits,
+        quantum_collision_resistance_bits,
+    })
+}
+
+pub(super) fn enforce_current_succinct_proof_soundness_policy(
+    trace_size: usize,
+) -> CanonicalResult<()> {
+    let report = succinct_proof_soundness_report(trace_size)?;
+    if report.effective_soundness_bits < MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS {
+        return Err(invalid_succinct_setup_proof(format!(
+            "succinct proof conjectured classical soundness after union is {} bits, below the required {} bits",
+            report.effective_soundness_bits,
+            MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS
+        )));
+    }
+
+    Ok(())
+}
+
+pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResult<Value> {
+    let trace_size = POLYNOMIAL_DEGREE / TRACE_SPLIT;
+    let soundness_report = succinct_proof_soundness_report(trace_size)?;
+    let extension_size = soundness_report.extension_size;
+    let commitment_bound = soundness_report.commitment_bound;
+    let mask_degree = column_mask_degree(trace_size);
+    let opened_evaluations_per_column = soundness_report.opened_masked_evaluations_per_column;
     // Clear consistency sums are bounded by max witness magnitude (two for
     // centered-binomial errors) times the ring degree times the coefficient
     // bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT binary digits.
@@ -72,15 +183,6 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     // Union budget over the first profile: limb fields, schedule keys,
     // trustees, and accepted ceremony objects. Stated as a power-of-two
     // allowance the per-round bounds are discounted by.
-    let union_budget_bits = 16_i64;
-    // Per-round round-by-round errors, in -log2, each rounded against us.
-    let fold_round_bits = challenge_field_bits - i64::from(extension_size.ilog2());
-    let out_of_domain_round_bits =
-        challenge_field_bits - (i64::from((3 * commitment_bound).ilog2()) + 1);
-    let lincheck_round_bits =
-        (challenge_field_bits - i64::from(trace_size.ilog2())) * LINCHECK_REPETITIONS as i64;
-    let consistency_round_bits =
-        CONSISTENCY_COEFFICIENT_BITS as i64 * CONSISTENCY_REPETITIONS as i64;
     // Query-phase soundness under CS25 "Our Conjecture 3" (mutual correlated
     // agreement up to the q-ary list-decoding capacity for prime fields). The
     // older accounting counted one bit per query, the disproved BCI+23
@@ -93,59 +195,63 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     // that to 930/1000 bit per query, a conservative understatement, to stay in
     // integer arithmetic; at 168 queries this records 156 bits, 140 after the
     // union allowance, still clearing 128.
-    let entropy_capacity_query_soundness_permille = 930_i64;
-    let query_round_bits =
-        LOW_DEGREE_QUERY_COUNT as i64 * entropy_capacity_query_soundness_permille / 1000;
+    let query_round_bits = soundness_report.query_round_bits;
     // The proven, unconditional fallback is the BCIKS20 Johnson radius
     // (square root of the rate, half a bit per query); it is independent of the
     // conjecture, so it is computed from the raw query count, not from the
     // re-based query-round bits above.
-    let proven_fallback_query_bits = LOW_DEGREE_QUERY_COUNT as i64 / 2;
-    let proven_fallback_effective_soundness_bits = proven_fallback_query_bits - union_budget_bits;
-    let proven_fallback_query_count_for_128_bits = 2 * (128 + union_budget_bits);
-    let weakest_round_bits = [
-        fold_round_bits,
-        out_of_domain_round_bits,
-        lincheck_round_bits,
-        consistency_round_bits,
-        query_round_bits,
-    ]
-    .into_iter()
-    .min()
-    .expect("round list is non-empty");
-    let effective_soundness_bits = weakest_round_bits - union_budget_bits;
+    let proven_fallback_query_bits = soundness_report.proven_fallback_query_bits;
+    let proven_fallback_effective_soundness_bits =
+        soundness_report.proven_fallback_effective_soundness_bits;
+    let proven_fallback_query_count_for_128_bits =
+        soundness_report.proven_fallback_query_count_for_128_bits;
+    let challenge_field_bits = soundness_report.challenge_field_bits;
+    let fold_round_bits = soundness_report.fold_round_bits;
+    let out_of_domain_round_bits = soundness_report.out_of_domain_round_bits;
+    let lincheck_round_bits = soundness_report.lincheck_round_bits;
+    let consistency_round_bits = soundness_report.consistency_round_bits;
+    let union_budget_bits = soundness_report.union_budget_bits;
+    let weakest_round_bits = soundness_report.weakest_round_bits;
+    let effective_soundness_bits = soundness_report.effective_soundness_bits;
     // Computed CMS19 QROM accounting. The t^2 * eps soundness term breaks at
     // t about eps^(-1/2), so the achieved quantum soundness is the Grover
     // square-root (half in bits) of the classical round-by-round soundness; it
     // is derived from the same classical variables so the two can never drift.
     // The t^3 / 2^lambda hash term is BHT quantum collision search on the
     // SHAKE256 512-bit digest, about a third of the digest in bits.
-    let achieved_quantum_soundness_bits = weakest_round_bits / 2;
-    let achieved_quantum_soundness_after_union_bits = effective_soundness_bits / 2;
+    let achieved_quantum_soundness_bits = soundness_report.achieved_quantum_soundness_bits;
+    let achieved_quantum_soundness_after_union_bits =
+        soundness_report.achieved_quantum_soundness_after_union_bits;
     let digest_bits = 512_i64;
-    let quantum_collision_resistance_bits = digest_bits / 3;
+    let quantum_collision_resistance_bits = soundness_report.quantum_collision_resistance_bits;
 
     Ok(json!({
         "objectType": "SuccinctEvaluationKeyProofAccounting",
-        "objectVersion": 2,
+        "objectVersion": 3,
         "proofFamily": "trustee-evaluation-key",
         "argumentShape": {
             "model": "per-limb-field univariate polynomial IOP with batched low-degree commitment",
             "limbFields": "one instance per active data prime, no lifted-integer carries",
             "traceSplit": TRACE_SPLIT,
-            "traceSize": trace_size,
+            "traceSize": soundness_report.trace_size,
             "domainBlowup": DOMAIN_BLOWUP,
             "extensionSize": extension_size,
             "commitmentDegreeBound": commitment_bound,
             "rate": "commitment bound over extension size, one half",
+            "sumcheckResidualDegreeBound": soundness_report.sumcheck_residual_degree_bound,
+            "sumcheckResidualRate": "residual degree bound over the same extension size, one quarter",
             "ringDegree": POLYNOMIAL_DEGREE,
             "challengeExtensionDegree": CHALLENGE_EXTENSION_DEGREE,
+            "baseFieldBitsFloor": soundness_report.base_field_bits,
             "challengeFieldBitsApproximate": challenge_field_bits,
             "challengeDomain": "every post-commitment challenge (key batching, lincheck, batching alphas, beta, out-of-domain points, batching lambda, fold challenges) is drawn from the degree-four extension tower of the limb field; committed columns and query openings stay in the base field",
         },
         "lowDegreeSoundness": {
             "queryCount": LOW_DEGREE_QUERY_COUNT,
             "foldedFinalCoefficientCount": LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
+            "mainBatchedDegreeBound": commitment_bound,
+            "sumcheckResidualDegreeBound": soundness_report.sumcheck_residual_degree_bound,
+            "sumcheckResidualProof": "a second low-degree proof over the same quotient tree proves the sumcheck residual column has degree below the trace size; the deterministic zero DEEP anchor binds its constant term",
             "conjecturedQueryBoundLog2": -query_round_bits,
             "provenBoundReference": "Ben-Sasson, Carmon, Ishai, Kopparty, Saraf, Proximity gaps for Reed-Solomon codes (BCIKS20)",
             "provenFallbackQueryBoundLog2": -proven_fallback_query_bits,
@@ -158,11 +264,14 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "effectiveSoundnessBitsAfterUnion": effective_soundness_bits,
         },
         "identitySoundness": {
-            "outOfDomainPointCount": DEEP_POINT_COUNT,
+            "randomOutOfDomainPointCount": DEEP_POINT_COUNT,
+            "deterministicResidualAnchorPointCount": SUMCHECK_RESIDUAL_ANCHOR_POINT_COUNT,
+            "totalDeepEvaluationPointCount": DEEP_EVALUATION_POINT_COUNT,
             "compositionDegreeBound": "three times the masked column degree bound",
-            "outOfDomainPointDomain": "degree-four challenge extension, rejection-sampled outside the base trace subgroup and coset",
+            "outOfDomainPointDomain": "random points are degree-four challenge-extension points rejection-sampled outside the base trace subgroup and coset; the deterministic residual anchor is zero, outside the trace subgroup and extension coset",
             "schwartzZippelPerPointLog2": -out_of_domain_round_bits,
             "linkedThroughBatchedQuotients": true,
+            "sumcheckResidualZeroAnchor": "the residual column's claimed evaluation at zero must be zero and is bound through the main DEEP-batched low-degree proof",
         },
         "linearRelationSoundness": {
             "lincheckRepetitions": LINCHECK_REPETITIONS,
@@ -183,6 +292,8 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         "zeroKnowledge": {
             "columnMaskDegree": mask_degree,
             "openedEvaluationsPerColumn": opened_evaluations_per_column,
+            "openedMaskedEvaluationsPerColumn": opened_evaluations_per_column,
+            "extraPhaseTwoResidualOpeningsPerColumn": 2 * LOW_DEGREE_QUERY_COUNT,
             "saltedCommitmentLeaves": true,
             "phaseTwoColumnsDeterministicFromMaskedMaterial": true,
             "simulatorMarginEvaluations": mask_degree as i64 - opened_evaluations_per_column as i64,

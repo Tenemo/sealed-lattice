@@ -127,6 +127,16 @@ pub(in super::super) fn sample_deep_points(
     Ok(points)
 }
 
+pub(in super::super) fn sample_deep_identity_points(
+    transcript: &mut FiatShamirTranscript,
+    plan: &EvaluationDomainPlan,
+) -> CanonicalResult<Vec<ChallengeExtensionElement>> {
+    let mut points = sample_deep_points(transcript, plan)?;
+    points.push(ChallengeExtensionTower::zero());
+
+    Ok(points)
+}
+
 pub(super) fn extension_powers(
     tower: &ChallengeExtensionTower,
     base: &ChallengeExtensionElement,

@@ -26,10 +26,10 @@ use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::merkle_commitment::LEAF_SALT_BYTES;
 use super::relation::{
     EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
-    SameSecretLinkageStatement,
+    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
 };
 use super::{
-    COMMITMENT_BOUND_FACTOR, CONSISTENCY_REPETITIONS, DEEP_POINT_COUNT, DOMAIN_BLOWUP,
+    COMMITMENT_BOUND_FACTOR, CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP,
     LOW_DEGREE_FINAL_COEFFICIENT_COUNT, LOW_DEGREE_QUERY_COUNT,
 };
 use crate::bgv::evaluator::records::MAXIMUM_OPTION_COUNT;

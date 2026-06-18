@@ -271,4 +271,4 @@ pub(crate) const PHASE_TWO_COLUMN_COUNT: usize = 4;
 pub(crate) const QUOTIENT_COLUMN_ROW_CHECK_LOW: usize = 0;
 pub(crate) const QUOTIENT_COLUMN_ROW_CHECK_HIGH: usize = 1;
 pub(crate) const QUOTIENT_COLUMN_SUMCHECK_VANISHING: usize = 2;
-pub(crate) const QUOTIENT_COLUMN_SUMCHECK_LINEAR: usize = 3;
+pub(crate) const QUOTIENT_COLUMN_SUMCHECK_RESIDUAL: usize = 3;

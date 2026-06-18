@@ -1109,8 +1109,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
 ) -> CanonicalResult<Value> {
     let largest_exposed_modulus_bits = data_basis_modulus_bits();
     let extended_basis_bits = extended_basis_modulus_bits();
-    let post_quantum_max_logq = 827_usize;
-    let classical_max_logq = 881_usize;
     let required_galois_key_count = expected_required_galois_key_schedule()?
         .as_array()
         .map(Vec::len)
@@ -1168,45 +1166,280 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
             "scheduledRelinearizationLevelCount": scheduled_relinearization_level_count,
             "scheduledGaloisKeyCount": required_galois_key_count
         },
-        "standardRows": {
-            "postQuantumTernary128": {
-                "costModel": "BKZ.qsieve",
-                "secretDistribution": "ternary",
+        "publishedReferenceRows": {
+            "bcc25TernaryGaussian319Category128": {
+                "source": "BCC25 Security Guidelines Table 5.2",
+                "costModel": "RC.MATZOV",
+                "secretDistribution": "uniform ternary",
+                "errorDistribution": "Gaussian sigma=3.19",
                 "polynomialDegree": 32768,
-                "securityLevelBits": 128,
-                "maximumLogQ": post_quantum_max_logq,
+                "targetClassicalSecurityBits": 128,
+                "maximumLogQ": 868,
                 "largestExposedModulusBits": largest_exposed_modulus_bits,
-                "marginBits": post_quantum_max_logq.saturating_sub(largest_exposed_modulus_bits),
-                "uSVPBits": "128.1",
-                "decodingBits": "128.7",
-                "dualBits": "128.4"
-            },
-            "classicalTernary128": {
-                "costModel": "BKZ.sieve",
-                "secretDistribution": "ternary",
-                "polynomialDegree": 32768,
-                "securityLevelBits": 128,
-                "maximumLogQ": classical_max_logq,
-                "largestExposedModulusBits": largest_exposed_modulus_bits,
-                "marginBits": classical_max_logq.saturating_sub(largest_exposed_modulus_bits),
-                "uSVPBits": "128.5",
-                "decodingBits": "129.1",
-                "dualBits": "128.5"
+                "tableMarginBits": 868_usize.saturating_sub(largest_exposed_modulus_bits),
+                "rowScope": "published context only; current centered-binomial-eta2 closure is the latticeEstimatorRows.currentQDataCenteredBinomialEta2 row"
             }
         },
         "estimatorBinding": {
-            "tool": "HE-standard published parameter table",
-            "toolVersion": "ACC18 local text reference",
+            "tool": "Lattice Estimator",
+            "toolVersion": "malb/lattice-estimator@27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5",
+            "estimatorRepository": "https://github.com/malb/lattice-estimator",
+            "estimatorCommit": "27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5",
+            "estimatorDefaultCostModel": "RC.MATZOV",
+            "sageRuntime": "SageMath 10.9",
+            "dockerImage": "sagemath/sagemath:latest",
+            "command": "pnpm exec tsx ./tools/ci/run-he-lattice-estimator.ts",
+            "resultsArtifact": "implementation-documentation/setup-proof-decisions/he-lattice-estimator-results.json",
             "securityEstimatorInputHash": security_estimator_input_hash()?,
-            "secretModel": "standard-ternary",
-            "errorModel": "centered-binomial-eta2",
+            "secretModel": "ND.Ternary",
+            "errorModel": "ND.CenteredBinomial(2)",
+            "sampleModel": "m=+Infinity",
+            "largestExposedBasisClass": "Q_data",
             "largestExposedModulusBits": largest_exposed_modulus_bits,
-            "publicSamplesBound": true
+            "utilityExtendedBasisBits": extended_basis_bits
         },
+        "latticeEstimatorRows": he_lattice_estimator_rows_value(
+            largest_exposed_modulus_bits,
+            extended_basis_bits,
+        ),
         "targetDecryptionStatus": {
             "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID
         }
     }))
+}
+
+fn he_lattice_estimator_rows_value(
+    largest_exposed_modulus_bits: usize,
+    extended_basis_bits: usize,
+) -> Value {
+    json!({
+        "targetClassicalSecurityBits": 128,
+        "currentQDataCenteredBinomialEta2": {
+            "modulusCeilLog2": largest_exposed_modulus_bits,
+            "modulusLog2": "798.9999986033129",
+            "secretDistribution": "ND.Ternary",
+            "errorDistribution": "ND.CenteredBinomial(2)",
+            "sampleModel": "m=+Infinity",
+            "weakestAttack": "bdd",
+            "weakestAttackCostLog2": "139.4001063588318",
+            "marginTo128Bits": "11.400106358831806",
+            "attackRows": {
+                "bdd": {
+                    "beta": 366,
+                    "d": 63227,
+                    "eta": 384,
+                    "redLog2": "139.39921967040428",
+                    "ropLog2": "139.4001063588318",
+                    "svpLog2": "128.73161153136738"
+                },
+                "dual": {
+                    "beta": 366,
+                    "d": 65530,
+                    "m": 32762,
+                    "memLog2": "90.37705181996229",
+                    "ropLog2": "140.47325808846173"
+                },
+                "dualHybrid": {
+                    "NLog2": "80.18959703594362",
+                    "beta": 365,
+                    "betaPrime": 393,
+                    "guessLog2": "117.74355809224927",
+                    "m": 32768,
+                    "p": 3,
+                    "redLog2": "140.18579512701064",
+                    "ropLog2": "140.1857953801665",
+                    "t": 50,
+                    "zeta": 10
+                },
+                "usvp": {
+                    "beta": 366,
+                    "d": 63501,
+                    "redLog2": "139.40549445792695",
+                    "ropLog2": "139.40549445792695"
+                }
+            }
+        },
+        "qExtendedIfExposedCenteredBinomialEta2": {
+            "modulusCeilLog2": extended_basis_bits,
+            "modulusLog2": "845.9999984306585",
+            "secretDistribution": "ND.Ternary",
+            "errorDistribution": "ND.CenteredBinomial(2)",
+            "sampleModel": "m=+Infinity",
+            "weakestAttack": "bdd",
+            "weakestAttackCostLog2": "131.11460628721997",
+            "marginTo128Bits": "3.1146062872199707",
+            "attackRows": {
+                "bdd": {
+                    "beta": 336,
+                    "d": 64462,
+                    "eta": 363,
+                    "redLog2": "131.10972612858453",
+                    "ropLog2": "131.11460628721997",
+                    "svpLog2": "122.9045442832175"
+                },
+                "dual": {
+                    "beta": 337,
+                    "d": 65564,
+                    "m": 32796,
+                    "memLog2": "84.67213625284322",
+                    "ropLog2": "132.45608835425"
+                },
+                "dualHybrid": {
+                    "NLog2": "60.30328853382016",
+                    "beta": 336,
+                    "betaPrime": 366,
+                    "guessLog2": "113.5119952129881",
+                    "m": 32768,
+                    "p": 3,
+                    "redLog2": "132.16825194866956",
+                    "ropLog2": "132.16825544072498",
+                    "t": 60,
+                    "zeta": 0
+                },
+                "usvp": {
+                    "beta": 337,
+                    "d": 62812,
+                    "redLog2": "131.34923816206893",
+                    "ropLog2": "131.34923816206893"
+                }
+            }
+        },
+        "boundaryTwoPower868CenteredBinomialEta2": {
+            "modulusCeilLog2": 868,
+            "modulusLog2": "868",
+            "secretDistribution": "ND.Ternary",
+            "errorDistribution": "ND.CenteredBinomial(2)",
+            "sampleModel": "m=+Infinity",
+            "weakestAttack": "bdd",
+            "weakestAttackCostLog2": "127.7592570356635",
+            "marginTo128Bits": "-0.24074296433650488",
+            "attackRows": {
+                "bdd": {
+                    "beta": 324,
+                    "d": 63226,
+                    "eta": 347,
+                    "redLog2": "127.75695346642212",
+                    "ropLog2": "127.7592570356635",
+                    "svpLog2": "118.46742571024016"
+                },
+                "dual": {
+                    "beta": 324,
+                    "d": 65537,
+                    "m": 32769,
+                    "memLog2": "82.13417521526284",
+                    "ropLog2": "128.87901754413153"
+                },
+                "dualHybrid": {
+                    "NLog2": "72.61043145128764",
+                    "beta": 324,
+                    "betaPrime": 355,
+                    "guessLog2": "108.42320411937244",
+                    "m": 32768,
+                    "p": 2,
+                    "redLog2": "128.87816375885674",
+                    "ropLog2": "128.87816476258922",
+                    "t": 70,
+                    "zeta": 10
+                },
+                "usvp": {
+                    "beta": 324,
+                    "d": 63577,
+                    "redLog2": "127.76498148379801",
+                    "ropLog2": "127.76498148379801"
+                }
+            }
+        },
+        "boundaryTwoPower881CenteredBinomialEta2": {
+            "modulusCeilLog2": 881,
+            "modulusLog2": "881",
+            "secretDistribution": "ND.Ternary",
+            "errorDistribution": "ND.CenteredBinomial(2)",
+            "sampleModel": "m=+Infinity",
+            "weakestAttack": "bdd",
+            "weakestAttackCostLog2": "125.81720263568408",
+            "marginTo128Bits": "-2.182797364315917",
+            "attackRows": {
+                "bdd": {
+                    "beta": 317,
+                    "d": 63100,
+                    "eta": 339,
+                    "redLog2": "125.81529996026482",
+                    "ropLog2": "125.81720263568408",
+                    "svpLog2": "116.2497302156383"
+                },
+                "dual": {
+                    "beta": 317,
+                    "d": 65544,
+                    "m": 32776,
+                    "memLog2": "80.65294349588433",
+                    "ropLog2": "126.87161921853478"
+                },
+                "dualHybrid": {
+                    "NLog2": "70.99118991845761",
+                    "beta": 317,
+                    "betaPrime": 348,
+                    "guessLog2": "108.3971451508635",
+                    "m": 32768,
+                    "p": 2,
+                    "redLog2": "126.87064652111765",
+                    "ropLog2": "126.8706504847732",
+                    "t": 70,
+                    "zeta": 10
+                },
+                "usvp": {
+                    "beta": 317,
+                    "d": 63413,
+                    "redLog2": "125.8224745402732",
+                    "ropLog2": "125.8224745402732"
+                }
+            }
+        },
+        "bcc25ReferenceTwoPower868Gaussian319": {
+            "modulusCeilLog2": 868,
+            "modulusLog2": "868",
+            "secretDistribution": "ND.Ternary",
+            "errorDistribution": "ND.DiscreteGaussian(3.19)",
+            "sampleModel": "m=+Infinity",
+            "weakestAttack": "bdd",
+            "weakestAttackCostLog2": "128.03348894742626",
+            "marginTo128Bits": "0.03348894742626385",
+            "attackRows": {
+                "bdd": {
+                    "beta": 325,
+                    "d": 63105,
+                    "eta": 348,
+                    "redLog2": "128.03118054543432",
+                    "ropLog2": "128.03348894742626",
+                    "svpLog2": "118.74467872376368"
+                },
+                "dual": {
+                    "beta": 325,
+                    "d": 65542,
+                    "m": 32774,
+                    "memLog2": "82.34573343101653",
+                    "ropLog2": "129.16612496596844"
+                },
+                "dualHybrid": {
+                    "NLog2": "71.73765769917073",
+                    "beta": 325,
+                    "betaPrime": 356,
+                    "guessLog2": "108.4057194955841",
+                    "m": 32768,
+                    "p": 2,
+                    "redLog2": "129.16522477458807",
+                    "ropLog2": "129.16522558730748",
+                    "t": 70,
+                    "zeta": 10
+                },
+                "usvp": {
+                    "beta": 325,
+                    "d": 63434,
+                    "redLog2": "128.038721279717",
+                    "ropLog2": "128.038721279717"
+                }
+            }
+        }
+    })
 }
 
 fn modulus_product_decimal(moduli: impl IntoIterator<Item = u64>) -> String {

@@ -3,16 +3,16 @@ use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::low_degree_proof::{LowDegreeParameters, prove_low_degree};
 use super::super::merkle_commitment::sorted_unique_indices;
 use super::super::relation::{
-    BaseColumnDomain, PHASE_TWO_COLUMN_COUNT, SumcheckPublicEvaluations,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness, batched_row_check_value,
-    batched_sumcheck_value,
+    BaseColumnDomain, PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL,
+    SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    batched_row_check_value, batched_sumcheck_value,
 };
 use super::super::*;
 use super::challenges::{build_limb_public_vectors, draw_limb_challenges};
 use super::claim_masking::{global_claim_id, global_claim_integers};
 use super::polynomial::{
     divide_by_trace_vanishing, extend_logical_vector, extend_logical_vector_extension,
-    extension_powers, sample_deep_points, trim_trailing_zeros,
+    extension_powers, sample_deep_identity_points, trim_trailing_zeros,
 };
 use super::salted_tree::commit_salted_extension_rows;
 use super::witness::{
@@ -142,7 +142,7 @@ fn prove_limb(
     let mut row_quotient_low = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
     let mut row_quotient_high = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
     let mut sumcheck_quotient = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
-    let mut sumcheck_linear = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
+    let mut sumcheck_residual = vec![Vec::new(); CHALLENGE_EXTENSION_DEGREE];
     let mut coordinate_evaluations = vec![0_u64; extension_size];
     for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
         for (slot, value) in coordinate_evaluations
@@ -196,9 +196,9 @@ fn prove_limb(
             ));
         }
         // Sum of an interpolant over the subgroup H of order T equals T times
-        // its constant coefficient, so only remainder[0] carries the sumcheck
-        // claim; remainder[1..] is the residual low-degree term bound separately
-        // by the DEEP/FRI layer.
+        // its constant coefficient. The committed residual is R(X) - R(0):
+        // degree below T and zero at X = 0, with the zero anchor bound through
+        // the DEEP batching below.
         let expected_constant = mul_mod_fast(
             publics.lincheck_claim[coordinate],
             inverse_trace_size,
@@ -209,8 +209,10 @@ fn prove_limb(
                 "witness does not satisfy the batched sumcheck claims",
             ));
         }
+        let mut residual = remainder;
+        residual[0] = sub_mod_fast(residual[0], expected_constant, modulus);
         sumcheck_quotient[coordinate] = quotient;
-        sumcheck_linear[coordinate] = remainder[1..].to_vec();
+        sumcheck_residual[coordinate] = trim_trailing_zeros(residual);
     }
     drop(row_check_extension);
     drop(sumcheck_extension);
@@ -221,7 +223,7 @@ fn prove_limb(
         &row_quotient_low,
         &row_quotient_high,
         &sumcheck_quotient,
-        &sumcheck_linear,
+        &sumcheck_residual,
     ];
     let mut phase_two_columns =
         vec![Vec::new(); PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE];
@@ -249,8 +251,8 @@ fn prove_limb(
 
     // Out-of-domain evaluations of every committed column at the extension
     // points, via one shared powers table per point.
-    let deep_points = sample_deep_points(&mut transcript, plan)?;
-    let mut deep_evaluations = Vec::with_capacity(DEEP_POINT_COUNT);
+    let deep_points = sample_deep_identity_points(&mut transcript, plan)?;
+    let mut deep_evaluations = Vec::with_capacity(DEEP_EVALUATION_POINT_COUNT);
     for point in &deep_points {
         let coefficient_length = commitment
             .masked_coefficients
@@ -308,7 +310,7 @@ fn prove_limb(
     let lambda = transcript.challenge_extension_elements(
         "lambda",
         modulus,
-        total_column_count * DEEP_POINT_COUNT,
+        total_column_count * DEEP_EVALUATION_POINT_COUNT,
     );
     let mut extension_points = Vec::with_capacity(extension_size);
     let mut point = plan.coset_offset;
@@ -316,7 +318,7 @@ fn prove_limb(
         extension_points.push(point);
         point = mul_mod_fast(point, plan.extension_root, modulus);
     }
-    let mut inverted_differences_by_point = Vec::with_capacity(DEEP_POINT_COUNT);
+    let mut inverted_differences_by_point = Vec::with_capacity(DEEP_EVALUATION_POINT_COUNT);
     for deep_point in &deep_points {
         let differences = extension_points
             .iter()
@@ -326,12 +328,14 @@ fn prove_limb(
     }
     // Per point: the lambda-weighted sum of claimed evaluations, hoisted out
     // of the position loop so the loop runs on base column values.
-    let mut lambda_evaluation_sums = [ChallengeExtensionTower::zero(); DEEP_POINT_COUNT];
-    let mut lambda_by_point =
-        vec![vec![ChallengeExtensionTower::zero(); total_column_count]; DEEP_POINT_COUNT];
+    let mut lambda_evaluation_sums = [ChallengeExtensionTower::zero(); DEEP_EVALUATION_POINT_COUNT];
+    let mut lambda_by_point = vec![
+        vec![ChallengeExtensionTower::zero(); total_column_count];
+        DEEP_EVALUATION_POINT_COUNT
+    ];
     for column_index in 0..total_column_count {
         for (point_index, evaluations) in deep_evaluations.iter().enumerate() {
-            let lambda_value = &lambda[column_index * DEEP_POINT_COUNT + point_index];
+            let lambda_value = &lambda[column_index * DEEP_EVALUATION_POINT_COUNT + point_index];
             lambda_evaluation_sums[point_index] = tower.add(
                 &lambda_evaluation_sums[point_index],
                 &tower.mul(lambda_value, &evaluations[column_index]),
@@ -387,8 +391,29 @@ fn prove_limb(
         initial_root: plan.extension_root,
         initial_degree_bound: commitment_bound,
     };
+    transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
     let (low_degree, query_positions) =
         prove_low_degree(&mut transcript, &low_degree_parameters, &batch_codeword)?;
+
+    let sumcheck_residual_codeword = (0..extension_size)
+        .map(|position| phase_two_logical_value(position, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL))
+        .collect::<Vec<_>>();
+    let sumcheck_residual_low_degree_parameters = LowDegreeParameters {
+        modulus,
+        initial_domain_size: extension_size,
+        initial_offset: plan.coset_offset,
+        initial_root: plan.extension_root,
+        initial_degree_bound: trace_size,
+    };
+    transcript.absorb(
+        "low-degree-purpose",
+        SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
+    );
+    let (sumcheck_residual_low_degree, sumcheck_residual_query_positions) = prove_low_degree(
+        &mut transcript,
+        &sumcheck_residual_low_degree_parameters,
+        &sumcheck_residual_codeword,
+    )?;
 
     let collect_row = |columns: &[Vec<u64>], position: usize| -> Vec<u64> {
         columns.iter().map(|column| column[position]).collect()
@@ -415,6 +440,19 @@ fn prove_limb(
             ],
         })
         .collect::<Vec<_>>();
+    let sumcheck_residual_query_openings = sumcheck_residual_query_positions
+        .iter()
+        .map(|position| PhaseTwoQueryOpening {
+            phase_two_rows: [
+                collect_row(&phase_two_columns, *position),
+                collect_row(&phase_two_columns, *position + half),
+            ],
+            phase_two_salts: [
+                phase_two_salted.salt(*position).to_vec(),
+                phase_two_salted.salt(*position + half).to_vec(),
+            ],
+        })
+        .collect::<Vec<_>>();
     // Both phase trees are opened at the same queried positions and their coset
     // partners, so one batched opening per tree authenticates every query slot.
     let phase_opened_indices = sorted_unique_indices(
@@ -424,6 +462,14 @@ fn prove_limb(
     );
     let witness_batch_opening = commitment.salted.tree.open_batch(&phase_opened_indices);
     let quotient_batch_opening = phase_two_salted.tree.open_batch(&phase_opened_indices);
+    let sumcheck_residual_opened_indices = sorted_unique_indices(
+        sumcheck_residual_query_positions
+            .iter()
+            .flat_map(|position| [*position, *position + half]),
+    );
+    let sumcheck_residual_batch_opening = phase_two_salted
+        .tree
+        .open_batch(&sumcheck_residual_opened_indices);
 
     Ok(LimbProof {
         witness_tree_root: commitment.salted.tree.root(),
@@ -431,9 +477,12 @@ fn prove_limb(
         masked_consistency_claims: masked_claims,
         deep_evaluations,
         low_degree,
+        sumcheck_residual_low_degree,
         query_openings,
+        sumcheck_residual_query_openings,
         witness_batch_opening,
         quotient_batch_opening,
+        sumcheck_residual_batch_opening,
     })
 }
 

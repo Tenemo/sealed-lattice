@@ -1,3 +1,4 @@
+use super::accounting;
 use super::evaluation_domain::EvaluationDomainPlan;
 use super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
@@ -9,13 +10,15 @@ use super::merkle_commitment::{
 };
 use super::prover::{
     LimbProof, SuccinctEvaluationKeyProof, barycentric_weights, build_limb_public_vectors,
-    draw_limb_challenges, global_claim_id, sample_deep_points, trace_vanishing_at_extension,
+    draw_limb_challenges, global_claim_id, sample_deep_identity_points,
+    trace_vanishing_at_extension,
 };
 use super::relation::{
     ExtensionColumnDomain, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
-    QUOTIENT_COLUMN_ROW_CHECK_HIGH, QUOTIENT_COLUMN_ROW_CHECK_LOW, QUOTIENT_COLUMN_SUMCHECK_LINEAR,
-    QUOTIENT_COLUMN_SUMCHECK_VANISHING, SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement,
-    batched_row_check_value, batched_sumcheck_value, masked_claim_bounds,
+    QUOTIENT_COLUMN_ROW_CHECK_HIGH, QUOTIENT_COLUMN_ROW_CHECK_LOW,
+    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, QUOTIENT_COLUMN_SUMCHECK_VANISHING,
+    SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, batched_row_check_value,
+    batched_sumcheck_value, masked_claim_bounds,
 };
 use super::*;
 use crate::bgv::modular_arithmetic::inverse_mod;
@@ -84,12 +87,13 @@ fn verify_limb(
     let phase_one_columns = layout.phase_one_physical_count();
     let total_columns = phase_one_columns + PHASE_TWO_COLUMN_COUNT;
     if limb_proof.masked_consistency_claims.len() != layout.claim_count()
-        || limb_proof.deep_evaluations.len() != DEEP_POINT_COUNT
+        || limb_proof.deep_evaluations.len() != DEEP_EVALUATION_POINT_COUNT
         || limb_proof
             .deep_evaluations
             .iter()
             .any(|evaluations| evaluations.len() != total_columns)
         || limb_proof.query_openings.len() != LOW_DEGREE_QUERY_COUNT
+        || limb_proof.sumcheck_residual_query_openings.len() != LOW_DEGREE_QUERY_COUNT
     {
         return Err(invalid_succinct_setup_proof(
             "limb proof shape does not match the statement",
@@ -119,7 +123,7 @@ fn verify_limb(
         "masked-consistency-claims",
         &limb_proof.masked_consistency_claims,
     );
-    let deep_points = sample_deep_points(&mut transcript, &plan)?;
+    let deep_points = sample_deep_identity_points(&mut transcript, &plan)?;
 
     // Out-of-domain identity checks: the claimed evaluations must satisfy the
     // batched row check and the sumcheck decomposition over the extension.
@@ -187,9 +191,16 @@ fn verify_limb(
         );
         let vanishing_quotient =
             &evaluations[phase_one_columns + QUOTIENT_COLUMN_SUMCHECK_VANISHING];
-        let linear_quotient = &evaluations[phase_one_columns + QUOTIENT_COLUMN_SUMCHECK_LINEAR];
+        let sumcheck_residual = &evaluations[phase_one_columns + QUOTIENT_COLUMN_SUMCHECK_RESIDUAL];
+        if ChallengeExtensionTower::is_zero(point)
+            && !ChallengeExtensionTower::is_zero(sumcheck_residual)
+        {
+            return Err(invalid_succinct_setup_proof(
+                "sumcheck residual failed the zero anchor",
+            ));
+        }
         let left = tower.sub(&sumcheck_value, &tower.mul(&vanishing, vanishing_quotient));
-        let right = tower.add(&expected_constant, &tower.mul(point, linear_quotient));
+        let right = tower.add(&expected_constant, sumcheck_residual);
         if left != right {
             return Err(invalid_succinct_setup_proof(
                 "sumcheck identity failed at an out-of-domain point",
@@ -204,7 +215,7 @@ fn verify_limb(
     let lambda = transcript.challenge_extension_elements(
         "lambda",
         modulus,
-        total_columns * DEEP_POINT_COUNT,
+        total_columns * DEEP_EVALUATION_POINT_COUNT,
     );
 
     let low_degree_parameters = LowDegreeParameters {
@@ -231,7 +242,7 @@ fn verify_limb(
                 point_sum = tower.add(
                     &point_sum,
                     &tower.scale_base(
-                        &lambda[column_index * DEEP_POINT_COUNT + point_index],
+                        &lambda[column_index * DEEP_EVALUATION_POINT_COUNT + point_index],
                         *column_value,
                     ),
                 );
@@ -245,7 +256,7 @@ fn verify_limb(
                 point_sum = tower.add(
                     &point_sum,
                     &tower.mul(
-                        &lambda[column_index * DEEP_POINT_COUNT + point_index],
+                        &lambda[column_index * DEEP_EVALUATION_POINT_COUNT + point_index],
                         &logical_value,
                     ),
                 );
@@ -254,7 +265,7 @@ fn verify_limb(
                 point_sum = tower.sub(
                     &point_sum,
                     &tower.mul(
-                        &lambda[column_index * DEEP_POINT_COUNT + point_index],
+                        &lambda[column_index * DEEP_EVALUATION_POINT_COUNT + point_index],
                         &limb_proof.deep_evaluations[point_index][column_index],
                     ),
                 );
@@ -267,6 +278,7 @@ fn verify_limb(
 
     let mut witness_leaves: Vec<(usize, [u8; 64])> = Vec::new();
     let mut quotient_leaves: Vec<(usize, [u8; 64])> = Vec::new();
+    transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
     verify_low_degree(
         &mut transcript,
         &low_degree_parameters,
@@ -321,6 +333,57 @@ fn verify_limb(
             ])
         },
     )?;
+    let sumcheck_residual_low_degree_parameters = LowDegreeParameters {
+        modulus,
+        initial_domain_size: extension_size,
+        initial_offset: plan.coset_offset,
+        initial_root: plan.extension_root,
+        initial_degree_bound: trace_size,
+    };
+    let mut sumcheck_residual_leaves: Vec<(usize, [u8; 64])> = Vec::new();
+    transcript.absorb(
+        "low-degree-purpose",
+        SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
+    );
+    verify_low_degree(
+        &mut transcript,
+        &sumcheck_residual_low_degree_parameters,
+        &limb_proof.sumcheck_residual_low_degree,
+        |query_ordinal, pair_index| {
+            let opening = &limb_proof.sumcheck_residual_query_openings[query_ordinal];
+            if opening.phase_two_rows[0].len() != phase_two_physical_columns
+                || opening.phase_two_rows[1].len() != phase_two_physical_columns
+                || opening
+                    .phase_two_salts
+                    .iter()
+                    .any(|salt| salt.len() != LEAF_SALT_BYTES)
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "sumcheck residual query opening shape does not match the column layout",
+                ));
+            }
+            for (slot, position) in [pair_index, pair_index + half].into_iter().enumerate() {
+                sumcheck_residual_leaves.push((
+                    position,
+                    leaf_hash(
+                        position,
+                        &opening.phase_two_salts[slot],
+                        &opening.phase_two_rows[slot],
+                    ),
+                ));
+            }
+            let mut first = ChallengeExtensionTower::zero();
+            let mut second = ChallengeExtensionTower::zero();
+            for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+                let column_index =
+                    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL * CHALLENGE_EXTENSION_DEGREE + coordinate;
+                first[coordinate] = opening.phase_two_rows[0][column_index];
+                second[coordinate] = opening.phase_two_rows[1][column_index];
+            }
+
+            Ok([first, second])
+        },
+    )?;
 
     // Authenticate both phase trees against their roots with one batched opening
     // each. A position opened to two different rows across queries is rejected
@@ -358,6 +421,22 @@ fn verify_limb(
     ) {
         return Err(invalid_succinct_setup_proof(
             "quotient tree query openings failed batched Merkle verification",
+        ));
+    }
+    let Some(sumcheck_residual_sorted_leaves) = consistent_sorted_leaves(sumcheck_residual_leaves)
+    else {
+        return Err(invalid_succinct_setup_proof(
+            "sumcheck residual tree opens one position to two values",
+        ));
+    };
+    if !verify_merkle_batch(
+        &limb_proof.quotient_tree_root,
+        phase_tree_depth,
+        &sumcheck_residual_sorted_leaves,
+        &limb_proof.sumcheck_residual_batch_opening,
+    ) {
+        return Err(invalid_succinct_setup_proof(
+            "sumcheck residual query openings failed batched Merkle verification",
         ));
     }
 
@@ -454,6 +533,9 @@ pub(crate) fn verify_evaluation_key_share(
     proof: &SuccinctEvaluationKeyProof,
 ) -> CanonicalResult<()> {
     statement.validate_shape()?;
+    accounting::enforce_current_succinct_proof_soundness_policy(
+        statement.ring_degree / TRACE_SPLIT,
+    )?;
     let limb_moduli = statement.limb_moduli();
     if proof.limb_proofs.len() != limb_moduli.len() {
         return Err(invalid_succinct_setup_proof(

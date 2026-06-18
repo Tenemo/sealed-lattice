@@ -69,6 +69,33 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     );
 
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "cafe0dd0",
+        &[round_one(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    proof.limb_proofs[0]
+        .sumcheck_residual_low_degree
+        .folded_layer_roots
+        .pop()
+        .expect("at least one committed folded layer");
+    let encoded = encode_trustee_evaluation_key_proof(&proof);
+    let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
+        Ok(_) => panic!("wrong residual low-degree fold count must reject at decode"),
+        Err(error) => error,
+    };
+    assert!(
+        error
+            .message
+            .contains("low-degree committed fold count does not match the statement"),
+        "unexpected residual low-degree fold-count error: {}",
+        error.message
+    );
+
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "dec0ded0",
         &[round_one(2), rotation(3, 1)],
         SMALL_RING_DEGREE,
@@ -145,6 +172,17 @@ fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
     assert_noncanonical_encoded_proof_rejects("low-degree folded opening", |proof, modulus| {
         proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_pairs[0].pair[0][0] =
             modulus;
+    });
+    assert_noncanonical_encoded_proof_rejects(
+        "residual low-degree final coefficient",
+        |proof, modulus| {
+            proof.limb_proofs[0]
+                .sumcheck_residual_low_degree
+                .final_coefficients[0][0] = modulus;
+        },
+    );
+    assert_noncanonical_encoded_proof_rejects("residual phase-two query row", |proof, modulus| {
+        proof.limb_proofs[0].sumcheck_residual_query_openings[0].phase_two_rows[0][0] = modulus;
     });
 }
 

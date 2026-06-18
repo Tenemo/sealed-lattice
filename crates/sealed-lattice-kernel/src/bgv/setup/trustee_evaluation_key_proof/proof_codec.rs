@@ -1,7 +1,9 @@
 use super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement};
 use super::low_degree_proof::{LowDegreePairOpening, LowDegreeProof, LowDegreeQueryOpening};
 use super::merkle_commitment::{BatchedMerkleOpening, LEAF_SALT_BYTES};
-use super::prover::{LimbProof, PhaseQueryOpening, SuccinctEvaluationKeyProof};
+use super::prover::{
+    LimbProof, PhaseQueryOpening, PhaseTwoQueryOpening, SuccinctEvaluationKeyProof,
+};
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TrusteeEvaluationKeyStatement};
 use super::*;
 
@@ -10,7 +12,7 @@ use super::*;
 // the byte stream carries no self-describing lengths except folded-layer
 // opening lengths that are checked against the statement, and trailing bytes
 // are refused.
-const PROOF_MAGIC: &[u8; 8] = b"SLTEKP02";
+const PROOF_MAGIC: &[u8; 8] = b"SLTEKP03";
 
 // Every limb modulus the proof commits over is a profile data prime: a ~2^47
 // value whose residues fit in six little-endian bytes. Field and challenge-
@@ -45,6 +47,7 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
             write_extension_slice(&mut bytes, evaluations);
         }
         encode_low_degree_proof(&mut bytes, &limb_proof.low_degree);
+        encode_low_degree_proof(&mut bytes, &limb_proof.sumcheck_residual_low_degree);
         for opening in &limb_proof.query_openings {
             for slot in 0..2 {
                 write_field_residue_slice(&mut bytes, &opening.phase_one_rows[slot]);
@@ -53,8 +56,15 @@ pub(crate) fn encode_trustee_evaluation_key_proof(proof: &SuccinctEvaluationKeyP
                 bytes.extend_from_slice(&opening.phase_two_salts[slot]);
             }
         }
+        for opening in &limb_proof.sumcheck_residual_query_openings {
+            for slot in 0..2 {
+                write_field_residue_slice(&mut bytes, &opening.phase_two_rows[slot]);
+                bytes.extend_from_slice(&opening.phase_two_salts[slot]);
+            }
+        }
         write_batched_opening(&mut bytes, &limb_proof.witness_batch_opening);
         write_batched_opening(&mut bytes, &limb_proof.quotient_batch_opening);
+        write_batched_opening(&mut bytes, &limb_proof.sumcheck_residual_batch_opening);
     }
 
     bytes
@@ -91,8 +101,8 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
         let modulus = statement.limb_moduli()[limb_index];
         let masked_consistency_claims =
             read_base_field_vec(bytes, &mut cursor, layout.claim_count(), modulus)?;
-        let mut deep_evaluations = Vec::with_capacity(DEEP_POINT_COUNT);
-        for _ in 0..DEEP_POINT_COUNT {
+        let mut deep_evaluations = Vec::with_capacity(DEEP_EVALUATION_POINT_COUNT);
+        for _ in 0..DEEP_EVALUATION_POINT_COUNT {
             deep_evaluations.push(read_extension_vec(
                 bytes,
                 &mut cursor,
@@ -100,7 +110,15 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                 modulus,
             )?);
         }
-        let low_degree = decode_low_degree_proof(bytes, &mut cursor, extension_size, modulus)?;
+        let low_degree = decode_low_degree_proof(
+            bytes,
+            &mut cursor,
+            extension_size,
+            COMMITMENT_BOUND_FACTOR * trace_size,
+            modulus,
+        )?;
+        let sumcheck_residual_low_degree =
+            decode_low_degree_proof(bytes, &mut cursor, extension_size, trace_size, modulus)?;
         let mut query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
         for _ in 0..LOW_DEGREE_QUERY_COUNT {
             let mut phase_one_rows = [Vec::new(), Vec::new()];
@@ -130,6 +148,24 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
                 phase_two_salts,
             });
         }
+        let mut sumcheck_residual_query_openings = Vec::with_capacity(LOW_DEGREE_QUERY_COUNT);
+        for _ in 0..LOW_DEGREE_QUERY_COUNT {
+            let mut phase_two_rows = [Vec::new(), Vec::new()];
+            let mut phase_two_salts = [Vec::new(), Vec::new()];
+            for slot in 0..2 {
+                phase_two_rows[slot] = read_base_field_vec(
+                    bytes,
+                    &mut cursor,
+                    PHASE_TWO_COLUMN_COUNT * CHALLENGE_EXTENSION_DEGREE,
+                    modulus,
+                )?;
+                phase_two_salts[slot] = read_bytes(bytes, &mut cursor, LEAF_SALT_BYTES)?;
+            }
+            sumcheck_residual_query_openings.push(PhaseTwoQueryOpening {
+                phase_two_rows,
+                phase_two_salts,
+            });
+        }
         // Each phase tree opens at most two positions per query, so the batched
         // authentication node count cannot exceed two paths' worth per query.
         let phase_batch_node_bound = 2 * LOW_DEGREE_QUERY_COUNT * tree_depth;
@@ -137,15 +173,20 @@ pub(crate) fn decode_trustee_evaluation_key_proof(
             read_batched_opening(bytes, &mut cursor, phase_batch_node_bound)?;
         let quotient_batch_opening =
             read_batched_opening(bytes, &mut cursor, phase_batch_node_bound)?;
+        let sumcheck_residual_batch_opening =
+            read_batched_opening(bytes, &mut cursor, phase_batch_node_bound)?;
         limb_proofs.push(LimbProof {
             witness_tree_root,
             quotient_tree_root,
             masked_consistency_claims,
             deep_evaluations,
             low_degree,
+            sumcheck_residual_low_degree,
             query_openings,
+            sumcheck_residual_query_openings,
             witness_batch_opening,
             quotient_batch_opening,
+            sumcheck_residual_batch_opening,
         });
     }
     if cursor != bytes.len() {
@@ -175,11 +216,12 @@ fn decode_low_degree_proof(
     bytes: &[u8],
     cursor: &mut usize,
     initial_domain_size: usize,
+    initial_degree_bound: usize,
     modulus: u64,
 ) -> CanonicalResult<LowDegreeProof> {
     let fold_count = usize::try_from(read_u64(bytes, cursor)?)
         .map_err(|_| invalid_succinct_setup_proof("low-degree fold count does not fit usize"))?;
-    let expected_fold_count = expected_low_degree_committed_fold_count(initial_domain_size)?;
+    let expected_fold_count = expected_low_degree_committed_fold_count(initial_degree_bound)?;
     if fold_count != expected_fold_count {
         return Err(invalid_succinct_setup_proof(
             "low-degree committed fold count does not match the statement",
@@ -220,23 +262,9 @@ fn decode_low_degree_proof(
 
 // Committed layer count is total folds minus one: the final fold is transmitted
 // as coefficients, not a Merkle-committed layer.
-fn expected_low_degree_committed_fold_count(initial_domain_size: usize) -> CanonicalResult<usize> {
-    let initial_degree_bound_numerator = initial_domain_size
-        .checked_mul(COMMITMENT_BOUND_FACTOR)
-        .ok_or_else(|| {
-        invalid_succinct_setup_proof("low-degree statement domain size overflowed")
-    })?;
-    if initial_domain_size == 0
-        || !initial_domain_size.is_power_of_two()
-        || initial_degree_bound_numerator % DOMAIN_BLOWUP != 0
-    {
-        return Err(invalid_succinct_setup_proof(
-            "low-degree statement domain does not match the fixed proof parameters",
-        ));
-    }
-
-    let initial_degree_bound = initial_degree_bound_numerator / DOMAIN_BLOWUP;
+fn expected_low_degree_committed_fold_count(initial_degree_bound: usize) -> CanonicalResult<usize> {
     if initial_degree_bound <= LOW_DEGREE_FINAL_COEFFICIENT_COUNT
+        || !initial_degree_bound.is_power_of_two()
         || !initial_degree_bound.is_multiple_of(LOW_DEGREE_FINAL_COEFFICIENT_COUNT)
     {
         return Err(invalid_succinct_setup_proof(

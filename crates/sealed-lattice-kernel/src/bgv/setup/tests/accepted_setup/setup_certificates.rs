@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::profile::{data_basis_modulus_bits, extended_basis_modulus_bits};
 
 #[test]
 fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
@@ -174,46 +175,20 @@ fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
     );
 }
 
-// A labeled non-claim proof-model row mutation: the case label and the closure
-// that upgrades one accounting flag the verifier must reject.
-type LabeledProofModelRowMutation = (&'static str, fn(&mut serde_json::Value));
-
 #[test]
-fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
-    // These rows must stay false and the verifier must reject any upgrade to
-    // true: the setup proofs are not QROM-sound and not 128-bit zero-knowledge,
-    // so claiming otherwise would overstate the closed claim boundary.
+fn collective_setup_verifier_refuses_tampered_succinct_leakage_accounting_hash() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
+        "collective_setup_verifier_refuses_tampered_succinct_leakage_accounting_hash",
     );
-
-    let model_row_mutations: [LabeledProofModelRowMutation; 2] = [
-        (
-            "upgraded trustee evaluation-key Fiat-Shamir QROM acceptance flag",
-            |package| {
-                package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]
-                    ["fiatShamir"]["qromAccepted"] = serde_json::json!(true);
-            },
-        ),
-        (
-            "tampered succinct leakage family accounting hash",
-            |package| {
-                package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["familyAccountingHashes"]
-                    ["trusteeEvaluationKey"] = serde_json::json!("0".repeat(128));
-            },
-        ),
-    ];
-
-    for (case_label, mutate_model_row) in model_row_mutations {
-        assert_minimal_collective_setup_package_refused_without_handoff(
-            case_label,
-            |package| {
-                mutate_model_row(package);
-                rebind_setup_proof_accounting_certificate_hash(package);
-            },
-            "setupProofAccountingCertificatePayloadMismatch",
-        );
-    }
+    assert_minimal_collective_setup_package_refused_without_handoff(
+        "tampered succinct leakage family accounting hash",
+        |package| {
+            package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["familyAccountingHashes"]
+                ["trusteeEvaluationKey"] = serde_json::json!("0".repeat(128));
+            rebind_setup_proof_accounting_certificate_hash(package);
+        },
+        "setupProofAccountingCertificatePayloadMismatch",
+    );
 }
 
 #[test]
@@ -234,19 +209,61 @@ fn collective_setup_verifier_checks_he_security_certificate() {
 #[test]
 fn he_security_certificate_records_direct_evaluator_parameter_margins() {
     let certificate = accepted_he_security_certificate_value().expect("HE security certificate");
+    let assessed_ring = certificate["assessedRing"]
+        .as_object()
+        .expect("assessed ring object");
 
-    // Security here is the recomputed parameter margin against the published HE
-    // standard rows, not a self-attested verdict string: every standard row must
-    // leave a positive margin between the accepted modulus and the secure bound.
-    for standard_row in ["postQuantumTernary128", "classicalTernary128"] {
-        let margin_bits = certificate["standardRows"][standard_row]["marginBits"]
-            .as_u64()
-            .expect("standard row margin bits");
-        assert!(
-            margin_bits > 0,
-            "standard row {standard_row} must leave a positive modulus margin"
-        );
-    }
+    assert_eq!(certificate["objectVersion"], serde_json::json!(1));
+    assert_eq!(assessed_ring["largestExposedBasisClass"], "Q_data");
+    assert_eq!(
+        assessed_ring["largestExposedModulusBits"],
+        serde_json::json!(data_basis_modulus_bits())
+    );
+    assert_eq!(
+        assessed_ring["dataPrimeCeilLog2Product"],
+        serde_json::json!(data_basis_modulus_bits())
+    );
+    assert_eq!(
+        assessed_ring["extendedUtilityCeilLog2Product"],
+        serde_json::json!(extended_basis_modulus_bits())
+    );
+
+    assert_eq!(certificate["estimatorBinding"]["tool"], "Lattice Estimator");
+    assert_eq!(
+        certificate["estimatorBinding"]["estimatorCommit"],
+        "27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5"
+    );
+    assert_eq!(
+        certificate["estimatorBinding"]["largestExposedBasisClass"],
+        "Q_data"
+    );
+
+    let estimator_rows = &certificate["latticeEstimatorRows"];
+    let current_q_data_row = &estimator_rows["currentQDataCenteredBinomialEta2"];
+    assert_eq!(
+        current_q_data_row["modulusCeilLog2"],
+        serde_json::json!(data_basis_modulus_bits())
+    );
+    assert_eq!(current_q_data_row["weakestAttack"], "bdd");
+    assert!(log2_string_field(current_q_data_row, "weakestAttackCostLog2") >= 128.0);
+    assert!(log2_string_field(current_q_data_row, "marginTo128Bits") > 11.0);
+
+    let extended_boundary_row = &estimator_rows["qExtendedIfExposedCenteredBinomialEta2"];
+    assert_eq!(
+        extended_boundary_row["modulusCeilLog2"],
+        serde_json::json!(extended_basis_modulus_bits())
+    );
+    assert!(log2_string_field(extended_boundary_row, "weakestAttackCostLog2") >= 128.0);
+    assert!(log2_string_field(extended_boundary_row, "marginTo128Bits") > 3.0);
+
+    // The old 868-bit shortcut is not valid for the current centered-binomial
+    // error model, so the certificate must bind a failing boundary row instead
+    // of treating the published Gaussian table row as direct closure evidence.
+    let centered_binomial_boundary_row = &estimator_rows["boundaryTwoPower868CenteredBinomialEta2"];
+    assert!(log2_string_field(centered_binomial_boundary_row, "weakestAttackCostLog2") < 128.0);
+
+    let published_reference_row = &estimator_rows["bcc25ReferenceTwoPower868Gaussian319"];
+    assert!(log2_string_field(published_reference_row, "weakestAttackCostLog2") >= 128.0);
 
     // The forward-looking target-decryption profile identifier stays bound; the
     // self-attested readiness/coverage flags around it were dropped.
@@ -255,6 +272,14 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
             .as_str()
             .is_some_and(|profile_id| !profile_id.is_empty())
     );
+}
+
+fn log2_string_field(row: &serde_json::Value, field_name: &str) -> f64 {
+    row[field_name]
+        .as_str()
+        .unwrap_or_else(|| panic!("{field_name} must be a decimal string"))
+        .parse()
+        .unwrap_or_else(|error| panic!("{field_name} must parse as f64: {error}"))
 }
 
 #[test]

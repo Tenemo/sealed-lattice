@@ -140,18 +140,24 @@ pub(super) const TRACE_SPLIT: usize = 2;
 pub(super) const DOMAIN_BLOWUP: usize = 4;
 pub(super) const COMMITMENT_BOUND_FACTOR: usize = 2;
 // Random Z_H-multiple mask degree per committed column. Every committed
-// column is opened at most 2 * query count + deep points times (338 at the
-// selected parameters), so 512 random mask coefficients cover the opened
-// evaluations with margin at full size. The cap trace / 4 keeps the cubic
-// row-check composition inside the blowup; development ring sizes below the
-// full profile fall under the cap and are not zero-knowledge evidence.
+// phase-one masked column is opened at most 2 * query count plus the random
+// DEEP points and zero anchor (339 at the selected parameters), so 512 random
+// mask coefficients cover the opened evaluations with margin at full size.
+// The cap trace / 4 keeps the cubic row-check composition inside the blowup;
+// development ring sizes below the full profile fall under the cap and are not
+// zero-knowledge evidence.
 pub(super) fn column_mask_degree(trace_size: usize) -> usize {
     512.min(trace_size / 4)
 }
-// Out-of-domain evaluation points per limb; identity soundness per point is
-// (composition degree / challenge field size), around 2^-171 at full size
-// with degree-four extension challenges.
+// Random out-of-domain evaluation points per limb; identity soundness per
+// point is (composition degree / challenge field size), around 2^-171 at full
+// size with degree-four extension challenges. A deterministic zero anchor is
+// added to the DEEP evaluation list separately to bind the sumcheck residual's
+// constant term.
 pub(super) const DEEP_POINT_COUNT: usize = 2;
+pub(super) const SUMCHECK_RESIDUAL_ANCHOR_POINT_COUNT: usize = 1;
+pub(super) const DEEP_EVALUATION_POINT_COUNT: usize =
+    DEEP_POINT_COUNT + SUMCHECK_RESIDUAL_ANCHOR_POINT_COUNT;
 // Independent power-challenge repetitions of the linear-relation sumcheck;
 // each contributes about (trace size / challenge field size), around 2^-174.
 pub(super) const LINCHECK_REPETITIONS: usize = 2;
@@ -178,6 +184,10 @@ pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 92;
 // fallback (half a bit per query) would need roughly 288 queries. See
 // accounting.rs for the full re-basing. No grinding is applied.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
+pub(super) const MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS: i64 = 128;
+pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree-v1";
+pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
+    b"sumcheck-residual-degree-v1";
 // The FRI recursion stops once the claimed degree bound reaches this size and
 // the final polynomial is sent in coefficient form.
 pub(super) const LOW_DEGREE_FINAL_COEFFICIENT_COUNT: usize = 8;

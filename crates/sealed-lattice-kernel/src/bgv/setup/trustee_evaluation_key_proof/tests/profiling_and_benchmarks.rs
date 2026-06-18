@@ -70,10 +70,31 @@ impl ProofSizeBreakdown {
     }
 }
 
-fn committed_fold_count(extension_size: usize) -> usize {
-    let initial_degree_bound = extension_size * COMMITMENT_BOUND_FACTOR / DOMAIN_BLOWUP;
+fn committed_fold_count(initial_degree_bound: usize) -> usize {
     let fold_ratio = initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT;
     fold_ratio.trailing_zeros() as usize - 1
+}
+
+fn add_low_degree_size(
+    breakdown: &mut ProofSizeBreakdown,
+    extension_size: usize,
+    initial_degree_bound: usize,
+    extension_element_bytes: usize,
+    hash_bytes: usize,
+) {
+    let folds = committed_fold_count(initial_degree_bound);
+    breakdown.length_prefixes += 8; // folded-layer-root count
+    breakdown.low_degree_fold_roots += folds * hash_bytes;
+    breakdown.low_degree_final_coefficients +=
+        LOW_DEGREE_FINAL_COEFFICIENT_COUNT * extension_element_bytes;
+    for _query in 0..LOW_DEGREE_QUERY_COUNT {
+        for fold_index in 0..folds {
+            breakdown.low_degree_query_pairs += 2 * extension_element_bytes;
+            breakdown.length_prefixes += 8; // path-length prefix
+            breakdown.low_degree_query_paths +=
+                folded_layer_path_length(extension_size, fold_index) * hash_bytes;
+        }
+    }
 }
 
 fn analyze_proof_size(
@@ -97,22 +118,25 @@ fn analyze_proof_size(
 
         breakdown.commitment_roots += 2 * hash_bytes;
         breakdown.masked_consistency_claims += claim_count * field_element_bytes;
-        breakdown.deep_evaluations += DEEP_POINT_COUNT * total_columns * extension_element_bytes;
+        breakdown.deep_evaluations +=
+            DEEP_EVALUATION_POINT_COUNT * total_columns * extension_element_bytes;
 
-        // Low-degree (batched FRI) proof.
-        let folds = committed_fold_count(extension_size);
-        breakdown.length_prefixes += 8; // folded-layer-root count
-        breakdown.low_degree_fold_roots += folds * hash_bytes;
-        breakdown.low_degree_final_coefficients +=
-            LOW_DEGREE_FINAL_COEFFICIENT_COUNT * extension_element_bytes;
-        for _query in 0..LOW_DEGREE_QUERY_COUNT {
-            for fold_index in 0..folds {
-                breakdown.low_degree_query_pairs += 2 * extension_element_bytes;
-                breakdown.length_prefixes += 8; // path-length prefix
-                breakdown.low_degree_query_paths +=
-                    folded_layer_path_length(extension_size, fold_index) * hash_bytes;
-            }
-        }
+        // Main batched low-degree proof and the residual low-degree proof.
+        let commitment_bound = COMMITMENT_BOUND_FACTOR * trace_size;
+        add_low_degree_size(
+            &mut breakdown,
+            extension_size,
+            commitment_bound,
+            extension_element_bytes,
+            hash_bytes,
+        );
+        add_low_degree_size(
+            &mut breakdown,
+            extension_size,
+            trace_size,
+            extension_element_bytes,
+            hash_bytes,
+        );
 
         // Phase (witness/quotient tree) query openings: two coset-pair slots.
         for _query in 0..LOW_DEGREE_QUERY_COUNT {
@@ -120,6 +144,13 @@ fn analyze_proof_size(
                 breakdown.phase_one_rows += phase_one_columns * field_element_bytes;
                 breakdown.leaf_salts += salt_bytes;
                 breakdown.phase_one_paths += tree_depth * hash_bytes;
+                breakdown.phase_two_rows += PHASE_TWO_COLUMN_COUNT * extension_element_bytes;
+                breakdown.leaf_salts += salt_bytes;
+                breakdown.phase_two_paths += tree_depth * hash_bytes;
+            }
+        }
+        for _query in 0..LOW_DEGREE_QUERY_COUNT {
+            for _slot in 0..2 {
                 breakdown.phase_two_rows += PHASE_TWO_COLUMN_COUNT * extension_element_bytes;
                 breakdown.leaf_salts += salt_bytes;
                 breakdown.phase_two_paths += tree_depth * hash_bytes;
@@ -261,15 +292,25 @@ fn profile_trustee_proof_size_breakdown() {
         .limb_proofs
         .iter()
         .map(|limb| {
-            (limb.witness_batch_opening.authentication_nodes.len()
+            let batched_node_count = limb.witness_batch_opening.authentication_nodes.len()
                 + limb.quotient_batch_opening.authentication_nodes.len()
+                + limb
+                    .sumcheck_residual_batch_opening
+                    .authentication_nodes
+                    .len()
                 + limb
                     .low_degree
                     .layer_batch_openings
                     .iter()
                     .map(|opening| opening.authentication_nodes.len())
-                    .sum::<usize>())
-                * 64
+                    .sum::<usize>()
+                + limb
+                    .sumcheck_residual_low_degree
+                    .layer_batch_openings
+                    .iter()
+                    .map(|opening| opening.authentication_nodes.len())
+                    .sum::<usize>();
+            batched_node_count * 64
         })
         .sum();
     let measured_saving = independent_paths.total() - encoded.len();

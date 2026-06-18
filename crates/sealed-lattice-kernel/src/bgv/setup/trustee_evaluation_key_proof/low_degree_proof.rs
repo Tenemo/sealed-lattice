@@ -8,10 +8,10 @@ use merkle_commitment::{
     verify_merkle_batch,
 };
 
-// Batched FRI low-degree argument at rate 1/2. The initial layer is the
-// lambda-batched DEEP quotient codeword over the extension coset; it is not
-// committed here because the verifier re-derives queried values from the
-// phase tree openings. Each fold halves the degree bound and the domain;
+// Batched FRI low-degree argument. The initial layer is a codeword over the
+// extension coset; it is not committed here because the verifier re-derives
+// queried values from the phase tree openings. Each fold halves the degree
+// bound and the domain;
 // folded layers are committed as Merkle trees over pair leaves so one opening
 // serves the next fold. The recursion stops at a small final polynomial sent
 // in coefficient form.
@@ -26,7 +26,8 @@ pub(super) struct LowDegreeParameters {
     pub(super) initial_offset: u64,
     pub(super) initial_root: u64,
     // Strict degree bound of the initial layer (the codeword claims degree
-    // below this value); must be half the initial domain size at rate 1/2.
+    // below this value). The domain must have at least a factor-two blowup; the
+    // residual sumcheck proof uses the same domain at factor-four blowup.
     pub(super) initial_degree_bound: usize,
 }
 
@@ -53,9 +54,39 @@ pub(super) struct LowDegreePairOpening {
 // fold_count - 1 Merkle layers because the final fold is sent as coefficients,
 // not a committed layer.
 fn fold_count(parameters: &LowDegreeParameters) -> usize {
-    debug_assert!(parameters.initial_degree_bound.is_power_of_two());
-    debug_assert!(parameters.initial_degree_bound > LOW_DEGREE_FINAL_COEFFICIENT_COUNT);
     (parameters.initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT).trailing_zeros() as usize
+}
+
+fn validate_low_degree_parameters(parameters: &LowDegreeParameters) -> CanonicalResult<()> {
+    if parameters.initial_domain_size == 0
+        || !parameters.initial_domain_size.is_power_of_two()
+        || parameters.initial_degree_bound <= LOW_DEGREE_FINAL_COEFFICIENT_COUNT
+        || !parameters.initial_degree_bound.is_power_of_two()
+        || parameters.initial_domain_size < 2 * parameters.initial_degree_bound
+        || !parameters
+            .initial_degree_bound
+            .is_multiple_of(LOW_DEGREE_FINAL_COEFFICIENT_COUNT)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree parameters do not match the fixed proof shape",
+        ));
+    }
+    let fold_ratio = parameters.initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT;
+    if !fold_ratio.is_power_of_two() {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree parameters do not have a canonical fold depth",
+        ));
+    }
+    let total_folds = fold_count(parameters);
+    let final_layer_size = parameters.initial_domain_size >> total_folds;
+    if final_layer_size < LOW_DEGREE_FINAL_COEFFICIENT_COUNT || !final_layer_size.is_power_of_two()
+    {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree final layer does not match the fixed proof shape",
+        ));
+    }
+
+    Ok(())
 }
 
 fn flatten_extension_pair(pair: &[ChallengeExtensionElement; 2]) -> [u64; 8] {
@@ -178,9 +209,8 @@ pub(super) fn prove_low_degree(
     parameters: &LowDegreeParameters,
     initial_layer: &[ChallengeExtensionElement],
 ) -> CanonicalResult<(LowDegreeProof, Vec<usize>)> {
-    if initial_layer.len() != parameters.initial_domain_size
-        || parameters.initial_domain_size != 2 * parameters.initial_degree_bound
-    {
+    validate_low_degree_parameters(parameters)?;
+    if initial_layer.len() != parameters.initial_domain_size {
         return Err(invalid_succinct_setup_proof(
             "low-degree initial layer does not match the declared parameters",
         ));
@@ -284,6 +314,7 @@ pub(super) fn verify_low_degree(
     proof: &LowDegreeProof,
     mut initial_pair_at: impl FnMut(usize, usize) -> CanonicalResult<[ChallengeExtensionElement; 2]>,
 ) -> CanonicalResult<()> {
+    validate_low_degree_parameters(parameters)?;
     let total_folds = fold_count(parameters);
     if proof.folded_layer_roots.len() + 1 != total_folds
         || proof.final_coefficients.len() != LOW_DEGREE_FINAL_COEFFICIENT_COUNT

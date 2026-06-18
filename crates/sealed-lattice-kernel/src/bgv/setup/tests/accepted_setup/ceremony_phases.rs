@@ -14,7 +14,7 @@ fn first_profile_setup_profile_hash_is_byte_stable() {
         profile["setupProfileHash"]
             .as_str()
             .expect("setup profile hash"),
-        "192b5496be08575410ea22a0771c4b2f00632eb7f230d2fa1bf8e1024e4786e89210bd51a4ffe7e65efb5100dcd1f30acbd3c9061675b7d5ad51fa1704ff06dd",
+        "05e75edb3e56dcc3078f63eb1fe2f6f99d19bf22f667facfcbb82ddd50cfb7273ab06ae34eaeff7dda9db885148ed61538bb8416024d04b94608364692d4e493",
     );
 }
 

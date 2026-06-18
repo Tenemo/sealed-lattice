@@ -33,12 +33,15 @@ pub(super) struct LimbProof {
     // four logical phase-two columns.
     pub(super) deep_evaluations: Vec<Vec<ChallengeExtensionElement>>,
     pub(super) low_degree: LowDegreeProof,
+    pub(super) sumcheck_residual_low_degree: LowDegreeProof,
     pub(super) query_openings: Vec<PhaseQueryOpening>,
+    pub(super) sumcheck_residual_query_openings: Vec<PhaseTwoQueryOpening>,
     // One batched authentication opening per phase tree, covering every queried
     // position and its coset partner at once instead of an independent path per
     // query slot.
     pub(super) witness_batch_opening: BatchedMerkleOpening,
     pub(super) quotient_batch_opening: BatchedMerkleOpening,
+    pub(super) sumcheck_residual_batch_opening: BatchedMerkleOpening,
 }
 
 // Openings of both phase trees at the queried extension pair positions,
@@ -47,6 +50,14 @@ pub(super) struct LimbProof {
 pub(super) struct PhaseQueryOpening {
     pub(super) phase_one_rows: [Vec<u64>; 2],
     pub(super) phase_one_salts: [Vec<u8>; 2],
+    pub(super) phase_two_rows: [Vec<u64>; 2],
+    pub(super) phase_two_salts: [Vec<u8>; 2],
+}
+
+// Openings of the phase-two tree at the residual low-degree query positions.
+// The residual FRI instance authenticates only the fourth logical phase-two
+// column, but the Merkle leaf still binds the whole phase-two row.
+pub(super) struct PhaseTwoQueryOpening {
     pub(super) phase_two_rows: [Vec<u64>; 2],
     pub(super) phase_two_salts: [Vec<u8>; 2],
 }

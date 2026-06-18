@@ -39,6 +39,49 @@ fn tampered_consistency_claim_is_rejected() {
 }
 
 #[test]
+fn tampered_sumcheck_residual_zero_anchor_is_rejected() {
+    let (statement, witness) =
+        generate_development_trustee_instance("a11ce000", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let modulus = statement.limb_moduli()[0];
+    let layout = LimbColumnLayout::new(&statement, 0).expect("limb layout");
+    let residual_column = layout.phase_one_physical_count() + QUOTIENT_COLUMN_SUMCHECK_RESIDUAL;
+    let anchor_point_index = DEEP_EVALUATION_POINT_COUNT - 1;
+    proof.limb_proofs[0].deep_evaluations[anchor_point_index][residual_column][0] =
+        (proof.limb_proofs[0].deep_evaluations[anchor_point_index][residual_column][0] + 1)
+            % modulus;
+    let result = verify_evaluation_key_share(&statement, &proof);
+    assert!(
+        result.is_err(),
+        "tampering with the residual zero anchor must reject"
+    );
+}
+
+#[test]
+fn tampered_sumcheck_residual_low_degree_proof_is_rejected() {
+    let (statement, witness) =
+        generate_development_trustee_instance("a11ce001", &[round_one(2)], SMALL_RING_DEGREE)
+            .expect("development instance");
+    let mut proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let modulus = statement.limb_moduli()[0];
+    proof.limb_proofs[0]
+        .sumcheck_residual_low_degree
+        .final_coefficients[0][0] = (proof.limb_proofs[0]
+        .sumcheck_residual_low_degree
+        .final_coefficients[0][0]
+        + 1)
+        % modulus;
+    let result = verify_evaluation_key_share(&statement, &proof);
+    assert!(
+        result.is_err(),
+        "tampering with the residual low-degree proof must reject"
+    );
+}
+
+#[test]
 fn forged_secret_inconsistent_across_limbs_is_rejected() {
     // A prover that commits a different secret in one limb field would produce
     // masked consistency claims that disagree across limbs as integers.

@@ -28,6 +28,28 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
             .expect("effective soundness")
             >= 128
     );
+    let report = super::accounting::succinct_proof_soundness_report(
+        crate::bgv::profile::POLYNOMIAL_DEGREE / 2,
+    )
+    .expect("typed soundness report");
+    assert_eq!(
+        report.effective_soundness_bits,
+        accounting["fiatShamir"]["effectiveSoundnessBitsAfterUnion"]
+            .as_i64()
+            .expect("JSON effective soundness")
+    );
+    super::accounting::enforce_current_succinct_proof_soundness_policy(
+        crate::bgv::profile::POLYNOMIAL_DEGREE / 2,
+    )
+    .expect("conjectured classical policy floor");
+    assert_eq!(
+        accounting["identitySoundness"]["totalDeepEvaluationPointCount"],
+        serde_json::json!(3)
+    );
+    assert_eq!(
+        accounting["lowDegreeSoundness"]["sumcheckResidualDegreeBound"],
+        accounting["argumentShape"]["traceSize"]
+    );
     assert!(
         accounting["zeroKnowledge"]["smudgingBudget"]["totalLeakageLog2Approximate"]
             .as_i64()
