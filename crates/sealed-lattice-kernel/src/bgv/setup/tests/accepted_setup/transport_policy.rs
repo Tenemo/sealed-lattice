@@ -342,6 +342,43 @@ fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_setup_transport_measurement_drift() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_setup_transport_measurement_drift",
+    );
+    let mut drifted_row_package = minimal_collective_setup_package();
+    drifted_row_package["setupTransportCertificate"]["transportMeasurementRows"][0]["byteLength"] =
+        serde_json::json!(1_u64);
+    rebind_collective_setup_package_hash(&mut drifted_row_package);
+
+    let drifted_row_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": drifted_row_package,
+    }))
+    .expect("verification response");
+    assert_eq!(drifted_row_result["verifierStatus"], "refused");
+    assert_eq!(
+        drifted_row_result["refusedObjects"][0]["reasonCode"],
+        "transportMeasurementRowsMismatch"
+    );
+
+    let mut drifted_summary_package = minimal_collective_setup_package();
+    drifted_summary_package["setupTransportCertificate"]["transportMeasurementSummary"]["totalByteLength"] =
+        serde_json::json!(1_u64);
+    rebind_collective_setup_package_hash(&mut drifted_summary_package);
+
+    let drifted_summary_result =
+        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+            "setupPackage": drifted_summary_package,
+        }))
+        .expect("verification response");
+    assert_eq!(drifted_summary_result["verifierStatus"], "refused");
+    assert_eq!(
+        drifted_summary_result["refusedObjects"][0]["reasonCode"],
+        "transportMeasurementSummaryMismatch"
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_public_key_share_transport_missing_certificate_object",

@@ -521,7 +521,7 @@ fn build_collective_setup_package_fixture_parts(
         "heSecurityCertificate": he_security_certificate,
         "heSecurityCertificateHash": he_security_certificate_hash,
     });
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     CollectiveSetupPackageFixture {
@@ -834,6 +834,52 @@ pub(super) fn setup_transport_certificate_fixture(
         }),
     )
     .expect("setup transport aggregate chunk root");
+    let transport_measurement_rows = serde_json::json!([
+        {
+            "objectType": "SetupTransportMeasurementRow",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+            "measurementKind": "static-profile-transport-manifest-accounting",
+            "objectName": "vssCoefficientCommitmentMaterial",
+            "objectRole": "public-vss-coefficient-commitment-material",
+            "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
+            "byteLength": total_byte_length,
+            "chunkStartIndex": 0_u64,
+            "chunkCount": chunk_count,
+            "chunkSizeBytes": chunk_size_bytes,
+            "chunkRoot": vss_chunk_root,
+            "fullObjectHash": vss_full_object_hash,
+            "storageQuotaBytes": 2_147_483_648_u64,
+            "largestSingleBufferBytes": 1_572_864_u64,
+            "copyCountLimit": 2_u64,
+            "streamVerificationOrder": "ascending-chunk-index",
+            "resumePolicy": "chunk-index-checkpointed-by-hash",
+            "lazyLoadingPolicy": "root-addressed-large-object-loading",
+            "profileScaleStatus": "profile-scale-transport-manifest-bound-to-current-package-shape",
+        }
+    ]);
+    let transport_measurement_summary = serde_json::json!({
+        "objectType": "SetupTransportMeasurementSummary",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+        "measurementKind": "static-profile-transport-manifest-accounting",
+        "rowCount": 1_u64,
+        "totalByteLength": total_byte_length,
+        "chunkCount": chunk_count,
+        "chunkSizeBytes": chunk_size_bytes,
+        "storageQuotaBytes": 2_147_483_648_u64,
+        "largestSingleBufferBytes": 1_572_864_u64,
+        "copyCountLimit": 2_u64,
+        "streamVerificationOrder": "ascending-chunk-index",
+        "resumePolicy": "chunk-index-checkpointed-by-hash",
+        "lazyLoadingPolicy": "root-addressed-large-object-loading",
+        "nativeReleaseBoundary": "native-release-verifier-runtime-measurements-are-recorded-outside-this-certificate",
+        "nodeWasmBoundary": "node-wasm-bridge-runtime-measurements-are-recorded-outside-this-certificate",
+        "supportedPhoneBoundary": "supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate",
+        "profileScaleStatus": "profile-scale-transport-manifest-bound-to-current-package-shape",
+    });
     let mut certificate = serde_json::json!({
         "objectType": "SetupTransportCertificate",
         "objectVersion": 1,
@@ -852,6 +898,8 @@ pub(super) fn setup_transport_certificate_fixture(
         "resumePolicy": "chunk-index-checkpointed-by-hash",
         "lazyLoadingPolicy": "root-addressed-large-object-loading",
         "transportedObjects": transported_objects,
+        "transportMeasurementRows": transport_measurement_rows,
+        "transportMeasurementSummary": transport_measurement_summary,
         "chunkHashes": chunk_hashes,
         "chunkRoot": chunk_root,
         "fullObjectHash": aggregate_full_object_hash,
@@ -1553,7 +1601,7 @@ pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json
 fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
     let mut package = minimal_collective_setup_package();
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package
@@ -1571,7 +1619,7 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> s
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package
@@ -1588,7 +1636,7 @@ fn build_collective_public_key_bearing_collective_setup_package() -> serde_json:
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package

@@ -736,6 +736,7 @@ export type BgvAcceptedSetupHandoff = {
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificateHash: ProtocolHash;
         readonly setupProofAccountingCertificateHash: ProtocolHash;
+        readonly setupAssemblyProvenanceCertificateHash: ProtocolHash;
         readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
         readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
         readonly heSecurityCertificateHash: ProtocolHash;

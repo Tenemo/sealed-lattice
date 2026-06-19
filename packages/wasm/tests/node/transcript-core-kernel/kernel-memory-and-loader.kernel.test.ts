@@ -8,6 +8,8 @@ import { createMockKernelExports } from './shared.js';
 
 import {
     createTranscriptCoreKernelLoader,
+    type BgvAcceptedSetupHandoff,
+    type DirectBallotAcceptedPublicKeyMaterial,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
 
@@ -297,6 +299,159 @@ describe('transcript-core kernel in Node', () => {
                 verifiedSetupProofMaterials,
             },
         ]);
+    });
+
+    it('forwards accepted setup verifier outputs into direct ballot kernel commands', async () => {
+        const decodedCommands: unknown[] = [];
+        const hashOne = '1'.repeat(128);
+        const hashTwo = '2'.repeat(128);
+        const hashThree = '3'.repeat(128);
+        const acceptedSetupHandoff = {
+            objectType: 'CollectiveBgvAcceptedSetupHandoff',
+            objectVersion: 1,
+            acceptedSetupHandoffRoot: hashOne,
+            directBallotEncryptionHandoff: {
+                objectType: 'DirectBallotEncryptionHandoff',
+                bgvPublicKeyRoot: hashTwo,
+                ballotValidityProofProfileHash: hashThree,
+            },
+            marker: 'verifier-returned-handoff',
+        } as unknown as BgvAcceptedSetupHandoff;
+        const acceptedPublicKeyMaterial = {
+            objectType: 'DirectBallotAcceptedPublicKeyMaterial',
+            objectVersion: 1,
+            acceptedSetupHandoffRoot: hashOne,
+            bgvPublicKeyRoot: hashTwo,
+            marker: 'verifier-returned-public-key-material',
+        } as unknown as DirectBallotAcceptedPublicKeyMaterial;
+        const commandResponse = {
+            success: true,
+            value: {
+                ok: true,
+                operation: 'verifyCollectiveBgvSetupPackage',
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                verifierStatus: 'accepted',
+                currentPhase: null,
+                phaseOrderHash: hashThree,
+                acceptedHashes: [hashOne],
+                missingObjects: [],
+                refusedObjects: [],
+                acceptedSetupHandoff,
+                acceptedPublicKeyMaterial,
+            },
+        };
+        const { loadMockKernel } = createMockKernelExports({
+            commandPointer: 4096,
+            commandResponse,
+            onCommand: (command) => {
+                decodedCommands.push(command);
+            },
+            outputLengthAllocationPointer: 2048,
+        });
+        const kernel = await loadMockKernel();
+        const setupPackage = {
+            objectType: 'SetupPackage',
+            marker: 'setup-package-must-not-reach-direct-ballot-commands',
+        };
+        const setupVerification = kernel.verifyCollectiveBgvSetup({
+            setupPackage,
+            expectedSetupPackageHash: hashOne,
+        });
+        const setupVerifierHandoff = setupVerification.acceptedSetupHandoff;
+        const setupVerifierPublicKeyMaterial =
+            setupVerification.acceptedPublicKeyMaterial;
+        if (
+            setupVerifierHandoff === undefined ||
+            setupVerifierPublicKeyMaterial === undefined
+        ) {
+            throw new Error(
+                'mock accepted setup verification did not return direct ballot material.',
+            );
+        }
+
+        const ballot = {
+            voterIdentity: 'voter-accepted-setup-output',
+            voterRosterPosition: 0,
+            actionContextHash: hashThree,
+            recoveryEpoch: 0,
+            deviceEpoch: 0,
+            scores: [10, 9, 8, 7, 6, 5, 4, 3, 2, 1],
+        };
+        const proofChunks = [
+            {
+                chunkIndex: 0,
+                byteLength: 1,
+                chunkHash: hashOne,
+                bytesHex: '00',
+            },
+        ];
+        const encryptedBallotPackage = {
+            objectType: 'EncryptedBallotPackage',
+            packageRoot: hashTwo,
+        };
+        const verifiedPackageInput = {
+            voterSigningPublicKeyHash: hashThree,
+            encryptedBallotPackage,
+            proofChunks,
+        };
+
+        kernel.createDirectEncryptedBallotPackages({
+            acceptedPublicKeyMaterial: setupVerifierPublicKeyMaterial,
+            acceptedSetupHandoff: setupVerifierHandoff,
+            ballotEncryptionRandomness: {
+                source: 'fresh-csprng',
+                encryptionSeedHexes: ['11'.repeat(32)],
+            },
+            proofMaskRandomness: {
+                source: 'fresh-csprng',
+                ballotProofRandomnessHexes: ['22'.repeat(32)],
+            },
+            ballots: [ballot],
+        });
+        kernel.verifyDirectEncryptedBallotPackage({
+            acceptedPublicKeyMaterial: setupVerifierPublicKeyMaterial,
+            acceptedSetupHandoff: setupVerifierHandoff,
+            ...verifiedPackageInput,
+        });
+        kernel.aggregateDirectEncryptedBallotPackages({
+            acceptedPublicKeyMaterial: setupVerifierPublicKeyMaterial,
+            acceptedSetupHandoff: setupVerifierHandoff,
+            encryptedBallotPackages: [verifiedPackageInput],
+            firstValidOrderHash: hashOne,
+            firstValidPackageRoots: [hashTwo],
+        });
+
+        expect(decodedCommands).toHaveLength(4);
+        expect(decodedCommands[0]).toEqual({
+            command: 'VerifyCollectiveBgvSetup',
+            setupPackage,
+            expectedSetupPackageHash: hashOne,
+        });
+        expect(decodedCommands[1]).toMatchObject({
+            command: 'CreateDirectEncryptedBallotPackages',
+            acceptedSetupHandoff: setupVerifierHandoff,
+            acceptedPublicKeyMaterial: setupVerifierPublicKeyMaterial,
+            ballots: [ballot],
+        });
+        expect(decodedCommands[2]).toMatchObject({
+            command: 'VerifyDirectEncryptedBallotPackage',
+            acceptedSetupHandoff: setupVerifierHandoff,
+            acceptedPublicKeyMaterial: setupVerifierPublicKeyMaterial,
+            encryptedBallotPackage,
+            proofChunks,
+        });
+        expect(decodedCommands[3]).toMatchObject({
+            command: 'AggregateDirectEncryptedBallotPackages',
+            acceptedSetupHandoff: setupVerifierHandoff,
+            acceptedPublicKeyMaterial: setupVerifierPublicKeyMaterial,
+            encryptedBallotPackages: [verifiedPackageInput],
+            firstValidOrderHash: hashOne,
+            firstValidPackageRoots: [hashTwo],
+        });
+        for (const directCommand of decodedCommands.slice(1)) {
+            expect(directCommand).not.toHaveProperty('setupPackage');
+            expect(directCommand).not.toHaveProperty('setupPublicMaterial');
+        }
     });
 
     it('forwards setup proof material stream commands to the kernel', async () => {

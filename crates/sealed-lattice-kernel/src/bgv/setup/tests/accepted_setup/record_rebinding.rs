@@ -354,7 +354,7 @@ pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_j
         derive_protocol_hash("SameSecretProofRoot", &package["sameSecretProofs"])
             .expect("same-secret proof set root")
     );
-    rebind_active_static_setup_theorem_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
 }
 
 pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
@@ -390,7 +390,7 @@ pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut se
         )
         .expect("public-key succinct proof set root")
     );
-    rebind_active_static_setup_theorem_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
 }
 
 pub(super) fn rebind_collective_public_key_root(package: &mut serde_json::Value) {
@@ -404,7 +404,7 @@ pub(super) fn rebind_collective_public_key_root(package: &mut serde_json::Value)
     );
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
-    rebind_active_static_setup_theorem_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
 }
 
 pub(super) fn rebind_collective_public_key_share_roots(package: &mut serde_json::Value) {
@@ -592,6 +592,18 @@ pub(super) fn rebind_setup_key_correctness_certificate(package: &mut serde_json:
     certificate["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash.clone());
     package["setupKeyCorrectnessCertificate"] = certificate;
     package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash);
+    rebind_active_static_setup_theorem_certificate(package);
+}
+
+pub(super) fn rebind_setup_assembly_provenance_certificate(package: &mut serde_json::Value) {
+    let mut certificate = setup_assembly_provenance_certificate_value(package)
+        .expect("setup assembly provenance certificate");
+    let certificate_hash = setup_assembly_provenance_certificate_hash(package)
+        .expect("setup assembly provenance certificate hash");
+    certificate["setupAssemblyProvenanceCertificateHash"] =
+        serde_json::json!(certificate_hash.clone());
+    package["setupAssemblyProvenanceCertificate"] = certificate;
+    package["setupAssemblyProvenanceCertificateHash"] = serde_json::json!(certificate_hash);
     rebind_active_static_setup_theorem_certificate(package);
 }
 

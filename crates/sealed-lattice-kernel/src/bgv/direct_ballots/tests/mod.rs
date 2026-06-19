@@ -179,6 +179,9 @@ fn accepted_setup_response_package_for_public_key_material(
         "setupProofAccountingCertificateHash": direct_ballot_test_hash(
             "setup proof accounting certificate hash",
         ),
+        "setupAssemblyProvenanceCertificateHash": direct_ballot_test_hash(
+            "setup assembly provenance certificate hash",
+        ),
         "setupKeyCorrectnessCertificateHash": direct_ballot_test_hash(
             "setup key correctness certificate hash",
         ),

@@ -611,6 +611,10 @@ fn verify_transport_certificate_body(
             "setupPackage.setupTransportCertificate.chunkRoot",
         )));
     }
+    transport_try!(verify_setup_transport_measurements(
+        transport_certificate,
+        &aggregate,
+    ));
 
     let certificate_hash = transport_canonical_try!(require_transport_hash(
         transport_certificate,
@@ -670,6 +674,8 @@ fn unexpected_setup_transport_certificate_field(value: &Value) -> Option<String>
             "resumePolicy",
             "lazyLoadingPolicy",
             "transportedObjects",
+            "transportMeasurementRows",
+            "transportMeasurementSummary",
             "chunkHashes",
             "chunkRoot",
             "fullObjectHash",
@@ -846,6 +852,7 @@ fn verify_setup_transported_objects(
     ));
 
     Ok(Ok(SetupTransportAggregate {
+        transported_objects,
         total_byte_length,
         chunk_count,
         chunk_hashes,
@@ -869,11 +876,109 @@ struct SetupTransportedObjectBinding {
 
 #[derive(Debug)]
 struct SetupTransportAggregate {
+    transported_objects: Vec<SetupTransportedObjectBinding>,
     total_byte_length: u64,
     chunk_count: u64,
     chunk_hashes: Vec<String>,
     chunk_root: String,
     full_object_hash: String,
+}
+
+fn setup_transport_measurement_rows(aggregate: &SetupTransportAggregate) -> Value {
+    Value::Array(
+        aggregate
+            .transported_objects
+            .iter()
+            .map(|transported_object| {
+                json!({
+                    "objectType": SETUP_TRANSPORT_MEASUREMENT_ROW_OBJECT_TYPE,
+                    "objectVersion": 1,
+                    "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+                    "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+                    "measurementKind": SETUP_TRANSPORT_MEASUREMENT_KIND,
+                    "objectName": transported_object.object_name,
+                    "objectRole": transported_object.object_role,
+                    "objectRoot": transported_object.object_root,
+                    "byteLength": transported_object.byte_length,
+                    "chunkStartIndex": transported_object.chunk_start_index,
+                    "chunkCount": transported_object.chunk_count,
+                    "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+                    "chunkRoot": transported_object.chunk_root,
+                    "fullObjectHash": transported_object.full_object_hash,
+                    "storageQuotaBytes": SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
+                    "largestSingleBufferBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
+                    "copyCountLimit": SETUP_TRANSPORT_COPY_COUNT_LIMIT,
+                    "streamVerificationOrder": SETUP_TRANSPORT_STREAM_ORDER,
+                    "resumePolicy": SETUP_TRANSPORT_RESUME_POLICY,
+                    "lazyLoadingPolicy": SETUP_TRANSPORT_LAZY_LOADING_POLICY,
+                    "profileScaleStatus": SETUP_TRANSPORT_PROFILE_SCALE_STATUS,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn setup_transport_measurement_summary(aggregate: &SetupTransportAggregate) -> Value {
+    json!({
+        "objectType": SETUP_TRANSPORT_MEASUREMENT_SUMMARY_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+        "measurementKind": SETUP_TRANSPORT_MEASUREMENT_KIND,
+        "rowCount": aggregate.transported_objects.len(),
+        "totalByteLength": aggregate.total_byte_length,
+        "chunkCount": aggregate.chunk_count,
+        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        "storageQuotaBytes": SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
+        "largestSingleBufferBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
+        "copyCountLimit": SETUP_TRANSPORT_COPY_COUNT_LIMIT,
+        "streamVerificationOrder": SETUP_TRANSPORT_STREAM_ORDER,
+        "resumePolicy": SETUP_TRANSPORT_RESUME_POLICY,
+        "lazyLoadingPolicy": SETUP_TRANSPORT_LAZY_LOADING_POLICY,
+        "nativeReleaseBoundary": SETUP_TRANSPORT_NATIVE_RELEASE_BOUNDARY,
+        "nodeWasmBoundary": SETUP_TRANSPORT_NODE_WASM_BOUNDARY,
+        "supportedPhoneBoundary": SETUP_TRANSPORT_SUPPORTED_PHONE_BOUNDARY,
+        "profileScaleStatus": SETUP_TRANSPORT_PROFILE_SCALE_STATUS,
+    })
+}
+
+fn verify_setup_transport_measurements(
+    transport_certificate: &Value,
+    aggregate: &SetupTransportAggregate,
+) -> Result<(), Refusal> {
+    let expected_measurement_rows = setup_transport_measurement_rows(aggregate);
+    match transport_certificate.get("transportMeasurementRows") {
+        Some(observed_rows) if observed_rows == &expected_measurement_rows => {}
+        Some(_) => {
+            return Err(Refusal::new(
+                "transportMeasurementRowsMismatch",
+                "setupTransportCertificate.transportMeasurementRows must match the transported-object profile accounting rows",
+                "setupPackage.setupTransportCertificate.transportMeasurementRows",
+            ));
+        }
+        None => {
+            return Err(Refusal::new(
+                "transportMeasurementRowsMissing",
+                "setupTransportCertificate.transportMeasurementRows is required",
+                "setupPackage.setupTransportCertificate.transportMeasurementRows",
+            ));
+        }
+    }
+
+    let expected_measurement_summary = setup_transport_measurement_summary(aggregate);
+    match transport_certificate.get("transportMeasurementSummary") {
+        Some(observed_summary) if observed_summary == &expected_measurement_summary => Ok(()),
+        Some(_) => Err(Refusal::new(
+            "transportMeasurementSummaryMismatch",
+            "setupTransportCertificate.transportMeasurementSummary must match the aggregate setup transport profile accounting",
+            "setupPackage.setupTransportCertificate.transportMeasurementSummary",
+        )),
+        None => Err(Refusal::new(
+            "transportMeasurementSummaryMissing",
+            "setupTransportCertificate.transportMeasurementSummary is required",
+            "setupPackage.setupTransportCertificate.transportMeasurementSummary",
+        )),
+    }
 }
 
 fn setup_transported_object_binding(

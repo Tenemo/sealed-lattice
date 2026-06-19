@@ -1,9 +1,28 @@
 import { describe, expect, it } from 'vitest';
 
+import type { PackageManagerRunner } from '#tools/ci/package-manager-runner';
 import {
+    buildGatingLanes,
+    buildParallelLanes,
     parseCheckArguments,
     redrawEnabledForProgressMode,
+    rustKernelFastTestArguments,
+    rustKernelHeavyTestPattern,
 } from '#tools/ci/run-check';
+
+const packageManagerRunner = {
+    command: 'node',
+    commandArgumentsPrefix: ['pnpm.cjs'],
+    kind: 'pnpm',
+} as const satisfies PackageManagerRunner;
+
+const defaultCheckCommandArguments = (): readonly string[] =>
+    [
+        ...buildGatingLanes(packageManagerRunner),
+        ...buildParallelLanes(packageManagerRunner),
+    ].flatMap((lane) =>
+        lane.commands.flatMap((command) => [command.command, ...command.args]),
+    );
 
 describe('check runner arguments', () => {
     it('uses automatic progress rendering by default', () => {
@@ -35,5 +54,24 @@ describe('check runner arguments', () => {
         expect(redrawEnabledForProgressMode('always', false)).toBe(false);
         expect(redrawEnabledForProgressMode('auto', false)).toBeUndefined();
         expect(redrawEnabledForProgressMode('never', true)).toBe(false);
+    });
+
+    it('keeps accepted setup heavy evidence manual in the default check plan', () => {
+        const commandArguments = defaultCheckCommandArguments();
+
+        expect(commandArguments).not.toContain('test:rust:kernel:heavy');
+        expect(commandArguments).not.toContain(
+            'test:rust:kernel:heavy:iterate',
+        );
+        expect(commandArguments).not.toContain(
+            'test:rust:kernel:heavy:required',
+        );
+        expect(commandArguments).not.toContain(
+            'test:direct-ballot:setup-handoff:evidence',
+        );
+        expect(rustKernelFastTestArguments).toEqual(
+            expect.arrayContaining(['--skip', rustKernelHeavyTestPattern]),
+        );
+        expect(rustKernelFastTestArguments).not.toContain('--ignored');
     });
 });

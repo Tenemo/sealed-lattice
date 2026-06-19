@@ -7,6 +7,7 @@ import {
     createCommonRandomnessCommit as createCommonRandomnessCommitInternal,
     createCommonRandomnessReveal as createCommonRandomnessRevealInternal,
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares as exportEncryptedLocalTrusteeSetupStateInternal,
+    createLocalTrusteeSetupStateTransportEvidence as createLocalTrusteeSetupStateTransportEvidenceInternal,
     createEvaluatorKeySchedule as createEvaluatorKeyScheduleInternal,
     createGaloisKeyShareBatches as createGaloisKeyShareBatchesInternal,
     createPublicKeyShareSuccinctProofSet as createPublicKeyShareSuccinctProofSetInternal,
@@ -59,6 +60,7 @@ import type {
     EvaluationKeyShareMaterialTransportInput as ProtocolEvaluationKeyShareMaterialTransportInput,
     GaloisKeyShareRootReference as ProtocolGaloisKeyShareRootReference,
     LocalTrusteeSetupStateDecryptionInput,
+    LocalTrusteeSetupStateTransportEvidence as ProtocolLocalTrusteeSetupStateTransportEvidence,
     PublicEvaluationKeySet as ProtocolPublicEvaluationKeySet,
     PublicEvaluationKeySetInput as ProtocolPublicEvaluationKeySetInput,
     BinaryChunkedSameSecretProofMaterialTransport as ProtocolBinaryChunkedSameSecretProofMaterialTransport,
@@ -694,6 +696,9 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
     }
 >;
 
+export type LocalTrusteeSetupStateTransportEvidence =
+    ProtocolLocalTrusteeSetupStateTransportEvidence;
+
 export type SetupContributionInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly trusteeIdentity: string;
@@ -965,6 +970,7 @@ export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
 export type ExportEncryptedLocalTrusteeSetupStateResult = Readonly<{
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly localStateTransportEvidence: LocalTrusteeSetupStateTransportEvidence;
     readonly sealedLocalStatePayloadHash: ProtocolHash;
     readonly storageAadHash: ProtocolHash;
 }>;
@@ -1006,6 +1012,7 @@ export type RestoredLocalTrusteeSetupState = Readonly<{
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload;
+    readonly localStateTransportEvidence: LocalTrusteeSetupStateTransportEvidence;
     readonly sealedLocalStatePayloadHash: ProtocolHash;
     readonly storageAadHash: ProtocolHash;
     readonly localStateVerification: LocalTrusteeSetupStateVerification;
@@ -1129,6 +1136,7 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificateHash: ProtocolHash;
         readonly setupProofAccountingCertificateHash: ProtocolHash;
+        readonly setupAssemblyProvenanceCertificateHash: ProtocolHash;
         readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
         readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
         readonly heSecurityCertificateHash: ProtocolHash;
@@ -1791,6 +1799,7 @@ export const exportEncryptedLocalTrusteeSetupState = async (
     return {
         localStateCommitment: result.localStateCommitment,
         encryptedLocalState: result.encryptedLocalState,
+        localStateTransportEvidence: result.localStateTransportEvidence,
         sealedLocalStatePayloadHash: result.localStatePlaintextHash,
         storageAadHash: result.storageAadHash,
     };
@@ -1957,6 +1966,10 @@ export const restoreLocalTrusteeSetupState = async (
     const sealedLocalStatePayload =
         decryptedState.localStatePlaintext as LocalTrusteeSetupStateSealedPayload;
     assertRestoredLocalStateBindings(input, sealedLocalStatePayload);
+    const localStateTransportEvidence =
+        createLocalTrusteeSetupStateTransportEvidenceInternal(
+            input.encryptedLocalState as unknown as LocalTrusteeSetupStateDecryptionInput['encryptedLocalState'],
+        );
 
     return {
         ok: true,
@@ -1964,6 +1977,7 @@ export const restoreLocalTrusteeSetupState = async (
         setupProfileId: 'CollectiveBgvSetup-v1',
         localStateCommitment: input.localStateCommitment,
         sealedLocalStatePayload,
+        localStateTransportEvidence,
         sealedLocalStatePayloadHash: decryptedState.localStatePlaintextHash,
         storageAadHash: decryptedState.storageAadHash,
         localStateVerification,

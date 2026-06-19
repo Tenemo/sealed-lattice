@@ -1589,19 +1589,100 @@ describe('accepted setup public package API in Node', () => {
             evaluationKeys: publicEvaluationKeys,
             setupCommitmentSecurityCertificate,
             setupTransportCertificate,
+            setupAssemblyProvenanceCertificate: {
+                objectType: 'SetupAssemblyProvenanceCertificate',
+                assemblySource: 'integrated-full-roster-setup-package-assembly',
+                sourceBoundary: {
+                    developmentAssemblyAcceptedAsClaimSource: false,
+                    helperAssemblyAcceptedAsClaimSource: false,
+                },
+            },
             heSecurityCertificate,
         });
         expect(setupPackage.collectivePublicKeyRoot).toBe(
             (setupPackage.collectivePublicKey as Record<string, unknown>)
                 .collectivePublicKeyRoot,
         );
+        const expectedTransportTotalByteLength = Number(
+            setupProfile.publicVssCommitmentMaterialSizeProfile
+                .fullMaterialCoefficientBytes,
+        );
         expect(setupPackage.setupTransportCertificate).toMatchObject({
+            transportProfileId:
+                'sealed-lattice-setup-binary-chunked-transport-v1',
+            largeObjectEncoding: 'binary',
+            chunking: 'required',
             chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: setupTransportChunkCount,
+            totalByteLength: expectedTransportTotalByteLength,
+            storageQuotaBytes: 2_147_483_648,
+            largestSingleBufferBytes: 1_572_864,
+            copyCountLimit: 2,
+            streamVerificationOrder: 'ascending-chunk-index',
+            resumePolicy: 'chunk-index-checkpointed-by-hash',
+            lazyLoadingPolicy: 'root-addressed-large-object-loading',
+            transportedObjects: [
+                expect.objectContaining({
+                    objectName: 'vssCoefficientCommitmentMaterial',
+                    objectRole: 'public-vss-coefficient-commitment-material',
+                    byteLength: expectedTransportTotalByteLength,
+                    chunkStartIndex: 0,
+                    chunkCount: setupTransportChunkCount,
+                    fullObjectHash: setupTransport.fullObjectHash,
+                }),
+            ],
+            transportMeasurementRows: [
+                expect.objectContaining({
+                    objectType: 'SetupTransportMeasurementRow',
+                    measurementKind:
+                        'static-profile-transport-manifest-accounting',
+                    objectName: 'vssCoefficientCommitmentMaterial',
+                    objectRole: 'public-vss-coefficient-commitment-material',
+                    byteLength: expectedTransportTotalByteLength,
+                    chunkStartIndex: 0,
+                    chunkCount: setupTransportChunkCount,
+                    chunkSizeBytes: setupTransportChunkSizeBytes,
+                    storageQuotaBytes: 2_147_483_648,
+                    largestSingleBufferBytes: 1_572_864,
+                    copyCountLimit: 2,
+                    profileScaleStatus:
+                        'profile-scale-transport-manifest-bound-to-current-package-shape',
+                }),
+            ],
+            transportMeasurementSummary: {
+                objectType: 'SetupTransportMeasurementSummary',
+                measurementKind: 'static-profile-transport-manifest-accounting',
+                rowCount: 1,
+                totalByteLength: expectedTransportTotalByteLength,
+                chunkCount: setupTransportChunkCount,
+                chunkSizeBytes: setupTransportChunkSizeBytes,
+                storageQuotaBytes: 2_147_483_648,
+                largestSingleBufferBytes: 1_572_864,
+                copyCountLimit: 2,
+                nativeReleaseBoundary:
+                    'native-release-verifier-runtime-measurements-are-recorded-outside-this-certificate',
+                nodeWasmBoundary:
+                    'node-wasm-bridge-runtime-measurements-are-recorded-outside-this-certificate',
+                supportedPhoneBoundary:
+                    'supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate',
+                profileScaleStatus:
+                    'profile-scale-transport-manifest-bound-to-current-package-shape',
+            },
             chunkHashes: setupTransport.chunkHashes,
         });
+        expect(String(setupTransportCertificate.fullObjectHash)).toMatch(
+            /^[0-9a-f]{128}$/u,
+        );
         expect(setupPackage.setupCommitmentSecurityCertificateHash).toBe(
             setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash,
+        );
+        expect(setupPackage.setupAssemblyProvenanceCertificateHash).toBe(
+            (
+                setupPackage.setupAssemblyProvenanceCertificate as Record<
+                    string,
+                    unknown
+                >
+            ).setupAssemblyProvenanceCertificateHash,
         );
         expect(
             (setupPackage.thresholdShareCommitments as Record<string, unknown>)
@@ -1700,6 +1781,53 @@ describe('accepted setup public package API in Node', () => {
                 exportedState.localStateCommitment as Record<string, unknown>
             ).localStateRoot,
         });
+        expect(exportedState.localStateTransportEvidence).toMatchObject({
+            objectType: 'LocalTrusteeSetupStateTransportEvidence',
+            measurementKind:
+                'static-encrypted-local-state-transport-accounting',
+            transportEncoding: 'canonical-json-envelope-with-hex-ciphertext',
+            chunkingStatus: 'single-envelope-not-chunked',
+            localStateRoot: (
+                exportedState.localStateCommitment as Record<string, unknown>
+            ).localStateRoot,
+            localStateCommitmentHash: (
+                exportedState.encryptedLocalState as Record<string, unknown>
+            ).localStateCommitmentHash,
+            storageAadHash: exportedState.storageAadHash,
+            encryptedLocalStateHash: (
+                exportedState.encryptedLocalState as Record<string, unknown>
+            ).encryptedLocalStateHash,
+            ciphertextBytesHash: (
+                exportedState.encryptedLocalState as Record<string, unknown>
+            ).ciphertextBytesHash,
+            ciphertextByteLength: (
+                exportedState.encryptedLocalState as Record<string, unknown>
+            ).ciphertextByteLength,
+            plaintextByteLength: (
+                exportedState.encryptedLocalState as Record<string, unknown>
+            ).plaintextByteLength,
+            aeadTagLength: 128,
+            transportedObjectCount: 1,
+            runtimeMeasurementBoundary:
+                'runtime-measurements-are-recorded-outside-this-local-state-transport-evidence',
+            supportedPhoneBoundary:
+                'supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-local-state-evidence',
+            profileScaleStatus:
+                'single-trustee-local-state-envelope-bound-to-profile-shape',
+        });
+        expect(
+            (
+                exportedState.localStateTransportEvidence as Record<
+                    string,
+                    unknown
+                >
+            ).localStateTransportEvidenceRoot,
+        ).toMatch(/^[0-9a-f]{128}$/u);
+        expect(
+            JSON.stringify(exportedState.localStateTransportEvidence),
+        ).not.toMatch(
+            /ciphertextBytesHex|localStatePlaintext|shareValues|privateEnvelope|coefficientMessage/u,
+        );
 
         const restoredState =
             await publicSetupApi.restoreLocalTrusteeSetupState({
@@ -1751,6 +1879,9 @@ describe('accepted setup public package API in Node', () => {
         expect(restoredState.sealedLocalStatePayloadHash).toBe(
             exportedState.sealedLocalStatePayloadHash,
         );
+        expect(restoredState.localStateTransportEvidence).toEqual(
+            exportedState.localStateTransportEvidence,
+        );
         expect(
             JSON.stringify(restoredState.sealedLocalStatePayload),
         ).not.toMatch(/shareValues|rawShare|coefficientMessage/u);
@@ -1784,6 +1915,32 @@ describe('accepted setup public package API in Node', () => {
                 minimumDeviceEpoch: 3,
             }),
         ).rejects.toThrow(/older than the minimum accepted device epoch/u);
+
+        await expect(
+            publicSetupApi.restoreLocalTrusteeSetupState({
+                encryptedLocalState: {
+                    ...(exportedState.encryptedLocalState as Record<
+                        string,
+                        unknown
+                    >),
+                    ciphertextByteLength:
+                        Number(
+                            (
+                                exportedState.encryptedLocalState as Record<
+                                    string,
+                                    unknown
+                                >
+                            ).ciphertextByteLength,
+                        ) + 1,
+                },
+                localStateCommitment: exportedState.localStateCommitment,
+                setupContext,
+                storageKeyBytesHex: '41'.repeat(32),
+                expectedTrusteeIdentity: trusteeIdentity,
+                expectedTrusteeRosterPosition: trusteeRosterPosition,
+                minimumDeviceEpoch: 2,
+            }),
+        ).rejects.toThrow(/ciphertextByteLength/u);
     });
 
     it('exposes setup package verification without accepting legacy setup objects', async () => {

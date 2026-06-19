@@ -195,6 +195,16 @@ const setupTransportStreamOrder = 'ascending-chunk-index';
 const setupTransportResumePolicy = 'chunk-index-checkpointed-by-hash';
 const setupTransportLazyLoadingPolicy = 'root-addressed-large-object-loading';
 const setupTransportedObjectLoadingPolicy = 'stream-verified-before-object-use';
+const setupTransportMeasurementKind =
+    'static-profile-transport-manifest-accounting';
+const setupTransportProfileScaleStatus =
+    'profile-scale-transport-manifest-bound-to-current-package-shape';
+const setupTransportNativeReleaseBoundary =
+    'native-release-verifier-runtime-measurements-are-recorded-outside-this-certificate';
+const setupTransportNodeWasmBoundary =
+    'node-wasm-bridge-runtime-measurements-are-recorded-outside-this-certificate';
+const setupTransportSupportedPhoneBoundary =
+    'supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate';
 const targetDecryptionProfileId = 'BGV-RNS-AsyncTargetDecryption-v1';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
@@ -212,6 +222,52 @@ type SetupTransportedObjectRecord = Readonly<{
     readonly fullObjectHash: ProtocolHash;
     readonly encoding: 'binary';
     readonly loadingPolicy: typeof setupTransportedObjectLoadingPolicy;
+}>;
+
+type SetupTransportMeasurementRow = Readonly<{
+    readonly objectType: 'SetupTransportMeasurementRow';
+    readonly objectVersion: 1;
+    readonly setupProfileId: typeof setupProfileId;
+    readonly transportProfileId: typeof setupTransportProfileId;
+    readonly measurementKind: typeof setupTransportMeasurementKind;
+    readonly objectName: string;
+    readonly objectRole: string;
+    readonly objectRoot: ProtocolHash;
+    readonly byteLength: number;
+    readonly chunkStartIndex: number;
+    readonly chunkCount: number;
+    readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+    readonly chunkRoot: ProtocolHash;
+    readonly fullObjectHash: ProtocolHash;
+    readonly storageQuotaBytes: typeof setupTransportStorageQuotaBytes;
+    readonly largestSingleBufferBytes: typeof setupTransportLargestSingleBufferBytes;
+    readonly copyCountLimit: typeof setupTransportCopyCountLimit;
+    readonly streamVerificationOrder: typeof setupTransportStreamOrder;
+    readonly resumePolicy: typeof setupTransportResumePolicy;
+    readonly lazyLoadingPolicy: typeof setupTransportLazyLoadingPolicy;
+    readonly profileScaleStatus: typeof setupTransportProfileScaleStatus;
+}>;
+
+type SetupTransportMeasurementSummary = Readonly<{
+    readonly objectType: 'SetupTransportMeasurementSummary';
+    readonly objectVersion: 1;
+    readonly setupProfileId: typeof setupProfileId;
+    readonly transportProfileId: typeof setupTransportProfileId;
+    readonly measurementKind: typeof setupTransportMeasurementKind;
+    readonly rowCount: number;
+    readonly totalByteLength: number;
+    readonly chunkCount: number;
+    readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
+    readonly storageQuotaBytes: typeof setupTransportStorageQuotaBytes;
+    readonly largestSingleBufferBytes: typeof setupTransportLargestSingleBufferBytes;
+    readonly copyCountLimit: typeof setupTransportCopyCountLimit;
+    readonly streamVerificationOrder: typeof setupTransportStreamOrder;
+    readonly resumePolicy: typeof setupTransportResumePolicy;
+    readonly lazyLoadingPolicy: typeof setupTransportLazyLoadingPolicy;
+    readonly nativeReleaseBoundary: typeof setupTransportNativeReleaseBoundary;
+    readonly nodeWasmBoundary: typeof setupTransportNodeWasmBoundary;
+    readonly supportedPhoneBoundary: typeof setupTransportSupportedPhoneBoundary;
+    readonly profileScaleStatus: typeof setupTransportProfileScaleStatus;
 }>;
 
 const assertObjectRecord = (value: unknown, fieldName: string): JsonRecord => {
@@ -1447,6 +1503,59 @@ function transportedObjectRecords(
     return transportedObjects;
 }
 
+const setupTransportMeasurementRows = (
+    transportedObjects: readonly SetupTransportedObjectRecord[],
+): readonly SetupTransportMeasurementRow[] =>
+    transportedObjects.map((transportedObject) => ({
+        objectType: 'SetupTransportMeasurementRow',
+        objectVersion: 1,
+        setupProfileId,
+        transportProfileId: setupTransportProfileId,
+        measurementKind: setupTransportMeasurementKind,
+        objectName: transportedObject.objectName,
+        objectRole: transportedObject.objectRole,
+        objectRoot: transportedObject.objectRoot,
+        byteLength: transportedObject.byteLength,
+        chunkStartIndex: transportedObject.chunkStartIndex,
+        chunkCount: transportedObject.chunkCount,
+        chunkSizeBytes: setupTransportChunkSizeBytes,
+        chunkRoot: transportedObject.chunkRoot,
+        fullObjectHash: transportedObject.fullObjectHash,
+        storageQuotaBytes: setupTransportStorageQuotaBytes,
+        largestSingleBufferBytes: setupTransportLargestSingleBufferBytes,
+        copyCountLimit: setupTransportCopyCountLimit,
+        streamVerificationOrder: setupTransportStreamOrder,
+        resumePolicy: setupTransportResumePolicy,
+        lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
+        profileScaleStatus: setupTransportProfileScaleStatus,
+    }));
+
+const setupTransportMeasurementSummary = (
+    transportedObjects: readonly SetupTransportedObjectRecord[],
+    totalByteLength: number,
+    chunkCount: number,
+): SetupTransportMeasurementSummary => ({
+    objectType: 'SetupTransportMeasurementSummary',
+    objectVersion: 1,
+    setupProfileId,
+    transportProfileId: setupTransportProfileId,
+    measurementKind: setupTransportMeasurementKind,
+    rowCount: transportedObjects.length,
+    totalByteLength,
+    chunkCount,
+    chunkSizeBytes: setupTransportChunkSizeBytes,
+    storageQuotaBytes: setupTransportStorageQuotaBytes,
+    largestSingleBufferBytes: setupTransportLargestSingleBufferBytes,
+    copyCountLimit: setupTransportCopyCountLimit,
+    streamVerificationOrder: setupTransportStreamOrder,
+    resumePolicy: setupTransportResumePolicy,
+    lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
+    nativeReleaseBoundary: setupTransportNativeReleaseBoundary,
+    nodeWasmBoundary: setupTransportNodeWasmBoundary,
+    supportedPhoneBoundary: setupTransportSupportedPhoneBoundary,
+    profileScaleStatus: setupTransportProfileScaleStatus,
+});
+
 const setupTransportCertificateBody = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
     vssCoefficientCommitmentMaterial: JsonRecord,
@@ -1514,6 +1623,13 @@ const setupTransportCertificateBody = (
         chunkHashes,
         fullObjectHash,
     });
+    const transportMeasurementRows =
+        setupTransportMeasurementRows(transportedObjects);
+    const transportMeasurementSummary = setupTransportMeasurementSummary(
+        transportedObjects,
+        totalByteLength,
+        chunkCount,
+    );
 
     return {
         objectType: 'SetupTransportCertificate',
@@ -1533,6 +1649,8 @@ const setupTransportCertificateBody = (
         resumePolicy: setupTransportResumePolicy,
         lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
         transportedObjects,
+        transportMeasurementRows,
+        transportMeasurementSummary,
         chunkHashes,
         chunkRoot,
         fullObjectHash,

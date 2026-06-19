@@ -22,6 +22,18 @@ export const localTrusteeSetupStateStorageProfile =
     'encrypted-local-device-state-required';
 export const localTrusteeSetupStateDeletionBoundary =
     'after-private-vss-aggregation';
+export const localTrusteeSetupStateTransportMeasurementKind =
+    'static-encrypted-local-state-transport-accounting';
+export const localTrusteeSetupStateTransportEncoding =
+    'canonical-json-envelope-with-hex-ciphertext';
+export const localTrusteeSetupStateTransportChunkingStatus =
+    'single-envelope-not-chunked';
+export const localTrusteeSetupStateTransportProfileScaleStatus =
+    'single-trustee-local-state-envelope-bound-to-profile-shape';
+export const localTrusteeSetupStateRuntimeMeasurementBoundary =
+    'runtime-measurements-are-recorded-outside-this-local-state-transport-evidence';
+export const localTrusteeSetupStateSupportedPhoneBoundary =
+    'supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-local-state-evidence';
 
 export const deletedLocalTrusteeSetupMaterialClasses = [
     'raw-per-source-trustee-vss-shares',
@@ -56,6 +68,7 @@ export type LocalTrusteeSetupStateEncryptionInput =
 export type LocalTrusteeSetupStateEncryptionResult = Readonly<{
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly localStateTransportEvidence: LocalTrusteeSetupStateTransportEvidence;
     readonly localStatePlaintextHash: ProtocolHash;
     readonly storageAadHash: ProtocolHash;
 }>;
@@ -135,6 +148,31 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly exportPolicy: typeof localTrusteeSetupStateExportPolicy;
         readonly storageProfile: typeof localTrusteeSetupStateStorageProfile;
         readonly localStateRoot: ProtocolHash;
+    }
+>;
+
+export type LocalTrusteeSetupStateTransportEvidence = Readonly<
+    JsonRecord & {
+        readonly objectType: 'LocalTrusteeSetupStateTransportEvidence';
+        readonly objectVersion: 1;
+        readonly measurementKind: typeof localTrusteeSetupStateTransportMeasurementKind;
+        readonly transportEncoding: typeof localTrusteeSetupStateTransportEncoding;
+        readonly chunkingStatus: typeof localTrusteeSetupStateTransportChunkingStatus;
+        readonly storageProfileId: EncryptedLocalTrusteeSetupState['storageProfileId'];
+        readonly ciphertextContentType: EncryptedLocalTrusteeSetupState['ciphertextContentType'];
+        readonly localStateRoot: ProtocolHash;
+        readonly localStateCommitmentHash: ProtocolHash;
+        readonly storageAadHash: ProtocolHash;
+        readonly encryptedLocalStateHash: ProtocolHash;
+        readonly ciphertextBytesHash: ProtocolHash;
+        readonly ciphertextByteLength: number;
+        readonly plaintextByteLength: number;
+        readonly aeadTagLength: EncryptedLocalTrusteeSetupState['aeadTagLength'];
+        readonly transportedObjectCount: 1;
+        readonly runtimeMeasurementBoundary: typeof localTrusteeSetupStateRuntimeMeasurementBoundary;
+        readonly supportedPhoneBoundary: typeof localTrusteeSetupStateSupportedPhoneBoundary;
+        readonly profileScaleStatus: typeof localTrusteeSetupStateTransportProfileScaleStatus;
+        readonly localStateTransportEvidenceRoot: ProtocolHash;
     }
 >;
 
@@ -476,6 +514,44 @@ export const createLocalTrusteeSetupStateCommitment = (
             localStateWithoutRoot,
         ),
     } satisfies LocalTrusteeSetupStateCommitment;
+};
+
+export const createLocalTrusteeSetupStateTransportEvidence = (
+    encryptedLocalState: EncryptedLocalTrusteeSetupState,
+): LocalTrusteeSetupStateTransportEvidence => {
+    const evidenceWithoutRoot = {
+        objectType: 'LocalTrusteeSetupStateTransportEvidence',
+        objectVersion: 1,
+        measurementKind: localTrusteeSetupStateTransportMeasurementKind,
+        transportEncoding: localTrusteeSetupStateTransportEncoding,
+        chunkingStatus: localTrusteeSetupStateTransportChunkingStatus,
+        storageProfileId: encryptedLocalState.storageProfileId,
+        ciphertextContentType: encryptedLocalState.ciphertextContentType,
+        localStateRoot: encryptedLocalState.localStateRoot,
+        localStateCommitmentHash: encryptedLocalState.localStateCommitmentHash,
+        storageAadHash: encryptedLocalState.storageAadHash,
+        encryptedLocalStateHash: encryptedLocalState.encryptedLocalStateHash,
+        ciphertextBytesHash: encryptedLocalState.ciphertextBytesHash,
+        ciphertextByteLength: encryptedLocalState.ciphertextByteLength,
+        plaintextByteLength: encryptedLocalState.plaintextByteLength,
+        aeadTagLength: encryptedLocalState.aeadTagLength,
+        transportedObjectCount: 1,
+        runtimeMeasurementBoundary:
+            localTrusteeSetupStateRuntimeMeasurementBoundary,
+        supportedPhoneBoundary: localTrusteeSetupStateSupportedPhoneBoundary,
+        profileScaleStatus: localTrusteeSetupStateTransportProfileScaleStatus,
+    } as const satisfies Omit<
+        LocalTrusteeSetupStateTransportEvidence,
+        'localStateTransportEvidenceRoot'
+    >;
+
+    return {
+        ...evidenceWithoutRoot,
+        localStateTransportEvidenceRoot: deriveProtocolHash(
+            'LocalTrusteeSetupStateTransportEvidenceRoot',
+            evidenceWithoutRoot,
+        ),
+    };
 };
 
 const thresholdShareCommitmentRecipientRoot = (
@@ -919,6 +995,10 @@ export async function encryptLocalTrusteeSetupState(
     return {
         localStateCommitment,
         encryptedLocalState: encryptedState.encryptedLocalState,
+        localStateTransportEvidence:
+            createLocalTrusteeSetupStateTransportEvidence(
+                encryptedState.encryptedLocalState,
+            ),
         localStatePlaintextHash: encryptedState.localStatePlaintextHash,
         storageAadHash: encryptedState.storageAadHash,
     };

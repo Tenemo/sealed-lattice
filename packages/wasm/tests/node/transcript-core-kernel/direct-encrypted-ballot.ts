@@ -950,6 +950,11 @@ const acceptedSetupHandoffForAcceptedPublicKeyMaterial = (
                     kernel,
                     'setup proof accounting certificate hash',
                 ),
+            setupAssemblyProvenanceCertificateHash:
+                directBallotSetupHandoffTestHash(
+                    kernel,
+                    'setup assembly provenance certificate hash',
+                ),
             setupKeyCorrectnessCertificateHash:
                 directBallotSetupHandoffTestHash(
                     kernel,

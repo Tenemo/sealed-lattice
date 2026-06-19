@@ -92,6 +92,23 @@ type SetupKeyCorrectnessCertificateBody = Readonly<
     }
 >;
 
+export type SetupAssemblyProvenanceCertificate = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupAssemblyProvenanceCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly setupAssemblyProvenanceCertificateHash: ProtocolHash;
+    }
+>;
+
+type SetupAssemblyProvenanceCertificateBody = Readonly<
+    JsonRecord & {
+        readonly objectType: 'SetupAssemblyProvenanceCertificate';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    }
+>;
+
 export type ActiveStaticSetupTheoremCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'ActiveStaticSetupTheoremCertificate';
@@ -211,6 +228,8 @@ export type SetupPackage = Readonly<
         readonly setupProofAccountingCertificateHash: ProtocolHash;
         readonly setupKeyCorrectnessCertificate: SetupKeyCorrectnessCertificate;
         readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
+        readonly setupAssemblyProvenanceCertificate: SetupAssemblyProvenanceCertificate;
+        readonly setupAssemblyProvenanceCertificateHash: ProtocolHash;
         readonly activeStaticSetupTheoremCertificate: ActiveStaticSetupTheoremCertificate;
         readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
         readonly heSecurityCertificate: JsonRecord;
@@ -1774,6 +1793,136 @@ const packageDeclaresPublicRuntimeMaterial = (
     );
 };
 
+const setupAssemblyProvenanceCertificateBody = (
+    setupPackage: Readonly<Record<string, unknown>>,
+): SetupAssemblyProvenanceCertificateBody => {
+    const setupContext = assertObjectRecord(
+        setupPackage.setupContext,
+        'setupPackage.setupContext',
+    );
+    const phaseTranscript = setupPackage.phaseTranscript;
+    if (!Array.isArray(phaseTranscript)) {
+        throw new TypeError('setupPackage.phaseTranscript must be an array.');
+    }
+
+    return {
+        objectType: 'SetupAssemblyProvenanceCertificate',
+        objectVersion: 1,
+        setupProfileId,
+        ...contextFieldsForCertificate(
+            setupContext as unknown as CollectiveBgvSetupContext,
+        ),
+        assemblySource: 'integrated-full-roster-setup-package-assembly',
+        assemblySourceStatus:
+            'claim-bearing-setup-source-bound-to-verifier-recomputed-final-record-roots',
+        participantCount: firstProfileParticipantCount,
+        setupCompletionQuorum: firstProfileSetupCompletionQuorum,
+        sourceBoundary: {
+            acceptedHandoffSource:
+                'accepted-setup-verifier-after-package-hash-certificate-and-final-object-gates',
+            developmentAssemblyAcceptedAsClaimSource: false,
+            helperAssemblyAcceptedAsClaimSource: false,
+        },
+        rootBindings: {
+            phaseTranscriptRoot: deriveProtocolHash(
+                'SetupPhaseTranscriptRoot',
+                phaseTranscript,
+            ),
+            commonRandomnessRoot: optionalNestedHashValue(
+                setupPackage,
+                'commonRandomness',
+                'commonRandomnessRoot',
+            ),
+            vssCoefficientCommitmentRoot: optionalNestedHashValue(
+                setupPackage,
+                'vssCoefficientCommitments',
+                'vssCoefficientCommitmentRoot',
+            ),
+            privateVssEnvelopeCommitmentRoot: optionalTopLevelHashValue(
+                setupPackage,
+                'privateVssEnvelopeCommitmentRoot',
+            ),
+            vssShareAcceptanceRoot: optionalNestedHashValue(
+                setupPackage,
+                'vssShareAcceptances',
+                'vssShareAcceptanceRoot',
+            ),
+            thresholdShareCommitmentRoot: optionalNestedHashValue(
+                setupPackage,
+                'thresholdShareCommitments',
+                'thresholdShareCommitmentRoot',
+            ),
+            sameSecretConsistencyRoot: optionalNestedHashValue(
+                setupPackage,
+                'sameSecretConsistency',
+                'sameSecretConsistencyRoot',
+            ),
+            publicKeyShareSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'publicKeyShares',
+                'publicKeyShareSetRoot',
+            ),
+            publicKeyShareProofSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'publicKeyShareProofs',
+                'publicKeyShareProofSetRoot',
+            ),
+            publicKeyShareMaterialSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'publicKeyShareMaterial',
+                'publicKeyShareMaterialSetRoot',
+            ),
+            publicKeyShareSuccinctProofSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'publicKeyShareSuccinctProofs',
+                'publicKeyShareSuccinctProofSetRoot',
+            ),
+            collectivePublicKeyRoot: optionalNestedHashValue(
+                setupPackage,
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ),
+            evaluatorKeyScheduleRoot: optionalNestedHashValue(
+                setupPackage,
+                'evaluatorKeySchedule',
+                'evaluatorKeyScheduleRoot',
+            ),
+            relinearizationKeyShareRoundsRoot: optionalNestedHashValue(
+                setupPackage,
+                'relinearizationKeyShareRounds',
+                'relinearizationKeyShareRoundsRoot',
+            ),
+            trusteeEvaluationKeyProofSetRoot: optionalNestedHashValue(
+                setupPackage,
+                'trusteeEvaluationKeyProofs',
+                'trusteeEvaluationKeyProofSetRoot',
+            ),
+            evaluationKeySetHash: optionalNestedHashValue(
+                setupPackage,
+                'evaluationKeys',
+                'evaluationKeySetHash',
+            ),
+        },
+        claimBoundary:
+            'accepted setup handoff construction is sourced from this verifier-recomputed package provenance certificate, not from development assembly or helper paths',
+    };
+};
+
+const createSetupAssemblyProvenanceCertificate = (
+    setupPackage: Readonly<Record<string, unknown>>,
+): SetupAssemblyProvenanceCertificate => {
+    const certificateBody =
+        setupAssemblyProvenanceCertificateBody(setupPackage);
+
+    return {
+        ...certificateBody,
+        setupAssemblyProvenanceCertificateHash: deriveProtocolHash(
+            'SetupAssemblyProvenanceCertificateHash',
+            certificateBody,
+        ),
+    };
+};
+
 const activeStaticSetupTheoremCertificateBody = (
     setupPackage: Readonly<Record<string, unknown>>,
 ): ActiveStaticSetupTheoremCertificateBody => {
@@ -1825,7 +1974,7 @@ const activeStaticSetupTheoremCertificateBody = (
             'threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied',
             'same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted',
             'collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records',
-            'setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects',
+            'setup commitment, proof-accounting, transport, assembly provenance, HE, and key-correctness certificates are root-bound package objects',
             'generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused',
         ],
         dependencyHashes: {
@@ -1842,6 +1991,11 @@ const activeStaticSetupTheoremCertificateBody = (
             setupProofAccountingCertificateHash: hashField(
                 setupPackage,
                 'setupProofAccountingCertificateHash',
+                'setupPackage',
+            ),
+            setupAssemblyProvenanceCertificateHash: hashField(
+                setupPackage,
+                'setupAssemblyProvenanceCertificateHash',
                 'setupPackage',
             ),
             heSecurityCertificateHash: hashField(
@@ -2011,7 +2165,7 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         'collectivePublicKey',
     );
 
-    const packageWithoutActiveStaticCertificate = {
+    const packageWithoutSetupAssemblyProvenanceCertificate = {
         objectType: 'SetupPackage',
         objectVersion: 1,
         setupProfileId,
@@ -2054,6 +2208,20 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         setupKeyCorrectnessCertificateHash,
         heSecurityCertificate: certificates.heSecurityCertificate,
         heSecurityCertificateHash,
+    } as const;
+    const setupAssemblyProvenanceCertificate =
+        createSetupAssemblyProvenanceCertificate(
+            packageWithoutSetupAssemblyProvenanceCertificate,
+        );
+    const setupAssemblyProvenanceCertificateHash = hashField(
+        setupAssemblyProvenanceCertificate,
+        'setupAssemblyProvenanceCertificateHash',
+        'setupAssemblyProvenanceCertificate',
+    );
+    const packageWithoutActiveStaticCertificate = {
+        ...packageWithoutSetupAssemblyProvenanceCertificate,
+        setupAssemblyProvenanceCertificate,
+        setupAssemblyProvenanceCertificateHash,
     } as const;
     const activeStaticSetupTheoremCertificate =
         createActiveStaticSetupTheoremCertificate(

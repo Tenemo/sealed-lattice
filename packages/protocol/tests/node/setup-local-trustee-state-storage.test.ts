@@ -1,4 +1,8 @@
-import { encryptLocalTrusteeSetupSealedMaterial } from '@sealed-lattice/crypto';
+import {
+    canonicalJson,
+    encryptLocalTrusteeSetupSealedMaterial,
+    hash512Hex,
+} from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -13,6 +17,7 @@ import {
 } from '#tests/support/setup-fixtures';
 
 const fixtureHash = makeSetupFixtureHash('setup-local-trustee-state-storage');
+const textEncoder = new TextEncoder();
 
 const setupContext = makeSetupContext(fixtureHash);
 
@@ -84,6 +89,23 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
     return { plaintext, storageInput };
 };
 
+const rebindEncryptedLocalStateHash = (
+    encryptedLocalState: Record<string, unknown>,
+): Record<string, unknown> => {
+    const envelopeWithoutHash = {
+        ...encryptedLocalState,
+    };
+    delete envelopeWithoutHash.encryptedLocalStateHash;
+
+    return {
+        ...encryptedLocalState,
+        encryptedLocalStateHash: hash512Hex(
+            'sealed-lattice-local-trustee-state/envelope-hash-v1',
+            [textEncoder.encode(canonicalJson(envelopeWithoutHash))],
+        ),
+    };
+};
+
 describe('local trustee setup state storage', () => {
     it('encrypts and restores protocol-built roots-only local state', async () => {
         const { plaintext, storageInput } = await localStatePlaintext();
@@ -108,6 +130,40 @@ describe('local trustee setup state storage', () => {
         expect(encryptedState.encryptedLocalState.localStateRoot).toBe(
             encryptedState.localStateCommitment.localStateRoot,
         );
+        expect(encryptedState.localStateTransportEvidence).toMatchObject({
+            objectType: 'LocalTrusteeSetupStateTransportEvidence',
+            measurementKind:
+                'static-encrypted-local-state-transport-accounting',
+            transportEncoding: 'canonical-json-envelope-with-hex-ciphertext',
+            chunkingStatus: 'single-envelope-not-chunked',
+            localStateRoot: encryptedState.localStateCommitment.localStateRoot,
+            localStateCommitmentHash:
+                encryptedState.encryptedLocalState.localStateCommitmentHash,
+            storageAadHash: encryptedState.storageAadHash,
+            encryptedLocalStateHash:
+                encryptedState.encryptedLocalState.encryptedLocalStateHash,
+            ciphertextBytesHash:
+                encryptedState.encryptedLocalState.ciphertextBytesHash,
+            ciphertextByteLength:
+                encryptedState.encryptedLocalState.ciphertextByteLength,
+            plaintextByteLength:
+                encryptedState.encryptedLocalState.plaintextByteLength,
+            aeadTagLength: 128,
+            transportedObjectCount: 1,
+            runtimeMeasurementBoundary:
+                'runtime-measurements-are-recorded-outside-this-local-state-transport-evidence',
+            supportedPhoneBoundary:
+                'supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-local-state-evidence',
+            profileScaleStatus:
+                'single-trustee-local-state-envelope-bound-to-profile-shape',
+        });
+        expect(
+            encryptedState.localStateTransportEvidence
+                .localStateTransportEvidenceRoot,
+        ).toMatch(/^[0-9a-f]{128}$/u);
+        expect(
+            JSON.stringify(encryptedState.localStateTransportEvidence),
+        ).not.toMatch(/ciphertextBytesHex|shareValues|privateEnvelope/u);
         expect(
             encryptedState.encryptedLocalState.storageAad.localStateCommitment,
         ).toEqual(encryptedState.localStateCommitment);
@@ -158,5 +214,46 @@ describe('local trustee setup state storage', () => {
                 storageKeyBytesHex: storageInput.storageKeyBytesHex,
             }),
         ).rejects.toThrow(/storageAad/u);
+    });
+
+    it('rejects encrypted local state transport metadata drift', async () => {
+        const { plaintext, storageInput } = await localStatePlaintext();
+        const encryptedState = await encryptLocalTrusteeSetupState({
+            ...storageInput,
+            localStatePlaintext: plaintext,
+        });
+
+        const driftedCiphertextByteLength = rebindEncryptedLocalStateHash({
+            ...encryptedState.encryptedLocalState,
+            ciphertextByteLength:
+                encryptedState.encryptedLocalState.ciphertextByteLength + 1,
+        });
+
+        await expect(
+            decryptLocalTrusteeSetupState({
+                encryptedLocalState:
+                    driftedCiphertextByteLength as typeof encryptedState.encryptedLocalState,
+                expectedLocalStateRoot:
+                    encryptedState.localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex: storageInput.storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/ciphertextByteLength/u);
+
+        const driftedAeadTagLength = rebindEncryptedLocalStateHash({
+            ...encryptedState.encryptedLocalState,
+            aeadTagLength: 96,
+        });
+
+        await expect(
+            decryptLocalTrusteeSetupState({
+                encryptedLocalState:
+                    driftedAeadTagLength as typeof encryptedState.encryptedLocalState,
+                expectedLocalStateRoot:
+                    encryptedState.localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex: storageInput.storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/aeadTagLength/u);
     });
 });

@@ -19,6 +19,7 @@ mod vss_complaints_and_acceptances;
 pub(super) use self::accepted_certificates::{
     accepted_he_security_certificate_hash, accepted_he_security_certificate_value,
     active_static_setup_theorem_certificate_hash, active_static_setup_theorem_certificate_value,
+    setup_assembly_provenance_certificate_hash, setup_assembly_provenance_certificate_value,
     setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
     setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
 };
@@ -45,8 +46,8 @@ use self::accepted_certificates::{
     setup_package_requires_setup_key_correctness_certificate,
     setup_proof_accounting_certificate_with_hash_value,
     verify_active_static_setup_theorem_certificate, verify_commitment_security_certificate,
-    verify_he_security_certificate, verify_setup_key_correctness_certificate,
-    verify_setup_proof_accounting_certificate,
+    verify_he_security_certificate, verify_setup_assembly_provenance_certificate,
+    verify_setup_key_correctness_certificate, verify_setup_proof_accounting_certificate,
 };
 use self::common_randomness::{
     derive_bgv_public_a_polynomial, derive_collective_bgv_setup_public_derivations,
@@ -279,6 +280,10 @@ const SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE: &str = "SetupProofAccounti
 const SETUP_PROOF_RECORD_BINDING_HASH_NAMESPACE: &str = "SetupProofRecordBindingHash";
 const SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE: &str =
     "SetupProofAccountingCertificateHash";
+const SETUP_ASSEMBLY_PROVENANCE_CERTIFICATE_OBJECT_TYPE: &str =
+    "SetupAssemblyProvenanceCertificate";
+const SETUP_ASSEMBLY_PROVENANCE_CERTIFICATE_HASH_NAMESPACE: &str =
+    "SetupAssemblyProvenanceCertificateHash";
 const SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE: &str = "SetupKeyCorrectnessCertificate";
 const SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE: &str = "SetupKeyCorrectnessCertificateHash";
 const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
@@ -294,6 +299,17 @@ const SETUP_TRANSPORT_STREAM_ORDER: &str = "ascending-chunk-index";
 const SETUP_TRANSPORT_RESUME_POLICY: &str = "chunk-index-checkpointed-by-hash";
 const SETUP_TRANSPORT_LAZY_LOADING_POLICY: &str = "root-addressed-large-object-loading";
 const SETUP_TRANSPORTED_VSS_MATERIAL_NAME: &str = "vssCoefficientCommitmentMaterial";
+const SETUP_TRANSPORT_MEASUREMENT_ROW_OBJECT_TYPE: &str = "SetupTransportMeasurementRow";
+const SETUP_TRANSPORT_MEASUREMENT_SUMMARY_OBJECT_TYPE: &str = "SetupTransportMeasurementSummary";
+const SETUP_TRANSPORT_MEASUREMENT_KIND: &str = "static-profile-transport-manifest-accounting";
+const SETUP_TRANSPORT_PROFILE_SCALE_STATUS: &str =
+    "profile-scale-transport-manifest-bound-to-current-package-shape";
+const SETUP_TRANSPORT_NATIVE_RELEASE_BOUNDARY: &str =
+    "native-release-verifier-runtime-measurements-are-recorded-outside-this-certificate";
+const SETUP_TRANSPORT_NODE_WASM_BOUNDARY: &str =
+    "node-wasm-bridge-runtime-measurements-are-recorded-outside-this-certificate";
+const SETUP_TRANSPORT_SUPPORTED_PHONE_BOUNDARY: &str =
+    "supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate";
 const SETUP_TRANSPORTED_VSS_MATERIAL_ROLE: &str = "public-vss-coefficient-commitment-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
@@ -414,6 +430,8 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "setupTransportCertificateHash",
     "setupProofAccountingCertificate",
     "setupProofAccountingCertificateHash",
+    "setupAssemblyProvenanceCertificate",
+    "setupAssemblyProvenanceCertificateHash",
     "setupKeyCorrectnessCertificate",
     "setupKeyCorrectnessCertificateHash",
     "activeStaticSetupTheoremCertificate",
@@ -812,6 +830,9 @@ fn verify_collective_setup_package(
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_he_security_certificate(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_setup_assembly_provenance_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_setup_key_correctness_certificate(setup_package)? {
@@ -1437,6 +1458,7 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
         "setupCommitmentSecurityCertificateHash",
         "setupTransportCertificateHash",
         "setupProofAccountingCertificateHash",
+        "setupAssemblyProvenanceCertificateHash",
         "setupKeyCorrectnessCertificateHash",
         "activeStaticSetupTheoremCertificateHash",
         "heSecurityCertificateHash",
@@ -1749,6 +1771,10 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "setupProofAccountingCertificateHash": value_string(
                 setup_package,
                 "setupProofAccountingCertificateHash",
+            )?,
+            "setupAssemblyProvenanceCertificateHash": value_string(
+                setup_package,
+                "setupAssemblyProvenanceCertificateHash",
             )?,
             "setupKeyCorrectnessCertificateHash": value_string(
                 setup_package,
@@ -2137,6 +2163,10 @@ mod accepted_setup_response_tests {
                 .expect("setup transport certificate hash"),
             "setupProofAccountingCertificateHash": unit_hash("setup proof accounting certificate")
                 .expect("setup proof accounting certificate hash"),
+            "setupAssemblyProvenanceCertificateHash": unit_hash(
+                "setup assembly provenance certificate",
+            )
+            .expect("setup assembly provenance certificate hash"),
             "setupKeyCorrectnessCertificateHash": unit_hash("setup key correctness certificate")
                 .expect("setup key correctness certificate hash"),
             "activeStaticSetupTheoremCertificateHash": unit_hash("active static theorem certificate")

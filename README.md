@@ -100,9 +100,13 @@ All current setup, ballot, aggregation, evaluator, and target-decryption code is
 
 In particular, the accepted collective BGV setup for `CollectiveBgvSetup-v1` is
 not claim-complete: a profile-scale Rust terminal setup-package lane now passes,
-but cross-runtime/public-package confirmation, transport/profile measurement
-rows, final adversarial package coverage, and final verification gates are still
-pending. On accepted terminal responses the setup verifier returns both
+cross-runtime/public-package boundary coverage plus required manual adversarial
+evidence passes for the current provenance-bound package shape, the setup transport
+certificate binds static measurement rows, and encrypted local trustee state
+export/restore now carries rooted static transport evidence. Final profile-scale
+transport/profile measurement evidence across the remaining setup proof, key,
+and local-state flows and final verification gates are still pending. On
+accepted terminal responses the setup verifier returns both
 `acceptedSetupHandoff` and `acceptedPublicKeyMaterial`; the accepted ballot
 package path consumes those objects directly, refuses passive setup material and
 fixture-labelled randomness in accepted package creation, uses closed
@@ -184,12 +188,46 @@ certificate records score, encoder, committed support, response, verifier, and
 BGV quotient rows; the accepted backend path is still scoped to accepted
 approximate-range/no-wrap accounting rather than appending explicit carry
 response polynomials. Full-profile setup-output-to-ballot integration evidence
-now passes in the Rust kernel heavy lane: on June 18, 2026,
+has a current Rust kernel heavy-lane pass over the provenance-bound accepted
+setup package shape. On June 19, 2026, the manual
+`pnpm run test:direct-ballot:setup-handoff:evidence` lane passed with exit code
+0 in 7,292,555 ms (started `2026-06-19T03:45:02.903Z`, finished
+`2026-06-19T05:46:35.463Z`), running the workspace build, all 18 listed
+required Rust heavy setup transport/refusal and setup-output-to-ballot tests,
+the public SDK setup-handoff forwarding test, the WASM bridge command-boundary
+test, and the lane-coverage registry check.
 `heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow`
 verified the accepted setup package, checked the direct-ballot setup-output
-bindings, created a direct encrypted ballot package, verified it publicly, and
-aggregated it while consuming the `acceptedSetupHandoff` and
-`acceptedPublicKeyMaterial` returned by accepted setup verification.
+bindings and refusal matrix, created a direct encrypted ballot package, verified
+it publicly, checked the package and aggregation refusal cases, and aggregated it
+while consuming the `acceptedSetupHandoff` and `acceptedPublicKeyMaterial`
+returned by accepted setup verification in 3,616,143 ms. This evidence must be
+refreshed after accepted package-shape changes. The normal
+check runner machine-checks that required manual Rust heavy-evidence tests,
+including this flow and the setup transport/refusal checks, stay named under the
+manual heavy accepted-setup lane, and that the manual setup-handoff evidence
+lane still includes both SDK/WASM public-boundary parity tests. It does not run
+the heavy proof lane, and check-runner unit coverage asserts that the default
+check plan excludes the heavy package scripts while the Rust fast lane skips the
+accepted setup heavy test pattern. The manual setup-handoff evidence lane
+remains outside default CI. Public package API
+coverage checks that `verifySetupPackage` outputs
+are forwarded unchanged into package creation, verification, and aggregation
+through the SDK boundary; the SDK path delegates to the same Rust/WASM kernel and
+does not implement a separate ballot proof verifier. The WASM bridge loader
+coverage also checks the raw kernel command boundary: accepted setup verifier
+outputs are forwarded into direct ballot creation, verification, and aggregation
+commands, while `setupPackage` and passive `setupPublicMaterial` are excluded
+from those direct ballot commands. Setup proof-material public package
+coverage streams the same-secret, public-key-share, and trustee-evaluation-key
+transported proof families into compact `VerifiedSetupProofMaterial` handles, or
+forwards caller-supplied handles unchanged, and excludes proof chunks from the
+final setup verifier command. Public setup package coverage also checks the
+generated transport certificate's first-profile byte total, chunk count, storage
+quota, largest-buffer bound, copy-count limit, resume policy, lazy-loading policy,
+transported-object manifest, per-object static transport measurement rows, and
+aggregate transport measurement summary. The heavy evidence lane remains manual
+and is not added to default CI.
 Supported-phone evidence remains a later runtime target, and native or Node/WASM
 runs do not upgrade the package to production or supported-phone status. The
 evaluator and target-decryption paths still need bounded-domain all-`K_top`
@@ -237,6 +275,15 @@ pnpm run check
 ```
 
 `pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the non-heavy kernel Node tests through the repository check runner.
+It also verifies that required manual Rust heavy-evidence tests remain covered by
+the manual heavy accepted-setup lane, without running that heavy proof lane.
+Check-runner unit coverage keeps the required heavy package scripts out of the
+default check plan and keeps the Rust fast lane on the heavy-test skip pattern.
+Use `pnpm run test:rust:kernel:heavy:required -- --list` to list the ordered
+manual evidence set, and pass one or more listed test names to run selected
+checkpoint-resumable evidence cases.
+Use `pnpm run test:direct-ballot:setup-handoff:evidence -- --list` to inspect
+the combined manual setup-handoff evidence lane before launching the full run.
 
 For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
@@ -245,6 +292,8 @@ Run focused verification:
 ```bash
 pnpm run vectors
 pnpm run test:rust:kernel:heavy
+pnpm run test:rust:kernel:heavy:required -- --list
+pnpm run test:direct-ballot:setup-handoff:evidence -- --list
 pnpm run test:node:fast
 pnpm run test:node:protocol
 pnpm run test:node:kernel

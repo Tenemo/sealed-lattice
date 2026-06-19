@@ -1213,6 +1213,31 @@ export const decryptLocalTrusteeState = async (
             'encryptedLocalState.localStateRoot does not match expectedLocalStateRoot.',
         );
     }
+    const ciphertextBytes = decodeCanonicalHex(
+        input.encryptedLocalState.ciphertextBytesHex,
+        'encryptedLocalState.ciphertextBytesHex',
+    );
+    assertNonNegativeSafeInteger(
+        input.encryptedLocalState.ciphertextByteLength,
+        'encryptedLocalState.ciphertextByteLength',
+    );
+    if (
+        ciphertextBytes.byteLength !==
+        input.encryptedLocalState.ciphertextByteLength
+    ) {
+        throw new Error(
+            'encryptedLocalState.ciphertextByteLength does not match ciphertextBytesHex.',
+        );
+    }
+    assertNonNegativeSafeInteger(
+        input.encryptedLocalState.plaintextByteLength,
+        'encryptedLocalState.plaintextByteLength',
+    );
+    if (input.encryptedLocalState.aeadTagLength !== aesGcmTagBitLength) {
+        throw new TypeError(
+            `encryptedLocalState.aeadTagLength must be ${String(aesGcmTagBitLength)}.`,
+        );
+    }
     const envelopeWithoutHash = {
         ...input.encryptedLocalState,
     } as Record<string, unknown>;
@@ -1269,9 +1294,6 @@ export const decryptLocalTrusteeState = async (
         input.encryptedLocalState.aeadNonceHex,
         aesGcmNonceByteLength,
         'encryptedLocalState.aeadNonceHex',
-    );
-    const ciphertextBytes = hexToBytes(
-        input.encryptedLocalState.ciphertextBytesHex,
     );
     const expectedCiphertextHash = hashBytes(
         'sealed-lattice-local-trustee-state/ciphertext-bytes-v1',

@@ -1,5 +1,6 @@
 import os from 'node:os';
 
+import { heavyAcceptedSetupTestPattern } from './heavy-evidence-tests.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
@@ -10,8 +11,6 @@ import {
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-
-const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
 
 // Each mutating heavy accepted-setup test clones the full first-profile
 // evaluation-key proof container package fixture, which embeds every trustee's

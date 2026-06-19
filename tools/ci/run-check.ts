@@ -35,7 +35,7 @@ type LaneStatus = 'failed' | 'passed' | 'stopped';
 
 // A validation lane is a named group of commands that run in series with one
 // another. Lanes may run concurrently during the independent-check phase.
-type ValidationLane = {
+export type ValidationLane = {
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
 };
@@ -56,9 +56,9 @@ export type ParsedCheckArguments = {
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
-const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
+export const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
 
-const rustKernelFastTestArguments = [
+export const rustKernelFastTestArguments = [
     'test',
     '-p',
     'sealed-lattice-kernel',
@@ -158,7 +158,7 @@ const createPackageManagerLane = (
 // of the parallel phase means no lane writes `dist/` while the test lanes import
 // it, and no `cargo` lane competes with the WebAssembly build for `target/`. A
 // failure here makes the rest pointless, so the run stops immediately.
-const buildGatingLanes = (
+export const buildGatingLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => [
     createPackageManagerLane(
@@ -175,7 +175,7 @@ const buildGatingLanes = (
     ),
 ];
 
-const buildRustKernelLane = (): ValidationLane => ({
+export const buildRustKernelLane = (): ValidationLane => ({
     commands: [
         createCargoCommand(
             'cargo fmt --check',
@@ -214,7 +214,7 @@ const buildRustKernelLane = (): ValidationLane => ({
 // kernel-heavy Node project, ignored Rust kernel heavy tests, and the
 // Playwright browser projects stay in their standalone lanes for pre-push
 // verification.
-const buildParallelLanes = (
+export const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
     const lane = (

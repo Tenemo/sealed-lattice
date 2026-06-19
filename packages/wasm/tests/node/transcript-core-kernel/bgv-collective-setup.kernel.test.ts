@@ -1503,6 +1503,58 @@ function acceptedSetupTransportCertificate(
             fullObjectHash,
         },
     });
+    const transportMeasurementRows = [
+        {
+            objectType: 'SetupTransportMeasurementRow',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            transportProfileId:
+                'sealed-lattice-setup-binary-chunked-transport-v1',
+            measurementKind: 'static-profile-transport-manifest-accounting',
+            objectName: transportedVssObject.objectName,
+            objectRole: transportedVssObject.objectRole,
+            objectRoot: transportedVssObject.objectRoot,
+            byteLength: transportedVssObject.byteLength,
+            chunkStartIndex: transportedVssObject.chunkStartIndex,
+            chunkCount: transportedVssObject.chunkCount,
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkRoot: transportedVssObject.chunkRoot,
+            fullObjectHash: transportedVssObject.fullObjectHash,
+            storageQuotaBytes: 2_147_483_648,
+            largestSingleBufferBytes: 1_572_864,
+            copyCountLimit: 2,
+            streamVerificationOrder: 'ascending-chunk-index',
+            resumePolicy: 'chunk-index-checkpointed-by-hash',
+            lazyLoadingPolicy: 'root-addressed-large-object-loading',
+            profileScaleStatus:
+                'profile-scale-transport-manifest-bound-to-current-package-shape',
+        },
+    ];
+    const transportMeasurementSummary = {
+        objectType: 'SetupTransportMeasurementSummary',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        transportProfileId: 'sealed-lattice-setup-binary-chunked-transport-v1',
+        measurementKind: 'static-profile-transport-manifest-accounting',
+        rowCount: transportMeasurementRows.length,
+        totalByteLength: setupTransportTotalByteLength,
+        chunkCount: setupTransportChunkCount,
+        chunkSizeBytes: setupTransportChunkSizeBytes,
+        storageQuotaBytes: 2_147_483_648,
+        largestSingleBufferBytes: 1_572_864,
+        copyCountLimit: 2,
+        streamVerificationOrder: 'ascending-chunk-index',
+        resumePolicy: 'chunk-index-checkpointed-by-hash',
+        lazyLoadingPolicy: 'root-addressed-large-object-loading',
+        nativeReleaseBoundary:
+            'native-release-verifier-runtime-measurements-are-recorded-outside-this-certificate',
+        nodeWasmBoundary:
+            'node-wasm-bridge-runtime-measurements-are-recorded-outside-this-certificate',
+        supportedPhoneBoundary:
+            'supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate',
+        profileScaleStatus:
+            'profile-scale-transport-manifest-bound-to-current-package-shape',
+    };
     const certificate = {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
@@ -1521,6 +1573,8 @@ function acceptedSetupTransportCertificate(
         resumePolicy: 'chunk-index-checkpointed-by-hash',
         lazyLoadingPolicy: 'root-addressed-large-object-loading',
         transportedObjects: [transportedVssObject],
+        transportMeasurementRows,
+        transportMeasurementSummary,
         chunkHashes,
         chunkRoot,
         fullObjectHash,
@@ -1647,7 +1701,7 @@ function acceptedActiveStaticSetupTheoremCertificate(
             'threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied',
             'same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted',
             'collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records',
-            'setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects',
+            'setup commitment, proof-accounting, transport, assembly provenance, HE, and key-correctness certificates are root-bound package objects',
             'generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused',
         ],
         dependencyHashes: {
@@ -1657,6 +1711,8 @@ function acceptedActiveStaticSetupTheoremCertificate(
                 setupPackage.setupTransportCertificateHash,
             setupProofAccountingCertificateHash:
                 setupPackage.setupProofAccountingCertificateHash,
+            setupAssemblyProvenanceCertificateHash:
+                setupPackage.setupAssemblyProvenanceCertificateHash,
             heSecurityCertificateHash: setupPackage.heSecurityCertificateHash,
             setupKeyCorrectnessCertificateHash: optionalHashFromRecord(
                 setupPackage,
@@ -1758,6 +1814,145 @@ function acceptedActiveStaticSetupTheoremCertificate(
             value: certificate,
         }),
     };
+}
+
+function acceptedSetupAssemblyProvenanceCertificate(
+    kernel: TranscriptCoreKernel,
+    setupPackage: JsonRecord,
+): JsonRecord {
+    const setupContext = setupPackage.setupContext as JsonRecord;
+    const phaseTranscript = setupPackage.phaseTranscript;
+    if (!Array.isArray(phaseTranscript)) {
+        throw new TypeError('setupPackage.phaseTranscript must be an array.');
+    }
+    const certificate = {
+        objectType: 'SetupAssemblyProvenanceCertificate',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        ceremonyId: setupContext.ceremonyId,
+        manifestHash: setupContext.manifestHash,
+        rosterHash: setupContext.rosterHash,
+        setupProfileHash: setupContext.setupProfileHash,
+        qShareHash: setupContext.qShareHash,
+        carryAwareVssShareRelationProfileHash:
+            setupContext.carryAwareVssShareRelationProfileHash,
+        commitmentProfileHash: setupContext.commitmentProfileHash,
+        setupEpoch: setupContext.setupEpoch,
+        assemblySource: 'integrated-full-roster-setup-package-assembly',
+        assemblySourceStatus:
+            'claim-bearing-setup-source-bound-to-verifier-recomputed-final-record-roots',
+        participantCount: firstProfileParticipantCount,
+        setupCompletionQuorum: firstProfileParticipantCount,
+        sourceBoundary: {
+            acceptedHandoffSource:
+                'accepted-setup-verifier-after-package-hash-certificate-and-final-object-gates',
+            developmentAssemblyAcceptedAsClaimSource: false,
+            helperAssemblyAcceptedAsClaimSource: false,
+        },
+        rootBindings: {
+            phaseTranscriptRoot: kernel.deriveProtocolHash({
+                namespace: 'SetupPhaseTranscriptRoot',
+                value: phaseTranscript,
+            }),
+            commonRandomnessRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'commonRandomness',
+                'commonRandomnessRoot',
+            ),
+            vssCoefficientCommitmentRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'vssCoefficientCommitments',
+                'vssCoefficientCommitmentRoot',
+            ),
+            privateVssEnvelopeCommitmentRoot: optionalHashFromRecord(
+                setupPackage,
+                'privateVssEnvelopeCommitmentRoot',
+            ),
+            vssShareAcceptanceRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'vssShareAcceptances',
+                'vssShareAcceptanceRoot',
+            ),
+            thresholdShareCommitmentRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'thresholdShareCommitments',
+                'thresholdShareCommitmentRoot',
+            ),
+            sameSecretConsistencyRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'sameSecretConsistency',
+                'sameSecretConsistencyRoot',
+            ),
+            publicKeyShareSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'publicKeyShares',
+                'publicKeyShareSetRoot',
+            ),
+            publicKeyShareProofSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'publicKeyShareProofs',
+                'publicKeyShareProofSetRoot',
+            ),
+            publicKeyShareMaterialSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'publicKeyShareMaterial',
+                'publicKeyShareMaterialSetRoot',
+            ),
+            publicKeyShareSuccinctProofSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'publicKeyShareSuccinctProofs',
+                'publicKeyShareSuccinctProofSetRoot',
+            ),
+            collectivePublicKeyRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'collectivePublicKey',
+                'collectivePublicKeyRoot',
+            ),
+            evaluatorKeyScheduleRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'evaluatorKeySchedule',
+                'evaluatorKeyScheduleRoot',
+            ),
+            relinearizationKeyShareRoundsRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'relinearizationKeyShareRounds',
+                'relinearizationKeyShareRoundsRoot',
+            ),
+            trusteeEvaluationKeyProofSetRoot: optionalNestedHashFromRecord(
+                setupPackage,
+                'trusteeEvaluationKeyProofs',
+                'trusteeEvaluationKeyProofSetRoot',
+            ),
+            evaluationKeySetHash: optionalNestedHashFromRecord(
+                setupPackage,
+                'evaluationKeys',
+                'evaluationKeySetHash',
+            ),
+        },
+        claimBoundary:
+            'accepted setup handoff construction is sourced from this verifier-recomputed package provenance certificate, not from development assembly or helper paths',
+    };
+
+    return {
+        ...certificate,
+        setupAssemblyProvenanceCertificateHash: kernel.deriveProtocolHash({
+            namespace: 'SetupAssemblyProvenanceCertificateHash',
+            value: certificate,
+        }),
+    };
+}
+
+function rebindAcceptedSetupAssemblyProvenanceCertificate(
+    kernel: TranscriptCoreKernel,
+    setupPackage: JsonRecord,
+): void {
+    const certificate = acceptedSetupAssemblyProvenanceCertificate(
+        kernel,
+        setupPackage,
+    );
+    setupPackage.setupAssemblyProvenanceCertificate = certificate;
+    setupPackage.setupAssemblyProvenanceCertificateHash =
+        certificate.setupAssemblyProvenanceCertificateHash;
 }
 
 async function buildAcceptedShapedSetupPackage(
@@ -1943,6 +2138,7 @@ async function buildAcceptedShapedSetupPackage(
         heSecurityCertificateHash:
             heSecurityCertificate.heSecurityCertificateHash,
     };
+    rebindAcceptedSetupAssemblyProvenanceCertificate(kernel, setupPackage);
     const activeStaticSetupTheoremCertificate =
         acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
     setupPackage.activeStaticSetupTheoremCertificate =
@@ -2180,6 +2376,7 @@ describe('collective BGV setup kernel commands', () => {
         const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
         setupPackage.sameSecretProofs =
             sameSecretProofsWithDriftedStatementHashes(profile, setupPackage);
+        rebindAcceptedSetupAssemblyProvenanceCertificate(kernel, setupPackage);
         const activeStaticSetupTheoremCertificate =
             acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
         setupPackage.activeStaticSetupTheoremCertificate =
@@ -2235,6 +2432,7 @@ describe('collective BGV setup kernel commands', () => {
                 profile,
                 setupPackage,
             );
+        rebindAcceptedSetupAssemblyProvenanceCertificate(kernel, setupPackage);
         const activeStaticSetupTheoremCertificate =
             acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
         setupPackage.activeStaticSetupTheoremCertificate =

@@ -565,6 +565,7 @@ pub(super) fn add_public_evaluation_key_material_transport(
         },
     );
     rebind_setup_key_correctness_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     serde_json::json!({

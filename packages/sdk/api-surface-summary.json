@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "05d3aa85a6c6827594077a21803bf1d22b952b2c84822fec25369e7cebf0bac2",
+    "reachableDeclarationHash": "cd625457f4ae2b1ffa79d491d2f78466306b175397f548df3188cd58a9228e69",
     "runtimeExports": [
         "aggregateDirectEncryptedBallotPackages",
         "createBinaryChunkedEvaluationKeyShareMaterialTransport",
@@ -150,6 +150,7 @@
         "LocalTrusteeSetupStateDeletionReceipt",
         "LocalTrusteeSetupStateSealedMaterial",
         "LocalTrusteeSetupStateSealedPayload",
+        "LocalTrusteeSetupStateTransportEvidence",
         "LocalTrusteeSetupStateVerification",
         "MalformedObjectFixture",
         "MalformedObjectFixtureVerification",

@@ -473,6 +473,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_setup_key_correctness
         .as_object_mut()
         .expect("setup package")
         .remove("setupKeyCorrectnessCertificateHash");
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -480,7 +481,10 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_setup_key_correctness
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(
+        result["verifierStatus"], "pending",
+        "unexpected verification result: {result:#}"
+    );
     assert!(
         result["missingObjects"]
             .as_array()
@@ -575,6 +579,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_setup_key_correctness_c
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["setupKeyCorrectnessCertificate"]["claimBoundary"] =
         serde_json::json!("weakened-key-correctness-claim");
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -582,10 +587,13 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_setup_key_correctness_c
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupKeyCorrectnessCertificatePayloadMismatch"
+        result["verifierStatus"], "refused",
+        "unexpected verification result: {result:#}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"], "setupKeyCorrectnessCertificatePayloadMismatch",
+        "unexpected verification result: {result:#}"
     );
 }
 
@@ -600,6 +608,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_
     package["setupKeyCorrectnessCertificate"]["setupKeyCorrectnessCertificateHash"] =
         serde_json::json!(valid_hash('8'));
     package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('8'));
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -607,10 +616,13 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "setupKeyCorrectnessCertificateHashMismatch"
+        result["verifierStatus"], "refused",
+        "unexpected verification result: {result:#}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"], "setupKeyCorrectnessCertificateHashMismatch",
+        "unexpected verification result: {result:#}"
     );
 }
 
@@ -623,6 +635,99 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_
     );
     let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
     package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('9'));
+    rebind_setup_assembly_provenance_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(
+        result["verifierStatus"], "refused",
+        "unexpected verification result: {result:#}"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupKeyCorrectnessPackageCertificateHashMismatch",
+        "unexpected verification result: {result:#}"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_requires_setup_assembly_provenance_certificate() {
+    let mut package = minimal_collective_setup_package();
+    package
+        .as_object_mut()
+        .expect("setup package")
+        .remove("setupAssemblyProvenanceCertificate");
+    package
+        .as_object_mut()
+        .expect("setup package")
+        .remove("setupAssemblyProvenanceCertificateHash");
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "pending");
+    assert!(
+        result["missingObjects"]
+            .as_array()
+            .expect("pending objects")
+            .iter()
+            .any(|object| object == "setupAssemblyProvenanceCertificate")
+    );
+}
+
+#[test]
+fn setup_assembly_provenance_certificate_records_accepted_source_boundary() {
+    let package = minimal_collective_setup_package();
+    let certificate = setup_assembly_provenance_certificate_value(&package)
+        .expect("setup assembly provenance certificate");
+
+    assert_eq!(
+        certificate["objectType"],
+        "SetupAssemblyProvenanceCertificate"
+    );
+    assert_eq!(
+        certificate["assemblySource"],
+        "integrated-full-roster-setup-package-assembly"
+    );
+    assert_eq!(
+        certificate["sourceBoundary"]["acceptedHandoffSource"],
+        "accepted-setup-verifier-after-package-hash-certificate-and-final-object-gates"
+    );
+    assert_eq!(
+        certificate["sourceBoundary"]["developmentAssemblyAcceptedAsClaimSource"],
+        false
+    );
+    assert_eq!(
+        certificate["sourceBoundary"]["helperAssemblyAcceptedAsClaimSource"],
+        false
+    );
+    assert_eq!(
+        certificate["rootBindings"]["commonRandomnessRoot"],
+        package["commonRandomness"]["commonRandomnessRoot"]
+    );
+    assert!(
+        certificate["rootBindings"]["phaseTranscriptRoot"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 128)
+    );
+    assert_eq!(
+        certificate["claimBoundary"],
+        "accepted setup handoff construction is sourced from this verifier-recomputed package provenance certificate, not from development assembly or helper paths"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_checks_setup_assembly_provenance_certificate() {
+    let mut package = minimal_collective_setup_package();
+    package["setupAssemblyProvenanceCertificate"]["claimBoundary"] =
+        serde_json::json!("development-assembly-accepted");
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -633,7 +738,45 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "setupKeyCorrectnessPackageCertificateHashMismatch"
+        "setupAssemblyProvenanceCertificatePayloadMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_setup_assembly_provenance_certificate_hash_drift() {
+    let mut package = minimal_collective_setup_package();
+    package["setupAssemblyProvenanceCertificate"]["setupAssemblyProvenanceCertificateHash"] =
+        serde_json::json!(valid_hash('d'));
+    package["setupAssemblyProvenanceCertificateHash"] = serde_json::json!(valid_hash('d'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupAssemblyProvenanceCertificateHashMismatch"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_setup_assembly_provenance_package_hash_drift() {
+    let mut package = minimal_collective_setup_package();
+    package["setupAssemblyProvenanceCertificateHash"] = serde_json::json!(valid_hash('e'));
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
+        "setupPackage": package,
+    }))
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "setupAssemblyProvenancePackageCertificateHashMismatch"
     );
 }
 
@@ -684,6 +827,10 @@ fn active_static_setup_theorem_certificate_records_accepted_claim_boundary() {
     assert_eq!(
         certificate["dependencyHashes"]["setupKeyCorrectnessCertificateHash"],
         package["setupKeyCorrectnessCertificateHash"]
+    );
+    assert_eq!(
+        certificate["dependencyHashes"]["setupAssemblyProvenanceCertificateHash"],
+        package["setupAssemblyProvenanceCertificateHash"]
     );
     assert_eq!(
         certificate["claimBoundary"]["certificateStatus"],

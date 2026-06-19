@@ -342,7 +342,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
         "public-key-share-proof-material",
         DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
     );
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
@@ -455,7 +455,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
                 .collect(),
         },
     );
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({

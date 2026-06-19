@@ -1,5 +1,18 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+    heavyAcceptedSetupTestPattern,
+    requiredRustHeavyEvidenceTests,
+    type RequiredRustHeavyEvidenceTest,
+} from './heavy-evidence-tests.js';
+import type { PackageManagerRunner } from './package-manager-runner.js';
+import type { CommandInvocation } from './run-command.js';
+import {
+    createDirectBallotSetupHandoffEvidenceCommands,
+    directBallotSetupHandoffPublicParityTestPaths,
+} from './run-direct-ballot-setup-handoff-evidence.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { collectFiles, toPosixPath } from '#tools/internal/files.js';
@@ -7,6 +20,13 @@ import { collectFiles, toPosixPath } from '#tools/internal/files.js';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const heavyKernelNodeTestPath =
     'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup.kernel.test.ts';
+const directBallotSetupHandoffPublicParityCommandDescription =
+    'Run direct ballot setup handoff SDK/WASM public package parity tests';
+const verificationPackageManagerRunner = {
+    command: process.execPath,
+    commandArgumentsPrefix: ['pnpm.cjs'],
+    kind: 'pnpm',
+} as const satisfies PackageManagerRunner;
 
 type TestLaneGroup =
     | 'browser'
@@ -86,6 +106,115 @@ export const validateTestLaneCoverage = (
     return failures.sort((left, right) => left.localeCompare(right));
 };
 
+const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+export const validateRustHeavyEvidenceTestSource = (
+    requiredTest: RequiredRustHeavyEvidenceTest,
+    sourceText: string,
+): readonly string[] => {
+    const failures: string[] = [];
+    if (!requiredTest.testName.startsWith(heavyAcceptedSetupTestPattern)) {
+        failures.push(
+            `${requiredTest.testName} must use the ${heavyAcceptedSetupTestPattern} prefix so pnpm run test:rust:kernel:heavy includes it.`,
+        );
+    }
+
+    const ignoredHeavyTestPattern = new RegExp(
+        `#\\[test\\]\\s*#\\[ignore\\s*=\\s*"heavy accepted setup test"\\]\\s*fn\\s+${escapeRegExp(
+            requiredTest.testName,
+        )}\\s*\\(`,
+        'u',
+    );
+    if (!ignoredHeavyTestPattern.test(sourceText)) {
+        failures.push(
+            `${requiredTest.relativePath} must define ${requiredTest.testName} as an ignored heavy accepted setup test for ${requiredTest.claimEvidence}.`,
+        );
+    }
+
+    return failures;
+};
+
+export const validateRequiredRustHeavyEvidenceTests = async (): Promise<
+    readonly string[]
+> => {
+    const failures: string[] = [];
+    for (const requiredTest of requiredRustHeavyEvidenceTests) {
+        const absolutePath = path.resolve(repoRoot, requiredTest.relativePath);
+        try {
+            const sourceText = await readFile(absolutePath, 'utf8');
+            failures.push(
+                ...validateRustHeavyEvidenceTestSource(
+                    requiredTest,
+                    sourceText,
+                ),
+            );
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            failures.push(
+                `${requiredTest.relativePath} could not be read while checking required Rust heavy evidence test ${requiredTest.testName}: ${message}`,
+            );
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
+};
+
+export const validateDirectBallotSetupHandoffPublicParityCommand = (
+    commands: readonly CommandInvocation[],
+): readonly string[] => {
+    const failures: string[] = [];
+    const publicParityCommands = commands.filter(
+        (command) =>
+            command.description ===
+            directBallotSetupHandoffPublicParityCommandDescription,
+    );
+
+    if (publicParityCommands.length !== 1) {
+        failures.push(
+            `direct ballot setup handoff evidence lane must include exactly one SDK/WASM public package parity command; found ${String(publicParityCommands.length)}.`,
+        );
+
+        return failures;
+    }
+
+    const [publicParityCommand] = publicParityCommands;
+    if (publicParityCommand === undefined) {
+        throw new Error(
+            'direct ballot setup handoff public parity command was unexpectedly missing after length validation.',
+        );
+    }
+    const commandArguments = publicParityCommand.args;
+    if (
+        !commandArguments.includes('exec') ||
+        !commandArguments.includes('vitest') ||
+        !commandArguments.includes('run')
+    ) {
+        failures.push(
+            'direct ballot setup handoff public parity command must run vitest through the package manager.',
+        );
+    }
+
+    for (const testPath of directBallotSetupHandoffPublicParityTestPaths) {
+        if (!commandArguments.includes(testPath)) {
+            failures.push(
+                `direct ballot setup handoff public parity command must include ${testPath}.`,
+            );
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
+};
+
+export const validateDirectBallotSetupHandoffEvidenceLane =
+    (): readonly string[] =>
+        validateDirectBallotSetupHandoffPublicParityCommand(
+            createDirectBallotSetupHandoffEvidenceCommands({
+                packageManagerRunner: verificationPackageManagerRunner,
+            }),
+        );
+
 const collectWorkspaceTestFiles = async (): Promise<readonly string[]> => [
     ...(await collectFiles(path.resolve(repoRoot, 'packages'), {
         fileNamePattern: /\.test\.ts$/u,
@@ -96,9 +225,11 @@ const collectWorkspaceTestFiles = async (): Promise<readonly string[]> => [
 ];
 
 const main = async (): Promise<void> => {
-    const failures = validateTestLaneCoverage(
-        await collectWorkspaceTestFiles(),
-    );
+    const failures = [
+        ...validateTestLaneCoverage(await collectWorkspaceTestFiles()),
+        ...(await validateRequiredRustHeavyEvidenceTests()),
+        ...validateDirectBallotSetupHandoffEvidenceLane(),
+    ].sort((left, right) => left.localeCompare(right));
     if (failures.length > 0) {
         throw new Error(failures.join('\n'));
     }

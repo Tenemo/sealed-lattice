@@ -91,12 +91,19 @@ export {
     collectForbiddenLocalTrusteeSetupStateFieldPaths,
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     createLocalTrusteeSetupStateCommitment,
+    createLocalTrusteeSetupStateTransportEvidence,
     deletedLocalTrusteeSetupMaterialClasses,
     decryptLocalTrusteeSetupState,
     encryptLocalTrusteeSetupState,
     localTrusteeSetupStateDeletionBoundary,
     localTrusteeSetupStateExportPolicy,
+    localTrusteeSetupStateRuntimeMeasurementBoundary,
     localTrusteeSetupStateStorageProfile,
+    localTrusteeSetupStateSupportedPhoneBoundary,
+    localTrusteeSetupStateTransportChunkingStatus,
+    localTrusteeSetupStateTransportEncoding,
+    localTrusteeSetupStateTransportMeasurementKind,
+    localTrusteeSetupStateTransportProfileScaleStatus,
     retainedLocalTrusteeSetupMaterialClasses,
 } from './setup/local-trustee-setup-state.js';
 export {
@@ -276,6 +283,7 @@ export type {
     LocalTrusteeSetupStateDeletionReceipt,
     LocalTrusteeSetupStateEncryptionInput,
     LocalTrusteeSetupStateEncryptionResult,
+    LocalTrusteeSetupStateTransportEvidence,
     GeneratedLocalTrusteeSetupStateInput,
     GeneratedLocalTrusteeSetupStateResult,
 } from './setup/local-trustee-setup-state.js';

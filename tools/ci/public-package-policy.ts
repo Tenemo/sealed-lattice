@@ -223,6 +223,7 @@ export const vendoredProtocolRuntimeEntryExports = [
         source: 'setup/local-trustee-setup-state.js',
         exports: [
             'createEncryptedLocalTrusteeSetupStateFromVerifiedShares',
+            'createLocalTrusteeSetupStateTransportEvidence',
             'decryptLocalTrusteeSetupState',
         ],
         runtimeFacadeExports: [

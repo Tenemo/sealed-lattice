@@ -302,7 +302,12 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["verifierStatus"],
+        "outsideProfile",
+        "unexpected verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideProfile"
@@ -687,32 +692,109 @@ fn heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow() {
 
     let mut drifted_public_key_material = accepted_public_key_material.clone();
     drifted_public_key_material["acceptedSetupHandoffRoot"] = serde_json::json!("0".repeat(128));
-    let drift_error = create_direct_encrypted_ballot_packages(&serde_json::json!({
-        "acceptedPublicKeyMaterial": drifted_public_key_material,
-        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
-        "ballotEncryptionRandomness": {
-            "source": "fresh-csprng",
-            "encryptionSeedHexes": [ballot_encryption_seed_hex.clone()]
+    assert_direct_ballot_creation_rejects_setup_output_drift(
+        DirectBallotSetupOutputDriftExpectation {
+            accepted_public_key_material: drifted_public_key_material,
+            accepted_setup_handoff: accepted_setup_handoff.clone(),
+            ballot_encryption_seed_hex: &ballot_encryption_seed_hex,
+            proof_mask_seed_hex: &proof_mask_seed_hex,
+            ballots: &ballots,
+            expected_code: CanonicalErrorCode::ProfileComponentMismatch,
+            expected_message_fragment: "acceptedPublicKeyMaterial.acceptedSetupHandoffRoot",
+            case_label: "accepted public-key material rebound to another setup handoff",
         },
-        "proofMaskRandomness": {
-            "source": "fresh-csprng",
-            "ballotProofRandomnessHexes": [proof_mask_seed_hex.clone()]
-        },
-        "ballots": ballots.clone()
-    }))
-    .expect_err("direct ballot creation must reject material that is not bound to the accepted setup handoff");
+    );
 
-    assert_eq!(
-        drift_error.code,
-        CanonicalErrorCode::ProfileComponentMismatch
+    let mut drifted_bgv_root_material = accepted_public_key_material.clone();
+    drifted_bgv_root_material["bgvPublicKeyRoot"] = serde_json::json!("0".repeat(128));
+    assert_direct_ballot_creation_rejects_setup_output_drift(
+        DirectBallotSetupOutputDriftExpectation {
+            accepted_public_key_material: drifted_bgv_root_material,
+            accepted_setup_handoff: accepted_setup_handoff.clone(),
+            ballot_encryption_seed_hex: &ballot_encryption_seed_hex,
+            proof_mask_seed_hex: &proof_mask_seed_hex,
+            ballots: &ballots,
+            expected_code: CanonicalErrorCode::ProfileComponentMismatch,
+            expected_message_fragment: "acceptedPublicKeyMaterial.bgvPublicKeyRoot",
+            case_label: "accepted public-key material with drifted BGV public-key root",
+        },
     );
-    assert!(
-        drift_error
-            .message
-            .contains("acceptedPublicKeyMaterial.acceptedSetupHandoffRoot"),
-        "unexpected drift refusal: {}",
-        drift_error.message
+
+    let mut setup_root_handoff = accepted_setup_handoff.clone();
+    setup_root_handoff["setupPackageHash"] = serde_json::json!("0".repeat(128));
+    rebind_setup_output_handoff_root(&mut setup_root_handoff);
+    let mut setup_root_material = accepted_public_key_material.clone();
+    setup_root_material["acceptedSetupHandoffRoot"] =
+        setup_root_handoff["acceptedSetupHandoffRoot"].clone();
+    assert_direct_ballot_creation_rejects_setup_output_drift(
+        DirectBallotSetupOutputDriftExpectation {
+            accepted_public_key_material: setup_root_material,
+            accepted_setup_handoff: setup_root_handoff,
+            ballot_encryption_seed_hex: &ballot_encryption_seed_hex,
+            proof_mask_seed_hex: &proof_mask_seed_hex,
+            ballots: &ballots,
+            expected_code: CanonicalErrorCode::ProfileComponentMismatch,
+            expected_message_fragment: "acceptedPublicKeyMaterial.setupPackageHash",
+            case_label: "accepted setup handoff rebound to another setup package root",
+        },
     );
+
+    let mut soundness_handoff = accepted_setup_handoff.clone();
+    soundness_handoff["directBallotEncryptionHandoff"]["soundnessCertificateHash"] =
+        serde_json::json!("0".repeat(128));
+    rebind_setup_output_handoff_root(&mut soundness_handoff);
+    let mut soundness_material = accepted_public_key_material.clone();
+    soundness_material["acceptedSetupHandoffRoot"] =
+        soundness_handoff["acceptedSetupHandoffRoot"].clone();
+    assert_direct_ballot_creation_rejects_setup_output_drift(
+        DirectBallotSetupOutputDriftExpectation {
+            accepted_public_key_material: soundness_material,
+            accepted_setup_handoff: soundness_handoff,
+            ballot_encryption_seed_hex: &ballot_encryption_seed_hex,
+            proof_mask_seed_hex: &proof_mask_seed_hex,
+            ballots: &ballots,
+            expected_code: CanonicalErrorCode::ProfileComponentMismatch,
+            expected_message_fragment: "directBallotEncryptionHandoff.soundnessCertificateHash",
+            case_label: "accepted setup handoff with drifted direct-ballot soundness certificate",
+        },
+    );
+
+    let mut public_key_summary_handoff = accepted_setup_handoff.clone();
+    public_key_summary_handoff["directBallotEncryptionHandoff"]["acceptedPublicKeyMaterial"]["publicKeyShareMaterialSetRoot"] =
+        serde_json::json!("0".repeat(128));
+    rebind_setup_output_handoff_root(&mut public_key_summary_handoff);
+    let mut public_key_summary_material = accepted_public_key_material.clone();
+    public_key_summary_material["acceptedSetupHandoffRoot"] =
+        public_key_summary_handoff["acceptedSetupHandoffRoot"].clone();
+    assert_direct_ballot_creation_rejects_setup_output_drift(
+        DirectBallotSetupOutputDriftExpectation {
+            accepted_public_key_material: public_key_summary_material,
+            accepted_setup_handoff: public_key_summary_handoff,
+            ballot_encryption_seed_hex: &ballot_encryption_seed_hex,
+            proof_mask_seed_hex: &proof_mask_seed_hex,
+            ballots: &ballots,
+            expected_code: CanonicalErrorCode::ProfileComponentMismatch,
+            expected_message_fragment: "acceptedPublicKeyMaterial.publicKeyShareMaterialSetRoot",
+            case_label: "accepted setup handoff with drifted embedded public-key summary",
+        },
+    );
+
+    let mut leaking_public_key_material = accepted_public_key_material.clone();
+    leaking_public_key_material["collectivePublicKey"]["setupPrivateWitness"] =
+        serde_json::json!({ "setupSeed": "must-not-enter-public-ballot-path" });
+    assert_direct_ballot_creation_rejects_setup_output_drift(
+        DirectBallotSetupOutputDriftExpectation {
+            accepted_public_key_material: leaking_public_key_material,
+            accepted_setup_handoff: accepted_setup_handoff.clone(),
+            ballot_encryption_seed_hex: &ballot_encryption_seed_hex,
+            proof_mask_seed_hex: &proof_mask_seed_hex,
+            ballots: &ballots,
+            expected_code: CanonicalErrorCode::InvalidFixture,
+            expected_message_fragment: "setupPrivateWitness",
+            case_label: "accepted public-key material containing leaked setup witness fields",
+        },
+    );
+    terminal_phase("checked direct ballot setup-output refusal matrix");
 
     let package_creation = create_direct_encrypted_ballot_packages(&serde_json::json!({
         "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
@@ -791,6 +873,163 @@ fn heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow() {
         package_verification["packageVerificationCertificate"]["publicAggregationInput"]["proofChunkRoot"],
         package_record["proofChunkManifestRoot"]
     );
+    assert_eq!(
+        package_verification["packageVerificationCertificate"]["packageVerificationCertificateHash"],
+        package_verification["packageVerificationCertificateHash"]
+    );
+    let mut package_verification_certificate_hash_input =
+        package_verification["packageVerificationCertificate"].clone();
+    package_verification_certificate_hash_input
+        .as_object_mut()
+        .expect("package verification certificate object")
+        .remove("packageVerificationCertificateHash");
+    let expected_package_verification_certificate_hash = derive_protocol_hash(
+        "DirectEncryptedBallotPackageVerificationCertificateHash",
+        &package_verification_certificate_hash_input,
+    )
+    .expect("package verification certificate hash");
+    assert_eq!(
+        package_verification["packageVerificationCertificateHash"].as_str(),
+        Some(expected_package_verification_certificate_hash.as_str())
+    );
+    let mut drifted_package_verification_certificate_hash_input =
+        package_verification["packageVerificationCertificate"].clone();
+    drifted_package_verification_certificate_hash_input["acceptedSetupHandoffRoot"] =
+        serde_json::json!("0".repeat(128));
+    drifted_package_verification_certificate_hash_input
+        .as_object_mut()
+        .expect("drifted package verification certificate object")
+        .remove("packageVerificationCertificateHash");
+    let drifted_package_verification_certificate_hash = derive_protocol_hash(
+        "DirectEncryptedBallotPackageVerificationCertificateHash",
+        &drifted_package_verification_certificate_hash_input,
+    )
+    .expect("drifted package verification certificate hash");
+    assert_ne!(
+        package_verification["packageVerificationCertificateHash"].as_str(),
+        Some(drifted_package_verification_certificate_hash.as_str())
+    );
+
+    let mut tampered_proof_chunks = package_record["proofChunks"].clone();
+    let first_chunk_bytes_hex = tampered_proof_chunks[0]["bytesHex"]
+        .as_str()
+        .expect("first proof chunk bytes");
+    let replacement_prefix = if first_chunk_bytes_hex.starts_with('0') {
+        "1"
+    } else {
+        "0"
+    };
+    tampered_proof_chunks[0]["bytesHex"] = serde_json::json!(format!(
+        "{replacement_prefix}{}",
+        &first_chunk_bytes_hex[1..]
+    ));
+    let tampered_chunk_error = verify_direct_encrypted_ballot_package(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash.clone(),
+        "encryptedBallotPackage": signed_package.clone(),
+        "proofChunks": tampered_proof_chunks,
+    }))
+    .expect_err("direct ballot package verification must reject tampered proof chunks from real setup output");
+    assert_eq!(
+        tampered_chunk_error.code,
+        CanonicalErrorCode::InvalidFixture
+    );
+    assert!(
+        tampered_chunk_error
+            .message
+            .contains("proofChunks[0] bytes do not match chunkHash"),
+        "unexpected tampered proof-chunk refusal: {}",
+        tampered_chunk_error.message
+    );
+
+    let mut tampered_signature_package = signed_package.clone();
+    let signature_bytes_hex = tampered_signature_package["signature"]["signatureBytesHex"]
+        .as_str()
+        .expect("signature bytes hex");
+    let replacement_prefix = if signature_bytes_hex.starts_with('0') {
+        "1"
+    } else {
+        "0"
+    };
+    tampered_signature_package["signature"]["signatureBytesHex"] =
+        serde_json::json!(format!("{replacement_prefix}{}", &signature_bytes_hex[1..]));
+    let tampered_signature_error = verify_direct_encrypted_ballot_package(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "voterSigningPublicKeyHash": voter_signing_public_key_hash.clone(),
+        "encryptedBallotPackage": tampered_signature_package,
+        "proofChunks": package_record["proofChunks"].clone(),
+    }))
+    .expect_err("direct ballot package verification must reject tampered voter signatures from real setup output");
+    assert_eq!(
+        tampered_signature_error.code,
+        CanonicalErrorCode::InvalidFixture
+    );
+    assert!(
+        tampered_signature_error
+            .message
+            .contains("Signature hash does not verify for the canonical signed root"),
+        "unexpected tampered signature refusal: {}",
+        tampered_signature_error.message
+    );
+    terminal_phase("checked direct ballot package refusal matrix");
+
+    let first_valid_mismatch_error =
+        aggregate_direct_encrypted_ballot_packages(&serde_json::json!({
+            "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
+            "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+            "firstValidOrderHash": "0".repeat(128),
+            "firstValidPackageRoots": ["1".repeat(128)],
+            "encryptedBallotPackages": [{
+                "voterSigningPublicKeyHash": voter_signing_public_key_hash.clone(),
+                "encryptedBallotPackage": signed_package.clone(),
+                "proofChunks": package_record["proofChunks"].clone(),
+            }]
+        }))
+        .expect_err("direct ballot aggregation must reject first-valid roots that do not match real setup-output packages");
+    assert_eq!(
+        first_valid_mismatch_error.code,
+        CanonicalErrorCode::ProfileComponentMismatch
+    );
+    assert!(
+        first_valid_mismatch_error
+            .message
+            .contains("firstValidPackageRoots must exactly match"),
+        "unexpected first-valid mismatch refusal: {}",
+        first_valid_mismatch_error.message
+    );
+
+    let duplicate_package_error = aggregate_direct_encrypted_ballot_packages(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material.clone(),
+        "acceptedSetupHandoff": accepted_setup_handoff.clone(),
+        "encryptedBallotPackages": [
+            {
+                "voterSigningPublicKeyHash": voter_signing_public_key_hash.clone(),
+                "encryptedBallotPackage": signed_package.clone(),
+                "proofChunks": package_record["proofChunks"].clone(),
+            },
+            {
+                "voterSigningPublicKeyHash": voter_signing_public_key_hash.clone(),
+                "encryptedBallotPackage": signed_package.clone(),
+                "proofChunks": package_record["proofChunks"].clone(),
+            }
+        ]
+    }))
+    .expect_err(
+        "direct ballot aggregation must reject duplicate package replay from real setup output",
+    );
+    assert_eq!(
+        duplicate_package_error.code,
+        CanonicalErrorCode::InvalidFixture
+    );
+    assert!(
+        duplicate_package_error
+            .message
+            .contains("duplicates a package root"),
+        "unexpected duplicate package refusal: {}",
+        duplicate_package_error.message
+    );
 
     let aggregate = aggregate_direct_encrypted_ballot_packages(&serde_json::json!({
         "acceptedPublicKeyMaterial": accepted_public_key_material,
@@ -817,6 +1056,108 @@ fn heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow() {
         aggregate["aggregateCertificate"]["packageVerificationInputs"][0]["packageRoot"],
         package_record["encryptedBallotPackageRoot"]
     );
+    assert_eq!(
+        aggregate["aggregateCertificate"]["aggregateCertificateHash"],
+        aggregate["aggregateCertificateHash"]
+    );
+    let mut aggregate_certificate_hash_input = aggregate["aggregateCertificate"].clone();
+    aggregate_certificate_hash_input
+        .as_object_mut()
+        .expect("aggregate certificate object")
+        .remove("aggregateCertificateHash");
+    let expected_aggregate_certificate_hash = derive_protocol_hash(
+        "DirectEncryptedBallotAggregateCertificateHash",
+        &aggregate_certificate_hash_input,
+    )
+    .expect("aggregate certificate hash");
+    assert_eq!(
+        aggregate["aggregateCertificateHash"].as_str(),
+        Some(expected_aggregate_certificate_hash.as_str())
+    );
+    let mut drifted_aggregate_certificate_hash_input = aggregate["aggregateCertificate"].clone();
+    drifted_aggregate_certificate_hash_input["ballotCount"] = serde_json::json!(2);
+    drifted_aggregate_certificate_hash_input
+        .as_object_mut()
+        .expect("drifted aggregate certificate object")
+        .remove("aggregateCertificateHash");
+    let drifted_aggregate_certificate_hash = derive_protocol_hash(
+        "DirectEncryptedBallotAggregateCertificateHash",
+        &drifted_aggregate_certificate_hash_input,
+    )
+    .expect("drifted aggregate certificate hash");
+    assert_ne!(
+        aggregate["aggregateCertificateHash"].as_str(),
+        Some(drifted_aggregate_certificate_hash.as_str())
+    );
+}
+
+struct DirectBallotSetupOutputDriftExpectation<'a> {
+    accepted_public_key_material: serde_json::Value,
+    accepted_setup_handoff: serde_json::Value,
+    ballot_encryption_seed_hex: &'a str,
+    proof_mask_seed_hex: &'a str,
+    ballots: &'a serde_json::Value,
+    expected_code: CanonicalErrorCode,
+    expected_message_fragment: &'a str,
+    case_label: &'a str,
+}
+
+fn assert_direct_ballot_creation_rejects_setup_output_drift(
+    expectation: DirectBallotSetupOutputDriftExpectation<'_>,
+) {
+    let DirectBallotSetupOutputDriftExpectation {
+        accepted_public_key_material,
+        accepted_setup_handoff,
+        ballot_encryption_seed_hex,
+        proof_mask_seed_hex,
+        ballots,
+        expected_code,
+        expected_message_fragment,
+        case_label,
+    } = expectation;
+
+    let error = match create_direct_encrypted_ballot_packages(&serde_json::json!({
+        "acceptedPublicKeyMaterial": accepted_public_key_material,
+        "acceptedSetupHandoff": accepted_setup_handoff,
+        "ballotEncryptionRandomness": {
+            "source": "fresh-csprng",
+            "encryptionSeedHexes": [ballot_encryption_seed_hex]
+        },
+        "proofMaskRandomness": {
+            "source": "fresh-csprng",
+            "ballotProofRandomnessHexes": [proof_mask_seed_hex]
+        },
+        "ballots": ballots.clone()
+    })) {
+        Ok(result) => panic!(
+            "{case_label} unexpectedly accepted before direct ballot proof generation: {}",
+            serde_json::to_string_pretty(&result).expect("accepted package result JSON")
+        ),
+        Err(error) => error,
+    };
+
+    assert_eq!(
+        error.code, expected_code,
+        "{case_label} produced the wrong refusal code: {}",
+        error.message
+    );
+    assert!(
+        error.message.contains(expected_message_fragment),
+        "{case_label} produced unexpected refusal: {}",
+        error.message
+    );
+}
+
+fn rebind_setup_output_handoff_root(accepted_setup_handoff: &mut serde_json::Value) {
+    accepted_setup_handoff
+        .as_object_mut()
+        .expect("accepted setup handoff is an object")
+        .remove("acceptedSetupHandoffRoot");
+    let accepted_setup_handoff_root =
+        derive_protocol_hash("AcceptedSetupHandoffRoot", accepted_setup_handoff)
+            .expect("accepted setup handoff root");
+    accepted_setup_handoff["acceptedSetupHandoffRoot"] =
+        serde_json::json!(accepted_setup_handoff_root);
 }
 
 #[test]
@@ -852,10 +1193,10 @@ fn collective_setup_verifier_refuses_drifted_terminal_certificate_hashes() {
 }
 
 #[test]
-#[ignore = "terminal recomputed-root refusal matrix at profile ring"]
-fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_refuses_every_recomputed_accepted_root_drift",
+        "heavy_accepted_setup_refuses_every_recomputed_accepted_root_drift",
     );
     let (package, companions) = setup_package_with_transported_public_setup_companions();
     let verify = |candidate: &serde_json::Value| {
@@ -873,11 +1214,13 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
         .expect("verification response")
     };
 
+    terminal_phase("verifying baseline terminal package before recomputed-root matrix");
     assert_eq!(
         verify(&package)["verifierStatus"],
         "accepted",
         "baseline terminal package must accept before the recomputed-root matrix",
     );
+    terminal_phase("verified baseline terminal package before recomputed-root matrix");
 
     // The matrix is driven by the verifier's own accepted-root enumeration, so it
     // covers exactly the root set the accept response binds: every accepted root,
@@ -888,13 +1231,19 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
         .as_str()
         .expect("setup package hash")
         .to_string();
+    let unique_accepted_roots = accepted_roots
+        .iter()
+        .filter(|root| *root != &package_hash)
+        .cloned()
+        .collect::<std::collections::BTreeSet<_>>();
+    terminal_phase(&format!(
+        "checking recomputed-root matrix over {} unique accepted roots",
+        unique_accepted_roots.len()
+    ));
 
     let mut unbound_roots = Vec::new();
     let mut covered_root_count = 0_usize;
-    for root in &accepted_roots {
-        if root == &package_hash {
-            continue;
-        }
+    for root in &unique_accepted_roots {
         let mut drifted = package.clone();
         let occurrences = drift_all_occurrences(&mut drifted, root, &drift_hash(root));
         assert!(
@@ -906,6 +1255,10 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
             unbound_roots.push(root.clone());
         }
         covered_root_count += 1;
+        terminal_phase(&format!(
+            "checked recomputed-root drift {covered_root_count}/{}",
+            unique_accepted_roots.len()
+        ));
     }
     assert!(
         unbound_roots.is_empty(),
@@ -928,11 +1281,11 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
 }
 
 #[test]
-#[ignore = "manual accepted setup closure diagnostic"]
-fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
+#[ignore = "heavy accepted setup test"]
+fn heavy_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift",
+        "heavy_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift",
     );
     let (mut package, companions) = setup_package_with_transported_public_setup_companions();
 
@@ -1065,7 +1418,12 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
     }))
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(
+        result["verifierStatus"],
+        "outsideProfile",
+        "unexpected verification result: {}",
+        serde_json::to_string_pretty(&result).expect("verification result JSON")
+    );
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideProfile"

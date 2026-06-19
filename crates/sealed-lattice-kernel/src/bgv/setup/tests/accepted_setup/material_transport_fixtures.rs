@@ -215,6 +215,7 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
     let mut chunk_count = 0_u64;
     let mut chunk_hashes = Vec::new();
     let mut transported_object_summaries = Vec::new();
+    let mut transport_measurement_rows = Vec::new();
 
     for transported_object in transported_objects {
         let byte_length = transported_object["byteLength"]
@@ -251,6 +252,29 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
             "chunkRoot": transported_object["chunkRoot"].clone(),
             "fullObjectHash": transported_object["fullObjectHash"].clone(),
         }));
+        transport_measurement_rows.push(serde_json::json!({
+            "objectType": "SetupTransportMeasurementRow",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+            "measurementKind": "static-profile-transport-manifest-accounting",
+            "objectName": transported_object["objectName"].clone(),
+            "objectRole": transported_object["objectRole"].clone(),
+            "objectRoot": transported_object["objectRoot"].clone(),
+            "byteLength": byte_length,
+            "chunkStartIndex": transported_object["chunkStartIndex"].clone(),
+            "chunkCount": object_chunk_count,
+            "chunkSizeBytes": 1_048_576_u64,
+            "chunkRoot": transported_object["chunkRoot"].clone(),
+            "fullObjectHash": transported_object["fullObjectHash"].clone(),
+            "storageQuotaBytes": 2_147_483_648_u64,
+            "largestSingleBufferBytes": 1_572_864_u64,
+            "copyCountLimit": 2_u64,
+            "streamVerificationOrder": "ascending-chunk-index",
+            "resumePolicy": "chunk-index-checkpointed-by-hash",
+            "lazyLoadingPolicy": "root-addressed-large-object-loading",
+            "profileScaleStatus": "profile-scale-transport-manifest-bound-to-current-package-shape",
+        }));
     }
 
     let aggregate_full_object_hash = derive_protocol_hash(
@@ -279,6 +303,31 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
     certificate["chunkHashes"] = serde_json::json!(chunk_hashes);
     certificate["fullObjectHash"] = serde_json::json!(aggregate_full_object_hash);
     certificate["chunkRoot"] = serde_json::json!(aggregate_chunk_root);
+    certificate["transportMeasurementRows"] = serde_json::json!(transport_measurement_rows);
+    certificate["transportMeasurementSummary"] = serde_json::json!({
+        "objectType": "SetupTransportMeasurementSummary",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
+        "measurementKind": "static-profile-transport-manifest-accounting",
+        "rowCount": certificate["transportedObjects"]
+            .as_array()
+            .expect("transported objects")
+            .len(),
+        "totalByteLength": total_byte_length,
+        "chunkCount": chunk_count,
+        "chunkSizeBytes": 1_048_576_u64,
+        "storageQuotaBytes": 2_147_483_648_u64,
+        "largestSingleBufferBytes": 1_572_864_u64,
+        "copyCountLimit": 2_u64,
+        "streamVerificationOrder": "ascending-chunk-index",
+        "resumePolicy": "chunk-index-checkpointed-by-hash",
+        "lazyLoadingPolicy": "root-addressed-large-object-loading",
+        "nativeReleaseBoundary": "native-release-verifier-runtime-measurements-are-recorded-outside-this-certificate",
+        "nodeWasmBoundary": "node-wasm-bridge-runtime-measurements-are-recorded-outside-this-certificate",
+        "supportedPhoneBoundary": "supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate",
+        "profileScaleStatus": "profile-scale-transport-manifest-bound-to-current-package-shape",
+    });
     let mut certificate_hash_input = certificate.clone();
     certificate_hash_input
         .as_object_mut()
@@ -777,7 +826,7 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
     let public_evaluation_key_material = add_public_evaluation_key_material_transport(&mut package);
     terminal_phase("generated public evaluation-key material");
 
-    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_setup_assembly_provenance_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
     terminal_phase("rebound terminal certificates and package hash");
 
@@ -925,6 +974,7 @@ pub(super) fn rebind_public_evaluation_key_material_transport(
             .expect("evaluation key set hash")
     );
     rebind_setup_key_correctness_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     let material_entry =
@@ -989,6 +1039,7 @@ pub(super) fn move_first_trustee_evaluation_key_proof_bytes_to_transport(
         },
     );
     rebind_setup_key_correctness_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     serde_json::json!({
@@ -1066,6 +1117,7 @@ pub(super) fn move_first_galois_key_share_component_vectors_to_transport(
         },
     );
     rebind_setup_key_correctness_certificate(package);
+    rebind_setup_assembly_provenance_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     transported_component_material_set

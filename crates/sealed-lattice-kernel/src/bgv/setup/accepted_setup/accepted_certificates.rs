@@ -900,6 +900,214 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
     }))
 }
 
+pub(super) fn verify_setup_assembly_provenance_certificate(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(certificate) = setup_package.get("setupAssemblyProvenanceCertificate") else {
+        return Ok(Some(verification_response(
+            VerifierStatus::Pending,
+            Some("setupPackageVerification"),
+            vec!["setupAssemblyProvenanceCertificate".to_string()],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    if !certificate.is_object() {
+        return Ok(Some(setup_assembly_provenance_certificate_refusal(
+            "setupAssemblyProvenanceCertificateNotObject",
+            "setupAssemblyProvenanceCertificate must be a root-bound object",
+            "setupPackage.setupAssemblyProvenanceCertificate",
+        )?));
+    }
+
+    let certificate_hash = certificate
+        .get("setupAssemblyProvenanceCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupAssemblyProvenanceCertificate.setupAssemblyProvenanceCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        certificate_hash,
+        "setupAssemblyProvenanceCertificate.setupAssemblyProvenanceCertificateHash",
+    )?;
+
+    let mut certificate_body = certificate.clone();
+    certificate_body
+        .as_object_mut()
+        .expect("setup assembly provenance certificate object was checked")
+        .remove("setupAssemblyProvenanceCertificateHash");
+    let expected_body = setup_assembly_provenance_certificate_value(setup_package)?;
+    if certificate_body != expected_body {
+        return Ok(Some(setup_assembly_provenance_certificate_refusal(
+            "setupAssemblyProvenanceCertificatePayloadMismatch",
+            "setupAssemblyProvenanceCertificate does not match the verifier-recomputed setup assembly provenance certificate",
+            "setupPackage.setupAssemblyProvenanceCertificate",
+        )?));
+    }
+
+    let expected_certificate_hash = setup_assembly_provenance_certificate_hash(setup_package)?;
+    if certificate_hash != expected_certificate_hash {
+        return Ok(Some(setup_assembly_provenance_certificate_refusal(
+            "setupAssemblyProvenanceCertificateHashMismatch",
+            "setupAssemblyProvenanceCertificateHash does not match the canonical setup assembly provenance certificate",
+            "setupPackage.setupAssemblyProvenanceCertificate.setupAssemblyProvenanceCertificateHash",
+        )?));
+    }
+    let package_certificate_hash = setup_package
+        .get("setupAssemblyProvenanceCertificateHash")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "setupPackage.setupAssemblyProvenanceCertificateHash is required",
+            )
+        })?;
+    validate_hash_string(
+        package_certificate_hash,
+        "setupPackage.setupAssemblyProvenanceCertificateHash",
+    )?;
+    if package_certificate_hash != certificate_hash {
+        return Ok(Some(setup_assembly_provenance_certificate_refusal(
+            "setupAssemblyProvenancePackageCertificateHashMismatch",
+            "setupPackage.setupAssemblyProvenanceCertificateHash must match setupAssemblyProvenanceCertificate.setupAssemblyProvenanceCertificateHash",
+            "setupPackage.setupAssemblyProvenanceCertificateHash",
+        )?));
+    }
+
+    Ok(None)
+}
+
+pub(in crate::bgv::setup) fn setup_assembly_provenance_certificate_hash(
+    setup_package: &Value,
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        SETUP_ASSEMBLY_PROVENANCE_CERTIFICATE_HASH_NAMESPACE,
+        &setup_assembly_provenance_certificate_value(setup_package)?,
+    )
+}
+
+pub(in crate::bgv::setup) fn setup_assembly_provenance_certificate_value(
+    setup_package: &Value,
+) -> CanonicalResult<Value> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "setupContext was required before setup assembly provenance certificate verification",
+        )
+    })?;
+    let phase_transcript = setup_package.get("phaseTranscript").ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "phaseTranscript was required before setup assembly provenance certificate verification",
+        )
+    })?;
+    let phase_transcript_root = derive_protocol_hash("SetupPhaseTranscriptRoot", phase_transcript)?;
+
+    Ok(json!({
+        "objectType": SETUP_ASSEMBLY_PROVENANCE_CERTIFICATE_OBJECT_TYPE,
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "ceremonyId": value_string(setup_context, "ceremonyId")?,
+        "manifestHash": value_string(setup_context, "manifestHash")?,
+        "rosterHash": value_string(setup_context, "rosterHash")?,
+        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
+        "qShareHash": value_string(setup_context, "qShareHash")?,
+        "carryAwareVssShareRelationProfileHash": value_string(setup_context, "carryAwareVssShareRelationProfileHash")?,
+        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupEpoch": value_string(setup_context, "setupEpoch")?,
+        "assemblySource": "integrated-full-roster-setup-package-assembly",
+        "assemblySourceStatus": "claim-bearing-setup-source-bound-to-verifier-recomputed-final-record-roots",
+        "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
+        "setupCompletionQuorum": FIRST_PROFILE_SETUP_COMPLETION_QUORUM,
+        "sourceBoundary": {
+            "acceptedHandoffSource": "accepted-setup-verifier-after-package-hash-certificate-and-final-object-gates",
+            "developmentAssemblyAcceptedAsClaimSource": false,
+            "helperAssemblyAcceptedAsClaimSource": false,
+        },
+        "rootBindings": {
+            "phaseTranscriptRoot": phase_transcript_root,
+            "commonRandomnessRoot": optional_nested_hash_value(
+                setup_package,
+                "commonRandomness",
+                "commonRandomnessRoot",
+            )?,
+            "vssCoefficientCommitmentRoot": optional_nested_hash_value(
+                setup_package,
+                "vssCoefficientCommitments",
+                "vssCoefficientCommitmentRoot",
+            )?,
+            "privateVssEnvelopeCommitmentRoot": optional_top_level_hash_value(
+                setup_package,
+                "privateVssEnvelopeCommitmentRoot",
+            )?,
+            "vssShareAcceptanceRoot": optional_nested_hash_value(
+                setup_package,
+                "vssShareAcceptances",
+                "vssShareAcceptanceRoot",
+            )?,
+            "thresholdShareCommitmentRoot": optional_nested_hash_value(
+                setup_package,
+                "thresholdShareCommitments",
+                "thresholdShareCommitmentRoot",
+            )?,
+            "sameSecretConsistencyRoot": optional_nested_hash_value(
+                setup_package,
+                "sameSecretConsistency",
+                "sameSecretConsistencyRoot",
+            )?,
+            "publicKeyShareSetRoot": optional_nested_hash_value(
+                setup_package,
+                "publicKeyShares",
+                "publicKeyShareSetRoot",
+            )?,
+            "publicKeyShareProofSetRoot": optional_nested_hash_value(
+                setup_package,
+                "publicKeyShareProofs",
+                "publicKeyShareProofSetRoot",
+            )?,
+            "publicKeyShareMaterialSetRoot": optional_nested_hash_value(
+                setup_package,
+                "publicKeyShareMaterial",
+                "publicKeyShareMaterialSetRoot",
+            )?,
+            "publicKeyShareSuccinctProofSetRoot": optional_nested_hash_value(
+                setup_package,
+                "publicKeyShareSuccinctProofs",
+                "publicKeyShareSuccinctProofSetRoot",
+            )?,
+            "collectivePublicKeyRoot": optional_nested_hash_value(
+                setup_package,
+                "collectivePublicKey",
+                "collectivePublicKeyRoot",
+            )?,
+            "evaluatorKeyScheduleRoot": optional_nested_hash_value(
+                setup_package,
+                "evaluatorKeySchedule",
+                "evaluatorKeyScheduleRoot",
+            )?,
+            "relinearizationKeyShareRoundsRoot": optional_nested_hash_value(
+                setup_package,
+                "relinearizationKeyShareRounds",
+                "relinearizationKeyShareRoundsRoot",
+            )?,
+            "trusteeEvaluationKeyProofSetRoot": optional_nested_hash_value(
+                setup_package,
+                "trusteeEvaluationKeyProofs",
+                "trusteeEvaluationKeyProofSetRoot",
+            )?,
+            "evaluationKeySetHash": optional_nested_hash_value(
+                setup_package,
+                "evaluationKeys",
+                "evaluationKeySetHash",
+            )?,
+        },
+        "claimBoundary": "accepted setup handoff construction is sourced from this verifier-recomputed package provenance certificate, not from development assembly or helper paths",
+    }))
+}
+
 pub(super) fn verify_active_static_setup_theorem_certificate(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
@@ -1044,7 +1252,7 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
             "threshold-share commitment roots are verifier-derived from public VSS commitments, not source-trustee supplied",
             "same-secret, public-key share, relinearization, and Galois proof records are verified before key roots are accepted",
             "collective public-key coefficients and public evaluation-key roots are verifier-recomputed from proof-bearing setup records",
-            "setup commitment, proof-accounting, transport, HE, and key-correctness certificates are root-bound package objects",
+            "setup commitment, proof-accounting, transport, assembly provenance, HE, and key-correctness certificates are root-bound package objects",
             "generic key-switch material, unscheduled Galois keys, raw setup witnesses, raw shares, external aggregate public-key material, and premature target-decryption readiness are refused",
         ],
         "dependencyHashes": {
@@ -1059,6 +1267,10 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
             "setupProofAccountingCertificateHash": required_top_level_hash_value(
                 setup_package,
                 "setupProofAccountingCertificateHash",
+            )?,
+            "setupAssemblyProvenanceCertificateHash": required_top_level_hash_value(
+                setup_package,
+                "setupAssemblyProvenanceCertificateHash",
             )?,
             "heSecurityCertificateHash": required_top_level_hash_value(
                 setup_package,
@@ -1200,6 +1412,20 @@ fn optional_hash_value(value: Option<&Value>, field_path: &str) -> CanonicalResu
 }
 
 fn active_static_setup_theorem_certificate_refusal(
+    reason_code: &'static str,
+    message: impl Into<String>,
+    object_path: impl Into<String>,
+) -> CanonicalResult<Value> {
+    verification_response(
+        VerifierStatus::Refused,
+        Some("setupPackageVerification"),
+        Vec::new(),
+        vec![Refusal::new(reason_code, message, object_path)],
+        Vec::new(),
+    )
+}
+
+fn setup_assembly_provenance_certificate_refusal(
     reason_code: &'static str,
     message: impl Into<String>,
     object_path: impl Into<String>,

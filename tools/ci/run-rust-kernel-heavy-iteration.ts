@@ -1,6 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 
+import { heavyAcceptedSetupTestPattern } from './heavy-evidence-tests.js';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import {
     createLocalRunLog,
@@ -35,8 +36,6 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 //      This only helps generation-bound tests (the trustee family); the heavy
 //      tests are otherwise dominated by proof verification, which nothing here
 //      changes.
-
-const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
 
 // The pinned iteration target directory. It lives under `target/` (already
 // ignored by git) but is distinct from the default `target/` the gate uses, so
