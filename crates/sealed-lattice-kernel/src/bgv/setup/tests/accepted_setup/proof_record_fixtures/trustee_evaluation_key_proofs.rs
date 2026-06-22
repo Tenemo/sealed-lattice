@@ -2,15 +2,6 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
-// One trustee-batched succinct proof per trustee over the package share
-// records, assembled through the same statement-rebuild path the package
-// verifier uses, with the deterministic fixture witnesses.
-pub(in super::super) fn trustee_evaluation_key_proofs_object(
-    package: &serde_json::Value,
-) -> serde_json::Value {
-    trustee_evaluation_key_proofs_object_inner(package, None, &BTreeMap::new(), None, None)
-}
-
 pub(in super::super) fn trustee_evaluation_key_proofs_object_with_terminal_transport(
     package: &serde_json::Value,
     transported_component_material: &serde_json::Value,
@@ -78,6 +69,7 @@ fn trustee_evaluation_key_proofs_object_inner(
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     let checkpoint_resume_enabled =
         terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
+    let compact_terminal_proof_transport = terminal_transport.is_some();
     let trustee_proof_batch_size = if terminal_transport.is_some() {
         // Full-ring terminal proving. An explicit
         // SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE (set by the memory-aware heavy
@@ -160,7 +152,12 @@ fn trustee_evaluation_key_proofs_object_inner(
         let built_record_batch: Vec<BuiltTrusteeEvaluationKeyProofRecord> = work_item_batch
             .into_par_iter()
             .map(|work_item| {
-                build_trustee_evaluation_key_proof_record(work_item, &resumed_records, ring_degree)
+                build_trustee_evaluation_key_proof_record(
+                    work_item,
+                    &resumed_records,
+                    ring_degree,
+                    compact_terminal_proof_transport,
+                )
             })
             .collect();
         built_records.extend(built_record_batch);
@@ -255,6 +252,7 @@ fn build_trustee_evaluation_key_proof_record(
     work_item: TrusteeEvaluationKeyProofWorkItem,
     resumed_records: &BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord>,
     ring_degree: usize,
+    compact_terminal_proof_transport: bool,
 ) -> BuiltTrusteeEvaluationKeyProofRecord {
     if let Some(resumed_record) = resumed_records.get(&work_item.trustee_roster_position) {
         terminal_phase(&format!(
@@ -310,6 +308,12 @@ fn build_trustee_evaluation_key_proof_record(
         work_item.trustee_roster_position,
         proof_bytes.len(),
     ));
+    if compact_terminal_proof_transport {
+        return trustee_evaluation_key_record_with_compact_transported_proof_bytes(
+            work_item.record,
+            proof_bytes,
+        );
+    }
     let record =
         trustee_evaluation_key_record_with_embedded_proof_bytes(work_item.record, &proof_bytes);
     BuiltTrusteeEvaluationKeyProofRecord {
@@ -329,6 +333,44 @@ fn trustee_evaluation_key_record_with_embedded_proof_bytes(
     record["proofBytesHex"] = serde_json::json!(to_hex(proof_bytes));
 
     record
+}
+
+fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
+    mut record: serde_json::Value,
+    proof_bytes: Vec<u8>,
+) -> BuiltTrusteeEvaluationKeyProofRecord {
+    let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
+    let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
+    let chunks = proof_bytes_transport_chunks(proof_bytes);
+    let transport_hashes = setup_proof_material_transport_hashes(
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    )
+    .expect("trustee evaluation-key proof transport hashes");
+    apply_trustee_evaluation_key_proof_transport_fields(
+        &mut record,
+        proof_size_bytes,
+        &proof_bytes_hash,
+        &transport_hashes,
+    );
+    let proof_material_root =
+        trustee_evaluation_key_proof_material_root(&record, &transport_hashes)
+            .expect("trustee evaluation-key proof material root");
+    record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
+    record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
+        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+            .expect("transported trustee evaluation-key proof root")
+    );
+    let proof_material =
+        transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
+    register_verified_trustee_evaluation_key_proof_material_chunks(&proof_material_root, chunks)
+        .expect("verified trustee evaluation-key proof material chunks");
+
+    BuiltTrusteeEvaluationKeyProofRecord {
+        record,
+        transported_proof_material: Some(proof_material),
+    }
 }
 
 fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(

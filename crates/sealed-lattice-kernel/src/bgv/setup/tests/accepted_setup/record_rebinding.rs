@@ -512,47 +512,6 @@ pub(super) fn rebind_trustee_evaluation_key_proof_record_root(
     );
 }
 
-// Rebind the proof set's record-container bindings after share records were
-// re-rooted; the proofs themselves stay valid because the statements bind the
-// share-record content, not the package roots.
-pub(super) fn rebind_trustee_evaluation_key_proof_set_bindings(package: &mut serde_json::Value) {
-    let rounds_root =
-        package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"].clone();
-    let batch_roots = package["galoisKeyShareBatches"]
-        .as_array()
-        .expect("Galois key share batches")
-        .iter()
-        .map(|batch| {
-            serde_json::json!({
-                "trusteeIdentity": batch["trusteeIdentity"],
-                "trusteeRosterPosition": batch["trusteeRosterPosition"],
-                "galoisKeyShareBatchRoot": batch["galoisKeyShareBatchRoot"],
-            })
-        })
-        .collect::<Vec<_>>();
-    package["trusteeEvaluationKeyProofs"]["relinearizationKeyShareRoundsRoot"] = rounds_root;
-    package["trusteeEvaluationKeyProofs"]["galoisKeyShareBatchRoots"] =
-        serde_json::json!(batch_roots);
-    rebind_trustee_evaluation_key_proof_set_root(package);
-}
-
-pub(super) fn rebind_galois_key_share_batch_root(
-    package: &mut serde_json::Value,
-    batch_index: usize,
-) {
-    package["galoisKeyShareBatches"][batch_index]
-        .as_object_mut()
-        .expect("Galois key share batch")
-        .remove("galoisKeyShareBatchRoot");
-    package["galoisKeyShareBatches"][batch_index]["galoisKeyShareBatchRoot"] = serde_json::json!(
-        derive_protocol_hash(
-            "GaloisKeyShareBatchRoot",
-            &package["galoisKeyShareBatches"][batch_index]
-        )
-        .expect("Galois key share batch root")
-    );
-}
-
 pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde_json::Value) {
     package["heSecurityCertificate"]
         .as_object_mut()

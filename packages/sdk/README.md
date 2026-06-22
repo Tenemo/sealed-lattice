@@ -2,8 +2,17 @@
 
 This package is the only published npm surface in the workspace.
 
-The current public runtime facade exposes safe-by-default helpers for transcript-core fixture verification; threshold, lifecycle, poll specification, capability, board-consistency, target-finality, roster-manifest, foundation transcript, cast receipt, close record, first-valid ordering, and recovery-epoch checks. It also exposes narrow accepted-setup helpers for signed setup intent creation, deterministic setup phase records, full-roster common-randomness commit/reveal assembly, recipient-local private VSS share verification, signed VSS acceptance and complaint records, roots-only setup contribution assembly, proof-material-only same-secret, public-key, and evaluation-key record assembly, binary-chunked same-secret and public-key setup proof material transport, binary-chunked evaluation-key proof and key-switch component material transport, binary-chunked public-key share material transport, binary-chunked public evaluation-key runtime material transport, verifier-derived threshold-share commitments during setup package assembly, root-bound setup certificate generation, encrypted local trustee setup state export, restore-after-restart validation, public-only setup package verification input construction, setup package verification, and the typed accepted setup handoff shape for terminal accepted responses.
+The current public facade exposes development verification helpers for poll
+validation, threshold derivation, lifecycle and capability checks, board and
+foundation transcript checks, target-finality checks, recovery/device epoch
+checks, first-valid ordering, and narrow setup-development verification.
 
-The foundation helpers verify the direct-route foundation transcript only. The integrated foundation fixture verifies through this public package in Node and browser, with structured negative fixtures and Rust/WASM canonical root parity under a foundation-only profile.
+The package is not a complete voting API. Complete setup, ballot generation,
+casting, encrypted aggregation, evaluator replay, target-bound decryption, and
+result release remain unavailable until the matching implementation and
+verification work is complete.
 
-It does not expose raw hashing, object mutation, generic cryptography, general VSS APIs, public ballot generation or casting, encrypted ballot package creation or verification, direct ballot proof construction, bounded-domain evaluator replay, target acceptance, decryption-share shell checks, decryption, raw BGV operations, proof witnesses, proof-generation witness inputs, encryption randomness, raw VSS shares, bridge routes, or protocol internals. Full-protocol `verifyTranscript` remains fail-closed until the later direct-path gates exist.
+It does not expose raw cryptography, object mutation helpers, generic VSS APIs,
+raw BGV operations, proof witnesses, encryption randomness, raw VSS shares,
+plaintext oracles, bridge routes, or protocol internals. Full-protocol
+`verifyTranscript` remains fail-closed until the complete workflow exists.

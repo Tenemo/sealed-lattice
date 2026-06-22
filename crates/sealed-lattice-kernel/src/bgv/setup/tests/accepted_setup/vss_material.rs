@@ -94,10 +94,9 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let missing_transport_result = verify_collective_bgv_setup_package_from_request(
-        &serde_json::json!({ "setupPackage": package.clone() }),
-    )
-    .expect("missing transported material result");
+    let missing_transport_result =
+        verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+            .expect("missing transported material result");
     assert_eq!(missing_transport_result["verifierStatus"], "pending");
     assert_eq!(
         missing_transport_result["currentPhase"],
@@ -108,10 +107,12 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
         "verifiedVssCoefficientCommitmentMaterial"
     );
 
-    let transported_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedVssCoefficientCommitmentMaterial": transported_material,
-    }))
+    let transported_result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedVssCoefficientCommitmentMaterial": transported_material,
+        }),
+    )
     .expect("transported material result");
     assert_eq!(transported_result["verifierStatus"], "refused");
     assert_eq!(
@@ -155,11 +156,13 @@ fn collective_setup_verifier_uses_stream_verified_vss_material_without_chunk_sid
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(&transported_material),
-        "verifiedVssCoefficientCommitmentMaterial": stream_derivation["verifiedVssCoefficientCommitmentMaterial"],
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(&transported_material),
+            "verifiedVssCoefficientCommitmentMaterial": stream_derivation["verifiedVssCoefficientCommitmentMaterial"],
+        }),
+    )
     .expect("verification response");
 
     assert_ne!(result["currentPhase"], "thresholdShareCommitments");
@@ -200,11 +203,13 @@ fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
         stream_derivation["verifiedVssCoefficientCommitmentMaterial"].clone();
     forged_verified_material["verificationId"] = serde_json::json!("missing-vss-stream");
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(&transported_material),
-        "verifiedVssCoefficientCommitmentMaterial": forged_verified_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedVssCoefficientCommitmentMaterial": transported_material_reference_value(&transported_material),
+            "verifiedVssCoefficientCommitmentMaterial": forged_verified_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
@@ -418,7 +423,7 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
     );
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_setup_package(package);
+    let result = verify_collective_setup_package(&package);
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "aborted");

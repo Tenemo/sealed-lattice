@@ -5,7 +5,7 @@ sidebar:
     order: 3
 ---
 
-The workspace is only in a good state when the checks, docs, smoke tests, Rust/WASM transcript paths, and selected direct-path verification lanes pass together.
+The workspace is only in a good state when the checks, docs, smoke tests, browser tests, and selected verification lanes pass together.
 
 ## Prerequisites
 
@@ -33,13 +33,13 @@ pnpm run smoke:pack:npm
 
 ## What each command proves
 
-- `pnpm run build`: every package builds, the private crypto/runtime facade is vendored into the SDK, the WASM transcript-core artifact is copied into the internal loader package, and the published SDK loader is pinned to the packaged kernel hash
+- `pnpm run build`: every package builds and the published SDK package is assembled
 - `pnpm run api-surface:generate`: runs the full build and regenerates the compact public API surface summary for manual PR review
-- `pnpm run check`: builds the workspace once, runs TypeScript, then runs lint, docs verification, npm package smoke verification, public package policy, test-lane coverage verification, package-boundary checks, vector manifest verification, dead-code analysis, the fast Node tests, and the non-heavy kernel Node tests in parallel against the built output while Rust formatting, Rust clippy, and fast Rust tests run in their own lane
+- `pnpm run check`: builds once, then runs the main TypeScript, lint, docs, smoke, package-boundary, vector, dead-code, Node, and fast Rust checks
 - `pnpm run vectors`: committed test vector files match `test-vectors/manifest.json`
 - `pnpm run test:node:fast`: pre-commit-friendly Node tests
 - `pnpm run test:node:protocol`: slower protocol and relation tests that remain useful for the selected direct path and shared substrate
-- `pnpm run test:node:kernel`: transcript-core WASM loader, parity, fixture, proof, and kernel integration tests
+- `pnpm run test:node:kernel`: Node kernel integration tests
 - `pnpm run test`: runs the Node lanes and browser lanes through the package scripts
 - `pnpm run verify:docs`: generated API pages, docs link structure, and the production docs site build stay consistent
 - `pnpm run docs:build`: builds the docs site without the surrounding verification checks when that narrower target is needed
@@ -66,12 +66,11 @@ Default and release gates should stay lean and direct-path-only.
 Use explicit heavy lanes only when the change touches the selected direct path area:
 
 ```text
-accepted direct proof evidence;
-direct Node/WASM proof-copy measurement;
-direct browser proof-copy measurement;
+direct proof evidence;
+browser proof measurement;
 bounded-domain evaluator replay evidence;
 target-bound decryption evidence;
-manual mobile proof and replay lane.
+manual mobile proof and replay evidence.
 ```
 
 Default, release, docs, package-smoke, browser, and mobile gates should cover only the selected direct path and shared substrate.

@@ -262,6 +262,39 @@ fn verify_trustee_evaluation_key_proof_set(
         }
     }
 
+    let proof_records = array_value(proof_set, "proofRecords")?;
+    if proof_records.len() != roster.participant_count as usize {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
+        ));
+    }
+    // Index-equals-position enforces a single canonical ordering and full dense
+    // coverage 0..n. Do this before rebuilding heavyweight aggregate inputs so
+    // malformed containers fail without paying proof-verification costs.
+    for (record_position, proof_record) in proof_records.iter().enumerate() {
+        let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
+        if trustee_roster_position != record_position as u64 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "trustee evaluation-key proof records must be ordered by roster position",
+            ));
+        }
+    }
+    let supplied_root = value_string(proof_set, "trusteeEvaluationKeyProofSetRoot")?;
+    let mut root_input = proof_set.clone();
+    root_input
+        .as_object_mut()
+        .expect("trustee evaluation-key proof set object was checked")
+        .remove("trusteeEvaluationKeyProofSetRoot");
+    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &root_input)?;
+    if supplied_root != expected_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "trusteeEvaluationKeyProofSetRoot does not match the canonical trustee proof container",
+        ));
+    }
+
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
@@ -275,30 +308,8 @@ fn verify_trustee_evaluation_key_proof_set(
         transported_key_switch_component_material,
     )?;
 
-    let proof_records = array_value(proof_set, "proofRecords")?;
-    if proof_records.len() != roster.participant_count as usize {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "trusteeEvaluationKeyProofs.proofRecords must contain one proof per trustee",
-        ));
-    }
-    // The ten trustee proofs are independent given the read-only shared inputs
-    // above, and each verifies a multi-megabyte succinct argument, so they run
-    // concurrently on native targets. Outcomes are collected in roster order, so
-    // the first failure reported is identical to sequential verification. wasm32
-    // has no shared-memory threads and stays sequential.
-    //
-    // Index-equals-position enforces a single canonical ordering and full dense
-    // coverage 0..n, so a proof set cannot be reshuffled or have a trustee
-    // silently dropped or duplicated.
     let verify_record = |record_position: usize, proof_record: &Value| -> CanonicalResult<()> {
-        let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
-        if trustee_roster_position != record_position as u64 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "trustee evaluation-key proof records must be ordered by roster position",
-            ));
-        }
+        let trustee_roster_position = record_position as u64;
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package,
@@ -315,34 +326,31 @@ fn verify_trustee_evaluation_key_proof_set(
             request,
         )
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    let record_verifications: Vec<CanonicalResult<()>> = proof_records
-        .par_iter()
-        .enumerate()
-        .map(|(record_position, proof_record)| verify_record(record_position, proof_record))
-        .collect();
-    #[cfg(target_arch = "wasm32")]
-    let record_verifications: Vec<CanonicalResult<()>> = proof_records
-        .iter()
-        .enumerate()
-        .map(|(record_position, proof_record)| verify_record(record_position, proof_record))
-        .collect();
-    record_verifications
-        .into_iter()
-        .collect::<CanonicalResult<Vec<()>>>()?;
+    if let Some((first_proof_record, remaining_proof_records)) = proof_records.split_first() {
+        verify_record(0, first_proof_record)?;
 
-    let supplied_root = value_string(proof_set, "trusteeEvaluationKeyProofSetRoot")?;
-    let mut root_input = proof_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("trustee evaluation-key proof set object was checked")
-        .remove("trusteeEvaluationKeyProofSetRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &root_input)?;
-    if supplied_root != expected_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trusteeEvaluationKeyProofSetRoot does not match the canonical trustee proof container",
-        ));
+        // After the first record has passed, the remaining trustee proofs are
+        // independent given the read-only shared inputs already rebuilt, and
+        // each verifies a multi-megabyte succinct argument, so they run
+        // concurrently on native targets. Outcomes are collected in roster
+        // order, so the first reported failure inside this suffix is identical
+        // to sequential verification. wasm32 has no shared-memory threads and
+        // stays sequential.
+        #[cfg(not(target_arch = "wasm32"))]
+        let record_verifications: Vec<CanonicalResult<()>> = remaining_proof_records
+            .par_iter()
+            .enumerate()
+            .map(|(record_offset, proof_record)| verify_record(record_offset + 1, proof_record))
+            .collect();
+        #[cfg(target_arch = "wasm32")]
+        let record_verifications: Vec<CanonicalResult<()>> = remaining_proof_records
+            .iter()
+            .enumerate()
+            .map(|(record_offset, proof_record)| verify_record(record_offset + 1, proof_record))
+            .collect();
+        record_verifications
+            .into_iter()
+            .collect::<CanonicalResult<Vec<()>>>()?;
     }
 
     Ok(())
@@ -1191,6 +1199,13 @@ fn stored_verified_trustee_evaluation_key_proof_material_chunks(
     drop(stored_chunks);
 
     read_verified_trustee_evaluation_key_proof_material_chunks(&store_entry)
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn stored_verified_trustee_evaluation_key_proof_material_chunks_for_test(
+    proof_material_root: &str,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    stored_verified_trustee_evaluation_key_proof_material_chunks(proof_material_root)
 }
 
 #[cfg(test)]

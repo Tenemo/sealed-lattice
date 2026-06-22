@@ -1,12 +1,6 @@
 use super::*;
 use rayon::prelude::*;
 
-pub(in super::super) fn relinearization_key_share_rounds_object(
-    package: &serde_json::Value,
-) -> serde_json::Value {
-    relinearization_key_share_rounds_object_inner(package, None).rounds
-}
-
 pub(in super::super) fn relinearization_key_share_rounds_fixture_with_terminal_transport(
     package: &serde_json::Value,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,

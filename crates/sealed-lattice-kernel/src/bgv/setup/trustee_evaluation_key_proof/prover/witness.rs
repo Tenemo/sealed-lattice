@@ -10,92 +10,11 @@ use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
 
-// Logical witness vectors in local layout order as residue vectors mod q. For
-// private VSS: the Shamir coefficient messages, the carry, and the
-// per-coefficient opening-randomness columns. For the standard family: the
-// secret, the active keys' error vectors, and in the commitment fields the
-// negative indicator and the per-commitment opening-randomness columns. This is
-// the full trace width, which for private VSS exceeds consistency_vector_count()
-// because the message columns are committed witnesses without a consistency
-// claim.
-fn logical_witness_residues(
-    witness: &TrusteeEvaluationKeyWitness,
-    layout: &LimbColumnLayout,
-    modulus: u64,
-) -> Vec<Vec<u64>> {
-    let logical_column_count = if layout.private_vss_active() {
-        layout.private_vss_logical_columns()
-    } else {
-        layout.consistency_vector_count()
-    };
-    let mut vectors = Vec::with_capacity(logical_column_count);
-    if layout.private_vss_active() {
-        for coefficient_messages in &witness.private_vss_coefficient_messages_by_shamir_index {
-            vectors.push(
-                coefficient_messages
-                    .iter()
-                    .map(|coefficient| signed_value_residue(*coefficient, modulus))
-                    .collect::<Vec<_>>(),
-            );
-        }
-        vectors.push(
-            witness
-                .private_vss_carry_witnesses
-                .iter()
-                .map(|coefficient| signed_value_residue(*coefficient, modulus))
-                .collect::<Vec<_>>(),
-        );
-        for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
-            for column in randomness_columns {
-                vectors.push(
-                    column
-                        .iter()
-                        .map(|coefficient| signed_value_residue(*coefficient, modulus))
-                        .collect::<Vec<_>>(),
-                );
-            }
-        }
-
-        return vectors;
-    }
-    vectors.push(
-        witness
-            .secret_coefficients
-            .iter()
-            .map(|coefficient| signed_value_residue(*coefficient, modulus))
-            .collect::<Vec<_>>(),
-    );
-    for (key_index, digit_count) in &layout.active_keys {
-        for digit_index in 0..*digit_count {
-            vectors.push(
-                witness.error_coefficients_by_key[*key_index][digit_index]
-                    .iter()
-                    .map(|coefficient| signed_value_residue(*coefficient, modulus))
-                    .collect::<Vec<_>>(),
-            );
-        }
-    }
-    if layout.linkage_active() {
-        vectors.push(
-            witness
-                .negative_indicator_coefficients
-                .iter()
-                .map(|coefficient| signed_value_residue(*coefficient, modulus))
-                .collect::<Vec<_>>(),
-        );
-        for randomness_columns in &witness.opening_randomness_by_limb {
-            for column in randomness_columns {
-                vectors.push(
-                    column
-                        .iter()
-                        .map(|coefficient| signed_value_residue(*coefficient, modulus))
-                        .collect::<Vec<_>>(),
-                );
-            }
-        }
-    }
-
-    vectors
+fn signed_residue_vector(coefficients: &[i64], modulus: u64) -> Vec<u64> {
+    coefficients
+        .iter()
+        .map(|coefficient| signed_value_residue(*coefficient, modulus))
+        .collect()
 }
 
 pub(super) struct LimbWitnessCommitment {
@@ -118,76 +37,89 @@ pub(super) fn build_limb_witness_commitment(
 ) -> CanonicalResult<LimbWitnessCommitment> {
     let layout = LimbColumnLayout::new(statement, limb_index)?;
     let plan = EvaluationDomainPlan::new(modulus, layout.trace_size)?;
-    let logical_witness = logical_witness_residues(witness, &layout, modulus);
-    let mask_columns = mask_digit_columns(statement, &layout, proof_randomness_seed_hex);
+
+    let trace_size = layout.trace_size;
+    let mut masked_coefficients = Vec::with_capacity(layout.phase_one_physical_count());
+    let mut extension_columns = Vec::with_capacity(layout.phase_one_physical_count());
+    let mut append_logical_vector = |logical_vector: &[u64]| {
+        debug_assert_eq!(logical_vector.len(), layout.ring_degree);
+        for half in 0..TRACE_SPLIT {
+            let physical_index = masked_coefficients.len();
+            let half_values = &logical_vector[half * trace_size..(half + 1) * trace_size];
+            let mut mask_sampler = DeterministicSampler::new(
+                COLUMN_MASK_DOMAIN,
+                &[
+                    proof_randomness_seed_hex.as_bytes(),
+                    &(limb_index as u64).to_le_bytes(),
+                    &(physical_index as u64).to_le_bytes(),
+                ],
+            );
+            let coefficients = masked_half_coefficients(&plan, half_values, &mut mask_sampler);
+            extension_columns.push(plan.extension_evaluations_from_coefficients(&coefficients));
+            masked_coefficients.push(coefficients);
+        }
+    };
 
     // Assemble the physical half-columns in layout order: secret halves, then
     // per error position the error halves, then the error-square halves, then
-    // the mask digit halves. The grouped push order below matches the layout's
-    // physical index functions exactly.
-    let trace_size = layout.trace_size;
-    let mut physical_halves: Vec<&[u64]> = Vec::with_capacity(layout.phase_one_physical_count());
-    let error_squares_storage: Vec<Vec<u64>>;
+    // the linkage columns and the mask digit halves. Each logical vector is
+    // converted and extended once, then dropped before the next logical vector.
     if layout.private_vss_active() {
-        for logical_vector in &logical_witness {
-            for half in 0..TRACE_SPLIT {
-                physical_halves.push(&logical_vector[half * trace_size..(half + 1) * trace_size]);
+        for coefficient_messages in &witness.private_vss_coefficient_messages_by_shamir_index {
+            let logical_vector = signed_residue_vector(coefficient_messages, modulus);
+            append_logical_vector(&logical_vector);
+        }
+        let carry_vector = signed_residue_vector(&witness.private_vss_carry_witnesses, modulus);
+        append_logical_vector(&carry_vector);
+        for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
+            for column in randomness_columns {
+                let logical_vector = signed_residue_vector(column, modulus);
+                append_logical_vector(&logical_vector);
             }
         }
     } else {
-        error_squares_storage = (0..layout.total_error_columns)
-            .map(|error_position| {
-                logical_witness[1 + error_position]
-                    .iter()
-                    .map(|value| mul_mod_fast(*value, *value, modulus))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        for half in 0..TRACE_SPLIT {
-            physical_halves.push(&logical_witness[0][half * trace_size..(half + 1) * trace_size]);
-        }
-        for error_position in 0..layout.total_error_columns {
-            let error = &logical_witness[1 + error_position];
-            for half in 0..TRACE_SPLIT {
-                physical_halves.push(&error[half * trace_size..(half + 1) * trace_size]);
+        let secret_vector = signed_residue_vector(&witness.secret_coefficients, modulus);
+        append_logical_vector(&secret_vector);
+        for (key_index, digit_count) in &layout.active_keys {
+            for digit_index in 0..*digit_count {
+                let error_vector = signed_residue_vector(
+                    &witness.error_coefficients_by_key[*key_index][digit_index],
+                    modulus,
+                );
+                append_logical_vector(&error_vector);
             }
         }
-        for error_square in &error_squares_storage {
-            for half in 0..TRACE_SPLIT {
-                physical_halves.push(&error_square[half * trace_size..(half + 1) * trace_size]);
+        for (key_index, digit_count) in &layout.active_keys {
+            for digit_index in 0..*digit_count {
+                let error_square_vector = witness.error_coefficients_by_key[*key_index]
+                    [digit_index]
+                    .iter()
+                    .map(|coefficient| {
+                        let residue = signed_value_residue(*coefficient, modulus);
+                        mul_mod_fast(residue, residue, modulus)
+                    })
+                    .collect::<Vec<_>>();
+                append_logical_vector(&error_square_vector);
             }
         }
         if layout.linkage_active() {
-            for linkage_vector in &logical_witness[1 + layout.total_error_columns..] {
-                for half in 0..TRACE_SPLIT {
-                    physical_halves
-                        .push(&linkage_vector[half * trace_size..(half + 1) * trace_size]);
+            let negative_indicator_vector =
+                signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
+            append_logical_vector(&negative_indicator_vector);
+            for randomness_columns in &witness.opening_randomness_by_limb {
+                for column in randomness_columns {
+                    let logical_vector = signed_residue_vector(column, modulus);
+                    append_logical_vector(&logical_vector);
                 }
             }
         }
     }
-    for mask_column in &mask_columns {
-        for half in 0..TRACE_SPLIT {
-            physical_halves.push(&mask_column[half * trace_size..(half + 1) * trace_size]);
-        }
+    let mask_columns = mask_digit_columns(statement, &layout, proof_randomness_seed_hex);
+    for logical_vector in &mask_columns {
+        append_logical_vector(logical_vector);
     }
-    debug_assert_eq!(physical_halves.len(), layout.phase_one_physical_count());
-
-    let mut masked_coefficients = Vec::with_capacity(physical_halves.len());
-    let mut extension_columns = Vec::with_capacity(physical_halves.len());
-    for (physical_index, half_values) in physical_halves.iter().enumerate() {
-        let mut mask_sampler = DeterministicSampler::new(
-            COLUMN_MASK_DOMAIN,
-            &[
-                proof_randomness_seed_hex.as_bytes(),
-                &(limb_index as u64).to_le_bytes(),
-                &(physical_index as u64).to_le_bytes(),
-            ],
-        );
-        let coefficients = masked_half_coefficients(&plan, half_values, &mut mask_sampler);
-        extension_columns.push(plan.extension_evaluations_from_coefficients(&coefficients));
-        masked_coefficients.push(coefficients);
-    }
+    debug_assert_eq!(masked_coefficients.len(), layout.phase_one_physical_count());
+    debug_assert_eq!(extension_columns.len(), layout.phase_one_physical_count());
     let mut salt_sampler = DeterministicSampler::new(
         LEAF_SALT_DOMAIN,
         &[

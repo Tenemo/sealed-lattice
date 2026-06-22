@@ -4,13 +4,13 @@
 
 [![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
-`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace.
+`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Every roster participant is intended to act as both voter and trustee. Untrusted services may store and distribute transcript objects, but the claim path is participant mobile browsers, not servers or dedicated heavy verifier machines.
 
 The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
 
 ## Selected direction
 
-The active project route is:
+The selected construction is:
 
 ```text
 active-static secure-with-abort collective BGV setup
@@ -22,18 +22,13 @@ active-static secure-with-abort collective BGV setup
 -> one-shot target-bound threshold decryption of C_target only
 ```
 
-The first ballot proof backend candidate is the LaZer/LNP-derived no-wrap
-profile. The public ballot package boundary is relation-fixed so that the proof
-backend can be replaced if soundness, zero-knowledge, QROM, proof size, or
-mobile-compatible runtime evidence fails to close.
-
 The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. Current security limitations, profile caveats, HE evidence, and target-decryption boundaries are not repeated here; see [SECURITY.md](SECURITY.md).
 
 ## Current package boundary
 
-The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll specification and threshold derivation, lifecycle transition and capability checks, foundation transcript verification through the bundled Rust/WASM kernel, and a set of narrow development helpers for the collective BGV setup ceremony (setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification). Reserved complete-protocol entry points fail closed until their claim gates are actually implemented.
+The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and narrow setup-development verification helpers. Reserved complete-protocol entry points fail closed until the matching implementation and verification work is complete.
 
-Foundation helpers include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. The distinction between package evidence and supported-phone evidence is maintained in [SECURITY.md](SECURITY.md).
+Current package tests are development evidence only. They do not replace supported mobile runtime evidence, production hardening, or the complete protocol security boundary in [SECURITY.md](SECURITY.md).
 
 ## Installation
 
@@ -76,15 +71,14 @@ const thresholdProfile = deriveThresholdProfile({
 - threshold and frozen roster profile derivation;
 - lifecycle transition and action capability checks;
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
-- development helpers for the collective BGV setup ceremony: setup intent, common-randomness commit/reveal, recipient-local private VSS verification, signed VSS acceptances and complaints, setup contribution and certificate assembly, encrypted local trustee state export and restore, and setup package verification;
-- transcript-core fixture verification through the bundled Rust/WASM kernel;
+- setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling;
+- foundation transcript verification through the packaged kernel;
 - package-boundary and public API smoke coverage for development integration.
 
 ## What is not available yet
 
 - a complete threshold voting workflow;
-- production-ready setup ceremony or real-election setup claim;
-- production setup ceremony, VSS, ballot generation, or casting APIs;
+- production-ready setup ceremony, ballot generation, or casting APIs;
 - public encrypted ballot package creation, verification, or accepted proof transport APIs;
 - public encrypted ballot aggregation APIs;
 - public bounded-domain mobile evaluator replay APIs;
@@ -95,7 +89,7 @@ The public package must not expose raw BGV decryption, arbitrary threshold decry
 
 ## Security
 
-Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the threat model, open security ledger, retry policy, audit status, and cryptographic caveats.
+Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, and cryptographic caveats.
 
 ## Repository layout
 
@@ -154,6 +148,16 @@ pnpm run test:lattigo-oracle
 pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
+
+The native Rust heavy lane now has constrained free-runner-knob evidence. On
+June 21, 2026, `pnpm run test:rust:kernel:heavy -- --no-run-log` completed with
+`57 passed; 0 failed` under `CARGO_INCREMENTAL=0`, `RAYON_NUM_THREADS=4`,
+`SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT=1`,
+`SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE=1`,
+`SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE=2`, and no checkpoint resume. The
+run finished in `17978.14s` and the measured process-tree peak RSS was
+`9.97 GiB`. This is native CI-runner setup/proof/key-transport evidence only; it
+is not browser, WASM, or supported-phone mobile runtime evidence.
 
 Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
 

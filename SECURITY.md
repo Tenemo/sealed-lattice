@@ -7,8 +7,8 @@ be used for real ballots or real ballot secrecy.
 
 This file is the canonical public security posture for the repository. Detailed
 mathematical derivations, implementation progress, and proof notes live in the
-linked implementation documents; they should not restate a separate public
-security ledger.
+implementation documentation; they are maintainer evidence, not a separate
+public security policy.
 
 ## Report a vulnerability
 
@@ -48,8 +48,7 @@ are resolved, callers must assume:
 - no complete threshold voting workflow is published;
 - no real ballot secrecy or election correctness claim is available;
 - public setup workflow, ballot, aggregation, evaluator, and target-decryption
-  paths are development evidence only, even though the setup/evaluator HE
-  parameter boundary is recorded and bound in the internal evidence ledger;
+  paths are development evidence only;
 - unsupported APIs, private package paths, fixtures, plaintext oracles, and local
   witness material are not stable or claim-bearing surfaces;
 - acceptance must depend on recomputed hashes, roots, canonical encodings, and
@@ -73,7 +72,7 @@ Relevant caveats include:
 
 These warnings follow the same class of caveats documented by production FHE
 libraries such as Lattigo, Microsoft SEAL, and OpenFHE, and by the CPAD and
-threshold-FHE literature linked below.
+threshold-FHE literature.
 
 ## Known limitations and open security items
 
@@ -90,11 +89,11 @@ Severity rubric:
 | Id        | Severity | Item                                                                                     | Current boundary                                                                                                                                                                                                                                         |
 | --------- | -------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SEC-001` | `P0`     | Real ballot use and ballot secrecy are out of scope.                                     | The package is for development verification only and has no complete threshold voting workflow.                                                                                                                                                          |
-| `SEC-002` | `P0`     | Target-bound decryption is not claim-bearing.                                            | `Q_target`, decryption-share proofs, C1-C4 checks, smudging/noise, recombination, and decoded result validation are downstream. Current target-decryption code must be treated as prototype evidence only.                                               |
+| `SEC-002` | `P0`     | Target-bound decryption is not claim-bearing.                                            | Decryption-share proofs, smudging/noise, recombination, and decoded result validation are unfinished. Current target-decryption code must be treated as development evidence only.                                                                        |
 | `SEC-003` | `P0/P1`  | Retry-safe multiparty participation is not implemented.                                  | Retrying setup, key-switching, decryption-share, or related threshold-FHE protocols under the same relevant material is out of scope unless a retry-safe construction is explicitly added and documented.                                                |
-| `SEC-004` | `P1`     | The setup proof system does not carry a conventional 128-bit quantum soundness label.    | Current QROM Fiat-Shamir accounting records about 70-bit quantum soundness after the instance union, scoped to proof-generation/publication-time soundness risk.                                                                                         |
-| `SEC-005` | `P1`     | Setup proof zero knowledge is bounded leakage, not full 128-bit zero knowledge.          | The recipient-private VSS family dominates the current leakage budget at about `2^-41` total after the implemented leakage fix.                                                                                                                          |
-| `SEC-006` | `P1/P2`  | Current HE evidence does not close target decryption.                                    | The setup/evaluator `Q_data` exposure records about 139.4 classical bits under the pinned estimator row and a labelled quantum-context row around 97.0 bits. That context row is not a conventional 128-bit quantum claim and does not cover `Q_target`. |
+| `SEC-004` | `P1`     | The setup proof system does not carry a conventional 128-bit quantum soundness label.    | Current proof-system accounting remains below the conventional 128-bit quantum target and is scoped to proof publication time.                                                                                                                            |
+| `SEC-005` | `P1`     | Setup proof zero knowledge is bounded leakage, not full 128-bit zero knowledge.          | Current setup proof accounting discloses bounded leakage rather than a full 128-bit zero-knowledge statement.                                                                                                                                            |
+| `SEC-006` | `P1/P2`  | Current HE evidence does not close target decryption.                                    | Current HE evidence covers the setup/evaluator boundary only. It does not close target decryption or produce a conventional 128-bit quantum claim for the full protocol.                                                                                 |
 | `SEC-007` | `P1/P2`  | The public encrypted ballot proof/package path is incomplete.                            | Accepted package schemas, public proof transport, final soundness and zero-knowledge accounting, randomness boundaries, and mobile-compatible proof readiness remain unfinished.                                                                         |
 | `SEC-008` | `P2`     | Supported-phone runtime evidence is missing.                                             | Native, Node, desktop-browser, and mobile-emulated runs do not count as supported-phone evidence.                                                                                                                                                        |
 | `SEC-009` | `P2`     | The project has not completed independent audit, certification, or production hardening. | Any production deployment would need separate review, operational hardening, and deployment-specific risk analysis.                                                                                                                                      |
@@ -124,7 +123,7 @@ affected protocol instance rather than retrying to obtain liveness.
 ## Correct use
 
 Current safe use is limited to development verification, package integration,
-transcript helpers, fixtures, and foundation/setup-development checks.
+transcript helpers, and foundation/setup-development checks.
 
 Callers must not:
 
@@ -139,27 +138,8 @@ Callers must not:
 - bypass structured verifier refusals, canonical hash/root recomputation, or
   proof-family checks.
 
-## Resolved security-relevant development findings
-
-These rows record development findings that are already reflected in the current
-implementation or implementation notes. They are not a statement that any release
-is production-ready.
-
-| Id          | Finding                                                                               | Current handling                                                                                                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SEC-R-001` | Producer-supplied outcome labels are not accepted as authority.                       | Acceptance is based on recomputed hashes, roots, canonical encodings, and proof-family verification. Historical status-shaped certificate fields are not a separate source of authority. |
-| `SEC-R-002` | Sumcheck-tail binding needed an explicit residual low-degree check.                   | The verifier checks the residual zero anchor and residual low-degree proof; tampering tests reject changed residual roots and anchors.                                                   |
-| `SEC-R-003` | Private-VSS zero-knowledge accounting overstated leakage before the family-aware fix. | Redundant message consistency claims were removed, the carry-driven bound is disclosed, and the family now records about `2^-58` per claim and about `2^-41` total.                      |
-
 ## Detailed evidence
 
-The following documents own the detailed evidence and derivations:
-
-- [`implementation-documentation/current-status.md`](implementation-documentation/current-status.md) for implementation progress and active blockers.
-- [`implementation-documentation/128-bit-pq.md`](implementation-documentation/128-bit-pq.md) for the deferred conventional 128-bit post-quantum roadmap.
-- [`implementation-documentation/setup-proof-decisions/qrom-fiat-shamir-soundness.md`](implementation-documentation/setup-proof-decisions/qrom-fiat-shamir-soundness.md) for QROM Fiat-Shamir accounting.
-- [`implementation-documentation/setup-proof-decisions/fri-low-degree-soundness.md`](implementation-documentation/setup-proof-decisions/fri-low-degree-soundness.md) for FRI low-degree soundness and the unconditional fallback path.
-- [`implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md`](implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md) for the private-VSS leakage fix.
-- [`implementation-documentation/setup-proof-decisions/he-noise-and-smudging-headroom.md`](implementation-documentation/setup-proof-decisions/he-noise-and-smudging-headroom.md) for setup/evaluator level headroom and the target-decryption boundary.
-- [`reference-documents/CSB24_On the Practical CPAD Security of Exact and Threshold FHE Schemes and Libraries.txt`](reference-documents/CSB24_On%20the%20Practical%20CPAD%20Security%20of%20Exact%20and%20Threshold%20FHE%20Schemes%20and%20Libraries.txt), [`reference-documents/CCP24_Attacks Against the IND-CPA-D Security of Exact FHE Schemes.txt`](reference-documents/CCP24_Attacks%20Against%20the%20IND-CPA-D%20Security%20of%20Exact%20FHE%20Schemes.txt), and the threshold-FHE references under `reference-documents/` for CPAD, smudging, and threshold-decryption context.
-- [`reference-projects/lattigo/SECURITY.md`](reference-projects/lattigo/SECURITY.md), [`reference-projects/SEAL/SECURITY.md`](reference-projects/SEAL/SECURITY.md), and [`reference-projects/openfhe-development/docs/static_docs/Security.md`](reference-projects/openfhe-development/docs/static_docs/Security.md) for comparable production-library disclosure patterns.
+Detailed implementation status, proof accounting, and supporting derivations are
+maintained separately from this public policy. Those notes are maintainer
+evidence and must not be treated as a public production-security approval.

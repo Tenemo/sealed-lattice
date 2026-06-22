@@ -1,12 +1,6 @@
 use super::*;
 use rayon::prelude::*;
 
-pub(in super::super) fn galois_key_share_batches_object(
-    package: &serde_json::Value,
-) -> serde_json::Value {
-    galois_key_share_batches_object_inner(package, None)
-}
-
 pub(in super::super) fn galois_key_share_batches_object_with_terminal_transport(
     package: &serde_json::Value,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,

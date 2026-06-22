@@ -13,21 +13,14 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
 
-// Each mutating heavy accepted-setup test clones the full first-profile
-// evaluation-key proof container package fixture, which embeds every trustee's
-// evaluation-key proof as inline hex, so a clone is several gigabytes resident.
-// The cargo default of one thread per core would hold enough concurrent clones
-// to exhaust system memory and abort the process. Size the libtest pool from
-// currently free memory with a per-test budget, capped by core count. The budget
-// is set from the worst case rather than the steady-state average: a single
-// package-inflating test (the extra/duplicate refusals, which add proofs to
-// their clone) was measured at roughly 57 GiB resident, most of it the shared
-// fixture that concurrent tests reuse, so the bound must keep that worst case
-// plus a few normal clones (about seven gigabytes marginal each) inside free
-// memory. At this budget a typical 88 GiB-free machine runs four threads, up
-// from three; pushing higher needs an empirical peak measurement, and the real
-// lever for using all cores is moving the container off inline hex onto the
-// transported-material representation, which would shrink the per-clone cost.
+// The heavy accepted-setup lane uses compact transported proof/key material, but
+// full-profile package construction and verification still have a large enough
+// transient working set that libtest concurrency must be memory-bound. A
+// free-runner-knob local simulation on 2026-06-21 completed the full lane with
+// one libtest thread, one trustee prover, two RNS limbs per trustee prover, and
+// a four-thread rayon pool at 9.97 GiB peak process-tree RSS. Keep the automatic
+// per-test budget conservative so the free runner stays serial while larger
+// workstations can still run multiple independent heavy tests.
 const approximateGigabytesPerHeavyTest = 15;
 const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
@@ -44,14 +37,12 @@ const heavyAcceptedSetupTestThreadCount = Math.min(
     memoryBoundedHeavyTestThreadCount,
 );
 
-// Each trustee evaluation-key prover holds a several-gigabyte working set while
-// the first-profile package fixture is assembled, so the number of provers
-// running at once must also fit available memory. The kernel proves the trustees
-// in batches; size that batch from free memory the same way as the libtest
-// thread pool, capped so a workstation keeps proving three trustees at a time
-// while a 16 GiB CI runner proves one and the build is no longer killed
-// mid-proving. The kernel reads this through SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE.
-const approximateGigabytesPerTrusteeProver = 8;
+// Each trustee evaluation-key prover now regenerates limb commitments in
+// bounded chunks instead of retaining the whole phase-one commitment set. The
+// remaining prover working set is still large enough that concurrent trustees
+// must be sized from memory. Keep this budget conservative: a free CI runner
+// should prove one trustee at a time, while a workstation can run several.
+const approximateGigabytesPerTrusteeProver = 10;
 // Match the kernel's core-derived terminal concurrency (a quarter of the cores;
 // each prover saturates a few cores through the shared work pool) so a
 // workstation proves as many trustees at once as it has memory for, while a
@@ -97,6 +88,81 @@ const rayonThreadCount = Math.min(
     memoryBoundedRayonThreadCount,
 );
 
+// Inside one trustee prover, the Rust kernel proves only this many RNS limbs at
+// once after all witness roots are transcript-bound. After the limb witness
+// builder stopped materializing the full residue/error-square witness copy, the
+// measured full-ring limb peak is about 4.5 GiB, so a free 14.4 GiB runner can
+// prove two limbs at a time with headroom while still keeping one trustee prover
+// active at a time.
+const approximateGigabytesPerTrusteeProofLimb = 5;
+const memoryBoundedTrusteeProofLimbBatchSize = Math.max(
+    1,
+    Math.floor(
+        (availableGigabytes * heavyTestMemoryBudgetFraction) /
+            approximateGigabytesPerTrusteeProofLimb,
+    ),
+);
+const trusteeProofLimbBatchSize = Math.min(
+    rayonThreadCount,
+    memoryBoundedTrusteeProofLimbBatchSize,
+);
+
+const parsePositiveIntegerEnvironmentOverride = (
+    variableName: string,
+    variableValue: string | undefined,
+): number | undefined => {
+    if (variableValue === undefined) {
+        return undefined;
+    }
+    if (!/^[1-9]\d*$/.test(variableValue)) {
+        throw new Error(`${variableName} must be a positive integer.`);
+    }
+    const parsedValue = Number.parseInt(variableValue, 10);
+    if (!Number.isSafeInteger(parsedValue)) {
+        throw new Error(`${variableName} must fit a safe integer.`);
+    }
+    return parsedValue;
+};
+
+const heavyAcceptedSetupTestThreadCountOverride =
+    parsePositiveIntegerEnvironmentOverride(
+        'SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT',
+        process.env.SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT,
+    );
+const effectiveHeavyAcceptedSetupTestThreadCount =
+    heavyAcceptedSetupTestThreadCountOverride ??
+    heavyAcceptedSetupTestThreadCount;
+const heavyAcceptedSetupTestThreadCountSource =
+    heavyAcceptedSetupTestThreadCountOverride === undefined
+        ? 'memory-bounded'
+        : 'environment override';
+
+const rayonThreadCountOverride = process.env.RAYON_NUM_THREADS;
+const effectiveRayonThreadCount =
+    rayonThreadCountOverride ?? String(rayonThreadCount);
+const rayonThreadCountSource =
+    rayonThreadCountOverride === undefined
+        ? 'memory-bounded'
+        : 'environment override';
+
+const trusteeProofBatchSizeOverride =
+    process.env.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE;
+const effectiveTrusteeProofBatchSize =
+    trusteeProofBatchSizeOverride ?? String(trusteeProofBatchSize);
+const trusteeProofBatchSizeSource =
+    trusteeProofBatchSizeOverride === undefined
+        ? 'memory-bounded'
+        : 'environment override';
+
+const trusteeProofLimbBatchSizeOverride =
+    process.env.SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE;
+const effectiveTrusteeProofLimbBatchSize =
+    trusteeProofLimbBatchSizeOverride ?? String(trusteeProofLimbBatchSize);
+const trusteeProofLimbBatchSizeSource =
+    trusteeProofLimbBatchSizeOverride === undefined
+        ? 'memory-bounded'
+        : 'environment override';
+
 const rustKernelHeavyTestCommand: CommandInvocation = {
     args: [
         'test',
@@ -105,20 +171,19 @@ const rustKernelHeavyTestCommand: CommandInvocation = {
         heavyAcceptedSetupTestPattern,
         '--',
         '--ignored',
-        '--show-output',
+        '--nocapture',
         '--test-threads',
-        String(heavyAcceptedSetupTestThreadCount),
+        String(effectiveHeavyAcceptedSetupTestThreadCount),
     ],
     command: 'cargo',
     description: 'cargo test heavy accepted setup tests',
     env: {
         ...process.env,
         CARGO_INCREMENTAL: '0',
-        RAYON_NUM_THREADS:
-            process.env.RAYON_NUM_THREADS ?? String(rayonThreadCount),
-        SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
-            process.env.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE ??
-            String(trusteeProofBatchSize),
+        RAYON_NUM_THREADS: effectiveRayonThreadCount,
+        SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE: effectiveTrusteeProofBatchSize,
+        SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
+            effectiveTrusteeProofLimbBatchSize,
     },
     logFileSlug: 'cargo-test-heavy-accepted-setup',
 };
@@ -140,23 +205,29 @@ const main = async (): Promise<void> => {
           });
 
     console.log(
-        `Rust kernel heavy lane: running with ${heavyAcceptedSetupTestThreadCount} test thread(s) ` +
-            `(memory-bounded; ${availableGigabytes.toFixed(1)} GiB available, ` +
-            `${approximateGigabytesPerHeavyTest} GiB budgeted per test).`,
+        `Rust kernel heavy lane: running with ${effectiveHeavyAcceptedSetupTestThreadCount} test thread(s) ` +
+            `(${heavyAcceptedSetupTestThreadCountSource}; ${availableGigabytes.toFixed(1)} GiB available, ` +
+            `${approximateGigabytesPerHeavyTest} GiB automatically budgeted per test).`,
     );
     console.log(
-        `Rust kernel heavy lane: proving up to ${trusteeProofBatchSize} trustee evaluation-key ` +
-            `proof(s) concurrently (memory-bounded; ${approximateGigabytesPerTrusteeProver} GiB ` +
-            `budgeted per prover).`,
+        `Rust kernel heavy lane: proving up to ${effectiveTrusteeProofBatchSize} trustee evaluation-key ` +
+            `proof(s) concurrently (${trusteeProofBatchSizeSource}; automatic budget uses ` +
+            `${approximateGigabytesPerTrusteeProver} GiB per prover).`,
     );
     console.log(
-        `Rust kernel heavy lane: bounding the rayon pool to ${rayonThreadCount} thread(s) ` +
-            `(memory-bounded; ${approximateGigabytesPerRayonThread} GiB budgeted per rayon thread).`,
+        `Rust kernel heavy lane: proving up to ${effectiveTrusteeProofLimbBatchSize} RNS limb(s) per ` +
+            `trustee evaluation-key prover (${trusteeProofLimbBatchSizeSource}; automatic budget uses ` +
+            `${approximateGigabytesPerTrusteeProofLimb} GiB per limb).`,
+    );
+    console.log(
+        `Rust kernel heavy lane: bounding the rayon pool to ${effectiveRayonThreadCount} thread(s) ` +
+            `(${rayonThreadCountSource}; automatic budget uses ` +
+            `${approximateGigabytesPerRayonThread} GiB per rayon thread).`,
     );
 
     const progressReporter = createHeavyTestProgressReporter({
         label: 'heavy',
-        threadCount: heavyAcceptedSetupTestThreadCount,
+        threadCount: effectiveHeavyAcceptedSetupTestThreadCount,
     });
 
     let exitCode: number | undefined;

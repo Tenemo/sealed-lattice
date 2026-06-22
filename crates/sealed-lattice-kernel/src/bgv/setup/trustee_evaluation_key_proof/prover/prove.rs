@@ -25,6 +25,28 @@ use crate::bgv::modular_arithmetic::inverse_mod;
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
+#[cfg(not(target_arch = "wasm32"))]
+const TRUSTEE_PROOF_LIMB_BATCH_SIZE_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE";
+
+fn normalize_limb_batch_size(requested_limb_batch_size: usize, limb_count: usize) -> usize {
+    requested_limb_batch_size.max(1).min(limb_count.max(1))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn configured_limb_batch_size(limb_count: usize) -> usize {
+    std::env::var(TRUSTEE_PROOF_LIMB_BATCH_SIZE_ENVIRONMENT_VARIABLE)
+        .ok()
+        .and_then(|configured_batch_size| configured_batch_size.parse::<usize>().ok())
+        .map(|configured_batch_size| normalize_limb_batch_size(configured_batch_size, limb_count))
+        .unwrap_or_else(|| normalize_limb_batch_size(rayon::current_num_threads(), limb_count))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn configured_limb_batch_size(limb_count: usize) -> usize {
+    normalize_limb_batch_size(1, limb_count)
+}
+
 fn prove_limb(
     statement: &TrusteeEvaluationKeyStatement,
     limb_index: usize,
@@ -491,43 +513,84 @@ pub(crate) fn prove_evaluation_key_share(
     witness: &TrusteeEvaluationKeyWitness,
     proof_randomness_seed_hex: &str,
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
+    prove_evaluation_key_share_with_limb_batch_size(
+        statement,
+        witness,
+        proof_randomness_seed_hex,
+        configured_limb_batch_size(statement.limb_moduli().len()),
+    )
+}
+
+#[cfg(test)]
+pub(crate) fn prove_evaluation_key_share_with_test_limb_batch_size(
+    statement: &TrusteeEvaluationKeyStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    proof_randomness_seed_hex: &str,
+    requested_limb_batch_size: usize,
+) -> CanonicalResult<SuccinctEvaluationKeyProof> {
+    prove_evaluation_key_share_with_limb_batch_size(
+        statement,
+        witness,
+        proof_randomness_seed_hex,
+        requested_limb_batch_size,
+    )
+}
+
+fn prove_evaluation_key_share_with_limb_batch_size(
+    statement: &TrusteeEvaluationKeyStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    proof_randomness_seed_hex: &str,
+    requested_limb_batch_size: usize,
+) -> CanonicalResult<SuccinctEvaluationKeyProof> {
     statement.validate_shape()?;
     validate_witness_support(statement, witness)?;
     let limb_moduli = statement.limb_moduli();
+    let limb_batch_size = normalize_limb_batch_size(requested_limb_batch_size, limb_moduli.len());
     let mut transcript = FiatShamirTranscript::new("trustee-evaluation-key-share");
     transcript.absorb("statement", &statement.statement_hash());
 
-    #[cfg(not(target_arch = "wasm32"))]
-    let commitments = limb_moduli
-        .par_iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| {
-            build_limb_witness_commitment(
-                statement,
-                witness,
-                limb_index,
-                *modulus,
-                proof_randomness_seed_hex,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let commitments = limb_moduli
-        .iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| {
-            build_limb_witness_commitment(
-                statement,
-                witness,
-                limb_index,
-                *modulus,
-                proof_randomness_seed_hex,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut witness_tree_roots = Vec::with_capacity(limb_moduli.len());
+    for (batch_index, modulus_batch) in limb_moduli.chunks(limb_batch_size).enumerate() {
+        let batch_start = batch_index * limb_batch_size;
 
-    for commitment in &commitments {
-        transcript.absorb("witness-tree-root", &commitment.salted.tree.root());
+        #[cfg(not(target_arch = "wasm32"))]
+        let batch_roots = modulus_batch
+            .par_iter()
+            .enumerate()
+            .map(|(batch_offset, modulus)| {
+                let limb_index = batch_start + batch_offset;
+                let commitment = build_limb_witness_commitment(
+                    statement,
+                    witness,
+                    limb_index,
+                    *modulus,
+                    proof_randomness_seed_hex,
+                )?;
+                Ok(commitment.salted.tree.root())
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        #[cfg(target_arch = "wasm32")]
+        let batch_roots = modulus_batch
+            .iter()
+            .enumerate()
+            .map(|(batch_offset, modulus)| {
+                let limb_index = batch_start + batch_offset;
+                let commitment = build_limb_witness_commitment(
+                    statement,
+                    witness,
+                    limb_index,
+                    *modulus,
+                    proof_randomness_seed_hex,
+                )?;
+                Ok(commitment.salted.tree.root())
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        witness_tree_roots.extend(batch_roots);
+    }
+
+    for witness_tree_root in &witness_tree_roots {
+        transcript.absorb("witness-tree-root", witness_tree_root);
     }
     let consistency_vectors = (0..CONSISTENCY_REPETITIONS)
         .map(|_| {
@@ -545,38 +608,71 @@ pub(crate) fn prove_evaluation_key_share(
         proof_randomness_seed_hex,
     );
 
-    #[cfg(not(target_arch = "wasm32"))]
-    let limb_proofs = commitments
-        .par_iter()
-        .enumerate()
-        .map(|(limb_index, commitment)| {
-            prove_limb(
-                statement,
-                limb_index,
-                commitment,
-                &consistency_vectors,
-                &claim_integers,
-                proof_randomness_seed_hex,
-                &transcript,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let limb_proofs = commitments
-        .iter()
-        .enumerate()
-        .map(|(limb_index, commitment)| {
-            prove_limb(
-                statement,
-                limb_index,
-                commitment,
-                &consistency_vectors,
-                &claim_integers,
-                proof_randomness_seed_hex,
-                &transcript,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut limb_proofs = Vec::with_capacity(limb_moduli.len());
+    for (batch_index, modulus_batch) in limb_moduli.chunks(limb_batch_size).enumerate() {
+        let batch_start = batch_index * limb_batch_size;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let proof_batch = modulus_batch
+            .par_iter()
+            .enumerate()
+            .map(|(batch_offset, modulus)| {
+                let limb_index = batch_start + batch_offset;
+                let commitment = build_limb_witness_commitment(
+                    statement,
+                    witness,
+                    limb_index,
+                    *modulus,
+                    proof_randomness_seed_hex,
+                )?;
+                if commitment.salted.tree.root() != witness_tree_roots[limb_index] {
+                    return Err(invalid_succinct_setup_proof(
+                        "regenerated witness-tree root changed before limb proving",
+                    ));
+                }
+                prove_limb(
+                    statement,
+                    limb_index,
+                    &commitment,
+                    &consistency_vectors,
+                    &claim_integers,
+                    proof_randomness_seed_hex,
+                    &transcript,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        #[cfg(target_arch = "wasm32")]
+        let proof_batch = modulus_batch
+            .iter()
+            .enumerate()
+            .map(|(batch_offset, modulus)| {
+                let limb_index = batch_start + batch_offset;
+                let commitment = build_limb_witness_commitment(
+                    statement,
+                    witness,
+                    limb_index,
+                    *modulus,
+                    proof_randomness_seed_hex,
+                )?;
+                if commitment.salted.tree.root() != witness_tree_roots[limb_index] {
+                    return Err(invalid_succinct_setup_proof(
+                        "regenerated witness-tree root changed before limb proving",
+                    ));
+                }
+                prove_limb(
+                    statement,
+                    limb_index,
+                    &commitment,
+                    &consistency_vectors,
+                    &claim_integers,
+                    proof_randomness_seed_hex,
+                    &transcript,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        limb_proofs.extend(proof_batch);
+    }
 
     Ok(SuccinctEvaluationKeyProof { limb_proofs })
 }

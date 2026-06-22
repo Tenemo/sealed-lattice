@@ -19,7 +19,7 @@ fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
     package["qShare"]["primes"][0] = serde_json::json!(65_537);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_setup_package(package);
+    let result = verify_collective_setup_package(&package);
 
     assert_eq!(result["verifierStatus"], "outsideProfile");
     assert_eq!(result["refusedObjects"][0]["reasonCode"], "qShareMismatch");
@@ -478,7 +478,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_setup_key_correctness
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_requires_setup_key_correctness_certificate_for_evaluation_keys",
     );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut package = compact_setup_key_correctness_certificate_package_with_certificate();
     package
         .as_object_mut()
         .expect("setup package")
@@ -487,12 +487,10 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_setup_key_correctness
         .as_object_mut()
         .expect("setup package")
         .remove("setupKeyCorrectnessCertificateHash");
-    rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_setup_key_correctness_certificate_for_test(&package)
+        .expect("verification response")
+        .expect("pending response");
 
     assert_eq!(result["verifierStatus"], "pending");
     assert!(
@@ -504,9 +502,8 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_setup_key_correctness
     );
 }
 
-#[test]
-fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
-    let package = serde_json::json!({
+fn compact_setup_key_correctness_certificate_package() -> serde_json::Value {
+    serde_json::json!({
         "setupContext": {
             "ceremonyId": "ceremony-main",
             "manifestHash": valid_hash('1'),
@@ -551,7 +548,24 @@ fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
         ],
         "setupProofAccountingCertificateHash": valid_hash('1'),
         "heSecurityCertificateHash": valid_hash('2'),
-    });
+    })
+}
+
+fn compact_setup_key_correctness_certificate_package_with_certificate() -> serde_json::Value {
+    let mut package = compact_setup_key_correctness_certificate_package();
+    let mut certificate = setup_key_correctness_certificate_value(&package)
+        .expect("setup key correctness certificate");
+    let certificate_hash = setup_key_correctness_certificate_hash(&package)
+        .expect("setup key correctness certificate hash");
+    certificate["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash.clone());
+    package["setupKeyCorrectnessCertificate"] = certificate;
+    package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash);
+    package
+}
+
+#[test]
+fn setup_key_correctness_certificate_binds_accepted_theorem_statement() {
+    let package = compact_setup_key_correctness_certificate_package();
 
     let certificate = setup_key_correctness_certificate_value(&package)
         .expect("setup key correctness certificate");
@@ -583,15 +597,13 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_setup_key_correctness_c
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_checks_setup_key_correctness_certificate",
     );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut package = compact_setup_key_correctness_certificate_package_with_certificate();
     package["setupKeyCorrectnessCertificate"]["claimBoundary"] =
         serde_json::json!("weakened-key-correctness-claim");
-    rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_setup_key_correctness_certificate_for_test(&package)
+        .expect("verification response")
+        .expect("refusal response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -607,16 +619,14 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_setup_key_correctness_certificate_hash_drift",
     );
-    let mut package = evaluation_key_proof_container_bearing_collective_setup_package();
+    let mut package = compact_setup_key_correctness_certificate_package_with_certificate();
     package["setupKeyCorrectnessCertificate"]["setupKeyCorrectnessCertificateHash"] =
         serde_json::json!(valid_hash('8'));
     package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('8'));
-    rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_setup_key_correctness_certificate_for_test(&package)
+        .expect("verification response")
+        .expect("refusal response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -638,7 +648,7 @@ fn collective_setup_verifier_requires_active_static_setup_theorem_certificate() 
         .remove("activeStaticSetupTheoremCertificateHash");
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_setup_package(package);
+    let result = verify_collective_setup_package(&package);
 
     assert_eq!(result["verifierStatus"], "pending");
     assert!(

@@ -5,9 +5,9 @@ sidebar:
     order: 1
 ---
 
-`sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting prototype.
+`sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting library.
 
-The selected direction is active-static secure-with-abort collective BGV setup, direct encrypted ballots, ballot validity proofs for the fixed encrypted-ballot relation, public ciphertext aggregation, bounded-domain mobile evaluator replay, unanimous target finality for the first profile, and one-shot target-bound threshold decryption of `C_target` only.
+Every roster participant is intended to be both voter and trustee. The design does not rely on a trusted tally server, special verifier role, heavy external prover, or desktop-class auditor in the claim path.
 
 The package is under active implementation. Use it for development, integration experiments, and verification tooling, not production elections, and read the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md) before treating any verification result as security evidence.
 
@@ -70,8 +70,8 @@ These helpers are useful for current development verification and package integr
 - threshold and frozen roster profile derivation
 - lifecycle transition and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
-- narrow accepted-setup verifier helpers for private VSS share verification, public-only setup package verification input construction, and setup package verification
-- transcript-core fixture verification through the bundled Rust/WASM kernel
+- setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling
+- foundation transcript verification through the packaged kernel
 - package-boundary and public API smoke coverage
 
 ## What is not available yet
@@ -83,7 +83,7 @@ These helpers are useful for current development verification and package integr
 - production target-bound decryption or result release
 - production security claims; see the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md)
 
-Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching direct-path layer exists.
+Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching functionality is implemented and verified.
 
 ## Next reads
 

@@ -20,7 +20,6 @@ use super::{
     generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
     release_verified_transported_vss_material_request, sample_public_residues,
     selected_public_evaluation_key_rotation_requests,
-    verify_collective_bgv_setup_package_from_request,
     verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
     verify_private_vss_share_envelope_from_request,
 };

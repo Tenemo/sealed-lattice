@@ -346,15 +346,17 @@ fn collective_setup_verifier_refuses_public_key_share_transport_missing_certific
     );
     let package = minimal_collective_setup_package();
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedPublicKeyShareMaterial": {
-            "totalByteLength": 1_u64,
-            "fullObjectHash": valid_hash('1'),
-            "chunkRoot": valid_hash('2'),
-            "chunkHashes": [valid_hash('3')],
-        },
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedPublicKeyShareMaterial": {
+                "totalByteLength": 1_u64,
+                "fullObjectHash": valid_hash('1'),
+                "chunkRoot": valid_hash('2'),
+                "chunkHashes": [valid_hash('3')],
+            },
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
@@ -374,7 +376,7 @@ fn collective_setup_verifier_refuses_unrequested_setup_transport_object() {
     append_unrequested_setup_transport_object(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_setup_package(package);
+    let result = verify_collective_setup_package(&package);
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(result["currentPhase"], "setupPackageVerification");
@@ -394,10 +396,12 @@ fn collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar() {
         append_unreferenced_same_secret_transport_sidecar(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedSameSecretProofMaterial": transported_same_secret_proof_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedSameSecretProofMaterial": transported_same_secret_proof_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
@@ -418,10 +422,12 @@ fn collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidec
         append_unreferenced_evaluation_key_component_transport_sidecar(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedEvaluationKeyShareComponentMaterial": transported_evaluation_key_component_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedEvaluationKeyShareComponentMaterial": transported_evaluation_key_component_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");

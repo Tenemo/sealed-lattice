@@ -11,9 +11,6 @@ static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: O
 > = OnceLock::new();
 static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
-static EVALUATION_KEY_PROOF_CONTAINER_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
-    serde_json::Value,
-> = OnceLock::new();
 
 #[derive(Clone)]
 pub(super) struct TerminalProfileRingSetupPackageFixture {
@@ -132,6 +129,7 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
                 POLYNOMIAL_DEGREE,
                 "profile-ring",
                 FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+                None,
             );
             TerminalProfileRingSetupPackageFixture {
                 package: package_fixture.package,
@@ -155,11 +153,13 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
 /// streamed path.
 pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
     participant_count: u64,
+    stream_derivation_purpose: &str,
 ) -> TerminalProfileRingSetupPackageFixture {
     let package_fixture = build_collective_setup_package_fixture_parts(
         128,
         DEVELOPMENT_REDUCED_RING_STREAMED_STATUS,
         participant_count,
+        Some(stream_derivation_purpose),
     );
     TerminalProfileRingSetupPackageFixture {
         package: package_fixture.package,
@@ -181,6 +181,7 @@ fn build_collective_setup_package_fixture(
         vss_material_ring_degree,
         vss_material_ring_degree_status,
         participant_count,
+        None,
     )
     .package
 }
@@ -225,6 +226,7 @@ fn build_collective_setup_package_fixture_parts(
     vss_material_ring_degree: usize,
     vss_material_ring_degree_status: &str,
     participant_count: u64,
+    stream_derivation_purpose: Option<&str>,
 ) -> CollectiveSetupPackageFixture {
     let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
@@ -426,8 +428,8 @@ fn build_collective_setup_package_fixture_parts(
     // Both the profile-ring terminal path and the reduced-ring dynamic-roster
     // accept path need the streamed VSS material so the package carries the
     // transported coefficient commitment material the accepted-setup verifier
-    // streams. The derivation id is unique per roster size so concurrent
-    // reduced-ring streams for different n never share derivation state.
+    // streams. Reduced-ring tests pass a purpose so repeated fixture builds at
+    // the same roster size never share live derivation state.
     let stream_vss_material = (vss_material_ring_degree == POLYNOMIAL_DEGREE
         && vss_material_ring_degree_status == "profile-ring")
         || vss_material_ring_degree_status == DEVELOPMENT_REDUCED_RING_STREAMED_STATUS;
@@ -435,8 +437,10 @@ fn build_collective_setup_package_fixture_parts(
         let derivation_id = if vss_material_ring_degree_status == "profile-ring" {
             "terminal-profile-ring-vss-material-stream".to_string()
         } else {
+            let stream_derivation_purpose =
+                stream_derivation_purpose.expect("reduced-ring streamed VSS fixture purpose");
             format!(
-                "development-reduced-ring-vss-material-stream-n{participant_count}-r{vss_material_ring_degree}"
+                "development-reduced-ring-vss-material-stream-{stream_derivation_purpose}-n{participant_count}-r{vss_material_ring_degree}"
             )
         };
         streamed_vss_coefficient_commitments_object(
@@ -675,7 +679,9 @@ pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json
 }
 
 fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = minimal_collective_setup_package();
+    let mut package = minimal_collective_setup_package_for_participant_count(
+        FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+    );
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
@@ -691,7 +697,7 @@ pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package()
 }
 
 fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = same_secret_proof_bearing_collective_setup_package();
+    let mut package = build_same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
@@ -708,34 +714,11 @@ pub(super) fn collective_public_key_bearing_collective_setup_package() -> serde_
 }
 
 fn build_collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
+    let mut package = build_public_key_share_succinct_proof_bearing_collective_setup_package();
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
     rebind_active_static_setup_theorem_certificate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    package
-}
-
-pub(super) fn evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value
-{
-    evaluation_key_proof_container_bearing_collective_setup_package_ref().clone()
-}
-
-pub(super) fn evaluation_key_proof_container_bearing_collective_setup_package_ref()
--> &'static serde_json::Value {
-    EVALUATION_KEY_PROOF_CONTAINER_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_evaluation_key_proof_container_bearing_collective_setup_package)
-}
-
-fn build_evaluation_key_proof_container_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = collective_public_key_bearing_collective_setup_package();
-    package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds_object(&package);
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object(&package);
-    package["trusteeEvaluationKeyProofs"] = trustee_evaluation_key_proofs_object(&package);
-    package["evaluationKeys"] = public_evaluation_key_set_object(&package);
-    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package

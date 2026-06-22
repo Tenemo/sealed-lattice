@@ -69,8 +69,9 @@ use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
     TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
     register_verified_trustee_evaluation_key_proof_material_chunks,
-    round_one_public_aggregate_diagonals_from_package, trustee_evaluation_key_proof_material_root,
-    trustee_evaluation_key_statement_from_package,
+    round_one_public_aggregate_diagonals_from_package,
+    stored_verified_trustee_evaluation_key_proof_material_chunks_for_test,
+    trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
 };
 use self::evaluation_key_share_rounds::{
     EvaluationKeyProofCommonBinding, evaluation_key_proof_common_binding,
@@ -567,6 +568,13 @@ pub(crate) fn verify_collective_bgv_setup_package_from_request(
             "setupPackage is required",
         )
     })?;
+    verify_collective_bgv_setup_package(setup_package, request)
+}
+
+pub(crate) fn verify_collective_bgv_setup_package(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Value> {
     if !setup_package.is_object() {
         return verification_response(
             VerifierStatus::OutsideProfile,
@@ -607,6 +615,21 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
         public_matrix_seed_hash,
         FIRST_PROFILE_DECRYPTION_THRESHOLD,
     )
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn verify_required_public_evaluation_key_set_for_test(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    verify_required_public_evaluation_key_set(setup_package, request)
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn verify_setup_key_correctness_certificate_for_test(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    verify_setup_key_correctness_certificate(setup_package)
 }
 
 fn verify_collective_setup_package(
@@ -728,13 +751,13 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_setup_proof_accounting_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_transport_certificate(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
     if let Some(response) = verify_he_security_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_setup_key_correctness_certificate(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) = verify_transport_certificate(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_active_static_setup_theorem_certificate(setup_package)? {

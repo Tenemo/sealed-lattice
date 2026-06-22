@@ -591,6 +591,12 @@ pub(super) fn proof_bytes_transport_chunks(proof_bytes: Vec<u8>) -> Vec<Vec<u8>>
     proof_bytes.chunks(chunk_size).map(<[u8]>::to_vec).collect()
 }
 
+static TRANSPORTED_PUBLIC_SETUP_COMPANIONS_CACHE: OnceLock<(
+    serde_json::Value,
+    TransportedPublicSetupCompanions,
+)> = OnceLock::new();
+
+#[derive(Clone)]
 pub(super) struct TransportedPublicSetupCompanions {
     pub(super) vss_coefficient_commitment_material: serde_json::Value,
     pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
@@ -633,6 +639,13 @@ const PROOF_TRANSPORT_CERTIFICATE_FIELDS: TransportedMaterialCertificateFields =
 
 pub(super) fn setup_package_with_transported_public_setup_companions()
 -> (serde_json::Value, TransportedPublicSetupCompanions) {
+    TRANSPORTED_PUBLIC_SETUP_COMPANIONS_CACHE
+        .get_or_init(build_setup_package_with_transported_public_setup_companions)
+        .clone()
+}
+
+fn build_setup_package_with_transported_public_setup_companions()
+-> (serde_json::Value, TransportedPublicSetupCompanions) {
     terminal_phase("start profile-ring package fixture");
     let terminal_profile_ring_fixture =
         terminal_profile_ring_minimal_collective_setup_package_fixture();
@@ -649,10 +662,13 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
 /// reaches that gate rather than `accepted`.
 pub(super) fn reduced_ring_setup_package_with_transported_public_setup_companions(
     participant_count: u64,
+    stream_derivation_purpose: &str,
 ) -> (serde_json::Value, TransportedPublicSetupCompanions) {
     terminal_phase("start reduced-ring package fixture");
-    let reduced_ring_fixture =
-        reduced_ring_streamed_collective_setup_package_fixture(participant_count);
+    let reduced_ring_fixture = reduced_ring_streamed_collective_setup_package_fixture(
+        participant_count,
+        stream_derivation_purpose,
+    );
     terminal_phase("built reduced-ring package fixture");
     assemble_transported_public_setup_companions(reduced_ring_fixture)
 }
@@ -962,133 +978,6 @@ pub(super) fn rebind_public_evaluation_key_material_transport(
             })
             .collect::<Vec<_>>(),
     );
-}
-
-pub(super) fn move_first_trustee_evaluation_key_proof_bytes_to_transport(
-    package: &mut serde_json::Value,
-) -> serde_json::Value {
-    let proof_material = {
-        let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
-        move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(proof_record, true)
-    };
-    rebind_trustee_evaluation_key_proof_set_root(package);
-    append_setup_transport_certificate_object(
-        package,
-        SetupTransportCertificateObjectFixture {
-            object_name: "evaluationKeyShareProofMaterial",
-            object_role: "evaluation-key-share-proof-material",
-            object_root: proof_material["proofMaterialRoot"]
-                .as_str()
-                .expect("transported trustee proof material root")
-                .to_string(),
-            byte_length: proof_material["proofTotalByteLength"]
-                .as_u64()
-                .expect("transported trustee proof byte length"),
-            full_object_hash: proof_material["proofFullObjectHash"]
-                .as_str()
-                .expect("transported trustee proof full object hash")
-                .to_string(),
-            chunk_root: proof_material["proofChunkRoot"]
-                .as_str()
-                .expect("transported trustee proof chunk root")
-                .to_string(),
-            chunk_hashes: transport_certificate_chunk_hashes(&proof_material, "proofChunkHashes"),
-        },
-    );
-    rebind_setup_key_correctness_certificate(package);
-    rebind_collective_setup_package_hash(package);
-
-    serde_json::json!({
-        "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
-        "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
-        "proofFamily": "trustee-evaluation-key",
-        "proofMaterials": [proof_material],
-    })
-}
-
-pub(super) fn move_first_galois_key_share_component_vectors_to_transport(
-    package: &mut serde_json::Value,
-) -> serde_json::Value {
-    let material_record_snapshot =
-        package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0].clone();
-    let trustee_roster_position = material_record_snapshot["trusteeRosterPosition"]
-        .as_u64()
-        .expect("trustee roster position");
-    let rotation = material_record_snapshot["rotation"]
-        .as_u64()
-        .expect("Galois rotation");
-    let level = material_record_snapshot["level"].as_u64().expect("level");
-    let ring_degree = material_record_snapshot["ringDegree"]
-        .as_u64()
-        .expect("ring degree") as usize;
-    let key_switch_seed_hex = material_record_snapshot["keySwitchSeedHex"]
-        .as_str()
-        .expect("key-switch seed")
-        .to_string();
-    let fixture_material = evaluation_key_share_fixture_material(
-        EvaluationKeyShareProofFamily::Galois,
-        trustee_roster_position,
-        level,
-        Some(rotation),
-        ring_degree,
-        &key_switch_seed_hex,
-        None,
-    );
-    let transported_component_material_set = {
-        let material_record =
-            &mut package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0];
-        move_evaluation_key_share_component_vectors_to_transport(
-            material_record,
-            EvaluationKeyShareProofFamily::Galois,
-            &fixture_material,
-        )
-    };
-    rebind_galois_key_share_batch_root(package, 0);
-    rebind_trustee_evaluation_key_proof_set_bindings(package);
-    package["evaluationKeys"] = public_evaluation_key_set_object(package);
-    let component_material = transported_component_material_set["componentMaterials"][0].clone();
-    append_setup_transport_certificate_object(
-        package,
-        SetupTransportCertificateObjectFixture {
-            object_name: "evaluationKeyShareComponentMaterial",
-            object_role: "evaluation-key-share-component-material",
-            object_root: component_material["keySwitchComponentMaterialRoot"]
-                .as_str()
-                .expect("transported component material root")
-                .to_string(),
-            byte_length: component_material["totalByteLength"]
-                .as_u64()
-                .expect("transported component material byte length"),
-            full_object_hash: component_material["fullObjectHash"]
-                .as_str()
-                .expect("transported component material full object hash")
-                .to_string(),
-            chunk_root: component_material["chunkRoot"]
-                .as_str()
-                .expect("transported component material chunk root")
-                .to_string(),
-            chunk_hashes: transport_certificate_chunk_hashes(&component_material, "chunkHashes"),
-        },
-    );
-    rebind_setup_key_correctness_certificate(package);
-    rebind_collective_setup_package_hash(package);
-
-    transported_component_material_set
-}
-
-fn move_evaluation_key_share_component_vectors_to_transport(
-    proof_record: &mut serde_json::Value,
-    proof_family: EvaluationKeyShareProofFamily,
-    fixture_material: &EvaluationKeyShareFixtureMaterial,
-) -> serde_json::Value {
-    move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
-        proof_record,
-        proof_family,
-        fixture_material,
-        true,
-    )
 }
 
 pub(super) fn move_evaluation_key_share_component_vectors_to_compact_transport(

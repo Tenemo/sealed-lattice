@@ -196,10 +196,9 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
 fn collective_setup_verifier_refuses_passive_setup_packages() {
     let _accepted_setup_test_timing =
         accepted_setup_test_timing("collective_setup_verifier_refuses_passive_setup_packages");
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": setup_package(),
-    }))
-    .expect("verification response");
+    let package = setup_package();
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "outsideProfile");
@@ -220,10 +219,8 @@ fn collective_setup_verifier_reports_missing_phase_as_pending() {
         .remove("phaseTranscript");
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "pending");
@@ -260,10 +257,8 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later
             .expect("package object")
             .remove("setupPackageHash");
 
-        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .expect("verification response");
+        let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+            .expect("verification response");
 
         assert_eq!(result["verifierStatus"], "refused");
         assert_eq!(
@@ -293,10 +288,9 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
         serde_json::json!(valid_hash('2'));
     forked_package["phaseTranscript"] = serde_json::json!([first_phase, forked_phase]);
     rebind_collective_setup_package_hash(&mut forked_package);
-    let forked_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": forked_package,
-    }))
-    .expect("verification response");
+    let forked_result =
+        verify_collective_bgv_setup_package(&forked_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(forked_result["verifierStatus"], "forkDetected");
     assert_eq!(
@@ -309,10 +303,9 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
         { "phaseId": "setupIntent", "phaseNumber": 2, "phaseRoot": valid_hash('3') }
     ]);
     rebind_collective_setup_package_hash(&mut wrong_order_package);
-    let wrong_order_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": wrong_order_package,
-    }))
-    .expect("verification response");
+    let wrong_order_result =
+        verify_collective_bgv_setup_package(&wrong_order_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(wrong_order_result["verifierStatus"], "refused");
     assert_eq!(
@@ -330,10 +323,9 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
     stale_epoch_package["phaseTranscript"][1]["setupEpoch"] = serde_json::json!("old-epoch");
     rebind_collective_setup_package_hash(&mut stale_epoch_package);
 
-    let stale_epoch_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": stale_epoch_package,
-    }))
-    .expect("verification response");
+    let stale_epoch_result =
+        verify_collective_bgv_setup_package(&stale_epoch_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(stale_epoch_result["verifierStatus"], "refused");
     assert_eq!(
@@ -345,10 +337,9 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
     bad_root_package["phaseTranscript"][1]["phaseRoot"] = serde_json::json!(valid_hash('9'));
     rebind_collective_setup_package_hash(&mut bad_root_package);
 
-    let bad_root_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": bad_root_package,
-    }))
-    .expect("verification response");
+    let bad_root_result =
+        verify_collective_bgv_setup_package(&bad_root_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(bad_root_result["verifierStatus"], "refused");
     assert_eq!(
@@ -395,10 +386,8 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
     rebind_collective_phase_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -418,10 +407,8 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     rebind_collective_setup_package_hash(&mut missing_reveal_package);
 
     let missing_reveal_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": missing_reveal_package,
-        }))
-        .expect("verification response");
+        verify_collective_bgv_setup_package(&missing_reveal_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(missing_reveal_result["verifierStatus"], "refused");
     assert_eq!(
@@ -434,10 +421,9 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         serde_json::json!(valid_hash('8'));
     rebind_collective_setup_package_hash(&mut wrong_seed_package);
 
-    let wrong_seed_result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": wrong_seed_package,
-    }))
-    .expect("verification response");
+    let wrong_seed_result =
+        verify_collective_bgv_setup_package(&wrong_seed_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(wrong_seed_result["verifierStatus"], "refused");
     assert_eq!(
@@ -451,10 +437,8 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     rebind_collective_setup_package_hash(&mut wrong_derivation_package);
 
     let wrong_derivation_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_derivation_package,
-        }))
-        .expect("verification response");
+        verify_collective_bgv_setup_package(&wrong_derivation_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(wrong_derivation_result["verifierStatus"], "refused");
     assert_eq!(
@@ -468,10 +452,8 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
     rebind_collective_setup_package_hash(&mut wrong_matrix_package);
 
     let wrong_matrix_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": wrong_matrix_package,
-        }))
-        .expect("verification response");
+        verify_collective_bgv_setup_package(&wrong_matrix_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(wrong_matrix_result["verifierStatus"], "refused");
     assert_eq!(

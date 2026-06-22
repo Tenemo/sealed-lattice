@@ -35,10 +35,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     );
     let package = public_key_share_succinct_proof_bearing_collective_setup_package();
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "pending");
@@ -63,11 +61,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         .remove("publicKeyShareProofs");
     rebind_collective_setup_package_hash(&mut missing_statement_proofs_package);
 
-    let missing_statement_proofs_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": missing_statement_proofs_package,
-        }))
-        .expect("verification response");
+    let missing_statement_proofs_result = verify_collective_bgv_setup_package(
+        &missing_statement_proofs_package,
+        &serde_json::json!({}),
+    )
+    .expect("verification response");
 
     assert_eq!(missing_statement_proofs_result["verifierStatus"], "refused");
     assert_eq!(
@@ -84,11 +82,11 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
         .remove("publicKeyShareSuccinctProofs");
     rebind_collective_setup_package_hash(&mut missing_succinct_proofs_package);
 
-    let missing_succinct_proofs_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": missing_succinct_proofs_package,
-        }))
-        .expect("verification response");
+    let missing_succinct_proofs_result = verify_collective_bgv_setup_package(
+        &missing_succinct_proofs_package,
+        &serde_json::json!({}),
+    )
+    .expect("verification response");
 
     assert_eq!(missing_succinct_proofs_result["verifierStatus"], "refused");
     assert_eq!(
@@ -134,10 +132,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
             .remove(field_name);
         rebind_collective_setup_package_hash(&mut package);
 
-        let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .expect("verification response");
+        let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+            .expect("verification response");
 
         assert_eq!(result["verifierStatus"], "refused");
         assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
@@ -264,10 +260,8 @@ fn assert_refuses_proof_object_variant(
     object_path: &str,
     message_fragment: Option<&str>,
 ) {
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
@@ -305,10 +299,12 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedPublicKeyShareProofMaterial": transported_proof_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedPublicKeyShareProofMaterial": transported_proof_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["ok"], false);
@@ -333,10 +329,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
         serde_json::json!("00");
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedPublicKeyShareProofMaterial": transported_proof_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedPublicKeyShareProofMaterial": transported_proof_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
@@ -357,10 +355,8 @@ fn heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_pu
     move_public_key_share_material_to_transport(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "pending");
@@ -418,10 +414,12 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedPublicKeyShareMaterial": transported_public_key_share_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedPublicKeyShareMaterial": transported_public_key_share_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["ok"], false);
@@ -445,10 +443,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     transported_public_key_share_material["chunks"][0]["bytesHex"] = serde_json::json!("00");
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-        "transportedPublicKeyShareMaterial": transported_public_key_share_material,
-    }))
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedPublicKeyShareMaterial": transported_public_key_share_material,
+        }),
+    )
     .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
@@ -480,10 +480,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         [0]["coefficientsLeHex"] = serde_json::json!(tampered_hex);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -504,10 +502,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         serde_json::json!(valid_hash('a'));
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -528,10 +524,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
         serde_json::json!(valid_hash('f'));
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -560,10 +554,8 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
         .remove("sameSecretProofs");
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -590,10 +582,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -615,10 +605,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -640,10 +628,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -665,10 +651,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -703,10 +687,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -742,10 +724,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_lo
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -770,10 +750,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
     );
     let package = collective_public_key_bearing_collective_setup_package();
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["ok"], false);
     assert_eq!(result["verifierStatus"], "outsideProfile");
@@ -809,10 +787,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     rebind_collective_public_key_root(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response");
+    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
+        .expect("verification response");
 
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
@@ -863,9 +839,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key_and_package_root",
     );
-    let base_package = collective_public_key_bearing_collective_setup_package();
-
-    let mut missing_object_package = base_package.clone();
+    let mut missing_object_package = collective_public_key_bearing_collective_setup_package();
     missing_object_package
         .as_object_mut()
         .expect("setup package")
@@ -873,10 +847,8 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
     rebind_collective_setup_package_hash(&mut missing_object_package);
 
     let missing_object_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": missing_object_package,
-        }))
-        .expect("verification response");
+        verify_collective_bgv_setup_package(&missing_object_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(missing_object_result["verifierStatus"], "refused");
     assert_eq!(
@@ -888,7 +860,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         "setupPackage.collectivePublicKey"
     );
 
-    let mut missing_root_package = base_package;
+    let mut missing_root_package = collective_public_key_bearing_collective_setup_package();
     missing_root_package
         .as_object_mut()
         .expect("setup package")
@@ -896,10 +868,8 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
     rebind_collective_setup_package_hash(&mut missing_root_package);
 
     let missing_root_result =
-        verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-            "setupPackage": missing_root_package,
-        }))
-        .expect("verification response");
+        verify_collective_bgv_setup_package(&missing_root_package, &serde_json::json!({}))
+            .expect("verification response");
 
     assert_eq!(missing_root_result["verifierStatus"], "refused");
     assert_eq!(

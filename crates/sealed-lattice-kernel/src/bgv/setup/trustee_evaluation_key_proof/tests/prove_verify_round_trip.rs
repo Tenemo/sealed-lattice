@@ -48,6 +48,51 @@ fn batched_trustee_schedule_round_trips_with_mixed_levels() {
 }
 
 #[test]
+fn regenerated_limb_roots_preserve_encoded_proof_bytes_across_batch_sizes() {
+    let (statement, witness) = generate_development_trustee_instance(
+        "cafe0002",
+        &[round_one(2), round_two(2), rotation(3, 2), rotation(5, 1)],
+        SMALL_RING_DEGREE,
+    )
+    .expect("development instance");
+    let serial_proof = prover::prove_evaluation_key_share_with_test_limb_batch_size(
+        &statement,
+        &witness,
+        PROOF_RANDOMNESS_SEED,
+        1,
+    )
+    .expect("serial prove");
+    let partial_batch_proof = prover::prove_evaluation_key_share_with_test_limb_batch_size(
+        &statement,
+        &witness,
+        PROOF_RANDOMNESS_SEED,
+        2,
+    )
+    .expect("partial batch prove");
+    let batched_proof = prover::prove_evaluation_key_share_with_test_limb_batch_size(
+        &statement,
+        &witness,
+        PROOF_RANDOMNESS_SEED,
+        3,
+    )
+    .expect("batched prove");
+
+    let serial_proof_bytes = encode_trustee_evaluation_key_proof(&serial_proof);
+    let partial_batch_proof_bytes = encode_trustee_evaluation_key_proof(&partial_batch_proof);
+    let batched_proof_bytes = encode_trustee_evaluation_key_proof(&batched_proof);
+    assert_eq!(
+        serial_proof_bytes, partial_batch_proof_bytes,
+        "two-pass limb regeneration must preserve the transcript and proof bytes with a partial trailing batch"
+    );
+    assert_eq!(
+        serial_proof_bytes, batched_proof_bytes,
+        "two-pass limb regeneration must preserve the transcript and proof bytes exactly"
+    );
+    verify_evaluation_key_share(&statement, &partial_batch_proof).expect("verify partial batch");
+    verify_evaluation_key_share(&statement, &batched_proof).expect("verify");
+}
+
+#[test]
 fn multi_trustee_ceremony_slice_round_trips_with_recomputed_aggregate() {
     // Three trustees, each with round-one and round-two relinearization
     // shares and same-secret linkage; every round-two source multiplies the

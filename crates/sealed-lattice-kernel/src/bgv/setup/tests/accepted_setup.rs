@@ -13,15 +13,13 @@ mod vss_material;
 use self::material_transport_fixtures::{
     DIRECT_TRANSPORT_CERTIFICATE_FIELDS, SetupTransportCertificateObjectFixture,
     StreamingVssMaterialFixtureWriter, TerminalEvaluationKeyTransportSinks,
-    append_setup_transport_certificate_object,
+    TransportedPublicSetupCompanions, append_setup_transport_certificate_object,
     append_transport_certificate_entries_from_material_set,
     append_unreferenced_evaluation_key_component_transport_sidecar,
     append_unreferenced_same_secret_transport_sidecar, append_unrequested_setup_transport_object,
     append_vss_material_binary_header, append_vss_material_binary_record,
     encode_transport_material_from_package,
     move_evaluation_key_share_component_vectors_to_compact_transport,
-    move_first_galois_key_share_component_vectors_to_transport,
-    move_first_trustee_evaluation_key_proof_bytes_to_transport,
     move_public_key_share_material_to_transport,
     move_public_key_share_succinct_proof_bytes_to_transport,
     move_same_secret_proof_bytes_to_transport,
@@ -36,10 +34,7 @@ use self::material_transport_fixtures::{
 use self::package_fixtures::{
     TerminalProfileRingSetupPackageFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
-    collective_public_key_bearing_collective_setup_package,
-    evaluation_key_proof_container_bearing_collective_setup_package,
-    evaluation_key_proof_container_bearing_collective_setup_package_ref,
-    minimal_collective_setup_package,
+    collective_public_key_bearing_collective_setup_package, minimal_collective_setup_package,
     public_key_share_succinct_proof_bearing_collective_setup_package,
     reduced_ring_streamed_collective_setup_package_fixture,
     same_secret_proof_bearing_collective_setup_package, setup_transport_certificate_fixture,
@@ -50,16 +45,15 @@ use self::package_fixtures::{
 use self::proof_record_fixtures::{
     EvaluationKeyShareFixtureMaterial, RelinearizationKeyShareRoundsFixture,
     add_public_evaluation_key_material_transport, collective_public_key_object,
-    evaluation_key_share_fixture_material, galois_key_share_batches_object,
-    galois_key_share_batches_object_with_terminal_transport, public_evaluation_key_set_object,
-    public_key_share_material_object, public_key_share_succinct_proofs_object,
+    evaluation_key_share_fixture_material, galois_key_share_batches_object_with_terminal_transport,
+    public_evaluation_key_set_object, public_key_share_material_object,
+    public_key_share_succinct_proofs_object,
     relinearization_key_share_rounds_fixture_with_terminal_transport,
-    relinearization_key_share_rounds_object, relinearization_key_switch_seed_for_test,
+    relinearization_key_switch_seed_for_test,
     relinearization_round_two_source_by_digit_for_fixture,
     replace_public_key_share_hashes_with_material_hashes,
     round_one_aggregate_diagonals_from_fixture_package,
     same_secret_constant_commitments_from_fixture_package, same_secret_proofs_object,
-    trustee_evaluation_key_proofs_object,
     trustee_evaluation_key_proofs_object_with_terminal_transport,
     trustee_evaluation_key_witness_for_fixture,
 };
@@ -77,11 +71,9 @@ use self::record_rebinding::{
     rebind_collective_vss_coefficient_commitment_material_root,
     rebind_collective_vss_commitment_roots, rebind_collective_vss_complaint_root,
     rebind_first_private_vss_encrypted_envelope_hash,
-    rebind_first_private_vss_envelope_commitment_record_root, rebind_galois_key_share_batch_root,
-    rebind_same_secret_proof_record_root, rebind_setup_key_correctness_certificate,
-    rebind_setup_proof_accounting_certificate_hash,
-    rebind_trustee_evaluation_key_proof_record_root,
-    rebind_trustee_evaluation_key_proof_set_bindings, rebind_trustee_evaluation_key_proof_set_root,
+    rebind_first_private_vss_envelope_commitment_record_root, rebind_same_secret_proof_record_root,
+    rebind_setup_key_correctness_certificate, rebind_setup_proof_accounting_certificate_hash,
+    rebind_trustee_evaluation_key_proof_record_root, rebind_trustee_evaluation_key_proof_set_root,
 };
 
 use super::super::accepted_setup::{
@@ -103,8 +95,11 @@ use super::super::accepted_setup::{
     round_one_public_aggregate_diagonals_from_package, same_secret_anchor_proof_material_root,
     setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
     setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
+    stored_verified_trustee_evaluation_key_proof_material_chunks_for_test,
     trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
-    verify_profile_ring_material, verify_terminal_setup_transport_policy,
+    verify_collective_bgv_setup_package, verify_profile_ring_material,
+    verify_required_public_evaluation_key_set_for_test,
+    verify_setup_key_correctness_certificate_for_test, verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_material::{
     EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -327,14 +322,35 @@ fn set_first_limb_low_degree_fold_count_to_wrong_value(
     );
 }
 
+fn transported_public_setup_verification_request(
+    companions: TransportedPublicSetupCompanions,
+) -> serde_json::Value {
+    serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
+        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
+        "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
+        "transportedPublicKeyShareMaterial": companions.public_key_share_material,
+        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
+        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
+        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
+        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
+    })
+}
+
+fn transported_public_setup_package_and_request() -> (serde_json::Value, serde_json::Value) {
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+    (
+        package,
+        transported_public_setup_verification_request(companions),
+    )
+}
+
 // Runs the collective BGV setup verifier over a setup package and returns the
 // verification response. Wraps the request envelope and the infallible-response
 // expectation that every accepted-setup rejection test repeats verbatim.
-fn verify_collective_setup_package(package: serde_json::Value) -> serde_json::Value {
-    verify_collective_bgv_setup_package_from_request(&serde_json::json!({
-        "setupPackage": package,
-    }))
-    .expect("verification response")
+fn verify_collective_setup_package(package: &serde_json::Value) -> serde_json::Value {
+    verify_collective_bgv_setup_package(package, &serde_json::json!({}))
+        .expect("verification response")
 }
 
 // Asserts that the verifier refuses a setup package with the expected first
@@ -346,7 +362,7 @@ fn assert_collective_setup_package_refused(
     package: serde_json::Value,
     expected_reason_code: &str,
 ) {
-    let result = verify_collective_setup_package(package);
+    let result = verify_collective_setup_package(&package);
     assert_eq!(
         result["verifierStatus"], "refused",
         "{case_label}: unexpected verifier result: {result}"
@@ -365,7 +381,7 @@ fn assert_collective_setup_package_refused_without_handoff(
     package: serde_json::Value,
     expected_reason_code: &str,
 ) {
-    let result = verify_collective_setup_package(package);
+    let result = verify_collective_setup_package(&package);
     assert_eq!(
         result["verifierStatus"], "refused",
         "{case_label}: unexpected verifier result: {result}"
