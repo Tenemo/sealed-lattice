@@ -1,5 +1,6 @@
 import {
     canonicalJson,
+    deriveProtocolHash,
     encryptLocalTrusteeSetupSealedMaterial,
     hash512Hex,
 } from '@sealed-lattice/crypto';
@@ -161,6 +162,16 @@ describe('local trustee setup state storage', () => {
             encryptedState.localStateTransportEvidence
                 .localStateTransportEvidenceRoot,
         ).toMatch(/^[0-9a-f]{128}$/u);
+        const {
+            localStateTransportEvidenceRoot,
+            ...localStateTransportEvidenceWithoutRoot
+        } = encryptedState.localStateTransportEvidence;
+        expect(localStateTransportEvidenceRoot).toBe(
+            deriveProtocolHash(
+                'LocalTrusteeSetupStateTransportEvidenceRoot',
+                localStateTransportEvidenceWithoutRoot,
+            ),
+        );
         expect(
             JSON.stringify(encryptedState.localStateTransportEvidence),
         ).not.toMatch(/ciphertextBytesHex|shareValues|privateEnvelope/u);

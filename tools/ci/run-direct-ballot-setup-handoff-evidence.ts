@@ -24,7 +24,10 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const listEvidenceCommandsArgument = '--list';
 
-export const directBallotSetupHandoffPublicParityTestPaths = [
+export const directBallotSetupHandoffPublicPackageEvidenceTestPaths = [
+    'packages/sdk/tests/node/accepted-setup-public-api.test.ts',
+    'packages/sdk/tests/node/setup-proof-material-streaming.test.ts',
+    'packages/protocol/tests/node/setup-local-trustee-state-storage.test.ts',
     'packages/sdk/tests/node/direct-encrypted-ballot-public-api.test.ts',
     'packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.kernel.test.ts',
 ] as const;
@@ -80,12 +83,12 @@ export const createDirectBallotSetupHandoffEvidenceCommands = (
         buildWorkspaceBuildCommand(packageManagerRunner),
         ...heavyEvidenceCommands,
         createPackageManagerCommand(
-            'Run direct ballot setup handoff SDK/WASM public package parity tests',
+            'Run direct ballot setup handoff public package evidence tests',
             [
                 'exec',
                 'vitest',
                 'run',
-                ...directBallotSetupHandoffPublicParityTestPaths,
+                ...directBallotSetupHandoffPublicPackageEvidenceTestPaths,
             ],
             {
                 logFileSlug: 'direct-ballot-setup-handoff-public-parity',
@@ -108,7 +111,7 @@ export const formatDirectBallotSetupHandoffEvidenceCommandPlan = (
 ): string =>
     [
         'Direct ballot setup handoff evidence lane:',
-        'Manual lane only. This combines the required full-profile Rust heavy setup evidence with SDK/WASM public package boundary tests; it is not part of default check.',
+        'Manual lane only. This combines the required full-profile Rust heavy setup evidence with public package transport, handoff, local-state, SDK, and WASM boundary tests; it is not part of default check.',
         ...commands.map(
             (command, commandIndex) =>
                 `${commandIndex + 1}. ${command.description}\n` +
@@ -139,7 +142,7 @@ const main = async (): Promise<void> => {
 
     console.log(
         'Direct ballot setup handoff evidence lane: manual lane only. ' +
-            'Runs the required Rust heavy evidence set, then SDK/WASM public package boundary tests.',
+            'Runs the required Rust heavy evidence set, then public package transport, handoff, local-state, SDK, and WASM boundary tests.',
     );
 
     try {

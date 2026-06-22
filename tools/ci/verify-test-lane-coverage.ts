@@ -11,7 +11,7 @@ import type { PackageManagerRunner } from './package-manager-runner.js';
 import type { CommandInvocation } from './run-command.js';
 import {
     createDirectBallotSetupHandoffEvidenceCommands,
-    directBallotSetupHandoffPublicParityTestPaths,
+    directBallotSetupHandoffPublicPackageEvidenceTestPaths,
 } from './run-direct-ballot-setup-handoff-evidence.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
@@ -20,8 +20,8 @@ import { collectFiles, toPosixPath } from '#tools/internal/files.js';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const heavyKernelNodeTestPath =
     'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup.kernel.test.ts';
-const directBallotSetupHandoffPublicParityCommandDescription =
-    'Run direct ballot setup handoff SDK/WASM public package parity tests';
+const directBallotSetupHandoffPublicPackageEvidenceCommandDescription =
+    'Run direct ballot setup handoff public package evidence tests';
 const verificationPackageManagerRunner = {
     command: process.execPath,
     commandArgumentsPrefix: ['pnpm.cjs'],
@@ -161,45 +161,45 @@ export const validateRequiredRustHeavyEvidenceTests = async (): Promise<
     return failures.sort((left, right) => left.localeCompare(right));
 };
 
-export const validateDirectBallotSetupHandoffPublicParityCommand = (
+export const validateDirectBallotSetupHandoffPublicPackageEvidenceCommand = (
     commands: readonly CommandInvocation[],
 ): readonly string[] => {
     const failures: string[] = [];
-    const publicParityCommands = commands.filter(
+    const publicPackageEvidenceCommands = commands.filter(
         (command) =>
             command.description ===
-            directBallotSetupHandoffPublicParityCommandDescription,
+            directBallotSetupHandoffPublicPackageEvidenceCommandDescription,
     );
 
-    if (publicParityCommands.length !== 1) {
+    if (publicPackageEvidenceCommands.length !== 1) {
         failures.push(
-            `direct ballot setup handoff evidence lane must include exactly one SDK/WASM public package parity command; found ${String(publicParityCommands.length)}.`,
+            `direct ballot setup handoff evidence lane must include exactly one public package evidence command; found ${String(publicPackageEvidenceCommands.length)}.`,
         );
 
         return failures;
     }
 
-    const [publicParityCommand] = publicParityCommands;
-    if (publicParityCommand === undefined) {
+    const [publicPackageEvidenceCommand] = publicPackageEvidenceCommands;
+    if (publicPackageEvidenceCommand === undefined) {
         throw new Error(
-            'direct ballot setup handoff public parity command was unexpectedly missing after length validation.',
+            'direct ballot setup handoff public package evidence command was unexpectedly missing after length validation.',
         );
     }
-    const commandArguments = publicParityCommand.args;
+    const commandArguments = publicPackageEvidenceCommand.args;
     if (
         !commandArguments.includes('exec') ||
         !commandArguments.includes('vitest') ||
         !commandArguments.includes('run')
     ) {
         failures.push(
-            'direct ballot setup handoff public parity command must run vitest through the package manager.',
+            'direct ballot setup handoff public package evidence command must run vitest through the package manager.',
         );
     }
 
-    for (const testPath of directBallotSetupHandoffPublicParityTestPaths) {
+    for (const testPath of directBallotSetupHandoffPublicPackageEvidenceTestPaths) {
         if (!commandArguments.includes(testPath)) {
             failures.push(
-                `direct ballot setup handoff public parity command must include ${testPath}.`,
+                `direct ballot setup handoff public package evidence command must include ${testPath}.`,
             );
         }
     }
@@ -209,7 +209,7 @@ export const validateDirectBallotSetupHandoffPublicParityCommand = (
 
 export const validateDirectBallotSetupHandoffEvidenceLane =
     (): readonly string[] =>
-        validateDirectBallotSetupHandoffPublicParityCommand(
+        validateDirectBallotSetupHandoffPublicPackageEvidenceCommand(
             createDirectBallotSetupHandoffEvidenceCommands({
                 packageManagerRunner: verificationPackageManagerRunner,
             }),

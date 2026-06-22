@@ -386,7 +386,7 @@ const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445
 const PROOF_RANDOMNESS_NONCE: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
 const SAME_SECRET_STATEMENT_HASH_VECTOR: &str = "c300200cb9bde4e95f2129ad4c07ca6fa22a2c236278be5f0be474095f604d3afd0613c791e807dc4e4d942f202ea4f5cac20d5a93745eab3d87abf05a3cf4ee";
 const PUBLIC_KEY_SHARE_STATEMENT_HASH_VECTOR: &str = "108d59c7677c2007c43910828650f4a93d7555c63041e5865dcc906ca3b6e114456c85fc963165929bc676aac063307b69ecc18c3abcfa6f0f91a6bbcdff861e";
-const PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR: &str = "8b43c6464851009487e251b166d242f3f28735b86100ae328a5f0d54f6972f65278a357a87b68b3852afd22627fa20a4d5076a658a080533f7f4920cca9bb45b";
+const PRIVATE_VSS_SHARE_STATEMENT_HASH_VECTOR: &str = "19f33e333c13637754e073a1738c87764791d8c96e0ea7817f8a099350fde11629f46f3411010f0e40df829426c0215bd36c5363afaee20785f04242a65e01e1";
 const TRUSTEE_EVALUATION_KEY_STATEMENT_HASH_VECTOR: &str = "11fce9a48c01d57c8b08e2816a9a7704623775fcfdf5afca029ec4d2c32f5c2f070e567c2042e6554f6bbb3f46fe75a4711b8b52ab6626509e0ecd10f307bef0";
 
 fn round_one(level: usize) -> (EvaluationKeyShareKind, usize) {
@@ -2227,5 +2227,66 @@ fn public_key_share_accounting_carries_family_rows() {
             .as_str()
             .is_some_and(|text| text.contains("opens every Q_share constant commitment")),
         "the public-key share accounting must distinguish its narrower linkage from the same-secret anchor"
+    );
+}
+
+#[test]
+fn private_vss_share_accounting_uses_family_aware_masked_claim_bound() {
+    let accounting = super::accounting::succinct_private_vss_share_accounting_value()
+        .expect("private VSS share accounting");
+    assert_eq!(accounting["proofFamily"], "vss-opening-carry");
+    assert_eq!(
+        accounting["objectType"],
+        "SuccinctPrivateVssShareAccounting"
+    );
+    assert_eq!(accounting["fiatShamir"]["qromAccepted"], false);
+    assert_eq!(
+        accounting["zeroKnowledge"]["zeroKnowledgeClaimStatus"],
+        "bounded-statistical-leakage-scope-recorded-not-128-bit-zero-knowledge"
+    );
+    assert!(
+        accounting["familyRelationRows"]["integerBinding"]
+            .as_str()
+            .is_some_and(|text| text.contains("source limb modulus")),
+        "private VSS accounting must record the source-message bound"
+    );
+
+    let smudging_budget = &accounting["zeroKnowledge"]["smudgingBudget"];
+    assert!(
+        smudging_budget["familyClearClaimBoundModel"]
+            .as_str()
+            .is_some_and(|text| text.contains("private VSS masked claims")),
+        "the private VSS row must disclose the wider masked-claim model"
+    );
+    let clear_claim_bound_bits = smudging_budget["clearClaimBoundBits"]
+        .as_i64()
+        .expect("clear claim bound bits");
+    let per_claim_leakage = smudging_budget["perClaimStatisticalDistanceLog2"]
+        .as_i64()
+        .expect("per-claim leakage");
+    assert_eq!(per_claim_leakage, clear_claim_bound_bits - 92);
+    assert!(
+        per_claim_leakage > -68,
+        "private VSS must not inherit the evaluation-key smudging budget"
+    );
+    assert!(
+        smudging_budget["totalLeakageLog2Approximate"]
+            .as_i64()
+            .expect("total leakage")
+            > -50,
+        "private VSS total leakage must disclose the wider family bound"
+    );
+    assert_eq!(
+        smudging_budget["acceptedForBoundedLeakagePrototype"],
+        serde_json::json!(true)
+    );
+    assert_eq!(
+        smudging_budget["acceptedFor128BitZeroKnowledge"],
+        serde_json::json!(false)
+    );
+    assert!(
+        smudging_budget["leakageStatement"]
+            .as_str()
+            .is_some_and(|text| text.contains("minus twenty-two"))
     );
 }

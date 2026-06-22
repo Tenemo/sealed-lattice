@@ -122,7 +122,10 @@ use crate::{
         validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
+    hashing::{
+        canonical_json, chunk_root, derive_protocol_hash,
+        derive_protocol_hash_omitting_object_field, hash512, hash512_hex,
+    },
 };
 
 pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =

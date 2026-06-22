@@ -324,6 +324,38 @@ fn canonical_json_len(value: &Value) -> CanonicalResult<usize> {
     }
 }
 
+fn canonical_json_object_len_omitting_field(
+    map: &serde_json::Map<String, Value>,
+    omitted_field_name: &str,
+) -> CanonicalResult<usize> {
+    let mut entries = Vec::<String>::with_capacity(map.len().saturating_sub(1));
+    let mut length = 2_usize;
+    for (key, entry_value) in map {
+        if key == omitted_field_name {
+            continue;
+        }
+        let normalized_key = normalize_json_string(key).into_owned();
+        if entries
+            .iter()
+            .any(|existing_key| existing_key == &normalized_key)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::DuplicateField,
+                "canonical JSON object keys collide after normalization",
+            ));
+        }
+        entries.push(normalized_key.clone());
+        if entries.len() > 1 {
+            length = checked_len_add(length, 1)?;
+        }
+        length = checked_len_add(length, serialized_json_string_len(&normalized_key)?)?;
+        length = checked_len_add(length, 1)?;
+        length = checked_len_add(length, canonical_json_len(entry_value)?)?;
+    }
+
+    Ok(length)
+}
+
 fn write_canonical_json(value: &Value, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
     match value {
         Value::Null => sink.write_str("null"),
@@ -371,6 +403,42 @@ fn write_canonical_json(value: &Value, sink: &mut impl CanonicalJsonSink) -> Can
             sink.write_char('}')
         }
     }
+}
+
+fn write_canonical_json_object_omitting_field(
+    map: &serde_json::Map<String, Value>,
+    omitted_field_name: &str,
+    sink: &mut impl CanonicalJsonSink,
+) -> CanonicalResult<()> {
+    let mut entries = Vec::<(String, &Value)>::with_capacity(map.len().saturating_sub(1));
+    for (key, entry_value) in map {
+        if key == omitted_field_name {
+            continue;
+        }
+        let normalized_key = normalize_json_string(key).into_owned();
+        if entries
+            .iter()
+            .any(|(existing_key, _)| existing_key == &normalized_key)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::DuplicateField,
+                "canonical JSON object keys collide after normalization",
+            ));
+        }
+        entries.push((normalized_key, entry_value));
+    }
+    entries.sort_by(|left, right| compare_utf16(&left.0, &right.0));
+
+    sink.write_char('{')?;
+    for (entry_index, (key, entry_value)) in entries.iter().enumerate() {
+        if entry_index > 0 {
+            sink.write_char(',')?;
+        }
+        sink.write_str(&serialize_json_string(key)?)?;
+        sink.write_char(':')?;
+        write_canonical_json(entry_value, sink)?;
+    }
+    sink.write_char('}')
 }
 
 pub fn canonical_json(value: &Value) -> CanonicalResult<String> {
@@ -474,6 +542,36 @@ pub fn derive_protocol_hash(namespace: &str, value: &Value) -> CanonicalResult<S
     update_bytes_prefix(&mut hasher, canonical_json_length)?;
     write_canonical_json(
         value,
+        &mut HashingCanonicalJsonSink {
+            hasher: &mut hasher,
+        },
+    )?;
+
+    Ok(finalize_hash512_hex(hasher))
+}
+
+pub fn derive_protocol_hash_omitting_object_field(
+    namespace: &str,
+    value: &Value,
+    omitted_field_name: &str,
+) -> CanonicalResult<String> {
+    let Value::Object(map) = value else {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "protocol hash field omission requires a JSON object",
+        ));
+    };
+    let domain = resolve_protocol_hash_domain(namespace)?;
+    let canonical_json_length = canonical_json_object_len_omitting_field(map, omitted_field_name)?;
+    let mut hasher = Shake256::default();
+    hasher.update(HASH512_PREIMAGE_PREFIX);
+    update_bytes_prefix(&mut hasher, domain.len())?;
+    hasher.update(domain.as_bytes());
+    update_varuint(&mut hasher, 1);
+    update_bytes_prefix(&mut hasher, canonical_json_length)?;
+    write_canonical_json_object_omitting_field(
+        map,
+        omitted_field_name,
         &mut HashingCanonicalJsonSink {
             hasher: &mut hasher,
         },
@@ -612,8 +710,8 @@ mod tests {
         POLL_SPEC_HASH_NAMESPACE, RESERVED_ROOT_NAMESPACES, canonical_json,
         canonical_json_matches_bytes, canonical_root, chunk_root, derive_protocol_hash,
         derive_protocol_hash_for_ascii_string_payload,
-        derive_protocol_hash_for_proof_bytes_payload, hash512, hash512_hex, namespace_root,
-        resolve_protocol_hash_domain,
+        derive_protocol_hash_for_proof_bytes_payload, derive_protocol_hash_omitting_object_field,
+        hash512, hash512_hex, namespace_root, resolve_protocol_hash_domain,
     };
 
     #[test]
@@ -702,6 +800,26 @@ mod tests {
         .expect("generic hash should derive");
 
         assert_eq!(specialized, generic);
+    }
+
+    #[test]
+    fn protocol_hash_omitting_object_field_matches_clone_and_remove() {
+        let value = serde_json::json!({
+            "z": ["kept", {"inner": true}],
+            "root": "removed",
+            "a": 17,
+        });
+        let mut cloned = value.clone();
+        cloned
+            .as_object_mut()
+            .expect("test value is an object")
+            .remove("root");
+        let omitted = derive_protocol_hash_omitting_object_field("PollSpecHash", &value, "root")
+            .expect("omitted-field hash should derive");
+        let cloned_hash =
+            derive_protocol_hash("PollSpecHash", &cloned).expect("clone-and-remove hash");
+
+        assert_eq!(omitted, cloned_hash);
     }
 
     #[test]

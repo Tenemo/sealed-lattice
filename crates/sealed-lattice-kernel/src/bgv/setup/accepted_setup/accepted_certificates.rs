@@ -515,8 +515,8 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
             "claimAccounting": {
                 "accountingObject": "SuccinctPrivateVssShareAccounting",
                 "accountingHash": succinct_private_vss_share_accounting_hash()?,
-                "closedItems": "the relation shape, canonical statement binding, proof-byte decoding, batched low-degree checks, cross-field integer consistency bound, classical Fiat-Shamir transcript rows, and bounded-leakage scope are recorded inside the bound accounting object",
-                "claimBoundary": "recipient-local private VSS accounting is accepted only for the succinct family under the named FRI conjecture and classical Fiat-Shamir rows; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "closedItems": "the relation shape, canonical statement binding, proof-byte decoding, batched low-degree checks, cross-field integer consistency bound, classical Fiat-Shamir transcript rows, achieved-level CMS19 QROM metadata, and family-specific bounded-leakage scope are recorded inside the bound accounting object",
+                "claimBoundary": "recipient-local private VSS accounting is accepted only for the succinct family under the named FRI conjecture with achieved-level QROM metadata recorded; QROM strength and 128-bit zero-knowledge are not accepted rows",
             },
         },
         {
@@ -534,7 +534,7 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
             "claimAccounting": {
                 "accountingObject": "SuccinctSameSecretLinkageAnchorAccounting",
                 "accountingHash": succinct_same_secret_linkage_anchor_accounting_hash()?,
-                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, classical round-by-round Fiat-Shamir accounting, and achieved-level CMS19 QROM metadata are recorded inside the bound accounting object; QROM strength and 128-bit zero-knowledge are not accepted rows",
                 "claimBoundary": "active-malicious same-secret linkage accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; secret-dependent setup families reference this anchor through the accepted family binding root",
             },
         },
@@ -554,7 +554,7 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
             "claimAccounting": {
                 "accountingObject": "SuccinctPublicKeyShareAccounting",
                 "accountingHash": succinct_public_key_share_accounting_hash()?,
-                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, classical round-by-round Fiat-Shamir accounting, and achieved-level CMS19 QROM metadata are recorded inside the bound accounting object; QROM strength and 128-bit zero-knowledge are not accepted rows",
                 "claimBoundary": "active-malicious public-key share accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; the share secret is rebound to the same-secret linkage anchor through the accepted family binding root and the limb-zero commitment opening theorem dependency",
             },
         },
@@ -576,7 +576,7 @@ fn setup_proof_family_accounting_value() -> CanonicalResult<Value> {
             "claimAccounting": {
                 "accountingObject": "SuccinctEvaluationKeyProofAccounting",
                 "accountingHash": succinct_evaluation_key_proof_accounting_hash()?,
-                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, and classical round-by-round Fiat-Shamir accounting are recorded inside the bound accounting object; QROM loss and 128-bit zero-knowledge are not accepted rows",
+                "closedItems": "the named-conjecture low-degree bound, the two-prime cross-limb consistency lemma, the simulator argument with its opening-budget margin, the scoped smudging leakage budget, classical round-by-round Fiat-Shamir accounting, and achieved-level CMS19 QROM metadata are recorded inside the bound accounting object; QROM strength and 128-bit zero-knowledge are not accepted rows",
                 "claimBoundary": "active-malicious evaluation-key proof accounting is accepted only for classical succinct-family soundness under the named FRI conjecture; ceremony transport, roster binding, and target decryption keep their own gates",
             },
         },
@@ -609,8 +609,12 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
         "objectType": "SetupProofFiatShamirTranscriptAccounting",
         "objectVersion": 1,
         "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "accountingStatus": "succinct-family-classical-fiat-shamir-accounting-bound-per-family",
-        "qromReductionStatus": "qrom-reduction-loss-not-computed-classical-transcript-accounting-only",
+        "accountingStatus": "succinct-family-fiat-shamir-accounting-bound-with-achieved-qrom-recorded",
+        "qromReductionStatus": "computed-cms19-state-restoration-achieved-level-recorded-per-family",
+        "qromReductionLossComputed": true,
+        "qromAccepted": false,
+        "meetsConventional128BitQuantumBar": false,
+        "achievedQuantumSoundnessAfterInstanceUnionBitsApproximate": 70,
         "familyAccountingHashes": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
@@ -618,7 +622,7 @@ fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Valu
             "trusteeEvaluationKey": crate::bgv::setup::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         },
         "challengeBinding": "each succinct proof statement hash, proof family label, binding roots, Merkle transcript, low-degree transcript, and challenge-extension sampling rule is recorded inside the bound family accounting object",
-        "claimBoundary": "the setup accounting certificate binds classical Fiat-Shamir rows only through the succinct family accounting objects; QROM rows remain reference-only until a fixed-profile reduction-loss calculation exists"
+        "claimBoundary": "the setup accounting certificate binds classical Fiat-Shamir rows and achieved-level CMS19 QROM metadata through the succinct family accounting objects; QROM strength and conventional 128-bit quantum QROM claims remain deferred"
     }))
 }
 fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
@@ -632,7 +636,7 @@ fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
             "vss-opening-carry",
             "trustee-evaluation-key"
         ],
-        "accountingStatus": "succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open",
+        "accountingStatus": "succinct-setup-proof-family-accounting-accepted-achieved-qrom-recorded",
         "familyAccounting": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_value()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
@@ -645,7 +649,7 @@ fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
             "recipient-local private VSS opening and carry relation",
             "trustee evaluation-key schedule relation"
         ],
-        "claimBoundary": "accepted only for the listed succinct setup proof families under their bound family accounting objects; QROM reduction loss and 128-bit zero-knowledge are not accepted rows, and this does not close ballot proofs, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families"
+        "claimBoundary": "accepted only for the listed succinct setup proof families under their bound family accounting objects; achieved-level CMS19 QROM metadata is recorded, but QROM strength and 128-bit zero-knowledge are not accepted rows, and this does not close ballot proofs, evaluator replay, target decryption, supported-phone evidence, production audit readiness, or future proof-system families"
     }))
 }
 fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
@@ -690,13 +694,17 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
         "publicKeyShareProofAccountingHash":
             crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
+        "privateVssShareProofAccounting":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_value()?,
+        "privateVssShareProofAccountingHash":
+            crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
         "succinctTransportAccounting": setup_proof_succinct_transport_accounting_value()?,
         "succinctLeakageAccounting": setup_proof_succinct_leakage_accounting_value()?,
         "fiatShamirTranscriptAccounting": setup_proof_fiat_shamir_transcript_accounting_value()?,
         "proofTheoremAccounting": setup_proof_theorem_accounting_value()?,
         "completionBoundary": "claim-bearing accepted setup is a repo-owned library claim and does not require external validation or a third-party review gate",
-        "certificateStatus": "succinct-setup-proof-family-classical-accounting-accepted-qrom-open",
-        "claimBoundary": "every bound setup proof family carries accepted classical accounting through its succinct-family accounting object under the named FRI conjecture where applicable; QROM reduction loss and 128-bit zero-knowledge are not accepted by this certificate",
+        "certificateStatus": "succinct-setup-proof-family-accounting-accepted-achieved-qrom-recorded",
+        "claimBoundary": "every bound setup proof family carries accepted classical accounting and achieved-level CMS19 QROM metadata through its succinct-family accounting object under the named FRI conjecture where applicable; QROM strength and 128-bit zero-knowledge are not accepted by this certificate",
     }))
 }
 

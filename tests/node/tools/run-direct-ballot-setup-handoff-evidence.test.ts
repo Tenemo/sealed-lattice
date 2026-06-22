@@ -4,7 +4,7 @@ import { requiredRustHeavyEvidenceTests } from '#tools/ci/heavy-evidence-tests';
 import type { PackageManagerRunner } from '#tools/ci/package-manager-runner';
 import {
     createDirectBallotSetupHandoffEvidenceCommands,
-    directBallotSetupHandoffPublicParityTestPaths,
+    directBallotSetupHandoffPublicPackageEvidenceTestPaths,
     formatDirectBallotSetupHandoffEvidenceCommandPlan,
     shouldListDirectBallotSetupHandoffEvidenceCommands,
     unknownDirectBallotSetupHandoffEvidenceOptions,
@@ -37,7 +37,7 @@ describe('direct ballot setup handoff evidence runner', () => {
         expect(commandPlan).toContain(
             'cargo test ' + requiredRustHeavyEvidenceTests[0].testName,
         );
-        for (const testPath of directBallotSetupHandoffPublicParityTestPaths) {
+        for (const testPath of directBallotSetupHandoffPublicPackageEvidenceTestPaths) {
             expect(commandPlan).toContain(testPath);
         }
         expect(commandPlan).toContain(
@@ -51,7 +51,7 @@ describe('direct ballot setup handoff evidence runner', () => {
         ).toEqual(['--unknown']);
     });
 
-    it('creates a build, required Rust heavy evidence, public parity, and lane coverage command sequence', () => {
+    it('creates a build, required Rust heavy evidence, public package evidence, and lane coverage command sequence', () => {
         const selectedHeavyTest =
             requiredRustHeavyEvidenceTests[
                 requiredRustHeavyEvidenceTests.length - 1
@@ -106,11 +106,11 @@ describe('direct ballot setup handoff evidence runner', () => {
                 'exec',
                 'vitest',
                 'run',
-                ...directBallotSetupHandoffPublicParityTestPaths,
+                ...directBallotSetupHandoffPublicPackageEvidenceTestPaths,
             ],
             command: 'node',
             description:
-                'Run direct ballot setup handoff SDK/WASM public package parity tests',
+                'Run direct ballot setup handoff public package evidence tests',
             logFileSlug: 'direct-ballot-setup-handoff-public-parity',
         });
         expect(commands[3]).toMatchObject({

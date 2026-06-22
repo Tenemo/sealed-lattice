@@ -387,6 +387,7 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         "manual_accepted_setup_collective_setup_verifier_accepts_all_transported_public_setup_companions",
     );
     let (package, companions) = setup_package_with_transported_public_setup_companions();
+    assert_full_profile_setup_transport_measurement_rows_cover_public_setup_companions(&package);
 
     let result = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -556,6 +557,170 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
     }
 }
 
+fn assert_full_profile_setup_transport_measurement_rows_cover_public_setup_companions(
+    package: &serde_json::Value,
+) {
+    let setup_transport_certificate = package
+        .get("setupTransportCertificate")
+        .expect("setup transport certificate");
+    let transported_objects = setup_transport_certificate["transportedObjects"]
+        .as_array()
+        .expect("setup transport transported objects");
+    let transport_measurement_rows = setup_transport_certificate["transportMeasurementRows"]
+        .as_array()
+        .expect("setup transport measurement rows");
+    let transport_measurement_summary = &setup_transport_certificate["transportMeasurementSummary"];
+
+    assert_eq!(
+        transport_measurement_rows.len(),
+        transported_objects.len(),
+        "every transported setup proof/key object must have a profile transport measurement row"
+    );
+    assert_eq!(
+        transport_measurement_summary["rowCount"],
+        serde_json::json!(transported_objects.len()),
+        "transport measurement summary row count must cover every transported object"
+    );
+    assert_eq!(
+        transport_measurement_summary["totalByteLength"],
+        setup_transport_certificate["totalByteLength"]
+    );
+    assert_eq!(
+        transport_measurement_summary["chunkCount"],
+        setup_transport_certificate["chunkCount"]
+    );
+    assert_eq!(
+        transport_measurement_summary["chunkSizeBytes"],
+        serde_json::json!(1_048_576_u64)
+    );
+    assert_eq!(
+        transport_measurement_summary["storageQuotaBytes"],
+        serde_json::json!(2_147_483_648_u64)
+    );
+    assert_eq!(
+        transport_measurement_summary["largestSingleBufferBytes"],
+        serde_json::json!(1_572_864_u64)
+    );
+    assert_eq!(
+        transport_measurement_summary["copyCountLimit"],
+        serde_json::json!(2_u64)
+    );
+    assert_eq!(
+        transport_measurement_summary["streamVerificationOrder"],
+        "ascending-chunk-index"
+    );
+    assert_eq!(
+        transport_measurement_summary["resumePolicy"],
+        "chunk-index-checkpointed-by-hash"
+    );
+    assert_eq!(
+        transport_measurement_summary["lazyLoadingPolicy"],
+        "root-addressed-large-object-loading"
+    );
+    assert_eq!(
+        transport_measurement_summary["supportedPhoneBoundary"],
+        "supported-phone-runtime-evidence-is-deferred-and-not-required-by-this-setup-certificate"
+    );
+    assert_eq!(
+        transport_measurement_summary["profileScaleStatus"],
+        "profile-scale-transport-manifest-bound-to-current-package-shape"
+    );
+
+    let mut covered_object_roles = std::collections::BTreeSet::new();
+    for (transported_object_index, transported_object) in transported_objects.iter().enumerate() {
+        let transport_measurement_row = &transport_measurement_rows[transported_object_index];
+        for matching_field_name in [
+            "objectName",
+            "objectRole",
+            "objectRoot",
+            "byteLength",
+            "chunkStartIndex",
+            "chunkCount",
+            "chunkRoot",
+            "fullObjectHash",
+        ] {
+            assert_eq!(
+                transport_measurement_row[matching_field_name],
+                transported_object[matching_field_name],
+                "measurement row {transported_object_index} must match transported object field {matching_field_name}"
+            );
+        }
+        assert_eq!(
+            transport_measurement_row["objectType"],
+            "SetupTransportMeasurementRow"
+        );
+        assert_eq!(
+            transport_measurement_row["objectVersion"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            transport_measurement_row["setupProfileId"],
+            "CollectiveBgvSetup-v1"
+        );
+        assert_eq!(
+            transport_measurement_row["transportProfileId"],
+            "sealed-lattice-setup-binary-chunked-transport-v1"
+        );
+        assert_eq!(
+            transport_measurement_row["measurementKind"],
+            "static-profile-transport-manifest-accounting"
+        );
+        assert_eq!(
+            transport_measurement_row["chunkSizeBytes"],
+            serde_json::json!(1_048_576_u64)
+        );
+        assert_eq!(
+            transport_measurement_row["storageQuotaBytes"],
+            serde_json::json!(2_147_483_648_u64)
+        );
+        assert_eq!(
+            transport_measurement_row["largestSingleBufferBytes"],
+            serde_json::json!(1_572_864_u64)
+        );
+        assert_eq!(
+            transport_measurement_row["copyCountLimit"],
+            serde_json::json!(2_u64)
+        );
+        assert_eq!(
+            transport_measurement_row["streamVerificationOrder"],
+            "ascending-chunk-index"
+        );
+        assert_eq!(
+            transport_measurement_row["resumePolicy"],
+            "chunk-index-checkpointed-by-hash"
+        );
+        assert_eq!(
+            transport_measurement_row["lazyLoadingPolicy"],
+            "root-addressed-large-object-loading"
+        );
+        assert_eq!(
+            transport_measurement_row["profileScaleStatus"],
+            "profile-scale-transport-manifest-bound-to-current-package-shape"
+        );
+        covered_object_roles.insert(
+            transported_object["objectRole"]
+                .as_str()
+                .expect("transported object role")
+                .to_string(),
+        );
+    }
+
+    for required_object_role in [
+        "public-vss-coefficient-commitment-material",
+        "same-secret-proof-material",
+        "public-key-share-material",
+        "public-key-share-proof-material",
+        "evaluation-key-share-component-material",
+        "evaluation-key-share-proof-material",
+        "public-evaluation-key-runtime-material",
+    ] {
+        assert!(
+            covered_object_roles.contains(required_object_role),
+            "setup transport measurement rows must cover {required_object_role}"
+        );
+    }
+}
+
 #[test]
 #[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow() {
@@ -563,6 +728,7 @@ fn heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow() {
         "heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow",
     );
     let (package, companions) = setup_package_with_transported_public_setup_companions();
+    assert_full_profile_setup_transport_measurement_rows_cover_public_setup_companions(&package);
 
     let setup_verification = verify_collective_bgv_setup_package_from_request(&serde_json::json!({
         "setupPackage": package,
@@ -1236,6 +1402,7 @@ fn heavy_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
         .filter(|root| *root != &package_hash)
         .cloned()
         .collect::<std::collections::BTreeSet<_>>();
+    let accepted_root_paths = accepted_root_paths_by_hash(&package, &unique_accepted_roots);
     terminal_phase(&format!(
         "checking recomputed-root matrix over {} unique accepted roots",
         unique_accepted_roots.len()
@@ -1244,6 +1411,15 @@ fn heavy_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     let mut unbound_roots = Vec::new();
     let mut covered_root_count = 0_usize;
     for root in &unique_accepted_roots {
+        let root_label = accepted_root_paths
+            .get(root)
+            .map(|paths| paths.join(", "))
+            .unwrap_or_else(|| "<unlocated>".to_string());
+        terminal_phase(&format!(
+            "checking recomputed-root drift {}/{} at {root_label}",
+            covered_root_count + 1,
+            unique_accepted_roots.len()
+        ));
         let mut drifted = package.clone();
         let occurrences = drift_all_occurrences(&mut drifted, root, &drift_hash(root));
         assert!(
@@ -1256,7 +1432,7 @@ fn heavy_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
         }
         covered_root_count += 1;
         terminal_phase(&format!(
-            "checked recomputed-root drift {covered_root_count}/{}",
+            "checked recomputed-root drift {covered_root_count}/{} at {root_label}",
             unique_accepted_roots.len()
         ));
     }
@@ -1278,6 +1454,53 @@ fn heavy_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
         "refused",
         "drifting the outer setup package hash must be refused",
     );
+}
+
+fn accepted_root_paths_by_hash(
+    value: &serde_json::Value,
+    accepted_roots: &std::collections::BTreeSet<String>,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut root_paths = std::collections::BTreeMap::new();
+    collect_accepted_root_paths(value, accepted_roots, "setupPackage", &mut root_paths);
+
+    root_paths
+}
+
+fn collect_accepted_root_paths(
+    value: &serde_json::Value,
+    accepted_roots: &std::collections::BTreeSet<String>,
+    path: &str,
+    root_paths: &mut std::collections::BTreeMap<String, Vec<String>>,
+) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for (item_index, item) in items.iter().enumerate() {
+                collect_accepted_root_paths(
+                    item,
+                    accepted_roots,
+                    &format!("{path}[{item_index}]"),
+                    root_paths,
+                );
+            }
+        }
+        serde_json::Value::Object(fields) => {
+            for (field_name, child) in fields {
+                collect_accepted_root_paths(
+                    child,
+                    accepted_roots,
+                    &format!("{path}.{field_name}"),
+                    root_paths,
+                );
+            }
+        }
+        serde_json::Value::String(hash) if accepted_roots.contains(hash) => {
+            root_paths
+                .entry(hash.clone())
+                .or_default()
+                .push(path.to_string());
+        }
+        _ => {}
+    }
 }
 
 #[test]
@@ -1851,13 +2074,13 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statemen
     assert_eq!(result["verifierStatus"], "refused");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
+        "trusteeEvaluationKeyProofRootPreflightFailed"
     );
     assert!(
         result["refusedObjects"][0]["message"]
             .as_str()
             .expect("refusal message")
-            .contains("statementHash must match the statement rebuilt")
+            .contains("trusteeEvaluationKeyProofRoot does not match")
     );
 }
 

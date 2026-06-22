@@ -17,21 +17,10 @@ import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const listRequiredTestsArgument = '--list';
+const defaultRequiredRustHeavyEvidenceTestThreadCount = 1;
 const approximateGigabytesPerHeavyTest = 15;
-const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
 const availableGigabytes = os.freemem() / gigabyte;
-const memoryBoundedHeavyTestThreadCount = Math.max(
-    1,
-    Math.floor(
-        (availableGigabytes * heavyTestMemoryBudgetFraction) /
-            approximateGigabytesPerHeavyTest,
-    ),
-);
-const heavyAcceptedSetupTestThreadCount = Math.min(
-    os.cpus().length,
-    memoryBoundedHeavyTestThreadCount,
-);
 
 export const heavyRequiredEvidenceTargetDirectory = path.resolve(
     process.cwd(),
@@ -131,7 +120,8 @@ export const createRequiredRustHeavyEvidenceCargoCommands = (
     const targetDirectory =
         input.targetDirectory ?? heavyRequiredEvidenceTargetDirectory;
     const testThreadCount =
-        input.testThreadCount ?? heavyAcceptedSetupTestThreadCount;
+        input.testThreadCount ??
+        defaultRequiredRustHeavyEvidenceTestThreadCount;
     const baseEnvironment = input.baseEnvironment ?? process.env;
 
     return selectedTests.map((test) => ({
@@ -180,7 +170,7 @@ const main = async (): Promise<void> => {
 
     console.log(
         `Rust kernel required heavy evidence lane: ${selectedTests.length} test(s), ` +
-            `${heavyAcceptedSetupTestThreadCount} test thread(s) ` +
+            `${defaultRequiredRustHeavyEvidenceTestThreadCount} test thread(s) ` +
             `(${availableGigabytes.toFixed(1)} GiB available, ` +
             `${approximateGigabytesPerHeavyTest} GiB budgeted per test).`,
     );
@@ -191,7 +181,7 @@ const main = async (): Promise<void> => {
 
     const progressReporter = createHeavyTestProgressReporter({
         label: 'heavy:required',
-        threadCount: heavyAcceptedSetupTestThreadCount,
+        threadCount: defaultRequiredRustHeavyEvidenceTestThreadCount,
     });
 
     let exitCode: number | undefined;

@@ -1752,10 +1752,12 @@ fn trustee_evaluation_key_proofs_object_inner(
         };
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let terminal_transport_enabled = terminal_transport.is_some();
     let checkpoint_resume_enabled =
-        terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
+        terminal_transport_enabled && terminal_accepted_setup_checkpoint_resume_enabled();
     let trustee_proof_batch_size = trustee_evaluation_key_proof_generation_batch_size(
-        terminal_transport.is_some(),
+        terminal_transport_enabled,
+        checkpoint_resume_enabled,
         same_secret_proofs.len(),
     );
     let mut built_records: Vec<BuiltTrusteeEvaluationKeyProofRecord> =
@@ -1817,12 +1819,30 @@ fn trustee_evaluation_key_proofs_object_inner(
         } else {
             BTreeMap::new()
         };
-        let built_record_batch: Vec<BuiltTrusteeEvaluationKeyProofRecord> = work_item_batch
-            .into_par_iter()
-            .map(|work_item| {
-                build_trustee_evaluation_key_proof_record(work_item, &resumed_records, ring_degree)
-            })
-            .collect();
+        let built_record_batch: Vec<BuiltTrusteeEvaluationKeyProofRecord> =
+            if terminal_transport_enabled {
+                work_item_batch
+                    .into_iter()
+                    .map(|work_item| {
+                        build_trustee_evaluation_key_proof_record(
+                            work_item,
+                            &resumed_records,
+                            ring_degree,
+                        )
+                    })
+                    .collect()
+            } else {
+                work_item_batch
+                    .into_par_iter()
+                    .map(|work_item| {
+                        build_trustee_evaluation_key_proof_record(
+                            work_item,
+                            &resumed_records,
+                            ring_degree,
+                        )
+                    })
+                    .collect()
+            };
         built_records.extend(built_record_batch);
     }
     let mut proof_records = Vec::new();
@@ -1915,13 +1935,9 @@ fn trustee_evaluation_key_proofs_object_inner(
 
 fn trustee_evaluation_key_proof_generation_batch_size(
     terminal_transport_enabled: bool,
+    checkpoint_resume_enabled: bool,
     proof_count: usize,
 ) -> usize {
-    let default_batch_size = if terminal_transport_enabled {
-        TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
-    } else {
-        TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
-    };
     let configured_batch_size = if terminal_transport_enabled {
         std::env::var(
             TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_BATCH_SIZE_ENVIRONMENT_VARIABLE,
@@ -1932,9 +1948,31 @@ fn trustee_evaluation_key_proof_generation_batch_size(
     } else {
         None
     };
+    trustee_evaluation_key_proof_generation_batch_size_from_config(
+        terminal_transport_enabled,
+        checkpoint_resume_enabled,
+        proof_count,
+        configured_batch_size,
+    )
+}
+
+fn trustee_evaluation_key_proof_generation_batch_size_from_config(
+    terminal_transport_enabled: bool,
+    checkpoint_resume_enabled: bool,
+    proof_count: usize,
+    configured_batch_size: Option<usize>,
+) -> usize {
+    let bounded_proof_count = proof_count.max(1);
+    let default_batch_size = if terminal_transport_enabled && checkpoint_resume_enabled {
+        bounded_proof_count
+    } else if terminal_transport_enabled {
+        TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+    } else {
+        TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+    };
     configured_batch_size
         .unwrap_or(default_batch_size)
-        .min(proof_count.max(1))
+        .min(bounded_proof_count)
 }
 
 fn build_trustee_evaluation_key_proof_record(
@@ -2831,4 +2869,50 @@ fn same_secret_constant_commitments_from_deterministic_fixture(
             .expect("deterministic setup commitment")
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_transport_checkpoint_resume_batches_all_trustee_proof_lookups_by_default() {
+        assert_eq!(
+            trustee_evaluation_key_proof_generation_batch_size_from_config(true, true, 10, None),
+            10
+        );
+    }
+
+    #[test]
+    fn terminal_transport_without_checkpoint_resume_keeps_one_trustee_proof_per_batch() {
+        assert_eq!(
+            trustee_evaluation_key_proof_generation_batch_size_from_config(true, false, 10, None),
+            TERMINAL_TRANSPORT_TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+        );
+    }
+
+    #[test]
+    fn non_terminal_trustee_proof_generation_keeps_parallel_default() {
+        assert_eq!(
+            trustee_evaluation_key_proof_generation_batch_size_from_config(false, true, 10, None),
+            TRUSTEE_EVALUATION_KEY_PROOF_GENERATION_BATCH_SIZE
+        );
+    }
+
+    #[test]
+    fn explicit_terminal_trustee_proof_batch_size_remains_bounded_by_proof_count() {
+        assert_eq!(
+            trustee_evaluation_key_proof_generation_batch_size_from_config(true, true, 10, Some(2)),
+            2
+        );
+        assert_eq!(
+            trustee_evaluation_key_proof_generation_batch_size_from_config(
+                true,
+                true,
+                10,
+                Some(99)
+            ),
+            10
+        );
+    }
 }

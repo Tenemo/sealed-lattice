@@ -194,9 +194,11 @@ pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // Each consistency claim is one shared integer (clear bounded combination
 // plus a ninety-two-bit mask committed digit-wise in binary mask columns)
 // published as its residue in every limb field. The product of the two
-// smallest profile primes exceeds twice the claim bound, so the verifier's
-// centered two-prime lift is unique and per-claim leakage is the clear bound
-// over the mask bound, about 2^-68. This is not a 128-bit zero-knowledge row.
+// smallest profile primes exceeds twice the family-specific claim bound, so
+// the verifier's centered two-prime lift is unique. Evaluation-key and
+// public-key share rows have about 2^-68 per-claim leakage, while private VSS
+// rows disclose the wider source-message bound separately. This is not a
+// 128-bit zero-knowledge row.
 pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 92;
 // FRI query count at rate 1/2. CHANGE (2026, Option B): the per-query
 // soundness is no longer the disproved one-bit (1 - rho) up-to-capacity bound

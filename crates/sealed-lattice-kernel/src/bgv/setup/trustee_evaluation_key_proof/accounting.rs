@@ -61,13 +61,10 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     let base_field_bits = i64::from(smallest_limb_prime.ilog2());
     let challenge_field_bits = base_field_bits * CHALLENGE_EXTENSION_DEGREE as i64;
     // Clear consistency sums are bounded by max witness magnitude (two for
-    // centered-binomial errors) times the ring degree times the coefficient
-    // bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT binary digits.
+    // centered-binomial errors in this family) times the ring degree times the
+    // coefficient bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT binary
+    // digits.
     let consistency_coefficient_bound = (1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1;
-    // Clear consistency sums are bounded by max witness magnitude (2 for
-    // centered-binomial errors) times the ring degree times the per-coefficient
-    // bound; this is correct for the eval-key family but is reused unchanged by
-    // migrated families (see the private-VSS known-issue note).
     let clear_claim_bound =
         2_u128 * POLYNOMIAL_DEGREE as u128 * u128::from(consistency_coefficient_bound);
     // Ceiling of the clear bound's bit length, again the conservative side.
@@ -266,7 +263,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "soundnessInheritance": "the opening relations are rows of the same batched lincheck and row checks, so their soundness is the linear-relation and consistency rows above",
             "accepted": true,
         },
-        "claimBoundary": "accounting closed for classical succinct-family soundness under the explicitly named CS25 mutual-correlated-agreement FRI conjecture up to the q-ary list-decoding (entropy) capacity, the admissible claim-bearing repair of the disproved up-to-capacity proximity gap, carrying a disclosed small-medium research risk; the proven BCIKS20 Johnson fallback is the unconditional alternative, the QROM reduction-loss calculation and the full 128-bit zero-knowledge upgrade are separately-tracked refinements not accounted by this row, and the smudging statement is scoped to its recorded bounded leakage; rows outside this argument (ceremony transport, roster binding, target decryption) keep their own gates",
+        "claimBoundary": "accounting closed for classical succinct-family soundness under the explicitly named CS25 mutual-correlated-agreement FRI conjecture up to the q-ary list-decoding (entropy) capacity, the admissible claim-bearing repair of the disproved up-to-capacity proximity gap, carrying a disclosed small-medium research risk; the proven BCIKS20 Johnson fallback is the unconditional alternative, CMS19 QROM achieved-level metadata is recorded but not accepted as QROM strength, the full 128-bit zero-knowledge upgrade is not accepted, and the smudging statement is scoped to its recorded bounded leakage; rows outside this argument (ceremony transport, roster binding, target decryption) keep their own gates",
     }))
 }
 
@@ -275,6 +272,73 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_hash() -> CanonicalResult
         "SuccinctEvaluationKeyProofAccountingHash",
         &succinct_evaluation_key_proof_accounting_value()?,
     )
+}
+
+const FIRST_PROFILE_ROSTER_SIZE: u64 = 10;
+const FIRST_PROFILE_DECRYPTION_THRESHOLD: usize = 4;
+const FIRST_PROFILE_CLAIM_BUDGET_LOG2_APPROXIMATE: i64 = 17;
+
+fn clear_consistency_claim_bound_for_witness_bound(witness_bound: u128) -> u128 {
+    let consistency_coefficient_bound = (1_u128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
+    witness_bound
+        .checked_mul(POLYNOMIAL_DEGREE as u128)
+        .and_then(|bound| bound.checked_mul(consistency_coefficient_bound))
+        .expect("first-profile consistency claim bound fits in u128")
+}
+
+fn bit_length(value: u128) -> i64 {
+    i64::from(value.ilog2()) + 1
+}
+
+fn first_profile_private_vss_carry_bound() -> u128 {
+    let mut power = 1_u128;
+    let mut bound = 0_u128;
+    for _ in 0..FIRST_PROFILE_DECRYPTION_THRESHOLD {
+        bound = bound
+            .checked_add(power)
+            .expect("first-profile private VSS carry bound fits in u128");
+        power = power
+            .checked_mul(u128::from(FIRST_PROFILE_ROSTER_SIZE))
+            .expect("first-profile private VSS carry bound fits in u128");
+    }
+
+    bound
+}
+
+fn first_profile_private_vss_smudging_budget() -> Value {
+    let largest_source_message_modulus = u128::from(
+        *DATA_PRIMES
+            .iter()
+            .max()
+            .expect("the data basis is non-empty"),
+    );
+    let source_message_bound = largest_source_message_modulus
+        .checked_sub(1)
+        .expect("data prime is positive");
+    let carry_bound = first_profile_private_vss_carry_bound();
+    let witness_bound = source_message_bound.max(carry_bound).max(1);
+    let clear_claim_bound = clear_consistency_claim_bound_for_witness_bound(witness_bound);
+    let clear_claim_bound_bits = bit_length(clear_claim_bound);
+    let per_claim_statistical_distance_log2 =
+        clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64;
+    let total_leakage_log2_approximate =
+        per_claim_statistical_distance_log2 + FIRST_PROFILE_CLAIM_BUDGET_LOG2_APPROXIMATE;
+
+    json!({
+        "perClaimStatisticalDistanceLog2": per_claim_statistical_distance_log2,
+        "leakageStatement": "private VSS published claim integers include full-size source-limb message residues, so the family-specific clear bound is about two to the seventy and the ninety-two-bit mask gives about two to the minus twenty-two per claim; across the first profile claim budget this is about two to the minus five, a disclosed bounded-leakage row only and not a 128-bit zero-knowledge statement",
+        "familyClearClaimBoundModel": "private VSS masked claims use max(source_message_modulus - 1, lifted carry bound) times ring degree times the eight-bit consistency coefficient bound; first-profile carry uses recipient point ten and four Shamir coefficients, giving 1 + 10 + 100 + 1000",
+        "largestSourceMessageModulus": largest_source_message_modulus.to_string(),
+        "sourceMessageBound": source_message_bound.to_string(),
+        "carryBound": carry_bound.to_string(),
+        "witnessBound": witness_bound.to_string(),
+        "clearClaimBound": clear_claim_bound.to_string(),
+        "clearClaimBoundBits": clear_claim_bound_bits,
+        "claimBudgetLog2Approximate": FIRST_PROFILE_CLAIM_BUDGET_LOG2_APPROXIMATE,
+        "totalLeakageLog2Approximate": total_leakage_log2_approximate,
+        "acceptedForBoundedLeakagePrototype": true,
+        "acceptedFor128BitZeroKnowledge": false,
+    })
 }
 
 // One migrated family's accounting: the closed evaluation-key accounting with
@@ -287,11 +351,8 @@ fn migrated_family_accounting(
     family_relation_rows: Value,
     wasm_browser_measurement: Value,
 ) -> CanonicalResult<Value> {
-    // Note: this carries the base eval-key smudgingBudget block
-    // (perClaimStatisticalDistanceLog2 about -68) unchanged into every migrated
-    // family. That figure is only correct for families whose witnesses are
-    // centered-binomial errors of magnitude 2; see the known-issue note on
-    // succinct_private_vss_share_accounting_value.
+    // Families with wider consistency witnesses must replace the inherited
+    // smudging budget after this shared accounting object is built.
     let mut accounting = succinct_evaluation_key_proof_accounting_value()?;
     let accounting_fields = accounting
         .as_object_mut()
@@ -408,16 +469,6 @@ pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<Str
 // coefficient openings plus the lifted recipient-share relation with hidden
 // carry columns over the setup commitment fields.
 pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<Value> {
-    // KNOWN ISSUE (leakage accounting): this family inherits the smudgingBudget
-    // from succinct_evaluation_key_proof_accounting_value via
-    // migrated_family_accounting, whose perClaimStatisticalDistanceLog2 is
-    // computed from clear_claim_bound about 2^24 (centered-binomial magnitude
-    // 2). The private-VSS family's real masked claim uses message_bound about
-    // the source prime (about 2^47) per masked_claim_bounds in relation.rs, so
-    // its true clear bound is about 2^70 and true per-claim leakage about
-    // 2^-22, not the disclosed about 2^-68. The masking math is family-correct;
-    // only the disclosed and bound accounting figure under-reports. Fix:
-    // recompute clear_claim_bound per family from masked_claim_bounds.
     let mut accounting = migrated_family_accounting(
         "SuccinctPrivateVssShareAccounting",
         super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
@@ -444,6 +495,12 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
                     .to_string(),
             ),
         );
+    }
+    if let Some(smudging_budget) = accounting_fields
+        .get_mut("zeroKnowledge")
+        .and_then(|zero_knowledge| zero_knowledge.get_mut("smudgingBudget"))
+    {
+        *smudging_budget = first_profile_private_vss_smudging_budget();
     }
 
     Ok(accounting)

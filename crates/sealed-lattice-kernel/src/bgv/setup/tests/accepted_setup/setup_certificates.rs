@@ -111,6 +111,50 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         proof_family_accounting[0]["claimAccounting"]["accountingObject"],
         "SuccinctPrivateVssShareAccounting"
     );
+    assert_eq!(
+        proof_family_accounting[0]["claimAccounting"]["accountingHash"],
+        certificate["privateVssShareProofAccountingHash"]
+    );
+    assert_eq!(
+        certificate["privateVssShareProofAccounting"]["objectType"],
+        "SuccinctPrivateVssShareAccounting"
+    );
+    let private_vss_smudging =
+        &certificate["privateVssShareProofAccounting"]["zeroKnowledge"]["smudgingBudget"];
+    assert_eq!(
+        private_vss_smudging["acceptedForBoundedLeakagePrototype"],
+        true
+    );
+    assert_eq!(
+        private_vss_smudging["acceptedFor128BitZeroKnowledge"],
+        false
+    );
+    let private_vss_clear_claim_bound_bits = private_vss_smudging["clearClaimBoundBits"]
+        .as_i64()
+        .expect("private VSS clear claim bound bits");
+    let private_vss_per_claim_leakage = private_vss_smudging["perClaimStatisticalDistanceLog2"]
+        .as_i64()
+        .expect("private VSS per-claim leakage");
+    assert_eq!(
+        private_vss_per_claim_leakage,
+        private_vss_clear_claim_bound_bits - 92
+    );
+    assert!(
+        private_vss_per_claim_leakage > -68,
+        "private VSS must not inherit the evaluation-key smudging budget"
+    );
+    assert!(
+        private_vss_smudging["totalLeakageLog2Approximate"]
+            .as_i64()
+            .expect("private VSS total leakage")
+            > -50,
+        "private VSS total leakage must disclose the wider family bound"
+    );
+    assert!(
+        private_vss_smudging["leakageStatement"]
+            .as_str()
+            .is_some_and(|text| text.contains("minus twenty-two"))
+    );
 
     // The same-secret linkage anchor carries its accepted succinct accounting:
     // the row binds the anchor accounting object with every theorem row closed
@@ -211,7 +255,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
     );
     assert_eq!(
         certificate["certificateStatus"],
-        "succinct-setup-proof-family-classical-accounting-accepted-qrom-open"
+        "succinct-setup-proof-family-accounting-accepted-achieved-qrom-recorded"
     );
 
     let succinct_transport_accounting = certificate["succinctTransportAccounting"]
@@ -243,11 +287,21 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         .expect("Fiat-Shamir transcript accounting");
     assert_eq!(
         fiat_shamir_accounting["accountingStatus"],
-        "succinct-family-classical-fiat-shamir-accounting-bound-per-family"
+        "succinct-family-fiat-shamir-accounting-bound-with-achieved-qrom-recorded"
     );
     assert_eq!(
         fiat_shamir_accounting["qromReductionStatus"],
-        "qrom-reduction-loss-not-computed-classical-transcript-accounting-only"
+        "computed-cms19-state-restoration-achieved-level-recorded-per-family"
+    );
+    assert_eq!(fiat_shamir_accounting["qromReductionLossComputed"], true);
+    assert_eq!(fiat_shamir_accounting["qromAccepted"], false);
+    assert_eq!(
+        fiat_shamir_accounting["meetsConventional128BitQuantumBar"],
+        false
+    );
+    assert_eq!(
+        fiat_shamir_accounting["achievedQuantumSoundnessAfterInstanceUnionBitsApproximate"],
+        70
     );
     assert_eq!(
         fiat_shamir_accounting["familyAccountingHashes"]["privateVssShare"],
@@ -271,7 +325,7 @@ fn setup_proof_accounting_certificate_accepts_claim_theorem_accounting() {
         .expect("proof theorem accounting");
     assert_eq!(
         proof_theorem_accounting["accountingStatus"],
-        "succinct-setup-proof-family-accounting-accepted-classical-fiat-shamir-qrom-open"
+        "succinct-setup-proof-family-accounting-accepted-achieved-qrom-recorded"
     );
     assert_eq!(
         proof_theorem_accounting["familyAccounting"]["privateVssShare"]["objectType"],
@@ -321,16 +375,21 @@ fn collective_setup_verifier_refuses_duplicate_current_proof_accounting_row() {
 #[test]
 fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
     // These rows must stay false and the verifier must reject any upgrade to
-    // true: the setup proofs are not QROM-sound and not 128-bit zero-knowledge,
-    // so claiming otherwise would overstate the closed claim boundary.
+    // true: the setup proofs record achieved-level QROM metadata, but not QROM
+    // strength or 128-bit zero-knowledge, so claiming otherwise would overstate
+    // the closed claim boundary.
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows",
     );
 
-    let model_row_mutations: [fn(&mut serde_json::Value); 3] = [
+    let model_row_mutations: [fn(&mut serde_json::Value); 5] = [
         |package| {
             package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromReductionStatus"] =
                 serde_json::json!("qrom-reduction-loss-accepted-for-final-claim");
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["fiatShamirTranscriptAccounting"]["qromAccepted"] =
+                serde_json::json!(true);
         },
         |package| {
             package["setupProofAccountingCertificate"]["succinctLeakageAccounting"]["zeroKnowledgeScope"] =
@@ -338,6 +397,10 @@ fn collective_setup_verifier_refuses_upgraded_non_claim_proof_model_rows() {
         },
         |package| {
             package["setupProofAccountingCertificate"]["trusteeEvaluationKeyProofAccounting"]["zeroKnowledge"]
+                ["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] = serde_json::json!(true);
+        },
+        |package| {
+            package["setupProofAccountingCertificate"]["privateVssShareProofAccounting"]["zeroKnowledge"]
                 ["smudgingBudget"]["acceptedFor128BitZeroKnowledge"] = serde_json::json!(true);
         },
     ];

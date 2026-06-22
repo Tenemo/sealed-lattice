@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     validateDirectBallotSetupHandoffEvidenceLane,
-    validateDirectBallotSetupHandoffPublicParityCommand,
+    validateDirectBallotSetupHandoffPublicPackageEvidenceCommand,
     validateRustHeavyEvidenceTestSource,
     testLaneGroupsForRelativePath,
     validateTestLaneCoverage,
@@ -91,11 +91,11 @@ describe('test lane coverage verification', () => {
         ]);
     });
 
-    it('requires the manual setup-handoff evidence lane to keep SDK and WASM public parity tests', () => {
+    it('requires the manual setup-handoff evidence lane to keep public package evidence tests', () => {
         expect(validateDirectBallotSetupHandoffEvidenceLane()).toEqual([]);
 
         expect(
-            validateDirectBallotSetupHandoffPublicParityCommand([
+            validateDirectBallotSetupHandoffPublicPackageEvidenceCommand([
                 {
                     args: [
                         'pnpm.cjs',
@@ -103,14 +103,17 @@ describe('test lane coverage verification', () => {
                         'vitest',
                         'run',
                         'packages/sdk/tests/node/direct-encrypted-ballot-public-api.test.ts',
+                        'packages/sdk/tests/node/setup-proof-material-streaming.test.ts',
+                        'packages/protocol/tests/node/setup-local-trustee-state-storage.test.ts',
+                        'packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.kernel.test.ts',
                     ],
                     command: 'node',
                     description:
-                        'Run direct ballot setup handoff SDK/WASM public package parity tests',
+                        'Run direct ballot setup handoff public package evidence tests',
                 },
             ]),
         ).toEqual([
-            'direct ballot setup handoff public parity command must include packages/wasm/tests/node/transcript-core-kernel/kernel-memory-and-loader.kernel.test.ts.',
+            'direct ballot setup handoff public package evidence command must include packages/sdk/tests/node/accepted-setup-public-api.test.ts.',
         ]);
     });
 });

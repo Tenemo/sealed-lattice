@@ -56,15 +56,18 @@ use self::common_randomness::{
 use self::evaluation_key_material_transport::{
     evaluation_key_material_refusal,
     transported_evaluation_key_share_component_material_from_request,
-    verify_public_evaluation_key_set, verify_required_public_evaluation_key_set,
+    verify_public_evaluation_key_set, verify_public_evaluation_key_set_hash_preflight,
+    verify_required_public_evaluation_key_set,
 };
-use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
     TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
     register_verified_trustee_evaluation_key_proof_material_chunks,
     round_one_public_aggregate_diagonals_from_package, trustee_evaluation_key_proof_material_root,
     trustee_evaluation_key_statement_from_package,
+};
+use self::evaluation_key_proof_checks::{
+    verify_trustee_evaluation_key_proof_set_root_preflight, verify_trustee_evaluation_key_proofs,
 };
 use self::evaluation_key_share_rounds::{
     EvaluationKeyProofCommonBinding, evaluation_key_proof_common_binding,
@@ -744,6 +747,9 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_context(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    if let Some(response) = verify_terminal_root_refusal_preflight(setup_package)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     if let Some(response) = verify_q_share(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -875,6 +881,17 @@ fn verify_collective_setup_package(
     }
     accepted_setup_verifier_phase("completed collective setup package verification");
     Ok(VerificationFlow::Continue)
+}
+
+fn verify_terminal_root_refusal_preflight(setup_package: &Value) -> CanonicalResult<Option<Value>> {
+    if let Some(response) = verify_trustee_evaluation_key_proof_set_root_preflight(setup_package)? {
+        return Ok(Some(response));
+    }
+    if let Some(response) = verify_public_evaluation_key_set_hash_preflight(setup_package)? {
+        return Ok(Some(response));
+    }
+
+    Ok(None)
 }
 
 fn verify_setup_package_hash(

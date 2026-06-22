@@ -189,6 +189,9 @@ pub(super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys.genericKeySwitchKeyRoots",
         )?));
     }
+    if let Some(response) = verify_public_evaluation_key_set_hash_preflight(setup_package)? {
+        return Ok(Some(response));
+    }
 
     let expected_relinearization_key_roots =
         expected_relinearization_key_roots_for_evaluation_keys(setup_package, &binding)?;
@@ -246,13 +249,11 @@ pub(super) fn verify_public_evaluation_key_set(
     }
 
     let supplied_evaluation_key_set_hash = value_string(evaluation_keys, "evaluationKeySetHash")?;
-    let mut root_input = evaluation_keys.clone();
-    root_input
-        .as_object_mut()
-        .expect("evaluationKeys object was checked")
-        .remove("evaluationKeySetHash");
-    let expected_evaluation_key_set_hash =
-        derive_protocol_hash("EvaluationKeySetHash", &root_input)?;
+    let expected_evaluation_key_set_hash = derive_protocol_hash_omitting_object_field(
+        "EvaluationKeySetHash",
+        evaluation_keys,
+        "evaluationKeySetHash",
+    )?;
     if supplied_evaluation_key_set_hash != expected_evaluation_key_set_hash {
         return Ok(Some(evaluation_key_material_refusal(
             "evaluationKeySetHashMismatch",
@@ -276,6 +277,38 @@ pub(super) fn verify_public_evaluation_key_set(
             "publicEvaluationKeyMaterialUndeclared",
             "transported public evaluation-key material must be declared by evaluationKeys",
             "transportedPublicEvaluationKeyMaterial",
+        )?));
+    }
+
+    Ok(None)
+}
+
+pub(super) fn verify_public_evaluation_key_set_hash_preflight(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(evaluation_keys) = setup_package.get("evaluationKeys") else {
+        return Ok(None);
+    };
+    if !evaluation_keys.is_object()
+        || evaluation_keys
+            .as_object()
+            .is_some_and(serde_json::Map::is_empty)
+        || evaluation_keys.get("evaluationKeySetHash").is_none()
+    {
+        return Ok(None);
+    }
+
+    let supplied_evaluation_key_set_hash = value_string(evaluation_keys, "evaluationKeySetHash")?;
+    let expected_evaluation_key_set_hash = derive_protocol_hash_omitting_object_field(
+        "EvaluationKeySetHash",
+        evaluation_keys,
+        "evaluationKeySetHash",
+    )?;
+    if supplied_evaluation_key_set_hash != expected_evaluation_key_set_hash {
+        return Ok(Some(evaluation_key_material_refusal(
+            "evaluationKeySetHashMismatch",
+            "evaluationKeySetHash does not match the canonical public evaluation-key set",
+            "setupPackage.evaluationKeys.evaluationKeySetHash",
         )?));
     }
 

@@ -116,6 +116,7 @@ fn verify_trustee_evaluation_key_proof_set(
             "trusteeEvaluationKeyProofs objectType and objectVersion must match the accepted profile",
         ));
     }
+    verify_trustee_evaluation_key_proof_set_roots(proof_set)?;
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -352,13 +353,47 @@ fn verify_trustee_evaluation_key_proof_set(
     }
     accepted_setup_verifier_phase("verified all trustee evaluation-key proof records");
 
+    Ok(())
+}
+
+pub(super) fn verify_trustee_evaluation_key_proof_set_root_preflight(
+    setup_package: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let Some(proof_set) = setup_package.get("trusteeEvaluationKeyProofs") else {
+        return Ok(None);
+    };
+    if !proof_set.is_object() {
+        return Ok(None);
+    }
+    if proof_set.get("trusteeEvaluationKeyProofSetRoot").is_none()
+        || proof_set.get("proofRecords").is_none()
+    {
+        return Ok(None);
+    }
+
+    if let Err(error) = verify_trustee_evaluation_key_proof_set_roots(proof_set) {
+        return Ok(Some(evaluation_key_material_refusal(
+            "trusteeEvaluationKeyProofRootPreflightFailed",
+            error.message,
+            "setupPackage.trusteeEvaluationKeyProofs",
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn verify_trustee_evaluation_key_proof_set_roots(proof_set: &Value) -> CanonicalResult<()> {
+    let proof_records = array_value(proof_set, "proofRecords")?;
+    for proof_record in proof_records {
+        verify_trustee_evaluation_key_proof_record_root(proof_record)?;
+    }
+
     let supplied_root = value_string(proof_set, "trusteeEvaluationKeyProofSetRoot")?;
-    let mut root_input = proof_set.clone();
-    root_input
-        .as_object_mut()
-        .expect("trustee evaluation-key proof set object was checked")
-        .remove("trusteeEvaluationKeyProofSetRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &root_input)?;
+    let expected_root = derive_protocol_hash_omitting_object_field(
+        "TrusteeEvaluationKeyProofSetRoot",
+        proof_set,
+        "trusteeEvaluationKeyProofSetRoot",
+    )?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -501,13 +536,18 @@ fn verify_trustee_evaluation_key_proof_record(
     accepted_setup_verifier_phase(&format!(
         "verified trustee evaluation-key relation proof for trustee {trustee_roster_position}"
     ));
+    verify_trustee_evaluation_key_proof_record_root(proof_record)?;
+
+    Ok(())
+}
+
+fn verify_trustee_evaluation_key_proof_record_root(proof_record: &Value) -> CanonicalResult<()> {
     let supplied_root = value_string(proof_record, "trusteeEvaluationKeyProofRoot")?;
-    let mut root_input = proof_record.clone();
-    root_input
-        .as_object_mut()
-        .expect("trustee evaluation-key proof record object was checked")
-        .remove("trusteeEvaluationKeyProofRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &root_input)?;
+    let expected_root = derive_protocol_hash_omitting_object_field(
+        "TrusteeEvaluationKeyProofRoot",
+        proof_record,
+        "trusteeEvaluationKeyProofRoot",
+    )?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

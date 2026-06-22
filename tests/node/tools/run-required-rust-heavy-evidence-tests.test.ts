@@ -67,6 +67,18 @@ describe('required Rust heavy evidence runner', () => {
         );
     });
 
+    it('uses one libtest thread by default for required heavy evidence commands', () => {
+        const selectedTest = requiredRustHeavyEvidenceTests[0];
+        const commands = createRequiredRustHeavyEvidenceCargoCommands([
+            selectedTest,
+        ]);
+        const testThreadsArgumentIndex =
+            commands[0]?.args.indexOf('--test-threads') ?? -1;
+
+        expect(testThreadsArgumentIndex).toBeGreaterThanOrEqual(0);
+        expect(commands[0]?.args[testThreadsArgumentIndex + 1]).toBe('1');
+    });
+
     it('creates one exact cargo command per selected test with checkpoint resume', () => {
         const selectedTest = requiredRustHeavyEvidenceTests[0];
         const targetDirectory = 'C:/workspace/target/heavy-required-evidence';

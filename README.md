@@ -96,16 +96,29 @@ The public package must not expose raw BGV decryption, arbitrary threshold decry
 
 ## Safety boundaries
 
-All current setup, ballot, aggregation, evaluator, and target-decryption code is development evidence only. The Rust/WASM transcript-core kernel can create, verify, and publicly aggregate `EncryptedBallotPackage` artifacts from package objects, canonical ciphertext bytes, public proof chunks, accepted public-key material, and an accepted setup handoff root without `setupPackage`, `setupPublicMaterial`, `setupPrivateWitness`, top-count evaluator requests, public evaluation-key material, or plaintext oracle access in the public package commands. Those artifacts are still non-claim-bearing relation evidence until the remaining final evidence, evaluator, and target-decryption gates close. Supported-phone proof evidence is a separate later runtime target, not a direct encrypted ballot proof blocker. The package must not be used for real ballots or ballot secrecy, and nothing in it is supported-phone, production, audited, or certified.
+The accepted collective BGV setup for `CollectiveBgvSetup-v1` is closed for the
+SL3 setup handoff under the active-static prototype boundary, and the direct
+encrypted ballot package path is closed as SL3 claim-path relation evidence under
+its selected proof-profile boundary. This does not make the package production,
+audited, certified, supported-phone-ready, or end-to-end complete. Evaluator,
+target-decryption, decoded result, finality, supported-phone runtime, QROM
+strength, and conventional 128-bit quantum QROM closure remain later targets.
+The package must not be used for real ballots or ballot secrecy.
 
-In particular, the accepted collective BGV setup for `CollectiveBgvSetup-v1` is
-not claim-complete: a profile-scale Rust terminal setup-package lane now passes,
-cross-runtime/public-package boundary coverage plus required manual adversarial
-evidence passes for the current provenance-bound package shape, the setup transport
-certificate binds static measurement rows, and encrypted local trustee state
-export/restore now carries rooted static transport evidence. Final profile-scale
-transport/profile measurement evidence across the remaining setup proof, key,
-and local-state flows and final verification gates are still pending. On
+The Rust/WASM transcript-core kernel can create, verify, and publicly aggregate
+`EncryptedBallotPackage` artifacts from package objects, canonical ciphertext
+bytes, public proof chunks, accepted public-key material, and an accepted setup
+handoff root without `setupPackage`, `setupPublicMaterial`,
+`setupPrivateWitness`, top-count evaluator requests, public evaluation-key
+material, or plaintext oracle access in the public package commands.
+
+In particular, the accepted collective BGV setup now has current-shape
+profile-scale evidence for SL3 handoff use: the setup transport certificate binds
+static measurement rows and an aggregate summary, encrypted local trustee state
+export/restore carries rooted static transport evidence, the setup assembly
+provenance certificate is verifier-recomputed and root-bound, and the required
+manual setup-handoff evidence lane passed on 2026-06-21 after the private-VSS
+family-specific accounting update. On
 accepted terminal responses the setup verifier returns both
 `acceptedSetupHandoff` and `acceptedPublicKeyMaterial`; the accepted ballot
 package path consumes those objects directly, refuses passive setup material and
@@ -189,42 +202,58 @@ BGV quotient rows; the accepted backend path is still scoped to accepted
 approximate-range/no-wrap accounting rather than appending explicit carry
 response polynomials. Full-profile setup-output-to-ballot integration evidence
 has a current Rust kernel heavy-lane pass over the provenance-bound accepted
-setup package shape. On June 19, 2026, the manual
+setup package shape. On June 21, 2026, the manual
 `pnpm run test:direct-ballot:setup-handoff:evidence` lane passed with exit code
-0 in 7,292,555 ms (started `2026-06-19T03:45:02.903Z`, finished
-`2026-06-19T05:46:35.463Z`), running the workspace build, all 18 listed
+0 in 42,220,833 ms (started `2026-06-21T03:27:31.687Z`, finished
+`2026-06-21T15:11:14.550Z`), running the workspace build, the 20 listed
 required Rust heavy setup transport/refusal and setup-output-to-ballot tests,
-the public SDK setup-handoff forwarding test, the WASM bridge command-boundary
-test, and the lane-coverage registry check.
+the expanded 5-file public-package evidence command, and the lane-coverage
+registry check.
 `heavy_accepted_setup_output_drives_direct_encrypted_ballot_package_flow`
 verified the accepted setup package, checked the direct-ballot setup-output
 bindings and refusal matrix, created a direct encrypted ballot package, verified
 it publicly, checked the package and aggregation refusal cases, and aggregated it
 while consuming the `acceptedSetupHandoff` and `acceptedPublicKeyMaterial`
-returned by accepted setup verification in 3,616,143 ms. This evidence must be
-refreshed after accepted package-shape changes. The normal
-check runner machine-checks that required manual Rust heavy-evidence tests,
+returned by accepted setup verification in 4,059,047 ms. That required test also
+asserts that the same full-profile setup package has
+static transport measurement rows for the transported VSS material, setup proof
+material, public-key material, evaluation-key component material, evaluation-key
+proof material, and public evaluation-key runtime material before SL3 consumes
+the accepted handoff. The current required
+Rust heavy-evidence registry lists 20 tests after adding final accepted-root
+drift and rebound terminal trustee proof statement-hash drift checks. The
+rebound terminal statement-hash drift case passes through the manual required
+runner, and the full accepted-root drift matrix passed through the manual
+runner on June 21, 2026 with exit code 0 in 32,406,034 ms over all 28
+unique accepted roots. The rebound terminal trustee proof statement-hash drift
+case passed in 1,276,431 ms. The required runner now emits one libtest thread
+per selected cargo invocation by default. The normal check runner machine-checks that
+required manual Rust heavy-evidence tests,
 including this flow and the setup transport/refusal checks, stay named under the
 manual heavy accepted-setup lane, and that the manual setup-handoff evidence
-lane still includes both SDK/WASM public-boundary parity tests. It does not run
-the heavy proof lane, and check-runner unit coverage asserts that the default
-check plan excludes the heavy package scripts while the Rust fast lane skips the
-accepted setup heavy test pattern. The manual setup-handoff evidence lane
-remains outside default CI. Public package API
-coverage checks that `verifySetupPackage` outputs
-are forwarded unchanged into package creation, verification, and aggregation
-through the SDK boundary; the SDK path delegates to the same Rust/WASM kernel and
-does not implement a separate ballot proof verifier. The WASM bridge loader
-coverage also checks the raw kernel command boundary: accepted setup verifier
-outputs are forwarded into direct ballot creation, verification, and aggregation
-commands, while `setupPackage` and passive `setupPublicMaterial` are excluded
-from those direct ballot commands. Setup proof-material public package
-coverage streams the same-secret, public-key-share, and trustee-evaluation-key
-transported proof families into compact `VerifiedSetupProofMaterial` handles, or
-forwards caller-supplied handles unchanged, and excludes proof chunks from the
-final setup verifier command. Public setup package coverage also checks the
-generated transport certificate's first-profile byte total, chunk count, storage
-quota, largest-buffer bound, copy-count limit, resume policy, lazy-loading policy,
+lane still includes setup public API, setup proof-material streaming, encrypted
+local-state transport evidence, direct-ballot SDK handoff, and WASM bridge
+command-boundary tests. It does not run the heavy proof lane, and check-runner
+unit coverage asserts that the default check plan excludes the heavy package
+scripts while the Rust fast lane skips the accepted setup heavy test pattern. The
+manual setup-handoff evidence lane remains outside default CI. The expanded
+public-package evidence command passed in the current full manual lane
+with 5 test files and 32 tests after adding protocol and SDK assertions that recompute
+`LocalTrusteeSetupStateTransportEvidenceRoot` from the local-state transport
+evidence body. Public package API coverage checks that `verifySetupPackage` outputs are
+forwarded unchanged into package creation, verification, and aggregation through
+the SDK boundary; the SDK path delegates to the same Rust/WASM kernel and does
+not implement a separate ballot proof verifier. The WASM bridge loader coverage
+also checks the raw kernel command boundary: accepted setup verifier outputs are
+forwarded into direct ballot creation, verification, and aggregation commands,
+while `setupPackage` and passive `setupPublicMaterial` are excluded from those
+direct ballot commands. Setup proof-material public package coverage streams the
+same-secret, public-key-share, and trustee-evaluation-key transported proof
+families into compact `VerifiedSetupProofMaterial` handles, or forwards
+caller-supplied handles unchanged, and excludes proof chunks from the final setup
+verifier command. Public setup package coverage also checks the generated
+transport certificate's first-profile byte total, chunk count, storage quota,
+largest-buffer bound, copy-count limit, resume policy, lazy-loading policy,
 transported-object manifest, per-object static transport measurement rows, and
 aggregate transport measurement summary. The heavy evidence lane remains manual
 and is not added to default CI.

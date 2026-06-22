@@ -1823,6 +1823,20 @@ describe('accepted setup public package API in Node', () => {
                 >
             ).localStateTransportEvidenceRoot,
         ).toMatch(/^[0-9a-f]{128}$/u);
+        const {
+            localStateTransportEvidenceRoot,
+            ...localStateTransportEvidenceWithoutRoot
+        } = exportedState.localStateTransportEvidence as Record<
+            string,
+            unknown
+        >;
+        expect(localStateTransportEvidenceRoot).toBe(
+            protocolHashFromKernel(
+                kernel,
+                'LocalTrusteeSetupStateTransportEvidenceRoot',
+                localStateTransportEvidenceWithoutRoot,
+            ),
+        );
         expect(
             JSON.stringify(exportedState.localStateTransportEvidence),
         ).not.toMatch(

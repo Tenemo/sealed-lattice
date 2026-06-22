@@ -2498,9 +2498,8 @@ pub(crate) fn generate_development_trustee_ceremony_slice(
 // Family-aware clear bound: the private-VSS family uses message_bound (the
 // source prime, about 2^47); every other family uses 2 (centered-binomial
 // magnitude). The mask is one-sided in [0, 2^CLAIM_MASK_DIGIT_COUNT), so the
-// centered claim lies in [-clear_bound, mask_bound + clear_bound]. NOTE: the
-// disclosed smudging figure in accounting.rs does not use this family-aware
-// bound and under-reports private-VSS leakage (see the known-issue note there).
+// centered claim lies in [-clear_bound, mask_bound + clear_bound]. The
+// accounting rows mirror this family-aware bound.
 pub(super) fn masked_claim_bounds(
     statement: &TrusteeEvaluationKeyStatement,
 ) -> CanonicalResult<(i128, i128)> {
