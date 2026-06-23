@@ -248,7 +248,7 @@ pub(crate) fn build_private_vss_public_vectors(
 // lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging
 // figure in accounting.rs recomputes from this same carry-driven family bound,
 // so the relation bound and the disclosed leakage figure agree by construction.
-// The carry's range bound here is load-bearing for the global sharing-soundness
+// The carry's range bound here is essential to the global sharing-soundness
 // argument: it keeps the pinned evaluation a bounded centered lift.
 pub(crate) fn masked_claim_bounds(
     statement: &TrusteeEvaluationKeyStatement,

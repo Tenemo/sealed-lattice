@@ -322,10 +322,6 @@ export function acceptedActiveStaticSetupTheoremCertificate(
                 'publicEvaluationKeyMaterialRoot',
             ),
         },
-        claimBoundary: {
-            remainingDependencies: [],
-            integrationDependencies: [],
-        },
     };
 
     return {

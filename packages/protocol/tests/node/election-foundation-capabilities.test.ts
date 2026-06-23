@@ -42,7 +42,7 @@ const targetAcceptedContext = (
     });
 
 describe('election foundation capability evaluator', () => {
-    it('requires local roster acceptance for claim-bearing direct actions', () => {
+    it('requires local roster acceptance for roster-bound direct actions', () => {
         expect(
             evaluateActionCapability(
                 'VerifyEncryptedBallotProofs',
@@ -57,7 +57,7 @@ describe('election foundation capability evaluator', () => {
         ).toMatchObject({ reason: 'LocalRosterNotAccepted' });
     });
 
-    it('requires claim-bearing action contexts to bind the local roster acceptance hash', () => {
+    it('requires roster-bound action contexts to bind the local roster acceptance hash', () => {
         expect(
             evaluateActionCapability(
                 'SubmitVote',
@@ -120,7 +120,7 @@ describe('election foundation capability evaluator', () => {
                     setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 }),
             ),
-        ).toMatchObject({ reason: 'ClaimClosureMissing' });
+        ).toMatchObject({ reason: 'FrozenStateIncomplete' });
 
         expect(
             evaluateActionCapability(
@@ -455,7 +455,7 @@ describe('election foundation capability evaluator', () => {
                         certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                 }),
             ),
-        ).toMatchObject({ reason: 'ClaimClosureMissing' });
+        ).toMatchObject({ reason: 'TargetDecryptionClosureMissing' });
         expect(
             evaluateActionCapability(
                 'RecombineAcceptedTarget',
@@ -474,7 +474,7 @@ describe('election foundation capability evaluator', () => {
     });
 
     it.each([3, 4, 5, 6, 7, 8, 9])(
-        'refuses roster size %d casual micro-rosters but allows certified dynamic rosters through claim-bearing gates',
+        'no longer gates target acceptance on roster certification: casual micro-roster size %d and certified dynamic rosters both pass',
         (rosterSize) => {
             const casualThresholdProfile = deriveThresholdProfile({
                 casualMicroRosterAcknowledged: true,
@@ -496,7 +496,7 @@ describe('election foundation capability evaluator', () => {
                         evaluatorReplaySucceeded: true,
                     }),
                 ),
-            ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
+            ).toEqual({ allowed: true, action: 'AcceptTarget' });
 
             expect(
                 evaluateActionCapability(

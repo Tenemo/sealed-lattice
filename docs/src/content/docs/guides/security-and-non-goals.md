@@ -1,6 +1,6 @@
 ---
 title: Security and non-goals
-description: The current claim boundary of the sealed-lattice workspace.
+description: The current trust boundary of the sealed-lattice workspace.
 sidebar:
     order: 4
 ---
@@ -12,7 +12,7 @@ This page intentionally does not maintain a separate threat model, retry policy,
 ## Caller responsibilities
 
 - treat the current public package as a development verification package
-- keep the participant mobile-browser claim path explicit
+- keep the participant mobile-browser verification path explicit
 - keep application logic off unpublished internal package names
 - do not assume the current internal package split implies frozen future public APIs
 - do not build setup, VSS, protocol, proof-generation, transport, or decryption assumptions around unpublished APIs

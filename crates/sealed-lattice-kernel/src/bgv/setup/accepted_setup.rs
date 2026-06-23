@@ -262,9 +262,9 @@ const FIRST_PROFILE_BALLOT_RELEASE_QUORUM: u64 = 10;
 const FIRST_PROFILE_FINALITY_QUORUM: u64 = 10;
 const FIRST_PROFILE_DECRYPTION_THRESHOLD: u64 = 4;
 // Supported parameterized roster range. The first closure profile (n = 10) is
-// the only benchmarked, mobile-certified, claim-bearing instance; the verifier
+// the only benchmarked, mobile-certified instance; the verifier
 // accepts any 3 <= n <= 20 by deriving the canonical quorums and threshold from
-// the roster size, but no runtime/security/mobile evidence is claimed for
+// the roster size, but no runtime/security/mobile evidence is established for
 // n != 10 until those profiles receive their own certificates and measurements.
 pub(super) const MINIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 3;
 pub(super) const MAXIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 20;

@@ -1110,8 +1110,8 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
 //
 // The reduced development ring keeps each proof-bearing build to seconds-to-low
 // minutes. Terminal `accepted` is deliberately profile-ring only: the terminal
-// claim gate (verify_profile_ring_material) refuses development-reduced-ring
-// material so a reduced-ring package can never be presented as claim-bearing.
+// profile-ring gate (verify_profile_ring_material) refuses development-reduced-ring
+// material so a reduced-ring package can never be presented as certified.
 // So the strongest reduced-ring outcome is reaching exactly that profile-ring
 // gate after every roster-dependent phase has passed: setup context + derived
 // quorums, the full phase transcript, common randomness and the roster-derived
@@ -1121,11 +1121,11 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
 // the public evaluation-key set, the roster-derived commitment-security and HE
 // security certificates, the active-static and key-correctness certificates,
 // and the roster-and-ring-derived transported VSS material metadata. The only
-// remaining refusal is the roster-independent profile-ring claim boundary,
+// remaining refusal is the roster-independent profile-ring boundary,
 // which proves the dynamic-roster machinery and the roster-derived certificates
-// accept n != 10 exactly as far as the claim boundary permits. Genuine terminal
+// accept n != 10 exactly as far as the profile-ring boundary permits. Genuine terminal
 // `accepted` at the profile ring for n != 10 is deferred until the n = 10
-// supported-mobile runtime evidence work; the claim-bearing closure profile
+// supported-mobile runtime evidence work; the certified closure profile
 // remains n = 10 only, so no profile-ring n != 10 fixture runs in any lane.
 //
 // This is prototype, desktop-only, fixture-backed evidence, not benchmarked or

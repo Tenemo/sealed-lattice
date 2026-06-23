@@ -39,7 +39,7 @@ pub enum CanonicalErrorCode {
     ProfileComponentMismatch,
     TrailingBytes,
     UnknownField,
-    UnknownBaseClaimProfile,
+    UnknownBaseProfile,
     UnknownSecurityClosure,
     UnknownProofProfile,
     UnsupportedCanonicalEnvelopeVersion,
@@ -70,7 +70,7 @@ pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
     CanonicalErrorCode::ProfileComponentMismatch,
     CanonicalErrorCode::TrailingBytes,
     CanonicalErrorCode::UnknownField,
-    CanonicalErrorCode::UnknownBaseClaimProfile,
+    CanonicalErrorCode::UnknownBaseProfile,
     CanonicalErrorCode::UnknownSecurityClosure,
     CanonicalErrorCode::UnknownProofProfile,
     CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
@@ -98,7 +98,7 @@ impl CanonicalErrorCode {
             Self::ProfileComponentMismatch => "ProfileComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
             Self::UnknownField => "UnknownField",
-            Self::UnknownBaseClaimProfile => "UnknownBaseClaimProfile",
+            Self::UnknownBaseProfile => "UnknownBaseProfile",
             Self::UnknownSecurityClosure => "UnknownSecurityClosure",
             Self::UnknownProofProfile => "UnknownProofProfile",
             Self::UnsupportedCanonicalEnvelopeVersion => "UnsupportedCanonicalEnvelopeVersion",
@@ -453,7 +453,7 @@ mod tests {
                 | CanonicalErrorCode::ProfileComponentMismatch
                 | CanonicalErrorCode::TrailingBytes
                 | CanonicalErrorCode::UnknownField
-                | CanonicalErrorCode::UnknownBaseClaimProfile
+                | CanonicalErrorCode::UnknownBaseProfile
                 | CanonicalErrorCode::UnknownSecurityClosure
                 | CanonicalErrorCode::UnknownProofProfile
                 | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion

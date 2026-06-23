@@ -12,7 +12,7 @@ use crate::{
 // set and development encryptions that exercise the evaluator. The preimage is
 // framed exactly like `hash512` so the stream is domain-separated and
 // byte-identical across native and WASM builds. This is development key/seed
-// material, never claim-bearing entropy.
+// material, never production-grade entropy.
 pub(crate) struct DeterministicSampler {
     reader: <Shake256 as ExtendableOutput>::Reader,
 }

@@ -419,9 +419,9 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
 }
 
 // Decisive Option A soundness gate. Option A drops the per-field consistency
-// claims on the Shamir coefficient message columns, leaving the commitment
+// assertions on the Shamir coefficient message columns, leaving the commitment
 // opening lincheck as the message column's only binding. This test confirms that
-// binding is load-bearing: a coefficient message that disagrees with what its
+// binding is essential: a coefficient message that disagrees with what its
 // commitment opens to cannot be packaged into an accepted proof. The tamper
 // keeps the recipient-share Shamir relation satisfied (so the witness-relation
 // self-check and shape checks pass) and leaves the randomness, the carry, and the

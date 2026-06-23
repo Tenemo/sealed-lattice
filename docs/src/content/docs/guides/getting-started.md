@@ -7,7 +7,7 @@ sidebar:
 
 `sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting library.
 
-Every roster participant is intended to be both voter and trustee. The design does not rely on a trusted tally server, special verifier role, heavy external prover, or desktop-class auditor in the claim path.
+Every roster participant is intended to be both voter and trustee. The design does not rely on a trusted tally server, special verifier role, heavy external prover, or desktop-class auditor in the verification path.
 
 The package is under active implementation. Use it for development, integration experiments, and verification tooling, not production elections, and read the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md) before treating any verification result as security evidence.
 

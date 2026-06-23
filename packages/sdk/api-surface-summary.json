@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "45ad7d77150e69817cff91a2003ca046bb5e8e6b0fe7fb72494add30cb71c761",
+    "reachableDeclarationHash": "c3f4e70bb04ea54efb08f0f4fcd9f9517ac90371630a12d0deb86d2e2a647d55",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveFrozenRosterProfile",
@@ -133,7 +133,6 @@
         "TargetFinalityVerificationInput",
         "TargetProposal",
         "ThresholdProfile",
-        "ThresholdProfileClaimBoundary",
         "ThresholdProfileFamily",
         "ThresholdProfileInput",
         "ThresholdWarning",

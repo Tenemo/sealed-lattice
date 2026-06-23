@@ -31,10 +31,10 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// Computes the protocol's domain-separated 64-byte SHAKE256 hash output.
 ///
 /// The `Hash512` name describes the output length. Security is bounded by
-/// SHAKE256, not by a generic 512-bit random-oracle claim.
+/// SHAKE256, not by a generic 512-bit random-oracle assumption.
 ///
 /// This helper frames the `sealed.vote/v1/hash512` prefix, a caller-supplied
-/// protocol step domain, and each supplied part. Claim-bearing protocol objects
+/// protocol step domain, and each supplied part. Canonical protocol objects
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
 pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {

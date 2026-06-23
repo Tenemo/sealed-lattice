@@ -89,7 +89,7 @@ describe('roster and manifest shells', () => {
         );
     });
 
-    it('rejects retired direct-path profile identifiers in claim-bearing manifests', () => {
+    it('rejects retired direct-path profile identifiers in certified manifests', () => {
         const registrations = [
             createRegistrationEntry('participant-1', 1, 0),
             createRegistrationEntry('participant-2', 1, 1),
@@ -172,7 +172,6 @@ describe('roster and manifest shells', () => {
             ...input.frozenRosterProfile,
             thresholdProfile: {
                 ...input.frozenRosterProfile.thresholdProfile,
-                claimBearing: true,
                 releaseQuorum:
                     input.frozenRosterProfile.thresholdProfile.releaseQuorum +
                     1,

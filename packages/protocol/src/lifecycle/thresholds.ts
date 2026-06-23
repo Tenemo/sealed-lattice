@@ -187,8 +187,6 @@ const deriveRosterProfile = (
     rosterSize: number,
     input: ThresholdProfileInput,
 ): {
-    readonly claimBoundary: ThresholdProfile['claimBoundary'];
-    readonly claimBearing: boolean;
     readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
     readonly rosterProfileKind: RosterProfileKind;
     readonly warnings: readonly ThresholdWarning[];
@@ -215,18 +213,15 @@ const deriveRosterProfile = (
         }
 
         return {
-            claimBoundary: 'CasualMicroRoster',
-            claimBearing: false,
             dynamicRosterProfileCertificateHash: null,
             rosterProfileKind: 'CasualMicroRoster',
             warnings: ['CasualMicroRoster'],
         };
     }
-    // Size 10 is the pre-certified first profile and is the only dynamic-range size allowed to be claim-bearing without a dynamic roster certificate.
+    // Size 10 is the pre-certified first profile and is the only dynamic-range
+    // size that runs without a separate dynamic-roster parameter certificate.
     if (rosterSize === firstProfileRosterSize) {
         return {
-            claimBoundary: 'FirstProfile',
-            claimBearing: true,
             dynamicRosterProfileCertificateHash: null,
             rosterProfileKind: 'FirstProfileRoster',
             warnings: [],
@@ -234,8 +229,6 @@ const deriveRosterProfile = (
     }
     if (dynamicRosterProfileCertificateHash !== null) {
         return {
-            claimBoundary: 'DynamicRosterCertificate',
-            claimBearing: true,
             dynamicRosterProfileCertificateHash,
             rosterProfileKind: 'SupportedDynamicRosterRange',
             warnings: [],
@@ -243,8 +236,6 @@ const deriveRosterProfile = (
     }
 
     return {
-        claimBoundary: 'DynamicRosterCertificateMissing',
-        claimBearing: false,
         dynamicRosterProfileCertificateHash: null,
         rosterProfileKind: 'UncertifiedDynamicRoster',
         warnings: ['DynamicRosterProfileCertificateRequired'],
@@ -314,8 +305,6 @@ export const deriveThresholdProfile = (
     return {
         rosterSize,
         rosterProfileKind: rosterProfile.rosterProfileKind,
-        claimBoundary: rosterProfile.claimBoundary,
-        claimBearing: rosterProfile.claimBearing,
         dynamicRosterProfileCertificateHash:
             rosterProfile.dynamicRosterProfileCertificateHash,
         structuralCorruptionBound,
@@ -350,8 +339,6 @@ export const deriveThresholdProfileHash = (input: {
         ballotReleaseFloor: input.thresholdProfile.ballotReleaseFloor,
         backendCorruptionBound: input.thresholdProfile.backendCorruptionBound,
         backendCorruptionModel: input.thresholdProfile.backendCorruptionModel,
-        claimBoundary: input.thresholdProfile.claimBoundary,
-        claimBearing: input.thresholdProfile.claimBearing,
         decryptionCorruptionBound:
             input.thresholdProfile.decryptionCorruptionBound,
         decryptionShareQuorum: input.thresholdProfile.decryptionShareQuorum,
@@ -414,7 +401,7 @@ export const deriveFrozenRosterProfile = (input: {
         dynamicRosterProfileCertificateHash === null
     ) {
         throw new Error(
-            'Dynamic claim-bearing roster profiles require parameter certificate coverage for the frozen roster size.',
+            'Dynamic roster profiles require parameter certificate coverage for the frozen roster size.',
         );
     }
 

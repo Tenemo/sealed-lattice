@@ -13,12 +13,12 @@ pub use codec::{
 pub use codec::{canonical_transcript_core_object, serialize_transcript_core_object};
 #[cfg(test)]
 pub use mutations::{
-    mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
+    mutate_base_profile_mismatch_fixture, mutate_duplicate_field_fixture,
     mutate_evaluator_replay_profile_mismatch_fixture, mutate_field_order_fixture,
     mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
     mutate_malformed_length_fixture, mutate_malformed_magic_fixture, mutate_missing_field_fixture,
     mutate_non_canonical_varuint_fixture, mutate_security_profile_mismatch_fixture,
-    mutate_trailing_bytes_fixture, mutate_unknown_base_claim_profile_fixture,
+    mutate_trailing_bytes_fixture, mutate_unknown_base_profile_fixture,
     mutate_unknown_evaluator_replay_profile_fixture, mutate_unknown_field_fixture,
     mutate_unknown_security_closure_fixture, mutate_unsupported_envelope_version_fixture,
     mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
@@ -32,13 +32,13 @@ pub use types::{FOUNDATION_TRANSCRIPT_CORE_PROFILE, TranscriptCoreProfile};
 mod tests {
     use super::{
         DeterministicFixtureRng, FOUNDATION_TRANSCRIPT_CORE_PROFILE, analyze_canonical_object,
-        canonical_transcript_core_object, decode_hex, mutate_base_claim_profile_mismatch_fixture,
+        canonical_transcript_core_object, decode_hex, mutate_base_profile_mismatch_fixture,
         mutate_duplicate_field_fixture, mutate_evaluator_replay_profile_mismatch_fixture,
         mutate_field_order_fixture, mutate_invalid_enum_fixture, mutate_invalid_profile_fixture,
         mutate_invalid_utf8_fixture, mutate_malformed_length_fixture,
         mutate_malformed_magic_fixture, mutate_missing_field_fixture,
         mutate_non_canonical_varuint_fixture, mutate_security_profile_mismatch_fixture,
-        mutate_trailing_bytes_fixture, mutate_unknown_base_claim_profile_fixture,
+        mutate_trailing_bytes_fixture, mutate_unknown_base_profile_fixture,
         mutate_unknown_evaluator_replay_profile_fixture, mutate_unknown_field_fixture,
         mutate_unknown_security_closure_fixture, mutate_unsupported_envelope_version_fixture,
         mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
@@ -173,15 +173,15 @@ mod tests {
                 CanonicalErrorCode::UnsupportedObjectVersion,
             ),
             (
-                mutate_unknown_base_claim_profile_fixture(),
-                CanonicalErrorCode::UnknownBaseClaimProfile,
+                mutate_unknown_base_profile_fixture(),
+                CanonicalErrorCode::UnknownBaseProfile,
             ),
             (
                 mutate_unknown_security_closure_fixture(),
                 CanonicalErrorCode::UnknownSecurityClosure,
             ),
             (
-                mutate_base_claim_profile_mismatch_fixture(),
+                mutate_base_profile_mismatch_fixture(),
                 CanonicalErrorCode::UnknownProofProfile,
             ),
             (

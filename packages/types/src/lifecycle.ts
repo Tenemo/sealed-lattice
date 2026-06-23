@@ -49,13 +49,6 @@ export type RosterProfileKind =
     | 'SupportedDynamicRosterRange'
     | 'UncertifiedDynamicRoster';
 
-/** Claim boundary carried by a derived threshold profile. */
-export type ThresholdProfileClaimBoundary =
-    | 'CasualMicroRoster'
-    | 'FirstProfile'
-    | 'DynamicRosterCertificate'
-    | 'DynamicRosterCertificateMissing';
-
 /** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
     | 'CasualMicroRoster'
@@ -67,8 +60,6 @@ export type ThresholdWarning =
 export type ThresholdProfile = {
     readonly rosterSize: number;
     readonly rosterProfileKind: RosterProfileKind;
-    readonly claimBoundary: ThresholdProfileClaimBoundary;
-    readonly claimBearing: boolean;
     readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
     readonly structuralCorruptionBound: number;
     readonly backendCorruptionBound: number;
@@ -105,7 +96,7 @@ export type RosterPolicy = 'OpenLinkPublicRoster';
 /** Threshold/profile family selected at poll creation. */
 export type ThresholdProfileFamily = 'BalancedDefault';
 
-/** Policy for rosters below the dynamic claim-bearing family. */
+/** Policy for rosters below the dynamic supported-roster family. */
 export type SmallRosterPolicy =
     | 'ForbidMicroRoster'
     | 'WarnMicroRoster'
@@ -214,7 +205,7 @@ export type LifecycleState =
     | 'resultDecoded'
     | 'fullyVerified'
     | 'pending'
-    | 'outsideClaim'
+    | 'outsideSupportedProfile'
     | 'forkDetected';
 
 /** Allowed lifecycle transition edge. */
@@ -295,7 +286,6 @@ export type RefusalReason =
     | 'OperationUnavailable'
     | 'InvalidLifecycleState'
     | 'PollSpecInvalid'
-    | 'ProfileNotClaimBearing'
     | 'LocalRosterNotAccepted'
     | 'RosterExternalAcceptanceHashMissing'
     | 'RosterExternalAcceptanceHashMismatch'
@@ -312,7 +302,8 @@ export type RefusalReason =
     | 'MissingDirectProofTransport'
     | 'MissingMobileReplayEvidence'
     | 'MissingTargetDecryptionCertificate'
-    | 'ClaimClosureMissing'
+    | 'FrozenStateIncomplete'
+    | 'TargetDecryptionClosureMissing'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'
     | 'ClonedDeviceState'

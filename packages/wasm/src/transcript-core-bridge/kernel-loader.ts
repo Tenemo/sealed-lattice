@@ -131,7 +131,7 @@ export const createTranscriptCoreKernelLoader = (
                         request,
                     ),
                 );
-            // Accepted setup is claim-bearing protocol input, not a fixture, so a fixture-shaped rejection is surfaced as a rejected protocol object rather than leaking the kernel fixture error code.
+            // Accepted setup is real protocol input, not a fixture, so a fixture-shaped rejection is surfaced as a rejected protocol object rather than leaking the kernel fixture error code.
             const executeAcceptedSetupCommand = <
                 Result extends BgvCollectiveSetupVerification,
             >(

@@ -210,7 +210,7 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
-    it('derives claim-bearing Hashes and field results through WASM', async () => {
+    it('derives protocol Hashes and field results through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(

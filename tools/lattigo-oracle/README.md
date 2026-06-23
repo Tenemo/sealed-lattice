@@ -2,7 +2,7 @@
 
 This directory owns the development-only Lattigo reference metadata and oracle tooling used by the BGV-RNS comparison lane.
 
-Pinned reference material is kept under `temp/lattigo/` only. The downloaded archive and extracted checkout are fully ignored by git, are not runtime code, are not public SDK inputs, and are not protocol evidence. The Docker oracle extracts the verified archive from `temp/lattigo/` as its build input. The sealed-lattice claim path accepts only sealed-lattice Rust/WASM canonical BGV objects.
+Pinned reference material is kept under `temp/lattigo/` only. The downloaded archive and extracted checkout are fully ignored by git, are not runtime code, are not public SDK inputs, and are not protocol evidence. The Docker oracle extracts the verified archive from `temp/lattigo/` as its build input. The sealed-lattice verification path accepts only sealed-lattice Rust/WASM canonical BGV objects.
 
 Pinned reference:
 

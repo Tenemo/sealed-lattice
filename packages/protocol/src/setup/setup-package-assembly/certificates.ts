@@ -457,10 +457,6 @@ const activeStaticSetupTheoremCertificateBody = (
                 'publicEvaluationKeyMaterialRoot',
             ),
         },
-        claimBoundary: {
-            remainingDependencies: [],
-            integrationDependencies: [],
-        },
     };
 };
 

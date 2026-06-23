@@ -50,7 +50,7 @@ are resolved, callers must assume:
 - public setup workflow, ballot, aggregation, evaluator, and target-decryption
   paths are development evidence only;
 - unsupported APIs, private package paths, fixtures, plaintext oracles, and local
-  witness material are not stable or claim-bearing surfaces;
+  witness material are not stable or certified surfaces;
 - acceptance must depend on recomputed hashes, roots, canonical encodings, and
   verified proof families, not on producer-supplied labels or summaries.
 
@@ -89,7 +89,7 @@ Severity rubric:
 | Id        | Severity | Item                                                                                     | Current boundary                                                                                                                                                                                                                                         |
 | --------- | -------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `SEC-001` | `P0`     | Real ballot use and ballot secrecy are out of scope.                                     | The package is for development verification only and has no complete threshold voting workflow.                                                                                                                                                          |
-| `SEC-002` | `P0`     | Target-bound decryption is not claim-bearing.                                            | Decryption-share proofs, smudging/noise, recombination, and decoded result validation are unfinished. Current target-decryption code must be treated as development evidence only.                                                                        |
+| `SEC-002` | `P0`     | Target-bound decryption is not certified.                                            | Decryption-share proofs, smudging/noise, recombination, and decoded result validation are unfinished. Current target-decryption code must be treated as development evidence only.                                                                        |
 | `SEC-003` | `P0/P1`  | Retry-safe multiparty participation is not implemented.                                  | Retrying setup, key-switching, decryption-share, or related threshold-FHE protocols under the same relevant material is out of scope unless a retry-safe construction is explicitly added and documented.                                                |
 | `SEC-004` | `P1`     | The setup proof system does not carry a conventional 128-bit quantum soundness label.    | Current proof-system accounting remains below the conventional 128-bit quantum target and is scoped to proof publication time.                                                                                                                            |
 | `SEC-005` | `P1`     | Setup proof zero knowledge is bounded leakage, not full 128-bit zero knowledge.          | Current setup proof accounting discloses bounded leakage rather than a full 128-bit zero-knowledge statement.                                                                                                                                            |

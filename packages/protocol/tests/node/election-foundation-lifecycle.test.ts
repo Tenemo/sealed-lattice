@@ -79,7 +79,7 @@ describe('lifecycle transition validation', () => {
         for (const terminal of [
             'fullyVerified',
             'pending',
-            'outsideClaim',
+            'outsideSupportedProfile',
             'forkDetected',
         ] as const satisfies readonly LifecycleState[]) {
             expect(

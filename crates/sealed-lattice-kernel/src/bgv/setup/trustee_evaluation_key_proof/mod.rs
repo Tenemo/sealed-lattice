@@ -14,7 +14,7 @@
 // accepted BDLOP constant commitments natively over the commitment-modulus
 // fields, so the proven key-relation secret is the committed trustee secret.
 //
-// Claim boundary: this argument is the evaluation-key proof path of the
+// Trust boundary: this argument is the evaluation-key proof path of the
 // accepted setup package; the package verifier rebuilds every statement from
 // the transported share records, the recomputed round-one public aggregates,
 // and the accepted same-secret commitments. The accounting object in this

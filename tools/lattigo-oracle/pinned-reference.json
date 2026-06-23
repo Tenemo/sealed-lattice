@@ -16,5 +16,5 @@
   "runtimeUse": "forbidden",
   "protocolEvidenceUse": "forbidden",
   "allowedUse": "development-only parity oracle for BGV-RNS comparable ring/RNS/NTT and coefficient arithmetic behavior",
-  "claimBoundary": "Only sealed-lattice Rust/WASM canonical objects are claim-path objects."
+  "canonicalScopeNote": "Only sealed-lattice Rust/WASM canonical objects are the protocol-path objects."
 }

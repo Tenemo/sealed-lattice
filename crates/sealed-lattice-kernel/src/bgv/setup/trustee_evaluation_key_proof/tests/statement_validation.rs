@@ -162,10 +162,10 @@ fn private_vss_consistency_set_excludes_committed_message_columns() {
     assert_eq!(
         layout.private_vss_logical_columns() - layout.consistency_vector_count(),
         layout.private_vss_coefficient_columns,
-        "exactly the message columns are committed without a consistency claim"
+        "exactly the message columns are committed without a consistency assertion"
     );
-    // The carry must stay in the consistency set: it is load-bearing for the
-    // global sharing-soundness argument that replaces the removed message claims
+    // The carry must stay in the consistency set: it is essential to the
+    // global sharing-soundness argument that replaces the removed message assertions
     // (carry consistency + the public range-checked share pin the polynomial
     // evaluation per recipient; see consistency_vector_count and
     // implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md

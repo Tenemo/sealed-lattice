@@ -309,7 +309,7 @@ pub(super) fn q_share_value() -> Value {
         "objectVersion": 1,
         "sharingDomain": "per-rns-prime",
         "primeOrder": "profile-order",
-        // This readiness flag is hashed into qShareHash on purpose, so the closed-target claim boundary is committed by every object that binds the Q_share list.
+        // This readiness flag is hashed into qShareHash on purpose, so the closed-target trust boundary is committed by every object that binds the Q_share list.
         "targetDecryptionReadiness": "refused-until-q-target-certificate-closes",
         "primes": DATA_PRIMES,
     })

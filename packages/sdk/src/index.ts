@@ -156,7 +156,6 @@ export type {
     TargetFinalityVerificationInput,
     TargetProposal,
     ThresholdProfile,
-    ThresholdProfileClaimBoundary,
     ThresholdProfileFamily,
     ThresholdProfileInput,
     ThresholdWarning,

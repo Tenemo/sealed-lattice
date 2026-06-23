@@ -24,10 +24,10 @@ use crate::hashing::derive_protocol_hash;
 // fixed 168-query count now records about 140 effective bits after the union
 // allowance rather than 144. The proven BCIKS20 Johnson fallback is unchanged.
 //
-// This conjecture is an admissible, claim-bearing soundness foundation under the
+// This conjecture is an admissible soundness foundation under the
 // project's proximity-gap policy: a repaired below-capacity conjecture may carry
-// claim-bearing post-quantum soundness, the disproved up-to-capacity one may not.
-// The residual is a disclosed small-medium research risk, not a claim gap: CS25
+// post-quantum soundness, the disproved up-to-capacity one may not.
+// The residual is a disclosed small-medium research risk, not a soundness gap: CS25
 // Our Conjecture 3 is a recent (2025) conjecture and could be weakened by future
 // work, though it is the best-pedigreed standing one (its authors disproved the
 // prior conjecture). The proven BCIKS20 Johnson fallback at a larger query count

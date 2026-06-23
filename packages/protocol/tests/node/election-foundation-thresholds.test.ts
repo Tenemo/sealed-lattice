@@ -161,7 +161,7 @@ describe('election foundation threshold profiles', () => {
         { rosterSize: 8, threshold: 3 },
         { rosterSize: 9, threshold: 4 },
     ])(
-        'marks acknowledged roster size $rosterSize as a non-claim casual micro-roster',
+        'marks acknowledged roster size $rosterSize as a casual micro-roster',
         ({ rosterSize, threshold }) => {
             const profile = deriveThresholdProfile({
                 casualMicroRosterAcknowledged: true,
@@ -169,8 +169,6 @@ describe('election foundation threshold profiles', () => {
             });
 
             expect(profile.rosterProfileKind).toBe('CasualMicroRoster');
-            expect(profile.claimBoundary).toBe('CasualMicroRoster');
-            expect(profile.claimBearing).toBe(false);
             expect(profile.releaseQuorum).toBe(rosterSize);
             expect(profile.setupCompletionQuorum).toBe(rosterSize);
             expect(profile.decryptionThreshold).toBe(threshold);
@@ -182,8 +180,6 @@ describe('election foundation threshold profiles', () => {
         const profile = deriveThresholdProfile({ rosterSize: 10 });
 
         expect(profile.rosterProfileKind).toBe('FirstProfileRoster');
-        expect(profile.claimBoundary).toBe('FirstProfile');
-        expect(profile.claimBearing).toBe(true);
         expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
         expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
     });
@@ -222,8 +218,6 @@ describe('election foundation threshold profiles', () => {
         });
 
         expect(profile.rosterProfileKind).toBe('FirstProfileRoster');
-        expect(profile.claimBoundary).toBe('FirstProfile');
-        expect(profile.claimBearing).toBe(true);
         expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
 
         const frozenRosterProfile = deriveFrozenRosterProfile({
@@ -250,7 +244,7 @@ describe('election foundation threshold profiles', () => {
                 rosterSize: 20,
             }),
         ).toThrow(
-            'Dynamic claim-bearing roster profiles require parameter certificate coverage for the frozen roster size.',
+            'Dynamic roster profiles require parameter certificate coverage for the frozen roster size.',
         );
     });
 
@@ -265,8 +259,6 @@ describe('election foundation threshold profiles', () => {
             expect(profile.rosterProfileKind).toBe(
                 'SupportedDynamicRosterRange',
             );
-            expect(profile.claimBoundary).toBe('DynamicRosterCertificate');
-            expect(profile.claimBearing).toBe(true);
             expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
         },
     );
@@ -277,10 +269,6 @@ describe('election foundation threshold profiles', () => {
             const profile = deriveThresholdProfile({ rosterSize });
 
             expect(profile.rosterProfileKind).toBe('UncertifiedDynamicRoster');
-            expect(profile.claimBoundary).toBe(
-                'DynamicRosterCertificateMissing',
-            );
-            expect(profile.claimBearing).toBe(false);
             expect(profile.warnings).toEqual([
                 'DynamicRosterProfileCertificateRequired',
                 'ShareSelectionProfileRequired',

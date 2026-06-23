@@ -167,7 +167,7 @@ impl BgvPublicKey {
 }
 
 // The development BGV key set used to drive and check the evaluator. The
-// collective public key uses the claim-path convention `b = p*e - a*s`, so the
+// collective public key uses the protocol convention `b = p*e - a*s`, so the
 // plaintext lives in the least-significant residue and decryption is exact mod
 // the plaintext modulus. The secret is retained only for development decryption
 // and correctness certificates; it is never exported through the public surface.

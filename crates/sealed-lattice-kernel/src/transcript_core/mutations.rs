@@ -3,7 +3,7 @@ use super::codec::{
     header_length_before_field_count, serialize_transcript_core_object,
 };
 use super::types::{
-    BaseClaimProfile, ENVELOPE_VERSION, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TITLE,
+    BaseProfile, ENVELOPE_VERSION, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TITLE,
     FOUNDATION_TRANSCRIPT_CORE_PROFILE, FOUNDATION_TRANSCRIPT_PROFILE_ID, MAGIC,
     TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
 };
@@ -65,9 +65,9 @@ pub fn mutate_non_canonical_varuint_fixture() -> String {
     bytes.extend([0x81, 0x00]);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.base_claim_profile.code());
+    append_varuint(&mut bytes, object.base_profile.code());
     append_varuint(&mut bytes, object.security_closure.code());
-    append_string(&mut bytes, &object.base_claim_profile_id);
+    append_string(&mut bytes, &object.base_profile_id);
     append_string(&mut bytes, &object.security_profile_id);
     append_string(&mut bytes, &object.he_setup_proof_profile_id);
     append_string(&mut bytes, &object.evaluator_replay_profile_id);
@@ -84,7 +84,7 @@ pub fn mutate_malformed_length_fixture() -> String {
     append_varuint(&mut bytes, ENVELOPE_VERSION);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, object.base_claim_profile.code());
+    append_varuint(&mut bytes, object.base_profile.code());
     append_varuint(&mut bytes, object.security_closure.code());
     append_varuint(&mut bytes, 10);
     bytes.extend(b"short");
@@ -102,7 +102,7 @@ pub fn mutate_trailing_bytes_fixture() -> String {
 
 pub fn mutate_invalid_profile_fixture() -> String {
     let mut object = canonical_transcript_core_object(FOUNDATION_TRANSCRIPT_CORE_PROFILE);
-    object.base_claim_profile_id = "transcript-core-unknown-base-claim-profile".to_string();
+    object.base_profile_id = "transcript-core-unknown-base-profile".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }
@@ -146,7 +146,7 @@ pub fn mutate_unsupported_object_version_fixture() -> String {
     encode_hex(&bytes)
 }
 
-pub fn mutate_unknown_base_claim_profile_fixture() -> String {
+pub fn mutate_unknown_base_profile_fixture() -> String {
     let mut bytes = Vec::new();
     bytes.extend(MAGIC);
     append_varuint(&mut bytes, ENVELOPE_VERSION);
@@ -163,15 +163,15 @@ pub fn mutate_unknown_security_closure_fixture() -> String {
     append_varuint(&mut bytes, ENVELOPE_VERSION);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut bytes, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut bytes, BaseClaimProfile::FoundationTranscript.code());
+    append_varuint(&mut bytes, BaseProfile::FoundationTranscript.code());
     append_varuint(&mut bytes, 99);
 
     encode_hex(&bytes)
 }
 
-pub fn mutate_base_claim_profile_mismatch_fixture() -> String {
+pub fn mutate_base_profile_mismatch_fixture() -> String {
     let mut object = canonical_transcript_core_object(FOUNDATION_TRANSCRIPT_CORE_PROFILE);
-    object.base_claim_profile_id = "transcript-core-unknown-base-claim-profile-v1".to_string();
+    object.base_profile_id = "transcript-core-unknown-base-profile-v1".to_string();
 
     encode_hex(&serialize_transcript_core_object(&object))
 }

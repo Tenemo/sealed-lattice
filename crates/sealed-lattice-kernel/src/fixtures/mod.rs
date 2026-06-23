@@ -9,12 +9,12 @@ use crate::{
 #[cfg(test)]
 use crate::transcript_core::{
     FOUNDATION_TRANSCRIPT_CORE_PROFILE, TranscriptCoreProfile, canonical_transcript_core_object,
-    encode_hex, mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
+    encode_hex, mutate_base_profile_mismatch_fixture, mutate_duplicate_field_fixture,
     mutate_evaluator_replay_profile_mismatch_fixture, mutate_field_order_fixture,
     mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
     mutate_malformed_length_fixture, mutate_malformed_magic_fixture, mutate_missing_field_fixture,
     mutate_non_canonical_varuint_fixture, mutate_security_profile_mismatch_fixture,
-    mutate_trailing_bytes_fixture, mutate_unknown_base_claim_profile_fixture,
+    mutate_trailing_bytes_fixture, mutate_unknown_base_profile_fixture,
     mutate_unknown_evaluator_replay_profile_fixture, mutate_unknown_field_fixture,
     mutate_unknown_security_closure_fixture, mutate_unsupported_envelope_version_fixture,
     mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
@@ -42,8 +42,8 @@ pub struct GoldenTranscriptCoreFixture {
     pub object_type: String,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "baseClaimProfileId")]
-    pub base_claim_profile_id: String,
+    #[serde(rename = "baseProfileId")]
+    pub base_profile_id: String,
     #[serde(rename = "securityProfileId")]
     pub security_profile_id: String,
     #[serde(rename = "heSetupProofProfileId")]
@@ -156,9 +156,9 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::UnsupportedObjectVersion,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "unknown-base-claim-profile",
-            mutate_unknown_base_claim_profile_fixture(),
-            CanonicalErrorCode::UnknownBaseClaimProfile,
+            "unknown-base-profile",
+            mutate_unknown_base_profile_fixture(),
+            CanonicalErrorCode::UnknownBaseProfile,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
             "unknown-security-closure",
@@ -166,8 +166,8 @@ pub fn canonical_fixture_set() -> CanonicalResult<Vec<TranscriptCoreFixture>> {
             CanonicalErrorCode::UnknownSecurityClosure,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
-            "base-claim-profile-mismatch",
-            mutate_base_claim_profile_mismatch_fixture(),
+            "base-profile-mismatch",
+            mutate_base_profile_mismatch_fixture(),
             CanonicalErrorCode::UnknownProofProfile,
         )),
         TranscriptCoreFixture::MalformedObject(build_malformed_fixture(
@@ -214,9 +214,9 @@ fn verify_golden_fixture(fixture: &GoldenTranscriptCoreFixture) -> CanonicalResu
         analysis.object_version,
     )?;
     compare_fixture_value(
-        "baseClaimProfileId",
-        fixture.base_claim_profile_id.as_str(),
-        analysis.base_claim_profile_id.as_str(),
+        "baseProfileId",
+        fixture.base_profile_id.as_str(),
+        analysis.base_profile_id.as_str(),
     )?;
     compare_fixture_value(
         "securityProfileId",
@@ -304,7 +304,7 @@ fn build_golden_fixture(
         canonical_bytes_hex: encode_hex(&canonical_bytes),
         object_type: analysis.object_type.to_string(),
         object_version: analysis.object_version,
-        base_claim_profile_id: analysis.base_claim_profile_id,
+        base_profile_id: analysis.base_profile_id,
         security_profile_id: analysis.security_profile_id,
         he_setup_proof_profile_id: analysis.he_setup_proof_profile_id,
         evaluator_replay_profile_id: analysis.evaluator_replay_profile_id,

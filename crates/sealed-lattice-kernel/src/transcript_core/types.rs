@@ -31,11 +31,11 @@ pub const NO_EVALUATOR_REPLAY_PROFILE_ID: &str = "transcript-core-no-evaluator-r
 pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BaseClaimProfile {
+pub enum BaseProfile {
     FoundationTranscript,
 }
 
-impl BaseClaimProfile {
+impl BaseProfile {
     pub fn code(self) -> u64 {
         match self {
             Self::FoundationTranscript => 1,
@@ -85,18 +85,18 @@ impl TranscriptCoreSecurityClosure {
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TranscriptCoreProfile {
-    pub base_claim_profile: BaseClaimProfile,
+    pub base_profile: BaseProfile,
     pub security_closure: TranscriptCoreSecurityClosure,
 }
 
 #[cfg(test)]
 impl TranscriptCoreProfile {
     pub const fn new(
-        base_claim_profile: BaseClaimProfile,
+        base_profile: BaseProfile,
         security_closure: TranscriptCoreSecurityClosure,
     ) -> Self {
         Self {
-            base_claim_profile,
+            base_profile,
             security_closure,
         }
     }
@@ -104,7 +104,7 @@ impl TranscriptCoreProfile {
     pub(super) fn seed_label(self) -> String {
         format!(
             "{}:{}",
-            self.base_claim_profile.label(),
+            self.base_profile.label(),
             self.security_closure.label()
         )
     }
@@ -112,7 +112,7 @@ impl TranscriptCoreProfile {
 
 #[cfg(test)]
 pub const FOUNDATION_TRANSCRIPT_CORE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
-    BaseClaimProfile::FoundationTranscript,
+    BaseProfile::FoundationTranscript,
     TranscriptCoreSecurityClosure::FoundationOnly,
 );
 
@@ -131,9 +131,9 @@ impl TranscriptCoreStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptCoreObject {
-    pub base_claim_profile: BaseClaimProfile,
+    pub base_profile: BaseProfile,
     pub security_closure: TranscriptCoreSecurityClosure,
-    pub base_claim_profile_id: String,
+    pub base_profile_id: String,
     pub security_profile_id: String,
     pub he_setup_proof_profile_id: String,
     pub evaluator_replay_profile_id: String,
@@ -154,8 +154,8 @@ pub struct TranscriptCoreAnalysis {
     pub object_type: &'static str,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "baseClaimProfileId")]
-    pub base_claim_profile_id: String,
+    #[serde(rename = "baseProfileId")]
+    pub base_profile_id: String,
     #[serde(rename = "securityProfileId")]
     pub security_profile_id: String,
     #[serde(rename = "heSetupProofProfileId")]

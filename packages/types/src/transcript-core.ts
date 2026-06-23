@@ -15,7 +15,7 @@ export const canonicalErrorCodeValues = [
     'NonCanonicalVarUint',
     'ProfileComponentMismatch',
     'TrailingBytes',
-    'UnknownBaseClaimProfile',
+    'UnknownBaseProfile',
     'UnknownField',
     'UnknownSecurityClosure',
     'UnknownProofProfile',
@@ -41,7 +41,7 @@ export type GoldenTranscriptCoreFixture = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseClaimProfileId: string;
+    readonly baseProfileId: string;
     readonly securityProfileId: string;
     readonly heSetupProofProfileId: string;
     readonly evaluatorReplayProfileId: string;
@@ -70,7 +70,7 @@ export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseClaimProfileId: string;
+    readonly baseProfileId: string;
     readonly securityProfileId: string;
     readonly heSetupProofProfileId: string;
     readonly evaluatorReplayProfileId: string;

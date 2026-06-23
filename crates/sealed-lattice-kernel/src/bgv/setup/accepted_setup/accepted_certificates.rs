@@ -885,10 +885,6 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
                 "publicEvaluationKeyMaterialRoot",
             )?,
         },
-        "claimBoundary": {
-            "remainingDependencies": [],
-            "integrationDependencies": [],
-        },
     }))
 }
 

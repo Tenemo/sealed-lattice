@@ -598,8 +598,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_setup_key_correctness_c
         "heavy_accepted_setup_collective_setup_verifier_checks_setup_key_correctness_certificate",
     );
     let mut package = compact_setup_key_correctness_certificate_package_with_certificate();
-    package["setupKeyCorrectnessCertificate"]["claimBoundary"] =
-        serde_json::json!("weakened-key-correctness-claim");
+    package["setupKeyCorrectnessCertificate"]["weakenedKeyCorrectnessMarker"] =
+        serde_json::json!("weakened-key-correctness");
 
     let result = verify_setup_key_correctness_certificate_for_test(&package)
         .expect("verification response")
@@ -661,7 +661,7 @@ fn collective_setup_verifier_requires_active_static_setup_theorem_certificate() 
 }
 
 #[test]
-fn active_static_setup_theorem_certificate_records_accepted_claim_boundary() {
+fn active_static_setup_theorem_certificate_records_dependency_hashes() {
     let mut package = minimal_collective_setup_package();
     package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(valid_hash('c'));
     let certificate = active_static_setup_theorem_certificate_value(&package)
@@ -687,27 +687,6 @@ fn active_static_setup_theorem_certificate_records_accepted_claim_boundary() {
         certificate["dependencyHashes"]["setupKeyCorrectnessCertificateHash"],
         package["setupKeyCorrectnessCertificateHash"]
     );
-    // The remaining-dependency list stays empty and never reintroduces an
-    // open-soundness dependency row.
-    let remaining_dependencies = certificate["claimBoundary"]["remainingDependencies"]
-        .as_array()
-        .expect("remaining theorem dependencies");
-    assert!(remaining_dependencies.is_empty());
-    assert!(remaining_dependencies.iter().all(|dependency| {
-        dependency
-            .as_str()
-            .is_some_and(|text| !text.contains("AB-DLOP/LNP soundness"))
-    }));
-    assert!(remaining_dependencies.iter().all(|dependency| {
-        dependency
-            .as_str()
-            .is_some_and(|text| !text.contains("Fiat-Shamir/QROM"))
-    }));
-    assert!(remaining_dependencies.iter().all(|dependency| {
-        dependency
-            .as_str()
-            .is_some_and(|text| !text.contains("tbox"))
-    }));
 }
 
 #[test]

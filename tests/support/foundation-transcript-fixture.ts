@@ -243,7 +243,7 @@ export const createFoundationTranscriptCoreFixture = (
     const canonicalBytes = encodeFoundationTranscriptCoreBytes(payloadBytes);
 
     return {
-        baseClaimProfileId: foundationTranscriptProfileId,
+        baseProfileId: foundationTranscriptProfileId,
         canonicalBytesHex: bytesToHex(canonicalBytes),
         caseName: 'foundation-transcript-roots',
         chunkSize: transcriptCoreChunkSize,

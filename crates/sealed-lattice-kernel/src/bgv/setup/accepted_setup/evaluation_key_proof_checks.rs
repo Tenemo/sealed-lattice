@@ -16,7 +16,7 @@ use crate::hashing::to_hex;
 // verifier rebuilds each statement from the transported share records, the
 // recomputed round-one public aggregates, the accepted same-secret constant
 // commitments, and the ceremony context. No proof material inside the share
-// records is trusted; everything claim-relevant is recomputed here.
+// records is trusted; everything verification-relevant is recomputed here.
 
 static VERIFIED_TRUSTEE_EVALUATION_KEY_PROOF_MATERIAL_CHUNKS: OnceLock<
     Mutex<BTreeMap<String, VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry>>,

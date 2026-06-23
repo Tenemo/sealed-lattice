@@ -2,7 +2,7 @@
 //!
 //! The maintained Rust API is the byte-oriented command runner and the FFI
 //! allocation functions below. Proof internals are crate-private and should be
-//! reached through transcript-core commands so claim boundaries stay centralized.
+//! reached through transcript-core commands so trust boundaries stay centralized.
 
 #![recursion_limit = "256"]
 

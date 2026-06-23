@@ -5,7 +5,7 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
     let accounting_hash = super::accounting::succinct_evaluation_key_proof_accounting_hash()
         .expect("accounting hash");
     assert_eq!(accounting_hash.len(), 128);
-    // These bounds are load-bearing: 128-bit effective soundness depends on the
+    // These bounds are essential: 128-bit effective soundness depends on the
     // -160 pre-union margin and a named, unproven FRI conjecture, and
     // zero-knowledge is bounded-leakage only -- do not relax them to make the
     // accounting pass. The recomputed numeric soundness and leakage bounds, not

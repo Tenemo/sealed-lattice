@@ -83,8 +83,6 @@ describe('integrated election foundation transcript', () => {
             fixture.input.rosterManifestTranscript.frozenRosterProfile
                 .thresholdProfile,
         ).toMatchObject({
-            claimBearing: true,
-            claimBoundary: 'FirstProfile',
             rosterSize: foundationParticipantCount,
         });
         expect(verification.ok).toBe(true);

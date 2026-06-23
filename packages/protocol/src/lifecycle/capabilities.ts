@@ -10,7 +10,7 @@ import type {
 import { isValidLifecycleTransition } from './lifecycle.js';
 import { allowAction, refuseAction } from './refusal.js';
 
-const claimBearingActions = new Set<ProtocolAction>([
+const rosterBoundActions = new Set<ProtocolAction>([
     'SubmitVote',
     'VerifyEncryptedBallotProofs',
     'AggregateEncryptedBallots',
@@ -83,9 +83,6 @@ const evaluateOpenVoting = (
     if (!lifecycleAllows(context, 'votingOpen')) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (!context.thresholdProfile.claimBearing) {
-        return refuseAction(action, 'ProfileNotClaimBearing');
-    }
     if (
         !nonEmptyHash(context.finalRosterHash) ||
         !nonEmptyHash(context.frozenRosterProfileHash) ||
@@ -95,7 +92,7 @@ const evaluateOpenVoting = (
         context.targetOutputLayoutFrozen !== true ||
         context.targetDecryptionProfileReferencePresent !== true
     ) {
-        return refuseAction(action, 'ClaimClosureMissing');
+        return refuseAction(action, 'FrozenStateIncomplete');
     }
     if (
         context.trusteeSetupComplete !== true ||
@@ -289,17 +286,17 @@ const evaluateRecombination = (
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
     if (context.targetDecryptionClosureApplied !== true) {
-        return refuseAction(action, 'ClaimClosureMissing');
+        return refuseAction(action, 'TargetDecryptionClosureMissing');
     }
 
     return allowAction(action);
 };
 
-const evaluateClaimBearingEnvironment = (
+const evaluateRosterBoundEnvironment = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision | undefined => {
-    if (!claimBearingActions.has(action)) {
+    if (!rosterBoundActions.has(action)) {
         return undefined;
     }
     if (context.localRosterAccepted !== true) {
@@ -320,9 +317,6 @@ const evaluateClaimBearingEnvironment = (
     ) {
         return refuseAction(action, 'RosterExternalAcceptanceHashMismatch');
     }
-    if (!context.thresholdProfile.claimBearing) {
-        return refuseAction(action, 'ProfileNotClaimBearing');
-    }
     if (context.runtimeProfileSupported === false) {
         return refuseAction(action, 'OutsideMeasuredRuntimeProfile');
     }
@@ -337,7 +331,7 @@ export const evaluateActionCapability = (
         return refuseAction(action, 'PollSpecInvalid');
     }
 
-    const environmentRefusal = evaluateClaimBearingEnvironment(action, context);
+    const environmentRefusal = evaluateRosterBoundEnvironment(action, context);
     if (environmentRefusal !== undefined) {
         return environmentRefusal;
     }

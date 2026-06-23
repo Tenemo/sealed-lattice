@@ -102,7 +102,7 @@ impl RnsPolynomial {
         if self.domain != PolynomialDomain::Coefficient {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "claim-path BGV-RNS objects must be coefficient-domain canonical objects",
+                "protocol-path BGV-RNS objects must be coefficient-domain canonical objects",
             ));
         }
         if self.encrypted_ballot_aggregate_layout_hash != encrypted_ballot_aggregate_layout_hash()?
