@@ -13,14 +13,10 @@ const estimatorDirectoryPath = path.resolve(
     'lattice-estimator',
 );
 const expectedEstimatorCommit = '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5';
-const expectedEstimatorArtifactCanonicalSha256 =
+const expectedEstimatorOutputCanonicalSha256 =
     '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
-const estimatorResultArtifactPath = path.resolve(
-    repoRoot,
-    'implementation-documentation',
-    'setup-proof-decisions',
-    'he-lattice-estimator-results.json',
-);
+const estimatorResultArtifactPath =
+    process.env.SEALED_LATTICE_HE_ESTIMATOR_RESULTS_PATH;
 
 const pythonEstimatorScript = String.raw`
 import json
@@ -353,19 +349,31 @@ const main = (): void => {
     const output = normalizeJsonText(runEstimator());
 
     if (process.argv.includes('--check-artifact')) {
+        if (
+            estimatorResultArtifactPath === undefined ||
+            estimatorResultArtifactPath.trim() === ''
+        ) {
+            throw new Error(
+                'Set SEALED_LATTICE_HE_ESTIMATOR_RESULTS_PATH before using --check-artifact.',
+            );
+        }
+        const resolvedEstimatorResultArtifactPath = path.resolve(
+            repoRoot,
+            estimatorResultArtifactPath,
+        );
         const expected = normalizeJsonText(
-            readFileSync(estimatorResultArtifactPath, 'utf8'),
+            readFileSync(resolvedEstimatorResultArtifactPath, 'utf8'),
         );
         if (output !== expected) {
             throw new Error(
-                `${estimatorResultArtifactPath} does not match the estimator output`,
+                `${resolvedEstimatorResultArtifactPath} does not match the estimator output`,
             );
         }
 
         const outputHash = sha256Hex(output);
-        if (outputHash !== expectedEstimatorArtifactCanonicalSha256) {
+        if (outputHash !== expectedEstimatorOutputCanonicalSha256) {
             throw new Error(
-                `${estimatorResultArtifactPath} canonical SHA-256 mismatch: expected ${expectedEstimatorArtifactCanonicalSha256}, got ${outputHash}`,
+                `${resolvedEstimatorResultArtifactPath} canonical SHA-256 mismatch: expected ${expectedEstimatorOutputCanonicalSha256}, got ${outputHash}`,
             );
         }
     }

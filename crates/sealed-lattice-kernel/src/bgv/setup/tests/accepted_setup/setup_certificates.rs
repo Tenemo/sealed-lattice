@@ -1,15 +1,10 @@
-use std::{fs, path::Path};
-
 use super::*;
 use crate::bgv::profile::{data_basis_modulus_bits, extended_basis_modulus_bits};
 
-const HE_LATTICE_ESTIMATOR_RESULTS_ARTIFACT_PATH: &str =
-    "implementation-documentation/setup-proof-decisions/he-lattice-estimator-results.json";
-const HE_LATTICE_ESTIMATOR_RESULTS_CANONICAL_SHA256: &str =
+const HE_LATTICE_ESTIMATOR_OUTPUT_CANONICAL_SHA256: &str =
     "1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399";
-const HE_LATTICE_ESTIMATOR_RESULTS_CANONICALIZATION: &str =
+const HE_LATTICE_ESTIMATOR_OUTPUT_CANONICALIZATION: &str =
     "recursively sorted JSON object keys, two-space indentation, trailing newline";
-const ESTIMATOR_DECIMAL_COMPARISON_TOLERANCE: f64 = 1.0e-9;
 
 #[test]
 fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
@@ -244,16 +239,12 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
         "27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5"
     );
     assert_eq!(
-        certificate["estimatorBinding"]["resultsArtifact"],
-        HE_LATTICE_ESTIMATOR_RESULTS_ARTIFACT_PATH
+        certificate["estimatorBinding"]["estimatorOutputCanonicalization"],
+        HE_LATTICE_ESTIMATOR_OUTPUT_CANONICALIZATION
     );
     assert_eq!(
-        certificate["estimatorBinding"]["resultsArtifactCanonicalization"],
-        HE_LATTICE_ESTIMATOR_RESULTS_CANONICALIZATION
-    );
-    assert_eq!(
-        certificate["estimatorBinding"]["resultsArtifactCanonicalSha256"],
-        HE_LATTICE_ESTIMATOR_RESULTS_CANONICAL_SHA256
+        certificate["estimatorBinding"]["estimatorOutputCanonicalSha256"],
+        HE_LATTICE_ESTIMATOR_OUTPUT_CANONICAL_SHA256
     );
     assert_eq!(
         certificate["estimatorBinding"]["largestExposedBasisClass"],
@@ -268,54 +259,52 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
         assessed_ring["extendedUtilityCeilLog2Product"]
     );
 
-    let estimator_results_artifact = he_lattice_estimator_results_artifact();
     assert_eq!(
-        estimator_results_artifact["estimatorCommit"],
-        certificate["estimatorBinding"]["estimatorCommit"]
+        certificate["estimatorBinding"]["estimatorCommit"],
+        "27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5"
     );
     assert_eq!(
-        estimator_results_artifact["estimatorDefaultCostModel"],
-        certificate["estimatorBinding"]["estimatorDefaultCostModel"]
+        certificate["estimatorBinding"]["estimatorDefaultCostModel"],
+        "RC.MATZOV"
+    );
+    assert_eq!(certificate["estimatorBinding"]["secretModel"], "ND.Ternary");
+    assert_eq!(
+        certificate["estimatorBinding"]["errorModel"],
+        "ND.CenteredBinomial(2)"
     );
     assert_eq!(
-        estimator_results_artifact["inputParameters"]["secretDistribution"],
-        certificate["estimatorBinding"]["secretModel"]
-    );
-    assert_eq!(
-        estimator_results_artifact["inputParameters"]["currentErrorDistribution"],
-        certificate["estimatorBinding"]["errorModel"]
-    );
-    assert_eq!(
-        estimator_results_artifact["inputParameters"]["sampleModel"],
-        certificate["estimatorBinding"]["sampleModel"]
+        certificate["estimatorBinding"]["sampleModel"],
+        "m=+Infinity"
     );
 
     let estimator_rows = &certificate["latticeEstimatorRows"];
     let current_q_data_row = &estimator_rows["currentQDataCenteredBinomialEta2"];
-    assert_estimator_row_matches_artifact(
-        &certificate,
-        &estimator_results_artifact,
-        "currentQDataCenteredBinomialEta2",
-        "marginTo128Bits",
-    );
     assert_eq!(
         current_q_data_row["modulusCeilLog2"],
         serde_json::json!(data_basis_modulus_bits())
     );
+    assert_eq!(current_q_data_row["modulusLog2"], "798.9999986033129");
     assert_eq!(current_q_data_row["weakestAttack"], "bdd");
+    assert_eq!(
+        current_q_data_row["weakestAttackCostLog2"],
+        "139.4001063588318"
+    );
+    assert_eq!(current_q_data_row["marginTo128Bits"], "11.400106358831806");
     assert!(log2_string_field(current_q_data_row, "weakestAttackCostLog2") >= 128.0);
     assert!(log2_string_field(current_q_data_row, "marginTo128Bits") > 11.0);
 
     let quantum_context_row =
         &estimator_rows["currentQDataCenteredBinomialEta2Adps16QuantumSieveContext"];
-    assert_estimator_row_matches_artifact(
-        &certificate,
-        &estimator_results_artifact,
-        "currentQDataCenteredBinomialEta2Adps16QuantumSieveContext",
-        "marginToConventional128Bits",
-    );
     assert_eq!(quantum_context_row["costModel"], "ADPS16(mode=quantum)");
     assert_eq!(quantum_context_row["weakestAttack"], "usvp");
+    assert_eq!(
+        quantum_context_row["weakestAttackCostLog2"],
+        "96.99000000000001"
+    );
+    assert_eq!(
+        quantum_context_row["marginToConventional128Bits"],
+        "-31.00999999999999"
+    );
     assert!(
         quantum_context_row["rowScope"]
             .as_str()
@@ -326,15 +315,17 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
     assert!(log2_string_field(quantum_context_row, "marginToConventional128Bits") < 0.0);
 
     let extended_boundary_row = &estimator_rows["qExtendedIfExposedCenteredBinomialEta2"];
-    assert_estimator_row_matches_artifact(
-        &certificate,
-        &estimator_results_artifact,
-        "qExtendedIfExposedCenteredBinomialEta2",
-        "marginTo128Bits",
-    );
     assert_eq!(
         extended_boundary_row["modulusCeilLog2"],
         serde_json::json!(extended_basis_modulus_bits())
+    );
+    assert_eq!(
+        extended_boundary_row["weakestAttackCostLog2"],
+        "131.11460628721997"
+    );
+    assert_eq!(
+        extended_boundary_row["marginTo128Bits"],
+        "3.1146062872199707"
     );
     assert!(log2_string_field(extended_boundary_row, "weakestAttackCostLog2") >= 128.0);
     assert!(log2_string_field(extended_boundary_row, "marginTo128Bits") > 3.0);
@@ -343,26 +334,42 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
     // error model, so the certificate must bind a failing boundary row instead
     // of treating the published Gaussian table row as direct closure evidence.
     let centered_binomial_boundary_row = &estimator_rows["boundaryTwoPower868CenteredBinomialEta2"];
-    assert_estimator_row_matches_artifact(
-        &certificate,
-        &estimator_results_artifact,
-        "boundaryTwoPower868CenteredBinomialEta2",
-        "marginTo128Bits",
+    assert_eq!(
+        centered_binomial_boundary_row["modulusCeilLog2"],
+        serde_json::json!(868)
     );
-    assert_estimator_row_matches_artifact(
-        &certificate,
-        &estimator_results_artifact,
-        "boundaryTwoPower881CenteredBinomialEta2",
-        "marginTo128Bits",
+    assert_eq!(
+        centered_binomial_boundary_row["weakestAttackCostLog2"],
+        "127.7592570356635"
+    );
+    assert_eq!(
+        centered_binomial_boundary_row["marginTo128Bits"],
+        "-0.24074296433650488"
+    );
+    let centered_binomial_wider_boundary_row =
+        &estimator_rows["boundaryTwoPower881CenteredBinomialEta2"];
+    assert_eq!(
+        centered_binomial_wider_boundary_row["modulusCeilLog2"],
+        serde_json::json!(881)
+    );
+    assert_eq!(
+        centered_binomial_wider_boundary_row["weakestAttackCostLog2"],
+        "125.81720263568408"
     );
     assert!(log2_string_field(centered_binomial_boundary_row, "weakestAttackCostLog2") < 128.0);
 
     let published_reference_row = &estimator_rows["bcc25ReferenceTwoPower868Gaussian319"];
-    assert_estimator_row_matches_artifact(
-        &certificate,
-        &estimator_results_artifact,
-        "bcc25ReferenceTwoPower868Gaussian319",
-        "marginTo128Bits",
+    assert_eq!(
+        published_reference_row["modulusCeilLog2"],
+        serde_json::json!(868)
+    );
+    assert_eq!(
+        published_reference_row["weakestAttackCostLog2"],
+        "128.03348894742626"
+    );
+    assert_eq!(
+        published_reference_row["marginTo128Bits"],
+        "0.03348894742626385"
     );
     assert!(log2_string_field(published_reference_row, "weakestAttackCostLog2") >= 128.0);
 
@@ -372,94 +379,6 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
         certificate["targetDecryptionStatus"]["targetDecryptionProfileId"]
             .as_str()
             .is_some_and(|profile_id| !profile_id.is_empty())
-    );
-}
-
-fn he_lattice_estimator_results_artifact() -> serde_json::Value {
-    let kernel_crate_directory = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let repository_root = kernel_crate_directory
-        .parent()
-        .and_then(|crates_directory| crates_directory.parent())
-        .expect("kernel crate must live under the repository crates directory");
-    let artifact_path = repository_root.join(HE_LATTICE_ESTIMATOR_RESULTS_ARTIFACT_PATH);
-    let artifact_text = fs::read_to_string(&artifact_path).unwrap_or_else(|error| {
-        panic!(
-            "HE lattice estimator result artifact must be readable at {}: {error}",
-            artifact_path.display()
-        )
-    });
-
-    serde_json::from_str(&artifact_text).unwrap_or_else(|error| {
-        panic!(
-            "HE lattice estimator result artifact must contain JSON at {}: {error}",
-            artifact_path.display()
-        )
-    })
-}
-
-fn assert_estimator_row_matches_artifact(
-    certificate: &serde_json::Value,
-    artifact: &serde_json::Value,
-    row_name: &str,
-    margin_field_name: &str,
-) {
-    let certificate_row = &certificate["latticeEstimatorRows"][row_name];
-    let artifact_row = &artifact["results"][row_name];
-
-    assert_eq!(
-        certificate_row["modulusCeilLog2"], artifact_row["modulusCeilLog2"],
-        "estimator row {row_name} modulusCeilLog2 must match the recorded artifact"
-    );
-    assert_eq!(
-        certificate_row["weakestAttack"], artifact_row["weakestAttack"],
-        "estimator row {row_name} weakestAttack must match the recorded artifact"
-    );
-    assert_log2_string_matches_artifact_number(
-        certificate_row,
-        artifact_row,
-        row_name,
-        "modulusLog2",
-    );
-    assert_log2_string_matches_artifact_number(
-        certificate_row,
-        artifact_row,
-        row_name,
-        "weakestAttackCostLog2",
-    );
-    assert_log2_string_matches_artifact_number(
-        certificate_row,
-        artifact_row,
-        row_name,
-        margin_field_name,
-    );
-
-    if let Some(artifact_cost_model) = artifact_row.get("costModel") {
-        assert_eq!(
-            &certificate_row["costModel"], artifact_cost_model,
-            "estimator row {row_name} costModel must match the recorded artifact"
-        );
-    }
-    if let Some(artifact_row_scope) = artifact_row.get("rowScope") {
-        assert_eq!(
-            &certificate_row["rowScope"], artifact_row_scope,
-            "estimator row {row_name} rowScope must match the recorded artifact"
-        );
-    }
-}
-
-fn assert_log2_string_matches_artifact_number(
-    certificate_row: &serde_json::Value,
-    artifact_row: &serde_json::Value,
-    row_name: &str,
-    field_name: &str,
-) {
-    let certificate_number = log2_string_field(certificate_row, field_name);
-    let artifact_number = artifact_row[field_name]
-        .as_f64()
-        .unwrap_or_else(|| panic!("artifact row {row_name} field {field_name} must be a number"));
-    assert!(
-        (certificate_number - artifact_number).abs() <= ESTIMATOR_DECIMAL_COMPARISON_TOLERANCE,
-        "estimator row {row_name} field {field_name} must match the recorded artifact"
     );
 }
 

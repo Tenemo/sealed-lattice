@@ -29,8 +29,6 @@ import {
 
 const heEstimatorArtifactCanonicalSha256 =
     '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
-const heEstimatorArtifactPath =
-    'implementation-documentation/setup-proof-decisions/he-lattice-estimator-results.json';
 const heEstimatorArtifactCanonicalization =
     'recursively sorted JSON object keys, two-space indentation, trailing newline';
 
@@ -597,10 +595,9 @@ describe('accepted setup public package API in Node', () => {
         expect(heEstimatorBinding).toMatchObject({
             estimatorCommit: '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5',
             estimatorDefaultCostModel: 'RC.MATZOV',
-            resultsArtifact: heEstimatorArtifactPath,
-            resultsArtifactCanonicalization:
+            estimatorOutputCanonicalization:
                 heEstimatorArtifactCanonicalization,
-            resultsArtifactCanonicalSha256: heEstimatorArtifactCanonicalSha256,
+            estimatorOutputCanonicalSha256: heEstimatorArtifactCanonicalSha256,
             largestExposedBasisClass: 'Q_data',
             largestExposedModulusBits: heAssessedRing.dataPrimeCeilLog2Product,
         });

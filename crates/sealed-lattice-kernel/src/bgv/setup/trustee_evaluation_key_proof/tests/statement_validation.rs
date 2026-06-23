@@ -167,9 +167,7 @@ fn private_vss_consistency_set_excludes_committed_message_columns() {
     // The carry must stay in the consistency set: it is essential to the
     // global sharing-soundness argument that replaces the removed message assertions
     // (carry consistency + the public range-checked share pin the polynomial
-    // evaluation per recipient; see consistency_vector_count and
-    // implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md
-    // section 4). Dropping it the way
+    // evaluation per recipient). Dropping it the way
     // the message claims were dropped would silently break soundness, so pin that
     // exactly one non-randomness consistency vector (the carry) remains.
     assert_eq!(

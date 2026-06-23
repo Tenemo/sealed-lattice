@@ -245,12 +245,10 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
     );
 }
 
-// Multi-recipient consistency is what actually makes Option A sound (see
-// implementation-documentation/setup-proof-decisions/private-vss-zero-knowledge-leakage.md
-// section 4): with the message consistency claims removed, a single recipient's
-// proof does not pin the Shamir coefficients across the RNS commitment fields,
-// so soundness comes from >= t honest recipients each verifying the same source
-// commitment. This
+// Multi-recipient consistency is what makes the reduced message-claim set sound:
+// with the message consistency claims removed, a single recipient's proof does
+// not pin the Shamir coefficients across the RNS commitment fields, so soundness
+// comes from >= t honest recipients each verifying the same source commitment. This
 // test exercises that structure: one committed degree-(t-1) polynomial, verified
 // at the four distinct recipient points of the first-profile decryption threshold
 // (t_secret = 4), all accepting. The shares differ per recipient (distinct
@@ -263,7 +261,7 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
 // field, so it structurally cannot emit per-field-inconsistent messages.
 // Demonstrating that requires constructing the committed columns below the prover
 // (bypassing validate_private_vss_witness), and is the recorded gold-standard
-// follow-up; the verifier-side gap it would exercise is documented in section 4b.
+// follow-up.
 #[test]
 fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients() {
     let ring_degree = PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE;
