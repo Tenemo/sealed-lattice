@@ -67,6 +67,401 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert!(profile["commitmentProfileHash"].as_str().is_some());
     assert_eq!(
+        profile["canonicalTargetBasis"]["objectType"],
+        "CanonicalTargetBasis"
+    );
+    assert_eq!(
+        profile["canonicalTargetBasis"]["targetLevel"],
+        serde_json::json!(crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL)
+    );
+    assert_eq!(
+        profile["canonicalTargetBasis"]["targetPrimes"]
+            .as_array()
+            .expect("canonical target primes")
+            .len(),
+        crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1
+    );
+    assert_eq!(
+        profile["canonicalTargetBasis"]["targetPrimes"][0],
+        serde_json::json!(DATA_PRIMES[0])
+    );
+    assert_eq!(
+        profile["canonicalTargetBasis"]["targetDecryptionReadiness"],
+        "refused until smudging proof coverage, recombination proof coverage, target proof backend, and verifier activation are complete"
+    );
+    assert!(
+        profile["canonicalTargetBasisHash"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 128)
+    );
+    assert_eq!(
+        profile["compactVssProfileBudget"]["objectType"],
+        "CompactVssProfileBudget"
+    );
+    assert_eq!(
+        profile["compactVssProfileBudget"]["publicVerifier"]["publicSetupDownloadBudgetBytes"],
+        serde_json::json!(67_108_864_u64)
+    );
+    assert_eq!(
+        profile["compactVssProfileBudget"]["recipientTrustee"]["privateMailboxBudgetBytes"],
+        serde_json::json!(67_108_864_u64)
+    );
+    assert_eq!(
+        profile["compactVssProfileBudget"]["persistentLocalState"]["proofWitnessBudgetBytes"],
+        serde_json::json!(16_777_216_u64)
+    );
+    assert_eq!(
+        profile["compactVssProfileBudget"]["accountingRules"]["privateMailboxBytes"],
+        "private recipient envelopes are reported separately from public verifier setup bytes"
+    );
+    assert_eq!(
+        profile["compactVssMatrixExpansionProfile"]["objectType"],
+        "CompactVssMatrixExpansionProfile"
+    );
+    assert_eq!(
+        profile["compactVssMatrixExpansionProfile"]["matrixKind"],
+        "compact-vss-commitment-key"
+    );
+    assert_eq!(
+        profile["compactVssMatrixExpansionProfile"]["coordinateCountPerCommitment"],
+        serde_json::json!(48_u64)
+    );
+    assert_eq!(
+        profile["compactVssMatrixExpansionProfile"]["sampledMatrixResiduesPerCoordinate"],
+        serde_json::json!(96_u64)
+    );
+    assert_eq!(
+        profile["compactVssMatrixExpansionProfile"]["sampledMatrixResiduesPerCommitment"],
+        serde_json::json!(4_608_u64)
+    );
+    assert_eq!(
+        profile["compactVssMatrixExpansionProfile"]["inputColumnLabels"],
+        serde_json::json!(["message", "randomness:0", "randomness:1"])
+    );
+    assert!(
+        profile["compactVssMatrixExpansionProfile"]["matrixResiduePreimageFields"]
+            .as_array()
+            .expect("compact VSS matrix residue preimage fields")
+            .iter()
+            .any(|entry| entry == "inputColumn")
+    );
+    assert!(
+        profile["compactVssMatrixExpansionProfileHash"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 128)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["objectType"],
+        "CompactVssParameterCertificateInputBinding"
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["relation"],
+        "C = A0 * m + A1 * r mod q_c"
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["commitmentModulusLimbs"],
+        serde_json::json!([
+            {
+                "commitmentModulusIndex": 0,
+                "modulus": DATA_PRIMES[0]
+            },
+            {
+                "commitmentModulusIndex": 1,
+                "modulus": DATA_PRIMES[1]
+            },
+            {
+                "commitmentModulusIndex": 2,
+                "modulus": DATA_PRIMES[2]
+            }
+        ])
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["normInputClasses"]
+            .as_array()
+            .expect("compact parameter certificate input classes")
+            .iter()
+            .filter_map(|entry| entry["className"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "shamirScalarL1Amplification",
+            "messageEncodingNorm",
+            "openingRandomnessNorm",
+            "aggregateDealerCount",
+            "proofExtractedOpeningNorm",
+            "targetDecryptionOpeningNorm",
+            "targetDecryptionRecombinationCoefficientAmplification"
+        ]
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["normInputClasses"][0]["oneRecipientAggregateShamirScalarL1"],
+        serde_json::json!(11_110_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["sameSecretBridgeInput"]["targetBasisHash"],
+        profile["canonicalTargetBasisHash"]
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["sameSecretBridgeInput"]
+            ["targetRnsPrimes"]
+            .as_array()
+            .expect("compact parameter target RNS primes")
+            .len(),
+        7
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["proofCoverageInputs"]["recombination"],
+        "target result acceptance requires denominator-cleared Lagrange recombination and decoding-margin verification"
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["compactVssParameterCertificateInputBindingHash"],
+        profile["compactVssParameterCertificateInputBindingHash"]
+    );
+    let mut compact_vss_parameter_certificate_input_body =
+        profile["compactVssParameterCertificateInputBinding"].clone();
+    compact_vss_parameter_certificate_input_body
+        .as_object_mut()
+        .expect("compact parameter certificate input binding body")
+        .remove("compactVssParameterCertificateInputBindingHash");
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBindingHash"],
+        serde_json::json!(
+            derive_protocol_hash(
+                "CompactVssParameterCertificateInputBindingHash",
+                &compact_vss_parameter_certificate_input_body
+            )
+            .expect("compact parameter certificate input binding hash")
+        )
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["objectType"],
+        "CurrentVssMaterialBaselineReport"
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["materialRecordCount"],
+        serde_json::json!(680_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["singleCommitmentCoefficientBytes"],
+        serde_json::json!(2_359_296_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["fullMaterialCoefficientBytes"],
+        serde_json::json!(1_604_321_280_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["exactBinaryTransportBytes"],
+        serde_json::json!(1_604_341_697_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["binaryTransportMetadataBytes"],
+        serde_json::json!(20_417_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["publicVerificationMemoryEstimate"]["lowerBoundBytes"],
+        serde_json::json!(3_407_872_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["localStateMaterialClasses"]["currentWitnessBoundary"],
+        "target proof witness material is root-bound and sealed; compact aggregate opening credentials are locally recomputed against declared compact roots, sealed, and restorable, while the zero-knowledge target proof backend is not implemented yet"
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["trusteePointScalarBounds"]["oneSourceMaximumShamirScalarL1"],
+        serde_json::json!(1_111_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["trusteePointScalarBounds"]["oneRecipientAggregateShamirScalarL1"],
+        serde_json::json!(11_110_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["normModel"]["shamirScalarL1Amplification"],
+        serde_json::json!(1_111_u64)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["normModel"]["openingRandomnessNorm"]["infinityNormBound"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        profile["currentVssMaterialBaselineReport"]["normModel"]["aggregateDealerCount"],
+        serde_json::json!(10_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["singleCompactCommitmentBytes"],
+        serde_json::json!(384_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["targetRnsLimbCount"],
+        serde_json::json!(7_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["totalCompactPublicCommitmentBytes"],
+        serde_json::json!(556_800_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["byteAccountingScope"],
+        "compact public commitment bodies only: source coefficient commitments, source-to-recipient share commitments, and recipient aggregate-threshold commitments"
+    );
+    assert!(
+        profile["compactVssDevelopmentMeasurement"]["measuredPublicCommitmentRoles"]
+            .as_array()
+            .expect("compact VSS measured public commitment roles")
+            .iter()
+            .any(|entry| entry == "source-to-recipient share commitments")
+    );
+    assert!(
+        profile["compactVssDevelopmentMeasurement"]["excludedByteCategories"]
+            .as_array()
+            .expect("compact VSS excluded byte categories")
+            .iter()
+            .any(|entry| entry == "private mailbox share and opening-credential bytes")
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["byteReduction"]["removedBytes"],
+        serde_json::json!(1_603_784_897_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["projectionWeight"],
+        serde_json::json!(32_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["cpuWorkModel"]["totalResidueMultiplyAdds"],
+        serde_json::json!(6_681_600_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["objectType"],
+        "CompactVssPrivateWitnessPayloadMeasurement"
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["measurementKind"],
+        "static-development-compact-vss-private-opening-payload-accounting"
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["oneSourceRecipientCredentialPayloadBytes"],
+        serde_json::json!(786_432_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["oneRecipientPrivateMailboxCredentialPayloadBytes"],
+        serde_json::json!(55_050_240_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["oneRecipientPersistentAggregateCredentialPayloadBytes"],
+        serde_json::json!(5_505_024_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["allRecipientsPrivateMailboxCredentialPayloadBytes"],
+        serde_json::json!(550_502_400_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["allRecipientsPersistentAggregateCredentialPayloadBytes"],
+        serde_json::json!(55_050_240_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["byteAccountingScope"],
+        "compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one aggregate opening payload per persisted recipient limb"
+    );
+    assert!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["excludedByteCategories"]
+            .as_array()
+            .expect("compact VSS private payload excluded byte categories")
+            .iter()
+            .any(|entry| entry == "mailbox KEM, AEAD, nonce, tag, and associated-data overhead")
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["budgetComparison"]["privateMailboxBudgetBytes"],
+        serde_json::json!(67_108_864_u64)
+    );
+    assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["budgetComparison"]["persistentProofWitnessBudgetBytes"],
+        serde_json::json!(16_777_216_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["objectType"],
+        "CompactVssParameterEvidence"
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["evidenceKind"],
+        "static-development-parameter-search-inputs"
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["certificateInputBindingHash"],
+        profile["compactVssParameterCertificateInputBindingHash"]
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["commitmentShape"]["projectionWeight"],
+        serde_json::json!(32_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["sampleCounts"]["totalCommitments"],
+        serde_json::json!(1_450_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["normInputs"]["oneRecipientAggregateShamirScalarL1"],
+        serde_json::json!(11_110_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["normInputs"]["certificateInputClasses"]["shamirScalarL1Amplification"]
+            ["maximumRecipientTrusteePoint"],
+        serde_json::json!(10_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["normInputs"]["certificateInputClasses"]["messageEncodingNorm"]
+            ["messageSource"],
+        "canonical per-prime share residues"
+    );
+    assert!(
+        profile["compactVssParameterEvidence"]["normInputs"]["certificateInputClasses"]
+            ["targetDecryptionRecombinationCoefficientAmplification"]["currentEvidence"]
+            .as_str()
+            .expect("target recombination norm evidence")
+            .contains("certificate-grade proof binding and norm bounds remain open")
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["sameSecretBridgeInput"]["targetBasisHash"],
+        profile["canonicalTargetBasisHash"]
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["sameSecretBridgeInput"]["existingSameSecretRelation"],
+        "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs"
+    );
+    assert!(
+        profile["compactVssParameterEvidence"]["sameSecretBridgeInput"]["currentStatementBinding"]
+            .as_str()
+            .expect("same-secret bridge current statement binding")
+            .contains("target-basis compact constant coefficient roots")
+    );
+    assert_eq!(
+        profile["compactVssParameterEvidence"]["sameSecretBridgeInput"]["requiredStatementInputs"]
+            ["targetBasisLimbOrder"]["targetRnsLimbCount"],
+        serde_json::json!(7_u64)
+    );
+    assert!(
+        profile["compactVssParameterEvidence"]["sameSecretBridgeInput"]["requiredStatementInputs"]
+            ["dataBasisProofRoots"]
+            .as_array()
+            .expect("same-secret bridge data-basis proof roots")
+            .iter()
+            .any(|entry| entry == "trusteeSecretCommitmentRoot")
+    );
+    assert!(
+        profile["compactVssParameterEvidence"]["certificateBoundary"]
+            .as_str()
+            .expect("compact parameter evidence boundary")
+            .contains("not a parameter certificate")
+    );
+    assert!(
+        profile["compactVssParameterEvidence"]["missingCertificateInputs"]
+            .as_array()
+            .expect("compact parameter evidence missing inputs")
+            .iter()
+            .any(|entry| entry == "same-secret bridge proof over signed ternary coefficients")
+    );
+    assert!(
+        profile["compactVssParameterEvidenceHash"]
+            .as_str()
+            .expect("compact parameter evidence hash")
+            .len()
+            == 128
+    );
+    assert_eq!(
         profile["publicVssCommitmentMaterialSizeProfile"]["objectType"],
         "PublicVssCommitmentMaterialSizeProfile"
     );

@@ -6,6 +6,13 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    compactVssCommitmentBinaryFormat,
+    compactVssCommitmentDevelopmentScope,
+    compactVssCommitmentProfileId,
+    verifyCompactVssCoefficientCommitmentSet,
+    type CompactVssCoefficientCommitmentSet,
+} from './compact-vss-commitments.js';
+import {
     setupProofChunkManifestRoot,
     setupProofMaterialChunkHash,
     setupProofTransportChunkSizeBytes,
@@ -41,6 +48,16 @@ export const sameSecretGenericKeySwitchBindingPolicy =
     'absent-unless-frozen-schedule-requires-proof-family';
 export const sameSecretTargetDecryptionBindingPolicy =
     'later-target-share-must-bind-threshold-share-commitment';
+export const compactVssSameSecretBridgeRelation =
+    'target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof';
+export const compactVssSameSecretBridgeProofBoundary =
+    'statement binding only; same-secret bridge proof backend is not implemented yet';
+export const compactVssSameSecretBridgeIntegerSupport =
+    'the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb';
+export const compactVssSameSecretBridgeSignedRepresentativeConvention =
+    'coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime';
+export const compactVssSameSecretBridgeTargetBasisLimbOrder =
+    'target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime';
 
 export type SameSecretConstantCoefficientCommitmentRoot = Readonly<{
     readonly rnsLimbIndex: number;
@@ -175,6 +192,85 @@ export type SameSecretProofSet = Readonly<
     }
 >;
 
+export type CompactVssSameSecretBridgeTargetConstantCommitmentRoot = Readonly<{
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly shamirCoefficientIndex: 0;
+    readonly coefficientCommitmentRoot: ProtocolHash;
+}>;
+
+export type CompactVssSameSecretBridgeStatementRecord = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssSameSecretBridgeStatement';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly compactCommitmentProfileId: typeof compactVssCommitmentProfileId;
+        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof sameSecretProofFamily;
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupProfileHash: ProtocolHash;
+        readonly qShareHash: ProtocolHash;
+        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly targetBasisHash: ProtocolHash;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly trusteeIdentity: string;
+        readonly trusteeRosterPosition: number;
+        readonly sameSecretStatementRoot: ProtocolHash;
+        readonly sameSecretProofRoot: ProtocolHash;
+        readonly trusteeSecretCommitmentRoot: ProtocolHash;
+        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+        readonly dataBasisRelation: typeof sameSecretRelation;
+        readonly integerSupport: typeof compactVssSameSecretBridgeIntegerSupport;
+        readonly signedRepresentativeConvention: typeof compactVssSameSecretBridgeSignedRepresentativeConvention;
+        readonly compactCommitmentEncoding: typeof compactVssCommitmentBinaryFormat;
+        readonly targetBasisLimbOrder: typeof compactVssSameSecretBridgeTargetBasisLimbOrder;
+        readonly targetConstantCoefficientCommitmentRoots: readonly CompactVssSameSecretBridgeTargetConstantCommitmentRoot[];
+        readonly relation: typeof compactVssSameSecretBridgeRelation;
+        readonly proofBoundary: typeof compactVssSameSecretBridgeProofBoundary;
+        readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    }
+>;
+
+export type CompactVssSameSecretBridgeStatementSet = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssSameSecretBridgeStatementSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly compactCommitmentProfileId: typeof compactVssCommitmentProfileId;
+        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof sameSecretProofFamily;
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupProfileHash: ProtocolHash;
+        readonly qShareHash: ProtocolHash;
+        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly targetBasisHash: ProtocolHash;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly targetRnsLimbCount: number;
+        readonly thresholdDegree: number;
+        readonly compactCoefficientCommitmentRoot: ProtocolHash;
+        readonly sameSecretConsistencyRoot: ProtocolHash;
+        readonly sameSecretProofSetRoot: ProtocolHash;
+        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+        readonly integerSupport: typeof compactVssSameSecretBridgeIntegerSupport;
+        readonly signedRepresentativeConvention: typeof compactVssSameSecretBridgeSignedRepresentativeConvention;
+        readonly compactCommitmentEncoding: typeof compactVssCommitmentBinaryFormat;
+        readonly targetBasisLimbOrder: typeof compactVssSameSecretBridgeTargetBasisLimbOrder;
+        readonly statementRecords: readonly CompactVssSameSecretBridgeStatementRecord[];
+        readonly compactSameSecretBridgeStatementSetRoot: ProtocolHash;
+    }
+>;
+
 export type SameSecretConsistencyStatementSetInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qSharePrimes: readonly number[];
@@ -191,6 +287,15 @@ export type SameSecretProofSetInput = {
     readonly vssCoefficientCommitmentMaterial: SetupPackageVssCoefficientCommitmentMaterialSet;
     readonly proofAccountingHash: ProtocolHash;
     readonly proofMaterials: readonly SameSecretProofMaterial[];
+};
+
+export type CompactVssSameSecretBridgeStatementSetInput = {
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly targetBasisHash: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly compactCoefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
 };
 
 export type TransportedSameSecretProofMaterialSet = Readonly<
@@ -236,7 +341,7 @@ const assertNonNegativeSafeInteger = (
 };
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
+    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 };
@@ -248,8 +353,18 @@ const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
 };
 
 const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
+    if (typeof value !== 'string' || value.length === 0) {
         throw new TypeError(`${fieldName} must be non-empty.`);
+    }
+};
+
+const assertExactString = (
+    value: string,
+    fieldName: string,
+    expectedValue: string,
+): void => {
+    if (value !== expectedValue) {
+        throw new TypeError(`${fieldName} is not supported.`);
     }
 };
 
@@ -875,6 +990,778 @@ export const createSameSecretProofSet = (
             proofSetWithoutRoot,
         ),
     } satisfies SameSecretProofSet;
+};
+
+type CompactVssSourceCoefficientRecord =
+    CompactVssCoefficientCommitmentSet['sourceTrusteeRecords'][number];
+
+const sortedCompactCoefficientSourceRecordsForBridge = (
+    compactCoefficientCommitmentSet: CompactVssCoefficientCommitmentSet,
+): CompactVssSourceCoefficientRecord[] => {
+    const sourceTrusteeRecords = [
+        ...compactCoefficientCommitmentSet.sourceTrusteeRecords,
+    ].sort(
+        (leftRecord, rightRecord) =>
+            leftRecord.sourceTrusteeRosterPosition -
+            rightRecord.sourceTrusteeRosterPosition,
+    );
+    if (
+        sourceTrusteeRecords.length !==
+        compactCoefficientCommitmentSet.participantCount
+    ) {
+        throw new Error(
+            'compact coefficient commitments must contain one source record per participant.',
+        );
+    }
+    sourceTrusteeRecords.forEach((sourceTrusteeRecord, expectedPosition) => {
+        if (
+            sourceTrusteeRecord.sourceTrusteeRosterPosition !== expectedPosition
+        ) {
+            throw new Error(
+                'compact coefficient source records must be contiguous from zero.',
+            );
+        }
+    });
+
+    return sourceTrusteeRecords;
+};
+
+const sortedSameSecretProofRecordsForBridge = (
+    input: Pick<
+        CompactVssSameSecretBridgeStatementSetInput,
+        'sameSecretProofs'
+    > & {
+        readonly participantCount: number;
+    },
+): SameSecretProofRecord[] => {
+    const proofRecords = [...input.sameSecretProofs.proofRecords].sort(
+        (leftRecord, rightRecord) =>
+            leftRecord.trusteeRosterPosition -
+            rightRecord.trusteeRosterPosition,
+    );
+    if (proofRecords.length !== input.participantCount) {
+        throw new Error(
+            'sameSecretProofs.proofRecords must contain one proof per participant.',
+        );
+    }
+    proofRecords.forEach((proofRecord, expectedPosition) => {
+        assertProtocolHash(
+            proofRecord.sameSecretProofRoot,
+            'sameSecretProofs.proofRecords.sameSecretProofRoot',
+        );
+        if (proofRecord.trusteeRosterPosition !== expectedPosition) {
+            throw new Error(
+                'sameSecretProofs.proofRecords roster positions must be contiguous from zero.',
+            );
+        }
+    });
+
+    return proofRecords;
+};
+
+const targetConstantCoefficientRootsForBridge = (
+    sourceTrusteeRecord: CompactVssSourceCoefficientRecord,
+    targetRnsLimbCount: number,
+): CompactVssSameSecretBridgeTargetConstantCommitmentRoot[] => {
+    const constantRoots = sourceTrusteeRecord.coefficientCommitments.filter(
+        (coefficientCommitment) =>
+            coefficientCommitment.shamirCoefficientIndex === 0,
+    );
+    if (constantRoots.length !== targetRnsLimbCount) {
+        throw new Error(
+            'compact coefficient commitments must contain one target-basis constant coefficient root per RNS limb.',
+        );
+    }
+
+    return constantRoots.map((coefficientCommitment, expectedRnsLimbIndex) => {
+        if (coefficientCommitment.rnsLimbIndex !== expectedRnsLimbIndex) {
+            throw new Error(
+                'compact target-basis constant coefficient roots must be ordered by RNS limb.',
+            );
+        }
+        assertProtocolHash(
+            coefficientCommitment.coefficientCommitmentRoot,
+            'compact coefficient commitment root',
+        );
+
+        return {
+            rnsLimbIndex: coefficientCommitment.rnsLimbIndex,
+            rnsPrime: coefficientCommitment.rnsPrime,
+            shamirCoefficientIndex: 0,
+            coefficientCommitmentRoot:
+                coefficientCommitment.coefficientCommitmentRoot,
+        };
+    });
+};
+
+export const createCompactVssSameSecretBridgeStatementSet = (
+    input: CompactVssSameSecretBridgeStatementSetInput,
+): CompactVssSameSecretBridgeStatementSet => {
+    assertProtocolHash(input.targetBasisHash, 'targetBasisHash');
+    assertProtocolHash(input.publicMatrixSeedHash, 'publicMatrixSeedHash');
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretConsistency,
+        'sameSecretConsistency',
+    );
+    assertContextMatches(
+        input.setupContext,
+        input.sameSecretProofs,
+        'sameSecretProofs',
+    );
+    const compactCoefficientCommitmentSet =
+        verifyCompactVssCoefficientCommitmentSet({
+            coefficientCommitmentSet: input.compactCoefficientCommitmentSet,
+        });
+    if (
+        compactCoefficientCommitmentSet.publicMatrixSeedHash !==
+        input.publicMatrixSeedHash
+    ) {
+        throw new Error(
+            'compact same-secret bridge statements must use the compact coefficient matrix seed hash.',
+        );
+    }
+    if (
+        input.sameSecretProofs.sameSecretConsistencyRoot !==
+            input.sameSecretConsistency.sameSecretConsistencyRoot ||
+        input.sameSecretProofs.sameSecretProofFamilyBindingRoot !==
+            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot
+    ) {
+        throw new Error(
+            'sameSecretProofs must bind the same same-secret statement set.',
+        );
+    }
+    if (
+        input.sameSecretConsistency.participantCount !==
+            compactCoefficientCommitmentSet.participantCount ||
+        input.sameSecretProofs.participantCount !==
+            compactCoefficientCommitmentSet.participantCount
+    ) {
+        throw new Error(
+            'compact same-secret bridge inputs must use one participant count.',
+        );
+    }
+    const compactSourceRecords = sortedCompactCoefficientSourceRecordsForBridge(
+        compactCoefficientCommitmentSet,
+    );
+    const sameSecretStatementRecords = sortedStatementRecordsForProofs({
+        participantCount: compactCoefficientCommitmentSet.participantCount,
+        sameSecretConsistency: input.sameSecretConsistency,
+    });
+    const sameSecretProofRecords = sortedSameSecretProofRecordsForBridge({
+        participantCount: compactCoefficientCommitmentSet.participantCount,
+        sameSecretProofs: input.sameSecretProofs,
+    });
+    const statementRecords = compactSourceRecords.map(
+        (compactSourceRecord, expectedPosition) => {
+            const sameSecretStatementRecord =
+                sameSecretStatementRecords[expectedPosition];
+            const sameSecretProofRecord =
+                sameSecretProofRecords[expectedPosition];
+            if (
+                sameSecretStatementRecord === undefined ||
+                sameSecretProofRecord === undefined
+            ) {
+                throw new Error(
+                    'compact same-secret bridge inputs must contain matching records.',
+                );
+            }
+            if (
+                compactSourceRecord.sourceTrusteeIdentity !==
+                    sameSecretStatementRecord.trusteeIdentity ||
+                compactSourceRecord.sourceTrusteeRosterPosition !==
+                    sameSecretStatementRecord.trusteeRosterPosition ||
+                sameSecretProofRecord.trusteeIdentity !==
+                    sameSecretStatementRecord.trusteeIdentity ||
+                sameSecretProofRecord.trusteeRosterPosition !==
+                    sameSecretStatementRecord.trusteeRosterPosition
+            ) {
+                throw new Error(
+                    'compact same-secret bridge records must bind one trustee identity and roster position.',
+                );
+            }
+            if (
+                sameSecretProofRecord.sameSecretStatementRoot !==
+                    sameSecretStatementRecord.sameSecretStatementRoot ||
+                sameSecretProofRecord.trusteeSecretCommitmentRoot !==
+                    sameSecretStatementRecord.trusteeSecretCommitmentRoot ||
+                sameSecretProofRecord.sameSecretProofFamilyBindingRoot !==
+                    sameSecretStatementRecord.sameSecretProofFamilyBindingRoot
+            ) {
+                throw new Error(
+                    'compact same-secret bridge proof records must bind the same statement record.',
+                );
+            }
+            const statementRecordWithoutRoot = {
+                objectType: 'CompactVssSameSecretBridgeStatement',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                compactCommitmentProfileId: compactVssCommitmentProfileId,
+                developmentScope: compactVssCommitmentDevelopmentScope,
+                setupProofProfileId,
+                proofFamily: sameSecretProofFamily,
+                ...contextFields(input.setupContext),
+                targetBasisHash: input.targetBasisHash,
+                publicMatrixSeedHash: input.publicMatrixSeedHash,
+                trusteeIdentity: sameSecretStatementRecord.trusteeIdentity,
+                trusteeRosterPosition:
+                    sameSecretStatementRecord.trusteeRosterPosition,
+                sameSecretStatementRoot:
+                    sameSecretStatementRecord.sameSecretStatementRoot,
+                sameSecretProofRoot: sameSecretProofRecord.sameSecretProofRoot,
+                trusteeSecretCommitmentRoot:
+                    sameSecretStatementRecord.trusteeSecretCommitmentRoot,
+                sameSecretProofFamilyBindingRoot:
+                    sameSecretStatementRecord.sameSecretProofFamilyBindingRoot,
+                dataBasisRelation: sameSecretRelation,
+                integerSupport: compactVssSameSecretBridgeIntegerSupport,
+                signedRepresentativeConvention:
+                    compactVssSameSecretBridgeSignedRepresentativeConvention,
+                compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
+                targetBasisLimbOrder:
+                    compactVssSameSecretBridgeTargetBasisLimbOrder,
+                targetConstantCoefficientCommitmentRoots:
+                    targetConstantCoefficientRootsForBridge(
+                        compactSourceRecord,
+                        compactCoefficientCommitmentSet.rnsLimbCount,
+                    ),
+                relation: compactVssSameSecretBridgeRelation,
+                proofBoundary: compactVssSameSecretBridgeProofBoundary,
+            } as const satisfies Omit<
+                CompactVssSameSecretBridgeStatementRecord,
+                'compactSameSecretBridgeStatementRoot'
+            >;
+
+            return {
+                ...statementRecordWithoutRoot,
+                compactSameSecretBridgeStatementRoot: deriveProtocolHash(
+                    'SetupProofRecordBindingHash',
+                    statementRecordWithoutRoot,
+                ),
+            };
+        },
+    );
+    const statementSetWithoutRoot = {
+        objectType: 'CompactVssSameSecretBridgeStatementSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        compactCommitmentProfileId: compactVssCommitmentProfileId,
+        developmentScope: compactVssCommitmentDevelopmentScope,
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        ...contextFields(input.setupContext),
+        targetBasisHash: input.targetBasisHash,
+        publicMatrixSeedHash: input.publicMatrixSeedHash,
+        participantCount: compactCoefficientCommitmentSet.participantCount,
+        targetRnsLimbCount: compactCoefficientCommitmentSet.rnsLimbCount,
+        thresholdDegree: compactCoefficientCommitmentSet.thresholdDegree,
+        compactCoefficientCommitmentRoot:
+            compactCoefficientCommitmentSet.coefficientCommitmentRoot,
+        sameSecretConsistencyRoot:
+            input.sameSecretConsistency.sameSecretConsistencyRoot,
+        sameSecretProofSetRoot: input.sameSecretProofs.sameSecretProofSetRoot,
+        sameSecretProofFamilyBindingRoot:
+            input.sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+        integerSupport: compactVssSameSecretBridgeIntegerSupport,
+        signedRepresentativeConvention:
+            compactVssSameSecretBridgeSignedRepresentativeConvention,
+        compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
+        targetBasisLimbOrder: compactVssSameSecretBridgeTargetBasisLimbOrder,
+        statementRecords,
+    } as const satisfies Omit<
+        CompactVssSameSecretBridgeStatementSet,
+        'compactSameSecretBridgeStatementSetRoot'
+    >;
+
+    return {
+        ...statementSetWithoutRoot,
+        compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
+            'SetupProofRecordBindingHash',
+            statementSetWithoutRoot,
+        ),
+    };
+};
+
+const assertEvidenceContextMatchesStatementSet = (
+    statementSet: CompactVssSameSecretBridgeStatementSet,
+    evidenceSet: Readonly<Record<string, unknown>>,
+    evidenceSetName: string,
+): void => {
+    for (const fieldName of setupContextFieldNames) {
+        if (evidenceSet[fieldName] !== statementSet[fieldName]) {
+            throw new Error(
+                `${evidenceSetName}.${fieldName} must match the compact same-secret bridge statement set.`,
+            );
+        }
+    }
+};
+
+const assertSameSecretEvidenceMatchesBridge = (input: {
+    readonly statementSet: CompactVssSameSecretBridgeStatementSet;
+    readonly sameSecretConsistency?: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs?: SameSecretProofSet;
+}): void => {
+    if (
+        (input.sameSecretConsistency === undefined) !==
+        (input.sameSecretProofs === undefined)
+    ) {
+        throw new Error(
+            'compact same-secret bridge evidence verification requires both sameSecretConsistency and sameSecretProofs.',
+        );
+    }
+    if (
+        input.sameSecretConsistency === undefined ||
+        input.sameSecretProofs === undefined
+    ) {
+        return;
+    }
+
+    const { statementSet, sameSecretConsistency, sameSecretProofs } = input;
+    assertEvidenceContextMatchesStatementSet(
+        statementSet,
+        sameSecretConsistency,
+        'sameSecretConsistency',
+    );
+    assertEvidenceContextMatchesStatementSet(
+        statementSet,
+        sameSecretProofs,
+        'sameSecretProofs',
+    );
+    if (
+        sameSecretConsistency.sameSecretConsistencyRoot !==
+            statementSet.sameSecretConsistencyRoot ||
+        sameSecretProofs.sameSecretProofSetRoot !==
+            statementSet.sameSecretProofSetRoot ||
+        sameSecretConsistency.sameSecretProofFamilyBindingRoot !==
+            statementSet.sameSecretProofFamilyBindingRoot ||
+        sameSecretProofs.sameSecretProofFamilyBindingRoot !==
+            statementSet.sameSecretProofFamilyBindingRoot ||
+        sameSecretProofs.sameSecretConsistencyRoot !==
+            sameSecretConsistency.sameSecretConsistencyRoot
+    ) {
+        throw new Error(
+            'compact same-secret bridge evidence roots must match the statement set.',
+        );
+    }
+
+    const {
+        sameSecretConsistencyRoot: _sameSecretConsistencyRoot,
+        ...sameSecretConsistencyWithoutRoot
+    } = sameSecretConsistency;
+    if (
+        sameSecretConsistency.sameSecretConsistencyRoot !==
+        deriveProtocolHash(
+            'SameSecretConsistencyRoot',
+            sameSecretConsistencyWithoutRoot,
+        )
+    ) {
+        throw new Error(
+            'same-secret consistency root does not match its bound statement set.',
+        );
+    }
+
+    const {
+        sameSecretProofSetRoot: _sameSecretProofSetRoot,
+        ...sameSecretProofsWithoutRoot
+    } = sameSecretProofs;
+    if (
+        sameSecretProofs.sameSecretProofSetRoot !==
+        deriveProtocolHash('SameSecretProofRoot', sameSecretProofsWithoutRoot)
+    ) {
+        throw new Error(
+            'same-secret proof set root does not match its bound proof records.',
+        );
+    }
+
+    const sameSecretStatementRecords = sortedStatementRecordsForProofs({
+        participantCount: statementSet.participantCount,
+        sameSecretConsistency,
+    });
+    const sameSecretProofRecords = sortedSameSecretProofRecordsForBridge({
+        participantCount: statementSet.participantCount,
+        sameSecretProofs,
+    });
+    if (
+        sameSecretConsistency.trusteeSecretCommitmentRoots.length !==
+            statementSet.participantCount ||
+        sameSecretProofs.sameSecretProofRoots.length !==
+            statementSet.participantCount
+    ) {
+        throw new Error(
+            'compact same-secret bridge evidence root references must cover every participant.',
+        );
+    }
+
+    statementSet.statementRecords.forEach(
+        (bridgeStatement, expectedPosition) => {
+            const sameSecretStatement =
+                sameSecretStatementRecords[expectedPosition];
+            const sameSecretProof = sameSecretProofRecords[expectedPosition];
+            const trusteeSecretRootReference =
+                sameSecretConsistency.trusteeSecretCommitmentRoots[
+                    expectedPosition
+                ];
+            const sameSecretProofRootReference =
+                sameSecretProofs.sameSecretProofRoots[expectedPosition];
+            if (
+                sameSecretStatement === undefined ||
+                sameSecretProof === undefined ||
+                trusteeSecretRootReference === undefined ||
+                sameSecretProofRootReference === undefined
+            ) {
+                throw new Error(
+                    'compact same-secret bridge evidence records must cover every participant.',
+                );
+            }
+
+            const {
+                sameSecretStatementRoot: _sameSecretStatementRoot,
+                ...sameSecretStatementWithoutRoot
+            } = sameSecretStatement;
+            if (
+                sameSecretStatement.sameSecretStatementRoot !==
+                deriveProtocolHash(
+                    'SameSecretConsistencyRoot',
+                    sameSecretStatementWithoutRoot,
+                )
+            ) {
+                throw new Error(
+                    'same-secret statement root does not match its bound statement.',
+                );
+            }
+
+            const {
+                sameSecretProofRoot: _sameSecretProofRoot,
+                ...sameSecretProofWithoutRoot
+            } = sameSecretProof;
+            if (
+                sameSecretProof.sameSecretProofRoot !==
+                deriveProtocolHash(
+                    'SameSecretProofRoot',
+                    sameSecretProofWithoutRoot,
+                )
+            ) {
+                throw new Error(
+                    'same-secret proof root does not match its bound proof record.',
+                );
+            }
+
+            if (
+                bridgeStatement.trusteeIdentity !==
+                    sameSecretStatement.trusteeIdentity ||
+                bridgeStatement.trusteeRosterPosition !== expectedPosition ||
+                sameSecretProof.trusteeIdentity !==
+                    sameSecretStatement.trusteeIdentity ||
+                sameSecretProof.trusteeRosterPosition !== expectedPosition ||
+                trusteeSecretRootReference.trusteeIdentity !==
+                    sameSecretStatement.trusteeIdentity ||
+                trusteeSecretRootReference.trusteeRosterPosition !==
+                    expectedPosition ||
+                sameSecretProofRootReference.trusteeIdentity !==
+                    sameSecretStatement.trusteeIdentity ||
+                sameSecretProofRootReference.trusteeRosterPosition !==
+                    expectedPosition
+            ) {
+                throw new Error(
+                    'compact same-secret bridge evidence records must bind the same trustee order.',
+                );
+            }
+
+            if (
+                bridgeStatement.sameSecretStatementRoot !==
+                    sameSecretStatement.sameSecretStatementRoot ||
+                bridgeStatement.trusteeSecretCommitmentRoot !==
+                    sameSecretStatement.trusteeSecretCommitmentRoot ||
+                bridgeStatement.sameSecretProofFamilyBindingRoot !==
+                    sameSecretStatement.sameSecretProofFamilyBindingRoot ||
+                sameSecretProof.sameSecretStatementRoot !==
+                    sameSecretStatement.sameSecretStatementRoot ||
+                sameSecretProof.trusteeSecretCommitmentRoot !==
+                    sameSecretStatement.trusteeSecretCommitmentRoot ||
+                sameSecretProof.sameSecretProofFamilyBindingRoot !==
+                    sameSecretStatement.sameSecretProofFamilyBindingRoot ||
+                bridgeStatement.sameSecretProofRoot !==
+                    sameSecretProof.sameSecretProofRoot ||
+                trusteeSecretRootReference.trusteeSecretCommitmentRoot !==
+                    sameSecretStatement.trusteeSecretCommitmentRoot ||
+                sameSecretProofRootReference.sameSecretProofRoot !==
+                    sameSecretProof.sameSecretProofRoot
+            ) {
+                throw new Error(
+                    'compact same-secret bridge evidence roots must match each bridge statement.',
+                );
+            }
+        },
+    );
+};
+
+export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
+    readonly statementSet: CompactVssSameSecretBridgeStatementSet;
+    readonly sameSecretConsistency?: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs?: SameSecretProofSet;
+}): CompactVssSameSecretBridgeStatementSet => {
+    const { statementSet } = input;
+    assertExactString(
+        statementSet.objectType,
+        'compact same-secret bridge statement set objectType',
+        'CompactVssSameSecretBridgeStatementSet',
+    );
+    if (statementSet.objectVersion !== 1) {
+        throw new TypeError(
+            'compact same-secret bridge statement set objectVersion is not supported.',
+        );
+    }
+    for (const [fieldName, expectedValue] of [
+        ['setupProfileId', 'CollectiveBgvSetup-v1'],
+        ['compactCommitmentProfileId', compactVssCommitmentProfileId],
+        ['developmentScope', compactVssCommitmentDevelopmentScope],
+        ['setupProofProfileId', setupProofProfileId],
+        ['proofFamily', sameSecretProofFamily],
+    ] as const) {
+        assertExactString(
+            statementSet[fieldName],
+            `compact same-secret bridge statement set ${fieldName}`,
+            expectedValue,
+        );
+    }
+    assertNonEmptyString(
+        statementSet.ceremonyId,
+        'compact same-secret bridge statement set ceremonyId',
+    );
+    assertNonEmptyString(
+        statementSet.setupEpoch,
+        'compact same-secret bridge statement set setupEpoch',
+    );
+    for (const fieldName of [
+        'manifestHash',
+        'rosterHash',
+        'setupProfileHash',
+        'qShareHash',
+        'carryAwareVssShareRelationProfileHash',
+        'commitmentProfileHash',
+        'targetBasisHash',
+        'publicMatrixSeedHash',
+        'compactCoefficientCommitmentRoot',
+        'sameSecretConsistencyRoot',
+        'sameSecretProofSetRoot',
+        'sameSecretProofFamilyBindingRoot',
+    ] as const) {
+        assertProtocolHash(
+            statementSet[fieldName],
+            `compact same-secret bridge statement set ${fieldName}`,
+        );
+    }
+    assertPositiveSafeInteger(
+        statementSet.participantCount,
+        'compact same-secret bridge statement set participantCount',
+    );
+    assertPositiveSafeInteger(
+        statementSet.targetRnsLimbCount,
+        'compact same-secret bridge statement set targetRnsLimbCount',
+    );
+    assertPositiveSafeInteger(
+        statementSet.thresholdDegree,
+        'compact same-secret bridge statement set thresholdDegree',
+    );
+    assertExactString(
+        statementSet.integerSupport,
+        'compact same-secret bridge statement set integerSupport',
+        compactVssSameSecretBridgeIntegerSupport,
+    );
+    assertExactString(
+        statementSet.signedRepresentativeConvention,
+        'compact same-secret bridge statement set signedRepresentativeConvention',
+        compactVssSameSecretBridgeSignedRepresentativeConvention,
+    );
+    assertExactString(
+        statementSet.compactCommitmentEncoding,
+        'compact same-secret bridge statement set compactCommitmentEncoding',
+        compactVssCommitmentBinaryFormat,
+    );
+    assertExactString(
+        statementSet.targetBasisLimbOrder,
+        'compact same-secret bridge statement set targetBasisLimbOrder',
+        compactVssSameSecretBridgeTargetBasisLimbOrder,
+    );
+    if (
+        statementSet.statementRecords.length !== statementSet.participantCount
+    ) {
+        throw new Error(
+            'compact same-secret bridge statement set must contain one statement per participant.',
+        );
+    }
+    statementSet.statementRecords.forEach(
+        (statementRecord, expectedPosition) => {
+            assertExactString(
+                statementRecord.objectType,
+                'compact same-secret bridge statement objectType',
+                'CompactVssSameSecretBridgeStatement',
+            );
+            if (statementRecord.objectVersion !== 1) {
+                throw new TypeError(
+                    'compact same-secret bridge statement objectVersion is not supported.',
+                );
+            }
+            for (const [fieldName, expectedValue] of [
+                ['setupProfileId', statementSet.setupProfileId],
+                [
+                    'compactCommitmentProfileId',
+                    statementSet.compactCommitmentProfileId,
+                ],
+                ['developmentScope', statementSet.developmentScope],
+                ['setupProofProfileId', statementSet.setupProofProfileId],
+                ['proofFamily', statementSet.proofFamily],
+            ] as const) {
+                assertExactString(
+                    statementRecord[fieldName],
+                    `compact same-secret bridge statement ${fieldName}`,
+                    expectedValue,
+                );
+            }
+            for (const fieldName of setupContextFieldNames) {
+                if (statementRecord[fieldName] !== statementSet[fieldName]) {
+                    throw new Error(
+                        `compact same-secret bridge statement ${fieldName} must match the statement set.`,
+                    );
+                }
+            }
+            if (
+                statementRecord.targetBasisHash !==
+                    statementSet.targetBasisHash ||
+                statementRecord.publicMatrixSeedHash !==
+                    statementSet.publicMatrixSeedHash
+            ) {
+                throw new Error(
+                    'compact same-secret bridge statement target binding must match the statement set.',
+                );
+            }
+            assertNonEmptyString(
+                statementRecord.trusteeIdentity,
+                'compact same-secret bridge statement trusteeIdentity',
+            );
+            if (statementRecord.trusteeRosterPosition !== expectedPosition) {
+                throw new Error(
+                    'compact same-secret bridge statement roster positions must be contiguous from zero.',
+                );
+            }
+            for (const fieldName of [
+                'sameSecretStatementRoot',
+                'sameSecretProofRoot',
+                'trusteeSecretCommitmentRoot',
+                'sameSecretProofFamilyBindingRoot',
+                'compactSameSecretBridgeStatementRoot',
+            ] as const) {
+                assertProtocolHash(
+                    statementRecord[fieldName],
+                    `compact same-secret bridge statement ${fieldName}`,
+                );
+            }
+            if (
+                statementRecord.sameSecretProofFamilyBindingRoot !==
+                statementSet.sameSecretProofFamilyBindingRoot
+            ) {
+                throw new Error(
+                    'compact same-secret bridge statement proof-family binding root must match the statement set.',
+                );
+            }
+            assertExactString(
+                statementRecord.dataBasisRelation,
+                'compact same-secret bridge statement dataBasisRelation',
+                sameSecretRelation,
+            );
+            for (const fieldName of [
+                'integerSupport',
+                'signedRepresentativeConvention',
+                'compactCommitmentEncoding',
+                'targetBasisLimbOrder',
+            ] as const) {
+                assertExactString(
+                    statementRecord[fieldName],
+                    `compact same-secret bridge statement ${fieldName}`,
+                    statementSet[fieldName],
+                );
+            }
+            assertExactString(
+                statementRecord.relation,
+                'compact same-secret bridge statement relation',
+                compactVssSameSecretBridgeRelation,
+            );
+            assertExactString(
+                statementRecord.proofBoundary,
+                'compact same-secret bridge statement proofBoundary',
+                compactVssSameSecretBridgeProofBoundary,
+            );
+            if (
+                statementRecord.targetConstantCoefficientCommitmentRoots
+                    .length !== statementSet.targetRnsLimbCount
+            ) {
+                throw new Error(
+                    'compact same-secret bridge statement must bind one target constant root per target RNS limb.',
+                );
+            }
+            statementRecord.targetConstantCoefficientCommitmentRoots.forEach(
+                (rootRecord, expectedRnsLimbIndex) => {
+                    if (
+                        rootRecord.rnsLimbIndex !== expectedRnsLimbIndex ||
+                        rootRecord.shamirCoefficientIndex !== 0
+                    ) {
+                        throw new Error(
+                            'compact same-secret bridge target constant roots must use canonical coordinates.',
+                        );
+                    }
+                    assertPositiveSafeInteger(
+                        rootRecord.rnsPrime,
+                        'compact same-secret bridge target constant root rnsPrime',
+                    );
+                    assertProtocolHash(
+                        rootRecord.coefficientCommitmentRoot,
+                        'compact same-secret bridge target constant root coefficientCommitmentRoot',
+                    );
+                },
+            );
+            const {
+                compactSameSecretBridgeStatementRoot:
+                    _compactSameSecretBridgeStatementRoot,
+                ...statementRecordWithoutRoot
+            } = statementRecord;
+            const expectedStatementRoot = deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                statementRecordWithoutRoot,
+            );
+            if (
+                statementRecord.compactSameSecretBridgeStatementRoot !==
+                expectedStatementRoot
+            ) {
+                throw new Error(
+                    'compact same-secret bridge statement root does not match its bound roots.',
+                );
+            }
+        },
+    );
+    const {
+        compactSameSecretBridgeStatementSetRoot:
+            _compactSameSecretBridgeStatementSetRoot,
+        ...statementSetWithoutRoot
+    } = statementSet;
+    const expectedStatementSetRoot = deriveProtocolHash(
+        'SetupProofRecordBindingHash',
+        statementSetWithoutRoot,
+    );
+    if (
+        statementSet.compactSameSecretBridgeStatementSetRoot !==
+        expectedStatementSetRoot
+    ) {
+        throw new Error(
+            'compact same-secret bridge statement set root does not match its statements.',
+        );
+    }
+    assertSameSecretEvidenceMatchesBridge({
+        statementSet,
+        sameSecretConsistency: input.sameSecretConsistency,
+        sameSecretProofs: input.sameSecretProofs,
+    });
+
+    return statementSet;
 };
 
 // Move embedded anchor proof bytes into binary chunked transport, mirroring

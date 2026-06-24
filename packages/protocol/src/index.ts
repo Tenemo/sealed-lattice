@@ -79,6 +79,43 @@ export {
     vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
+    compactVssCommitmentBinaryFormat,
+    compactVssCommitmentDevelopmentScope,
+    compactVssCommitmentMeasurement,
+    compactVssMatrixExpansionProfile,
+    compactVssParameterCertificateInputBinding,
+    compactVssPrivateWitnessPayloadMeasurement,
+    compactVssCommitmentModulusLimbIndices,
+    compactVssCommitmentOutputCoordinateCount,
+    compactVssCommitmentProfileId,
+    compactVssCommitmentRandomnessColumnCount,
+    compactVssShareLinkageAggregateThresholdRule,
+    compactVssShareLinkageCommonKeyRule,
+    compactVssShareLinkageProofBatchingRule,
+    compactVssShareLinkageRecipientApprovalBoundary,
+    compactVssShareLinkageShamirEvaluationRule,
+    compactVssProjectionWeight,
+    compactVssEncodedCommitmentByteLength,
+    aggregateCompactVssThresholdShareCommitments,
+    combineCompactVssCommitments,
+    createCompactVssCoefficientCommitmentSet,
+    createCompactVssRecipientShareCommitmentBundle,
+    createCompactVssShareLinkageStatement,
+    computeCompactVssCommitmentFromOpening,
+    verifyCompactVssCoefficientCommitmentSet,
+    verifyCompactVssRecipientShareCommitmentSet,
+    verifyCompactVssAggregateThresholdCommitmentSet,
+    verifyCompactVssShareLinkageStatement,
+    verifyCompactVssCommitmentOpening,
+    type CompactVssAggregateThresholdCommitmentSet,
+    type CompactVssAggregateThresholdOpeningCredential,
+    type CompactVssCoefficientCommitmentSet,
+    type CompactVssParameterCertificateInputBinding,
+    type CompactVssRecipientShareOpeningCredential,
+    type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageStatement,
+} from './setup/compact-vss-commitments.js';
+export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     createLocalTrusteeSetupStateCommitment,
     deletedLocalTrusteeSetupMaterialClasses,
@@ -108,8 +145,14 @@ export {
 } from './setup/setup-package-assembly.js';
 export {
     createBinaryChunkedSameSecretProofMaterialTransport,
+    createCompactVssSameSecretBridgeStatementSet,
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
+    compactVssSameSecretBridgeIntegerSupport,
+    compactVssSameSecretBridgeProofBoundary,
+    compactVssSameSecretBridgeRelation,
+    compactVssSameSecretBridgeSignedRepresentativeConvention,
+    compactVssSameSecretBridgeTargetBasisLimbOrder,
     sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
     sameSecretGenericKeySwitchBindingPolicy,
@@ -117,6 +160,7 @@ export {
     sameSecretRelation,
     sameSecretTargetDecryptionBindingPolicy,
     setupProofProfileId,
+    verifyCompactVssSameSecretBridgeStatementSet,
 } from './setup/same-secret-consistency-records.js';
 export {
     createVssComplaintSet,
@@ -253,6 +297,7 @@ export type {
     VssOpeningRandomByteSource,
 } from './setup/vss-coefficient-commitments.js';
 export type {
+    GeneratedCompactVssTargetProofWitnessInput,
     LocalTrusteeSetupStateCommitment,
     LocalTrusteeSetupStateCommitmentInput,
     LocalTrusteeSetupStateDecryptionInput,
@@ -309,6 +354,10 @@ export type {
 } from './setup/threshold-share-commitments.js';
 export type {
     BinaryChunkedSameSecretProofMaterialTransport,
+    CompactVssSameSecretBridgeStatementRecord,
+    CompactVssSameSecretBridgeStatementSet,
+    CompactVssSameSecretBridgeStatementSetInput,
+    CompactVssSameSecretBridgeTargetConstantCommitmentRoot,
     SameSecretConsistencyStatementRecord,
     SameSecretConsistencyStatementSet,
     SameSecretConsistencyStatementSetInput,

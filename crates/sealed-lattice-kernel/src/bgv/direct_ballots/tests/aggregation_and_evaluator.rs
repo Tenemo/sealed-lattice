@@ -24,6 +24,49 @@ fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
 }
 
 #[test]
+fn direct_ballot_target_proposal_binds_canonical_target_basis() {
+    let setup_package = setup_package();
+    let target_basis_hash = canonical_target_basis_hash().expect("target basis hash");
+    let target_ciphertext_hash = "c".repeat(128);
+    let target_layout_hash = "d".repeat(128);
+    let aggregate_ciphertext_root = "a".repeat(128);
+    let evaluator_replay_context_hash = "e".repeat(128);
+    let evaluator_replay_record_hash = "f".repeat(128);
+    let target_finality_policy_hash = "b".repeat(128);
+    let proposal = direct_ballot_target_proposal(DirectBallotTargetProposalInput {
+        setup_package: &setup_package,
+        aggregate_ciphertext_root: &aggregate_ciphertext_root,
+        evaluator_replay_context_hash: &evaluator_replay_context_hash,
+        evaluator_replay_record_hash: &evaluator_replay_record_hash,
+        target_ciphertext_hash: &target_ciphertext_hash,
+        target_layout_hash: &target_layout_hash,
+        target_basis_hash: &target_basis_hash,
+        target_finality_policy_hash: Some(&target_finality_policy_hash),
+    })
+    .expect("target proposal");
+
+    assert_eq!(proposal["targetBasisHash"], json!(target_basis_hash));
+    assert_eq!(
+        proposal["targetCiphertextHash"],
+        json!(target_ciphertext_hash)
+    );
+    assert_eq!(proposal["targetLayoutHash"], json!(target_layout_hash));
+    assert!(
+        proposal["targetProposalHash"]
+            .as_str()
+            .is_some_and(|hash| hash.len() == 128)
+    );
+    assert_eq!(
+        direct_ballot_evaluator_working_level(1),
+        SELECTED_EVALUATOR_WORKING_LEVEL
+    );
+    assert_eq!(
+        direct_ballot_evaluator_working_level(10),
+        SELECTED_EVALUATOR_WORKING_LEVEL
+    );
+}
+
+#[test]
 fn direct_ballot_top_counts_reject_duplicates_before_evaluator_replay() {
     let error = optional_direct_ballot_top_count_request(&json!({
         "topCounts": [1, 1]

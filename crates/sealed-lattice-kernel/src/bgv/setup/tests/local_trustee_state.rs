@@ -18,6 +18,10 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
         "roots-only-no-raw-share-or-opening-export"
     );
     assert_eq!(result["deletionBoundary"], "after-private-vss-aggregation");
+    assert_eq!(
+        result["targetDecryptionProofWitnessRoot"],
+        request["localStateCommitment"]["targetDecryptionProofWitnessRoot"]
+    );
     assert!(
         result["localStateRoot"]
             .as_str()
@@ -41,6 +45,25 @@ fn local_trustee_setup_state_verifier_rejects_deletion_receipt_drift() {
         crate::encoding::CanonicalErrorCode::InvalidFixture
     );
     assert!(error.message.contains("deletedMaterialClasses"));
+}
+
+#[test]
+fn local_trustee_setup_state_verifier_rejects_missing_target_proof_witness_root() {
+    let mut request = local_trustee_setup_state_request();
+    request["localStateCommitment"]
+        .as_object_mut()
+        .expect("local state")
+        .remove("targetDecryptionProofWitnessRoot");
+    rebind_local_state_root(&mut request);
+
+    let error = verify_local_trustee_setup_state_from_request(&request)
+        .expect_err("missing target proof witness root must be refused");
+
+    assert_eq!(
+        error.code,
+        crate::encoding::CanonicalErrorCode::InvalidFixture
+    );
+    assert!(error.message.contains("targetDecryptionProofWitnessRoot"));
 }
 
 fn local_trustee_setup_state_request() -> serde_json::Value {
@@ -102,6 +125,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         ],
         "retainedMaterialClasses": [
             "aggregate-threshold-share-sealed",
+            "target-decryption-proof-witness-sealed",
             "issued-vss-acceptance-roots",
             "issued-vss-complaint-roots",
             "setup-context"
@@ -128,6 +152,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "trusteePoint": trustee_point,
         "thresholdShareCommitmentRecipientRoot": valid_hash('1'),
         "aggregateThresholdShareRoot": valid_hash('2'),
+        "targetDecryptionProofWitnessRoot": valid_hash('3'),
         "issuedVssAcceptanceRoot": valid_hash('4'),
         "issuedVssComplaintRoots": [valid_hash('5')],
         "deletionReceiptRoot": deletion_receipt["deletionReceiptRoot"],

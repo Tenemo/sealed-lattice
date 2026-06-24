@@ -382,6 +382,185 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly serialization: Readonly<Record<string, unknown>>;
     };
     readonly commitmentProfileHash: ProtocolHash;
+    readonly canonicalTargetBasis: {
+        readonly objectType: 'CanonicalTargetBasis';
+        readonly objectVersion: 1;
+        readonly basisId: string;
+        readonly targetLevel: number;
+        readonly primeOrder: 'profile-order-prefix';
+        readonly targetPrimes: readonly number[];
+        readonly modulusSwitchSchedule: Readonly<
+            Record<string, string | number>
+        >;
+        readonly scalingNormalization: string;
+        readonly targetCiphertextRule: string;
+        readonly targetDecryptionReadiness: string;
+    };
+    readonly canonicalTargetBasisHash: ProtocolHash;
+    readonly compactVssProfileBudget: {
+        readonly objectType: 'CompactVssProfileBudget';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly budgetScope: string;
+        readonly publicVerifier: Readonly<Record<string, number>>;
+        readonly recipientTrustee: Readonly<Record<string, number>>;
+        readonly sourceTrustee: Readonly<Record<string, number>>;
+        readonly persistentLocalState: Readonly<Record<string, number>>;
+        readonly matrixExpansion: Readonly<Record<string, number>>;
+        readonly accountingRules: Readonly<Record<string, string>>;
+    };
+    readonly compactVssMatrixExpansionProfile: {
+        readonly objectType: 'CompactVssMatrixExpansionProfile';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: string;
+        readonly developmentScope: string;
+        readonly matrixKind: 'compact-vss-commitment-key';
+        readonly keyScope: string;
+        readonly ringDegree: number;
+        readonly commitmentModulusLimbIndices: readonly number[];
+        readonly outputCoordinateCount: number;
+        readonly projectionWeight: number;
+        readonly randomnessColumnCount: number;
+        readonly inputColumnLabels: readonly string[];
+        readonly matrixResidueHashDomain: string;
+        readonly projectionIndexHashDomain: string;
+        readonly rejectionSamplingRule: string;
+        readonly matrixResiduePreimageFields: readonly string[];
+        readonly projectionIndexPreimageFields: readonly string[];
+        readonly biasBoundary: string;
+        readonly coordinateCountPerCommitment: number;
+        readonly sampledMatrixResiduesPerCoordinate: number;
+        readonly sampledProjectionIndicesPerCoordinate: number;
+        readonly sampledMatrixResiduesPerCommitment: number;
+        readonly sampledProjectionIndicesPerCommitment: number;
+        readonly residueMultiplyAddsPerCommitment: number;
+        readonly certificateBoundary: string;
+    };
+    readonly compactVssMatrixExpansionProfileHash: ProtocolHash;
+    readonly compactVssParameterCertificateInputBinding: {
+        readonly objectType: 'CompactVssParameterCertificateInputBinding';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: string;
+        readonly developmentScope: string;
+        readonly compactVssParameterCertificateInputBindingHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly sourceRnsLimbCount: number;
+        readonly targetRnsLimbCount: number;
+        readonly thresholdDegree: number;
+        readonly ringDegree: number;
+        readonly commitmentRelation: Readonly<Record<string, unknown>>;
+        readonly commonCommitmentKey: Readonly<Record<string, unknown>>;
+        readonly messageEncoding: Readonly<Record<string, unknown>>;
+        readonly normInputClasses: readonly Readonly<Record<string, unknown>>[];
+        readonly estimatorInputRows: readonly Readonly<
+            Record<string, unknown>
+        >[];
+        readonly proofCoverageInputs: Readonly<Record<string, unknown>>;
+        readonly structuredRingDisclosure: string;
+        readonly sameSecretBridgeInput: Readonly<Record<string, unknown>>;
+    };
+    readonly compactVssParameterCertificateInputBindingHash: ProtocolHash;
+    readonly compactVssParameterEvidence: {
+        readonly objectType: 'CompactVssParameterEvidence';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: string;
+        readonly developmentScope: string;
+        readonly evidenceKind: string;
+        readonly certificateBoundary: string;
+        readonly certificateInputBindingHash: ProtocolHash;
+        readonly commitmentShape: Readonly<Record<string, unknown>>;
+        readonly sampleCounts: Readonly<Record<string, number>>;
+        readonly normInputs: Readonly<Record<string, unknown>>;
+        readonly securityAssumptionInputs: Readonly<Record<string, string>>;
+        readonly sameSecretBridgeInput: Readonly<Record<string, unknown>>;
+        readonly missingCertificateInputs: readonly string[];
+    };
+    readonly compactVssParameterEvidenceHash: ProtocolHash;
+    readonly compactVssDevelopmentMeasurement: {
+        readonly objectType: 'CompactVssCommitmentMeasurement';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: string;
+        readonly developmentScope: string;
+        readonly measurementKind: string;
+        readonly participantCount: 10;
+        readonly sourceRnsLimbCount: number;
+        readonly targetRnsLimbCount: number;
+        readonly thresholdDegree: 4;
+        readonly ringDegree: number;
+        readonly projectionWeight: number;
+        readonly commitmentModulusLimbCount: number;
+        readonly outputCoordinateCount: number;
+        readonly randomnessColumnCount: number;
+        readonly singleCompactCommitmentBytes: number;
+        readonly fullCoefficientCommitmentBytes: number;
+        readonly recipientShareCommitmentBytes: number;
+        readonly aggregateThresholdCommitmentBytes: number;
+        readonly totalCompactPublicCommitmentBytes: number;
+        readonly currentFullCoefficientTransportBytes: number;
+        readonly byteAccountingScope: string;
+        readonly measuredPublicCommitmentRoles: readonly string[];
+        readonly excludedByteCategories: readonly string[];
+        readonly byteReduction: Readonly<Record<string, number>>;
+        readonly largestSingleObjectBytes: number;
+        readonly largestWasmBoundaryCopyBytes: number;
+        readonly cpuWorkModel: Readonly<Record<string, number>>;
+        readonly proofBoundary: string;
+    };
+    readonly compactVssPrivateWitnessPayloadMeasurement: {
+        readonly objectType: 'CompactVssPrivateWitnessPayloadMeasurement';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: string;
+        readonly developmentScope: string;
+        readonly measurementKind: string;
+        readonly participantCount: 10;
+        readonly targetRnsLimbCount: number;
+        readonly ringDegree: number;
+        readonly bytesPerResidue: 8;
+        readonly randomnessColumnCount: number;
+        readonly oneSourceRecipientCredentialPayloadBytes: number;
+        readonly oneRecipientPrivateMailboxCredentialPayloadBytes: number;
+        readonly oneRecipientPersistentAggregateCredentialPayloadBytes: number;
+        readonly allRecipientsPrivateMailboxCredentialPayloadBytes: number;
+        readonly allRecipientsPersistentAggregateCredentialPayloadBytes: number;
+        readonly largestSingleCredentialPayloadBytes: number;
+        readonly byteAccountingScope: string;
+        readonly excludedByteCategories: readonly string[];
+        readonly budgetComparison: Readonly<Record<string, number | string>>;
+    };
+    readonly currentVssMaterialBaselineReport: {
+        readonly objectType: 'CurrentVssMaterialBaselineReport';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly measurementKind: string;
+        readonly participantCount: 10;
+        readonly rnsLimbCount: number;
+        readonly shamirCoefficientCount: 4;
+        readonly ringDegree: number;
+        readonly commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1';
+        readonly commitmentModulusLimbCount: number;
+        readonly commitmentRowCount: number;
+        readonly bytesPerResidue: 8;
+        readonly materialRecordCount: number;
+        readonly singleCommitmentCoefficientBytes: number;
+        readonly fullMaterialCoefficientBytes: number;
+        readonly exactBinaryTransportBytes: number;
+        readonly binaryTransportMetadataBytes: number;
+        readonly publicVerificationMemoryEstimate: Readonly<
+            Record<string, number | string>
+        >;
+        readonly localStateMaterialClasses: Readonly<
+            Record<string, readonly string[] | string>
+        >;
+        readonly trusteePointScalarBounds: Readonly<
+            Record<string, number | string>
+        >;
+        readonly normModel: Readonly<Record<string, unknown>>;
+    };
     readonly publicVssCommitmentMaterialSizeProfile: {
         readonly objectType: 'PublicVssCommitmentMaterialSizeProfile';
         readonly objectVersion: 1;
@@ -794,6 +973,117 @@ export type BgvSetupCommitmentOpeningComputation = {
     readonly coefficientVectorHash512: string;
 };
 
+export type BgvCompactVssCommitmentRole =
+    | 'coefficient'
+    | 'recipient-share'
+    | 'aggregate-threshold-share';
+
+export type BgvCompactVssCommitmentOpeningInput = {
+    readonly commitmentRole: BgvCompactVssCommitmentRole;
+    readonly commitmentContext: Readonly<Record<string, unknown>>;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly ringDegree: number;
+    readonly messageCoefficients: readonly number[];
+    readonly randomnessByColumn: readonly (readonly number[])[];
+};
+
+export type BgvCompactVssCommitmentOpeningComputation = {
+    readonly ok: true;
+    readonly operation: 'computeCompactVssCommitmentFromOpening';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly commitment: Readonly<Record<string, unknown>>;
+    readonly commitmentRoot: ProtocolHash;
+    readonly commitmentContextHash: ProtocolHash;
+    readonly openingRoot: ProtocolHash;
+    readonly encodedCommitmentByteLength: number;
+};
+
+export type BgvCompactVssCommitmentOpeningVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssCommitmentOpening';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly commitmentRoot: ProtocolHash;
+    readonly openingRoot: ProtocolHash;
+};
+
+export type BgvCompactVssCoefficientCommitmentSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssCoefficientCommitmentSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly coefficientCommitmentRoot: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly participantCount: number;
+    readonly rnsLimbCount: number;
+    readonly thresholdDegree: number;
+    readonly ringDegree: number;
+};
+
+export type BgvCompactVssRecipientShareCommitmentSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssRecipientShareCommitmentSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly recipientShareCommitmentRoot: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly participantCount: number;
+    readonly rnsLimbCount: number;
+    readonly ringDegree: number;
+};
+
+export type BgvCompactVssAggregateThresholdCommitmentSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssAggregateThresholdCommitmentSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly aggregateThresholdCommitmentRoot: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly participantCount: number;
+    readonly rnsLimbCount: number;
+    readonly ringDegree: number;
+};
+
+export type BgvCompactVssShareLinkageStatementVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssShareLinkageStatement';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly statementRoot: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
+    readonly coefficientCommitmentRoot: ProtocolHash;
+    readonly recipientShareCommitmentRoot: ProtocolHash;
+    readonly aggregateThresholdCommitmentRoot: ProtocolHash;
+    readonly participantCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly thresholdDegree: number;
+    readonly proofBatchingRule: string;
+    readonly shamirEvaluationRule: string;
+    readonly aggregateThresholdRule: string;
+    readonly commonKeyRule: string;
+    readonly recipientApprovalBoundary: string;
+    readonly proofBoundary: string;
+};
+
+export type BgvCompactVssSameSecretBridgeStatementSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssSameSecretBridgeStatementSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly compactSameSecretBridgeStatementSetRoot: ProtocolHash;
+    readonly participantCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly thresholdDegree: number;
+    readonly targetBasisHash: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly compactCoefficientCommitmentRoot: ProtocolHash;
+    readonly sameSecretConsistencyRoot: ProtocolHash;
+    readonly sameSecretProofSetRoot: ProtocolHash;
+    readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+    readonly integerSupport: string;
+    readonly signedRepresentativeConvention: string;
+    readonly compactCommitmentEncoding: string;
+    readonly targetBasisLimbOrder: string;
+    readonly proofBoundary: string;
+};
+
 export type BgvThresholdShareCommitmentTransportDerivation = Omit<
     BgvThresholdShareCommitmentDerivation,
     'operation'
@@ -893,6 +1183,7 @@ export type BgvLocalTrusteeSetupStateVerification = {
     readonly trusteeRosterPosition: number;
     readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
+    readonly targetDecryptionProofWitnessRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
     readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
     readonly storageProfile: 'encrypted-local-device-state-required';
@@ -902,6 +1193,78 @@ export type BgvLocalTrusteeSetupStateVerification = {
 export type BgvTargetCiphertextPairInput = {
     readonly targetIdCanonicalBytesHex: string;
     readonly targetOrderCanonicalBytesHex: string;
+};
+
+export type BgvTargetDecryptionDevelopmentFixture = Readonly<
+    Record<string, unknown> & {
+        readonly objectType: 'BgvTargetDecryptionDevelopmentFixture';
+        readonly objectVersion: 1;
+        readonly fixtureScope: 'development-target-decryption-command-parity';
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly setupPrivateWitness: {
+            readonly setupSeed: string;
+        };
+        readonly targetAcceptedRecord: Record<string, unknown>;
+        readonly targetCiphertextBinding: Record<string, unknown>;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: Record<string, unknown>;
+        readonly trusteeIdentity: string;
+        readonly localTargetShareWitness: Record<string, unknown>;
+    }
+>;
+
+export type BgvTargetDecryptionSmudgingInputReport = {
+    readonly objectType: 'TargetDecryptionSmudgingInputReport';
+    readonly objectVersion: 1;
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1';
+    readonly smudgingProfileId: string;
+    readonly developmentScope: string;
+    readonly setupPackageHash: ProtocolHash;
+    readonly targetAcceptedRecordHash: ProtocolHash;
+    readonly targetContextHash: ProtocolHash;
+    readonly targetCiphertextHash: ProtocolHash;
+    readonly targetDecryptionCiphertextHash: ProtocolHash;
+    readonly targetShareProfileHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
+    readonly targetIdRoot: ProtocolHash;
+    readonly targetOrderRoot: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly rosterPosition: number;
+    readonly boardPosition: number;
+    readonly interpolationPoint: number;
+    readonly recoveryEpoch: number;
+    readonly deviceEpoch: number;
+    readonly minimumSharesForInterpolation: number;
+    readonly decryptionThreshold: number;
+    readonly activeRnsLimbCount: number;
+    readonly ringDegree: number;
+    readonly smudgingCoefficientBound: number;
+    readonly smudgingPolynomialDegree: number;
+    readonly plaintextMultiple: number;
+    readonly zeroSharingRule: string;
+    readonly correctnessRule: string;
+    readonly proofBoundary: string;
+    readonly roleReports: readonly {
+        readonly role: 'targetId' | 'targetOrder';
+        readonly limbReports: readonly {
+            readonly rnsLimbIndex: number;
+            readonly rnsPrime: number;
+            readonly noiseShareHash512: string;
+            readonly maximumAbsoluteNoiseShare: number;
+        }[];
+    }[];
+};
+
+export type BgvTargetDecryptionSharePayload = {
+    readonly objectType: 'BgvTargetDecryptionSharePayload';
+    readonly objectVersion: 1;
+    readonly encoding: string;
+    readonly level: number;
+    readonly smudgingInputReport: BgvTargetDecryptionSmudgingInputReport;
+    readonly smudgingInputReportHash: ProtocolHash;
+    readonly targetId: readonly unknown[];
+    readonly targetOrder: readonly unknown[];
 };
 
 export type BgvTargetDecryptionShare = Readonly<
@@ -918,9 +1281,110 @@ export type BgvTargetDecryptionShare = Readonly<
         readonly targetDecryptionCiphertextHash: ProtocolHash;
         readonly targetShareProfileHash: ProtocolHash;
         readonly shareRoot: ProtocolHash;
-        readonly sharePayload: unknown;
+        readonly sharePayload: BgvTargetDecryptionSharePayload;
     }
 >;
+
+export type BgvTargetDecryptionShareProofStatement = Readonly<
+    Record<string, unknown> & {
+        readonly objectType: 'BgvTargetDecryptionShareProofStatement';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1';
+        readonly proofStatementRoot: ProtocolHash;
+        readonly setupPackageHash: ProtocolHash;
+        readonly trusteeIdentity: string;
+        readonly rosterPosition: number;
+        readonly interpolationPoint: number;
+        readonly targetAcceptedRecordHash: ProtocolHash;
+        readonly targetContextHash: ProtocolHash;
+        readonly targetCiphertextHash: ProtocolHash;
+        readonly targetDecryptionCiphertextHash: ProtocolHash;
+        readonly targetShareProfileHash: ProtocolHash;
+        readonly targetBasisHash: ProtocolHash;
+        readonly oneShotTargetContextRule: string;
+        readonly restoredWitnessOwnershipRule: string;
+        readonly targetBasisRule: string;
+        readonly smudgingRequirement: string;
+        readonly recombinationRequirement: string;
+        readonly proofBoundary: string;
+        readonly targetDecryptionShareHash: ProtocolHash;
+        readonly shareRoot: ProtocolHash;
+        readonly smudgingInputReportHash: ProtocolHash;
+        readonly compactAggregateOpeningBinding: unknown;
+        readonly relation: string;
+    }
+>;
+
+export type BgvTargetDecryptionShareProofStatementVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyBgvTargetDecryptionShareProofStatement';
+    readonly proofStatementRoot: ProtocolHash;
+    readonly targetDecryptionShareHash: ProtocolHash;
+    readonly shareRoot: ProtocolHash;
+    readonly smudgingInputReportHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
+    readonly oneShotTargetContextRule: string;
+    readonly restoredWitnessOwnershipRule: string;
+    readonly targetBasisRule: string;
+    readonly smudgingRequirement: string;
+    readonly recombinationRequirement: string;
+    readonly proofBoundary: string;
+};
+
+export type BgvTargetDecryptionRecombinationInputReport = {
+    readonly objectType: 'TargetDecryptionRecombinationInputReport';
+    readonly objectVersion: 1;
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly targetDecryptionProfileId: string;
+    readonly setupPackageHash: ProtocolHash;
+    readonly targetAcceptedRecordHash: ProtocolHash;
+    readonly targetContextHash: ProtocolHash;
+    readonly targetCiphertextHash: ProtocolHash;
+    readonly targetShareProfileHash: ProtocolHash;
+    readonly targetBasisHash: ProtocolHash;
+    readonly targetIdRoot: ProtocolHash;
+    readonly targetOrderRoot: ProtocolHash;
+    readonly minimumSharesForInterpolation: number;
+    readonly decryptionThreshold: number;
+    readonly selectedShareCount: number;
+    readonly selectedShares: readonly {
+        readonly trusteeIdentity: string;
+        readonly rosterPosition: number;
+        readonly boardPosition: number;
+        readonly interpolationPoint: number;
+        readonly shareRoot: ProtocolHash;
+        readonly targetDecryptionShareHash: ProtocolHash;
+        readonly smudgingInputReportHash: ProtocolHash;
+    }[];
+    readonly smudgingProfileId: string;
+    readonly smudgingDevelopmentScope: string;
+    readonly smudgingCombinationRule: string;
+    readonly smudgingProofBoundary: string;
+    readonly activeRnsLimbCount: number;
+    readonly activeRnsLimbReports: readonly {
+        readonly rnsLimbIndex: number;
+        readonly rnsPrime: number;
+        readonly lagrangeTerms: readonly {
+            readonly selectedShareIndex: number;
+            readonly rosterPosition: number;
+            readonly boardPosition: number;
+            readonly interpolationPoint: number;
+            readonly numeratorProductModuloPrime: number;
+            readonly denominatorProductModuloPrime: number;
+            readonly denominatorInverseModuloPrime: number;
+            readonly lagrangeCoefficientModuloPrime: number;
+        }[];
+    }[];
+    readonly recombinationCoefficientEquation: string;
+    readonly decodingMargin: {
+        readonly plaintextModulus: number;
+        readonly centeredPositiveLimit: number;
+        readonly maximumDecodedTargetValue: number;
+        readonly centeredPositiveMargin: number;
+        readonly marginRule: string;
+    };
+};
 
 export type BgvTargetDecryptionResult = {
     readonly ok: true;
@@ -932,6 +1396,8 @@ export type BgvTargetDecryptionResult = {
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetShareProfileHash: ProtocolHash;
     readonly targetDecryptionProfileHash: ProtocolHash;
+    readonly recombinationInputReport: BgvTargetDecryptionRecombinationInputReport;
+    readonly recombinationInputReportHash: ProtocolHash;
     readonly minimumSharesForInterpolation: number;
     readonly decryptionThreshold: number;
     readonly decryptionShareQuorum: number;

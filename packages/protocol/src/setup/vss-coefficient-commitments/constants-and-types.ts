@@ -36,7 +36,8 @@ export const acceptedBgvSetupQShare = {
     objectVersion: 1,
     sharingDomain: 'per-rns-prime',
     primeOrder: 'profile-order',
-    targetDecryptionReadiness: 'refused-until-q-target-certificate-closes',
+    targetDecryptionReadiness:
+        'refused until smudging proof coverage, recombination proof coverage, target proof backend, and verifier activation are complete',
     primes: acceptedBgvSetupQSharePrimes,
 } as const;
 

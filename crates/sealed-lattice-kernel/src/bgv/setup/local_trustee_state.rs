@@ -30,6 +30,7 @@ const DELETED_MATERIAL_CLASSES: &[&str] = &[
 
 const RETAINED_MATERIAL_CLASSES: &[&str] = &[
     "aggregate-threshold-share-sealed",
+    "target-decryption-proof-witness-sealed",
     "issued-vss-acceptance-roots",
     "issued-vss-complaint-roots",
     "setup-context",
@@ -63,6 +64,7 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
     for field_name in [
         "thresholdShareCommitmentRecipientRoot",
         "aggregateThresholdShareRoot",
+        "targetDecryptionProofWitnessRoot",
         "issuedVssAcceptanceRoot",
     ] {
         validate_hash_string(
@@ -100,6 +102,7 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
         "trusteePoint": trustee_point,
         "localStateRoot": local_state_root,
         "deletionReceiptRoot": deletion_receipt_root,
+        "targetDecryptionProofWitnessRoot": hash_string_field(local_state, "targetDecryptionProofWitnessRoot")?,
         "exportPolicy": LOCAL_STATE_EXPORT_POLICY,
         "storageProfile": LOCAL_STATE_STORAGE_PROFILE,
         "deletionBoundary": DELETION_BOUNDARY,
@@ -259,7 +262,7 @@ fn verify_deletion_receipt(
     if string_array_field(deletion_receipt, "retainedMaterialClasses")? != RETAINED_MATERIAL_CLASSES
     {
         return Err(invalid_local_state_input(
-            "deletionReceipt.retainedMaterialClasses must retain only sealed aggregate state and roots",
+            "deletionReceipt.retainedMaterialClasses must retain sealed aggregate state, sealed target-decryption proof witness material, and roots",
         ));
     }
 

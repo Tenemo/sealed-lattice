@@ -131,6 +131,7 @@ export const vendoredProtocolRuntimeModules = [
     'roster/index.ts',
     'roster/object-validation.ts',
     'roster/verification.ts',
+    'setup/compact-vss-commitments.ts',
     'setup/common-randomness-records.ts',
     'setup/binary-chunk-writer.ts',
     'setup/evaluation-key-proof-records.ts',

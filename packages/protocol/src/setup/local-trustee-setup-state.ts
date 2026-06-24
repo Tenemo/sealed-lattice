@@ -9,6 +9,17 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    computeCompactVssCommitmentFromOpening,
+    verifyCompactVssAggregateThresholdCommitmentSet,
+    verifyCompactVssShareLinkageStatement,
+    type CompactVssAggregateThresholdCommitmentSet,
+    type CompactVssAggregateThresholdOpeningCredential,
+    type CompactVssCoefficientCommitmentSet,
+    type CompactVssRecipientShareOpeningCredential,
+    type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageStatement,
+} from './compact-vss-commitments.js';
 import type {
     CollectiveBgvSetupContext,
     PrivateVssEnvelopeVerificationReference,
@@ -31,6 +42,7 @@ export const deletedLocalTrusteeSetupMaterialClasses = [
 
 export const retainedLocalTrusteeSetupMaterialClasses = [
     'aggregate-threshold-share-sealed',
+    'target-decryption-proof-witness-sealed',
     'issued-vss-acceptance-roots',
     'issued-vss-complaint-roots',
     'setup-context',
@@ -42,6 +54,7 @@ export type LocalTrusteeSetupStateCommitmentInput = {
     readonly trusteeRosterPosition: number;
     readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
     readonly aggregateThresholdShareRoot: ProtocolHash;
+    readonly targetDecryptionProofWitnessRoot: ProtocolHash;
     readonly issuedVssAcceptanceRoot: ProtocolHash;
     readonly issuedVssComplaintRoots: readonly ProtocolHash[];
 };
@@ -60,6 +73,15 @@ export type LocalTrusteeSetupStateEncryptionResult = Readonly<{
     readonly storageAadHash: ProtocolHash;
 }>;
 
+export type GeneratedCompactVssTargetProofWitnessInput = Readonly<{
+    readonly coefficientCommitmentSet?: CompactVssCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet?: CompactVssRecipientShareCommitmentSet;
+    readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
+    readonly aggregateThresholdOpeningCredentials?: readonly CompactVssAggregateThresholdOpeningCredential[];
+    readonly recipientShareOpeningCredentials?: readonly CompactVssRecipientShareOpeningCredential[];
+    readonly shareLinkageStatement: CompactVssShareLinkageStatement;
+}>;
+
 export type GeneratedLocalTrusteeSetupStateInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly trusteeIdentity: string;
@@ -73,6 +95,8 @@ export type GeneratedLocalTrusteeSetupStateInput = Readonly<{
     readonly storageKeyBytesHex: string;
     readonly localStateAeadNonceBytesHex?: string;
     readonly sealedAggregateThresholdShareAeadNonceBytesHex?: string;
+    readonly sealedTargetDecryptionProofWitnessAeadNonceBytesHex?: string;
+    readonly compactVssTargetProofWitness?: GeneratedCompactVssTargetProofWitnessInput;
 }>;
 
 export type GeneratedLocalTrusteeSetupStateResult =
@@ -128,6 +152,7 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly trusteePoint: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly aggregateThresholdShareRoot: ProtocolHash;
+        readonly targetDecryptionProofWitnessRoot: ProtocolHash;
         readonly issuedVssAcceptanceRoot: ProtocolHash;
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly deletionReceiptRoot: ProtocolHash;
@@ -305,6 +330,10 @@ const validateInput = (input: LocalTrusteeSetupStateCommitmentInput): void => {
         'aggregateThresholdShareRoot',
     );
     assertProtocolHash(
+        input.targetDecryptionProofWitnessRoot,
+        'targetDecryptionProofWitnessRoot',
+    );
+    assertProtocolHash(
         input.issuedVssAcceptanceRoot,
         'issuedVssAcceptanceRoot',
     );
@@ -351,6 +380,8 @@ export const createLocalTrusteeSetupStateCommitment = (
         thresholdShareCommitmentRecipientRoot:
             input.thresholdShareCommitmentRecipientRoot,
         aggregateThresholdShareRoot: input.aggregateThresholdShareRoot,
+        targetDecryptionProofWitnessRoot:
+            input.targetDecryptionProofWitnessRoot,
         issuedVssAcceptanceRoot: input.issuedVssAcceptanceRoot,
         issuedVssComplaintRoots: input.issuedVssComplaintRoots,
         deletionReceiptRoot: deletionReceipt.deletionReceiptRoot,
@@ -649,12 +680,31 @@ const assertPrivateEnvelopeMatchesReference = (
     }
 };
 
+const assertSameShareValues = (
+    leftValues: readonly number[],
+    rightValues: readonly number[],
+    objectPath: string,
+    expectedDescription = 'the aggregate threshold share material',
+): void => {
+    if (leftValues.length !== rightValues.length) {
+        throw new Error(`${objectPath} length must match.`);
+    }
+    leftValues.forEach((leftValue, valueIndex) => {
+        if (leftValue !== rightValues[valueIndex]) {
+            throw new Error(
+                `${objectPath}.${String(valueIndex)} must match ${expectedDescription}.`,
+            );
+        }
+    });
+};
+
 const aggregateVerifiedPrivateVssMaterial = (
     input: GeneratedLocalTrusteeSetupStateInput,
     thresholdShareCommitmentRecipientRootValue: ProtocolHash,
     envelopeReferences: readonly PrivateVssEnvelopeVerificationReference[],
 ): Readonly<{
     readonly aggregateThresholdShareMaterial: JsonRecord;
+    readonly compactVssRecipientShareOpeningCredentials: readonly CompactVssRecipientShareOpeningCredential[];
 }> => {
     const privateEnvelopeByHash = new Map<ProtocolHash, JsonRecord>();
     for (const privateEnvelopeValue of input.verifiedPrivateVssShareEnvelopes) {
@@ -675,6 +725,8 @@ const aggregateVerifiedPrivateVssMaterial = (
     }
 
     const aggregateByLimb = new Map<number, AggregateLimbAccumulator>();
+    const compactVssRecipientShareOpeningCredentials: CompactVssRecipientShareOpeningCredential[] =
+        [];
     for (const envelopeReference of envelopeReferences) {
         const privateEnvelope = privateEnvelopeByHash.get(
             envelopeReference.privateEnvelopeHash,
@@ -719,6 +771,40 @@ const aggregateVerifiedPrivateVssMaterial = (
                     );
                 }
             });
+            if (
+                limbOpening.compactVssRecipientShareOpeningCredential !==
+                undefined
+            ) {
+                const compactCredential = jsonRecord(
+                    limbOpening.compactVssRecipientShareOpeningCredential,
+                    'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential',
+                ) as unknown as CompactVssRecipientShareOpeningCredential;
+                if (
+                    compactCredential.sourceTrusteeIdentity !==
+                        envelopeReference.sourceTrusteeIdentity ||
+                    compactCredential.sourceTrusteeRosterPosition !==
+                        envelopeReference.sourceTrusteeRosterPosition ||
+                    compactCredential.recipientIdentity !==
+                        envelopeReference.recipientIdentity ||
+                    compactCredential.recipientRosterPosition !==
+                        envelopeReference.recipientRosterPosition ||
+                    compactCredential.rnsLimbIndex !== rnsLimbIndex ||
+                    compactCredential.rnsPrime !== rnsPrime
+                ) {
+                    throw new Error(
+                        'compact VSS recipient share opening credential must match its private VSS envelope limb binding.',
+                    );
+                }
+                assertSameShareValues(
+                    compactCredential.shareValues,
+                    shareValues,
+                    'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareValues',
+                    'the delivered private VSS share values',
+                );
+                compactVssRecipientShareOpeningCredentials.push(
+                    compactCredential,
+                );
+            }
             const existingAccumulator = aggregateByLimb.get(rnsLimbIndex);
             if (existingAccumulator === undefined) {
                 aggregateByLimb.set(rnsLimbIndex, {
@@ -780,6 +866,496 @@ const aggregateVerifiedPrivateVssMaterial = (
                     Number(shareValue),
                 ),
             })),
+        },
+        compactVssRecipientShareOpeningCredentials,
+    };
+};
+
+type AggregateThresholdShareLimbMaterial = Readonly<{
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly shareValues: readonly number[];
+}>;
+
+const aggregateThresholdShareLimbMaterials = (
+    aggregateThresholdShareMaterial: JsonRecord,
+): readonly AggregateThresholdShareLimbMaterial[] =>
+    jsonRecordArray(
+        aggregateThresholdShareMaterial.aggregateShareByRnsLimb,
+        'aggregateThresholdShareMaterial.aggregateShareByRnsLimb',
+    ).map((limbMaterial, limbIndex) => {
+        const objectPath = `aggregateThresholdShareMaterial.aggregateShareByRnsLimb.${String(limbIndex)}`;
+        const rnsLimbIndex = nonNegativeIntegerField(
+            limbMaterial,
+            'rnsLimbIndex',
+            objectPath,
+        );
+        const rnsPrime = nonNegativeIntegerField(
+            limbMaterial,
+            'rnsPrime',
+            objectPath,
+        );
+        if (rnsPrime === 0) {
+            throw new Error(
+                `${objectPath}.rnsPrime must be a positive integer.`,
+            );
+        }
+        const shareValues = numericVector(
+            limbMaterial.shareValues,
+            `${objectPath}.shareValues`,
+        );
+        shareValues.forEach((shareValue, shareValueIndex) => {
+            if (shareValue < 0 || shareValue >= rnsPrime) {
+                throw new TypeError(
+                    `${objectPath}.shareValues.${String(shareValueIndex)} must be a residue below rnsPrime.`,
+                );
+            }
+        });
+
+        return {
+            rnsLimbIndex,
+            rnsPrime,
+            shareValues,
+        };
+    });
+
+const compactVssCredentialKey = (
+    recipientRosterPosition: number,
+    rnsLimbIndex: number,
+): string => `${String(recipientRosterPosition)}:${String(rnsLimbIndex)}`;
+
+const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
+    readonly recipientShareOpeningCredentials: readonly CompactVssRecipientShareOpeningCredential[];
+}): readonly CompactVssAggregateThresholdOpeningCredential[] => {
+    const aggregateThresholdCommitmentSet =
+        verifyCompactVssAggregateThresholdCommitmentSet({
+            aggregateThresholdCommitmentSet:
+                input.aggregateThresholdCommitmentSet,
+        });
+    const recipientRecords = aggregateThresholdCommitmentSet.recipientRecords
+        .filter(
+            (record) =>
+                record.recipientIdentity === input.trusteeIdentity &&
+                record.recipientRosterPosition === input.trusteeRosterPosition,
+        )
+        .sort((left, right) => left.rnsLimbIndex - right.rnsLimbIndex);
+    return recipientRecords.map((record) => {
+        const credentials = input.recipientShareOpeningCredentials
+            .filter(
+                (credential) =>
+                    credential.recipientIdentity === input.trusteeIdentity &&
+                    credential.recipientRosterPosition ===
+                        input.trusteeRosterPosition &&
+                    credential.rnsLimbIndex === record.rnsLimbIndex,
+            )
+            .sort(
+                (left, right) =>
+                    left.sourceTrusteeRosterPosition -
+                    right.sourceTrusteeRosterPosition,
+            );
+        if (
+            credentials.length !==
+            aggregateThresholdCommitmentSet.participantCount
+        ) {
+            throw new Error(
+                'compact VSS recipient share opening credentials must cover every source trustee for each local recipient limb.',
+            );
+        }
+        const seenSourcePositions = new Set<number>();
+        const sourceShareCommitmentRoots = new Set(
+            record.sourceShareCommitmentRoots,
+        );
+        const aggregateShareValues = Array.from(
+            { length: aggregateThresholdCommitmentSet.ringDegree },
+            () => 0n,
+        );
+        const aggregateRandomnessByColumn: number[][] | undefined =
+            credentials[0]?.randomnessByColumn.map((randomnessColumn) =>
+                Array.from({ length: randomnessColumn.length }, () => 0),
+            );
+        if (aggregateRandomnessByColumn === undefined) {
+            throw new Error(
+                'compact VSS recipient share opening credentials must not be empty.',
+            );
+        }
+        credentials.forEach((credential) => {
+            if (
+                seenSourcePositions.has(credential.sourceTrusteeRosterPosition)
+            ) {
+                throw new Error(
+                    'compact VSS recipient share opening credentials must contain at most one credential per source trustee for each recipient limb.',
+                );
+            }
+            seenSourcePositions.add(credential.sourceTrusteeRosterPosition);
+            if (
+                credential.rnsPrime !== record.rnsPrime ||
+                credential.recipientTrusteePoint !==
+                    record.recipientTrusteePoint ||
+                credential.shareValues.length !==
+                    aggregateThresholdCommitmentSet.ringDegree ||
+                !sourceShareCommitmentRoots.has(credential.shareCommitmentRoot)
+            ) {
+                throw new Error(
+                    'compact VSS recipient share opening credential must match the public aggregate threshold commitment record.',
+                );
+            }
+            const recomputedCommitment = computeCompactVssCommitmentFromOpening(
+                {
+                    commitmentRole: 'recipient-share',
+                    commitmentContext: {
+                        objectType: 'CompactVssRecipientShareCommitmentContext',
+                        objectVersion: 1,
+                        ...setupContextFields(input.setupContext),
+                        sourceTrusteeIdentity: credential.sourceTrusteeIdentity,
+                        sourceTrusteeRosterPosition:
+                            credential.sourceTrusteeRosterPosition,
+                        recipientIdentity: credential.recipientIdentity,
+                        recipientRosterPosition:
+                            credential.recipientRosterPosition,
+                        rnsLimbIndex: credential.rnsLimbIndex,
+                        rnsPrime: credential.rnsPrime,
+                    },
+                    publicMatrixSeedHash:
+                        aggregateThresholdCommitmentSet.publicMatrixSeedHash,
+                    rnsLimbIndex: credential.rnsLimbIndex,
+                    rnsPrime: credential.rnsPrime,
+                    ringDegree: aggregateThresholdCommitmentSet.ringDegree,
+                    messageCoefficients: credential.shareValues,
+                    randomnessByColumn: credential.randomnessByColumn,
+                },
+            );
+            if (
+                recomputedCommitment.commitmentRoot !==
+                    credential.shareCommitmentRoot ||
+                recomputedCommitment.openingRoot !== credential.shareOpeningRoot
+            ) {
+                throw new Error(
+                    'compact VSS recipient share opening credential does not open its public recipient-share commitment.',
+                );
+            }
+            const rnsPrimeWide = BigInt(record.rnsPrime);
+            credential.shareValues.forEach((shareValue, shareValueIndex) => {
+                aggregateShareValues[shareValueIndex] =
+                    ((aggregateShareValues[shareValueIndex] ?? 0n) +
+                        BigInt(shareValue)) %
+                    rnsPrimeWide;
+            });
+            credential.randomnessByColumn.forEach(
+                (randomnessColumn, columnIndex) => {
+                    const aggregateRandomnessColumn =
+                        aggregateRandomnessByColumn[columnIndex];
+                    if (
+                        aggregateRandomnessColumn?.length !==
+                        randomnessColumn.length
+                    ) {
+                        throw new Error(
+                            'compact VSS recipient share opening credential randomness shape must match across source trustees.',
+                        );
+                    }
+                    randomnessColumn.forEach(
+                        (randomnessCoefficient, coefficientIndex) => {
+                            aggregateRandomnessColumn[coefficientIndex] =
+                                (aggregateRandomnessColumn[coefficientIndex] ??
+                                    0) + randomnessCoefficient;
+                        },
+                    );
+                },
+            );
+        });
+
+        return {
+            objectType: 'CompactVssAggregateThresholdOpeningCredential',
+            objectVersion: 1,
+            profileId: aggregateThresholdCommitmentSet.profileId,
+            recipientIdentity: record.recipientIdentity,
+            recipientRosterPosition: record.recipientRosterPosition,
+            recipientTrusteePoint: record.recipientTrusteePoint,
+            rnsLimbIndex: record.rnsLimbIndex,
+            rnsPrime: record.rnsPrime,
+            aggregateShareValues: aggregateShareValues.map((shareValue) =>
+                Number(shareValue),
+            ),
+            aggregateRandomnessByColumn,
+            aggregateCommitmentRoot: record.aggregateCommitmentRoot,
+            aggregateOpeningRoot: record.aggregateOpeningRoot,
+            sourceShareOpeningRoots: credentials.map(
+                (credential) => credential.shareOpeningRoot,
+            ),
+        } satisfies CompactVssAggregateThresholdOpeningCredential;
+    });
+};
+
+const buildTargetDecryptionProofWitnessMaterial = (
+    input: GeneratedLocalTrusteeSetupStateInput,
+    thresholdShareCommitmentRecipientRootValue: ProtocolHash,
+    aggregateThresholdShareRoot: ProtocolHash,
+    aggregateThresholdShareMaterial: JsonRecord,
+    envelopeReferences: readonly PrivateVssEnvelopeVerificationReference[],
+    deliveredCompactVssRecipientShareOpeningCredentials: readonly CompactVssRecipientShareOpeningCredential[],
+): JsonRecord => {
+    const commonWitnessFields = {
+        objectType: 'LocalTrusteeTargetDecryptionProofWitnessMaterial',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        ...setupContextFields(input.setupContext),
+        trusteeIdentity: input.trusteeIdentity,
+        trusteeRosterPosition: input.trusteeRosterPosition,
+        thresholdShareCommitmentRecipientRoot:
+            thresholdShareCommitmentRecipientRootValue,
+        aggregateThresholdShareRoot,
+        sourcePrivateEnvelopeReferences:
+            sourcePrivateEnvelopeReferences(envelopeReferences),
+        witnessOwnership: 'recipient-owned-restorable-local-state',
+    } as const satisfies JsonRecord;
+
+    if (input.compactVssTargetProofWitness === undefined) {
+        return {
+            ...commonWitnessFields,
+            witnessUse:
+                'target-decryption share proof generation after compact opening credential delivery is implemented',
+            currentProofGenerationBoundary:
+                'current full-material setup state does not yet contain compact aggregate opening credentials',
+        };
+    }
+
+    const compactWitness = input.compactVssTargetProofWitness;
+    const aggregateThresholdCommitmentSet =
+        verifyCompactVssAggregateThresholdCommitmentSet({
+            aggregateThresholdCommitmentSet:
+                compactWitness.aggregateThresholdCommitmentSet,
+        });
+
+    const hasShareLinkageEvidence =
+        compactWitness.coefficientCommitmentSet !== undefined ||
+        compactWitness.recipientShareCommitmentSet !== undefined;
+    if (
+        hasShareLinkageEvidence &&
+        (compactWitness.coefficientCommitmentSet === undefined ||
+            compactWitness.recipientShareCommitmentSet === undefined)
+    ) {
+        throw new Error(
+            'compact VSS target proof witness must include both coefficient and recipient-share commitment sets when linkage evidence is supplied.',
+        );
+    }
+    const shareLinkageStatement = verifyCompactVssShareLinkageStatement(
+        hasShareLinkageEvidence
+            ? {
+                  statement: compactWitness.shareLinkageStatement,
+                  coefficientCommitmentSet:
+                      compactWitness.coefficientCommitmentSet,
+                  recipientShareCommitmentSet:
+                      compactWitness.recipientShareCommitmentSet,
+                  aggregateThresholdCommitmentSet,
+              }
+            : {
+                  statement: compactWitness.shareLinkageStatement,
+              },
+    );
+    const shareLinkageStatementRecord =
+        shareLinkageStatement as unknown as JsonRecord;
+    assertSetupContextBinding(
+        input.setupContext,
+        shareLinkageStatementRecord,
+        'compactVssTargetProofWitness.shareLinkageStatement',
+    );
+    const targetBasisHash = protocolHashField(
+        shareLinkageStatementRecord,
+        'targetBasisHash',
+        'compactVssTargetProofWitness.shareLinkageStatement',
+    );
+    if (
+        shareLinkageStatement.aggregateThresholdCommitmentRoot !==
+        aggregateThresholdCommitmentSet.aggregateThresholdCommitmentRoot
+    ) {
+        throw new Error(
+            'compact VSS share linkage statement must bind the aggregate threshold commitment set root.',
+        );
+    }
+    if (
+        shareLinkageStatement.publicMatrixSeedHash !==
+        aggregateThresholdCommitmentSet.publicMatrixSeedHash
+    ) {
+        throw new Error(
+            'compact VSS share linkage statement must bind the aggregate threshold commitment matrix seed.',
+        );
+    }
+
+    const aggregateShareByLimb = new Map(
+        aggregateThresholdShareLimbMaterials(
+            aggregateThresholdShareMaterial,
+        ).map((limbMaterial) => [limbMaterial.rnsLimbIndex, limbMaterial]),
+    );
+    const credentialsByCoordinate = new Map<
+        string,
+        CompactVssAggregateThresholdOpeningCredential
+    >();
+    const aggregateThresholdOpeningCredentials =
+        compactWitness.aggregateThresholdOpeningCredentials ??
+        aggregateCompactVssOpeningCredentialsFromRecipientCredentials({
+            setupContext: input.setupContext,
+            trusteeIdentity: input.trusteeIdentity,
+            trusteeRosterPosition: input.trusteeRosterPosition,
+            aggregateThresholdCommitmentSet,
+            recipientShareOpeningCredentials: [
+                ...deliveredCompactVssRecipientShareOpeningCredentials,
+                ...(compactWitness.recipientShareOpeningCredentials ?? []),
+            ],
+        });
+    aggregateThresholdOpeningCredentials
+        .filter(
+            (credential) =>
+                credential.recipientIdentity === input.trusteeIdentity &&
+                credential.recipientRosterPosition ===
+                    input.trusteeRosterPosition,
+        )
+        .forEach((credential) => {
+            const credentialKey = compactVssCredentialKey(
+                credential.recipientRosterPosition,
+                credential.rnsLimbIndex,
+            );
+            if (credentialsByCoordinate.has(credentialKey)) {
+                throw new Error(
+                    'compact VSS aggregate opening credentials must contain at most one credential for each recipient limb.',
+                );
+            }
+            credentialsByCoordinate.set(credentialKey, credential);
+        });
+
+    const recipientRecords = aggregateThresholdCommitmentSet.recipientRecords
+        .filter(
+            (record) =>
+                record.recipientIdentity === input.trusteeIdentity &&
+                record.recipientRosterPosition === input.trusteeRosterPosition,
+        )
+        .sort((left, right) => left.rnsLimbIndex - right.rnsLimbIndex);
+    if (recipientRecords.length === 0) {
+        throw new Error(
+            'compact VSS aggregate threshold commitment set must contain records for the local trustee.',
+        );
+    }
+    if (credentialsByCoordinate.size !== recipientRecords.length) {
+        throw new Error(
+            'compact VSS aggregate opening credentials must cover every local recipient limb.',
+        );
+    }
+
+    const compactAggregateOpeningCredentials = recipientRecords.map(
+        (record) => {
+            const credential = credentialsByCoordinate.get(
+                compactVssCredentialKey(
+                    record.recipientRosterPosition,
+                    record.rnsLimbIndex,
+                ),
+            );
+            if (credential === undefined) {
+                throw new Error(
+                    'compact VSS aggregate opening credential is missing for a local recipient limb.',
+                );
+            }
+            if (
+                credential.recipientTrusteePoint !==
+                    record.recipientTrusteePoint ||
+                credential.rnsPrime !== record.rnsPrime ||
+                credential.aggregateCommitmentRoot !==
+                    record.aggregateCommitmentRoot ||
+                credential.aggregateOpeningRoot !== record.aggregateOpeningRoot
+            ) {
+                throw new Error(
+                    'compact VSS aggregate opening credential must match its public aggregate commitment record.',
+                );
+            }
+            const aggregateShareMaterial = aggregateShareByLimb.get(
+                record.rnsLimbIndex,
+            );
+            if (aggregateShareMaterial === undefined) {
+                throw new Error(
+                    'compact VSS aggregate opening credential must have matching aggregate threshold share material.',
+                );
+            }
+            if (aggregateShareMaterial.rnsPrime !== record.rnsPrime) {
+                throw new Error(
+                    'compact VSS aggregate opening credential rnsPrime must match aggregate threshold share material.',
+                );
+            }
+            assertSameShareValues(
+                credential.aggregateShareValues,
+                aggregateShareMaterial.shareValues,
+                'compactVssTargetProofWitness.aggregateThresholdOpeningCredentials.aggregateShareValues',
+            );
+            const recomputedCommitment = computeCompactVssCommitmentFromOpening(
+                {
+                    commitmentRole: 'aggregate-threshold-share',
+                    commitmentContext: {
+                        objectType:
+                            'CompactVssAggregateThresholdShareCommitmentContext',
+                        objectVersion: 1,
+                        ...setupContextFields(input.setupContext),
+                        recipientIdentity: credential.recipientIdentity,
+                        recipientRosterPosition:
+                            credential.recipientRosterPosition,
+                        rnsLimbIndex: credential.rnsLimbIndex,
+                        rnsPrime: credential.rnsPrime,
+                    },
+                    publicMatrixSeedHash:
+                        aggregateThresholdCommitmentSet.publicMatrixSeedHash,
+                    rnsLimbIndex: credential.rnsLimbIndex,
+                    rnsPrime: credential.rnsPrime,
+                    ringDegree: aggregateThresholdCommitmentSet.ringDegree,
+                    messageCoefficients: credential.aggregateShareValues,
+                    randomnessByColumn: credential.aggregateRandomnessByColumn,
+                },
+            );
+            if (
+                recomputedCommitment.commitmentRoot !==
+                    credential.aggregateCommitmentRoot ||
+                recomputedCommitment.openingRoot !==
+                    credential.aggregateOpeningRoot
+            ) {
+                throw new Error(
+                    'compact VSS aggregate opening credential does not open its public aggregate commitment.',
+                );
+            }
+
+            return {
+                objectType: 'LocalTrusteeCompactVssAggregateOpeningCredential',
+                objectVersion: 1,
+                recipientIdentity: credential.recipientIdentity,
+                recipientRosterPosition: credential.recipientRosterPosition,
+                recipientTrusteePoint: credential.recipientTrusteePoint,
+                rnsLimbIndex: credential.rnsLimbIndex,
+                rnsPrime: credential.rnsPrime,
+                aggregateCommitmentRoot: credential.aggregateCommitmentRoot,
+                aggregateOpeningRoot: credential.aggregateOpeningRoot,
+                aggregateShareValues: credential.aggregateShareValues,
+                aggregateRandomnessByColumn:
+                    credential.aggregateRandomnessByColumn,
+                sourceShareOpeningRoots: credential.sourceShareOpeningRoots,
+            } satisfies JsonRecord;
+        },
+    );
+
+    return {
+        ...commonWitnessFields,
+        witnessUse:
+            'target-decryption share proof generation from the sealed compact aggregate opening',
+        currentProofGenerationBoundary:
+            'zero-knowledge target-decryption proof backend from compact local openings is not implemented yet',
+        compactAggregateOpening: {
+            objectType: 'LocalTrusteeCompactVssAggregateOpeningWitness',
+            objectVersion: 1,
+            profileId: aggregateThresholdCommitmentSet.profileId,
+            developmentScope: aggregateThresholdCommitmentSet.developmentScope,
+            publicMatrixSeedHash:
+                aggregateThresholdCommitmentSet.publicMatrixSeedHash,
+            targetBasisHash,
+            shareLinkageStatementRoot: shareLinkageStatement.statementRoot,
+            aggregateThresholdCommitmentRoot:
+                aggregateThresholdCommitmentSet.aggregateThresholdCommitmentRoot,
+            compactAggregateOpeningCredentials,
         },
     };
 };
@@ -843,6 +1419,28 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
             aeadNonceBytesHex:
                 input.sealedAggregateThresholdShareAeadNonceBytesHex,
         });
+    const targetDecryptionProofWitnessMaterial =
+        buildTargetDecryptionProofWitnessMaterial(
+            input,
+            thresholdShareCommitmentRecipientRootValue,
+            sealedAggregateThresholdShare.materialRoot,
+            materialPlaintexts.aggregateThresholdShareMaterial,
+            envelopeReferences,
+            materialPlaintexts.compactVssRecipientShareOpeningCredentials,
+        );
+    const sealedTargetDecryptionProofWitness =
+        await encryptLocalTrusteeSetupSealedMaterial({
+            materialClass: 'target-decryption-proof-witness-sealed',
+            materialPlaintext: targetDecryptionProofWitnessMaterial,
+            setupContext: input.setupContext,
+            trusteeIdentity: input.trusteeIdentity,
+            trusteeRosterPosition: input.trusteeRosterPosition,
+            thresholdShareCommitmentRecipientRoot:
+                thresholdShareCommitmentRecipientRootValue,
+            storageKeyBytesHex: input.storageKeyBytesHex,
+            aeadNonceBytesHex:
+                input.sealedTargetDecryptionProofWitnessAeadNonceBytesHex,
+        });
     const acceptanceRoot = issuedVssAcceptanceRoot(
         input,
         privateVssEnvelopeCommitmentRoot,
@@ -867,6 +1465,8 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
             thresholdShareCommitmentRecipientRootValue,
         sealedAggregateThresholdShare:
             sealedAggregateThresholdShare.sealedMaterial,
+        sealedTargetDecryptionProofWitness:
+            sealedTargetDecryptionProofWitness.sealedMaterial,
         issuedVssAcceptanceRoots: [acceptanceRoot],
         issuedVssComplaintRoots: complaintRoots,
     } satisfies LocalTrusteeSetupStateSealedPayload;
@@ -877,6 +1477,8 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
         thresholdShareCommitmentRecipientRoot:
             thresholdShareCommitmentRecipientRootValue,
         aggregateThresholdShareRoot: sealedAggregateThresholdShare.materialRoot,
+        targetDecryptionProofWitnessRoot:
+            sealedTargetDecryptionProofWitness.materialRoot,
         issuedVssAcceptanceRoot: acceptanceRoot,
         issuedVssComplaintRoots: complaintRoots,
         localStatePlaintext,

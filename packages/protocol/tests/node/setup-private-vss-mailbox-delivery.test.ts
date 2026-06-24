@@ -5,7 +5,10 @@ import {
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
-import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
+import {
+    createCompactVssRecipientShareCommitmentBundle,
+    createPrivateVssMailboxDeliverySet,
+} from '#packages/protocol/src/index';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -85,6 +88,40 @@ describe('private VSS mailbox delivery', () => {
         const mailboxKeyPair = createPrivateVssMailboxKeyPair(
             fixtureHash('mailbox-key'),
         );
+        const compactRecipientShareBundle =
+            createCompactVssRecipientShareCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                participantCount: 1,
+                qSharePrimes: [65_537],
+                ringDegree: 2,
+                thresholdDegree: 1,
+                sourceTrusteeOpeningStates: [
+                    {
+                        sourceTrusteeIdentity: 'trustee-0',
+                        sourceTrusteeRosterPosition: 0,
+                        coefficientOpenings: [
+                            {
+                                rnsLimbIndex: 0,
+                                rnsPrime: 65_537,
+                                shamirCoefficientIndex: 0,
+                                coefficientMessage: [1, 2],
+                                randomnessByColumn: [],
+                            },
+                        ],
+                    },
+                ],
+                recipientTrustees: [
+                    {
+                        trusteeIdentity: 'trustee-0',
+                        trusteeRosterPosition: 0,
+                    },
+                ],
+                shareOpeningRandomness: ({ ringDegree }) => [
+                    Array.from({ length: ringDegree }, () => 1),
+                    Array.from({ length: ringDegree }, () => 0),
+                ],
+            });
 
         const deliverySet = await createPrivateVssMailboxDeliverySet({
             kernel: {
@@ -140,6 +177,8 @@ describe('private VSS mailbox delivery', () => {
                 proofMaterialRoot: fixtureHash('embedded-material-root'),
                 proofBytesHex,
             }),
+            compactVssRecipientShareOpeningCredentials:
+                compactRecipientShareBundle.recipientShareOpeningCredentials,
             sourceTrusteeContributionStates: [
                 {
                     sourceTrusteeIdentity: 'trustee-0',
@@ -177,6 +216,14 @@ describe('private VSS mailbox delivery', () => {
                 unknown
             >[]
         )[0];
+        expect(
+            (
+                limbOpening.compactVssRecipientShareOpeningCredential as Record<
+                    string,
+                    unknown
+                >
+            ).shareValues,
+        ).toEqual([1, 2]);
         const transportedProofRecord =
             limbOpening.privateVssShareProof as Record<string, unknown>;
         expect(transportedProofRecord.proofBytesHex).toBeUndefined();

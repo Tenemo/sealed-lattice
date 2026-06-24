@@ -26,6 +26,13 @@ enum TranscriptCoreCommand {
     GenerateTrusteeEvaluationKeyProof,
     VerifyTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
+    ComputeCompactVssCommitmentFromOpening,
+    VerifyCompactVssCommitmentOpening,
+    VerifyCompactVssCoefficientCommitmentSet,
+    VerifyCompactVssRecipientShareCommitmentSet,
+    VerifyCompactVssAggregateThresholdCommitmentSet,
+    VerifyCompactVssShareLinkageStatement,
+    VerifyCompactVssSameSecretBridgeStatementSet,
     DeriveThresholdShareCommitments,
     DeriveThresholdShareCommitmentsFromTransport,
     BeginThresholdShareCommitmentsFromTransportStream,
@@ -45,7 +52,11 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RunDirectEncryptedBallot,
+    GenerateBgvTargetDecryptionFixture,
     GenerateBgvTargetDecryptionShare,
+    GenerateBgvTargetDecryptionShareFromLocalShare,
+    DeriveBgvTargetDecryptionShareProofStatement,
+    VerifyBgvTargetDecryptionShareProofStatement,
     RecombineBgvTargetDecryptionShares,
 }
 
@@ -217,6 +228,13 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
+        | TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening
+        | TranscriptCoreCommand::VerifyCompactVssCommitmentOpening
+        | TranscriptCoreCommand::VerifyCompactVssCoefficientCommitmentSet
+        | TranscriptCoreCommand::VerifyCompactVssRecipientShareCommitmentSet
+        | TranscriptCoreCommand::VerifyCompactVssAggregateThresholdCommitmentSet
+        | TranscriptCoreCommand::VerifyCompactVssShareLinkageStatement
+        | TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeStatementSet
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
         | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
@@ -236,7 +254,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RunDirectEncryptedBallot
+        | TranscriptCoreCommand::GenerateBgvTargetDecryptionFixture
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
+        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
+        | TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement
+        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatement
         | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
             run_bgv_command(command, &request)
         }
@@ -286,6 +308,27 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::commands::compute_setup_commitment_from_opening(request)
+        }
+        TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening => {
+            crate::bgv::commands::compute_compact_vss_commitment_from_opening(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssCommitmentOpening => {
+            crate::bgv::commands::verify_compact_vss_commitment_opening(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssCoefficientCommitmentSet => {
+            crate::bgv::commands::verify_compact_vss_coefficient_commitment_set(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssRecipientShareCommitmentSet => {
+            crate::bgv::commands::verify_compact_vss_recipient_share_commitment_set(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssAggregateThresholdCommitmentSet => {
+            crate::bgv::commands::verify_compact_vss_aggregate_threshold_commitment_set(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssShareLinkageStatement => {
+            crate::bgv::commands::verify_compact_vss_share_linkage_statement(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeStatementSet => {
+            crate::bgv::commands::verify_compact_vss_same_secret_bridge_statement_set(request)
         }
         TranscriptCoreCommand::DeriveThresholdShareCommitments => {
             crate::bgv::commands::derive_threshold_share_commitments(request)
@@ -346,8 +389,28 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::RunDirectEncryptedBallot => {
             crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
         }
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionFixture => {
+            crate::bgv::target_decryption::generate_bgv_target_decryption_fixture_from_request(
+                request,
+            )
+        }
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShare => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare => {
+            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_local_share_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement => {
+            crate::bgv::target_decryption::derive_bgv_target_decryption_share_proof_statement_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatement => {
+            crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_statement_from_request(
                 request,
             )
         }

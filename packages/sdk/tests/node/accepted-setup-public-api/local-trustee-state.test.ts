@@ -49,6 +49,12 @@ describe('accepted setup public package API in Node', () => {
                         unknown
                     >
                 ).aggregateThresholdShareRoot,
+                expectedTargetDecryptionProofWitnessRoot: (
+                    exportedState.localStateCommitment as Record<
+                        string,
+                        unknown
+                    >
+                ).targetDecryptionProofWitnessRoot,
                 expectedThresholdShareCommitmentRecipientRoot: (
                     exportedState.localStateCommitment as Record<
                         string,
@@ -76,6 +82,12 @@ describe('accepted setup public package API in Node', () => {
                         unknown
                     >
                 ).localStateRoot,
+                targetDecryptionProofWitnessRoot: (
+                    exportedState.localStateCommitment as Record<
+                        string,
+                        unknown
+                    >
+                ).targetDecryptionProofWitnessRoot,
             },
         });
         expect(restoredState).not.toHaveProperty('localStatePlaintext');

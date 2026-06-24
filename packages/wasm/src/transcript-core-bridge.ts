@@ -9,10 +9,13 @@ export type {
     BgvCiphertextConventionFixture,
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupVerification,
+    BgvCompactVssCommitmentOpeningInput,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPrivateVssShareEnvelopeVerification,
     BgvRnsProfileDescription,
+    BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionShareProofStatement,
     BgvThresholdShareCommitmentDerivation,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';

@@ -19,11 +19,19 @@ pub(super) fn read_target_ciphertext_pair(
             "target id and target order ciphertexts must use the same BGV level",
         ));
     }
+    validate_canonical_target_ciphertext(&target_id.ciphertext, "target id ciphertext")?;
+    validate_canonical_target_ciphertext(&target_order.ciphertext, "target order ciphertext")?;
     compare_hash_field(
         binding,
         "targetLayoutHash",
         &target_accepted.target_layout_hash,
         "target ciphertext layout hash",
+    )?;
+    compare_hash_field(
+        binding,
+        "targetBasisHash",
+        &target_accepted.target_basis_hash,
+        "target ciphertext basis hash",
     )?;
     let aggregate_ciphertext_root = hash_at_path(binding, &["aggregateCiphertextRoot"])?;
     let top_count = usize_field(binding, "topCount")?;
@@ -37,6 +45,7 @@ pub(super) fn read_target_ciphertext_pair(
         aggregate_ciphertext_root,
         top_count,
         &target_accepted.target_layout_hash,
+        &target_accepted.target_basis_hash,
         &target_id.root,
         &target_order.root,
     )?;
@@ -54,6 +63,7 @@ pub(super) fn read_target_ciphertext_pair(
             "aggregateCiphertextRoot": aggregate_ciphertext_root,
             "topCount": top_count,
             "targetLayoutHash": target_accepted.target_layout_hash,
+            "targetBasisHash": target_accepted.target_basis_hash,
             "targetIdRoot": target_id.root,
             "targetOrderRoot": target_order.root,
             "targetCiphertextHash": target_ciphertext_hash,
@@ -115,6 +125,7 @@ pub(crate) fn direct_target_ciphertext_hash(
     aggregate_ciphertext_root: &str,
     top_count: usize,
     target_layout_hash: &str,
+    target_basis_hash: &str,
     target_id_root: &str,
     target_order_root: &str,
 ) -> CanonicalResult<String> {
@@ -127,6 +138,7 @@ pub(crate) fn direct_target_ciphertext_hash(
             "topCount": top_count,
             "tiePolicy": TIE_POLICY,
             "targetLayoutHash": target_layout_hash,
+            "targetBasisHash": target_basis_hash,
             "targetIdRoot": target_id_root,
             "targetOrderRoot": target_order_root,
             "openedIntermediates": [],

@@ -7,6 +7,7 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import type { CompactVssRecipientShareOpeningCredential } from './compact-vss-commitments.js';
 import { setupProofProfileId } from './same-secret-consistency-records.js';
 import type { VerifiedVssCoefficientCommitmentMaterial } from './vss-coefficient-commitments.js';
 
@@ -178,6 +179,7 @@ export type PrivateVssMailboxDeliverySetInput = {
         | typeof embeddedPrivateVssShareProofBytesEncoding
         | typeof transportedSetupProofMaterialEncoding;
     readonly privateVssShareProofFactory?: PrivateVssShareProofFactory;
+    readonly compactVssRecipientShareOpeningCredentials?: readonly CompactVssRecipientShareOpeningCredential[];
     readonly sourceTrusteeContributionStates: readonly PrivateVssSourceTrusteeContributionState[];
     readonly recipients: readonly PrivateVssMailboxRecipient[];
 };
@@ -862,6 +864,61 @@ type PrivateVssShareEnvelopeBuild = Readonly<{
     readonly transportedPrivateVssShareProofMaterial?: TransportedPrivateVssShareProofMaterialSet;
 }>;
 
+const sameResidueVector = (
+    leftValues: readonly number[],
+    rightValues: readonly number[],
+): boolean =>
+    leftValues.length === rightValues.length &&
+    leftValues.every(
+        (leftValue, valueIndex) => leftValue === rightValues[valueIndex],
+    );
+
+const compactVssRecipientShareOpeningCredentialForLimb = (
+    input: PrivateVssMailboxDeliveryContext,
+    sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
+    recipient: PrivateVssMailboxRecipient,
+    rnsLimbIndex: number,
+    rnsPrime: number,
+    shareValues: readonly number[],
+): CompactVssRecipientShareOpeningCredential | undefined => {
+    if (input.compactVssRecipientShareOpeningCredentials === undefined) {
+        return undefined;
+    }
+    const matchingCredentials =
+        input.compactVssRecipientShareOpeningCredentials.filter(
+            (credential) =>
+                credential.sourceTrusteeIdentity ===
+                    sourceTrusteeState.sourceTrusteeIdentity &&
+                credential.sourceTrusteeRosterPosition ===
+                    sourceTrusteeState.sourceTrusteeRosterPosition &&
+                credential.recipientIdentity === recipient.recipientIdentity &&
+                credential.recipientRosterPosition ===
+                    recipient.recipientRosterPosition &&
+                credential.rnsLimbIndex === rnsLimbIndex,
+        );
+    if (matchingCredentials.length !== 1) {
+        throw new Error(
+            'compact VSS recipient share opening credentials must contain exactly one credential for each delivered private VSS limb.',
+        );
+    }
+    const credential = matchingCredentials[0];
+    if (credential === undefined) {
+        throw new Error(
+            'compact VSS recipient share opening credential is missing.',
+        );
+    }
+    if (
+        credential.rnsPrime !== rnsPrime ||
+        !sameResidueVector(credential.shareValues, shareValues)
+    ) {
+        throw new Error(
+            'compact VSS recipient share opening credential must match the delivered private VSS share values.',
+        );
+    }
+
+    return credential;
+};
+
 const privateEnvelope = (
     input: PrivateVssMailboxDeliveryContext,
     sourceTrusteeState: PrivateVssSourceTrusteeContributionState,
@@ -989,6 +1046,15 @@ const privateEnvelope = (
                           return transportedProof.proofRecord;
                       })()
                     : generatedPrivateVssShareProof;
+            const compactVssRecipientShareOpeningCredential =
+                compactVssRecipientShareOpeningCredentialForLimb(
+                    input,
+                    sourceTrusteeState,
+                    recipient,
+                    rnsLimbIndex,
+                    rnsPrime,
+                    shareValues,
+                );
 
             return {
                 objectType: 'PrivateVssShareLimbOpening',
@@ -998,6 +1064,9 @@ const privateEnvelope = (
                 shareValues,
                 coefficientCommitmentRoots,
                 privateVssShareProof,
+                ...(compactVssRecipientShareOpeningCredential === undefined
+                    ? {}
+                    : { compactVssRecipientShareOpeningCredential }),
             };
         },
     );

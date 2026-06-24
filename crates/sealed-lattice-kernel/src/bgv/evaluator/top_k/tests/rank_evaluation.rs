@@ -18,6 +18,86 @@ fn top_k_order_polynomial_masks_unselected_ranks() {
     assert_eq!(&decrypted[..rank_values.len()], &[1, 2, 0, 0, 0]);
 }
 
+#[test]
+fn sparse_target_projection_normalizes_full_target_to_canonical_level() {
+    let context = EvaluatorContext::new(
+        "sparse-target-canonical-full",
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1,
+    )
+    .expect("context");
+    let packed_ranks = encrypted_packed_option_slots(&context, &[0, 1, 2, 3, 4], "full-ranks");
+    let rank_evaluation = PackedRankEvaluation {
+        packed_ranks,
+        exact_rank_indicators: Vec::new(),
+    };
+
+    let target =
+        project_packed_sparse_target_from_rank_evaluation(&context, &rank_evaluation, 5, 5)
+            .expect("sparse target");
+
+    validate_canonical_target_ciphertext(&target.target_id, "target id ciphertext")
+        .expect("canonical target id");
+    validate_canonical_target_ciphertext(&target.target_order, "target order ciphertext")
+        .expect("canonical target order");
+    assert_eq!(target.target_id.level, CANONICAL_TARGET_CIPHERTEXT_LEVEL);
+    assert_eq!(target.target_order.level, CANONICAL_TARGET_CIPHERTEXT_LEVEL);
+}
+
+#[test]
+fn sparse_target_projection_normalizes_exact_indicators_to_canonical_level() {
+    let context = EvaluatorContext::new(
+        "sparse-target-canonical-indicators",
+        CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1,
+    )
+    .expect("context");
+    let packed_ranks = encrypted_packed_option_slots(&context, &[0, 0, 0, 0, 0], "dummy-ranks");
+    let first_rank_indicator =
+        encrypted_packed_option_slots(&context, &[0, 1, 0, 0, 0], "first-rank-indicator");
+    let second_rank_indicator =
+        encrypted_packed_option_slots(&context, &[0, 0, 0, 1, 0], "second-rank-indicator");
+    let rank_evaluation = PackedRankEvaluation {
+        packed_ranks,
+        exact_rank_indicators: vec![first_rank_indicator, second_rank_indicator],
+    };
+
+    let target =
+        project_packed_sparse_target_from_rank_evaluation(&context, &rank_evaluation, 5, 2)
+            .expect("sparse target");
+
+    validate_canonical_target_ciphertext(&target.target_id, "target id ciphertext")
+        .expect("canonical target id");
+    validate_canonical_target_ciphertext(&target.target_order, "target order ciphertext")
+        .expect("canonical target order");
+    let target_id_slots = context
+        .key()
+        .decrypt_to_slots(&target.target_id)
+        .expect("decrypt target ids");
+    let target_order_slots = context
+        .key()
+        .decrypt_to_slots(&target.target_order)
+        .expect("decrypt target orders");
+    assert_eq!(target_id_slots[packed_score_slot(1)], 2);
+    assert_eq!(target_order_slots[packed_score_slot(1)], 1);
+    assert_eq!(target_id_slots[packed_score_slot(3)], 4);
+    assert_eq!(target_order_slots[packed_score_slot(3)], 2);
+    assert_eq!(target_id_slots[packed_score_slot(0)], 0);
+    assert_eq!(target_order_slots[packed_score_slot(0)], 0);
+}
+
+fn encrypted_packed_option_slots(
+    context: &EvaluatorContext,
+    option_values: &[u64],
+    seed: &str,
+) -> Ciphertext {
+    let mut slots = vec![0_u64; POLYNOMIAL_DEGREE];
+    for (option, value) in option_values.iter().enumerate() {
+        slots[packed_score_slot(option)] = *value;
+    }
+    let encrypted = context.key().encrypt_slots(&slots, seed).expect("encrypt");
+    modulus_switch_to(&encrypted, CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1)
+        .expect("working-level ciphertext")
+}
+
 // Manual consumed-schedule instrumentation: runs the real packing, batched-pair
 // rank, and sparse-target pipeline at the selected working level and reports
 // every relinearization level and (rotation, level) pair the evaluator

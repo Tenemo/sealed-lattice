@@ -2,6 +2,7 @@ use super::*;
 
 pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
     validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
+    let setup_context_hashes = collective_bgv_setup_context_hashes_from_package(setup_package)?;
     let setup_package_hash = hash_at_path(setup_package, &["setupPackageHash"])?.to_string();
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?.to_string();
     let election_manifest_hash =
@@ -68,6 +69,12 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         setup_package_hash,
         ceremony_id,
         election_manifest_hash,
+        roster_hash: setup_context_hashes.roster_hash,
+        setup_profile_hash: setup_context_hashes.setup_profile_hash,
+        q_share_hash: setup_context_hashes.q_share_hash,
+        carry_aware_vss_share_relation_profile_hash: setup_context_hashes
+            .carry_aware_vss_share_relation_profile_hash,
+        commitment_profile_hash: setup_context_hashes.commitment_profile_hash,
         threshold_profile_hash,
         target_decryption_profile_hash,
         target_decryption_profile_binding_hash,
@@ -114,6 +121,12 @@ pub(super) fn read_target_accepted_binding(
         "targetDecryptionProfileHash",
         &setup_binding.target_decryption_profile_hash,
         "target decryption profile hash",
+    )?;
+    compare_hash_field(
+        record,
+        "targetBasisHash",
+        &canonical_target_basis_hash()?,
+        "target basis hash",
     )?;
     let expected_record_hash = derive_protocol_hash(
         "TargetAcceptedRecordHash",

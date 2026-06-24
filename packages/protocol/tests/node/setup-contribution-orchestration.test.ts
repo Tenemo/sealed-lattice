@@ -119,6 +119,7 @@ const localStateCommitment = {
     trusteePoint: 4,
     thresholdShareCommitmentRecipientRoot: fixtureHash('threshold-recipient'),
     aggregateThresholdShareRoot: fixtureHash('aggregate-share'),
+    targetDecryptionProofWitnessRoot: fixtureHash('target-proof-witness'),
     issuedVssAcceptanceRoot: fixtureHash('issued-acceptance'),
     issuedVssComplaintRoots: [],
     deletionReceiptRoot: fixtureHash('deletion-receipt'),
@@ -155,6 +156,8 @@ describe('setup contribution orchestration', () => {
                 localStateCommitment.thresholdShareCommitmentRecipientRoot,
             aggregateThresholdShareRoot:
                 localStateCommitment.aggregateThresholdShareRoot,
+            targetDecryptionProofWitnessRoot:
+                localStateCommitment.targetDecryptionProofWitnessRoot,
             localStateRoot: localStateCommitment.localStateRoot,
         });
         expect(assembly.phaseObjectRoots).toEqual([

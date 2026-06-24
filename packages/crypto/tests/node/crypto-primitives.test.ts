@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
     canonicalJson,
     createPrivateVssMailboxKeyPair,
+    decryptLocalTrusteeSetupSealedMaterial,
     decryptLocalTrusteeState,
     decryptPrivateVssMailboxEnvelope,
     deriveMlDsaPublicKeyHash,
@@ -529,6 +530,28 @@ describe('crypto primitive boundary', () => {
             });
         const aggregateThresholdShareRoot =
             sealedAggregateThresholdShare.materialRoot;
+        const sealedTargetDecryptionProofWitness =
+            await encryptLocalTrusteeSetupSealedMaterial({
+                materialClass: 'target-decryption-proof-witness-sealed',
+                materialPlaintext: {
+                    objectType:
+                        'LocalTrusteeTargetDecryptionProofWitnessMaterial',
+                    objectVersion: 1,
+                    trusteeIdentity: 'trustee-3',
+                    trusteeRosterPosition: 3,
+                    thresholdShareCommitmentRecipientRoot,
+                    aggregateThresholdShareRoot,
+                    witnessOwnership: 'recipient-owned-restorable-local-state',
+                },
+                setupContext,
+                trusteeIdentity: 'trustee-3',
+                trusteeRosterPosition: 3,
+                thresholdShareCommitmentRecipientRoot,
+                storageKeyBytesHex,
+                aeadNonceBytesHex: '44'.repeat(12),
+            });
+        const targetDecryptionProofWitnessRoot =
+            sealedTargetDecryptionProofWitness.materialRoot;
         const localStateCommitment = {
             objectType: 'LocalTrusteeSetupStateCommitment',
             objectVersion: 1,
@@ -546,6 +569,7 @@ describe('crypto primitive boundary', () => {
             trusteeRosterPosition: 3,
             thresholdShareCommitmentRecipientRoot,
             aggregateThresholdShareRoot,
+            targetDecryptionProofWitnessRoot,
             issuedVssAcceptanceRoot,
             issuedVssComplaintRoots,
         } as const;
@@ -563,6 +587,9 @@ describe('crypto primitive boundary', () => {
             thresholdShareCommitmentRecipientRoot,
             sealedAggregateThresholdShare: {
                 ...sealedAggregateThresholdShare.sealedMaterial,
+            },
+            sealedTargetDecryptionProofWitness: {
+                ...sealedTargetDecryptionProofWitness.sealedMaterial,
             },
             issuedVssAcceptanceRoots: [issuedVssAcceptanceRoot],
             issuedVssComplaintRoots,
@@ -595,6 +622,41 @@ describe('crypto primitive boundary', () => {
             localStatePlaintextHash: encrypted.localStatePlaintextHash,
             storageAadHash: encrypted.storageAadHash,
         });
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial:
+                    localStatePlaintext.sealedTargetDecryptionProofWitness,
+                expectedMaterialClass: 'target-decryption-proof-witness-sealed',
+                expectedMaterialRoot: targetDecryptionProofWitnessRoot,
+                setupContext,
+                localStateCommitment,
+                storageKeyBytesHex,
+            }),
+        ).resolves.toMatchObject({
+            materialPlaintext: {
+                objectType: 'LocalTrusteeTargetDecryptionProofWitnessMaterial',
+                objectVersion: 1,
+                trusteeIdentity: 'trustee-3',
+                trusteeRosterPosition: 3,
+                thresholdShareCommitmentRecipientRoot,
+                aggregateThresholdShareRoot,
+                witnessOwnership: 'recipient-owned-restorable-local-state',
+            },
+            materialPlaintextHash:
+                sealedTargetDecryptionProofWitness.materialPlaintextHash,
+            materialAadHash: sealedTargetDecryptionProofWitness.materialAadHash,
+        });
+        await expect(
+            decryptLocalTrusteeSetupSealedMaterial({
+                sealedMaterial:
+                    localStatePlaintext.sealedTargetDecryptionProofWitness,
+                expectedMaterialClass: 'target-decryption-proof-witness-sealed',
+                expectedMaterialRoot: aggregateThresholdShareRoot,
+                setupContext,
+                localStateCommitment,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/materialRoot/u);
 
         await expect(
             encryptLocalTrusteeState({

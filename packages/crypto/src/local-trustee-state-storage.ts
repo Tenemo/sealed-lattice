@@ -22,7 +22,8 @@ const aesGcmTagBitLength = 128;
 type JsonRecord = Record<string, unknown>;
 
 export type LocalTrusteeSetupStateSealedMaterialClass =
-    'aggregate-threshold-share-sealed';
+    | 'aggregate-threshold-share-sealed'
+    | 'target-decryption-proof-witness-sealed';
 
 export type EncryptedLocalTrusteeSetupMaterial = Readonly<
     JsonRecord & {
@@ -70,6 +71,7 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
         readonly deviceEpoch: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+        readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
         readonly issuedVssAcceptanceRoots: readonly ProtocolHash[];
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
     }
@@ -90,6 +92,7 @@ export type LocalTrusteeStateStorageEncryptionInput = {
             readonly trusteeRosterPosition: number;
             readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
             readonly aggregateThresholdShareRoot: ProtocolHash;
+            readonly targetDecryptionProofWitnessRoot: ProtocolHash;
             readonly issuedVssAcceptanceRoot: ProtocolHash;
             readonly issuedVssComplaintRoots: readonly ProtocolHash[];
             readonly localStateRoot: ProtocolHash;
@@ -160,6 +163,21 @@ export type LocalTrusteeSetupSealedMaterialEncryptionResult = {
     readonly materialAadHash: ProtocolHash;
 };
 
+export type LocalTrusteeSetupSealedMaterialDecryptionInput = {
+    readonly sealedMaterial: LocalTrusteeSetupStateSealedMaterial;
+    readonly expectedMaterialClass: LocalTrusteeSetupStateSealedMaterialClass;
+    readonly expectedMaterialRoot: ProtocolHash;
+    readonly setupContext: unknown;
+    readonly localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
+    readonly storageKeyBytesHex: string;
+};
+
+export type LocalTrusteeSetupSealedMaterialDecryptionResult = {
+    readonly materialPlaintext: unknown;
+    readonly materialPlaintextHash: ProtocolHash;
+    readonly materialAadHash: ProtocolHash;
+};
+
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const setupContextFieldNames = [
@@ -182,6 +200,7 @@ const localTrusteeSealedPayloadFieldNames = [
     'deviceEpoch',
     'thresholdShareCommitmentRecipientRoot',
     'sealedAggregateThresholdShare',
+    'sealedTargetDecryptionProofWitness',
     'issuedVssAcceptanceRoots',
     'issuedVssComplaintRoots',
 ] as const;
@@ -545,6 +564,10 @@ const assertCommitmentHeader = (
         'localStateCommitment.aggregateThresholdShareRoot',
     );
     assertProtocolHash(
+        localStateCommitment.targetDecryptionProofWitnessRoot,
+        'localStateCommitment.targetDecryptionProofWitnessRoot',
+    );
+    assertProtocolHash(
         localStateCommitment.issuedVssAcceptanceRoot,
         'localStateCommitment.issuedVssAcceptanceRoot',
     );
@@ -878,6 +901,14 @@ const validateLocalStatePlaintext = (
         localStateCommitment,
         'localStatePlaintext.sealedAggregateThresholdShare',
     );
+    validateSealedMaterial(
+        plaintext.sealedTargetDecryptionProofWitness,
+        'target-decryption-proof-witness-sealed',
+        localStateCommitment.targetDecryptionProofWitnessRoot,
+        setupContext,
+        localStateCommitment,
+        'localStatePlaintext.sealedTargetDecryptionProofWitness',
+    );
     const issuedVssAcceptanceRoots = protocolHashArrayField(
         plaintext,
         'issuedVssAcceptanceRoots',
@@ -1020,6 +1051,84 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
             [materialPlaintextBytes],
         ),
         materialAadHash,
+    };
+};
+
+export const decryptLocalTrusteeSetupSealedMaterial = async (
+    input: LocalTrusteeSetupSealedMaterialDecryptionInput,
+): Promise<LocalTrusteeSetupSealedMaterialDecryptionResult> => {
+    assertCommitmentHeader(input.localStateCommitment);
+    assertSetupContextBinding(input.setupContext, input.localStateCommitment);
+    const sealedMaterial = validateSealedMaterial(
+        input.sealedMaterial,
+        input.expectedMaterialClass,
+        input.expectedMaterialRoot,
+        input.setupContext,
+        input.localStateCommitment,
+        'sealedMaterial',
+    );
+    const storageKeyBytes = decodeFixedHex(
+        input.storageKeyBytesHex,
+        aesGcmKeyByteLength,
+        'storageKeyBytesHex',
+    );
+    const keyBytes = deriveSealedMaterialAesGcmKeyBytes(
+        storageKeyBytes,
+        input.expectedMaterialRoot,
+        sealedMaterial.encryptedMaterial.materialAadHash,
+    );
+    const key = await importAesGcmKey(keyBytes, ['decrypt']);
+    const nonceBytes = decodeFixedHex(
+        sealedMaterial.encryptedMaterial.aeadNonceHex,
+        aesGcmNonceByteLength,
+        'sealedMaterial.encryptedMaterial.aeadNonceHex',
+    );
+    const associatedDataBytes = textEncoder.encode(
+        canonicalJson(sealedMaterial.encryptedMaterial.materialAad),
+    );
+    const ciphertextBytes = hexToBytes(
+        sealedMaterial.encryptedMaterial.ciphertextBytesHex,
+    );
+    const plaintextBytes = new Uint8Array(
+        await subtleCrypto().decrypt(
+            {
+                name: 'AES-GCM',
+                iv: arrayBufferFromBytes(nonceBytes),
+                additionalData: arrayBufferFromBytes(associatedDataBytes),
+                tagLength: aesGcmTagBitLength,
+            },
+            key,
+            arrayBufferFromBytes(ciphertextBytes),
+        ),
+    );
+    if (
+        plaintextBytes.byteLength !==
+        sealedMaterial.encryptedMaterial.plaintextByteLength
+    ) {
+        throw new Error(
+            'decrypted sealed material byte length does not match plaintextByteLength.',
+        );
+    }
+    const materialPlaintext: unknown = JSON.parse(
+        textDecoder.decode(plaintextBytes),
+    );
+    const materialRoot = deriveProtocolHash(
+        'LocalTrusteeSetupStateRoot',
+        materialPlaintext,
+    );
+    if (materialRoot !== input.expectedMaterialRoot) {
+        throw new Error(
+            'decrypted sealed material root does not match expectedMaterialRoot.',
+        );
+    }
+
+    return {
+        materialPlaintext,
+        materialPlaintextHash: hash512Hex(
+            'sealed-lattice-local-trustee-state/sealed-material-plaintext-hash-v1',
+            [plaintextBytes],
+        ),
+        materialAadHash: sealedMaterial.encryptedMaterial.materialAadHash,
     };
 };
 

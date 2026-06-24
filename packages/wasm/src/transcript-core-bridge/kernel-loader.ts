@@ -13,6 +13,13 @@ import type {
     BgvCollectiveSetupProfileDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
+    BgvCompactVssAggregateThresholdCommitmentSetVerification,
+    BgvCompactVssCommitmentOpeningComputation,
+    BgvCompactVssCoefficientCommitmentSetVerification,
+    BgvCompactVssCommitmentOpeningVerification,
+    BgvCompactVssRecipientShareCommitmentSetVerification,
+    BgvCompactVssSameSecretBridgeStatementSetVerification,
+    BgvCompactVssShareLinkageStatementVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyProofVerification,
     BgvEvaluatorOperationValidation,
@@ -28,8 +35,11 @@ import type {
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
+    BgvTargetDecryptionDevelopmentFixture,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofStatement,
+    BgvTargetDecryptionShareProofStatementVerification,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
     BgvThresholdShareCommitmentTransportStreamAbort,
@@ -305,6 +315,11 @@ export const createTranscriptCoreKernelLoader = (
                         workingLevel: input.workingLevel,
                         rotationKeys: input.rotationKeys,
                     }),
+                generateBgvTargetDecryptionFixture:
+                    (): BgvTargetDecryptionDevelopmentFixture =>
+                        executeCommand<BgvTargetDecryptionDevelopmentFixture>({
+                            command: 'GenerateBgvTargetDecryptionFixture',
+                        }),
                 generateBgvTargetDecryptionShare: (
                     input,
                 ): BgvTargetDecryptionShare =>
@@ -318,6 +333,51 @@ export const createTranscriptCoreKernelLoader = (
                         targetShareProfile: input.targetShareProfile,
                         trusteeIdentity: input.trusteeIdentity,
                     }),
+                generateBgvTargetDecryptionShareFromLocalShare: (
+                    input,
+                ): BgvTargetDecryptionShare =>
+                    executeCommand<BgvTargetDecryptionShare>({
+                        command:
+                            'GenerateBgvTargetDecryptionShareFromLocalShare',
+                        setupPackage: input.setupPackage,
+                        localTargetShareWitness: input.localTargetShareWitness,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                    }),
+                deriveBgvTargetDecryptionShareProofStatement: (
+                    input,
+                ): BgvTargetDecryptionShareProofStatement =>
+                    executeCommand<BgvTargetDecryptionShareProofStatement>({
+                        command: 'DeriveBgvTargetDecryptionShareProofStatement',
+                        setupPackage: input.setupPackage,
+                        localTargetShareWitness: input.localTargetShareWitness,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        trusteeIdentity: input.trusteeIdentity,
+                        targetDecryptionShare: input.targetDecryptionShare,
+                    }),
+                verifyBgvTargetDecryptionShareProofStatement: (
+                    input,
+                ): BgvTargetDecryptionShareProofStatementVerification =>
+                    executeCommand<BgvTargetDecryptionShareProofStatementVerification>(
+                        {
+                            command:
+                                'VerifyBgvTargetDecryptionShareProofStatement',
+                            setupPackage: input.setupPackage,
+                            targetAcceptedRecord: input.targetAcceptedRecord,
+                            targetCiphertextBinding:
+                                input.targetCiphertextBinding,
+                            targetCiphertexts: input.targetCiphertexts,
+                            targetShareProfile: input.targetShareProfile,
+                            targetDecryptionShare: input.targetDecryptionShare,
+                            proofStatement: input.proofStatement,
+                        },
+                    ),
                 recombineBgvTargetDecryptionShares: (
                     input,
                 ): BgvTargetDecryptionResult =>
@@ -464,6 +524,87 @@ export const createTranscriptCoreKernelLoader = (
                         randomnessByColumn: input.randomnessByColumn,
                         ringDegree: input.ringDegree,
                     }),
+                computeCompactVssCommitmentFromOpening: (
+                    input,
+                ): BgvCompactVssCommitmentOpeningComputation =>
+                    executeCommand<BgvCompactVssCommitmentOpeningComputation>({
+                        command: 'ComputeCompactVssCommitmentFromOpening',
+                        commitmentRole: input.commitmentRole,
+                        commitmentContext: input.commitmentContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        rnsLimbIndex: input.rnsLimbIndex,
+                        rnsPrime: input.rnsPrime,
+                        ringDegree: input.ringDegree,
+                        messageCoefficients: input.messageCoefficients,
+                        randomnessByColumn: input.randomnessByColumn,
+                    }),
+                verifyCompactVssCommitmentOpening: (
+                    input,
+                ): BgvCompactVssCommitmentOpeningVerification =>
+                    executeCommand<BgvCompactVssCommitmentOpeningVerification>({
+                        command: 'VerifyCompactVssCommitmentOpening',
+                        opening: input.opening,
+                        expectedCommitmentRoot: input.expectedCommitmentRoot,
+                    }),
+                verifyCompactVssCoefficientCommitmentSet: (
+                    input,
+                ): BgvCompactVssCoefficientCommitmentSetVerification =>
+                    executeCommand<BgvCompactVssCoefficientCommitmentSetVerification>(
+                        {
+                            command: 'VerifyCompactVssCoefficientCommitmentSet',
+                            coefficientCommitmentSet:
+                                input.coefficientCommitmentSet,
+                        },
+                    ),
+                verifyCompactVssRecipientShareCommitmentSet: (
+                    input,
+                ): BgvCompactVssRecipientShareCommitmentSetVerification =>
+                    executeCommand<BgvCompactVssRecipientShareCommitmentSetVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssRecipientShareCommitmentSet',
+                            recipientShareCommitmentSet:
+                                input.recipientShareCommitmentSet,
+                        },
+                    ),
+                verifyCompactVssAggregateThresholdCommitmentSet: (
+                    input,
+                ): BgvCompactVssAggregateThresholdCommitmentSetVerification =>
+                    executeCommand<BgvCompactVssAggregateThresholdCommitmentSetVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssAggregateThresholdCommitmentSet',
+                            aggregateThresholdCommitmentSet:
+                                input.aggregateThresholdCommitmentSet,
+                        },
+                    ),
+                verifyCompactVssShareLinkageStatement: (
+                    input,
+                ): BgvCompactVssShareLinkageStatementVerification =>
+                    executeCommand<BgvCompactVssShareLinkageStatementVerification>(
+                        {
+                            command: 'VerifyCompactVssShareLinkageStatement',
+                            statement: input.statement,
+                            coefficientCommitmentSet:
+                                input.coefficientCommitmentSet,
+                            recipientShareCommitmentSet:
+                                input.recipientShareCommitmentSet,
+                            aggregateThresholdCommitmentSet:
+                                input.aggregateThresholdCommitmentSet,
+                        },
+                    ),
+                verifyCompactVssSameSecretBridgeStatementSet: (
+                    input,
+                ): BgvCompactVssSameSecretBridgeStatementSetVerification =>
+                    executeCommand<BgvCompactVssSameSecretBridgeStatementSetVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssSameSecretBridgeStatementSet',
+                            statementSet: input.statementSet,
+                            sameSecretConsistency: input.sameSecretConsistency,
+                            sameSecretProofs: input.sameSecretProofs,
+                        },
+                    ),
                 deriveThresholdShareCommitments: (
                     input,
                 ): BgvThresholdShareCommitmentDerivation =>

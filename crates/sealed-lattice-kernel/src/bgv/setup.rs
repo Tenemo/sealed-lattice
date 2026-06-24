@@ -6,6 +6,8 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
+mod compact_same_secret_bridge;
+mod compact_vss_commitment;
 mod development_fixtures;
 mod evaluation_key_share_material;
 mod input;
@@ -32,10 +34,20 @@ mod vss;
 mod tests;
 
 pub(crate) use accepted_setup::{
-    derive_collective_bgv_setup_public_derivations_from_request,
+    COLLECTIVE_BGV_SETUP_PROFILE_ID, derive_collective_bgv_setup_public_derivations_from_request,
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
+pub(crate) use compact_same_secret_bridge::verify_compact_vss_same_secret_bridge_statement_set_request;
+pub(crate) use compact_vss_commitment::{
+    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    compute_compact_vss_commitment_from_opening_request, read_compact_vss_randomness_by_column,
+    verify_compact_vss_aggregate_threshold_commitment_set_request,
+    verify_compact_vss_coefficient_commitment_set_request,
+    verify_compact_vss_commitment_opening_request,
+    verify_compact_vss_recipient_share_commitment_set_request,
+    verify_compact_vss_share_linkage_statement_request,
+};
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
@@ -102,9 +114,9 @@ use crate::{
         },
         setup_helpers::{
             array_at_path, compare_derived_hash, compare_expected_string, compare_hash_at_path,
-            compare_string_at_path, hash_at_path, integer_at_path, read_hash_field,
-            read_non_empty_string, read_optional_u64, read_optional_usize, string_at_path,
-            unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
+            compare_required_string, compare_string_at_path, hash_at_path, integer_at_path,
+            read_hash_field, read_non_empty_string, read_optional_u64, read_optional_usize,
+            string_at_path, unsigned_at_path, usize_at_path, validate_hash_string, value_at_path,
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -144,6 +156,34 @@ struct PassiveSetupInput {
     setup_seed_hash: String,
     private_setup_seed_hash: String,
     participants: Vec<SetupParticipant>,
+}
+
+pub(crate) struct CollectiveBgvSetupContextHashes {
+    pub(crate) roster_hash: String,
+    pub(crate) setup_profile_hash: String,
+    pub(crate) q_share_hash: String,
+    pub(crate) carry_aware_vss_share_relation_profile_hash: String,
+    pub(crate) commitment_profile_hash: String,
+}
+
+pub(crate) fn collective_bgv_setup_context_hashes_from_package(
+    setup_package: &Value,
+) -> CanonicalResult<CollectiveBgvSetupContextHashes> {
+    let roster_hash = if let Some(setup_context) = setup_package.get("setupContext") {
+        hash_at_path(setup_context, &["rosterHash"])?.to_string()
+    } else {
+        hash_at_path(setup_package, &["setupInputs", "rosterHash"])?.to_string()
+    };
+    let roster = accepted_setup::accepted_roster_from_package(setup_package);
+
+    Ok(CollectiveBgvSetupContextHashes {
+        roster_hash,
+        setup_profile_hash: accepted_setup::setup_profile_hash_for_roster(&roster)?,
+        q_share_hash: accepted_setup::accepted_q_share_hash()?,
+        carry_aware_vss_share_relation_profile_hash:
+            vss::carry_aware_vss_share_relation_profile_hash()?,
+        commitment_profile_hash: commitment::setup_commitment_profile_hash()?,
+    })
 }
 
 struct ParticipantSetupMaterial {

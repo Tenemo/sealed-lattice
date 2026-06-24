@@ -64,6 +64,7 @@ export type SetupContributionAssembly = Readonly<
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash | null;
         readonly aggregateThresholdShareRoot: ProtocolHash | null;
+        readonly targetDecryptionProofWitnessRoot: ProtocolHash | null;
         readonly localStateRoot: ProtocolHash | null;
         readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
@@ -399,6 +400,9 @@ export const createSetupContributionAssembly = (
             null,
         aggregateThresholdShareRoot:
             input.localStateCommitment?.aggregateThresholdShareRoot ?? null,
+        targetDecryptionProofWitnessRoot:
+            input.localStateCommitment?.targetDecryptionProofWitnessRoot ??
+            null,
         localStateRoot: input.localStateCommitment?.localStateRoot ?? null,
         localStateDeletionReceiptRoot:
             input.localStateCommitment?.deletionReceiptRoot ?? null,

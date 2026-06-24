@@ -99,6 +99,9 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             DIRECT_BALLOT_OPTION_COUNT,
             *top_count,
         )?;
+        validate_canonical_target_ciphertext(&target.target_id, "target id ciphertext")?;
+        validate_canonical_target_ciphertext(&target.target_order, "target order ciphertext")?;
+        let target_basis_hash = canonical_target_basis_hash()?;
         let replay_time_milliseconds = replay_started.elapsed_milliseconds();
         let target_id_root = ciphertext_object_root(&target.target_id)?;
         let target_order_root = ciphertext_object_root(&target.target_order)?;
@@ -106,6 +109,7 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             &aggregate_ciphertext_root,
             *top_count,
             &target_layout_root,
+            &target_basis_hash,
             &target_id_root,
             &target_order_root,
         )?;
@@ -119,6 +123,7 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
                 score_domain_max,
                 working_level: context.working_level(),
                 target_layout_hash: &target_layout_root,
+                target_basis_hash: &target_basis_hash,
                 evaluation_key_material_source,
                 public_evaluation_key_material_hash,
             },
@@ -129,6 +134,7 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             &evaluator_replay_context_hash,
             &target_ciphertext_hash,
             &target_layout_root,
+            &target_basis_hash,
         )?;
         let target_id_slots = evaluator_key.decrypt_to_slots(&target.target_id)?;
         let target_order_slots = evaluator_key.decrypt_to_slots(&target.target_order)?;
@@ -143,21 +149,24 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
                 "direct encrypted ballot packed batched-pair evaluator did not match the plaintext target oracle",
             ));
         }
-        let target_proposal = direct_ballot_target_proposal(
+        let target_proposal = direct_ballot_target_proposal(DirectBallotTargetProposalInput {
             setup_package,
-            &aggregate_ciphertext_root,
-            &evaluator_replay_context_hash,
-            &evaluator_replay_record_hash,
-            &target_ciphertext_hash,
-            &target_layout_root,
+            aggregate_ciphertext_root: &aggregate_ciphertext_root,
+            evaluator_replay_context_hash: &evaluator_replay_context_hash,
+            evaluator_replay_record_hash: &evaluator_replay_record_hash,
+            target_ciphertext_hash: &target_ciphertext_hash,
+            target_layout_hash: &target_layout_root,
+            target_basis_hash: &target_basis_hash,
             target_finality_policy_hash,
-        )?;
+        })?;
 
         let mut evaluation = json!({
             "topCount": top_count,
             "scoreDomainMax": score_domain_max,
             "tiePolicy": TIE_POLICY,
             "workingLevel": context.working_level(),
+            "targetLevel": CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+            "targetBasisHash": target_basis_hash,
             "evaluationKeyMaterialSource": evaluation_key_material_source,
             "packedScoreRoot": packed_score_root.clone(),
             "rankRoot": rank_root.clone(),
@@ -185,12 +194,8 @@ pub(super) fn direct_packed_option_slots(slots: &[u64]) -> Vec<u64> {
         .collect()
 }
 
-pub(super) fn direct_ballot_evaluator_working_level(ballot_count: usize) -> usize {
-    if ballot_count == 1 {
-        DIRECT_BALLOT_SINGLE_BALLOT_FULL_TARGET_WORKING_LEVEL
-    } else {
-        DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL
-    }
+pub(super) fn direct_ballot_evaluator_working_level(_ballot_count: usize) -> usize {
+    DIRECT_BALLOT_DEFAULT_EVALUATOR_WORKING_LEVEL
 }
 
 pub(super) fn direct_ballot_comparison_domain_max(ballot_count: usize) -> CanonicalResult<u64> {
@@ -256,6 +261,7 @@ pub(super) struct DirectBallotEvaluatorReplayContextHashInput<'a> {
     score_domain_max: u64,
     working_level: usize,
     target_layout_hash: &'a str,
+    target_basis_hash: &'a str,
     evaluation_key_material_source: &'a str,
     public_evaluation_key_material_hash: Option<&'a str>,
 }
@@ -290,6 +296,8 @@ pub(super) fn direct_ballot_evaluator_replay_context_hash(
             "directComparisonProfileHash": direct_comparison_profile_hash()?,
             "evaluationKeyMaterial": evaluation_key_material,
             "targetLayoutHash": input.target_layout_hash,
+            "targetLevel": CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+            "targetBasisHash": input.target_basis_hash,
             "intermediateOpeningsAllowed": false,
         }),
     )
@@ -301,6 +309,7 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
     evaluator_replay_context_hash: &str,
     target_ciphertext_hash: &str,
     target_layout_hash: &str,
+    target_basis_hash: &str,
 ) -> CanonicalResult<String> {
     derive_protocol_hash(
         "EvaluatorReplayRecordHash",
@@ -314,6 +323,7 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
             "evaluatorReplayContextHash": evaluator_replay_context_hash,
             "targetCiphertextHash": target_ciphertext_hash,
             "targetLayoutHash": target_layout_hash,
+            "targetBasisHash": target_basis_hash,
         }),
     )
 }

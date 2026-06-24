@@ -23,8 +23,14 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
         let encrypted_zero = scalar_mul(&normalized_ranks, 0)?;
 
         return Ok(EncryptedSparseTarget {
-            target_id: add_plaintext_coefficients(&encrypted_zero, &id_selector)?,
-            target_order: add_plaintext_coefficients(&normalized_ranks, &option_slot_mask)?,
+            target_id: canonicalize_target_ciphertext(&add_plaintext_coefficients(
+                &encrypted_zero,
+                &id_selector,
+            )?)?,
+            target_order: canonicalize_target_ciphertext(&add_plaintext_coefficients(
+                &normalized_ranks,
+                &option_slot_mask,
+            )?)?,
         });
     }
 
@@ -54,8 +60,14 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
     };
 
     Ok(EncryptedSparseTarget {
-        target_id: plaintext_mul(&normalize_scaling(&indicators)?, &id_selector)?,
-        target_order: plaintext_mul(&normalize_scaling(&order_values)?, &option_slot_mask)?,
+        target_id: canonicalize_target_ciphertext(&plaintext_mul(
+            &normalize_scaling(&indicators)?,
+            &id_selector,
+        )?)?,
+        target_order: canonicalize_target_ciphertext(&plaintext_mul(
+            &normalize_scaling(&order_values)?,
+            &option_slot_mask,
+        )?)?,
     })
 }
 

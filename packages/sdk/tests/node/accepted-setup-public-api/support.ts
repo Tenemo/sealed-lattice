@@ -722,6 +722,7 @@ export const localStateInput = (
         storageKeyBytesHex: '41'.repeat(32),
         localStateAeadNonceBytesHex: '51'.repeat(12),
         sealedAggregateThresholdShareAeadNonceBytesHex: '61'.repeat(12),
+        sealedTargetDecryptionProofWitnessAeadNonceBytesHex: '62'.repeat(12),
     };
 };
 

@@ -404,6 +404,7 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly trusteePoint: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly aggregateThresholdShareRoot: ProtocolHash;
+        readonly targetDecryptionProofWitnessRoot: ProtocolHash;
         readonly issuedVssAcceptanceRoot: ProtocolHash;
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly deletionReceiptRoot: ProtocolHash;
@@ -418,7 +419,9 @@ export type LocalTrusteeSetupStateSealedMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedMaterial';
         readonly objectVersion: 1;
-        readonly materialClass: 'aggregate-threshold-share-sealed';
+        readonly materialClass:
+            | 'aggregate-threshold-share-sealed'
+            | 'target-decryption-proof-witness-sealed';
         readonly materialRoot: ProtocolHash;
         readonly ciphertextReference: ProtocolHash;
         readonly encryptedMaterial: Readonly<JsonRecord>;
@@ -439,6 +442,7 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
         readonly deviceEpoch: number;
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+        readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
         readonly issuedVssAcceptanceRoots: readonly ProtocolHash[];
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
     }
@@ -504,6 +508,7 @@ export type SetupContribution = Readonly<
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash | null;
         readonly aggregateThresholdShareRoot: ProtocolHash | null;
+        readonly targetDecryptionProofWitnessRoot: ProtocolHash | null;
         readonly localStateRoot: ProtocolHash | null;
         readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
@@ -664,6 +669,7 @@ export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
     readonly storageKeyBytesHex: string;
     readonly localStateAeadNonceBytesHex?: string;
     readonly sealedAggregateThresholdShareAeadNonceBytesHex?: string;
+    readonly sealedTargetDecryptionProofWitnessAeadNonceBytesHex?: string;
 }>;
 
 export type ExportEncryptedLocalTrusteeSetupStateResult = Readonly<{
@@ -686,6 +692,7 @@ export type RestoreLocalTrusteeSetupStateInput = Readonly<{
     readonly minimumDeviceEpoch?: number;
     readonly expectedThresholdShareCommitmentRecipientRoot?: ProtocolHash;
     readonly expectedAggregateThresholdShareRoot?: ProtocolHash;
+    readonly expectedTargetDecryptionProofWitnessRoot?: ProtocolHash;
     readonly expectedIssuedVssAcceptanceRoot?: ProtocolHash;
 }>;
 
@@ -697,6 +704,7 @@ export type LocalTrusteeSetupStateVerification = Readonly<{
     readonly trusteeRosterPosition: number;
     readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
+    readonly targetDecryptionProofWitnessRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
     readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
     readonly storageProfile: 'encrypted-local-device-state-required';
@@ -1075,6 +1083,16 @@ const assertRestoredLocalStateBindings = (
         'sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot',
     );
     assertExpectedHash(
+        input.localStateCommitment.targetDecryptionProofWitnessRoot,
+        input.expectedTargetDecryptionProofWitnessRoot,
+        'localStateCommitment.targetDecryptionProofWitnessRoot',
+    );
+    assertExpectedHash(
+        sealedLocalStatePayload.sealedTargetDecryptionProofWitness.materialRoot,
+        input.expectedTargetDecryptionProofWitnessRoot,
+        'sealedLocalStatePayload.sealedTargetDecryptionProofWitness.materialRoot',
+    );
+    assertExpectedHash(
         input.localStateCommitment.issuedVssAcceptanceRoot,
         input.expectedIssuedVssAcceptanceRoot,
         'localStateCommitment.issuedVssAcceptanceRoot',
@@ -1096,6 +1114,15 @@ const assertRestoredLocalStateBindings = (
     ) {
         throw new Error(
             'sealedLocalStatePayload.sealedAggregateThresholdShare.materialRoot must match the local state commitment.',
+        );
+    }
+    if (
+        sealedLocalStatePayload.sealedTargetDecryptionProofWitness
+            .materialRoot !==
+        input.localStateCommitment.targetDecryptionProofWitnessRoot
+    ) {
+        throw new Error(
+            'sealedLocalStatePayload.sealedTargetDecryptionProofWitness.materialRoot must match the local state commitment.',
         );
     }
 };

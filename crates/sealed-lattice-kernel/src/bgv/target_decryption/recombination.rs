@@ -52,6 +52,19 @@ pub(super) fn recombine_target_decryption_shares(
         })?;
     let decoded_target_ids = packed_target_values(&target_id_slots);
     let decoded_target_orders = packed_target_values(&target_order_slots);
+    let recombination_input_report = recombination_input_report_value(
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_profile,
+        &selected,
+        &decoded_target_ids,
+        &decoded_target_orders,
+    )?;
+    let recombination_input_report_hash = derive_protocol_hash(
+        "TargetDecryptionRecombinationInputReportHash",
+        &recombination_input_report,
+    )?;
     let target_result_root = derive_protocol_hash(
         "TargetDecryptionResultHash",
         &json!({
@@ -62,6 +75,7 @@ pub(super) fn recombine_target_decryption_shares(
             "targetContextHash": target_accepted.target_context_hash,
             "targetCiphertextHash": target_accepted.target_ciphertext_hash,
             "targetShareProfileHash": target_share_profile.hash,
+            "recombinationInputReportHash": recombination_input_report_hash,
             "selectedBoardPositions": selected_board_positions,
             "selectedRosterPositions": selected_roster_positions,
             "decodedTargetIds": decoded_target_ids,
@@ -79,6 +93,8 @@ pub(super) fn recombine_target_decryption_shares(
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
+        "recombinationInputReport": recombination_input_report,
+        "recombinationInputReportHash": recombination_input_report_hash,
         "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
         "decryptionThreshold": target_share_profile.decryption_threshold,
         "decryptionShareQuorum": target_share_profile.decryption_share_quorum,
@@ -87,6 +103,95 @@ pub(super) fn recombine_target_decryption_shares(
         "decodedTargetIds": decoded_target_ids,
         "decodedTargetOrders": decoded_target_orders,
         "decryptScaling": 1,
+    }))
+}
+
+fn recombination_input_report_value(
+    setup_binding: &SetupBinding,
+    target_accepted: &TargetAcceptedBinding,
+    target_ciphertexts: &TargetCiphertextPair,
+    target_share_profile: &TargetShareProfile,
+    selected_shares: &[PartialDecryptionShare],
+    decoded_target_ids: &[u64],
+    decoded_target_orders: &[u64],
+) -> CanonicalResult<Value> {
+    let selected_share_records = selected_shares
+        .iter()
+        .map(|share| {
+            Ok(json!({
+                "trusteeIdentity": string_at_path(&share.record, &["trusteeIdentity"])?,
+                "rosterPosition": share.roster_position,
+                "boardPosition": share.board_position,
+                "interpolationPoint": share.interpolation_point,
+                "shareRoot": hash_at_path(&share.record, &["shareRoot"])?,
+                "targetDecryptionShareHash": hash_at_path(&share.record, &["targetDecryptionShareHash"])?,
+                "smudgingInputReportHash": share.smudging_input_report_hash.as_str(),
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let active_rns_limb_reports = target_ciphertexts
+        .target_id
+        .primes()
+        .iter()
+        .enumerate()
+        .map(|(rns_limb_index, rns_prime)| {
+            let lagrange_terms =
+                lagrange_coefficient_terms_at_zero_mod(selected_shares, *rns_prime)?
+                    .iter()
+                    .map(lagrange_coefficient_term_value)
+                    .collect::<Vec<_>>();
+            Ok(json!({
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "lagrangeTerms": lagrange_terms,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let maximum_decoded_value = decoded_target_ids
+        .iter()
+        .chain(decoded_target_orders.iter())
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let centered_positive_limit = (crate::bgv::profile::PLAINTEXT_MODULUS - 1) / 2;
+    if maximum_decoded_value > centered_positive_limit {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "target decryption decoded values exceed the centered plaintext decoding margin",
+        ));
+    }
+
+    Ok(json!({
+        "objectType": "TargetDecryptionRecombinationInputReport",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "setupPackageHash": setup_binding.setup_package_hash,
+        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
+        "targetContextHash": target_accepted.target_context_hash,
+        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
+        "targetShareProfileHash": target_share_profile.hash,
+        "targetBasisHash": target_accepted.target_basis_hash,
+        "targetIdRoot": target_ciphertexts.target_id_root,
+        "targetOrderRoot": target_ciphertexts.target_order_root,
+        "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
+        "decryptionThreshold": target_share_profile.decryption_threshold,
+        "selectedShareCount": selected_shares.len(),
+        "selectedShares": selected_share_records,
+        "smudgingProfileId": TARGET_DECRYPTION_SMUDGING_PROFILE_ID,
+        "smudgingDevelopmentScope": TARGET_DECRYPTION_SMUDGING_DEVELOPMENT_SCOPE,
+        "smudgingCombinationRule": TARGET_DECRYPTION_SMUDGING_ZERO_SHARING_RULE,
+        "smudgingProofBoundary": TARGET_DECRYPTION_SMUDGING_PROOF_BOUNDARY,
+        "activeRnsLimbCount": active_rns_limb_reports.len(),
+        "activeRnsLimbReports": active_rns_limb_reports,
+        "recombinationCoefficientEquation": "denominatorProductModuloPrime * lagrangeCoefficientModuloPrime = numeratorProductModuloPrime mod rnsPrime",
+        "decodingMargin": {
+            "plaintextModulus": crate::bgv::profile::PLAINTEXT_MODULUS,
+            "centeredPositiveLimit": centered_positive_limit,
+            "maximumDecodedTargetValue": maximum_decoded_value,
+            "centeredPositiveMargin": centered_positive_limit - maximum_decoded_value,
+            "marginRule": "decoded target id and order residues must remain in the nonnegative centered plaintext range after recombination",
+        },
     }))
 }
 
@@ -128,7 +233,28 @@ pub(super) fn lagrange_coefficients_at_zero_mod(
     shares: &[PartialDecryptionShare],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let mut coefficients = Vec::with_capacity(shares.len());
+    Ok(lagrange_coefficient_terms_at_zero_mod(shares, modulus)?
+        .iter()
+        .map(|term| term.lagrange_coefficient_modulo_prime)
+        .collect())
+}
+
+struct LagrangeCoefficientTerm {
+    selected_share_index: usize,
+    roster_position: usize,
+    board_position: usize,
+    interpolation_point: u64,
+    numerator_product_modulo_prime: u64,
+    denominator_product_modulo_prime: u64,
+    denominator_inverse_modulo_prime: u64,
+    lagrange_coefficient_modulo_prime: u64,
+}
+
+fn lagrange_coefficient_terms_at_zero_mod(
+    shares: &[PartialDecryptionShare],
+    modulus: u64,
+) -> CanonicalResult<Vec<LagrangeCoefficientTerm>> {
+    let mut terms = Vec::with_capacity(shares.len());
     for (share_index, share) in shares.iter().enumerate() {
         let x_i = share.interpolation_point % modulus;
         if x_i == 0 {
@@ -158,14 +284,33 @@ pub(super) fn lagrange_coefficients_at_zero_mod(
             };
             denominator = mul_mod(denominator, difference, modulus)?;
         }
-        coefficients.push(mul_mod(
-            numerator,
-            inverse_mod(denominator, modulus)?,
-            modulus,
-        )?);
+        let denominator_inverse = inverse_mod(denominator, modulus)?;
+        terms.push(LagrangeCoefficientTerm {
+            selected_share_index: share_index,
+            roster_position: share.roster_position,
+            board_position: share.board_position,
+            interpolation_point: share.interpolation_point,
+            numerator_product_modulo_prime: numerator,
+            denominator_product_modulo_prime: denominator,
+            denominator_inverse_modulo_prime: denominator_inverse,
+            lagrange_coefficient_modulo_prime: mul_mod(numerator, denominator_inverse, modulus)?,
+        });
     }
 
-    Ok(coefficients)
+    Ok(terms)
+}
+
+fn lagrange_coefficient_term_value(term: &LagrangeCoefficientTerm) -> Value {
+    json!({
+        "selectedShareIndex": term.selected_share_index,
+        "rosterPosition": term.roster_position,
+        "boardPosition": term.board_position,
+        "interpolationPoint": term.interpolation_point,
+        "numeratorProductModuloPrime": term.numerator_product_modulo_prime,
+        "denominatorProductModuloPrime": term.denominator_product_modulo_prime,
+        "denominatorInverseModuloPrime": term.denominator_inverse_modulo_prime,
+        "lagrangeCoefficientModuloPrime": term.lagrange_coefficient_modulo_prime,
+    })
 }
 
 pub(super) fn packed_target_values(slots: &[u64]) -> Vec<u64> {

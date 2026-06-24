@@ -2,17 +2,25 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
+    createCompactVssCoefficientCommitmentSet,
+    createCompactVssSameSecretBridgeStatementSet,
     createSameSecretConsistencyStatementSet,
+    createSameSecretProofSet,
     createVssCoefficientCommitmentBundle,
+    verifyCompactVssSameSecretBridgeStatementSet,
+    compactVssCommitmentBinaryFormat,
+    compactVssSameSecretBridgeIntegerSupport,
     sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
     sameSecretGenericKeySwitchBindingPolicy,
+    compactVssSameSecretBridgeSignedRepresentativeConvention,
+    compactVssSameSecretBridgeTargetBasisLimbOrder,
     sameSecretProofFamily,
     sameSecretRelation,
     sameSecretTargetDecryptionBindingPolicy,
     setupCommitmentProfileId,
     setupProofProfileId,
-    type SameSecretConsistencyStatementRecord,
+    type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientCommitmentRecord,
@@ -111,7 +119,7 @@ const sourceTrusteeOpeningState = (
     ),
 });
 
-const acceptedCommitmentSet = (): VssCoefficientCommitmentSet =>
+const acceptedCommitmentBundle = (): VssCoefficientCommitmentBundle =>
     createVssCoefficientCommitmentBundle({
         setupContext,
         publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
@@ -125,7 +133,10 @@ const acceptedCommitmentSet = (): VssCoefficientCommitmentSet =>
             sourceTrusteeOpeningState(0),
             sourceTrusteeOpeningState(1),
         ],
-    }).commitmentSet;
+    });
+
+const acceptedCommitmentSet = (): VssCoefficientCommitmentSet =>
+    acceptedCommitmentBundle().commitmentSet;
 
 const requiredSourceTrusteeRecord = (
     commitmentSet: VssCoefficientCommitmentSet,
@@ -140,10 +151,10 @@ const requiredSourceTrusteeRecord = (
     return sourceTrusteeRecord;
 };
 
-const requiredStatementRecord = (
-    statementRecords: readonly SameSecretConsistencyStatementRecord[],
+const requiredStatementRecord = <StatementRecord>(
+    statementRecords: readonly StatementRecord[],
     statementRecordIndex: number,
-): SameSecretConsistencyStatementRecord => {
+): StatementRecord => {
     const statementRecord = statementRecords[statementRecordIndex];
     if (statementRecord === undefined) {
         throw new Error('fixture statement record is missing');
@@ -257,6 +268,271 @@ describe('same-secret consistency statement builders', () => {
                 statementSetWithoutRoot,
             ),
         );
+    });
+
+    it('binds compact target-basis constants to same-secret statement and proof roots', () => {
+        const vssCoefficientBundle = acceptedCommitmentBundle();
+        const sameSecretConsistency = createSameSecretConsistencyStatementSet({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            thresholdDegree,
+            vssCoefficientCommitments: vssCoefficientBundle.commitmentSet,
+        });
+        const sameSecretProofs = createSameSecretProofSet({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            sameSecretConsistency,
+            vssCoefficientCommitmentMaterial: vssCoefficientBundle.materialSet,
+            proofAccountingHash: fixtureHash('same-secret-proof-accounting'),
+            proofMaterials: sameSecretConsistency.statementRecords.map(
+                (statementRecord) => ({
+                    setupProofProfileId,
+                    proofFamily: sameSecretProofFamily,
+                    trusteeIdentity: statementRecord.trusteeIdentity,
+                    trusteeRosterPosition:
+                        statementRecord.trusteeRosterPosition,
+                    statementHash: fixtureHash(
+                        `same-secret-statement-${String(statementRecord.trusteeRosterPosition)}`,
+                    ),
+                    proofSizeBytes: 1,
+                    proofBytesHash: fixtureHash(
+                        `same-secret-proof-bytes-${String(statementRecord.trusteeRosterPosition)}`,
+                    ),
+                    proofBytesHex: '00',
+                }),
+            ),
+        });
+        const compactPublicMatrixSeedHash = fixtureHash(
+            'compact-public-matrix-seed',
+        );
+        const compactCoefficientCommitmentSet =
+            createCompactVssCoefficientCommitmentSet({
+                setupContext,
+                publicMatrixSeedHash: compactPublicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                sourceTrusteeOpeningStates: [
+                    sourceTrusteeOpeningState(2),
+                    sourceTrusteeOpeningState(0),
+                    sourceTrusteeOpeningState(1),
+                ],
+                coefficientOpeningRandomness: ({
+                    trusteeRosterPosition,
+                    rnsLimbIndex,
+                    shamirCoefficientIndex,
+                    ringDegree: compactRingDegree,
+                }) => [
+                    Array.from(
+                        { length: compactRingDegree },
+                        (_unused, coefficientIndex) =>
+                            ((trusteeRosterPosition +
+                                rnsLimbIndex +
+                                shamirCoefficientIndex +
+                                coefficientIndex) %
+                                3) -
+                            1,
+                    ),
+                    Array.from(
+                        { length: compactRingDegree },
+                        (_unused, coefficientIndex) =>
+                            ((trusteeRosterPosition +
+                                rnsLimbIndex +
+                                shamirCoefficientIndex +
+                                coefficientIndex +
+                                1) %
+                                3) -
+                            1,
+                    ),
+                ],
+            });
+        const bridgeStatementSet = createCompactVssSameSecretBridgeStatementSet(
+            {
+                setupContext,
+                targetBasisHash: fixtureHash('compact-target-basis'),
+                publicMatrixSeedHash: compactPublicMatrixSeedHash,
+                compactCoefficientCommitmentSet,
+                sameSecretConsistency,
+                sameSecretProofs,
+            },
+        );
+        const firstBridgeStatement = requiredStatementRecord(
+            bridgeStatementSet.statementRecords,
+            0,
+        );
+        const {
+            compactSameSecretBridgeStatementRoot,
+            ...bridgeStatementWithoutRoot
+        } = firstBridgeStatement;
+        const {
+            compactSameSecretBridgeStatementSetRoot,
+            ...bridgeStatementSetWithoutRoot
+        } = bridgeStatementSet;
+
+        expect(bridgeStatementSet.compactCoefficientCommitmentRoot).toBe(
+            compactCoefficientCommitmentSet.coefficientCommitmentRoot,
+        );
+        expect(bridgeStatementSet.sameSecretConsistencyRoot).toBe(
+            sameSecretConsistency.sameSecretConsistencyRoot,
+        );
+        expect(bridgeStatementSet.sameSecretProofSetRoot).toBe(
+            sameSecretProofs.sameSecretProofSetRoot,
+        );
+        expect(bridgeStatementSet).toMatchObject({
+            integerSupport: compactVssSameSecretBridgeIntegerSupport,
+            signedRepresentativeConvention:
+                compactVssSameSecretBridgeSignedRepresentativeConvention,
+            compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
+            targetBasisLimbOrder:
+                compactVssSameSecretBridgeTargetBasisLimbOrder,
+        });
+        expect(firstBridgeStatement).toMatchObject({
+            integerSupport: bridgeStatementSet.integerSupport,
+            signedRepresentativeConvention:
+                bridgeStatementSet.signedRepresentativeConvention,
+            compactCommitmentEncoding:
+                bridgeStatementSet.compactCommitmentEncoding,
+            targetBasisLimbOrder: bridgeStatementSet.targetBasisLimbOrder,
+        });
+        expect(
+            firstBridgeStatement.targetConstantCoefficientCommitmentRoots,
+        ).toHaveLength(qSharePrimes.length);
+        expect(firstBridgeStatement.sameSecretStatementRoot).toBe(
+            sameSecretConsistency.statementRecords[0]?.sameSecretStatementRoot,
+        );
+        expect(firstBridgeStatement.sameSecretProofRoot).toBe(
+            sameSecretProofs.proofRecords[0]?.sameSecretProofRoot,
+        );
+        expect(compactSameSecretBridgeStatementRoot).toBe(
+            deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                bridgeStatementWithoutRoot,
+            ),
+        );
+        expect(compactSameSecretBridgeStatementSetRoot).toBe(
+            deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                bridgeStatementSetWithoutRoot,
+            ),
+        );
+        expect(
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: bridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs,
+            }),
+        ).toBe(bridgeStatementSet);
+
+        const forgedProofRootStatement = {
+            ...firstBridgeStatement,
+            sameSecretProofRoot: '0'.repeat(128),
+        } as typeof firstBridgeStatement;
+        const {
+            compactSameSecretBridgeStatementRoot: _oldForgedStatementRoot,
+            ...forgedProofRootStatementWithoutRoot
+        } = forgedProofRootStatement;
+        const reboundForgedProofRootStatement = {
+            ...forgedProofRootStatement,
+            compactSameSecretBridgeStatementRoot: deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                forgedProofRootStatementWithoutRoot,
+            ),
+        };
+        const forgedProofRootSet = {
+            ...bridgeStatementSet,
+            statementRecords: [
+                reboundForgedProofRootStatement,
+                ...bridgeStatementSet.statementRecords.slice(1),
+            ],
+        } as typeof bridgeStatementSet;
+        const {
+            compactSameSecretBridgeStatementSetRoot: _oldForgedSetRoot,
+            ...forgedProofRootSetWithoutRoot
+        } = forgedProofRootSet;
+        const reboundForgedProofRootSet = {
+            ...forgedProofRootSet,
+            compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                forgedProofRootSetWithoutRoot,
+            ),
+        };
+        expect(
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: reboundForgedProofRootSet,
+            }),
+        ).toBe(reboundForgedProofRootSet);
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: reboundForgedProofRootSet,
+                sameSecretConsistency,
+                sameSecretProofs,
+            }),
+        ).toThrow(/evidence roots/u);
+
+        const unsupportedBoundaryStatement = {
+            ...firstBridgeStatement,
+            proofBoundary: 'unsupported compact same-secret bridge boundary',
+        } as unknown as typeof firstBridgeStatement;
+        const {
+            compactSameSecretBridgeStatementRoot: _oldStatementRoot,
+            ...unsupportedBoundaryStatementWithoutRoot
+        } = unsupportedBoundaryStatement;
+        const reboundUnsupportedBoundaryStatement = {
+            ...unsupportedBoundaryStatement,
+            compactSameSecretBridgeStatementRoot: deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                unsupportedBoundaryStatementWithoutRoot,
+            ),
+        };
+        const unsupportedBoundarySet = {
+            ...bridgeStatementSet,
+            statementRecords: [
+                reboundUnsupportedBoundaryStatement,
+                ...bridgeStatementSet.statementRecords.slice(1),
+            ],
+        } as unknown as typeof bridgeStatementSet;
+        const {
+            compactSameSecretBridgeStatementSetRoot: _oldStatementSetRoot,
+            ...unsupportedBoundarySetWithoutRoot
+        } = unsupportedBoundarySet;
+
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: {
+                    ...unsupportedBoundarySet,
+                    compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
+                        'SetupProofRecordBindingHash',
+                        unsupportedBoundarySetWithoutRoot,
+                    ),
+                },
+            }),
+        ).toThrow(/proofBoundary/u);
+
+        const unsupportedSignedConventionSet = {
+            ...bridgeStatementSet,
+            signedRepresentativeConvention:
+                'unsupported compact bridge signed representative convention',
+        } as unknown as typeof bridgeStatementSet;
+        const {
+            compactSameSecretBridgeStatementSetRoot:
+                _oldConventionStatementSetRoot,
+            ...unsupportedSignedConventionSetWithoutRoot
+        } = unsupportedSignedConventionSet;
+
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: {
+                    ...unsupportedSignedConventionSet,
+                    compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
+                        'SetupProofRecordBindingHash',
+                        unsupportedSignedConventionSetWithoutRoot,
+                    ),
+                },
+            }),
+        ).toThrow(/signedRepresentativeConvention/u);
     });
 
     it('rejects malformed statement-set inputs before root publication', () => {
