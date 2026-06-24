@@ -12,7 +12,7 @@ use crate::{
 // set and development encryptions that exercise the evaluator. The preimage is
 // framed exactly like `hash512` so the stream is domain-separated and
 // byte-identical across native and WASM builds. This is development key/seed
-// material, never claim-bearing entropy.
+// material, never production-grade entropy.
 pub(crate) struct DeterministicSampler {
     reader: <Shake256 as ExtendableOutput>::Reader,
 }
@@ -46,6 +46,14 @@ impl DeterministicSampler {
         self.reader.read(&mut byte);
 
         byte[0]
+    }
+
+    // Raw stream bytes, used for development commitment salts.
+    pub(crate) fn bytes(&mut self, count: usize) -> Vec<u8> {
+        let mut output = vec![0_u8; count];
+        self.reader.read(&mut output);
+
+        output
     }
 
     // Rejection-sampled uniform residues in [0, modulus). The rejection zone

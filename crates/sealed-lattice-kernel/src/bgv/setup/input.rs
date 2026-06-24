@@ -196,7 +196,6 @@ fn read_setup_participants(request: &Value) -> CanonicalResult<Vec<SetupParticip
                 })
             }
             Value::Object(_) => {
-                reject_forbidden_setup_fields(value)?;
                 let trustee_identity = read_non_empty_string(value, "trusteeIdentity")?.to_string();
                 ensure_nfc_identity(&trustee_identity, "participant trusteeIdentity")?;
                 Ok(SetupParticipant {

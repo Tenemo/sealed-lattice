@@ -2,24 +2,6 @@ use super::*;
 
 pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
     validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
-    if !bool_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetPartDecImplemented"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "target decryption requires setup material that marks target PartDec implemented",
-        ));
-    }
-    if bool_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetC1C4StatusAccepted"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "target decryption setup must not claim C1-C4 certification until that gate is closed",
-        ));
-    }
     let setup_package_hash = hash_at_path(setup_package, &["setupPackageHash"])?.to_string();
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?.to_string();
     let election_manifest_hash =
@@ -59,9 +41,12 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         .iter()
         .map(|participant| {
             let roster_position = usize_at_path(participant, &["rosterPosition"])?;
+            let board_position = usize_at_path(participant, &["boardPosition"])?;
             Ok(ParticipantBinding {
                 trustee_identity: string_at_path(participant, &["trusteeIdentity"])?.to_string(),
                 roster_position,
+                board_position,
+                // Shamir abscissa = roster_position + 1 so 0-based roster positions never produce the forbidden x = 0 point; share generation and recombination must use the identical mapping.
                 interpolation_point: u64::try_from(roster_position + 1).map_err(|_| {
                     CanonicalError::new(
                         CanonicalErrorCode::MalformedLength,
@@ -100,11 +85,10 @@ pub(super) fn read_target_accepted_binding(
 ) -> CanonicalResult<TargetAcceptedBinding> {
     if string_at_path(record, &["objectType"])? != "TargetAcceptedRecord"
         || unsigned_at_path(record, &["objectVersion"])? != 1
-        || string_at_path(record, &["acceptanceMode"])? != "evaluator-replay"
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "targetAcceptedRecord must be a canonical evaluator-replay TargetAcceptedRecord",
+            "targetAcceptedRecord must be a canonical TargetAcceptedRecord",
         ));
     }
     if string_at_path(record, &["targetDecryptionProfileId"])? != TARGET_DECRYPTION_PROFILE_ID {
@@ -134,7 +118,6 @@ pub(super) fn read_target_accepted_binding(
     let expected_record_hash = derive_protocol_hash(
         "TargetAcceptedRecordHash",
         &json!({
-            "acceptanceMode": string_at_path(record, &["acceptanceMode"])?,
             "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
             "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
             "ceremonyId": string_at_path(record, &["ceremonyId"])?,
@@ -151,7 +134,6 @@ pub(super) fn read_target_accepted_binding(
             "targetDecryptionProfileId": string_at_path(record, &["targetDecryptionProfileId"])?,
             "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
             "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
-            "targetFinalityScope": string_at_path(record, &["targetFinalityScope"])?,
             "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
             "targetPreimageHash": hash_at_path(record, &["targetPreimageHash"])?,
             "targetProposalHash": hash_at_path(record, &["targetProposalHash"])?,
@@ -219,16 +201,17 @@ pub(super) fn read_target_share_profile(
         &setup_binding.target_decryption_profile_binding_hash,
         "target decryption profile binding hash",
     )?;
-    compare_string_field(
-        value,
-        "selectedShareRule",
-        SELECTED_SHARE_RULE,
-        "target decryption share-selection rule",
-    )?;
     let decryption_threshold = usize_field(value, "decryptionThreshold")?;
     let minimum_shares_for_interpolation = usize_field(value, "minimumSharesForInterpolation")?;
     let decryption_share_quorum = usize_field(value, "decryptionShareQuorum")?;
     let participant_count = setup_binding.participants.len();
+    let expected_decryption_threshold = participant_count / 3 + 1;
+    if decryption_threshold != expected_decryption_threshold {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "targetShareProfile.decryptionThreshold must match the setup roster-derived threshold",
+        ));
+    }
     if decryption_threshold == 0
         || decryption_threshold > participant_count
         || minimum_shares_for_interpolation < decryption_threshold
@@ -251,7 +234,6 @@ pub(super) fn read_target_share_profile(
         "decryptionThreshold": decryption_threshold,
         "minimumSharesForInterpolation": minimum_shares_for_interpolation,
         "decryptionShareQuorum": decryption_share_quorum,
-        "selectedShareRule": SELECTED_SHARE_RULE,
     });
     let hash = derive_protocol_hash("TargetDecryptionShareProfileHash", &hash_input)?;
     compare_hash_field(

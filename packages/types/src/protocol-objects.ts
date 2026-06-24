@@ -1,8 +1,3 @@
-import type {
-    FailureStatusLabel,
-    ModeStatusLabel,
-    PrimaryStatusLabel,
-} from './lifecycle.js';
 import type { ProtocolHash } from './protocol-hash.js';
 import type { DecodedSparseTopKSelection } from './target-result.js';
 
@@ -15,6 +10,8 @@ export type ProtocolObjectType =
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
+    | 'CommonRandomnessCommit'
+    | 'CommonRandomnessReveal'
     | 'ElectionManifest'
     | 'EvaluatorReplayRecord'
     | 'FirstValidOrder'
@@ -38,15 +35,20 @@ export type SignedObjectType =
     | 'BoardHead'
     | 'CastReceipt'
     | 'CloseRecord'
+    | 'CommonRandomnessCommit'
+    | 'CommonRandomnessReveal'
     | 'ElectionManifest'
     | 'EvaluatorReplayRecord'
     | 'RecoveryEpochUpdate'
     | 'RegistrationEntry'
     | 'RosterExternalAcceptance'
+    | 'SetupPhaseParticipantObject'
     | 'TargetAcceptedRecord'
     | 'TargetFinalityRecord'
     | 'TopKDecryptionShare'
     | 'TrusteeSetupEntry'
+    | 'VssShareAcceptance'
+    | 'VssShareComplaint'
     | 'WitnessCheckpoint';
 
 /** Role asserted by a protocol signature envelope. */
@@ -101,12 +103,6 @@ export type ProtocolSignatureEnvelope = {
     readonly signatureBytesHex: string;
     readonly signatureHash: ProtocolHash;
 };
-
-/** Unified status label emitted by protocol verification helpers. */
-export type ProtocolVerificationStatusLabel =
-    | PrimaryStatusLabel
-    | FailureStatusLabel
-    | ModeStatusLabel;
 
 /** Stable refusal code emitted by protocol verification helpers. */
 export type ProtocolRefusalCode =
@@ -185,7 +181,6 @@ export type ConflictingHeadEvidence = {
 /** Shared structured result shape for protocol verification helpers. */
 export type StructuredProtocolVerificationResult = {
     readonly ok: boolean;
-    readonly statusLabels: readonly ProtocolVerificationStatusLabel[];
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;

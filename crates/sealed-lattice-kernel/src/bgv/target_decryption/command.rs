@@ -3,21 +3,6 @@ use super::*;
 pub(crate) fn generate_bgv_target_decryption_share_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupPackage",
-            "setupPrivateWitness",
-            "targetAcceptedRecord",
-            "targetCiphertextBinding",
-            "targetCiphertexts",
-            "targetShareProfile",
-            "trusteeIdentity",
-        ],
-        "generateBgvTargetDecryptionShare",
-    )?;
-    reject_forbidden_setup_fields(request)?;
-
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let setup_binding = read_setup_binding(setup_package)?;
     let target_accepted = read_target_accepted_binding(
@@ -62,20 +47,6 @@ pub(crate) fn generate_bgv_target_decryption_share_from_request(
 pub(crate) fn recombine_bgv_target_decryption_shares_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "setupPackage",
-            "targetAcceptedRecord",
-            "targetCiphertextBinding",
-            "targetCiphertexts",
-            "targetShareProfile",
-            "decryptionShares",
-        ],
-        "recombineBgvTargetDecryptionShares",
-    )?;
-    reject_forbidden_setup_fields(request)?;
-
     let setup_package = value_at_path(request, &["setupPackage"])?;
     let setup_binding = read_setup_binding(setup_package)?;
     let target_accepted = read_target_accepted_binding(

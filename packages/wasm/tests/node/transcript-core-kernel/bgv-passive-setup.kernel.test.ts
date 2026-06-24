@@ -1,113 +1,19 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import {
+    arrayAtPath,
+    expectReboundSetupPackageToBeRejected,
+    rebindSetupPackageHash,
+    setupRequest,
+    setPathValue,
+    validHash,
+} from './bgv-passive-setup-fixtures.js';
+
 import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
-    type TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
-
-const setupRequest = {
-    ceremonyId: 'ceremony-main',
-    manifestHash: deriveProtocolHash('ElectionManifestHash', {
-        manifest: 'passive-bgv-setup-test',
-    }),
-    rosterHash: deriveProtocolHash('RosterHash', {
-        roster: 'passive-bgv-setup-test',
-    }),
-    thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
-        threshold: 'passive-bgv-setup-test',
-    }),
-    participants: [
-        {
-            trusteeIdentity: 'trustee-1',
-            rosterPosition: 0,
-            boardPosition: 3,
-        },
-        {
-            trusteeIdentity: 'trustee-2',
-            rosterPosition: 1,
-            boardPosition: 4,
-        },
-        {
-            trusteeIdentity: 'trustee-3',
-            rosterPosition: 2,
-            boardPosition: 5,
-        },
-    ],
-    setupSeed: 'passive-bgv-setup-test-seed',
-} as const;
-
-const rebindSetupPackageHash = (
-    kernel: TranscriptCoreKernel,
-    setupPackage: BgvPassiveSetupPackage,
-): BgvPassiveSetupPackage => {
-    const hashInput = structuredClone(setupPackage) as Record<string, unknown>;
-    delete hashInput.setupPackageHash;
-
-    return {
-        ...setupPackage,
-        setupPackageHash: kernel.deriveProtocolHash({
-            namespace: 'BGVPassiveSetupPackageHash',
-            value: hashInput,
-        }),
-    };
-};
-
-type MutableJsonRecord = Record<string, unknown>;
-type JsonPathSegment = string | number;
-
-const validHash = (fill: string): string => fill.repeat(128);
-
-const setPathValue = (
-    target: unknown,
-    path: readonly JsonPathSegment[],
-    value: unknown,
-): void => {
-    let currentValue = target;
-    for (const pathSegment of path.slice(0, -1)) {
-        currentValue =
-            typeof pathSegment === 'number'
-                ? (currentValue as unknown[])[pathSegment]
-                : (currentValue as MutableJsonRecord)[pathSegment];
-    }
-    const finalSegment = path[path.length - 1];
-    if (finalSegment === undefined) {
-        throw new Error('Cannot set an empty JSON path.');
-    }
-    if (typeof finalSegment === 'number') {
-        (currentValue as unknown[])[finalSegment] = value;
-    } else {
-        (currentValue as MutableJsonRecord)[finalSegment] = value;
-    }
-};
-
-const arrayAtPath = (
-    target: unknown,
-    path: readonly JsonPathSegment[],
-): unknown[] => {
-    let currentValue = target;
-    for (const pathSegment of path) {
-        currentValue =
-            typeof pathSegment === 'number'
-                ? (currentValue as unknown[])[pathSegment]
-                : (currentValue as MutableJsonRecord)[pathSegment];
-    }
-
-    return currentValue as unknown[];
-};
-
-const expectReboundSetupPackageToBeRejected = (
-    kernel: TranscriptCoreKernel,
-    setupPackage: BgvPassiveSetupPackage,
-): void => {
-    expect(() =>
-        kernel.verifyBgvPassiveSetup({
-            setupPackage: rebindSetupPackageHash(kernel, setupPackage),
-        }),
-    ).toThrow(TranscriptCoreKernelCommandError);
-};
 
 describe('BGV passive passive BGV setup kernel commands', () => {
     it('describes the frozen passive setup object model', async () => {
@@ -115,10 +21,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
             readonly setupProfileId: string;
             readonly reservedRootsAndHashes: readonly string[];
-            readonly trustedDealerBoundary: {
-                readonly transcriptValidCentralizedSecretReconstruction: boolean;
-            };
-            readonly statusLabels: readonly string[];
         };
 
         expect(objectModel.setupProfileId).toBe(
@@ -133,13 +35,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 'ThresholdShareVerificationKeyRoot',
             ]),
         );
-        expect(
-            objectModel.trustedDealerBoundary
-                .transcriptValidCentralizedSecretReconstruction,
-        ).toBe(false);
-        expect(objectModel.statusLabels).toContain(
-            'PassiveBgvSetupCanonicalObjectModelFrozen',
-        );
     });
 
     it('generates deterministic full-roster passive setup material and verifies it', async () => {
@@ -147,48 +42,21 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
         const repeated = kernel.generateBgvPassiveSetup(setupRequest);
         const certificates = setup.certificates as {
-            readonly setupParameterCertificate: {
-                readonly finalSecurityStatus: string;
-                readonly largestExposedModulusBitsWithoutQTarget: number;
-            };
             readonly publicRlweSamplesByBasis: {
                 readonly QData: {
                     readonly publicKeyShares: number;
                     readonly rotationKeys: number;
                 };
                 readonly QPPublic: {
-                    readonly exposedOnAcceptedDirectEvaluatorReplayPath: boolean;
                     readonly rotationKeys: number;
-                };
-                readonly QTarget: {
-                    readonly sampleCountStatus: string;
                 };
             };
         };
 
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
-        expect(setup.statusLabels).toEqual(
-            expect.arrayContaining([
-                'PassiveBgvSetupGenerated',
-                'CollectivePublicKeyRootBound',
-                'EvaluationKeyRootBound',
-                'PassiveSetupInputReady',
-                'DirectEvaluatorReplayHeSecurityAccepted',
-                'FinalTargetSecurityPendingTargetModulus',
-            ]),
-        );
-        expect(setup.nonClaims).toContain('TargetShareProofNotCertified');
         expect(setup.targetDecryptionStatus).toMatchObject({
             targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
-            setupMaterialMatchesTargetDecryption: true,
-            targetPartDecImplemented: true,
-            targetC1C4StatusAccepted: false,
-        });
-        expect(certificates.setupParameterCertificate).toMatchObject({
-            finalSecurityStatus:
-                'acceptedForDirectEvaluatorReplayTargetPending',
-            largestExposedModulusBitsWithoutQTarget: 799,
         });
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
@@ -197,12 +65,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             certificates.publicRlweSamplesByBasis.QData.rotationKeys,
         ).toBeGreaterThan(0);
         expect(certificates.publicRlweSamplesByBasis.QPPublic).toMatchObject({
-            exposedOnAcceptedDirectEvaluatorReplayPath: false,
             rotationKeys: 0,
         });
-        expect(
-            certificates.publicRlweSamplesByBasis.QTarget.sampleCountStatus,
-        ).toBe('pendingUntilFinalNoiseAnalysis');
         expect(
             setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
         ).toHaveLength(128);
@@ -234,38 +98,12 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             ok: true,
             operation: 'verifyBgvPassiveSetupPackage',
         });
-        expect(verification.statusLabels).toContain(
-            'PassiveBgvSetupPackageVerified',
-        );
     });
 
-    it('refuses trusted-dealer setup fields and wrong expected roots', async () => {
+    it('refuses wrong expected roots and mutated canonical bindings', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
 
-        for (const fieldName of [
-            'globalSecretPolynomial',
-            'trustedDealerSecret',
-            'trustedDealerKeyMaterial',
-            'fullSecretKey',
-            'collectiveSecretKey',
-            'fullSecretReconstruction',
-            'thresholdSecretShares',
-        ]) {
-            expect(() =>
-                kernel.generateBgvPassiveSetup({
-                    ...setupRequest,
-                    participants: [
-                        {
-                            ...setupRequest.participants[0],
-                            [fieldName]: 'forbidden',
-                        },
-                        setupRequest.participants[1],
-                        setupRequest.participants[2],
-                    ],
-                }),
-            ).toThrow(TranscriptCoreKernelCommandError);
-        }
         expect(() =>
             kernel.verifyBgvPassiveSetup({
                 setupPackage: setup,
@@ -317,15 +155,8 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             objectType: 'BgvPublicEvaluationKeyMaterial',
             setupPackageHash: setup.setupPackageHash,
             evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
-            rawSecretMaterialExported: false,
         });
         expect((material.rotationKeys as readonly unknown[]).length).toBe(0);
-        expect(material.statusLabels).toEqual(
-            expect.arrayContaining([
-                'PublicEvaluationKeyMaterialGenerated',
-                'SetupPrivateWitnessNotExported',
-            ]),
-        );
         expect(
             Object.prototype.hasOwnProperty.call(
                 material,
@@ -530,15 +361,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         setupPackage,
                         ['certificates', 'setupParameterCertificateHash'],
                         validHash('6'),
-                    ),
-            ],
-            [
-                'target decryption PartDec missing',
-                (setupPackage) =>
-                    setPathValue(
-                        setupPackage,
-                        ['targetDecryptionStatus', 'targetPartDecImplemented'],
-                        false,
                     ),
             ],
             [

@@ -1,7 +1,4 @@
 import {
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
     deriveProtocolHash,
     deriveProtocolSignatureHash,
 } from '@sealed-lattice/crypto';
@@ -13,6 +10,7 @@ import {
     encryptedBallotLayoutProfileId,
     evaluatorReplayProfileId,
     mobileProfileId,
+    targetBoundShareSelectionProfileId,
     targetDecryptionProfileId,
 } from '@sealed-lattice/types';
 import type {
@@ -29,6 +27,11 @@ import {
     deriveTargetFinalityPolicyHash,
     deriveWitnessPolicyHash,
 } from '#packages/protocol/src/finality/index';
+import {
+    createMlDsaKeyPairFixture,
+    createMlDsaSignatureProfileFixture,
+    createProtocolSignatureFixture,
+} from '#tests/support/protocol-signature-fixtures';
 
 export const deriveFixtureHash = (
     purpose: string,
@@ -108,6 +111,18 @@ export const defaultThresholdProfileHash = deriveProtocolHash(
     'ThresholdProfileHash',
     { profile: 'default-target-finality-threshold-profile' },
 );
+export const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
+export const targetBoundShareSelectionProfile = {
+    profileId: targetBoundShareSelectionProfileId,
+    certificateHash: 'target-bound-certificate-hash',
+    targetDecryptionProfileId,
+    targetBasisHash: 'target-basis-hash',
+    decryptionShareQuorum: 9,
+    minimumSharesForInterpolation: 7,
+    minimumArrivalsForRobustDecode: 9,
+    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
+    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
+} as const;
 export const witnessPublicKeyHashes = Object.fromEntries(
     witnessIdentities.map((witnessIdentity) => [
         witnessIdentity,

@@ -10,15 +10,33 @@ import type {
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
+    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupPublicDerivations,
+    BgvCollectiveSetupVerification,
+    BgvTrusteeEvaluationKeyProofGeneration,
+    BgvTrusteeEvaluationKeyProofVerification,
     BgvEvaluatorOperationValidation,
+    BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
     BgvPassiveSetupPackage,
     BgvPassiveSetupVerification,
+    BgvPrivateVssShareEnvelopeVerification,
+    BgvPrivateVssShareProofGeneration,
     BgvProfileRejection,
-    BgvReferenceOracleRejection,
     BgvRnsProfileDescription,
+    BgvSetupCommitmentOpeningComputation,
+    BgvSetupProofMaterialTransportStreamBegin,
+    BgvSetupProofMaterialTransportStreamChunkAbsorption,
+    BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
+    BgvThresholdShareCommitmentDerivation,
+    BgvThresholdShareCommitmentTransportDerivation,
+    BgvThresholdShareCommitmentTransportStreamAbort,
+    BgvThresholdShareCommitmentTransportStreamBegin,
+    BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
+    BgvThresholdShareCommitmentTransportStreamDerivation,
+    BgvVerifiedTransportedVssMaterialRelease,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -26,6 +44,7 @@ import type {
 } from './kernel-contracts.js';
 import type { TranscriptCoreKernelLoaderOptions } from './kernel-runtime.js';
 import {
+    TranscriptCoreKernelCommandError,
     copyFromKernelMemory,
     copyIntoKernelMemory,
     requireKernelIntegrityExpectation,
@@ -79,6 +98,7 @@ export const createTranscriptCoreKernelLoader = (
             )
                 .map((entry) => entry.name)
                 .sort();
+            // This guards a single synchronous allocate/run/free cycle only; multi-call transport streams are kept separate by their kernel-side id, not by this flag.
             let kernelOperationInProgress = false;
             // One WASM instance has a single shared linear memory and allocator, so
             // overlapping commands would corrupt each other's buffers; the kernel is
@@ -111,9 +131,38 @@ export const createTranscriptCoreKernelLoader = (
                         request,
                     ),
                 );
+            // Accepted setup is real protocol input, not a fixture, so a fixture-shaped rejection is surfaced as a rejected protocol object rather than leaking the kernel fixture error code.
+            const executeAcceptedSetupCommand = <
+                Result extends BgvCollectiveSetupVerification,
+            >(
+                request: TranscriptCoreKernelCommand,
+            ): Result => {
+                try {
+                    return executeCommand<Result>(request);
+                } catch (error) {
+                    if (
+                        error instanceof TranscriptCoreKernelCommandError &&
+                        error.code === 'InvalidFixture'
+                    ) {
+                        const message = error.message.replace(
+                            /^InvalidFixture: /u,
+                            '',
+                        );
+                        throw new TranscriptCoreKernelCommandError({
+                            code: 'InvalidProtocolObject',
+                            message,
+                        });
+                    }
+
+                    throw error;
+                }
+            };
 
             return {
                 exportedFunctionNames,
+                // WASM linear memory only grows, so the byte length after a
+                // sequence of commands is that sequence's peak footprint.
+                wasmMemoryByteLength: (): number => memory.buffer.byteLength,
                 analyzeCanonicalObject: (input): TranscriptCoreAnalysis =>
                     executeCommand<TranscriptCoreAnalysis>({
                         command: 'AnalyzeCanonicalObject',
@@ -224,6 +273,18 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<unknown>({
                         command: 'DescribeBgvPassiveSetupObjectModel',
                     }),
+                describeCollectiveBgvSetupProfile:
+                    (): BgvCollectiveSetupProfileDescription =>
+                        executeCommand<BgvCollectiveSetupProfileDescription>({
+                            command: 'DescribeCollectiveBgvSetupProfile',
+                        }),
+                deriveCollectiveBgvSetupPublicDerivations: (
+                    input,
+                ): BgvCollectiveSetupPublicDerivations =>
+                    executeCommand<BgvCollectiveSetupPublicDerivations>({
+                        command: 'DeriveCollectiveBgvSetupPublicDerivations',
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                    }),
                 generateBgvPassiveSetup: (input): BgvPassiveSetupPackage =>
                     executeCommand<BgvPassiveSetupPackage>({
                         command: 'GenerateBgvPassiveSetup',
@@ -283,6 +344,249 @@ export const createTranscriptCoreKernelLoader = (
                         expectedEvaluationKeyRoot:
                             input.expectedEvaluationKeyRoot,
                     }),
+                verifyCollectiveBgvSetup: (
+                    input,
+                ): BgvCollectiveSetupVerification =>
+                    executeAcceptedSetupCommand<BgvCollectiveSetupVerification>(
+                        {
+                            command: 'VerifyCollectiveBgvSetup',
+                            setupPackage: input.setupPackage,
+                            expectedSetupPackageHash:
+                                input.expectedSetupPackageHash,
+                            expectedManifestHash: input.expectedManifestHash,
+                            expectedRosterHash: input.expectedRosterHash,
+                            transportedVssCoefficientCommitmentMaterial:
+                                input.transportedVssCoefficientCommitmentMaterial,
+                            verifiedVssCoefficientCommitmentMaterial:
+                                input.verifiedVssCoefficientCommitmentMaterial,
+                            transportedSameSecretProofMaterial:
+                                input.transportedSameSecretProofMaterial,
+                            transportedPublicKeyShareMaterial:
+                                input.transportedPublicKeyShareMaterial,
+                            transportedPublicKeyShareProofMaterial:
+                                input.transportedPublicKeyShareProofMaterial,
+                            transportedEvaluationKeyShareProofMaterial:
+                                input.transportedEvaluationKeyShareProofMaterial,
+                            transportedEvaluationKeyShareComponentMaterial:
+                                input.transportedEvaluationKeyShareComponentMaterial,
+                            transportedPublicEvaluationKeyMaterial:
+                                input.transportedPublicEvaluationKeyMaterial,
+                            verifiedSetupProofMaterials:
+                                input.verifiedSetupProofMaterials,
+                        },
+                    ),
+                verifyPrivateVssShareEnvelope: (
+                    input,
+                ): BgvPrivateVssShareEnvelopeVerification =>
+                    executeCommand<BgvPrivateVssShareEnvelopeVerification>({
+                        command: 'VerifyPrivateVssShareEnvelope',
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        sourceTrusteeCoefficientCommitmentRecord:
+                            input.sourceTrusteeCoefficientCommitmentRecord,
+                        sourceTrusteeCoefficientCommitmentMaterialRecords:
+                            input.sourceTrusteeCoefficientCommitmentMaterialRecords,
+                        privateEnvelope: input.privateEnvelope,
+                        transportedPrivateVssShareProofMaterial:
+                            input.transportedPrivateVssShareProofMaterial,
+                        expectedPrivateEnvelopeHash:
+                            input.expectedPrivateEnvelopeHash,
+                        expectedLocalVerificationRoot:
+                            input.expectedLocalVerificationRoot,
+                    }),
+                generatePrivateVssShareProof: (
+                    input,
+                ): BgvPrivateVssShareProofGeneration =>
+                    executeCommand<BgvPrivateVssShareProofGeneration>({
+                        command: 'GeneratePrivateVssShareProof',
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        privateEnvelopeAadHash: input.privateEnvelopeAadHash,
+                        sourceTrusteeCoefficientCommitmentRecord:
+                            input.sourceTrusteeCoefficientCommitmentRecord,
+                        sourceTrusteeCoefficientCommitmentMaterialRecords:
+                            input.sourceTrusteeCoefficientCommitmentMaterialRecords,
+                        recipientIdentity: input.recipientIdentity,
+                        recipientRosterPosition: input.recipientRosterPosition,
+                        rnsLimbIndex: input.rnsLimbIndex,
+                        rnsPrime: input.rnsPrime,
+                        ringDegree: input.ringDegree,
+                        shareValues: input.shareValues,
+                        coefficientCommitmentRoots:
+                            input.coefficientCommitmentRoots,
+                        coefficientMessagesByShamirIndex:
+                            input.coefficientMessagesByShamirIndex,
+                        openingRandomnessByShamirIndex:
+                            input.openingRandomnessByShamirIndex,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                    }),
+                generateTrusteeEvaluationKeyProof: (
+                    input,
+                ): BgvTrusteeEvaluationKeyProofGeneration =>
+                    executeCommand<BgvTrusteeEvaluationKeyProofGeneration>({
+                        command: 'GenerateTrusteeEvaluationKeyProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        keys: input.keys,
+                        sameSecretLinkage: input.sameSecretLinkage,
+                        secretCoefficients: input.secretCoefficients,
+                        errorCoefficientsByKey: input.errorCoefficientsByKey,
+                        negativeIndicatorCoefficients:
+                            input.negativeIndicatorCoefficients,
+                        openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                    }),
+                verifyTrusteeEvaluationKeyProof: (
+                    input,
+                ): BgvTrusteeEvaluationKeyProofVerification =>
+                    executeCommand<BgvTrusteeEvaluationKeyProofVerification>({
+                        command: 'VerifyTrusteeEvaluationKeyProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        keys: input.keys,
+                        sameSecretLinkage: input.sameSecretLinkage,
+                        proofBytesHex: input.proofBytesHex,
+                    }),
+                computeSetupCommitmentFromOpening: (
+                    input,
+                ): BgvSetupCommitmentOpeningComputation =>
+                    executeCommand<BgvSetupCommitmentOpeningComputation>({
+                        command: 'ComputeSetupCommitmentFromOpening',
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        sourceRnsLimbIndex: input.sourceRnsLimbIndex,
+                        sourceMessageModulus: input.sourceMessageModulus,
+                        shamirCoefficientIndex: input.shamirCoefficientIndex,
+                        messageCoefficients: input.messageCoefficients,
+                        randomnessByColumn: input.randomnessByColumn,
+                        ringDegree: input.ringDegree,
+                    }),
+                deriveThresholdShareCommitments: (
+                    input,
+                ): BgvThresholdShareCommitmentDerivation =>
+                    executeCommand<BgvThresholdShareCommitmentDerivation>({
+                        command: 'DeriveThresholdShareCommitments',
+                        setupContext: input.setupContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        sourceTrusteeCoefficientCommitmentRecords:
+                            input.sourceTrusteeCoefficientCommitmentRecords,
+                        coefficientCommitments: input.coefficientCommitments,
+                    }),
+                deriveThresholdShareCommitmentsFromTransport: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportDerivation =>
+                    executeCommand<BgvThresholdShareCommitmentTransportDerivation>(
+                        {
+                            command:
+                                'DeriveThresholdShareCommitmentsFromTransport',
+                            setupContext: input.setupContext,
+                            publicMatrixSeedHash: input.publicMatrixSeedHash,
+                            vssCoefficientCommitmentRoot:
+                                input.vssCoefficientCommitmentRoot,
+                            sourceTrusteeCoefficientCommitmentRecords:
+                                input.sourceTrusteeCoefficientCommitmentRecords,
+                            transportedVssCoefficientCommitmentMaterial:
+                                input.transportedVssCoefficientCommitmentMaterial,
+                        },
+                    ),
+                beginThresholdShareCommitmentsFromTransportStream: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamBegin =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamBegin>(
+                        {
+                            command:
+                                'BeginThresholdShareCommitmentsFromTransportStream',
+                            derivationId: input.derivationId,
+                            setupContext: input.setupContext,
+                            publicMatrixSeedHash: input.publicMatrixSeedHash,
+                            transportedVssCoefficientCommitmentMaterial:
+                                input.transportedVssCoefficientCommitmentMaterial,
+                        },
+                    ),
+                abortThresholdShareCommitmentsFromTransportStream: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamAbort =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamAbort>(
+                        {
+                            command:
+                                'AbortThresholdShareCommitmentsFromTransportStream',
+                            derivationId: input.derivationId,
+                        },
+                    ),
+                absorbThresholdShareCommitmentsFromTransportStreamChunk: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamChunkAbsorption =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamChunkAbsorption>(
+                        {
+                            command:
+                                'AbsorbThresholdShareCommitmentsFromTransportStreamChunk',
+                            derivationId: input.derivationId,
+                            chunkIndex: input.chunkIndex,
+                            bytesHex: input.bytesHex,
+                        },
+                    ),
+                finishThresholdShareCommitmentsFromTransportStream: (
+                    input,
+                ): BgvThresholdShareCommitmentTransportStreamDerivation =>
+                    executeCommand<BgvThresholdShareCommitmentTransportStreamDerivation>(
+                        {
+                            command:
+                                'FinishThresholdShareCommitmentsFromTransportStream',
+                            derivationId: input.derivationId,
+                            vssCoefficientCommitmentRoot:
+                                input.vssCoefficientCommitmentRoot,
+                            sourceTrusteeCoefficientCommitmentRecords:
+                                input.sourceTrusteeCoefficientCommitmentRecords,
+                        },
+                    ),
+                releaseVerifiedTransportedVssMaterial: (
+                    input,
+                ): BgvVerifiedTransportedVssMaterialRelease =>
+                    executeCommand<BgvVerifiedTransportedVssMaterialRelease>({
+                        command: 'ReleaseVerifiedTransportedVssMaterial',
+                        verificationId: input.verificationId,
+                    }),
+                beginSetupProofMaterialTransportStream: (
+                    input,
+                ): BgvSetupProofMaterialTransportStreamBegin =>
+                    executeCommand<BgvSetupProofMaterialTransportStreamBegin>({
+                        command: 'BeginSetupProofMaterialTransportStream',
+                        verificationId: input.verificationId,
+                        transportedSetupProofMaterial:
+                            input.transportedSetupProofMaterial,
+                    }),
+                absorbSetupProofMaterialTransportStreamChunk: (
+                    input,
+                ): BgvSetupProofMaterialTransportStreamChunkAbsorption =>
+                    executeCommand<BgvSetupProofMaterialTransportStreamChunkAbsorption>(
+                        {
+                            command:
+                                'AbsorbSetupProofMaterialTransportStreamChunk',
+                            verificationId: input.verificationId,
+                            chunkIndex: input.chunkIndex,
+                            bytesHex: input.bytesHex,
+                        },
+                    ),
+                finishSetupProofMaterialTransportStream: (
+                    input,
+                ): BgvSetupProofMaterialTransportStreamVerification =>
+                    executeCommand<BgvSetupProofMaterialTransportStreamVerification>(
+                        {
+                            command: 'FinishSetupProofMaterialTransportStream',
+                            verificationId: input.verificationId,
+                        },
+                    ),
+                verifyLocalTrusteeSetupState: (
+                    input,
+                ): BgvLocalTrusteeSetupStateVerification =>
+                    executeCommand<BgvLocalTrusteeSetupStateVerification>({
+                        command: 'VerifyLocalTrusteeSetupState',
+                        setupContext: input.setupContext,
+                        localStateCommitment: input.localStateCommitment,
+                    }),
                 encodeBgvBatchPlaintext: (
                     input,
                 ): BgvBatchPlaintextEncoding | BgvProfileRejection =>
@@ -341,13 +645,6 @@ export const createTranscriptCoreKernelLoader = (
                     >({
                         command: 'AnalyzeBgvCanonicalObject',
                         canonicalBytesHex: input.canonicalBytesHex,
-                    }),
-                rejectBgvReferenceOracleArtifact: (
-                    input,
-                ): BgvReferenceOracleRejection =>
-                    executeCommand<BgvReferenceOracleRejection>({
-                        command: 'RejectBgvReferenceOracleArtifact',
-                        artifact: input.artifact,
                     }),
             };
         })().catch((error: unknown) => {

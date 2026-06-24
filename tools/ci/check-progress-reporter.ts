@@ -11,7 +11,7 @@ export type {
 export {
     checkCommandTimingKey,
     formatProgressDuration,
-} from './check-progress-reporter/durations.js';
+} from './check-progress-reporter/formatting.js';
 export { RecentOutputBuffer } from './check-progress-reporter/output-buffers.js';
 export {
     extractCheckTimingHistoryFromSummary,

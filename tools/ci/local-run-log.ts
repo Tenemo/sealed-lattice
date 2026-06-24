@@ -241,25 +241,3 @@ export const createLocalRunLog = async (
         summaryPath: path.join(runDirectoryPath, 'summary.json'),
     });
 };
-
-export const installProcessOutputLogTee = (
-    runLog: ActiveLocalRunLog,
-): (() => void) => {
-    const originalStdoutWrite = process.stdout.write.bind(process.stdout);
-    const originalStderrWrite = process.stderr.write.bind(process.stderr);
-    process.stdout.write = (chunk: string | Uint8Array): boolean => {
-        runLog.writeCombinedOutput(chunk);
-
-        return originalStdoutWrite(chunk);
-    };
-    process.stderr.write = (chunk: string | Uint8Array): boolean => {
-        runLog.writeCombinedOutput(chunk);
-
-        return originalStderrWrite(chunk);
-    };
-
-    return () => {
-        process.stdout.write = originalStdoutWrite;
-        process.stderr.write = originalStderrWrite;
-    };
-};

@@ -1,0 +1,851 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+    contextFields,
+    createSameSecretConsistencyStatementSet,
+    createVssCoefficientCommitmentBundle,
+    galoisShareMaterial,
+    hashFromKernel,
+    loadPublicTranscriptCoreKernel,
+    participantCount,
+    phaseObject,
+    phaseTranscriptFixture,
+    publicKeyShareMaterialContribution,
+    publicKeyShareSuccinctProofMaterial,
+    publicSetupApi,
+    qSharePrimes,
+    relinearizationShareMaterial,
+    requiredGaloisKeySchedule,
+    sameSecretProofMaterial,
+    sameSecretProofReferencesFromSet,
+    setupContextFromKernel,
+    setupTransportChunkSizeBytes,
+    trusteeIdentity,
+    trusteeRosterPosition,
+    vssFixtureRingDegree,
+    vssFixtureThresholdDegree,
+    vssSourceTrusteeOpeningState,
+} from './support.js';
+
+const heEstimatorArtifactCanonicalSha256 =
+    '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
+const heEstimatorArtifactCanonicalization =
+    'recursively sorted JSON object keys, two-space indentation, trailing newline';
+
+describe('accepted setup public package API in Node', () => {
+    it('creates a roots-only setup contribution and refuses raw fields in the public record', async () => {
+        const kernel = await loadPublicTranscriptCoreKernel();
+        const setupContext = setupContextFromKernel(kernel);
+        const commonFields = contextFields(setupContext);
+        const sourceTrusteeRecord = {
+            objectType: 'VssSourceTrusteeCoefficientCommitments',
+            objectVersion: 1,
+            ...commonFields,
+            sourceTrusteeIdentity: trusteeIdentity,
+            sourceTrusteeRosterPosition: trusteeRosterPosition,
+            publicMatrixSeedHash: hashFromKernel(kernel, 'public-matrix-seed'),
+            coefficientCommitments: [],
+            sourceTrusteeCommitmentRoot: hashFromKernel(
+                kernel,
+                'source-trustee-root',
+            ),
+        };
+
+        const setupContribution = publicSetupApi.createSetupContribution({
+            setupContext,
+            trusteeIdentity,
+            trusteeRosterPosition,
+            setupPhaseParticipantObjects: [
+                phaseObject(kernel, setupContext, 2),
+                phaseObject(kernel, setupContext, 1),
+            ],
+            commonRandomnessCommitRoot: hashFromKernel(
+                kernel,
+                'common-randomness-commit',
+            ),
+            commonRandomnessRevealRoot: hashFromKernel(
+                kernel,
+                'common-randomness-reveal',
+            ),
+            vssSourceTrusteeRecord: sourceTrusteeRecord,
+        });
+
+        expect(setupContribution).toMatchObject({
+            objectType: 'SetupContributionAssembly',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            trusteeIdentity,
+            trusteeRosterPosition,
+            vssSourceTrusteeCommitmentRoot:
+                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+            phaseObjectRoots: [
+                hashFromKernel(kernel, 'phase-root-1'),
+                hashFromKernel(kernel, 'phase-root-2'),
+            ],
+        });
+        expect(String(setupContribution.setupContributionRoot)).toHaveLength(
+            128,
+        );
+        expect(JSON.stringify(setupContribution)).not.toMatch(
+            /shareValues|coefficientMessage|randomnessByColumn/u,
+        );
+    });
+
+    it('assembles public key and evaluation-key records from proof material only', async () => {
+        const kernel = await loadPublicTranscriptCoreKernel();
+        const setupProfile = kernel.describeCollectiveBgvSetupProfile();
+        const bgvProfile = kernel.describeBgvRnsProfile();
+        const setupContext = setupContextFromKernel(kernel);
+        const publicMatrixSeedHash = hashFromKernel(
+            kernel,
+            'key-record-public-matrix-seed',
+        );
+        const publicDerivations =
+            kernel.deriveCollectiveBgvSetupPublicDerivations({
+                publicMatrixSeedHash,
+            });
+        const publicKeyCrpRoot = publicDerivations.crpRoots.publicKeyCrpRoot;
+        const publicAPolynomialRoot =
+            publicDerivations.bgvPublicA.publicPolynomialRoot;
+        const relinearizationCrpRoot =
+            publicDerivations.crpRoots.relinearizationCrpRoot;
+        const galoisKeyCrpRoot = publicDerivations.crpRoots.galoisKeyCrpRoot;
+        const vssCoefficientCommitmentBundle =
+            createVssCoefficientCommitmentBundle({
+                setupContext: setupContext,
+                publicMatrixSeedHash,
+                setupCommitmentComputer: (commitmentOpeningInput) =>
+                    kernel.computeSetupCommitmentFromOpening(
+                        commitmentOpeningInput,
+                    ),
+                qSharePrimes,
+                ringDegree: vssFixtureRingDegree,
+                participantCount,
+                thresholdDegree: vssFixtureThresholdDegree,
+                sourceTrusteeOpeningStates: Array.from(
+                    { length: participantCount },
+                    (_unused, sourceTrusteeRosterPosition) =>
+                        vssSourceTrusteeOpeningState(
+                            sourceTrusteeRosterPosition,
+                        ),
+                ),
+            });
+        const vssCoefficientCommitments =
+            vssCoefficientCommitmentBundle.commitmentSet;
+        const vssCoefficientCommitmentMaterial =
+            vssCoefficientCommitmentBundle.materialSet;
+        const sameSecretConsistency = createSameSecretConsistencyStatementSet({
+            setupContext: setupContext,
+            qSharePrimes,
+            participantCount,
+            thresholdDegree: vssFixtureThresholdDegree,
+            vssCoefficientCommitments,
+        });
+        const publicKeyShareMaterialContributions = Array.from(
+            { length: participantCount },
+            (_unused, shareRosterPosition) =>
+                publicKeyShareMaterialContribution(shareRosterPosition),
+        );
+        const shareContributions = publicKeyShareMaterialContributions.map(
+            (materialContribution) => ({
+                trusteeIdentity: materialContribution.trusteeIdentity,
+                trusteeRosterPosition:
+                    materialContribution.trusteeRosterPosition,
+                shareCoefficientVectorHash512ByLimb: (
+                    materialContribution.shareCoefficientVectorsByLimb as readonly Record<
+                        string,
+                        unknown
+                    >[]
+                ).map((coefficientVector) => ({
+                    rnsLimbIndex: coefficientVector.rnsLimbIndex,
+                    rnsPrime: coefficientVector.rnsPrime,
+                    component: coefficientVector.component,
+                    coefficientVectorHash512:
+                        coefficientVector.coefficientVectorHash512,
+                })),
+            }),
+        );
+
+        const publicKeyShares = publicSetupApi.createPublicKeyShareSet({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            publicMatrixSeedHash,
+            publicKeyCrpRoot,
+            publicAPolynomialRoot,
+            sameSecretConsistency,
+            shareContributions,
+        });
+        const publicKeyShareProofs =
+            publicSetupApi.createPublicKeyShareProofSet({
+                setupContext,
+                qSharePrimes,
+                participantCount,
+                publicMatrixSeedHash,
+                publicKeyCrpRoot,
+                publicAPolynomialRoot,
+                sameSecretConsistency,
+                publicKeyShares,
+            });
+        const sameSecretLinkageAnchorProofAccountingHash = hashFromKernel(
+            kernel,
+            'same-secret-linkage-anchor-proof-accounting',
+        );
+        const sameSecretProofs = publicSetupApi.createSameSecretProofSet({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            sameSecretConsistency,
+            vssCoefficientCommitmentMaterial,
+            proofAccountingHash: sameSecretLinkageAnchorProofAccountingHash,
+            proofMaterials: (
+                sameSecretConsistency.statementRecords as readonly Record<
+                    string,
+                    unknown
+                >[]
+            ).map((statementRecord) =>
+                sameSecretProofMaterial(kernel, statementRecord),
+            ),
+        });
+        const publicKeyShareMaterial =
+            publicSetupApi.createPublicKeyShareMaterialSet({
+                setupContext,
+                qSharePrimes,
+                participantCount,
+                ringDegree: vssFixtureRingDegree,
+                publicMatrixSeedHash,
+                publicKeyCrpRoot,
+                publicAPolynomialRoot,
+                publicKeyShares,
+                materialContributions: publicKeyShareMaterialContributions,
+            });
+        const publicKeyShareProofAccountingHash = hashFromKernel(
+            kernel,
+            'public-key-share-proof-accounting',
+        );
+        const publicKeyShareSuccinctProofs =
+            publicSetupApi.createPublicKeyShareSuccinctProofSet({
+                setupContext,
+                qSharePrimes,
+                participantCount,
+                publicMatrixSeedHash,
+                publicKeyCrpRoot,
+                publicAPolynomialRoot,
+                sameSecretConsistency,
+                sameSecretProofs,
+                publicKeyShares,
+                publicKeyShareProofs,
+                publicKeyShareMaterial,
+                proofAccountingHash: publicKeyShareProofAccountingHash,
+                proofMaterials: (
+                    publicKeyShareProofs.proofRecords as readonly Record<
+                        string,
+                        unknown
+                    >[]
+                ).map((proofRecord) =>
+                    publicKeyShareSuccinctProofMaterial(kernel, proofRecord),
+                ),
+            });
+        const evaluatorKeySchedule = publicSetupApi.createEvaluatorKeySchedule({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            publicMatrixSeedHash,
+            relinearizationCrpRoot,
+            galoisKeyCrpRoot,
+            sameSecretConsistency,
+            publicKeyShares,
+            publicKeyShareProofs,
+            requiredGaloisKeySchedule,
+        });
+        const relinearizationLevelSchedule =
+            evaluatorKeySchedule.relinearizationLevelSchedule as readonly {
+                readonly level: number;
+            }[];
+        const sameSecretProofReferences =
+            sameSecretProofReferencesFromSet(sameSecretProofs);
+        const commonEvaluationKeyInput = {
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            evaluatorKeySchedule,
+            sameSecretProofSetRoot: sameSecretProofs.sameSecretProofSetRoot,
+            sameSecretProofFamilyBindingRoot:
+                sameSecretConsistency.sameSecretProofFamilyBindingRoot,
+            publicKeyShareSuccinctProofSetRoot:
+                publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
+            sameSecretProofReferences,
+        };
+        const relinearizationLevels = relinearizationLevelSchedule.map(
+            (scheduleEntry) => scheduleEntry.level,
+        );
+        const roundOneContributions = sameSecretProofReferences.flatMap(
+            (reference) =>
+                relinearizationLevels.map((level) => {
+                    const contributionLabel = `${String(reference.trusteeRosterPosition)}-${String(level)}`;
+                    const roundOneShareRoot = hashFromKernel(
+                        kernel,
+                        `round-one-share-${contributionLabel}`,
+                    );
+
+                    return {
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        level,
+                        roundOneShareRoot,
+                        shareMaterial: relinearizationShareMaterial(
+                            kernel,
+                            evaluatorKeySchedule,
+                            roundOneShareRoot,
+                            `round-one-${contributionLabel}`,
+                            'round-one',
+                            level,
+                        ),
+                    };
+                }),
+        );
+        const roundTwoContributions = sameSecretProofReferences.flatMap(
+            (reference) =>
+                relinearizationLevels.map((level) => {
+                    const contributionLabel = `${String(reference.trusteeRosterPosition)}-${String(level)}`;
+                    const roundTwoShareRoot = hashFromKernel(
+                        kernel,
+                        `round-two-share-${contributionLabel}`,
+                    );
+
+                    return {
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        level,
+                        roundTwoShareRoot,
+                        shareMaterial: relinearizationShareMaterial(
+                            kernel,
+                            evaluatorKeySchedule,
+                            roundTwoShareRoot,
+                            `round-two-${contributionLabel}`,
+                            'round-two',
+                            level,
+                        ),
+                    };
+                }),
+        );
+        const relinearizationKeyShareRounds =
+            publicSetupApi.createRelinearizationKeyShareRounds({
+                ...commonEvaluationKeyInput,
+                roundOneContributions,
+                roundTwoContributions,
+            });
+        const galoisKeyShareBatches =
+            publicSetupApi.createGaloisKeyShareBatches({
+                ...commonEvaluationKeyInput,
+                batchContributions: sameSecretProofReferences.map(
+                    (reference) => ({
+                        trusteeRosterPosition: reference.trusteeRosterPosition,
+                        galoisKeyShares: requiredGaloisKeySchedule.map(
+                            (scheduleEntry) => {
+                                const galoisKeyShareRoot = hashFromKernel(
+                                    kernel,
+                                    `galois-share-${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.rotation)}`,
+                                );
+
+                                return {
+                                    rotation: scheduleEntry.rotation,
+                                    level: scheduleEntry.level,
+                                    galoisKeyShareRoot,
+                                    shareMaterial: galoisShareMaterial(
+                                        kernel,
+                                        evaluatorKeySchedule,
+                                        galoisKeyShareRoot,
+                                        `${String(reference.trusteeRosterPosition)}-${String(scheduleEntry.rotation)}`,
+                                        scheduleEntry.rotation,
+                                        scheduleEntry.level,
+                                    ),
+                                };
+                            },
+                        ),
+                    }),
+                ),
+            });
+        const publicEvaluationKeys =
+            publicSetupApi.createPublicEvaluationKeySet({
+                ...commonEvaluationKeyInput,
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches,
+            });
+        const trusteeEvaluationKeyProofsWithoutRoot = {
+            objectType: 'TrusteeEvaluationKeyProofSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            relinearizationKeyShareRoundsRoot:
+                relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+            proofRecords: [],
+        };
+        const trusteeEvaluationKeyProofs = {
+            ...trusteeEvaluationKeyProofsWithoutRoot,
+            trusteeEvaluationKeyProofSetRoot: kernel.deriveProtocolHash({
+                namespace: 'TrusteeEvaluationKeyProofSetRoot',
+                value: trusteeEvaluationKeyProofsWithoutRoot,
+            }),
+        };
+        const privateVssEnvelopeCommitmentRoot = hashFromKernel(
+            kernel,
+            'package-private-vss-envelope-root',
+        );
+        const setupTransportChunkCount = Math.ceil(
+            Number(
+                setupProfile.publicVssCommitmentMaterialSizeProfile
+                    .fullMaterialCoefficientBytes,
+            ) / setupTransportChunkSizeBytes,
+        );
+        const transportedCompanionObjects = [
+            {
+                objectName: 'sameSecretProofMaterial',
+                objectRole: 'same-secret-proof-material',
+                objectRoot: sameSecretProofs.sameSecretProofSetRoot,
+            },
+            {
+                objectName: 'publicKeyShareMaterial',
+                objectRole: 'public-key-share-material',
+                objectRoot:
+                    publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
+            },
+            {
+                objectName: 'publicKeyShareProofMaterial',
+                objectRole: 'public-key-share-proof-material',
+                objectRoot:
+                    publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
+            },
+            {
+                objectName: 'evaluationKeyShareComponentMaterial',
+                objectRole: 'evaluation-key-share-component-material',
+                objectRoot:
+                    relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+            },
+            {
+                objectName: 'evaluationKeyShareProofMaterial',
+                objectRole: 'evaluation-key-share-proof-material',
+                objectRoot:
+                    trusteeEvaluationKeyProofs.trusteeEvaluationKeyProofSetRoot,
+            },
+            {
+                objectName: 'publicEvaluationKeyMaterial',
+                objectRole: 'public-evaluation-key-material',
+                objectRoot: hashFromKernel(
+                    kernel,
+                    'public-evaluation-key-material-root',
+                ),
+            },
+        ].map((transportedObject, transportedObjectIndex) => ({
+            ...transportedObject,
+            byteLength: 4 + transportedObjectIndex,
+            fullObjectHash: hashFromKernel(
+                kernel,
+                `transported-companion-full-object-${String(transportedObjectIndex)}`,
+            ),
+            chunkRoot: hashFromKernel(
+                kernel,
+                `transported-companion-chunk-root-${String(transportedObjectIndex)}`,
+            ),
+            chunkHashes: [
+                hashFromKernel(
+                    kernel,
+                    `transported-companion-chunk-${String(transportedObjectIndex)}`,
+                ),
+            ],
+        }));
+        const transportedCompanionChunkHashes =
+            transportedCompanionObjects.flatMap(
+                (transportedObject) => transportedObject.chunkHashes,
+            );
+        const transportedCompanionByteLength =
+            transportedCompanionObjects.reduce(
+                (totalByteLength, transportedObject) =>
+                    totalByteLength + transportedObject.byteLength,
+                0,
+            );
+        const setupTransport = {
+            fullObjectHash: hashFromKernel(
+                kernel,
+                'setup-transport-full-object',
+            ),
+            chunkHashes: Array.from(
+                { length: setupTransportChunkCount },
+                (_unused, chunkIndex) =>
+                    hashFromKernel(
+                        kernel,
+                        `setup-transport-chunk-${String(chunkIndex)}`,
+                    ),
+            ),
+            transportedObjects: transportedCompanionObjects,
+        };
+        const setupCertificates = publicSetupApi.createSetupCertificates({
+            setupProfile,
+            bgvProfile,
+            vssCoefficientCommitmentMaterial,
+            transport: setupTransport,
+            sameSecretLinkageAnchorProofAccounting: {
+                objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+                objectVersion: 1,
+                fixture: 'sdk-same-secret-linkage-anchor-accounting',
+            },
+            publicKeyShareProofAccounting: {
+                objectType: 'SuccinctPublicKeyShareAccounting',
+                objectVersion: 1,
+                fixture: 'sdk-public-key-share-accounting',
+            },
+            trusteeEvaluationKeyProofAccounting: {
+                objectType: 'SuccinctEvaluationKeyProofAccounting',
+                objectVersion: 1,
+                fixture: 'sdk-trustee-evaluation-key-accounting',
+            },
+        });
+        expect(() =>
+            publicSetupApi.createSetupCertificates({
+                setupProfile,
+                bgvProfile,
+                vssCoefficientCommitmentMaterial,
+                transport: {
+                    ...setupTransport,
+                    transportedObjects: [
+                        transportedCompanionObjects[0],
+                        {
+                            ...transportedCompanionObjects[1],
+                            objectRoot:
+                                transportedCompanionObjects[0].objectRoot,
+                        },
+                    ],
+                },
+                sameSecretLinkageAnchorProofAccounting: {
+                    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-duplicate-transport-root-same-secret-accounting',
+                },
+                publicKeyShareProofAccounting: {
+                    objectType: 'SuccinctPublicKeyShareAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-duplicate-transport-root-public-key-accounting',
+                },
+                trusteeEvaluationKeyProofAccounting: {
+                    objectType: 'SuccinctEvaluationKeyProofAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-duplicate-transport-root-evaluation-key-accounting',
+                },
+            }),
+        ).toThrow(/duplicate object roots/u);
+        expect(() =>
+            publicSetupApi.createSetupCertificates({
+                setupProfile,
+                bgvProfile,
+                vssCoefficientCommitmentMaterial,
+                transport: {
+                    ...setupTransport,
+                    transportedObjects: [
+                        {
+                            ...transportedCompanionObjects[0],
+                            byteLength: setupTransportChunkSizeBytes + 1,
+                        },
+                    ],
+                },
+                sameSecretLinkageAnchorProofAccounting: {
+                    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-mismatched-transport-chunks-same-secret-accounting',
+                },
+                publicKeyShareProofAccounting: {
+                    objectType: 'SuccinctPublicKeyShareAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-mismatched-transport-chunks-public-key-accounting',
+                },
+                trusteeEvaluationKeyProofAccounting: {
+                    objectType: 'SuccinctEvaluationKeyProofAccounting',
+                    objectVersion: 1,
+                    fixture:
+                        'sdk-mismatched-transport-chunks-evaluation-key-accounting',
+                },
+            }),
+        ).toThrow(/chunkHashes length/u);
+        const setupCommitmentSecurityCertificate =
+            setupCertificates.setupCommitmentSecurityCertificate as Record<
+                string,
+                unknown
+            >;
+        const setupTransportCertificate =
+            setupCertificates.setupTransportCertificate as Record<
+                string,
+                unknown
+            >;
+        const heSecurityCertificate =
+            setupCertificates.heSecurityCertificate as Record<string, unknown>;
+        const heAssessedRing = heSecurityCertificate.assessedRing as Record<
+            string,
+            unknown
+        >;
+        const heEstimatorBinding =
+            heSecurityCertificate.estimatorBinding as Record<string, unknown>;
+
+        expect(heAssessedRing.largestExposedBasisClass).toBe('Q_data');
+        expect(heAssessedRing.largestExposedModulusBits).toBe(
+            heAssessedRing.dataPrimeCeilLog2Product,
+        );
+        expect(heAssessedRing.largestExposedModulusBits).not.toBe(
+            heAssessedRing.extendedUtilityCeilLog2Product,
+        );
+        expect(heEstimatorBinding).toMatchObject({
+            estimatorCommit: '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5',
+            estimatorDefaultCostModel: 'RC.MATZOV',
+            estimatorOutputCanonicalization:
+                heEstimatorArtifactCanonicalization,
+            estimatorOutputCanonicalSha256: heEstimatorArtifactCanonicalSha256,
+            largestExposedBasisClass: 'Q_data',
+            largestExposedModulusBits: heAssessedRing.dataPrimeCeilLog2Product,
+        });
+        const commonRandomnessWithoutRoot = {
+            objectType: 'SetupCommonRandomness',
+            objectVersion: 1,
+            ceremonyId: setupContext.ceremonyId,
+            manifestHash: setupContext.manifestHash,
+            rosterHash: setupContext.rosterHash,
+            setupProfileHash: setupContext.setupProfileHash,
+            setupEpoch: setupContext.setupEpoch,
+            publicMatrixSeedHash,
+            publicDerivations,
+            commitRecords: [],
+            revealRecords: [],
+        } as const;
+        const setupPackageInput = {
+            setupContext,
+            qShare: setupProfile.qShare,
+            phaseTranscript: phaseTranscriptFixture(kernel, setupContext),
+            commonRandomness: {
+                ...commonRandomnessWithoutRoot,
+                commonRandomnessRoot: kernel.deriveProtocolHash({
+                    namespace: 'SetupCommonRandomnessRoot',
+                    value: commonRandomnessWithoutRoot,
+                }),
+            },
+            vssCoefficientCommitments,
+            vssCoefficientCommitmentMaterial,
+            privateVssEnvelopeCommitments: {
+                objectType: 'PrivateVssEnvelopeCommitmentSet',
+                objectVersion: 1,
+                ...contextFields(setupContext),
+                privateVssEnvelopeCommitmentRoot,
+                envelopeReferences: [
+                    {
+                        objectType: 'PrivateVssEnvelopeCommitment',
+                        objectVersion: 1,
+                        ...contextFields(setupContext),
+                        sourceTrusteeIdentity: 'trustee-0',
+                        sourceTrusteeRosterPosition: 0,
+                        recipientIdentity: 'trustee-1',
+                        recipientRosterPosition: 1,
+                        privateEnvelopeCommitmentRoot: hashFromKernel(
+                            kernel,
+                            'package-private-envelope-commitment',
+                        ),
+                        encryptedEnvelopeHash: hashFromKernel(
+                            kernel,
+                            'package-encrypted-envelope',
+                        ),
+                        privateEnvelopeHash: hashFromKernel(
+                            kernel,
+                            'package-private-envelope',
+                        ),
+                        localVerificationRoot: hashFromKernel(
+                            kernel,
+                            'package-local-verification',
+                        ),
+                        encryptedEnvelope: {
+                            objectType: 'EncryptedPrivateVssShareEnvelope',
+                            ciphertextBytesHex: '00',
+                        },
+                        transportedPrivateVssShareProofMaterial: {
+                            objectType:
+                                'SetupTransportedPrivateVssShareProofMaterialSet',
+                        },
+                    },
+                ],
+            },
+            vssShareAcceptances: {
+                objectType: 'VssShareAcceptanceSet',
+                objectVersion: 1,
+                ...contextFields(setupContext),
+                privateVssEnvelopeCommitmentRoot,
+                acceptanceRecords: [],
+                vssShareAcceptanceRoot: hashFromKernel(
+                    kernel,
+                    'package-acceptance-root',
+                ),
+            },
+            sameSecretConsistency,
+            sameSecretProofs,
+            publicKeyShares,
+            publicKeyShareProofs,
+            publicKeyShareMaterial,
+            publicKeyShareSuccinctProofs,
+            evaluatorKeySchedule,
+            relinearizationKeyShareRounds,
+            galoisKeyShareBatches,
+            trusteeEvaluationKeyProofs,
+            evaluationKeys: publicEvaluationKeys,
+            setupCertificateInput: {
+                setupProfile,
+                bgvProfile,
+                transport: setupTransport,
+            },
+        };
+        const setupPackage =
+            publicSetupApi.createSetupPackage(setupPackageInput);
+        const { setupPackageHash, ...setupPackageHashInput } = setupPackage;
+
+        expect(publicKeyShares).toMatchObject({
+            objectType: 'PublicKeyShareSet',
+            publicMatrixSeedHash,
+        });
+        expect(relinearizationKeyShareRounds.objectType).toBe(
+            'RelinearizationKeyShareRounds',
+        );
+        expect(
+            Array.isArray(relinearizationKeyShareRounds.roundOneRecords),
+        ).toBe(true);
+        expect(
+            Array.isArray(relinearizationKeyShareRounds.roundTwoRecords),
+        ).toBe(true);
+        expect(galoisKeyShareBatches).toHaveLength(participantCount);
+        expect(publicEvaluationKeys).toMatchObject({
+            objectType: 'PublicEvaluationKeySet',
+            rawKeyBytesEmbedded: false,
+            verifierGeneratedKeyMaterial: false,
+            relinearizationKeyShareRoundsRoot:
+                relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
+        });
+        expect(setupPackage).toMatchObject({
+            objectType: 'SetupPackage',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupContext,
+            collectivePublicKey: {
+                objectType: 'CollectivePublicKey',
+                publicKeyShareMaterialSetRoot:
+                    publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
+                publicKeyShareSuccinctProofSetRoot:
+                    publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofSetRoot,
+            },
+            privateVssEnvelopeCommitmentRoot,
+            evaluationKeys: publicEvaluationKeys,
+            setupCommitmentSecurityCertificate,
+            setupTransportCertificate,
+            heSecurityCertificate,
+        });
+        expect(setupPackage.collectivePublicKeyRoot).toBe(
+            (setupPackage.collectivePublicKey as Record<string, unknown>)
+                .collectivePublicKeyRoot,
+        );
+        expect(setupPackage.setupTransportCertificate).toMatchObject({
+            chunkSizeBytes: setupTransportChunkSizeBytes,
+            chunkCount:
+                setupTransportChunkCount + transportedCompanionObjects.length,
+            totalByteLength:
+                Number(
+                    setupProfile.publicVssCommitmentMaterialSizeProfile
+                        .fullMaterialCoefficientBytes,
+                ) + transportedCompanionByteLength,
+            chunkHashes: [
+                ...setupTransport.chunkHashes,
+                ...transportedCompanionChunkHashes,
+            ],
+        });
+        expect(
+            (setupPackage.setupTransportCertificate as Record<string, unknown>)
+                .transportedObjects,
+        ).toMatchObject([
+            {
+                objectName: 'vssCoefficientCommitmentMaterial',
+                objectRole: 'public-vss-coefficient-commitment-material',
+                chunkStartIndex: 0,
+                chunkCount: setupTransportChunkCount,
+            },
+            ...transportedCompanionObjects.map(
+                (transportedObject, transportedObjectIndex) => ({
+                    objectName: transportedObject.objectName,
+                    objectRole: transportedObject.objectRole,
+                    objectRoot: transportedObject.objectRoot,
+                    byteLength: transportedObject.byteLength,
+                    chunkStartIndex:
+                        setupTransportChunkCount + transportedObjectIndex,
+                    chunkCount: 1,
+                    chunkHashes: transportedObject.chunkHashes,
+                    fullObjectHash: transportedObject.fullObjectHash,
+                    encoding: 'binary',
+                    loadingPolicy: 'stream-verified-before-object-use',
+                }),
+            ),
+        ]);
+        expect(setupPackage.setupCommitmentSecurityCertificateHash).toBe(
+            setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash,
+        );
+        expect(
+            (setupPackage.thresholdShareCommitments as Record<string, unknown>)
+                .thresholdShareCommitmentRoot,
+        ).toMatch(/^[0-9a-f]{128}$/u);
+        expect(setupPackageHash).toBe(
+            kernel.deriveProtocolHash({
+                namespace: 'SetupPackageHash',
+                value: setupPackageHashInput,
+            }),
+        );
+        expect(JSON.stringify(setupPackage)).not.toContain(
+            '"encryptedEnvelope":',
+        );
+        expect(JSON.stringify(setupPackage)).not.toContain(
+            '"transportedPrivateVssShareProofMaterial":',
+        );
+        expect(
+            JSON.stringify({
+                relinearizationKeyShareRounds,
+                galoisKeyShareBatches,
+                publicEvaluationKeys,
+                setupPackage,
+            }),
+        ).not.toMatch(
+            /secretCoefficients|openingRandomness|roundOneAggregateSourceCoefficients|proofGeneration/u,
+        );
+        expect(() =>
+            publicSetupApi.createSetupPackage({
+                ...setupPackageInput,
+                thresholdShareCommitments: {
+                    ...(setupPackage.thresholdShareCommitments as Record<
+                        string,
+                        unknown
+                    >),
+                    thresholdShareCommitmentRoot: hashFromKernel(
+                        kernel,
+                        'stale-threshold-share-commitment',
+                    ),
+                },
+            }),
+        ).toThrow(/verifier-derived commitments/u);
+        for (const requiredPublicKeyClosureField of [
+            'sameSecretProofs',
+            'publicKeyShareMaterial',
+            'publicKeyShareSuccinctProofs',
+        ]) {
+            const incompleteSetupPackageInput = {
+                ...setupPackageInput,
+            };
+            delete incompleteSetupPackageInput[
+                requiredPublicKeyClosureField as keyof typeof incompleteSetupPackageInput
+            ];
+
+            expect(() =>
+                publicSetupApi.createSetupPackage(incompleteSetupPackageInput),
+            ).toThrow(
+                new RegExp(
+                    `${requiredPublicKeyClosureField} must be an object`,
+                    'u',
+                ),
+            );
+        }
+    });
+});

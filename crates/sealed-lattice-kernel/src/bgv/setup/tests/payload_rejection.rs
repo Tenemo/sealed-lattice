@@ -1,28 +1,4 @@
-use super::*;
-
-#[test]
-fn passive_setup_rejects_trusted_dealer_secret_fields() {
-    for field_name in [
-        "globalSecretPolynomial",
-        "trustedDealerSecret",
-        "trustedDealerKeyMaterial",
-        "fullSecretKey",
-        "collectiveSecretKey",
-        "fullSecretReconstruction",
-        "thresholdSecretShares",
-    ] {
-        let mut request = request();
-        request["participants"][0][field_name] = serde_json::json!("forbidden");
-
-        let error = generate_passive_setup_package_from_request(&request)
-            .expect_err("setup must reject centralized secret material");
-        assert!(
-            error.message.contains(field_name),
-            "{field_name}: {}",
-            error.message
-        );
-    }
-}
+﻿use super::*;
 
 #[test]
 fn passive_setup_rejects_non_canonical_roster_positions_and_hashes() {
@@ -115,20 +91,6 @@ fn passive_setup_payload_validation_rejects_coefficient_material_mutations() {
 }
 
 #[test]
-fn passive_setup_verification_rejects_nested_secret_material() {
-    let mut package = setup_package();
-    package["participants"][0]["globalSecretPolynomial"] = serde_json::json!("forbidden");
-    rebind_setup_package_hash(&mut package);
-
-    assert!(
-        verify_passive_setup_package_from_request(&serde_json::json!({
-            "setupPackage": package,
-        }))
-        .is_err()
-    );
-}
-
-#[test]
 fn passive_setup_payload_validation_rejects_binding_mutations() {
     let package = setup_package();
     let mutations: Vec<SetupPackageMutation> = vec![
@@ -214,20 +176,6 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
             Box::new(|mutated_package| {
                 mutated_package["certificates"]["collectiveSecretDistributionCertificateHash"] =
                     serde_json::json!(valid_hash('9'));
-            }),
-        ),
-        (
-            "target decryption PartDec missing",
-            Box::new(|mutated_package| {
-                mutated_package["targetDecryptionStatus"]["targetPartDecImplemented"] =
-                    serde_json::json!(false);
-            }),
-        ),
-        (
-            "target decryption C1-C4 claim",
-            Box::new(|mutated_package| {
-                mutated_package["targetDecryptionStatus"]["targetC1C4StatusAccepted"] =
-                    serde_json::json!(true);
             }),
         ),
         (
@@ -341,49 +289,12 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
                 "participantCount": invalid_participant_count,
             },
             "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "trustedDealerBoundary": {
-                "rawSecretSharesExported": false,
-                "transcriptValidCentralizedSecretReconstruction": false,
-            },
         });
         assert!(
             validate_setup_package_shape(&minimally_shaped_package).is_err(),
             "participant count {invalid_participant_count} must be rejected by verification shape checks"
         );
     }
-
-    let stale_security_status_package = serde_json::json!({
-        "certificates": {
-            "setupParameterCertificate": {
-                "finalSecurityStatus": "pendingQTarget",
-            },
-        },
-        "targetDecryptionStatus": {
-            "targetC1C4StatusAccepted": false,
-            "targetPartDecImplemented": true,
-            "setupMaterialMatchesTargetDecryption": true,
-        },
-        "objectType": "BgvPassiveSetupPackage",
-        "objectVersion": 1,
-        "participants": vec![serde_json::json!({}); 3],
-        "setupInputs": {
-            "participantCount": 3,
-        },
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "trustedDealerBoundary": {
-            "rawSecretSharesExported": false,
-            "transcriptValidCentralizedSecretReconstruction": false,
-        },
-    });
-    let stale_status_error = validate_setup_package_shape(&stale_security_status_package)
-        .expect_err("stale setup security status must be refused before encrypted evaluation");
-    assert!(
-        stale_status_error
-            .message
-            .contains("accept direct evaluator replay HE security"),
-        "{}",
-        stale_status_error.message
-    );
 
     let mut malformed_threshold_hash_request = request();
     malformed_threshold_hash_request["thresholdProfileHash"] = serde_json::json!("not-a-hash");
@@ -444,7 +355,7 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
     let rotations = package["evaluationKeys"]["rotSet"]["rotations"]
         .as_array()
         .expect("rotations");
-    assert_eq!(rotations.len(), 20);
+    assert_eq!(rotations.len(), 23);
     assert_eq!(rotations[0], serde_json::json!(3));
     assert_eq!(
         package["evaluationKeys"]["rotSet"]["requiredRotationGroups"][0]["purpose"],

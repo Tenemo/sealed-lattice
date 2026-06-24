@@ -8,7 +8,10 @@ import type {
     SignedBoardHead,
 } from '@sealed-lattice/types';
 
-import { isNonNegativeInteger } from '../common/verification-helpers.js';
+import {
+    isRecord,
+    isNonNegativeInteger,
+} from '../common/verification-helpers.js';
 
 type BoardEntryHashInput = {
     readonly boardPosition: number;
@@ -170,9 +173,6 @@ export const inclusionProofUsesMerklePath = (
 ): boolean =>
     inclusionProof.boardEntryCount !== undefined ||
     inclusionProof.boardEntryMerklePath !== undefined;
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-    typeof value === 'object' && value !== null;
 
 const isBoardEntryMerklePathStep = (
     value: unknown,

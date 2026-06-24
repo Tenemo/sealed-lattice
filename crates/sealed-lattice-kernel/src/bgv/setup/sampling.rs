@@ -117,6 +117,9 @@ pub(super) fn sample_small_distribution_offset(
     }
 }
 
+// Each coefficient position has a single hash-elected owner, so the collective
+// secret and error are a position-partition of single-draw samples and stay
+// within the per-coefficient bound (no n-fold variance blow-up).
 pub(super) fn bounded_collective_secret_share_coefficient(
     seed_hash: &str,
     participant_identities: &[String],
@@ -254,16 +257,28 @@ pub(super) fn sample_centered_binomial_eta2(
 }
 
 pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) -> Vec<u64> {
+    dense_public_residues_with_degree(seed_hash, label, modulus, POLYNOMIAL_DEGREE)
+}
+
+// Same per-position framing as `dense_public_residues` over an explicit
+// degree, so reduced development rings derive a prefix of the profile-ring
+// residues instead of a differently framed vector.
+pub(super) fn dense_public_residues_with_degree(
+    seed_hash: &str,
+    label: &str,
+    modulus: u64,
+    ring_degree: usize,
+) -> Vec<u64> {
     #[cfg(not(target_arch = "wasm32"))]
     {
-        (0..POLYNOMIAL_DEGREE)
+        (0..ring_degree)
             .into_par_iter()
             .map(|position| sample_residue(seed_hash, label, position, modulus))
             .collect()
     }
     #[cfg(target_arch = "wasm32")]
     {
-        (0..POLYNOMIAL_DEGREE)
+        (0..ring_degree)
             .map(|position| sample_residue(seed_hash, label, position, modulus))
             .collect()
     }
@@ -362,6 +377,8 @@ fn centered_binomial_eta2_coefficient(
 
 // Centered binomial distribution with eta=2, support [-2, 2]: takes 4 random
 // bits per sample and returns (b0 + b1) - (b2 + b3).
+// eta = 2 is the accepted error parameter: per-coefficient noise stays in
+// [-2, 2], which feeds the BGV noise budget and the commitment no-wrap bound.
 fn centered_binomial_eta2_from_bits(bits: u8) -> i64 {
     let low_weight = i64::from(bits & 1) + i64::from((bits >> 1) & 1);
     let high_weight = i64::from((bits >> 2) & 1) + i64::from((bits >> 3) & 1);
@@ -397,15 +414,16 @@ pub(super) fn negacyclic_product_mod(
     right: &[u64],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let left_ntt = forward_negacyclic_ntt(left, modulus)?;
-    let right_ntt = forward_negacyclic_ntt(right, modulus)?;
-    let product_ntt = left_ntt
-        .iter()
-        .zip(right_ntt.iter())
-        .map(|(left_value, right_value)| mul_mod(*left_value, *right_value, modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut left_ntt = left.to_vec();
+    let mut right_ntt = right.to_vec();
+    forward_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
+    forward_negacyclic_ntt_in_place(&mut right_ntt, modulus)?;
+    for (left_value, right_value) in left_ntt.iter_mut().zip(right_ntt.iter()) {
+        *left_value = mul_mod(*left_value, *right_value, modulus)?;
+    }
+    inverse_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
 
-    inverse_negacyclic_ntt(&product_ntt, modulus)
+    Ok(left_ntt)
 }
 
 pub(super) fn sample_values(values: &[u64]) -> Vec<Value> {
@@ -428,42 +446,6 @@ pub(super) fn sample_signed_values(values: &[i64]) -> Vec<Value> {
                 "position": position,
                 "value": values[position],
             })
-        })
-        .collect()
-}
-
-pub(super) fn sample_encryption_relation_checks(
-    message_residues: &[u64],
-    public_key_product: &[u64],
-    public_sample_product: &[u64],
-    scaled_error_zero_residues: &[u64],
-    scaled_error_one_residues: &[u64],
-) -> CanonicalResult<Vec<Value>> {
-    let modulus = DATA_PRIMES[0];
-    sample_positions()
-        .into_iter()
-        .map(|position| {
-            let component_zero = add_mod(
-                add_mod(
-                    public_key_product[position],
-                    scaled_error_zero_residues[position],
-                    modulus,
-                )?,
-                message_residues[position],
-                modulus,
-            )?;
-            let component_one = add_mod(
-                public_sample_product[position],
-                scaled_error_one_residues[position],
-                modulus,
-            )?;
-            Ok(json!({
-                "position": position,
-                "modulus": modulus,
-                "componentZeroCoefficient": component_zero,
-                "componentOneCoefficient": component_one,
-                "relationMatches": true,
-            }))
         })
         .collect()
 }
@@ -502,6 +484,8 @@ pub(super) fn reduce_unbiased_u64(candidate: u64, modulus: u64) -> Option<u64> {
         return None;
     }
     let modulus = u128::from(modulus);
+    // Rejection sampling: accept only the largest multiple of the modulus below
+    // 2^64 so the reduction is bias-free; None means resample.
     let accepted_candidate_count = ((1_u128 << 64) / modulus) * modulus;
     let candidate = u128::from(candidate);
     if candidate < accepted_candidate_count {

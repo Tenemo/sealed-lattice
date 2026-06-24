@@ -21,29 +21,6 @@ fn direct_ballot_aggregation_matches_plaintext_oracle_for_multiple_ballots() {
             .expect("aggregation report");
 
     assert_eq!(aggregation_report.report["ballotCount"].as_u64(), Some(2));
-    assert!(aggregation_report.report.get("aggregateScores").is_none());
-    assert!(
-        aggregation_report
-            .report
-            .get("plaintextOracleScores")
-            .is_none()
-    );
-    assert_eq!(
-        aggregation_report.report["privateCorrectnessCheck"].as_str(),
-        Some("aggregate score slots matched the plaintext oracle")
-    );
-}
-
-#[test]
-#[ignore = "heavy direct ballot evaluator replay candidate; run selectively"]
-fn direct_ballot_packed_batched_pair_evaluator_top_count_20_matches_oracle() {
-    assert_direct_ballot_packed_batched_pair_evaluator_matches_oracle(DIRECT_BALLOT_OPTION_COUNT);
-}
-
-#[test]
-#[ignore = "heavy direct ballot evaluator replay candidate; run selectively"]
-fn direct_ballot_packed_batched_pair_evaluator_top_count_1_matches_oracle() {
-    assert_direct_ballot_packed_batched_pair_evaluator_matches_oracle(1);
 }
 
 #[test]

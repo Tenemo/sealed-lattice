@@ -20,7 +20,6 @@ use participant_checks::validate_participant_setup_records;
 pub(super) fn validate_setup_package_internal_bindings(
     setup_package: &Value,
 ) -> CanonicalResult<()> {
-    reject_forbidden_setup_package_secret_fields(setup_package)?;
     let profile_hash = profile_hash()?;
     let backend_profile_hash = backend_profile_hash()?;
     compare_string_at_path(
@@ -127,7 +126,6 @@ pub(super) fn validate_setup_package_internal_bindings(
         &json!({
             "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "profileStatus": "target-decryption-profile-binding",
         }),
     )?;
     compare_string_at_path(
@@ -186,65 +184,6 @@ pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalRe
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "setupPackage is not a passive BGV setup package",
-        ));
-    }
-    if !bool_at_path(
-        setup_package,
-        &[
-            "targetDecryptionStatus",
-            "setupMaterialMatchesTargetDecryption",
-        ],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must mark target decryption material matching",
-        ));
-    }
-    if !bool_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetPartDecImplemented"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must mark target decryption PartDec implemented",
-        ));
-    }
-    if bool_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetC1C4StatusAccepted"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim target decryption C1-C4 certification",
-        ));
-    }
-    if bool_at_path(
-        setup_package,
-        &[
-            "trustedDealerBoundary",
-            "transcriptValidCentralizedSecretReconstruction",
-        ],
-    )? || bool_at_path(
-        setup_package,
-        &["trustedDealerBoundary", "rawSecretSharesExported"],
-    )? {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must not claim centralized secret reconstruction or raw share export",
-        ));
-    }
-    if string_at_path(
-        setup_package,
-        &[
-            "certificates",
-            "setupParameterCertificate",
-            "finalSecurityStatus",
-        ],
-    )? != "acceptedForDirectEvaluatorReplayTargetPending"
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "passive BGV setup package must accept direct evaluator replay HE security while keeping target modulus downstream",
         ));
     }
     let participants = setup_package

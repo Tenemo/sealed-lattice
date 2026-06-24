@@ -1,14 +1,42 @@
 use super::sampling::{
     reduce_unbiased_u64, sample_centered_binomial_eta2, sample_residue, sample_small_distribution,
 };
+use super::sharing::{
+    RnsShamirShare, canonical_trustee_point, evaluate_shamir_polynomial,
+    interpolate_shamir_constant_with_threshold,
+};
 use super::validation::{validate_setup_package_internal_bindings, validate_setup_package_shape};
+use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
-    DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE, data_basis_modulus_bits,
-    dense_centered_binomial_coefficients, development_evaluator_key_from_passive_setup_package,
-    extended_basis_modulus_bits, generate_passive_setup_package_from_request,
-    generate_passive_setup_public_evaluation_key_material_from_request,
-    read_public_evaluation_key_rotation_requests, sample_public_residues,
-    selected_public_evaluation_key_rotation_requests, verify_passive_setup_package_from_request,
+    DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE,
+    abort_threshold_share_commitment_transport_derivation_stream_request,
+    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
+    begin_threshold_share_commitment_transport_derivation_stream_request, data_basis_modulus_bits,
+    dense_centered_binomial_coefficients, derive_threshold_share_commitments_from_request,
+    derive_threshold_share_commitments_from_transport_request,
+    describe_collective_bgv_setup_profile, development_evaluator_key_from_passive_setup_package,
+    extended_basis_modulus_bits,
+    finish_threshold_share_commitment_transport_derivation_stream_request,
+    generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
+    release_verified_transported_vss_material_request, sample_public_residues,
+    selected_public_evaluation_key_rotation_requests,
+    verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
+    verify_private_vss_share_envelope_from_request,
+};
+use super::{
+    commitment::{
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
+        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+        compute_setup_commitment_for_tests, parse_setup_commitment_full_value,
+        setup_commitment_full_value, setup_commitment_root,
+    },
+    private_vss_share_proof::{
+        PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
+        PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
+        verify_private_vss_share_succinct_relation_proof,
+    },
+    trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash,
+    vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
 use crate::bgv::evaluator::{
     circuit::{EvaluatorContext, modulus_switch_to, multiply},
@@ -16,20 +44,26 @@ use crate::bgv::evaluator::{
     key_switch::{generate_galois_key, generate_relinearization_key, relinearize, rotate},
     top_k::DIRECT_COMPARISON_OUTPUT_LEVEL,
 };
-use crate::bgv::modular_arithmetic::{add_mod, sub_mod};
+use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
 use crate::bgv::ntt::forward_negacyclic_ntt;
 use crate::bgv::profile::PLAINTEXT_MODULUS;
 use crate::hashing::{derive_protocol_hash, hash512};
 use std::sync::OnceLock;
 
+mod accepted_setup;
 mod evaluation_key_material;
 mod generation_and_certificate;
+mod local_trustee_state;
 mod payload_rejection;
+mod private_vss;
 mod sampling;
+mod sharing_algebra;
+mod threshold_share_commitments;
+mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "cbc79bff6a4307499941d328417c4209a99a45f52f45a27d6c3ba8e17a11975b9282fd8e9f5affa12e8be695e2f7a89748b34ae41c16f19c53d5d88701f5564a";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "0afc588b05a79ca085f81bab52bfe3f2056ab36f7c53c29e8c8a77aa0d97bdb2753f496d78001e6af25a7626d4b9b0c2401934298b7f2fbf6e8d0d8337e101d6";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -162,12 +196,16 @@ fn level_one_public_context() -> &'static EvaluatorContext {
 }
 
 fn direct_comparison_rotation_request() -> (usize, usize) {
+    // Every scheduled rotation key now sits at the working level; the return
+    // rotation entry exercises truncated use at the comparison output level.
     let rotation_request = setup_package_ref()["evaluationKeys"]["rotationKeyRoots"]
         .as_array()
         .expect("rotation key roots")
         .iter()
-        .find(|entry| entry["level"].as_u64() == Some(DIRECT_COMPARISON_OUTPUT_LEVEL as u64))
-        .expect("direct-comparison return rotation key");
+        .find(|entry| {
+            entry["purpose"].as_str() == Some("generator-ordered-packed-rank-return-basis")
+        })
+        .expect("packed-rank return rotation key");
     let galois_element = rotation_request["rotation"]
         .as_u64()
         .expect("rotation")

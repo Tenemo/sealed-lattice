@@ -15,23 +15,32 @@ pub(super) fn recombine_target_decryption_shares(
     }
     let mut identities = BTreeSet::new();
     let mut roster_positions = BTreeSet::new();
+    let mut board_positions = BTreeSet::new();
     for share in &shares {
         let trustee_identity = string_at_path(&share.record, &["trusteeIdentity"])?.to_string();
-        if !identities.insert(trustee_identity) || !roster_positions.insert(share.roster_position) {
+        if !identities.insert(trustee_identity)
+            || !roster_positions.insert(share.roster_position)
+            || !board_positions.insert(share.board_position)
+        {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
-                "target recombination rejects duplicate trustee shares",
+                "target recombination rejects duplicate trustee, roster-position, or board-position shares",
             ));
         }
     }
-    shares.sort_by_key(|share| share.roster_position);
+    // Shares are selected deterministically by board position, but interpolation uses the roster-derived abscissa; the triple dedup prevents a trustee from re-submitting under a different board/roster slot.
+    shares.sort_by_key(|share| share.board_position);
     let selected = shares
         .into_iter()
         .take(target_share_profile.minimum_shares_for_interpolation)
         .collect::<Vec<_>>();
-    let selected_positions = selected
+    let selected_roster_positions = selected
         .iter()
         .map(|share| share.roster_position)
+        .collect::<Vec<_>>();
+    let selected_board_positions = selected
+        .iter()
+        .map(|share| share.board_position)
         .collect::<Vec<_>>();
     let target_id_slots =
         recombine_ciphertext_slots(&target_ciphertexts.target_id, &selected, |share| {
@@ -53,7 +62,8 @@ pub(super) fn recombine_target_decryption_shares(
             "targetContextHash": target_accepted.target_context_hash,
             "targetCiphertextHash": target_accepted.target_ciphertext_hash,
             "targetShareProfileHash": target_share_profile.hash,
-            "selectedRosterPositions": selected_positions,
+            "selectedBoardPositions": selected_board_positions,
+            "selectedRosterPositions": selected_roster_positions,
             "decodedTargetIds": decoded_target_ids,
             "decodedTargetOrders": decoded_target_orders,
         }),
@@ -69,21 +79,14 @@ pub(super) fn recombine_target_decryption_shares(
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
         "targetShareProfileHash": target_share_profile.hash,
         "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "shareEquation": TARGET_SHARE_EQUATION,
-        "recombinationEquation": "c0 + sum(lambda_i * PartDec_i(C_target)) over every active BGV data prime",
-        "selectedShareRule": SELECTED_SHARE_RULE,
         "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
         "decryptionThreshold": target_share_profile.decryption_threshold,
         "decryptionShareQuorum": target_share_profile.decryption_share_quorum,
-        "selectedRosterPositions": selected_positions,
+        "selectedBoardPositions": selected_board_positions,
+        "selectedRosterPositions": selected_roster_positions,
         "decodedTargetIds": decoded_target_ids,
         "decodedTargetOrders": decoded_target_orders,
         "decryptScaling": 1,
-        "statusLabels": [
-            "TargetBoundRecombinationComputed",
-            "AcceptedTargetContextBound",
-            "ShareProofCertificationPending"
-        ],
     }))
 }
 
@@ -95,19 +98,12 @@ pub(super) fn recombine_ciphertext_slots<F>(
 where
     F: Fn(&PartialDecryptionShare) -> &[Vec<u64>],
 {
+    // c0 is the message-bearing component; adding the sum of lambda_i * (c1*s_i) reconstructs c0 + c1*s = m + p*e, then centered reduction mod p recovers m.
     let mut accumulator = ciphertext.components[0].clone();
     for (limb_index, modulus) in ciphertext.primes().iter().enumerate() {
         let coefficients = lagrange_coefficients_at_zero_mod(shares, *modulus)?;
         for (share, lagrange_coefficient) in shares.iter().zip(coefficients) {
             let share_partials = partials(share);
-            if share_partials.len() != ciphertext.primes().len()
-                || share_partials[limb_index].len() != POLYNOMIAL_DEGREE
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "target decryption share payload shape does not match the ciphertext level",
-                ));
-            }
             for coefficient_index in 0..POLYNOMIAL_DEGREE {
                 let weighted = mul_mod(
                     share_partials[limb_index][coefficient_index],
@@ -127,6 +123,7 @@ where
     forward_negacyclic_ntt(&coefficients, crate::bgv::profile::PLAINTEXT_MODULUS)
 }
 
+// Interpolation is per RNS prime field, so abscissae must stay distinct mod each prime; the reduction is identity for the tiny roster points but the check is required in general.
 pub(super) fn lagrange_coefficients_at_zero_mod(
     shares: &[PartialDecryptionShare],
     modulus: u64,

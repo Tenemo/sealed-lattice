@@ -1,19 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { previousTimingDetailsVersion } from './constants.js';
-import { checkCommandTimingKey } from './durations.js';
-import { isRecord, isUsableDuration } from './guards.js';
-import type {
-    CheckCommandStatus,
-    CheckProgressHistoryMetric,
-    CheckProgressMetric,
-    CheckProgressStatus,
-    CheckProgressUnit,
-    CheckRunCommandTiming,
-    CheckRunLaneTiming,
-    CheckRunTimingDetails,
-    CheckTimingHistory,
+import { checkCommandTimingKey } from './formatting.js';
+import {
+    isRecord,
+    isUsableDuration,
+    previousTimingDetailsVersion,
+    type CheckCommandStatus,
+    type CheckProgressHistoryMetric,
+    type CheckProgressMetric,
+    type CheckProgressStatus,
+    type CheckProgressUnit,
+    type CheckRunCommandTiming,
+    type CheckRunLaneTiming,
+    type CheckRunTimingDetails,
+    type CheckTimingHistory,
 } from './types.js';
 
 const emptyTimingHistory = (): CheckTimingHistory => ({

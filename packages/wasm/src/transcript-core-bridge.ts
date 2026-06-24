@@ -1,14 +1,19 @@
 // Public entry point for the transcript-core WASM bridge.
 export { canonicalErrorCodes } from './transcript-core-bridge/kernel-contracts.js';
 export type {
+    BgvAcceptedSetupHandoff,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
+    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupVerification,
+    BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
-    BgvReferenceOracleRejection,
+    BgvPrivateVssShareEnvelopeVerification,
     BgvRnsProfileDescription,
+    BgvThresholdShareCommitmentDerivation,
     TranscriptCoreKernel,
 } from './transcript-core-bridge/kernel-contracts.js';
 export {

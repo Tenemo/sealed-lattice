@@ -28,7 +28,7 @@ type PinnedReference = {
     readonly allowedUse: string;
     readonly archivePath: string;
     readonly archiveSha256: string;
-    readonly claimBoundary: string;
+    readonly canonicalScopeNote: string;
     readonly containerBaseImage: string;
     readonly containerBaseImageHash: string;
     readonly goToolchain: string;
@@ -249,7 +249,7 @@ export const buildReferenceOracleHashBindings = (
     const profileRecord = {
         referenceName: pinnedReference.referenceName,
         allowedUse: pinnedReference.allowedUse,
-        claimBoundary: pinnedReference.claimBoundary,
+        canonicalScopeNote: pinnedReference.canonicalScopeNote,
         comparableScope: 'ring/RNS/NTT and coefficient arithmetic parity only',
         runtimeUse: pinnedReference.runtimeUse,
         protocolEvidenceUse: pinnedReference.protocolEvidenceUse,

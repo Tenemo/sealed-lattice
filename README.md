@@ -2,94 +2,94 @@
 
 > This project is under active implementation. It has not been audited or externally reviewed.
 
-[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Node source coverage](https://img.shields.io/endpoint?url=https://tenemo.github.io/sealed-lattice/coverage-badge.json)](https://tenemo.github.io/sealed-lattice/coverage-summary.json) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
-`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. The selected construction uses direct BGV-encrypted ballots, public ciphertext aggregation, mandatory mobile evaluator replay, target finality, and target-bound threshold decryption.
+`sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Every roster participant is intended to act as both voter and trustee. Untrusted services may store and distribute transcript objects, but the verification path is participant mobile browsers, not servers or dedicated heavy verifier machines.
 
-The public npm package is intentionally narrow while the protocol implementation is still being built and verified. It is not a complete voting library and must not be used for real ballot secrecy.
+The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
 
-## Selected construction
+## Selected direction
 
-The active project route is:
+The selected construction is:
 
 ```text
-direct BGV-encrypted ballots
--> post-quantum ballot validity proofs
+active-static secure-with-abort collective BGV setup
+-> direct BGV-encrypted ballots
+-> ballot validity proofs for the fixed encrypted-ballot relation
 -> public ciphertext aggregation
--> mandatory mobile evaluator replay
--> target finality
--> target-bound threshold decryption
+-> bounded-domain encrypted evaluator replay on mobile
+-> unanimous target finality for the first profile
+-> one-shot target-bound threshold decryption of C_target only
 ```
 
-The first claim-bearing mobile profile targets `n = 10`, `m = 20`, and every `1 <= K_top <= 20`. Larger profiles require separate mobile evidence before they can be treated as claim-bearing.
+The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. Current security limitations, profile caveats, HE evidence, and target-decryption boundaries are not repeated here; see [SECURITY.md](SECURITY.md).
 
 ## Current package boundary
 
-The published package currently supports development verification surfaces while the final direct voting API is being built. Use it for packaging, transcript, foundation, and verifier integration work, not for a complete voting ceremony.
+The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and narrow setup-development verification helpers. Reserved complete-protocol entry points fail closed until the matching implementation and verification work is complete.
 
-The final direct-path package surface must be defined around:
+Current package tests are development evidence only. They do not replace supported mobile runtime evidence, production hardening, or the complete protocol security boundary in [SECURITY.md](SECURITY.md).
 
-- setup verification;
-- encrypted ballot verification;
-- encrypted ballot aggregation;
-- mobile evaluator replay verification;
-- target finality verification;
-- target-bound decryption-share verification;
-- target recombination;
-- decoded result verification.
+## Installation
 
-The public package must not expose raw BGV decrypt, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
+```bash
+npm install sealed-lattice
+```
 
-Reserved complete-protocol entry points must fail closed until their direct-path claim gates are actually implemented.
+```bash
+pnpm add sealed-lattice
+```
 
-Foundation helpers now include an integrated public foundation verifier. One deterministic direct-route foundation transcript fixture verifies through the public package in Node and browser, integrated foundation mutations fail with structured refusals, and the packaged Rust/WASM transcript-core path matches the fixture roots under a foundation-only profile. Browser and mobile-emulated browser coverage is useful package evidence, but it is not supported-phone evidence.
+## Basic usage
 
-## Current implementation status
+```typescript
+import { deriveThresholdProfile, validatePollSpec } from "sealed-lattice";
 
-The direct encrypted ballot implementation has useful internal evidence:
+const pollValidation = validatePollSpec({
+    pollId: "board-election-2026",
+    question: "Which proposal should be adopted?",
+    options: ["Proposal A", "Proposal B"],
+    topOptionCount: 1,
+});
 
-- one 20-score direct BGV ballot can be encoded;
-- private preflight checks all 17 data-prime encryption equations against one shared encoded-message, randomizer, and error witness;
-- one internal binary proof checks all data-prime encryption equations, score-to-encoding linkage, exactly-one bucket sums, score weighted-sum constraints, one-hot Booleanity, randomizer support, and error support with one shared response vector;
-- the current internal proof is 18,626,400 bytes;
-- binary proof transport is chunked and publicly hash-bound inside the internal command, including proof length, chunk size/count, chunk hashes, chunk Merkle root, full proof hash, statement hash, ciphertext root, voter identity, action context, profile, collective key, ballot layout, and proof profile;
-- Node/WASM one-proof verification and aggregation pass through the internal command path;
-- Node/WASM 20-ballot proof verification and aggregation pass with internal binary chunk transport in about 76.4 s outer wall time, 372,528,000 total proof bytes, about 396 MB WASM linear memory after the run, and about 603 MB Node resident set after the run;
-- desktop Chromium proof smoke verifies one widened proof and aggregates one ballot with internal binary chunk transport in about 4.7 s and about 179 MB WASM linear memory after the run;
-- the internal command uses fresh CSPRNG proof-mask and ballot-encryption randomness by default in Node/WASM and browser helpers;
-- the internal command rejects reused encryption randomness, reused proof-mask randomness, and proof/encryption randomness overlap;
-- duplicate voter identities, out-of-order voter identities, invalid scores, and mismatched setup witness seeds reject before encryption and proof generation;
-- the packed batched-pair evaluator produces encrypted sparse target roots for requested top counts without publishing aggregate scores, ranks, comparisons, masks, evaluator intermediates, or decoded target slots;
-- one native one-ballot packed batched-pair replay matches the full 20-option target oracle at working level 8 in about 240 s;
-- target-accepted record and target-bound decryption-share verification refuse shares for any ciphertext other than the accepted target ciphertext;
-- target-bound threshold `PartDec` and recombination math compute context-bound Shamir partial decryptions for the accepted sparse target ciphertext pair and recover target ID/order slots with Lagrange interpolation.
+if (!pollValidation.ok) {
+    throw new Error(
+        pollValidation.errors[0]?.message ?? "Invalid poll specification.",
+    );
+}
 
-This evidence is not claim-bearing. The current blockers are:
+const thresholdProfile = deriveThresholdProfile({
+    rosterSize: 10,
+});
+```
 
-- weakest-relation proof soundness accounting, including score and one-hot checks that currently reduce over 65537;
-- zero-knowledge accounting, including replacement or formal redesign of witness-dependent support commitments;
-- Fiat-Shamir/QROM review;
-- public package proof transport for an accepted proof profile;
-- public accepted randomness API boundaries;
-- supported-phone mobile proof verification;
-- supported-phone mobile evaluator replay;
-- browser/mobile proof-copy and memory evidence;
-- target decryption share proof verification and certification;
-- smudging, noise, and C1-C4 target-decryption closure;
-- public target-decryption/recombination integration;
-- supported-phone mobile target-decryption/recombination evidence.
+`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdProfile` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
 
-## What is internal
+## What you can use today
 
-Several components exist only as workspace-internal implementation, test, or vector infrastructure:
+- poll specification validation and canonical hash derivation;
+- threshold and frozen roster profile derivation;
+- lifecycle transition and action capability checks;
+- board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
+- setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling;
+- foundation transcript verification through the packaged kernel;
+- package-boundary and public API smoke coverage for development integration.
 
-- `GF(65537)` arithmetic and plaintext top-k oracle helpers for tests;
-- sealed-lattice Rust/WASM BGV-RNS arithmetic, selected-prime arithmetic, RNS coefficient objects, NTT/INTT, plaintext basis conversion, `BGVBatchEncode_65537`, canonical plaintext/ciphertext roots, and object validation;
-- an internal direct encrypted ballot command for current implementation work;
-- Rust/WASM transcript-core commands used to keep TypeScript and native canonicalization behavior aligned;
-- development-only reference-oracle tooling and generated public test vectors.
+## What is not available yet
 
-These pieces are not exported as a public voting API.
+- a complete threshold voting workflow;
+- production-ready setup ceremony, ballot generation, or casting APIs;
+- public encrypted ballot package creation, verification, or accepted proof transport APIs;
+- public encrypted ballot aggregation APIs;
+- public bounded-domain mobile evaluator replay APIs;
+- production target-bound decryption, target recombination, or result release APIs;
+- production security claims; see [SECURITY.md](SECURITY.md).
+
+The public package must not expose raw BGV decryption, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
+
+## Security
+
+Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, and cryptographic caveats.
 
 ## Repository layout
 
@@ -115,14 +115,6 @@ sealed-lattice/
 - [Protocol spec](https://tenemo.github.io/sealed-lattice/spec/)
 - [API reference](https://tenemo.github.io/sealed-lattice/api/)
 
-## Installation
-
-```bash
-pnpm add sealed-lattice
-```
-
-Treat the package as a development verification package until the direct encrypted ballot API is explicitly published and audited.
-
 ## Development
 
 Install dependencies:
@@ -137,7 +129,7 @@ Run the main local validation gate:
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, Rust tests, and fast Node tests through the repository check runner.
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the non-heavy kernel Node tests through the repository check runner.
 
 For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
@@ -145,20 +137,29 @@ Run focused verification:
 
 ```bash
 pnpm run vectors
+pnpm run test:rust:kernel:heavy
 pnpm run test:node:fast
 pnpm run test:node:protocol
 pnpm run test:node:kernel
+pnpm run test:node:kernel:heavy
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
-pnpm run test:proof-benchmark
-pnpm run test:proof-benchmark:node
-pnpm run test:proof-benchmark:browser:desktop
 pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 
-Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should remain explicit and direct-path-only.
+The native Rust heavy lane now has constrained free-runner-knob evidence. On
+June 21, 2026, `pnpm run test:rust:kernel:heavy -- --no-run-log` completed with
+`57 passed; 0 failed` under `CARGO_INCREMENTAL=0`, `RAYON_NUM_THREADS=4`,
+`SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT=1`,
+`SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE=1`,
+`SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE=2`, and no checkpoint resume. The
+run finished in `17978.14s` and the measured process-tree peak RSS was
+`9.97 GiB`. This is native CI-runner setup/proof/key-transport evidence only; it
+is not browser, WASM, or supported-phone mobile runtime evidence.
+
+Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
 
 Build and package-smoke the published SDK:
 

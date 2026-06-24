@@ -1,32 +1,40 @@
 use super::*;
 
+// The consumed relinearization schedule: one key at the selected evaluator
+// working level. Every lower level the evaluator reaches uses the same key
+// through CRT-idempotent truncation, so no per-level keys are generated,
+// published, or proven.
 pub(super) fn selected_relinearization_levels() -> CanonicalResult<Vec<usize>> {
-    if DIRECT_COMPARISON_OUTPUT_LEVEL >= DATA_PRIMES.len() {
+    if SELECTED_EVALUATOR_WORKING_LEVEL >= DATA_PRIMES.len()
+        || DIRECT_COMPARISON_OUTPUT_LEVEL > SELECTED_EVALUATOR_WORKING_LEVEL
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "direct comparison output level must fit the selected data basis",
+            "selected evaluator schedule levels must fit the data basis",
         ));
     }
 
-    Ok((1..DATA_PRIMES.len()).collect())
+    Ok(vec![SELECTED_EVALUATOR_WORKING_LEVEL])
 }
 
 pub(super) fn selected_rotation_schedule_entries() -> CanonicalResult<Vec<RotationScheduleEntry>> {
     let mut entries_by_rotation_and_level = BTreeMap::new();
     for rotation in direct_score_packing_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level.insert(
-            (rotation, DATA_PRIMES.len() - 1),
+            (rotation, SELECTED_EVALUATOR_WORKING_LEVEL),
             "direct-score-packing-generator-basis",
         );
     }
     for rotation in packed_rank_forward_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level
-            .entry((rotation, DATA_PRIMES.len() - 1))
+            .entry((rotation, SELECTED_EVALUATOR_WORKING_LEVEL))
             .or_insert("generator-ordered-packed-rank-forward-basis");
     }
+    // Inverse-basis rotations run at the working level and at the comparison
+    // output level; one key at the working level serves both via truncation.
     for rotation in packed_rank_return_basis_galois_elements(MAXIMUM_OPTION_COUNT)? {
         entries_by_rotation_and_level.insert(
-            (rotation, DIRECT_COMPARISON_OUTPUT_LEVEL),
+            (rotation, SELECTED_EVALUATOR_WORKING_LEVEL),
             "generator-ordered-packed-rank-return-basis",
         );
     }

@@ -13,36 +13,36 @@ import type {
     ThresholdWarning,
 } from '@sealed-lattice/types';
 
-import { isNonNegativeInteger } from '../common/verification-helpers.js';
+import {
+    isNonNegativeInteger,
+    isProtocolHashString,
+} from '../common/verification-helpers.js';
 
 import { derivePollSpecHash } from './poll-spec.js';
 import {
-    mandatoryBenchmarkRosterSize,
+    firstProfileRosterSize,
     maximumSupportedRosterSize,
     minimumDynamicRosterSize,
     minimumSupportedRosterSize,
-    strictLessThanOneThirdModel,
+    structuralOneThirdModel,
     targetBoundShareSelectionProfileId,
     targetDecryptionProfileId,
 } from './profiles.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
 const normalizeDynamicRosterProfileCertificateHash = (
     hash: ProtocolHash | undefined,
-): ProtocolHash | null =>
-    hash !== undefined && protocolHashPattern.test(hash) ? hash : null;
+): ProtocolHash | null => (isProtocolHashString(hash) ? hash : null);
 
 const normalizeBackendCorruptionModel = (
     rosterSize: number,
     model: HeBackendCorruptionModel | undefined,
 ): HeBackendCorruptionModel => {
     if (model === undefined) {
-        return strictLessThanOneThirdModel;
+        return structuralOneThirdModel;
     }
 
-    if (model.kind === 'StrictLessThanOneThird') {
-        return strictLessThanOneThirdModel;
+    if (model.kind === 'StructuralOneThird') {
+        return structuralOneThirdModel;
     }
 
     if (!isNonNegativeInteger(model.backendCorruptionBound)) {
@@ -187,8 +187,6 @@ const deriveRosterProfile = (
     rosterSize: number,
     input: ThresholdProfileInput,
 ): {
-    readonly claimBoundary: ThresholdProfile['claimBoundary'];
-    readonly claimBearing: boolean;
     readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
     readonly rosterProfileKind: RosterProfileKind;
     readonly warnings: readonly ThresholdWarning[];
@@ -200,7 +198,7 @@ const deriveRosterProfile = (
         throw new RangeError('Roster size must be at least 3.');
     }
     if (rosterSize > maximumSupportedRosterSize) {
-        throw new RangeError('Roster size must be at most 50.');
+        throw new RangeError('Roster size must be at most 20.');
     }
     const dynamicRosterProfileCertificateHash =
         normalizeDynamicRosterProfileCertificateHash(
@@ -215,26 +213,22 @@ const deriveRosterProfile = (
         }
 
         return {
-            claimBoundary: 'CasualMicroRoster',
-            claimBearing: false,
             dynamicRosterProfileCertificateHash: null,
             rosterProfileKind: 'CasualMicroRoster',
             warnings: ['CasualMicroRoster'],
         };
     }
-    if (rosterSize === mandatoryBenchmarkRosterSize) {
+    // Size 10 is the pre-certified first profile and is the only dynamic-range
+    // size that runs without a separate dynamic-roster parameter certificate.
+    if (rosterSize === firstProfileRosterSize) {
         return {
-            claimBoundary: 'MandatoryBenchmark',
-            claimBearing: true,
             dynamicRosterProfileCertificateHash: null,
-            rosterProfileKind: 'MandatoryBenchmarkRoster',
+            rosterProfileKind: 'FirstProfileRoster',
             warnings: [],
         };
     }
     if (dynamicRosterProfileCertificateHash !== null) {
         return {
-            claimBoundary: 'DynamicRosterCertificate',
-            claimBearing: true,
             dynamicRosterProfileCertificateHash,
             rosterProfileKind: 'SupportedDynamicRosterRange',
             warnings: [],
@@ -242,8 +236,6 @@ const deriveRosterProfile = (
     }
 
     return {
-        claimBoundary: 'DynamicRosterCertificateMissing',
-        claimBearing: false,
         dynamicRosterProfileCertificateHash: null,
         rosterProfileKind: 'UncertifiedDynamicRoster',
         warnings: ['DynamicRosterProfileCertificateRequired'],
@@ -262,11 +254,15 @@ export const deriveThresholdProfile = (
     // floor(n/3): tolerate up to a third corrupt (BFT-style 1/3 corruption
     // bound).
     const structuralCorruptionBound = Math.floor(rosterSize / 3);
-    // Strict model uses floor((n-1)/3): the largest f with n > 3f, i.e. a hard
-    // strictly-less-than-one-third backend bound.
+    // Structural one-third model uses floor(n/3): the default HE-backend
+    // corruption tolerance matches the structural bound, so the privacy bound
+    // is c_priv = floor(n/3) and the decryption threshold is q_dec =
+    // floor(n/3) + 1 (the stronger-privacy, non-degenerate convention; at n=3
+    // this is a real 2-of-3, never 1-of-3). This is sound under the
+    // secure-with-abort model, which does not require a strict n > 3f margin.
     const backendCorruptionBound =
-        backendCorruptionModel.kind === 'StrictLessThanOneThird'
-            ? Math.floor((rosterSize - 1) / 3)
+        backendCorruptionModel.kind === 'StructuralOneThird'
+            ? Math.floor(rosterSize / 3)
             : backendCorruptionModel.backendCorruptionBound;
     const privacyCorruptionBound = Math.min(
         structuralCorruptionBound,
@@ -285,12 +281,10 @@ export const deriveThresholdProfile = (
             decryptionThreshold,
             input.targetBoundShareSelectionProfile,
         );
-    // 2/3 turnout floor: ceil(2n/3) but never fewer than a hard floor of 10,
-    // and never more than the roster itself (min with n for small rosters).
-    const releaseQuorum = Math.min(
-        rosterSize,
-        Math.max(10, Math.ceil((2 * rosterSize) / 3)),
-    );
+    // Full-roster ballot release for the secure-with-abort phase: q_ballot_release
+    // = n. A flexible sub-unanimous turnout quorum (e.g. ceil(2n/3)) is a
+    // deferred future-profile concept and is intentionally not used here.
+    const releaseQuorum = rosterSize;
     const decryptionShareQuorum =
         targetBoundShareSelectionProfile?.decryptionShareQuorum ?? null;
     const maximumRaceShares = rosterSize;
@@ -311,8 +305,6 @@ export const deriveThresholdProfile = (
     return {
         rosterSize,
         rosterProfileKind: rosterProfile.rosterProfileKind,
-        claimBoundary: rosterProfile.claimBoundary,
-        claimBearing: rosterProfile.claimBearing,
         dynamicRosterProfileCertificateHash:
             rosterProfile.dynamicRosterProfileCertificateHash,
         structuralCorruptionBound,
@@ -347,8 +339,6 @@ export const deriveThresholdProfileHash = (input: {
         ballotReleaseFloor: input.thresholdProfile.ballotReleaseFloor,
         backendCorruptionBound: input.thresholdProfile.backendCorruptionBound,
         backendCorruptionModel: input.thresholdProfile.backendCorruptionModel,
-        claimBoundary: input.thresholdProfile.claimBoundary,
-        claimBearing: input.thresholdProfile.claimBearing,
         decryptionCorruptionBound:
             input.thresholdProfile.decryptionCorruptionBound,
         decryptionShareQuorum: input.thresholdProfile.decryptionShareQuorum,
@@ -407,11 +397,11 @@ export const deriveFrozenRosterProfile = (input: {
     }
     if (
         rosterSize >= minimumDynamicRosterSize &&
-        rosterSize !== mandatoryBenchmarkRosterSize &&
+        rosterSize !== firstProfileRosterSize &&
         dynamicRosterProfileCertificateHash === null
     ) {
         throw new Error(
-            'Dynamic claim-bearing roster profiles require parameter certificate coverage for the frozen roster size.',
+            'Dynamic roster profiles require parameter certificate coverage for the frozen roster size.',
         );
     }
 

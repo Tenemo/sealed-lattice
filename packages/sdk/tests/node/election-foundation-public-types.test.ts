@@ -33,6 +33,21 @@ type BlockedDirectInternalTypes = [
     publicTypes.TopKEvaluatorDirectAggregateInput,
 ];
 
+type BlockedSetupWitnessTypes = [
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.EvaluationKeyProofCommonInput,
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.EvaluationKeyShareProofGenerationBase,
+    // @ts-expect-error evaluation-key proof-generation outputs are not a public facade contract.
+    publicTypes.EvaluationKeyShareProofGenerationOutput,
+    // @ts-expect-error evaluation-key proof generators are not public facade inputs.
+    publicTypes.EvaluationKeyShareProofGenerator,
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.GaloisKeyShareProofGeneration,
+    // @ts-expect-error evaluation-key proof-generation inputs carry raw witness material.
+    publicTypes.RelinearizationKeyShareProofGeneration,
+];
+
 type PublicFoundationTypes = [
     publicTypes.AcceptedTargetFinalityCheckpoint,
     publicTypes.BoardConsistencyInput,
@@ -52,12 +67,112 @@ type PublicFoundationTypes = [
     publicTypes.TrusteeSetupEntry,
 ];
 
+// Verifier-only setup type surface. The setup-assembly builders and their input/output
+// types are no longer public; the relocated builders live in
+// packages/sdk/tests/support/internal-setup-flow.ts.
+type PublicSetupTypes = [
+    publicTypes.AcceptedSetupHandoff,
+    publicTypes.CollectiveBgvSetupContext,
+    publicTypes.PrivateVssShareVerification,
+    publicTypes.SetupPackage,
+    publicTypes.SetupPackageVerification,
+    publicTypes.SetupPackageVerificationInputSource,
+    publicTypes.SetupTransportedPublicKeyShareMaterial,
+    publicTypes.SetupTransportedVssCoefficientCommitmentMaterialLike,
+    publicTypes.TransportedEvaluationKeyShareComponentMaterialSet,
+    publicTypes.TransportedEvaluationKeyShareProofMaterialSet,
+    publicTypes.TransportedPublicEvaluationKeyMaterialSet,
+    publicTypes.TransportedPublicKeyShareProofMaterialSet,
+    publicTypes.TransportedSameSecretProofMaterialSet,
+    publicTypes.VerifiedSetupProofMaterial,
+    publicTypes.VerifiedSetupProofMaterialSet,
+    publicTypes.VerifiedVssCoefficientCommitmentMaterial,
+    publicTypes.VerifyPrivateVssShareInput,
+    publicTypes.VerifySetupPackageInput,
+];
+
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedDirectInternalTypes: BlockedDirectInternalTypes;
     readonly blockedTargetOpeningTypes: BlockedTargetOpeningTypes;
+    readonly blockedSetupWitnessTypes: BlockedSetupWitnessTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
+    readonly publicSetupTypes: PublicSetupTypes;
 };
+
+type OptionalInputField<Input, FieldName extends keyof Input> = Exclude<
+    Input[FieldName],
+    undefined
+>;
+
+type VerifySetupPackageTransportFieldProbe = [
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedVssCoefficientCommitmentMaterial'
+    > extends publicTypes.SetupTransportedVssCoefficientCommitmentMaterialLike
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'verifiedVssCoefficientCommitmentMaterial'
+    > extends publicTypes.VerifiedVssCoefficientCommitmentMaterial
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'verifiedSetupProofMaterials'
+    > extends publicTypes.VerifiedSetupProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedSameSecretProofMaterial'
+    > extends publicTypes.TransportedSameSecretProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedPublicKeyShareMaterial'
+    > extends publicTypes.SetupTransportedPublicKeyShareMaterial
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedPublicKeyShareProofMaterial'
+    > extends publicTypes.TransportedPublicKeyShareProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedEvaluationKeyShareProofMaterial'
+    > extends publicTypes.TransportedEvaluationKeyShareProofMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedEvaluationKeyShareComponentMaterial'
+    > extends publicTypes.TransportedEvaluationKeyShareComponentMaterialSet
+        ? true
+        : false,
+    OptionalInputField<
+        publicTypes.VerifySetupPackageInput,
+        'transportedPublicEvaluationKeyMaterial'
+    > extends publicTypes.TransportedPublicEvaluationKeyMaterialSet
+        ? true
+        : false,
+];
+
+const verifySetupPackageTransportFieldProbe = [
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+] as const satisfies VerifySetupPackageTransportFieldProbe;
 
 type PublicFoundationTypeNames = readonly string[] & {
     readonly length: PublicTypeSurfaceProbe['publicFoundationTypes']['length'];
@@ -82,8 +197,41 @@ const publicFoundationTypeNames = [
     'TrusteeSetupEntry',
 ] as const satisfies PublicFoundationTypeNames;
 
+type PublicSetupTypeNames = readonly string[] & {
+    readonly length: PublicTypeSurfaceProbe['publicSetupTypes']['length'];
+};
+
+const publicSetupTypeNames = [
+    'AcceptedSetupHandoff',
+    'CollectiveBgvSetupContext',
+    'PrivateVssShareVerification',
+    'SetupPackage',
+    'SetupPackageVerification',
+    'SetupPackageVerificationInputSource',
+    'SetupTransportedPublicKeyShareMaterial',
+    'SetupTransportedVssCoefficientCommitmentMaterialLike',
+    'TransportedEvaluationKeyShareComponentMaterialSet',
+    'TransportedEvaluationKeyShareProofMaterialSet',
+    'TransportedPublicEvaluationKeyMaterialSet',
+    'TransportedPublicKeyShareProofMaterialSet',
+    'TransportedSameSecretProofMaterialSet',
+    'VerifiedSetupProofMaterial',
+    'VerifiedSetupProofMaterialSet',
+    'VerifiedVssCoefficientCommitmentMaterial',
+    'VerifyPrivateVssShareInput',
+    'VerifySetupPackageInput',
+] as const satisfies PublicSetupTypeNames;
+
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
         expect(publicFoundationTypeNames).toHaveLength(16);
+    });
+
+    it('keeps the verifier-only accepted setup type surface available', () => {
+        expect(publicSetupTypeNames).toHaveLength(18);
+    });
+
+    it('keeps setup verifier transport companions on concrete public types', () => {
+        expect(verifySetupPackageTransportFieldProbe).toHaveLength(9);
     });
 });

@@ -1,7 +1,6 @@
 import {
     canonicalJson,
     deriveProtocolHash,
-    hash512,
     hash512Hex,
 } from '#packages/crypto/src/index';
 import {
@@ -33,6 +32,7 @@ import {
 import type {
     FoundationTranscriptInput,
     GoldenTranscriptCoreFixture,
+    MalformedObjectFixture,
     ProtocolHash,
     RegistrationEntry,
     RosterExternalAcceptance,
@@ -67,6 +67,23 @@ export type FoundationTranscriptExpectedHashes = {
 };
 
 const textEncoder = new TextEncoder();
+
+const hexToBytes = (hex: string): Uint8Array => {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+
+    return bytes;
+};
+
+const hash512Bytes = (
+    domain: string,
+    parts: readonly Uint8Array[],
+): Uint8Array => hexToBytes(hash512Hex(domain, parts));
 const transcriptCoreChunkSize = 8;
 
 const bytesToHex = (bytes: Uint8Array): string =>
@@ -120,7 +137,7 @@ const transcriptCoreChunkRoot = (
         chunkStart += chunkSize, chunkIndex += 1
     ) {
         leaves.push(
-            hash512('transcript-core/chunk-leaf', [
+            hash512Bytes('transcript-core/chunk-leaf', [
                 varUintBytes(chunkIndex),
                 canonicalBytes.slice(chunkStart, chunkStart + chunkSize),
             ]),
@@ -128,7 +145,7 @@ const transcriptCoreChunkRoot = (
     }
 
     if (leaves.length === 0) {
-        leaves.push(hash512('transcript-core/chunk-empty', []));
+        leaves.push(hash512Bytes('transcript-core/chunk-empty', []));
     }
 
     let currentLevel = leaves;
@@ -142,7 +159,7 @@ const transcriptCoreChunkRoot = (
             const left = currentLevel[leafIndex];
             const right = currentLevel[leafIndex + 1] ?? left;
             nextLevel.push(
-                hash512('transcript-core/chunk-node', [left, right]),
+                hash512Bytes('transcript-core/chunk-node', [left, right]),
             );
         }
         currentLevel = nextLevel;
@@ -157,6 +174,7 @@ const transcriptCoreChunkRoot = (
 
 const encodeFoundationTranscriptCoreBytes = (
     payloadBytes: Uint8Array,
+    statusCode = 1,
 ): Uint8Array => {
     const bytes: number[] = [];
     const tags = [
@@ -189,7 +207,7 @@ const encodeFoundationTranscriptCoreBytes = (
     appendVarUint(bytes, 3);
     appendBytes(bytes, payloadBytes);
     appendVarUint(bytes, 4);
-    appendVarUint(bytes, 1);
+    appendVarUint(bytes, statusCode);
     appendVarUint(bytes, 5);
     appendVarUint(bytes, tags.length);
     for (const tag of tags) {
@@ -204,10 +222,10 @@ const encodeFoundationTranscriptCoreBytes = (
     return Uint8Array.from(bytes);
 };
 
-export const createFoundationTranscriptCoreFixture = (
+const encodeFoundationTranscriptCorePayload = (
     expectedHashes: FoundationTranscriptExpectedHashes,
-): GoldenTranscriptCoreFixture => {
-    const payloadBytes = textEncoder.encode(
+): Uint8Array =>
+    textEncoder.encode(
         canonicalJson({
             expectedHashes,
             optionCount: foundationOptionCount,
@@ -217,11 +235,15 @@ export const createFoundationTranscriptCoreFixture = (
             topOptionCount: foundationTopOptionCount,
         }),
     );
+
+export const createFoundationTranscriptCoreFixture = (
+    expectedHashes: FoundationTranscriptExpectedHashes,
+): GoldenTranscriptCoreFixture => {
+    const payloadBytes = encodeFoundationTranscriptCorePayload(expectedHashes);
     const canonicalBytes = encodeFoundationTranscriptCoreBytes(payloadBytes);
 
     return {
-        baseClaimProfile: 'FoundationTranscript',
-        baseClaimProfileId: foundationTranscriptProfileId,
+        baseProfileId: foundationTranscriptProfileId,
         canonicalBytesHex: bytesToHex(canonicalBytes),
         caseName: 'foundation-transcript-roots',
         chunkSize: transcriptCoreChunkSize,
@@ -232,14 +254,30 @@ export const createFoundationTranscriptCoreFixture = (
             transcriptCoreChunkSize,
         ),
         expectedObjectHash512: transcriptCoreObjectRoot(canonicalBytes),
-        expectedStatusLabels: ['TranscriptCoreVerified'],
         fixtureVersion: 1,
         heSetupProofProfileId: noHeSetupProofProfileId,
         kind: 'golden-transcript-core',
-        mheSecurityClosure: 'FoundationOnly',
-        mheSecurityProfileId: foundationOnlyProfileId,
+        securityProfileId: foundationOnlyProfileId,
         objectType: 'TranscriptCore',
         objectVersion: 1,
+    };
+};
+
+export const createInvalidFoundationTranscriptStatusFixture = (
+    expectedHashes: FoundationTranscriptExpectedHashes,
+): MalformedObjectFixture => {
+    const payloadBytes = encodeFoundationTranscriptCorePayload(expectedHashes);
+    const canonicalBytes = encodeFoundationTranscriptCoreBytes(
+        payloadBytes,
+        99,
+    );
+
+    return {
+        canonicalBytesHex: bytesToHex(canonicalBytes),
+        caseName: 'invalid-enum',
+        expectedErrorCode: 'InvalidEnum',
+        fixtureVersion: 1,
+        kind: 'malformed-object',
     };
 };
 

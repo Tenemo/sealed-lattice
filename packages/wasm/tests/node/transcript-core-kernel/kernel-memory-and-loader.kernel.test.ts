@@ -136,6 +136,242 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
+    it('forwards accepted setup transported proof material', async () => {
+        const decodedCommands: unknown[] = [];
+        const commandResponse = {
+            success: true,
+            value: {
+                ok: false,
+                operation: 'verifyCollectiveBgvSetupPackage',
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                verifierStatus: 'refused',
+                currentPhase: 'setupPackageVerification',
+                acceptedHashes: [],
+                refusedObjects: [],
+            },
+        };
+        const { loadMockKernel } = createMockKernelExports({
+            commandPointer: 4096,
+            commandResponse,
+            onCommand: (command) => {
+                decodedCommands.push(command);
+            },
+            outputLengthAllocationPointer: 2048,
+        });
+        const kernel = await loadMockKernel();
+        const setupPackage = { objectType: 'SetupPackage' };
+        const hashOne = '1'.repeat(128);
+        const hashTwo = '2'.repeat(128);
+        const hashThree = '3'.repeat(128);
+        const emptyTransportChunk = { chunkIndex: 0, bytesHex: '00' };
+        const transportedVssCoefficientCommitmentMaterial = {
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            binaryFormat:
+                'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 1,
+            totalByteLength: 1,
+            fullObjectHash: hashOne,
+            chunkHashes: [hashOne],
+            chunkRoot: hashOne,
+            chunks: [emptyTransportChunk],
+            marker: 'vss-material',
+        } as const;
+        const transportedSameSecretProofMaterial = {
+            objectType: 'SetupTransportedSameSecretProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            proofFamily: 'same-secret-linkage-anchor',
+            proofMaterials: [],
+            marker: 'same-secret-proof',
+        } as const;
+        const transportedPublicKeyShareMaterial = {
+            objectType: 'SetupTransportedPublicKeyShareMaterial',
+            objectVersion: 1,
+            binaryFormat: 'sealed-lattice-public-key-share-material-binary-v1',
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 1,
+            totalByteLength: 1,
+            fullObjectHash: hashTwo,
+            chunkHashes: [hashTwo],
+            chunkRoot: hashTwo,
+            chunks: [emptyTransportChunk],
+            marker: 'public-key-share-material',
+        } as const;
+        const transportedPublicKeyShareProofMaterial = {
+            objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            proofFamily: 'public-key-share',
+            proofMaterials: [],
+            marker: 'public-key-proof',
+        } as const;
+        const transportedEvaluationKeyShareProofMaterial = {
+            objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            proofFamily: 'evaluation-key-share',
+            proofMaterials: [],
+            marker: 'evaluation-key-proof',
+        } as const;
+        const transportedEvaluationKeyShareComponentMaterial = {
+            objectType:
+                'SetupTransportedEvaluationKeyShareComponentMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            componentMaterials: [],
+            marker: 'evaluation-key-component-material',
+        } as const;
+        const transportedPublicEvaluationKeyMaterial = {
+            objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            materialEncoding:
+                'sealed-lattice-public-evaluation-key-material-binary-v1',
+            publicEvaluationKeyMaterials: [],
+            componentMaterials: [],
+            marker: 'public-evaluation-key-material',
+        } as const;
+        const verifiedSetupProofMaterials = {
+            objectType: 'VerifiedSetupProofMaterialSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            proofMaterials: [
+                {
+                    objectType: 'VerifiedSetupProofMaterial',
+                    objectVersion: 1,
+                    setupProfileId: 'CollectiveBgvSetup-v1',
+                    setupProofProfileId: 'SealedLattice-SetupProof-v1',
+                    verificationId: 'same-secret-proof-0',
+                    proofFamily: 'same-secret-linkage-anchor',
+                    proofMaterialRoot: hashOne,
+                    proofBytesEncoding: 'binary-chunked-proof-bytes',
+                    proofChunkSizeBytes: 1_048_576,
+                    proofChunkCount: 1,
+                    proofTotalByteLength: 1,
+                    proofFullObjectHash: hashOne,
+                    proofChunkRoot: hashOne,
+                    proofChunkHashes: [hashOne],
+                },
+            ],
+            marker: 'verified-setup-proof-materials',
+        } as const;
+
+        const result = kernel.verifyCollectiveBgvSetup({
+            setupPackage,
+            expectedSetupPackageHash: hashOne,
+            expectedManifestHash: hashTwo,
+            expectedRosterHash: hashThree,
+            transportedVssCoefficientCommitmentMaterial,
+            transportedSameSecretProofMaterial,
+            transportedPublicKeyShareMaterial,
+            transportedPublicKeyShareProofMaterial,
+            transportedEvaluationKeyShareProofMaterial,
+            transportedEvaluationKeyShareComponentMaterial,
+            transportedPublicEvaluationKeyMaterial,
+            verifiedSetupProofMaterials,
+        });
+
+        expect(result.verifierStatus).toBe('refused');
+        expect(decodedCommands).toEqual([
+            {
+                command: 'VerifyCollectiveBgvSetup',
+                setupPackage,
+                expectedSetupPackageHash: hashOne,
+                expectedManifestHash: hashTwo,
+                expectedRosterHash: hashThree,
+                transportedVssCoefficientCommitmentMaterial,
+                transportedSameSecretProofMaterial,
+                transportedPublicKeyShareMaterial,
+                transportedPublicKeyShareProofMaterial,
+                transportedEvaluationKeyShareProofMaterial,
+                transportedEvaluationKeyShareComponentMaterial,
+                transportedPublicEvaluationKeyMaterial,
+                verifiedSetupProofMaterials,
+            },
+        ]);
+    });
+
+    it('forwards setup proof material stream commands to the kernel', async () => {
+        const decodedCommands: unknown[] = [];
+        const hashOne = '1'.repeat(128);
+        const commandResponse = {
+            success: true,
+            value: {
+                ok: true,
+                operation: 'beginSetupProofMaterialTransportStream',
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId: 'SealedLattice-SetupProof-v1',
+                verificationId: 'same-secret-proof-0',
+                proofFamily: 'same-secret-linkage-anchor',
+                proofMaterialRoot: hashOne,
+                proofBytesEncoding: 'binary-chunked-proof-bytes',
+                transport: {},
+            },
+        };
+        const { loadMockKernel } = createMockKernelExports({
+            commandPointer: 4096,
+            commandResponse,
+            onCommand: (command) => {
+                decodedCommands.push(command);
+            },
+            outputLengthAllocationPointer: 2048,
+        });
+        const kernel = await loadMockKernel();
+        const transportedSetupProofMaterial = {
+            objectType: 'SetupTransportedSameSecretProofMaterial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            proofFamily: 'same-secret-linkage-anchor',
+            proofMaterialRoot: hashOne,
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 1,
+            totalByteLength: 1,
+            fullObjectHash: hashOne,
+            chunkRoot: hashOne,
+            chunkHashes: [hashOne],
+        } as const;
+
+        kernel.beginSetupProofMaterialTransportStream({
+            verificationId: 'same-secret-proof-0',
+            transportedSetupProofMaterial,
+        });
+        kernel.absorbSetupProofMaterialTransportStreamChunk({
+            verificationId: 'same-secret-proof-0',
+            chunkIndex: 0,
+            bytesHex: '00',
+        });
+        kernel.finishSetupProofMaterialTransportStream({
+            verificationId: 'same-secret-proof-0',
+        });
+
+        expect(decodedCommands).toEqual([
+            {
+                command: 'BeginSetupProofMaterialTransportStream',
+                verificationId: 'same-secret-proof-0',
+                transportedSetupProofMaterial,
+            },
+            {
+                command: 'AbsorbSetupProofMaterialTransportStreamChunk',
+                verificationId: 'same-secret-proof-0',
+                chunkIndex: 0,
+                bytesHex: '00',
+            },
+            {
+                command: 'FinishSetupProofMaterialTransportStream',
+                verificationId: 'same-secret-proof-0',
+            },
+        ]);
+    });
+
     it('rejects a transcript-core kernel with the wrong integrity hash', async () => {
         const { getInstantiateCallCount, loadMockKernel } =
             createMockKernelExports({

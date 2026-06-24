@@ -134,17 +134,7 @@ pub(super) fn development_encryption_fixture(
         "canonicalByteLength": canonical_bytes.len(),
         "messageSlotSample": message_slots,
         "sampleModulus": modulus,
-        "encryptionFormula": "c0=pk*u+p*e0+m,c1=a*u+p*e1-over-selected-level-zero-Q-data",
-        "sampledPublicRelationChecks": sample_encryption_relation_checks(
-            message_residues,
-            &public_key_product,
-            &public_sample_product,
-            &scaled_error_zero_residues,
-            &scaled_error_one_residues,
-        )?,
         "fixtureScope": "development-collective-public-key-encryption-fixture",
-        "directProofClaim": false,
-        "directEvaluatorReplayClaim": false,
     });
     let fixture_hash =
         derive_protocol_hash("BGVDevelopmentEncryptionFixtureHash", &fixture_record)?;
@@ -152,11 +142,5 @@ pub(super) fn development_encryption_fixture(
     Ok(json!({
         "fixture": fixture_record,
         "fixtureHash": fixture_hash,
-        "statusLabels": [
-            "DevelopmentEncryptionFixtureBound",
-            "CollectivePublicKeyRootBound",
-            "NotDirectProofEvidence",
-            "NotEvaluatorReplayClosureEvidence"
-        ],
     }))
 }

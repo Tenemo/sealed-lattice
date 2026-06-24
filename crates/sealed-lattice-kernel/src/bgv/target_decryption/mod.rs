@@ -7,6 +7,7 @@ mod recombination;
 mod share_generation;
 mod share_records;
 use bindings::*;
+pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
 use ciphertext_codec::*;
 pub(crate) use command::{
     generate_bgv_target_decryption_share_from_request,
@@ -21,6 +22,9 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::{
+        coefficient_codec::{
+            coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
+        },
         evaluator::{
             engine::{
                 Ciphertext, DevelopmentBgvKey, decryption_accumulator_to_coefficients,
@@ -39,14 +43,13 @@ use crate::{
             validate_passive_setup_package_for_encrypted_evaluation,
         },
         setup_helpers::{
-            array_at_path, bool_at_path, hash_at_path, reject_forbidden_setup_fields,
-            string_at_path, unsigned_at_path, usize_at_path, value_at_path,
+            array_at_path, hash_at_path, string_at_path, unsigned_at_path, usize_at_path,
+            value_at_path,
         },
-        validation::reject_unexpected_bgv_request_fields,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_protocol_hash, hash512_hex},
-    transcript_core::{decode_hex, encode_hex},
+    hashing::derive_protocol_hash,
+    transcript_core::decode_hex,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -54,9 +57,8 @@ use rayon::prelude::*;
 
 const TARGET_SHARE_PAYLOAD_ENCODING: &str =
     "coefficient-domain-u64-little-endian-partial-decryption-limbs";
-const TARGET_SHARE_EQUATION: &str =
-    "PartDec_i(C_target)=c1*s_i(x_i) over each active BGV data prime";
-const SELECTED_SHARE_RULE: &str = "FirstValidSharesInCanonicalBoardOrder";
+const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1";
 
 #[derive(Clone)]
 struct TargetShareProfile {
@@ -69,6 +71,7 @@ struct TargetShareProfile {
 struct ParticipantBinding {
     trustee_identity: String,
     roster_position: usize,
+    board_position: usize,
     interpolation_point: u64,
     recovery_epoch: u64,
     device_epoch: u64,
@@ -120,6 +123,7 @@ struct PartialDecryptionShare {
     target_id_partials: Vec<Vec<u64>>,
     target_order_partials: Vec<Vec<u64>>,
     roster_position: usize,
+    board_position: usize,
     interpolation_point: u64,
 }
 

@@ -8,6 +8,7 @@ import {
 } from './public-package-policy.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
+import { extractModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkRuntimePath = path.resolve(
@@ -23,9 +24,18 @@ const protocolSourceDirectoryPath = path.resolve(
     'protocol',
     'src',
 );
+const cryptoSourceDirectoryPath = path.resolve(
+    repoRoot,
+    'packages',
+    'crypto',
+    'src',
+);
 
 const sortedUnique = (values: readonly string[]): string[] =>
     [...new Set(values)].sort((left, right) => left.localeCompare(right));
+
+const toPosixPath = (filePath: string): string =>
+    filePath.split(path.sep).join('/');
 
 const duplicates = (values: readonly string[]): string[] => {
     const seen = new Set<string>();
@@ -46,6 +56,36 @@ const duplicates = (values: readonly string[]): string[] => {
 const protocolRuntimeSourcePathForEntrySource = (source: string): string =>
     source.replace(/\.js$/u, '.ts');
 
+const runtimeSourcePathForSpecifier = (
+    runtimeSourceDirectoryPath: string,
+    sourceRelativePath: string,
+    moduleSpecifier: string,
+): string | undefined => {
+    if (!moduleSpecifier.startsWith('.')) {
+        return undefined;
+    }
+
+    const sourceDirectoryPath = path.dirname(
+        path.resolve(runtimeSourceDirectoryPath, sourceRelativePath),
+    );
+    const sourceModulePath = path.resolve(sourceDirectoryPath, moduleSpecifier);
+    const sourcePath = sourceModulePath.endsWith('.js')
+        ? sourceModulePath.replace(/\.js$/u, '.ts')
+        : sourceModulePath;
+    const relativeSourcePath = toPosixPath(
+        path.relative(runtimeSourceDirectoryPath, sourcePath),
+    );
+
+    if (
+        relativeSourcePath.startsWith('../') ||
+        path.isAbsolute(relativeSourcePath)
+    ) {
+        return undefined;
+    }
+
+    return relativeSourcePath;
+};
+
 const isRelativeVendoredModulePath = (relativePath: string): boolean =>
     relativePath.endsWith('.ts') &&
     !relativePath.startsWith('/') &&
@@ -55,12 +95,82 @@ const isRelativeVendoredModulePath = (relativePath: string): boolean =>
 const validateUnique = (label: string, values: readonly string[]): string[] =>
     duplicates(values).map((value) => `${label} contains duplicate "${value}"`);
 
+const collectReachableVendoredRuntimeModules = async (
+    runtimeSourceDirectoryPath: string,
+    entrySources: readonly string[],
+    missingSourceLabel: string,
+    unsupportedModuleLabel: string,
+): Promise<{
+    readonly failures: readonly string[];
+    readonly reachableModules: ReadonlySet<string>;
+}> => {
+    const failures: string[] = [];
+    const reachableModules = new Set<string>();
+    const pendingModules = [...entrySources];
+
+    while (pendingModules.length > 0) {
+        const relativeSourcePath = pendingModules.pop();
+        if (relativeSourcePath === undefined) {
+            continue;
+        }
+        if (reachableModules.has(relativeSourcePath)) {
+            continue;
+        }
+        reachableModules.add(relativeSourcePath);
+
+        const absoluteSourcePath = path.resolve(
+            runtimeSourceDirectoryPath,
+            relativeSourcePath,
+        );
+        let sourceText: string;
+        try {
+            sourceText = await fs.readFile(absoluteSourcePath, 'utf8');
+        } catch {
+            failures.push(
+                `${missingSourceLabel} reaches missing source "${relativeSourcePath}"`,
+            );
+            continue;
+        }
+
+        for (const moduleSpecifier of extractModuleSpecifiers(
+            sourceText,
+            absoluteSourcePath,
+        )) {
+            const dependencySourcePath = runtimeSourcePathForSpecifier(
+                runtimeSourceDirectoryPath,
+                relativeSourcePath,
+                moduleSpecifier,
+            );
+            if (dependencySourcePath === undefined) {
+                continue;
+            }
+            if (!dependencySourcePath.endsWith('.ts')) {
+                failures.push(
+                    `${unsupportedModuleLabel} source "${relativeSourcePath}" imports unsupported local module "${moduleSpecifier}"`,
+                );
+                continue;
+            }
+            if (!reachableModules.has(dependencySourcePath)) {
+                pendingModules.push(dependencySourcePath);
+            }
+        }
+    }
+
+    return {
+        failures,
+        reachableModules,
+    };
+};
+
 const validateVendoredProtocolRuntime = async (
     policy: PublicPackagePolicy,
     runtimeExports: ReadonlySet<string>,
 ): Promise<string[]> => {
     const failures: string[] = [];
     const vendoredModules = new Set(policy.vendoredProtocolRuntimeModules);
+    const entrySourcePaths = policy.vendoredProtocolRuntimeEntryExports.map(
+        (entry) => protocolRuntimeSourcePathForEntrySource(entry.source),
+    );
 
     failures.push(
         ...validateUnique(
@@ -101,6 +211,14 @@ const validateVendoredProtocolRuntime = async (
                 entry.exports,
             ),
         );
+        if (entry.runtimeFacadeExports !== undefined) {
+            failures.push(
+                ...validateUnique(
+                    `vendoredProtocolRuntimeEntryExports ${entry.source} runtimeFacadeExports`,
+                    entry.runtimeFacadeExports,
+                ),
+            );
+        }
 
         if (!entry.source.endsWith('.js')) {
             failures.push(
@@ -118,12 +236,81 @@ const validateVendoredProtocolRuntime = async (
             );
         }
 
-        for (const exportName of entry.exports) {
+        for (const exportName of entry.runtimeFacadeExports ?? entry.exports) {
             if (!runtimeExports.has(exportName)) {
                 failures.push(
                     `vendoredProtocolRuntimeEntryExports ${entry.source} exposes "${exportName}" outside the SDK runtime facade`,
                 );
             }
+        }
+    }
+
+    const reachableRuntimeModules =
+        await collectReachableVendoredRuntimeModules(
+            protocolSourceDirectoryPath,
+            entrySourcePaths,
+            'vendoredProtocolRuntimeEntryExports',
+            'vendored protocol runtime',
+        );
+    failures.push(...reachableRuntimeModules.failures);
+
+    for (const reachableSourcePath of reachableRuntimeModules.reachableModules) {
+        if (!vendoredModules.has(reachableSourcePath)) {
+            failures.push(
+                `vendoredProtocolRuntimeModules is missing reachable source "${reachableSourcePath}"`,
+            );
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
+};
+
+const validateVendoredCryptoRuntime = async (
+    policy: PublicPackagePolicy,
+): Promise<string[]> => {
+    const failures: string[] = [];
+    const vendoredModules = new Set(policy.vendoredCryptoRuntimeModules);
+
+    failures.push(
+        ...validateUnique(
+            'vendoredCryptoRuntimeModules',
+            policy.vendoredCryptoRuntimeModules,
+        ),
+    );
+
+    for (const relativeSourcePath of policy.vendoredCryptoRuntimeModules) {
+        if (!isRelativeVendoredModulePath(relativeSourcePath)) {
+            failures.push(
+                `vendoredCryptoRuntimeModules contains invalid path "${relativeSourcePath}"`,
+            );
+            continue;
+        }
+
+        try {
+            await fs.access(
+                path.resolve(cryptoSourceDirectoryPath, relativeSourcePath),
+            );
+        } catch {
+            failures.push(
+                `vendoredCryptoRuntimeModules references missing source "${relativeSourcePath}"`,
+            );
+        }
+    }
+
+    const reachableRuntimeModules =
+        await collectReachableVendoredRuntimeModules(
+            cryptoSourceDirectoryPath,
+            ['index.ts'],
+            'vendoredCryptoRuntimeModules',
+            'vendored crypto runtime',
+        );
+    failures.push(...reachableRuntimeModules.failures);
+
+    for (const reachableSourcePath of reachableRuntimeModules.reachableModules) {
+        if (!vendoredModules.has(reachableSourcePath)) {
+            failures.push(
+                `vendoredCryptoRuntimeModules is missing reachable source "${reachableSourcePath}"`,
+            );
         }
     }
 
@@ -164,6 +351,7 @@ export const validatePublicPackagePolicy = async (
 
     failures.push(
         ...(await validateVendoredProtocolRuntime(policy, runtimeExportSet)),
+        ...(await validateVendoredCryptoRuntime(policy)),
     );
 
     return sortedUnique(failures);

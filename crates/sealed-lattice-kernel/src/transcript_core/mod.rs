@@ -1,52 +1,47 @@
 mod codec;
+#[cfg(test)]
 mod mutations;
+#[cfg(test)]
 mod rng;
 mod types;
 
 pub use codec::{
-    analyze_canonical_object, analyze_canonical_object_hex, canonical_transcript_core_object,
-    decode_hex, encode_hex, parse_transcript_core_object, serialize_transcript_core_object,
+    analyze_canonical_object, analyze_canonical_object_hex, decode_hex, encode_hex,
+    parse_transcript_core_object,
 };
+#[cfg(test)]
+pub use codec::{canonical_transcript_core_object, serialize_transcript_core_object};
+#[cfg(test)]
 pub use mutations::{
-    mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
-    mutate_field_order_fixture, mutate_fully_verified_missing_evaluator_replay_profile_fixture,
+    mutate_base_profile_mismatch_fixture, mutate_duplicate_field_fixture,
+    mutate_evaluator_replay_profile_mismatch_fixture, mutate_field_order_fixture,
     mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
-    mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
-    mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
-    mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
-    mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluator_replay_profile_fixture,
-    mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
-    mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-    mutate_unsupported_object_version_fixture, mutate_wrong_evaluator_replay_profile_fixture,
+    mutate_malformed_length_fixture, mutate_malformed_magic_fixture, mutate_missing_field_fixture,
+    mutate_non_canonical_varuint_fixture, mutate_security_profile_mismatch_fixture,
+    mutate_trailing_bytes_fixture, mutate_unknown_base_profile_fixture,
+    mutate_unknown_evaluator_replay_profile_fixture, mutate_unknown_field_fixture,
+    mutate_unknown_security_closure_fixture, mutate_unsupported_envelope_version_fixture,
+    mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
 };
 #[cfg(test)]
 pub use rng::DeterministicFixtureRng;
 #[cfg(test)]
-pub use types::MANDATORY_EVALUATOR_REPLAY_PROFILE_ID;
-pub use types::{
-    FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE, FULLY_VERIFIED_PASSIVE_MHE_PROFILE,
-    TranscriptCoreProfile,
-};
-
-#[cfg(test)]
-pub const MODULE_MARKER: &str = "transcript-core";
+pub use types::{FOUNDATION_TRANSCRIPT_CORE_PROFILE, TranscriptCoreProfile};
 
 #[cfg(test)]
 mod tests {
     use super::{
-        DeterministicFixtureRng, FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE,
-        FULLY_VERIFIED_PASSIVE_MHE_PROFILE, MANDATORY_EVALUATOR_REPLAY_PROFILE_ID,
-        analyze_canonical_object, canonical_transcript_core_object, decode_hex,
-        mutate_base_claim_profile_mismatch_fixture, mutate_duplicate_field_fixture,
-        mutate_field_order_fixture, mutate_fully_verified_missing_evaluator_replay_profile_fixture,
-        mutate_invalid_enum_fixture, mutate_invalid_profile_fixture, mutate_invalid_utf8_fixture,
-        mutate_malformed_length_fixture, mutate_malformed_magic_fixture,
-        mutate_mhe_security_profile_mismatch_fixture, mutate_missing_field_fixture,
-        mutate_non_canonical_varuint_fixture, mutate_trailing_bytes_fixture,
-        mutate_unknown_base_claim_profile_fixture, mutate_unknown_evaluator_replay_profile_fixture,
-        mutate_unknown_field_fixture, mutate_unknown_mhe_security_closure_fixture,
-        mutate_unsupported_envelope_version_fixture, mutate_unsupported_object_type_fixture,
-        mutate_unsupported_object_version_fixture, mutate_wrong_evaluator_replay_profile_fixture,
+        DeterministicFixtureRng, FOUNDATION_TRANSCRIPT_CORE_PROFILE, analyze_canonical_object,
+        canonical_transcript_core_object, decode_hex, mutate_base_profile_mismatch_fixture,
+        mutate_duplicate_field_fixture, mutate_evaluator_replay_profile_mismatch_fixture,
+        mutate_field_order_fixture, mutate_invalid_enum_fixture, mutate_invalid_profile_fixture,
+        mutate_invalid_utf8_fixture, mutate_malformed_length_fixture,
+        mutate_malformed_magic_fixture, mutate_missing_field_fixture,
+        mutate_non_canonical_varuint_fixture, mutate_security_profile_mismatch_fixture,
+        mutate_trailing_bytes_fixture, mutate_unknown_base_profile_fixture,
+        mutate_unknown_evaluator_replay_profile_fixture, mutate_unknown_field_fixture,
+        mutate_unknown_security_closure_fixture, mutate_unsupported_envelope_version_fixture,
+        mutate_unsupported_object_type_fixture, mutate_unsupported_object_version_fixture,
         parse_transcript_core_object, serialize_transcript_core_object,
     };
     use crate::encoding::{CanonicalErrorCode, append_varuint};
@@ -54,7 +49,7 @@ mod tests {
 
     #[test]
     fn canonical_object_round_trips_byte_identically() {
-        let object = canonical_transcript_core_object(FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE);
+        let object = canonical_transcript_core_object(FOUNDATION_TRANSCRIPT_CORE_PROFILE);
         let canonical_bytes = serialize_transcript_core_object(&object);
         let parsed = parse_transcript_core_object(&canonical_bytes).expect("object should parse");
 
@@ -70,7 +65,7 @@ mod tests {
 
     #[test]
     fn malformed_list_count_rejects_without_allocation() {
-        let object = canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE);
+        let object = canonical_transcript_core_object(FOUNDATION_TRANSCRIPT_CORE_PROFILE);
         let mut bytes = Vec::new();
         super::codec::append_transcript_core_header(&mut bytes, &object);
         append_varuint(&mut bytes, 1);
@@ -83,34 +78,18 @@ mod tests {
     }
 
     #[test]
-    fn profile_components_keep_the_same_shape_but_distinct_roots() {
-        let fully_verified_passive_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(FULLY_VERIFIED_PASSIVE_MHE_PROFILE),
-        );
-        let fully_verified_active_bytes = serialize_transcript_core_object(
-            &canonical_transcript_core_object(FULLY_VERIFIED_ACTIVE_MALICIOUS_PROFILE),
-        );
-        let fully_verified_passive = analyze_canonical_object(&fully_verified_passive_bytes, 8)
-            .expect("fully verified passive profile should analyze");
-        let fully_verified_active = analyze_canonical_object(&fully_verified_active_bytes, 8)
-            .expect("fully verified active profile should analyze");
+    fn foundation_profile_analyzes_expected_boundary() {
+        let foundation_bytes = serialize_transcript_core_object(&canonical_transcript_core_object(
+            FOUNDATION_TRANSCRIPT_CORE_PROFILE,
+        ));
+        let analysis = analyze_canonical_object(&foundation_bytes, 8)
+            .expect("foundation profile should analyze");
 
         assert_eq!(
-            fully_verified_passive.object_type,
-            fully_verified_active.object_type
+            analysis.evaluator_replay_profile_id,
+            "transcript-core-no-evaluator-replay-proof-v1",
         );
-        assert_eq!(
-            fully_verified_passive.object_version,
-            fully_verified_active.object_version
-        );
-        assert_ne!(
-            fully_verified_passive.object_hash512,
-            fully_verified_active.object_hash512
-        );
-        assert_eq!(
-            fully_verified_active.evaluator_replay_profile_id,
-            MANDATORY_EVALUATOR_REPLAY_PROFILE_ID,
-        );
+        assert!(analysis.tags.iter().any(|tag| tag == "direct-route"));
     }
 
     #[test]
@@ -143,7 +122,7 @@ mod tests {
 
     #[test]
     fn malformed_fixture_variants_reject_with_targeted_errors() {
-        let cases: [(String, CanonicalErrorCode); 21] = [
+        let cases: [(String, CanonicalErrorCode); 20] = [
             (
                 mutate_duplicate_field_fixture(),
                 CanonicalErrorCode::DuplicateField,
@@ -194,27 +173,23 @@ mod tests {
                 CanonicalErrorCode::UnsupportedObjectVersion,
             ),
             (
-                mutate_unknown_base_claim_profile_fixture(),
-                CanonicalErrorCode::UnknownBaseClaimProfile,
+                mutate_unknown_base_profile_fixture(),
+                CanonicalErrorCode::UnknownBaseProfile,
             ),
             (
-                mutate_unknown_mhe_security_closure_fixture(),
-                CanonicalErrorCode::UnknownMheSecurityClosure,
+                mutate_unknown_security_closure_fixture(),
+                CanonicalErrorCode::UnknownSecurityClosure,
             ),
             (
-                mutate_base_claim_profile_mismatch_fixture(),
+                mutate_base_profile_mismatch_fixture(),
                 CanonicalErrorCode::UnknownProofProfile,
             ),
             (
-                mutate_mhe_security_profile_mismatch_fixture(),
+                mutate_security_profile_mismatch_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (
-                mutate_wrong_evaluator_replay_profile_fixture(),
-                CanonicalErrorCode::ProfileComponentMismatch,
-            ),
-            (
-                mutate_fully_verified_missing_evaluator_replay_profile_fixture(),
+                mutate_evaluator_replay_profile_mismatch_fixture(),
                 CanonicalErrorCode::ProfileComponentMismatch,
             ),
             (

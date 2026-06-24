@@ -603,7 +603,7 @@ describe('board consistency', () => {
         };
 
         delete malformedBoardHead.previousHeadHash;
-        const malformedBoardResult = expectFailClosed(
+        expectFailClosed(
             () =>
                 verifyBoardConsistency(
                     createBoardEvidence([
@@ -611,9 +611,6 @@ describe('board consistency', () => {
                     ]),
                 ),
             'BoardConsistencyFailure',
-        );
-        expect(malformedBoardResult.refusedObjects[0]?.message).toContain(
-            'Diagnostic:',
         );
         expectFailClosed(
             () => verifySignedObjectSignature(malformedSignature),

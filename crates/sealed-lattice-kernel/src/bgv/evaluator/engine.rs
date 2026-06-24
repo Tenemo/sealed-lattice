@@ -5,7 +5,10 @@ use crate::{
     bgv::{
         evaluator::prg::DeterministicSampler,
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
+        ntt::{
+            forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
+            inverse_negacyclic_ntt_in_place,
+        },
         profile::{
             BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
             encrypted_ballot_aggregate_layout_hash,
@@ -20,6 +23,17 @@ use crate::{
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
+
+mod ciphertext_records;
+mod decryption;
+mod operations;
+
+pub(crate) use ciphertext_records::{ciphertext_canonical_bytes_hex, ciphertext_object_root};
+pub(crate) use decryption::decryption_accumulator_to_coefficients;
+pub(crate) use operations::{
+    add_plaintext_coefficients, ciphertext_add, ciphertext_negate, ciphertext_sub,
+    ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
+};
 
 // Highest modulus-chain level: index of the last data prime, so a fresh
 // ciphertext at this level uses all data primes (q = product of all primes).
@@ -42,15 +56,16 @@ pub(crate) fn negacyclic_mul(
     right: &[u64],
     modulus: u64,
 ) -> CanonicalResult<Vec<u64>> {
-    let left_ntt = forward_negacyclic_ntt(left, modulus)?;
-    let right_ntt = forward_negacyclic_ntt(right, modulus)?;
-    let product = left_ntt
-        .iter()
-        .zip(right_ntt.iter())
-        .map(|(left_value, right_value)| mul_mod_fast(*left_value, *right_value, modulus))
-        .collect::<Vec<_>>();
+    let mut left_ntt = left.to_vec();
+    let mut right_ntt = right.to_vec();
+    forward_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
+    forward_negacyclic_ntt_in_place(&mut right_ntt, modulus)?;
+    for (left_value, right_value) in left_ntt.iter_mut().zip(right_ntt.iter()) {
+        *left_value = mul_mod_fast(*left_value, *right_value, modulus);
+    }
+    inverse_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
 
-    inverse_negacyclic_ntt(&product, modulus)
+    Ok(left_ntt)
 }
 
 // A leveled BGV-RNS ciphertext in the coefficient domain. `components` holds the
@@ -97,8 +112,62 @@ impl Ciphertext {
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct BgvPublicKey {
+    public_b: Vec<Vec<u64>>,
+    public_a: Vec<Vec<u64>>,
+}
+
+impl BgvPublicKey {
+    pub(crate) fn from_components(
+        public_b: Vec<Vec<u64>>,
+        public_a: Vec<Vec<u64>>,
+    ) -> CanonicalResult<Self> {
+        validate_public_key_component_shape(&public_b, "component zero")?;
+        validate_public_key_component_shape(&public_a, "component one")?;
+
+        Ok(Self { public_b, public_a })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encrypt_slots(
+        &self,
+        slots: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<Ciphertext> {
+        let coefficients = encode_slots_to_coefficients(slots)?;
+
+        self.encrypt_coefficients(&coefficients, seed_hex)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encrypt_coefficients(
+        &self,
+        plaintext_coefficients: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<Ciphertext> {
+        Ok(self
+            .encrypt_coefficients_with_witness(plaintext_coefficients, seed_hex)?
+            .0)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn encrypt_coefficients_with_witness(
+        &self,
+        plaintext_coefficients: &[u64],
+        seed_hex: &str,
+    ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
+        encrypt_coefficients_with_public_key_components(
+            &self.public_b,
+            &self.public_a,
+            plaintext_coefficients,
+            seed_hex,
+        )
+    }
+}
+
 // The development BGV key set used to drive and check the evaluator. The
-// collective public key uses the claim-path convention `b = p*e - a*s`, so the
+// collective public key uses the protocol convention `b = p*e - a*s`, so the
 // plaintext lives in the least-significant residue and decryption is exact mod
 // the plaintext modulus. The secret is retained only for development decryption
 // and correctness certificates; it is never exported through the public surface.
@@ -121,8 +190,8 @@ impl DevelopmentBgvKey {
                 "BGV evaluator collective secret width must match the polynomial degree",
             ));
         }
-        validate_public_key_component_shape(&public_b, "component zero")?;
-        validate_public_key_component_shape(&public_a, "component one")?;
+        let BgvPublicKey { public_b, public_a } =
+            BgvPublicKey::from_components(public_b, public_a)?;
 
         Ok(Self {
             secret,
@@ -268,85 +337,12 @@ impl DevelopmentBgvKey {
         plaintext_coefficients: &[u64],
         seed_hex: &str,
     ) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
-        if plaintext_coefficients.len() != POLYNOMIAL_DEGREE {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "BGV evaluator plaintext coefficient vector must match the polynomial degree",
-            ));
-        }
-        let randomizer = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-encryption-randomizer-v1",
-            &[seed_hex.as_bytes()],
+        encrypt_coefficients_with_public_key_components(
+            &self.public_b,
+            &self.public_a,
+            plaintext_coefficients,
+            seed_hex,
         )
-        .ternary(POLYNOMIAL_DEGREE);
-        let error_zero = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-encryption-error-zero-v1",
-            &[seed_hex.as_bytes()],
-        )
-        .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-        let error_one = DeterministicSampler::new(
-            "sealed-lattice-bgv-evaluator/development-encryption-error-one-v1",
-            &[seed_hex.as_bytes()],
-        )
-        .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-
-        let mut component_zero = Vec::with_capacity(DATA_PRIMES.len());
-        let mut component_one = Vec::with_capacity(DATA_PRIMES.len());
-        for (modulus_index, modulus) in DATA_PRIMES.into_iter().enumerate() {
-            let randomizer_residues = randomizer
-                .iter()
-                .map(|coefficient| signed_residue(*coefficient, modulus))
-                .collect::<Vec<_>>();
-            let public_key_product =
-                negacyclic_mul(&self.public_b[modulus_index], &randomizer_residues, modulus)?;
-            let public_sample_product =
-                negacyclic_mul(&self.public_a[modulus_index], &randomizer_residues, modulus)?;
-
-            let limb_zero = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    let scaled_error = signed_residue(
-                        error_zero[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
-                        modulus,
-                    );
-                    let with_error =
-                        add_mod(public_key_product[coefficient_index], scaled_error, modulus)?;
-                    add_mod(
-                        with_error,
-                        plaintext_coefficients[coefficient_index],
-                        modulus,
-                    )
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            let limb_one = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    let scaled_error = signed_residue(
-                        error_one[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
-                        modulus,
-                    );
-                    add_mod(
-                        public_sample_product[coefficient_index],
-                        scaled_error,
-                        modulus,
-                    )
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-
-            component_zero.push(limb_zero);
-            component_one.push(limb_one);
-        }
-
-        Ok((
-            Ciphertext {
-                components: vec![component_zero, component_one],
-                level: EVALUATOR_FULL_LEVEL,
-                decrypt_scaling: 1,
-            },
-            EncryptionWitness {
-                randomizer_coefficients: randomizer,
-                error_zero_coefficients: error_zero,
-                error_one_coefficients: error_one,
-            },
-        ))
     }
 
     pub(crate) fn decrypt_to_coefficients(
@@ -396,50 +392,96 @@ impl DevelopmentBgvKey {
     }
 }
 
-pub(crate) fn decryption_accumulator_to_coefficients(
-    ciphertext: &Ciphertext,
-    accumulator: &[Vec<u64>],
-) -> CanonicalResult<Vec<u64>> {
-    let primes = ciphertext.primes();
-    if accumulator.len() != primes.len() {
+const PLAINTEXT_MODULUS_I32: i32 = 65_537;
+
+fn encrypt_coefficients_with_public_key_components(
+    public_b: &[Vec<u64>],
+    public_a: &[Vec<u64>],
+    plaintext_coefficients: &[u64],
+    seed_hex: &str,
+) -> CanonicalResult<(Ciphertext, EncryptionWitness)> {
+    validate_public_key_component_shape(public_b, "component zero")?;
+    validate_public_key_component_shape(public_a, "component one")?;
+    if plaintext_coefficients.len() != POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "BGV decryption accumulator must have one limb per active data prime",
+            "BGV evaluator plaintext coefficient vector must match the polynomial degree",
         ));
     }
-    for (limb_index, (limb, modulus)) in accumulator.iter().zip(primes.iter()).enumerate() {
-        if limb.len() != POLYNOMIAL_DEGREE {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                format!(
-                    "BGV decryption accumulator limb {limb_index} has the wrong coefficient count"
-                ),
-            ));
-        }
-        if limb.iter().any(|coefficient| *coefficient >= *modulus) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("BGV decryption accumulator limb {limb_index} has non-canonical residues"),
-            ));
-        }
-    }
+    let randomizer = DeterministicSampler::new(
+        "sealed-lattice-bgv-evaluator/development-encryption-randomizer-v1",
+        &[seed_hex.as_bytes()],
+    )
+    .ternary(POLYNOMIAL_DEGREE);
+    let error_zero = DeterministicSampler::new(
+        "sealed-lattice-bgv-evaluator/development-encryption-error-zero-v1",
+        &[seed_hex.as_bytes()],
+    )
+    .centered_binomial_eta2(POLYNOMIAL_DEGREE);
+    let error_one = DeterministicSampler::new(
+        "sealed-lattice-bgv-evaluator/development-encryption-error-one-v1",
+        &[seed_hex.as_bytes()],
+    )
+    .centered_binomial_eta2(POLYNOMIAL_DEGREE);
 
-    let crt = CrtContext::new(primes);
-    let scaling = ciphertext.decrypt_scaling;
-    let mut message_coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
-    for coefficient_index in 0..POLYNOMIAL_DEGREE {
-        let residues = accumulator
+    let mut component_zero = Vec::with_capacity(DATA_PRIMES.len());
+    let mut component_one = Vec::with_capacity(DATA_PRIMES.len());
+    for (modulus_index, modulus) in DATA_PRIMES.iter().copied().enumerate() {
+        let randomizer_residues = randomizer
             .iter()
-            .map(|limb| limb[coefficient_index])
+            .map(|coefficient| signed_residue(*coefficient, modulus))
             .collect::<Vec<_>>();
-        let centered_mod_plaintext = crt.center_then_reduce_mod_plaintext(&residues);
-        message_coefficients.push(mul_mod(centered_mod_plaintext, scaling, PLAINTEXT_MODULUS)?);
+        let public_key_product =
+            negacyclic_mul(&public_b[modulus_index], &randomizer_residues, modulus)?;
+        let public_sample_product =
+            negacyclic_mul(&public_a[modulus_index], &randomizer_residues, modulus)?;
+
+        let limb_zero = (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                let scaled_error = signed_residue(
+                    error_zero[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
+                    modulus,
+                );
+                let with_error =
+                    add_mod(public_key_product[coefficient_index], scaled_error, modulus)?;
+                add_mod(
+                    with_error,
+                    plaintext_coefficients[coefficient_index],
+                    modulus,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let limb_one = (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                let scaled_error = signed_residue(
+                    error_one[coefficient_index] * i64::from(PLAINTEXT_MODULUS_I32),
+                    modulus,
+                );
+                add_mod(
+                    public_sample_product[coefficient_index],
+                    scaled_error,
+                    modulus,
+                )
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+
+        component_zero.push(limb_zero);
+        component_one.push(limb_one);
     }
 
-    Ok(message_coefficients)
+    Ok((
+        Ciphertext {
+            components: vec![component_zero, component_one],
+            level: EVALUATOR_FULL_LEVEL,
+            decrypt_scaling: 1,
+        },
+        EncryptionWitness {
+            randomizer_coefficients: randomizer,
+            error_zero_coefficients: error_zero,
+            error_one_coefficients: error_one,
+        },
+    ))
 }
-
-const PLAINTEXT_MODULUS_I32: i32 = 65_537;
 
 fn validate_public_key_component_shape(component: &[Vec<u64>], label: &str) -> CanonicalResult<()> {
     if component.len() != DATA_PRIMES.len() {
@@ -489,497 +531,11 @@ pub(crate) fn encode_slots_to_coefficients(slots: &[u64]) -> CanonicalResult<Vec
     inverse_negacyclic_ntt(&padded, PLAINTEXT_MODULUS)
 }
 
-// The canonical ciphertext root of an evaluator output: serialize the
-// coefficient-domain components as a canonical BGV ciphertext object and root
-// the bytes. Used to bind evaluator output ciphertexts into the records.
-pub(crate) fn ciphertext_object_root(ciphertext: &Ciphertext) -> CanonicalResult<String> {
-    let canonical_bytes = ciphertext_canonical_bytes(ciphertext)?;
-
-    Ok(ciphertext_root(&canonical_bytes))
-}
-
-pub(crate) fn ciphertext_canonical_bytes_hex(ciphertext: &Ciphertext) -> CanonicalResult<String> {
-    Ok(canonical_bytes_hex(&ciphertext_canonical_bytes(
-        ciphertext,
-    )?))
-}
-
-fn ciphertext_canonical_bytes(ciphertext: &Ciphertext) -> CanonicalResult<Vec<u8>> {
-    let canonical_layout = encrypted_ballot_aggregate_layout_hash()?;
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            RnsPolynomial::coefficient_domain(
-                BgvBasisKind::Data,
-                ciphertext.level,
-                canonical_layout.clone(),
-                component.clone(),
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    serialize_bgv_object(BgvObjectKind::Ciphertext, &components)
-}
-
-fn require_same_level(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<()> {
-    if left.level != right.level {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV evaluator operation requires ciphertexts at the same modulus level",
-        ));
-    }
-
-    Ok(())
-}
-
-fn require_same_shape(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<()> {
-    require_same_level(left, right)?;
-    if left.decrypt_scaling != right.decrypt_scaling {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV evaluator addition requires ciphertexts with the same scaling factor",
-        ));
-    }
-
-    Ok(())
-}
-
-pub(crate) fn ciphertext_add(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<Ciphertext> {
-    require_same_shape(left, right)?;
-    let component_count = left.components.len().max(right.components.len());
-    let primes = left.primes();
-    let mut components = Vec::with_capacity(component_count);
-    for component_index in 0..component_count {
-        let mut limbs = Vec::with_capacity(primes.len());
-        for (limb_index, modulus) in primes.iter().enumerate() {
-            let left_limb = left
-                .components
-                .get(component_index)
-                .map(|component| &component[limb_index]);
-            let right_limb = right
-                .components
-                .get(component_index)
-                .map(|component| &component[limb_index]);
-            let limb = (0..POLYNOMIAL_DEGREE)
-                .map(|coefficient_index| {
-                    let left_value = left_limb.map_or(0, |limb| limb[coefficient_index]);
-                    let right_value = right_limb.map_or(0, |limb| limb[coefficient_index]);
-                    add_mod(left_value, right_value, *modulus)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            limbs.push(limb);
-        }
-        components.push(limbs);
-    }
-
-    Ok(Ciphertext {
-        components,
-        level: left.level,
-        decrypt_scaling: left.decrypt_scaling,
-    })
-}
-
-pub(crate) fn ciphertext_negate(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
-    let primes = ciphertext.primes();
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            component
-                .iter()
-                .enumerate()
-                .map(|(limb_index, limb)| {
-                    let modulus = primes[limb_index];
-                    limb.iter()
-                        .map(|value| sub_mod(0, *value, modulus))
-                        .collect::<CanonicalResult<Vec<_>>>()
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(Ciphertext {
-        components,
-        level: ciphertext.level,
-        decrypt_scaling: ciphertext.decrypt_scaling,
-    })
-}
-
-pub(crate) fn ciphertext_sub(left: &Ciphertext, right: &Ciphertext) -> CanonicalResult<Ciphertext> {
-    ciphertext_add(left, &ciphertext_negate(right)?)
-}
-
-fn centered_plaintext_scalar(scalar: i64) -> i64 {
-    let residue = signed_residue(scalar, PLAINTEXT_MODULUS);
-    if residue > PLAINTEXT_MODULUS / 2 {
-        i64::try_from(i128::from(residue) - i128::from(PLAINTEXT_MODULUS))
-            .expect("centered plaintext scalar fits i64")
-    } else {
-        i64::try_from(residue).expect("centered plaintext scalar fits i64")
-    }
-}
-
-// Multiply a ciphertext by an integer plaintext scalar (the same value in every
-// slot). The message is multiplied modulo the plaintext field, but the RNS lift
-// uses the centered representative so negative interpolation coefficients do not
-// inflate ciphertext noise by an unnecessary factor of the plaintext modulus.
-pub(crate) fn scalar_mul(ciphertext: &Ciphertext, scalar: i64) -> CanonicalResult<Ciphertext> {
-    let primes = ciphertext.primes();
-    let centered_scalar = centered_plaintext_scalar(scalar);
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            component
-                .iter()
-                .enumerate()
-                .map(|(limb_index, limb)| {
-                    let modulus = primes[limb_index];
-                    let scalar_lift = signed_residue(centered_scalar, modulus);
-                    limb.iter()
-                        .map(|value| mul_mod(*value, scalar_lift, modulus))
-                        .collect::<CanonicalResult<Vec<_>>>()
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(Ciphertext {
-        components,
-        level: ciphertext.level,
-        decrypt_scaling: ciphertext.decrypt_scaling,
-    })
-}
-
-// Add a plaintext polynomial (coefficients in the plaintext field) into the
-// ciphertext's message component, used for constant terms in polynomial
-// evaluation.
-pub(crate) fn add_plaintext_coefficients(
-    ciphertext: &Ciphertext,
-    plaintext_coefficients: &[u64],
-) -> CanonicalResult<Ciphertext> {
-    let primes = ciphertext.primes();
-    let mut result = ciphertext.clone();
-    for (limb_index, modulus) in primes.iter().enumerate() {
-        for (target, plaintext) in result.components[0][limb_index]
-            .iter_mut()
-            .zip(plaintext_coefficients.iter())
-        {
-            *target = add_mod(*target, plaintext % modulus, *modulus)?;
-        }
-    }
-
-    Ok(result)
-}
-
-// Slot-wise multiply a ciphertext by a plaintext polynomial (negacyclic product
-// per limb). The message becomes the slot-wise product with the plaintext.
-pub(crate) fn plaintext_mul(
-    ciphertext: &Ciphertext,
-    plaintext_coefficients: &[u64],
-) -> CanonicalResult<Ciphertext> {
-    let primes = ciphertext.primes();
-    #[cfg(not(target_arch = "wasm32"))]
-    let limb_products = primes
-        .par_iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| {
-            plaintext_mul_limb(ciphertext, plaintext_coefficients, limb_index, *modulus)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let limb_products = primes
-        .iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| {
-            plaintext_mul_limb(ciphertext, plaintext_coefficients, limb_index, *modulus)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let mut components = (0..ciphertext.components.len())
-        .map(|_| Vec::with_capacity(limb_products.len()))
-        .collect::<Vec<_>>();
-    for limb_product in limb_products {
-        for (component_index, product) in limb_product.into_iter().enumerate() {
-            components[component_index].push(product);
-        }
-    }
-
-    Ok(Ciphertext {
-        components,
-        level: ciphertext.level,
-        decrypt_scaling: ciphertext.decrypt_scaling,
-    })
-}
-
-fn plaintext_mul_limb(
-    ciphertext: &Ciphertext,
-    plaintext_coefficients: &[u64],
-    limb_index: usize,
-    modulus: u64,
-) -> CanonicalResult<Vec<Vec<u64>>> {
-    let lifted_plaintext = plaintext_coefficients
-        .iter()
-        .map(|coefficient| centered_plaintext_lift(*coefficient, modulus))
-        .collect::<Vec<_>>();
-    let plaintext_ntt = forward_negacyclic_ntt(&lifted_plaintext, modulus)?;
-    ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            let component_ntt = forward_negacyclic_ntt(&component[limb_index], modulus)?;
-            let product_ntt = component_ntt
-                .iter()
-                .zip(plaintext_ntt.iter())
-                .map(|(component_value, plaintext_value)| {
-                    mul_mod_fast(*component_value, *plaintext_value, modulus)
-                })
-                .collect::<Vec<_>>();
-
-            inverse_negacyclic_ntt(&product_ntt, modulus)
-        })
-        .collect()
-}
-
-fn centered_plaintext_lift(coefficient: u64, modulus: u64) -> u64 {
-    let coefficient = coefficient % PLAINTEXT_MODULUS;
-    if coefficient > PLAINTEXT_MODULUS / 2 {
-        signed_residue(
-            i64::try_from(coefficient).expect("plaintext coefficient fits i64")
-                - i64::try_from(PLAINTEXT_MODULUS).expect("plaintext modulus fits i64"),
-            modulus,
-        )
-    } else {
-        coefficient % modulus
-    }
-}
-
-// Homomorphic ciphertext multiplication (tensor product) of two two-component
-// ciphertexts, producing the three-component ciphertext
-// (a0*b0, a0*b1 + a1*b0, a1*b1) before relinearization.
-pub(crate) fn ciphertext_tensor(
-    left: &Ciphertext,
-    right: &Ciphertext,
-) -> CanonicalResult<Ciphertext> {
-    require_same_level(left, right)?;
-    left.assert_two_components()?;
-    right.assert_two_components()?;
-    let primes = left.primes();
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let tensor_limbs = primes
-        .par_iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| ciphertext_tensor_limb(left, right, limb_index, *modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let tensor_limbs = primes
-        .iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| ciphertext_tensor_limb(left, right, limb_index, *modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let mut component_zero = Vec::with_capacity(tensor_limbs.len());
-    let mut component_one = Vec::with_capacity(tensor_limbs.len());
-    let mut component_two = Vec::with_capacity(tensor_limbs.len());
-    for (zero, one, two) in tensor_limbs {
-        component_zero.push(zero);
-        component_one.push(one);
-        component_two.push(two);
-    }
-
-    Ok(Ciphertext {
-        components: vec![component_zero, component_one, component_two],
-        level: left.level,
-        decrypt_scaling: mul_mod(
-            left.decrypt_scaling,
-            right.decrypt_scaling,
-            PLAINTEXT_MODULUS,
-        )?,
-    })
-}
-
-fn ciphertext_tensor_limb(
-    left: &Ciphertext,
-    right: &Ciphertext,
-    limb_index: usize,
-    modulus: u64,
-) -> CanonicalResult<(Vec<u64>, Vec<u64>, Vec<u64>)> {
-    let left_zero_ntt = forward_negacyclic_ntt(&left.components[0][limb_index], modulus)?;
-    let left_one_ntt = forward_negacyclic_ntt(&left.components[1][limb_index], modulus)?;
-    let right_zero_ntt = forward_negacyclic_ntt(&right.components[0][limb_index], modulus)?;
-    let right_one_ntt = forward_negacyclic_ntt(&right.components[1][limb_index], modulus)?;
-
-    let mut zero_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
-    let mut one_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
-    let mut two_ntt = Vec::with_capacity(POLYNOMIAL_DEGREE);
-    for evaluation_index in 0..POLYNOMIAL_DEGREE {
-        let left_zero = left_zero_ntt[evaluation_index];
-        let left_one = left_one_ntt[evaluation_index];
-        let right_zero = right_zero_ntt[evaluation_index];
-        let right_one = right_one_ntt[evaluation_index];
-        zero_ntt.push(mul_mod_fast(left_zero, right_zero, modulus));
-        let cross = add_mod_fast(
-            mul_mod_fast(left_zero, right_one, modulus),
-            mul_mod_fast(left_one, right_zero, modulus),
-            modulus,
-        );
-        one_ntt.push(cross);
-        two_ntt.push(mul_mod_fast(left_one, right_one, modulus));
-    }
-
-    Ok((
-        inverse_negacyclic_ntt(&zero_ntt, modulus)?,
-        inverse_negacyclic_ntt(&one_ntt, modulus)?,
-        inverse_negacyclic_ntt(&two_ntt, modulus)?,
-    ))
-}
-
-// RNS modulus switch dropping the top prime, reducing noise and moving the
-// ciphertext down one level. Per coefficient the dropped limb is centered and
-// subtracted, then the remaining limbs are divided by the dropped prime; the
-// message is preserved up to the tracked dropped-prime scaling that decryption
-// undoes.
-pub(crate) fn modulus_switch(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
-    if ciphertext.level == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV evaluator cannot modulus switch below the smallest level",
-        ));
-    }
-    let dropped_modulus = DATA_PRIMES[ciphertext.level];
-    let remaining_primes = &DATA_PRIMES[..ciphertext.level];
-    let dropped_inverses = remaining_primes
-        .iter()
-        .map(|modulus| inverse_mod(dropped_modulus % modulus, *modulus))
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    // To preserve the message modulo the plaintext modulus, each component
-    // coefficient subtracts a correction delta with delta == c (mod dropped
-    // prime) and delta == 0 (mod plaintext modulus), so delta = p * k with
-    // k = c * p^{-1} (mod dropped prime), centered. After exact division by the
-    // dropped prime the message is scaled by the dropped prime's inverse mod the
-    // plaintext modulus, which decryption undoes.
-    let plaintext_inverse_mod_dropped =
-        inverse_mod(PLAINTEXT_MODULUS % dropped_modulus, dropped_modulus)?;
-    let half_dropped_modulus = dropped_modulus / 2;
-
-    let components = ciphertext
-        .components
-        .iter()
-        .map(|component| {
-            let dropped_limb = &component[ciphertext.level];
-            let corrections = dropped_limb
-                .iter()
-                .map(|dropped_value| {
-                    let scaled = mul_mod(
-                        *dropped_value,
-                        plaintext_inverse_mod_dropped,
-                        dropped_modulus,
-                    )?;
-                    let centered = if scaled > half_dropped_modulus {
-                        i128::from(scaled) - i128::from(dropped_modulus)
-                    } else {
-                        i128::from(scaled)
-                    };
-                    Ok(i128::from(PLAINTEXT_MODULUS) * centered)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?;
-            remaining_primes
-                .iter()
-                .enumerate()
-                .map(|(limb_index, modulus)| {
-                    let dropped_inverse = dropped_inverses[limb_index];
-                    (0..POLYNOMIAL_DEGREE)
-                        .map(|coefficient_index| {
-                            let correction =
-                                signed_residue_i128(corrections[coefficient_index], *modulus);
-                            let difference = sub_mod(
-                                component[limb_index][coefficient_index],
-                                correction,
-                                *modulus,
-                            )?;
-                            mul_mod(difference, dropped_inverse, *modulus)
-                        })
-                        .collect::<CanonicalResult<Vec<_>>>()
-                })
-                .collect::<CanonicalResult<Vec<_>>>()
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(Ciphertext {
-        components,
-        level: ciphertext.level - 1,
-        decrypt_scaling: mul_mod(
-            ciphertext.decrypt_scaling,
-            dropped_modulus % PLAINTEXT_MODULUS,
-            PLAINTEXT_MODULUS,
-        )?,
-    })
-}
-
-// Reduce a wide signed correction into the canonical residue range of a prime.
-fn signed_residue_i128(value: i128, modulus: u64) -> u64 {
-    let modulus_i128 = i128::from(modulus);
-    let reduced = ((value % modulus_i128) + modulus_i128) % modulus_i128;
-
-    u64::try_from(reduced).expect("residue below a u64 modulus fits u64")
-}
-
-// CRT reconstruction context for a fixed prime set, precomputing the per-prime
-// reconstruction factors so decryption only does big-integer additions.
-struct CrtContext {
-    modulus: BigInt,
-    half_modulus: BigInt,
-    factors: Vec<BigInt>,
-    plaintext_modulus: BigInt,
-}
-
-impl CrtContext {
-    fn new(primes: &[u64]) -> Self {
-        let modulus: BigInt = primes.iter().map(|prime| BigInt::from(*prime)).product();
-        let factors = primes
-            .iter()
-            .map(|prime| {
-                let prime_big = BigInt::from(*prime);
-                let cofactor = &modulus / &prime_big;
-                let cofactor_mod = (&cofactor % &prime_big)
-                    .to_u64()
-                    .expect("cofactor residue below the prime fits u64");
-                let inverse =
-                    inverse_mod(cofactor_mod, *prime).expect("cofactor is coprime to its prime");
-                (&cofactor * BigInt::from(inverse)) % &modulus
-            })
-            .collect::<Vec<_>>();
-        let half_modulus = &modulus / 2;
-
-        Self {
-            modulus,
-            half_modulus,
-            factors,
-            plaintext_modulus: BigInt::from(PLAINTEXT_MODULUS),
-        }
-    }
-
-    fn center_then_reduce_mod_plaintext(&self, residues: &[u64]) -> u64 {
-        let mut accumulator = BigInt::zero();
-        for (residue, factor) in residues.iter().zip(self.factors.iter()) {
-            accumulator += BigInt::from(*residue) * factor;
-        }
-        accumulator %= &self.modulus;
-        if accumulator > self.half_modulus {
-            accumulator -= &self.modulus;
-        }
-        let reduced = ((accumulator % &self.plaintext_modulus) + &self.plaintext_modulus)
-            % &self.plaintext_modulus;
-
-        reduced.to_u64().expect("plaintext residue fits u64")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate, ciphertext_sub,
-        ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
+        BgvPublicKey, Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate,
+        ciphertext_sub, ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
     };
     use crate::bgv::profile::PLAINTEXT_MODULUS;
 
@@ -1008,6 +564,33 @@ mod tests {
         let slots = first_slots(&[0, 1, 2, 200, 65_536, 7]);
         let ciphertext = key.encrypt_slots(&slots, "aa01").expect("encrypt");
         assert_eq!(decrypt_prefix(key, &ciphertext, slots.len()), slots);
+    }
+
+    #[test]
+    fn public_key_encryption_matches_development_key_encryption() {
+        let key = shared_key();
+        let (component_b, component_a) = key.public_key_components();
+        let public_key = BgvPublicKey::from_components(component_b.to_vec(), component_a.to_vec())
+            .expect("public key");
+        let slots = first_slots(&[11, 0, 65_536, 29, 700]);
+
+        let development_ciphertext = key
+            .encrypt_slots(&slots, "public-key-parity")
+            .expect("development encrypt");
+        let public_ciphertext = public_key
+            .encrypt_slots(&slots, "public-key-parity")
+            .expect("public encrypt");
+
+        assert_eq!(
+            public_ciphertext.components,
+            development_ciphertext.components
+        );
+        assert_eq!(public_ciphertext.level, development_ciphertext.level);
+        assert_eq!(
+            public_ciphertext.decrypt_scaling,
+            development_ciphertext.decrypt_scaling
+        );
+        assert_eq!(decrypt_prefix(key, &public_ciphertext, slots.len()), slots);
     }
 
     #[test]

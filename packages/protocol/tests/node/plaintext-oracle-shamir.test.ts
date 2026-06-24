@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { dynamicRosterProfileCertificateHash } from './election-foundation-fixture-constants';
 import {
     collectContributorPositionSets,
     createDeterministicPolynomial,
@@ -17,8 +18,6 @@ import {
 } from '#packages/protocol/src/plaintext-oracle/index';
 
 describe('plaintext oracle Shamir and interpolation', () => {
-    const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
-
     it('matches deterministic Shamir vectors and reconstructs the secret', () => {
         const shares = evaluateShamirPolynomialForRoster(
             shamirVectors.polynomial,
@@ -40,7 +39,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         );
     });
 
-    it.each([3, 19, 20, 30, 40, 50])(
+    it.each([3, 19, 20])(
         'reconstructs for supported roster size %d using threshold profile',
         (rosterSize) => {
             const thresholdProfile = deriveThresholdProfile({

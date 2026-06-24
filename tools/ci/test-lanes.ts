@@ -1,9 +1,14 @@
 export const nodeTestTimeoutMs = 60_000;
 export const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
-export const proofBenchmarkTestTimeoutMs = 60 * 60_000;
+export const nodeKernelVeryHeavyTestTimeoutMs = 60 * 60_000;
 export const nodeHookTimeoutMs = 240_000;
 
-export const nodeTestLaneValues = ['fast', 'protocol', 'kernel'] as const;
+export const nodeTestLaneValues = [
+    'fast',
+    'protocol',
+    'kernel',
+    'kernel-heavy',
+] as const;
 
 export type NodeTestLane = (typeof nodeTestLaneValues)[number];
 
@@ -25,6 +30,10 @@ const kernelNodeTestGlobs = [
     'tests/node/**/*.kernel.test.ts',
 ] as const;
 
+const heavyKernelNodeTestGlobs = [
+    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/**/*.kernel.test.ts',
+] as const;
+
 export const nodeTestLaneDefinitions = {
     fast: {
         commandDescription: 'Run fast Node tests',
@@ -44,10 +53,18 @@ export const nodeTestLaneDefinitions = {
     },
     kernel: {
         commandDescription: 'Run kernel Node tests',
+        exclude: heavyKernelNodeTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
         projectName: 'node-kernel',
         testTimeout: nodeKernelHeavyTestTimeoutMs,
+    },
+    'kernel-heavy': {
+        commandDescription: 'Run heavy kernel Node tests',
+        fileParallelism: false,
+        include: heavyKernelNodeTestGlobs,
+        projectName: 'node-kernel-heavy',
+        testTimeout: nodeKernelVeryHeavyTestTimeoutMs,
     },
 } as const satisfies Record<NodeTestLane, NodeTestProjectDefinition>;
 
@@ -55,12 +72,14 @@ export const nodeTestProjectDefinitions = [
     nodeTestLaneDefinitions.fast,
     nodeTestLaneDefinitions.protocol,
     nodeTestLaneDefinitions.kernel,
+    nodeTestLaneDefinitions['kernel-heavy'],
 ] as const;
 
 export const defaultNodeTestLanes = [
     'fast',
     'protocol',
     'kernel',
+    'kernel-heavy',
 ] as const satisfies readonly NodeTestLane[];
 
 export const browserTestLaneValues = ['desktop', 'mobile'] as const;
@@ -82,41 +101,3 @@ export const browserTestLaneDefinitions = {
         projectName: 'browser-mobile',
     },
 } as const satisfies Record<BrowserTestLane, BrowserTestLaneDefinition>;
-
-export const proofBenchmarkLaneValues = ['node', 'desktop'] as const;
-
-export type ProofBenchmarkLane = (typeof proofBenchmarkLaneValues)[number];
-
-type ProofBenchmarkLaneDefinition = {
-    readonly commandDescription: string;
-    readonly fileParallelism: false;
-    readonly include: readonly string[];
-    readonly projectName: string;
-    readonly testTimeout: number;
-};
-
-const browserProofBenchmarkTestGlobs = [
-    'packages/wasm/tests/browser/**/*.browser.benchmark.ts',
-] as const;
-
-export const proofBenchmarkLaneDefinitions = {
-    node: {
-        commandDescription: 'Run node proof benchmark',
-        fileParallelism: false,
-        include: ['packages/wasm/tests/node/**/*.benchmark.ts'],
-        projectName: 'node-proof-benchmark',
-        testTimeout: proofBenchmarkTestTimeoutMs,
-    },
-    desktop: {
-        commandDescription: 'Run desktop proof benchmark',
-        fileParallelism: false,
-        include: browserProofBenchmarkTestGlobs,
-        projectName: 'browser-desktop-proof-benchmark',
-        testTimeout: proofBenchmarkTestTimeoutMs,
-    },
-} as const satisfies Record<ProofBenchmarkLane, ProofBenchmarkLaneDefinition>;
-
-export const defaultProofBenchmarkLanes = [
-    'node',
-    'desktop',
-] as const satisfies readonly ProofBenchmarkLane[];

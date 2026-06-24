@@ -86,7 +86,7 @@ fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
                     "ActionContextHash",
                     &json!({ "action": "direct encrypted ballot embedded encryption seed test" }),
                 ).expect("action hash"),
-                "encryptionSeedHex": direct_ballot_test_randomness_hex("legacy-ballot-seed", 0),
+                "encryptionSeedHex": direct_ballot_test_randomness_hex("embedded-ballot-seed", 0),
                 "scores": [
                     10, 9, 8, 7, 6,
                     5, 4, 3, 2, 1,

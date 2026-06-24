@@ -1,18 +1,18 @@
-import type {
-    TranscriptCoreFixture,
-    TranscriptCoreFixtureVerification,
-} from '@sealed-lattice/types';
-
 import {
     canonicalErrorCodes,
     createTranscriptCoreKernelLoader,
     TranscriptCoreKernelCommandError,
+    type BgvAcceptedSetupHandoff,
     type BgvBaseConversionFixture,
     type BgvBatchPlaintextEncoding,
     type BgvCiphertextConventionFixture,
+    type BgvCollectiveSetupProfileDescription,
+    type BgvCollectiveSetupVerification,
+    type BgvLocalTrusteeSetupStateVerification,
     type BgvObjectValidation,
-    type BgvReferenceOracleRejection,
+    type BgvPrivateVssShareEnvelopeVerification,
     type BgvRnsProfileDescription,
+    type BgvThresholdShareCommitmentDerivation,
     type TranscriptCoreKernelLoaderOptions,
     type TranscriptCoreKernelSharePoint,
     type TranscriptCorePlaintextComparison,
@@ -30,13 +30,18 @@ export {
     TranscriptCoreKernelCommandError,
 };
 export type {
+    BgvAcceptedSetupHandoff,
     TranscriptCoreKernel,
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
+    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupVerification,
+    BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
-    BgvReferenceOracleRejection,
+    BgvPrivateVssShareEnvelopeVerification,
     BgvRnsProfileDescription,
+    BgvThresholdShareCommitmentDerivation,
     TranscriptCoreKernelLoaderOptions,
     TranscriptCoreKernelSharePoint,
     TranscriptCorePlaintextComparison,
@@ -51,19 +56,3 @@ export const loadTranscriptCoreKernel: () => Promise<TranscriptCoreKernel> =
     createTranscriptCoreKernelLoader(transcriptCoreKernelUrl, {
         allowUnpinnedKernel: true,
     });
-
-export const verifyTranscriptCoreFixture = async (
-    fixture: TranscriptCoreFixture,
-): Promise<TranscriptCoreFixtureVerification> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.verifyFixture(fixture);
-};
-
-export const roundTripBytesThroughKernel = async (
-    input: Uint8Array,
-): Promise<Uint8Array> => {
-    const kernel = await loadTranscriptCoreKernel();
-
-    return kernel.roundTripBytes(input);
-};

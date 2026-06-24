@@ -7,13 +7,13 @@
                 "tools/**/*.ts",
                 "docs/typedoc/**/*.ts",
                 "docs/astro.config.ts",
-                "docs/src/content.config.ts"
+                "docs/src/content.config.ts",
             ],
             "project": [
                 "tests/**/*.ts",
                 "tools/**/*.ts",
                 "docs/typedoc/**/*.ts",
-                "docs/src/**/*.ts"
+                "docs/src/**/*.ts",
             ],
             "ignore": ["docs/src/env.d.ts"],
             "ignoreDependencies": [
@@ -24,31 +24,31 @@
                 "publint",
                 // The Wasm kernel build resolves binaryen's wasm-opt script by path.
                 "binaryen",
-                // Root-level public API tests intentionally import the workspace package by its published name.
-                "sealed-lattice"
-            ]
+            ],
         },
         "packages/sdk": {
-            "project": ["src/**/*.ts"],
+            "entry": ["tests/**/*.ts"],
+            "project": ["src/**/*.ts", "tests/**/*.ts"],
             "ignoreDependencies": [
                 // The public package intentionally declares the crypto backends used by the vendored runtime surface.
                 "@noble/hashes",
-                "@noble/post-quantum"
-            ]
+                "@noble/post-quantum",
+            ],
         },
         "packages/types": {
-            "project": ["src/**/*.ts"]
+            "project": ["src/**/*.ts"],
         },
         "packages/protocol": {
             "entry": ["tests/**/*.ts"],
-            "project": ["src/**/*.ts", "tests/**/*.ts"]
+            "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/crypto": {
-            "project": ["src/**/*.ts"]
+            "entry": ["tests/**/*.ts"],
+            "project": ["src/**/*.ts", "tests/**/*.ts"],
         },
         "packages/wasm": {
             "entry": ["tests/**/*.ts"],
-            "project": ["src/**/*.ts", "tests/**/*.ts"]
-        }
-    }
+            "project": ["src/**/*.ts", "tests/**/*.ts"],
+        },
+    },
 }

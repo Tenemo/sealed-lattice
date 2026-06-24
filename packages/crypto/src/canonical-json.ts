@@ -162,10 +162,7 @@ const appendBytesToHash = (
     hash.update(value);
 };
 
-export const hash512 = (
-    domain: string,
-    parts: readonly Uint8Array[],
-): Uint8Array => {
+const hash512 = (domain: string, parts: readonly Uint8Array[]): Uint8Array => {
     const hash = shake256.create({ dkLen: 64 });
 
     try {
@@ -190,3 +187,116 @@ export const hash512Hex = (
     domain: string,
     parts: readonly Uint8Array[],
 ): string => bytesToHex(hash512(domain, parts));
+
+export const setupProofMaterialFullObjectHashHex = (
+    proofFamily: string,
+    totalByteLength: number,
+    chunks: readonly Uint8Array[],
+): string => {
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength < 0) {
+        throw new TypeError(
+            'setup proof material totalByteLength must be a non-negative safe integer.',
+        );
+    }
+    if (chunks.length === 0) {
+        throw new TypeError(
+            'setup proof material full-object hash requires at least one chunk.',
+        );
+    }
+
+    const hash = shake256.create({ dkLen: 64 });
+    try {
+        hash.update(hash512PreimagePrefix);
+        appendBytesToHash(
+            hash,
+            textEncoder.encode(
+                'sealed-lattice/setup/proof-material/full-object-v1',
+            ),
+        );
+        appendBytesToHash(hash, textEncoder.encode(proofFamily));
+        appendVarUintToHash(hash, totalByteLength);
+        for (const chunk of chunks) {
+            hash.update(chunk);
+        }
+
+        return bytesToHex(hash.digest());
+    } finally {
+        hash.destroy();
+    }
+};
+
+export type SetupVssMaterialFullObjectHasher = Readonly<{
+    update: (chunk: Uint8Array) => void;
+    digestHex: () => string;
+}>;
+
+// Chunks are concatenated unframed; the digest is injective only because all non-final chunks are exactly the fixed transport chunk size, so totalByteLength recovers the boundaries. Do not call with variable-size chunks.
+export const createSetupVssMaterialFullObjectHasher = (
+    totalByteLength: number,
+): SetupVssMaterialFullObjectHasher => {
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength < 0) {
+        throw new TypeError(
+            'setup VSS material totalByteLength must be a non-negative safe integer.',
+        );
+    }
+
+    const hash = shake256.create({ dkLen: 64 });
+    let finalized = false;
+    hash.update(hash512PreimagePrefix);
+    appendBytesToHash(
+        hash,
+        textEncoder.encode(
+            'sealed-lattice/setup/vss-coefficient-commitment-material/full-object-v1',
+        ),
+    );
+    appendVarUintToHash(hash, 1);
+    appendVarUintToHash(hash, totalByteLength);
+
+    return {
+        update: (chunk: Uint8Array): void => {
+            if (finalized) {
+                throw new Error(
+                    'setup VSS material full-object hash is already finalized.',
+                );
+            }
+            hash.update(chunk);
+        },
+        digestHex: (): string => {
+            if (finalized) {
+                throw new Error(
+                    'setup VSS material full-object hash is already finalized.',
+                );
+            }
+            finalized = true;
+
+            try {
+                return bytesToHex(hash.digest());
+            } finally {
+                hash.destroy();
+            }
+        },
+    };
+};
+
+export const setupVssMaterialFullObjectHashHex = (
+    totalByteLength: number,
+    chunks: readonly Uint8Array[],
+): string => {
+    if (!Number.isSafeInteger(totalByteLength) || totalByteLength < 0) {
+        throw new TypeError(
+            'setup VSS material totalByteLength must be a non-negative safe integer.',
+        );
+    }
+    if (chunks.length === 0) {
+        throw new TypeError(
+            'setup VSS material full-object hash requires at least one chunk.',
+        );
+    }
+
+    const hasher = createSetupVssMaterialFullObjectHasher(totalByteLength);
+    for (const chunk of chunks) {
+        hasher.update(chunk);
+    }
+
+    return hasher.digestHex();
+};

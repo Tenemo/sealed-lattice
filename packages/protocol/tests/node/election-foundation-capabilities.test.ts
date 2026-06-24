@@ -1,28 +1,16 @@
-import {
-    targetBoundShareSelectionProfileId,
-    targetDecryptionProfileId,
-    type CapabilityContext,
-} from '@sealed-lattice/types';
+import type { CapabilityContext } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
+
+import {
+    dynamicRosterProfileCertificateHash,
+    targetBoundShareSelectionProfile,
+} from './election-foundation-fixture-constants.js';
 
 import {
     deriveThresholdProfile,
     evaluateActionCapability,
 } from '#packages/protocol/src/index';
 
-const targetBoundShareSelectionProfile = {
-    profileId: targetBoundShareSelectionProfileId,
-    certificateHash: 'target-bound-certificate-hash',
-    targetDecryptionProfileId,
-    targetBasisHash: 'target-basis-hash',
-    decryptionShareQuorum: 9,
-    minimumSharesForInterpolation: 7,
-    minimumArrivalsForRobustDecode: 9,
-    invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
-} as const;
-
-const dynamicRosterProfileCertificateHash = 'a'.repeat(128);
 const thresholdProfile = deriveThresholdProfile({ rosterSize: 10 });
 const certifiedThresholdProfile = deriveThresholdProfile({
     rosterSize: 10,
@@ -54,7 +42,7 @@ const targetAcceptedContext = (
     });
 
 describe('election foundation capability evaluator', () => {
-    it('requires local roster acceptance for claim-bearing direct actions', () => {
+    it('requires local roster acceptance for roster-bound direct actions', () => {
         expect(
             evaluateActionCapability(
                 'VerifyEncryptedBallotProofs',
@@ -69,7 +57,7 @@ describe('election foundation capability evaluator', () => {
         ).toMatchObject({ reason: 'LocalRosterNotAccepted' });
     });
 
-    it('requires claim-bearing action contexts to bind the local roster acceptance hash', () => {
+    it('requires roster-bound action contexts to bind the local roster acceptance hash', () => {
         expect(
             evaluateActionCapability(
                 'SubmitVote',
@@ -132,7 +120,7 @@ describe('election foundation capability evaluator', () => {
                     setupCompleteCount: thresholdProfile.setupCompletionQuorum,
                 }),
             ),
-        ).toMatchObject({ reason: 'ClaimClosureMissing' });
+        ).toMatchObject({ reason: 'FrozenStateIncomplete' });
 
         expect(
             evaluateActionCapability(
@@ -467,7 +455,7 @@ describe('election foundation capability evaluator', () => {
                         certifiedThresholdProfile.decryptionShareQuorum ?? 0,
                 }),
             ),
-        ).toMatchObject({ reason: 'ClaimClosureMissing' });
+        ).toMatchObject({ reason: 'TargetDecryptionClosureMissing' });
         expect(
             evaluateActionCapability(
                 'RecombineAcceptedTarget',
@@ -486,7 +474,7 @@ describe('election foundation capability evaluator', () => {
     });
 
     it.each([3, 4, 5, 6, 7, 8, 9])(
-        'refuses roster size %d casual micro-rosters but allows certified dynamic rosters through claim-bearing gates',
+        'no longer gates target acceptance on roster certification: casual micro-roster size %d and certified dynamic rosters both pass',
         (rosterSize) => {
             const casualThresholdProfile = deriveThresholdProfile({
                 casualMicroRosterAcknowledged: true,
@@ -508,7 +496,7 @@ describe('election foundation capability evaluator', () => {
                         evaluatorReplaySucceeded: true,
                     }),
                 ),
-            ).toMatchObject({ reason: 'ProfileNotClaimBearing' });
+            ).toEqual({ allowed: true, action: 'AcceptTarget' });
 
             expect(
                 evaluateActionCapability(

@@ -1,4 +1,11 @@
-export { canonicalJson, hash512, hash512Hex } from './canonical-json.js';
+export {
+    canonicalJson,
+    createSetupVssMaterialFullObjectHasher,
+    hash512Hex,
+    setupProofMaterialFullObjectHashHex,
+    setupVssMaterialFullObjectHashHex,
+} from './canonical-json.js';
+export type { SetupVssMaterialFullObjectHasher } from './canonical-json.js';
 export {
     deriveProtocolHash,
     protocolHashNamespaceValues,
@@ -6,15 +13,42 @@ export {
 } from './hashes.js';
 export type { ProtocolHashNamespace } from './hashes.js';
 export {
-    createMlDsaKeyPairFixture,
-    createMlDsaSignatureProfileFixture,
-    createProtocolSignatureFixture,
-    deriveMlDsaContextByteLength,
     deriveMlDsaPublicKeyHash,
     deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from './signatures.js';
+export type { SignatureExpectation } from './signatures.js';
+export {
+    createPrivateVssMailboxKeyPair,
+    decryptPrivateVssMailboxEnvelope,
+    encryptPrivateVssMailboxEnvelope,
+    privateVssMailboxEncryptionProfileId,
+} from './private-vss-mailbox.js';
+export {
+    decryptLocalTrusteeState,
+    encryptLocalTrusteeSetupSealedMaterial,
+    encryptLocalTrusteeState,
+    localTrusteeSealedMaterialStorageProfileId,
+    localTrusteeStateStorageProfileId,
+} from './local-trustee-state-storage.js';
 export type {
-    MlDsaKeyPairFixture,
-    SignatureExpectation,
-} from './signatures.js';
+    PrivateVssEncryptedEnvelope,
+    PrivateVssMailboxDecryptionInput,
+    PrivateVssMailboxDecryptionResult,
+    PrivateVssMailboxEncryptionInput,
+    PrivateVssMailboxEncryptionResult,
+    PrivateVssMailboxKeyPair,
+} from './private-vss-mailbox.js';
+export type {
+    EncryptedLocalTrusteeSetupMaterial,
+    EncryptedLocalTrusteeSetupState,
+    LocalTrusteeSetupSealedMaterialEncryptionInput,
+    LocalTrusteeSetupSealedMaterialEncryptionResult,
+    LocalTrusteeSetupStateSealedMaterialClass,
+    LocalTrusteeSetupStateSealedMaterial,
+    LocalTrusteeSetupStateSealedPayload,
+    LocalTrusteeStateStorageDecryptionInput,
+    LocalTrusteeStateStorageDecryptionResult,
+    LocalTrusteeStateStorageEncryptionInput,
+    LocalTrusteeStateStorageEncryptionResult,
+} from './local-trustee-state-storage.js';

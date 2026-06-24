@@ -231,7 +231,6 @@ const createSparseTargetDecodingFailure = (
         ),
     ],
     selectedOptionOrdinals: [],
-    statusLabels: [],
 });
 
 const decodeSparseTopKTargetUnchecked = (input: {
@@ -443,7 +442,6 @@ const decodeSparseTopKTargetUnchecked = (input: {
             refusedObjects.length === 0
                 ? sortedSelections.map((selection) => selection.optionOrdinal)
                 : [],
-        statusLabels: [],
         targetHash: refusedObjects.length === 0 ? target.targetHash : undefined,
     };
 };

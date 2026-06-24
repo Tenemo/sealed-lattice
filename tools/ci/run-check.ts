@@ -18,11 +18,13 @@ import {
     type ActiveLocalRunLog,
 } from './local-run-log.js';
 import {
-    createPackageManagerCommand,
     resolvePackageManagerRunner,
+    type PackageManagerRunner,
+} from './package-manager-runner.js';
+import {
+    createPackageManagerCommand,
     runCommandsInSeries,
     type CommandInvocation,
-    type PackageManagerRunner,
 } from './run-command.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
@@ -32,10 +34,7 @@ import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 type LaneStatus = 'failed' | 'passed' | 'stopped';
 
 // A validation lane is a named group of commands that run in series with one
-// another. Lanes may run concurrently during the independent-check phase, and
-// the isolated Rust lane keeps `cargo fmt`, `cargo clippy`, and `cargo test`
-// sequential so they share one native `target/` build lock and reuse each
-// other's dependency artifacts.
+// another. Lanes may run concurrently during the independent-check phase.
 type ValidationLane = {
     readonly commands: readonly CommandInvocation[];
     readonly name: string;
@@ -56,8 +55,19 @@ export type ParsedCheckArguments = {
 
 const checkUsage =
     'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
-const rustKernelLaneName = 'Rust kernel (fmt, clippy, optimized test)';
-const legacyRustKernelLaneName = 'Rust kernel (fmt, clippy, test)';
+const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
+const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
+
+const rustKernelFastTestArguments = [
+    'test',
+    '-p',
+    'sealed-lattice-kernel',
+    '--quiet',
+    '--',
+    '--skip',
+    rustKernelHeavyTestPattern,
+    '--show-output',
+] as const;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -120,6 +130,10 @@ const createCargoCommand = (
     args: commandArguments,
     command: 'cargo',
     description,
+    env: {
+        ...process.env,
+        CARGO_INCREMENTAL: '0',
+    },
     logFileSlug,
 });
 
@@ -140,8 +154,9 @@ const createPackageManagerLane = (
 
 // The gating lanes run first, in series. The workspace build emits every
 // `dist/` artifact and compiles the Rust kernel to WebAssembly (holding the
-// cargo build lock); the type-check also emits declarations. Keeping both ahead
-// of the parallel phase means no lane writes `dist/` while the test lanes import
+// cargo build lock); the type-check also emits declarations; the smoke package
+// lane stages and hashes the built public package. Keeping these ahead of the
+// parallel phase means no lane writes or stages `dist/` while test lanes import
 // it, and no `cargo` lane competes with the WebAssembly build for `target/`. A
 // failure here makes the rest pointless, so the run stops immediately.
 const buildGatingLanes = (
@@ -159,96 +174,19 @@ const buildGatingLanes = (
         'tsc',
         ['run', 'tsc'],
     ),
-];
-
-// Independent checks run concurrently against the built output. The docs lane
-// uses the same build script as standalone verification so TypeDoc generation
-// and postprocessing stay in one package-script sequence on Windows. The pack
-// smoke lane still calls its underlying tool directly because its package script
-// rebuilds for standalone use. The Rust lane runs after this phase: the tests
-// are memory-heavy on Windows and should not compete with docs rendering,
-// linting, package smoke verification, and Node tests. The commit gate runs
-// only the fast Node test project; the heavier protocol and kernel Node
-// projects and the Playwright browser projects stay in `pnpm run test:node`
-// and `pnpm run test:browser` for pre-push verification.
-const buildParallelLanes = (
-    packageManagerRunner: PackageManagerRunner,
-): readonly ValidationLane[] => {
-    const lane = (
-        name: string,
-        logFileSlug: string,
-        commandArguments: readonly string[],
-    ): ValidationLane =>
-        createPackageManagerLane(
-            packageManagerRunner,
-            name,
-            logFileSlug,
-            commandArguments,
-        );
-
-    return [
-        lane('Lint', 'lint', ['run', 'lint']),
-        {
-            commands: [
-                createPackageManagerCommand(
-                    'Build docs',
-                    ['run', 'docs:build'],
-                    {
-                        logFileSlug: 'docs-build',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Verify docs links',
-                    ['exec', 'tsx', './docs/typedoc/verify-docs.ts'],
-                    {
-                        logFileSlug: 'docs-link-verification',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Verify rendered docs',
-                    ['exec', 'tsx', './tools/ci/verify-docs-render.ts'],
-                    {
-                        logFileSlug: 'docs-render-verification',
-                        packageManagerRunner,
-                    },
-                ),
-            ],
-            name: 'Verify docs',
-        },
-        lane('Smoke npm package', 'smoke-pack-npm', [
+    createPackageManagerLane(
+        packageManagerRunner,
+        'Smoke npm package',
+        'smoke-pack-npm',
+        [
             'exec',
             'tsx',
             './tools/ci/verify-packed-package.ts',
             '--package-manager',
             'npm',
-        ]),
-        lane('Verify public package policy', 'package-policy', [
-            'exec',
-            'tsx',
-            './tools/ci/verify-public-package-policy.ts',
-        ]),
-        lane('Check package boundaries', 'package-boundaries', [
-            'exec',
-            'tsx',
-            './tools/ci/check-package-boundaries.ts',
-        ]),
-        lane('Verify test vectors', 'test-vectors', ['run', 'vectors']),
-        lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
-        lane('Node tests (fast)', 'vitest-node', [
-            'exec',
-            'vitest',
-            '--project',
-            'node',
-            '--run',
-            '--reporter',
-            'default',
-            '--reporter',
-            './tools/ci/vitest-progress-reporter.ts',
-        ]),
-    ];
-};
+        ],
+    ),
+];
 
 const buildRustKernelLane = (): ValidationLane => ({
     commands: [
@@ -271,17 +209,148 @@ const buildRustKernelLane = (): ValidationLane => ({
             'cargo-clippy',
         ),
         createCargoCommand(
-            'cargo test (optimized test profile)',
-            ['test', '-p', 'sealed-lattice-kernel', '--quiet'],
+            'cargo test (optimized test profile, fast)',
+            rustKernelFastTestArguments,
             'cargo-test',
         ),
     ],
     name: rustKernelLaneName,
 });
 
-const buildIsolatedLanes = (): readonly ValidationLane[] => [
-    buildRustKernelLane(),
-];
+// Independent checks run concurrently against the built output. The docs lane
+// runs the post-build docs commands directly instead of `pnpm run docs:build`,
+// because the standalone docs script rebuilds the workspace and would write
+// `dist/` during the parallel phase. The commit gate runs the fast Node test
+// project, the non-heavy kernel Node project, and the fast Rust kernel tests.
+// The heavier protocol, kernel-heavy Node project, ignored Rust kernel heavy
+// tests, and the Playwright browser projects stay in their standalone lanes for
+// pre-push verification.
+const buildParallelLanes = (
+    packageManagerRunner: PackageManagerRunner,
+): readonly ValidationLane[] => {
+    const lane = (
+        name: string,
+        logFileSlug: string,
+        commandArguments: readonly string[],
+    ): ValidationLane =>
+        createPackageManagerLane(
+            packageManagerRunner,
+            name,
+            logFileSlug,
+            commandArguments,
+        );
+
+    return [
+        lane('Lint', 'lint', ['run', 'lint']),
+        buildRustKernelLane(),
+        {
+            commands: [
+                createPackageManagerCommand(
+                    'Clear docs API reference',
+                    ['exec', 'del-cli', 'docs/src/content/docs/api/reference'],
+                    {
+                        logFileSlug: 'docs-clear-api-reference',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Generate docs API reference',
+                    [
+                        'exec',
+                        'tsx',
+                        './node_modules/typedoc/bin/typedoc',
+                        '--options',
+                        'typedoc.config.mjs',
+                    ],
+                    {
+                        logFileSlug: 'docs-api-reference',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Postprocess docs API reference',
+                    ['exec', 'tsx', './docs/typedoc/postprocess-site-docs.ts'],
+                    {
+                        logFileSlug: 'docs-api-postprocess',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Clear docs site output',
+                    ['exec', 'del-cli', 'docs/dist'],
+                    {
+                        logFileSlug: 'docs-clear-site-output',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Build docs site',
+                    ['exec', 'astro', 'build', '--root', 'docs', '--silent'],
+                    {
+                        logFileSlug: 'docs-site-build',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Verify docs links',
+                    ['exec', 'tsx', './docs/typedoc/verify-docs.ts'],
+                    {
+                        logFileSlug: 'docs-link-verification',
+                        packageManagerRunner,
+                    },
+                ),
+                createPackageManagerCommand(
+                    'Verify rendered docs',
+                    ['exec', 'tsx', './tools/ci/verify-docs-render.ts'],
+                    {
+                        logFileSlug: 'docs-render-verification',
+                        packageManagerRunner,
+                    },
+                ),
+            ],
+            name: 'Verify docs',
+        },
+        lane('Verify public package policy', 'package-policy', [
+            'exec',
+            'tsx',
+            './tools/ci/verify-public-package-policy.ts',
+        ]),
+        lane('Verify test lane coverage', 'test-lane-coverage', [
+            'exec',
+            'tsx',
+            './tools/ci/verify-test-lane-coverage.ts',
+        ]),
+        lane('Check package boundaries', 'package-boundaries', [
+            'exec',
+            'tsx',
+            './tools/ci/check-package-boundaries.ts',
+        ]),
+        lane('Verify test vectors', 'test-vectors', ['run', 'vectors']),
+        lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
+        lane('Node tests (fast)', 'vitest-node', [
+            'exec',
+            'vitest',
+            '--project',
+            'node',
+            '--run',
+            '--reporter',
+            'default',
+            '--reporter',
+            './tools/ci/vitest-progress-reporter.ts',
+        ]),
+        lane('Node tests (kernel)', 'vitest-node-kernel', [
+            'exec',
+            'vitest',
+            '--project',
+            'node-kernel',
+            '--run',
+            '--reporter',
+            'default',
+            '--reporter',
+            './tools/ci/vitest-progress-reporter.ts',
+        ]),
+    ];
+};
 
 const buildProgressLanePlans = (
     lanes: readonly ValidationLane[],
@@ -292,8 +361,7 @@ const buildProgressLanePlans = (
     ): CheckProgressLanePlan['progress'] => {
         const previousProgress =
             lane.name === rustKernelLaneName
-                ? (timingHistory.laneProgress.get(rustKernelLaneName) ??
-                  timingHistory.laneProgress.get(legacyRustKernelLaneName))
+                ? timingHistory.laneProgress.get(rustKernelLaneName)
                 : timingHistory.laneProgress.get(lane.name);
         if (lane.name === 'Build workspace packages') {
             return {
@@ -308,16 +376,11 @@ const buildProgressLanePlans = (
                 source: 'turbo',
             };
         }
-        if (lane.name === 'Node tests (fast)') {
+        if (
+            lane.name === 'Node tests (fast)' ||
+            lane.name === 'Node tests (kernel)'
+        ) {
             return {
-                primary:
-                    previousProgress?.primary === undefined
-                        ? undefined
-                        : {
-                              completed: 0,
-                              total: previousProgress.primary.total,
-                              unit: 'test file',
-                          },
                 secondary:
                     previousProgress?.secondary === undefined
                         ? undefined
@@ -533,12 +596,7 @@ const main = async (): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
-    const isolatedLanes = buildIsolatedLanes();
-    const validationLanes = [
-        ...gatingLanes,
-        ...parallelLanes,
-        ...isolatedLanes,
-    ];
+    const validationLanes = [...gatingLanes, ...parallelLanes];
     const timingHistory = await readPreviousCheckTimingHistory();
     const reporter = new CheckProgressReporter({
         history: timingHistory,
@@ -602,14 +660,6 @@ const main = async (): Promise<void> => {
             process.exitCode = overallExitCode(results);
 
             return;
-        }
-
-        for (const lane of isolatedLanes) {
-            const result = await runGatingLane(lane, runLog, reporter);
-            results.push(result);
-            if (result.exitCode !== 0) {
-                break;
-            }
         }
 
         reporter.stop();

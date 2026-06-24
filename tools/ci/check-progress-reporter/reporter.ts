@@ -10,17 +10,9 @@ import type {
 } from '../run-command.js';
 
 import {
-    defaultRenderIntervalMilliseconds,
-    failureOutputLineLimit,
-    latestOutputLineLimit,
-    previousTimingDetailsVersion,
-    progressEventPrefix,
-    renderDebounceMilliseconds,
-} from './constants.js';
-import { formatProgressDuration } from './durations.js';
-import {
     commandIsFinished,
     formatLaneProgress,
+    formatProgressDuration,
     laneElapsedMilliseconds,
     laneStatusLabels,
     terminalColumnCount,
@@ -33,15 +25,22 @@ import {
     consumeStructuredProgressLine,
     consumeTurboProgressLine,
 } from './progress-parsers.js';
-import type { CommandState, LaneState } from './state.js';
 import { cloneProgressMetric, emptyTimingHistory } from './timing-history.js';
-import type {
-    CheckFailureDetail,
-    CheckProgressLanePlan,
-    CheckProgressStatus,
-    CheckRunTimingDetails,
-    CheckTimingHistory,
-    TerminalWriter,
+import {
+    defaultRenderIntervalMilliseconds,
+    failureOutputLineLimit,
+    latestOutputLineLimit,
+    previousTimingDetailsVersion,
+    progressEventPrefix,
+    renderDebounceMilliseconds,
+    type CheckFailureDetail,
+    type CheckProgressLanePlan,
+    type CheckProgressStatus,
+    type CheckRunTimingDetails,
+    type CheckTimingHistory,
+    type CommandState,
+    type LaneState,
+    type TerminalWriter,
 } from './types.js';
 
 export class CheckProgressReporter {

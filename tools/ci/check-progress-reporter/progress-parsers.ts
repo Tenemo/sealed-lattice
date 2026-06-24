@@ -1,7 +1,5 @@
-import { progressEventPrefix } from './constants.js';
 import { readProgressCount } from './formatting.js';
-import { isRecord } from './guards.js';
-import type { LaneState } from './state.js';
+import { isRecord, progressEventPrefix, type LaneState } from './types.js';
 
 export const consumeStructuredProgressLine = (
     lane: LaneState,

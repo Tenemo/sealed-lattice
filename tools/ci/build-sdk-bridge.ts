@@ -18,6 +18,7 @@ import {
 } from 'typescript';
 
 import {
+    vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,
 } from './public-package-policy.js';
@@ -116,6 +117,7 @@ const runtimeImportTargets = new Map([
 ]);
 export const sdkProtocolRuntimeSourceRelativePaths =
     vendoredProtocolRuntimeModules;
+export const sdkCryptoRuntimeSourceRelativePaths = vendoredCryptoRuntimeModules;
 const sdkProtocolRuntimeIndexSource =
     vendoredProtocolRuntimeEntryExports
         .map(
@@ -237,10 +239,6 @@ export const buildSdkProtocolRuntime = async (): Promise<void> => {
 };
 
 export const buildSdkCryptoRuntime = async (): Promise<void> => {
-    const sourceFilePaths = await collectFiles(cryptoSourceDirectoryPath, {
-        extensions: ['.ts'],
-    });
-
     await rm(cryptoOutputDirectoryPath, {
         recursive: true,
         force: true,
@@ -248,10 +246,10 @@ export const buildSdkCryptoRuntime = async (): Promise<void> => {
     await mkdir(cryptoOutputDirectoryPath, { recursive: true });
 
     await Promise.all(
-        sourceFilePaths.map(async (sourcePath) => {
-            const relativeSourcePath = path.relative(
+        sdkCryptoRuntimeSourceRelativePaths.map(async (relativeSourcePath) => {
+            const sourcePath = path.join(
                 cryptoSourceDirectoryPath,
-                sourcePath,
+                relativeSourcePath,
             );
             const outputPath = path.join(
                 cryptoOutputDirectoryPath,

@@ -5,22 +5,6 @@ pub(crate) fn broadcast_constant(value: u64) -> Vec<u64> {
     broadcast_constant_coefficients(value)
 }
 
-// Add the slot-wise constant `value` to a scaling-one ciphertext.
-#[cfg(test)]
-pub(crate) fn add_constant(ciphertext: &Ciphertext, value: u64) -> CanonicalResult<Ciphertext> {
-    let normalized = normalize_scaling(ciphertext)?;
-
-    add_plaintext_coefficients(&normalized, &broadcast_constant(value))
-}
-
-// Logical NOT of an encrypted boolean (1 - bit), valid for scaling-one inputs.
-#[cfg(test)]
-pub(crate) fn boolean_not(ciphertext: &Ciphertext) -> CanonicalResult<Ciphertext> {
-    let negated = ciphertext_negate(&normalize_scaling(ciphertext)?)?;
-
-    add_plaintext_coefficients(&negated, &broadcast_constant(1))
-}
-
 // Bring several ciphertexts to a common level and scaling, then add them.
 pub(crate) fn sum_aligned(ciphertexts: &[Ciphertext]) -> CanonicalResult<Ciphertext> {
     if ciphertexts.is_empty() {

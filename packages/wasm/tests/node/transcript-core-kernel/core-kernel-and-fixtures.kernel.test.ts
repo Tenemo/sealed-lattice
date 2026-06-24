@@ -2,24 +2,75 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-    fullyVerifiedActiveFixture,
-    fullyVerifiedPassiveMhePrototypeFixture,
+    foundationTranscriptCoreFixture,
     invalidEnumFixture,
     textDecoder,
     textEncoder,
     wasmHeader,
 } from './shared.js';
 
-import { canonicalJson, deriveProtocolHash } from '#packages/crypto/src/index';
 import {
-    loadTranscriptCoreKernel,
-    roundTripBytesThroughKernel,
-    verifyTranscriptCoreFixture,
-} from '#packages/wasm/src/index';
+    canonicalJson,
+    deriveProtocolHash,
+    setupProofMaterialFullObjectHashHex,
+} from '#packages/crypto/src/index';
+import {
+    setupProofChunkManifestRoot,
+    setupProofMaterialChunkHash,
+    setupProofTransportChunkSizeBytes,
+} from '#packages/protocol/src/setup/setup-proof-material-transport';
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import {
     normalizeTranscriptCoreKernelBytesForHash,
     TranscriptCoreKernelCommandError,
 } from '#packages/wasm/src/transcript-core-bridge';
+
+type SetupCommitmentOpeningComputation = Readonly<{
+    readonly operation: 'computeSetupCommitmentFromOpening';
+    readonly commitment: Record<string, unknown>;
+    readonly commitmentRoot: string;
+    readonly commitmentChunkRoot: string;
+    readonly coefficientVectorHash512: string;
+}>;
+
+type SetupCommitmentKernel = Readonly<{
+    readonly exportedFunctionNames: readonly string[];
+    readonly computeSetupCommitmentFromOpening: (input: {
+        readonly publicMatrixSeedHash: string;
+        readonly sourceRnsLimbIndex: number;
+        readonly sourceMessageModulus: number;
+        readonly shamirCoefficientIndex: number;
+        readonly messageCoefficients: readonly number[];
+        readonly randomnessByColumn: readonly (readonly number[])[];
+        readonly ringDegree: number;
+    }) => SetupCommitmentOpeningComputation;
+}>;
+
+type ThresholdShareTransportStreamKernel = Readonly<{
+    readonly describeCollectiveBgvSetupProfile: () => {
+        readonly setupProfileHash: string;
+        readonly qShareHash: string;
+        readonly carryAwareVssShareRelationProfileHash: string;
+        readonly commitmentProfileHash: string;
+    };
+    readonly beginThresholdShareCommitmentsFromTransportStream: (input: {
+        readonly derivationId: string;
+        readonly setupContext: unknown;
+        readonly publicMatrixSeedHash: string;
+        readonly transportedVssCoefficientCommitmentMaterial: unknown;
+    }) => {
+        readonly operation: 'beginThresholdShareCommitmentsFromTransportStream';
+        readonly derivationId: string;
+    };
+    readonly finishThresholdShareCommitmentsFromTransportStream: (input: {
+        readonly derivationId: string;
+        readonly vssCoefficientCommitmentRoot: string;
+        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
+    }) => unknown;
+}>;
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
 describe('transcript-core kernel in Node', () => {
     it('normalizes host-specific Rust source paths before hashing', () => {
@@ -131,7 +182,8 @@ describe('transcript-core kernel in Node', () => {
     });
 
     it('loads the transcript-core module and exposes command exports', async () => {
-        const kernel = await loadTranscriptCoreKernel();
+        const kernel =
+            (await loadTranscriptCoreKernel()) as SetupCommitmentKernel;
 
         expect(kernel.exportedFunctionNames).toEqual(
             expect.arrayContaining([
@@ -144,32 +196,21 @@ describe('transcript-core kernel in Node', () => {
         );
     });
 
-    it('analyzes golden transcript-core fixtures through WASM', async () => {
+    it('analyzes the foundation transcript-core fixture through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const fullyVerifiedPassiveMhePrototypeAnalysis =
-            kernel.analyzeCanonicalObject({
-                canonicalBytesHex:
-                    fullyVerifiedPassiveMhePrototypeFixture.canonicalBytesHex,
-                chunkSize: fullyVerifiedPassiveMhePrototypeFixture.chunkSize,
-            });
-        const fullyVerifiedActiveAnalysis = kernel.analyzeCanonicalObject({
-            canonicalBytesHex: fullyVerifiedActiveFixture.canonicalBytesHex,
-            chunkSize: fullyVerifiedActiveFixture.chunkSize,
+        const foundationAnalysis = kernel.analyzeCanonicalObject({
+            canonicalBytesHex:
+                foundationTranscriptCoreFixture.canonicalBytesHex,
+            chunkSize: foundationTranscriptCoreFixture.chunkSize,
         });
 
-        expect(fullyVerifiedPassiveMhePrototypeAnalysis.baseClaimProfile).toBe(
-            'FullyVerifiedResult',
-        );
-        expect(fullyVerifiedActiveAnalysis.mheSecurityClosure).toBe(
-            'ActiveMalicious',
-        );
-        expect(fullyVerifiedPassiveMhePrototypeAnalysis.objectHash512).not.toBe(
-            fullyVerifiedActiveAnalysis.objectHash512,
+        expect(foundationAnalysis.evaluatorReplayProfileId).toBe(
+            'transcript-core-no-evaluator-replay-proof-v1',
         );
     });
 
-    it('derives claim-bearing Hashes and field results through WASM', async () => {
+    it('derives protocol Hashes and field results through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(
@@ -276,23 +317,202 @@ describe('transcript-core kernel in Node', () => {
         }
     });
 
+    it('computes setup commitments from openings through WASM', async () => {
+        const kernel =
+            (await loadTranscriptCoreKernel()) as SetupCommitmentKernel;
+        const firstAcceptedDataPrime = 140_737_487_306_753;
+        const ringDegree = 8;
+        const messageCoefficients = [0, 1, 2, 3, 5, 8, 13, 21];
+        const randomnessByColumn = Array.from(
+            { length: 5 },
+            (_unused, columnIndex) =>
+                Array.from({ length: ringDegree }, (_unusedAgain, index) => {
+                    const residue = (columnIndex + index) % 3;
+
+                    return residue === 0 ? -1 : residue === 1 ? 0 : 1;
+                }),
+        );
+
+        const computation: SetupCommitmentOpeningComputation =
+            kernel.computeSetupCommitmentFromOpening({
+                publicMatrixSeedHash: 'a'.repeat(128),
+                sourceRnsLimbIndex: 0,
+                sourceMessageModulus: firstAcceptedDataPrime,
+                shamirCoefficientIndex: 1,
+                messageCoefficients,
+                randomnessByColumn,
+                ringDegree,
+            });
+
+        expect(computation.operation).toBe('computeSetupCommitmentFromOpening');
+        expect(computation.commitmentRoot).toHaveLength(128);
+        expect(computation.commitmentChunkRoot).toHaveLength(128);
+        expect(computation.coefficientVectorHash512).toHaveLength(128);
+        expect(computation.commitment).toMatchObject({
+            objectType: 'SetupCommitment',
+            sourceRnsLimbIndex: 0,
+            sourceMessageModulus: firstAcceptedDataPrime,
+            shamirCoefficientIndex: 1,
+            ringDegree,
+        });
+
+        expect(() =>
+            kernel.computeSetupCommitmentFromOpening({
+                publicMatrixSeedHash: 'a'.repeat(128),
+                sourceRnsLimbIndex: 0,
+                sourceMessageModulus: firstAcceptedDataPrime + 1,
+                shamirCoefficientIndex: 1,
+                messageCoefficients,
+                randomnessByColumn,
+                ringDegree,
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('exposes chunk-fed VSS threshold derivation stream commands through WASM', async () => {
+        const kernel =
+            (await loadTranscriptCoreKernel()) as ThresholdShareTransportStreamKernel;
+        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const setupContext = {
+            ceremonyId: 'ceremony-main',
+            manifestHash: 'a'.repeat(128),
+            rosterHash: 'b'.repeat(128),
+            setupProfileHash: profile.setupProfileHash,
+            qShareHash: profile.qShareHash,
+            carryAwareVssShareRelationProfileHash:
+                profile.carryAwareVssShareRelationProfileHash,
+            commitmentProfileHash: profile.commitmentProfileHash,
+            setupEpoch: 'setup-epoch-1',
+        };
+        const derivationId = 'wasm-vss-stream-smoke';
+
+        const beginResult =
+            kernel.beginThresholdShareCommitmentsFromTransportStream({
+                derivationId,
+                setupContext,
+                publicMatrixSeedHash: 'c'.repeat(128),
+                transportedVssCoefficientCommitmentMaterial: {
+                    objectType:
+                        'SetupTransportedVssCoefficientCommitmentMaterial',
+                    objectVersion: 1,
+                    binaryFormat:
+                        'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+                    chunkSizeBytes: 1_048_576,
+                    chunkCount: 1,
+                    totalByteLength: 8,
+                },
+            });
+
+        expect(beginResult).toMatchObject({
+            operation: 'beginThresholdShareCommitmentsFromTransportStream',
+            derivationId,
+        });
+        expect(() =>
+            kernel.finishThresholdShareCommitmentsFromTransportStream({
+                derivationId,
+                vssCoefficientCommitmentRoot: 'd'.repeat(128),
+                sourceTrusteeCoefficientCommitmentRecords: [],
+            }),
+        ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('exposes chunk-fed setup proof material stream commands through WASM', async () => {
+        const kernel = await loadTranscriptCoreKernel();
+        const proofFamily = 'same-secret-linkage-anchor';
+        const proofChunk = textEncoder.encode('setup proof material stream');
+        const proofChunks = [proofChunk] as const;
+        const fullObjectHash = setupProofMaterialFullObjectHashHex(
+            proofFamily,
+            proofChunk.byteLength,
+            proofChunks,
+        );
+        const chunkHashes = [
+            setupProofMaterialChunkHash(
+                proofFamily,
+                fullObjectHash,
+                0,
+                proofChunk,
+            ),
+        ];
+        const chunkRoot = setupProofChunkManifestRoot(
+            proofFamily,
+            chunkHashes,
+            fullObjectHash,
+            proofChunk.byteLength,
+        );
+        const proofMaterialRoot = fullObjectHash;
+        const verificationId = 'wasm-setup-proof-material-stream-smoke';
+
+        const beginResult = kernel.beginSetupProofMaterialTransportStream({
+            verificationId,
+            transportedSetupProofMaterial: {
+                objectType: 'SetupTransportedSameSecretProofMaterial',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                setupProofProfileId: 'SealedLattice-SetupProof-v1',
+                proofFamily,
+                proofMaterialRoot,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: 1,
+                totalByteLength: proofChunk.byteLength,
+                fullObjectHash,
+                chunkRoot,
+                chunkHashes,
+            },
+        });
+
+        expect(beginResult).toMatchObject({
+            operation: 'beginSetupProofMaterialTransportStream',
+            verificationId,
+            proofFamily,
+            proofMaterialRoot,
+        });
+
+        const absorbResult =
+            kernel.absorbSetupProofMaterialTransportStreamChunk({
+                verificationId,
+                chunkIndex: 0,
+                bytesHex: bytesToHex(proofChunk),
+            });
+
+        expect(absorbResult).toMatchObject({
+            operation: 'absorbSetupProofMaterialTransportStreamChunk',
+            absorbedChunkIndex: 0,
+            nextChunkIndex: 1,
+            observedTotalByteLength: proofChunk.byteLength,
+        });
+
+        const finishResult = kernel.finishSetupProofMaterialTransportStream({
+            verificationId,
+        });
+
+        expect(finishResult).toMatchObject({
+            operation: 'finishSetupProofMaterialTransportStream',
+            verificationId,
+            proofFamily,
+            proofMaterialRoot,
+            verifiedSetupProofMaterial: {
+                objectType: 'VerifiedSetupProofMaterial',
+                verificationId,
+                proofFamily,
+                proofMaterialRoot,
+                proofFullObjectHash: fullObjectHash,
+                proofChunkRoot: chunkRoot,
+                proofChunkHashes: chunkHashes,
+            },
+        });
+    });
+
     it('verifies golden and malformed fixtures with stable outputs', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(
-            kernel.verifyFixture(fullyVerifiedPassiveMhePrototypeFixture),
-        ).toEqual({
-            verified: true,
-            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
+        expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
+            caseName: 'foundation-transcript-roots',
             objectHash512:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedObjectHash512,
-            chunkRoot:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedChunkRoot,
-            statusLabels:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedStatusLabels,
+                foundationTranscriptCoreFixture.expectedObjectHash512,
+            chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
         });
         expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
-            verified: true,
             caseName: 'invalid-enum',
             expectedErrorCode: 'InvalidEnum',
         });
@@ -326,26 +546,11 @@ describe('transcript-core kernel in Node', () => {
     });
 
     it('keeps byte round-trip as an allocation smoke path', async () => {
-        await expect(
-            roundTripBytesThroughKernel(Uint8Array.from([9, 8, 7, 6, 5])),
-        ).resolves.toEqual(Uint8Array.from([9, 8, 7, 6, 5]));
-    });
+        const kernel = await loadTranscriptCoreKernel();
 
-    it('verifies fixtures through the public WASM wrapper', async () => {
-        await expect(
-            verifyTranscriptCoreFixture(
-                fullyVerifiedPassiveMhePrototypeFixture,
-            ),
-        ).resolves.toEqual({
-            verified: true,
-            caseName: 'fully-verified-passive-mhe-prototype-transcript-core',
-            objectHash512:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedObjectHash512,
-            chunkRoot:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedChunkRoot,
-            statusLabels:
-                fullyVerifiedPassiveMhePrototypeFixture.expectedStatusLabels,
-        });
+        expect(kernel.roundTripBytes(Uint8Array.from([9, 8, 7, 6, 5]))).toEqual(
+            Uint8Array.from([9, 8, 7, 6, 5]),
+        );
     });
 
     it('computes internal hash smoke outputs through the command bridge', async () => {

@@ -3,7 +3,6 @@ import type {
     FoundationTranscriptComponentResults,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
-    ProtocolVerificationStatusLabel,
     RefusalRecord,
     RecoveryEpochVerification,
     TargetFinalityVerification,
@@ -35,7 +34,6 @@ const nextFoundationEvidence = [
 
 const emptyFirstValidOrdering: FirstValidOrderingVerification = {
     ok: false,
-    statusLabels: [],
     acceptedHashes: [],
     refusedObjects: [],
     orderedObjects: [],
@@ -43,7 +41,6 @@ const emptyFirstValidOrdering: FirstValidOrderingVerification = {
 
 const emptyTargetFinality: TargetFinalityVerification = {
     ok: false,
-    statusLabels: [],
     acceptedHashes: [],
     refusedObjects: [],
     validWitnessIdentities: [],
@@ -55,7 +52,6 @@ const buildFailure = (
     componentResults?: Partial<FoundationTranscriptComponentResults>,
 ): FoundationTranscriptVerification => ({
     ok: false,
-    statusLabels: [],
     acceptedHashes: [],
     refusedObjects,
     validWitnessIdentities: [],
@@ -63,7 +59,6 @@ const buildFailure = (
     componentResults: {
         rosterManifest: componentResults?.rosterManifest ?? {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [],
             participantIdentities: [],
@@ -71,7 +66,6 @@ const buildFailure = (
         rosterExternalAcceptance:
             componentResults?.rosterExternalAcceptance ?? {
                 ok: false,
-                statusLabels: [],
                 acceptedHashes: [],
                 refusedObjects: [],
             },
@@ -289,24 +283,10 @@ const verifyFoundationTranscriptUnchecked = (
         recoveryEpochUpdates.every((result) => result.ok) &&
         firstValidOrdering.ok &&
         targetFinality.ok;
-    const statusLabels: readonly ProtocolVerificationStatusLabel[] = accepted
-        ? uniqueStrings([
-              ...rosterManifest.statusLabels,
-              ...rosterExternalAcceptance.statusLabels,
-              ...firstValidOrdering.statusLabels,
-              ...targetFinality.statusLabels,
-          ])
-        : uniqueStrings([
-              ...rosterManifest.statusLabels,
-              ...rosterExternalAcceptance.statusLabels,
-              ...firstValidOrdering.statusLabels,
-              ...targetFinality.statusLabels,
-          ]);
 
     if (!accepted) {
         return {
             ...buildFailure(refusedObjects, componentResults),
-            statusLabels,
             forkEvidence:
                 targetFinality.forkEvidence ?? rosterManifest.forkEvidence,
         };
@@ -314,7 +294,6 @@ const verifyFoundationTranscriptUnchecked = (
 
     return {
         ok: true,
-        statusLabels,
         acceptedHashes: uniqueStrings([
             ...rosterManifest.acceptedHashes,
             ...rosterExternalAcceptance.acceptedHashes,

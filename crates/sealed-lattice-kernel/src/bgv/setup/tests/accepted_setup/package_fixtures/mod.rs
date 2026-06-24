@@ -1,0 +1,739 @@
+use super::*;
+
+static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
+static TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    TerminalProfileRingSetupPackageFixture,
+> = OnceLock::new();
+static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
+    OnceLock::new();
+static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    serde_json::Value,
+> = OnceLock::new();
+static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
+    OnceLock::new();
+
+#[derive(Clone)]
+pub(super) struct TerminalProfileRingSetupPackageFixture {
+    pub(super) package: serde_json::Value,
+    pub(super) transported_vss_coefficient_commitment_material: serde_json::Value,
+    pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
+}
+
+struct VssMaterialPackageComponents {
+    vss_coefficient_commitments: serde_json::Value,
+    vss_coefficient_commitment_material: serde_json::Value,
+    threshold_share_commitments: serde_json::Value,
+    transported_vss_coefficient_commitment_material: Option<serde_json::Value>,
+    verified_vss_coefficient_commitment_material: Option<serde_json::Value>,
+}
+
+struct CollectiveSetupPackageFixture {
+    package: serde_json::Value,
+    transported_vss_coefficient_commitment_material: Option<serde_json::Value>,
+    verified_vss_coefficient_commitment_material: Option<serde_json::Value>,
+}
+
+fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
+    derive_protocol_hash(
+        "PublicKeyHash",
+        &serde_json::json!({
+            "algorithm": "ML-KEM-768",
+            "keyPurpose": "private-vss-mailbox",
+            "recipientRosterPosition": roster_position,
+        }),
+    )
+    .expect("recipient mailbox public key hash")
+}
+
+fn private_vss_mailbox_public_key_bytes_hash(roster_position: u64) -> String {
+    derive_protocol_hash(
+        "PublicKeyHash",
+        &serde_json::json!({
+            "fixture": "recipient-mailbox-public-key-bytes",
+            "recipientRosterPosition": roster_position,
+        }),
+    )
+    .expect("recipient mailbox public key bytes hash")
+}
+
+fn setup_trustee_signature_seed_label(trustee_identity: &str) -> String {
+    format!("{trustee_identity}-setup-signing")
+}
+
+fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
+    let roster_entries = (0..participant_count)
+        .map(|roster_position| {
+            let trustee_identity = format!("trustee-{roster_position}");
+            let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(
+                &setup_trustee_signature_seed_label(&trustee_identity),
+            )
+            .expect("setup trustee signing public-key hash");
+            serde_json::json!({
+                "objectType": "CollectiveBgvSetupRosterEntry",
+                "objectVersion": 1,
+                "rosterPosition": roster_position,
+                "trusteeIdentity": trustee_identity,
+                "signingPublicKeyHash": signing_public_key_hash,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    derive_protocol_hash(
+        "CollectiveBgvSetupRosterHash",
+        &serde_json::Value::Array(roster_entries),
+    )
+    .expect("collective setup roster hash")
+}
+
+/// The first-closure roster size (n = 10). The minimal package and every
+/// historical fixture path use this, so its bytes stay identical.
+const FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT: u64 = 10;
+
+/// Internal fixture toggle that forces the streamed VSS coefficient commitment
+/// material path at the reduced development ring. The streamed path is what
+/// produces the transported coefficient commitment material the terminal
+/// accepted-setup verifier streams, so the reduced-ring dynamic-roster accept
+/// fixture uses it. The production-recorded ring status the derivation writes
+/// is still "development-reduced-ring"; this string never leaves the fixtures.
+const DEVELOPMENT_REDUCED_RING_STREAMED_STATUS: &str = "development-reduced-ring-streamed";
+
+pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
+    // The reduced development ring must stay provable by the trustee
+    // evaluation-key argument: the trace splits each vector in two and the
+    // smallest supported trace is sixty-four, so the development ring is one
+    // hundred twenty-eight.
+    MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(|| {
+            minimal_collective_setup_package_for_participant_count(
+                FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+            )
+        })
+        .clone()
+}
+
+/// Reduced development-ring (128) collective setup package for an arbitrary
+/// supported roster size, built through the non-streamed VSS path. Drives the
+/// same per-trustee material and roster-derived certificates as the n = 10
+/// path. At n = 10 this is byte identical to `minimal_collective_setup_package`.
+pub(super) fn minimal_collective_setup_package_for_participant_count(
+    participant_count: u64,
+) -> serde_json::Value {
+    build_collective_setup_package_fixture(128, "development-reduced-ring", participant_count)
+}
+
+pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
+-> TerminalProfileRingSetupPackageFixture {
+    TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(|| {
+            let package_fixture = build_collective_setup_package_fixture_parts(
+                POLYNOMIAL_DEGREE,
+                "profile-ring",
+                FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+                None,
+            );
+            TerminalProfileRingSetupPackageFixture {
+                package: package_fixture.package,
+                transported_vss_coefficient_commitment_material: package_fixture
+                    .transported_vss_coefficient_commitment_material
+                    .expect("profile-ring VSS transport reference"),
+                verified_vss_coefficient_commitment_material: package_fixture
+                    .verified_vss_coefficient_commitment_material
+                    .expect("profile-ring verified VSS material reference"),
+            }
+        })
+        .clone()
+}
+
+/// Reduced development-ring (128) collective setup package for roster size n,
+/// built through the streamed VSS coefficient commitment material path so it
+/// carries the transported and verified coefficient commitment material the
+/// terminal accepted-setup verifier streams. Used by the dynamic-roster fixture
+/// to drive every roster-dependent binding for any supported n without the
+/// heavy profile ring. At n = 10 the package shape matches the first-closure
+/// streamed path.
+pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
+    participant_count: u64,
+    stream_derivation_purpose: &str,
+) -> TerminalProfileRingSetupPackageFixture {
+    let package_fixture = build_collective_setup_package_fixture_parts(
+        128,
+        DEVELOPMENT_REDUCED_RING_STREAMED_STATUS,
+        participant_count,
+        Some(stream_derivation_purpose),
+    );
+    TerminalProfileRingSetupPackageFixture {
+        package: package_fixture.package,
+        transported_vss_coefficient_commitment_material: package_fixture
+            .transported_vss_coefficient_commitment_material
+            .expect("reduced-ring streamed VSS transport reference"),
+        verified_vss_coefficient_commitment_material: package_fixture
+            .verified_vss_coefficient_commitment_material
+            .expect("reduced-ring streamed verified VSS material reference"),
+    }
+}
+
+fn build_collective_setup_package_fixture(
+    vss_material_ring_degree: usize,
+    vss_material_ring_degree_status: &str,
+    participant_count: u64,
+) -> serde_json::Value {
+    build_collective_setup_package_fixture_parts(
+        vss_material_ring_degree,
+        vss_material_ring_degree_status,
+        participant_count,
+        None,
+    )
+    .package
+}
+
+// The collective setup context shared by the package fixtures. Every fixture
+// builds the same first-profile context shape, so this keeps one definition of
+// it instead of repeating the json! block at each construction site.
+#[allow(clippy::too_many_arguments)]
+fn collective_setup_context_fixture(
+    ceremony_id: &str,
+    manifest_hash: &str,
+    roster_hash: &str,
+    setup_profile_hash: &str,
+    q_share_hash: &str,
+    carry_aware_vss_relation_profile_hash: &str,
+    commitment_profile_hash: &str,
+    setup_epoch: &str,
+    participant_count: u64,
+) -> serde_json::Value {
+    // Full-roster quorums equal the participant count and the decryption
+    // threshold is floor(n/3) + 1; these match the production verifier's
+    // roster-derived parameters (accepted_setup.rs), so the context is accepted
+    // for any supported roster size.
+    serde_json::json!({
+        "ceremonyId": ceremony_id,
+        "manifestHash": manifest_hash,
+        "rosterHash": roster_hash,
+        "setupProfileHash": setup_profile_hash,
+        "qShareHash": q_share_hash,
+        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
+        "commitmentProfileHash": commitment_profile_hash,
+        "setupEpoch": setup_epoch,
+        "participantCount": participant_count,
+        "qSetupComplete": participant_count,
+        "qBallotRelease": participant_count,
+        "qFinal": participant_count,
+        "qDec": participant_count / 3 + 1,
+    })
+}
+
+fn build_collective_setup_package_fixture_parts(
+    vss_material_ring_degree: usize,
+    vss_material_ring_degree_status: &str,
+    participant_count: u64,
+    stream_derivation_purpose: Option<&str>,
+) -> CollectiveSetupPackageFixture {
+    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let ceremony_id = "ceremony-main";
+    let manifest_hash = derive_protocol_hash(
+        "ElectionManifestHash",
+        &serde_json::json!({ "manifest": "collective-bgv-setup-test" }),
+    )
+    .expect("manifest hash");
+    let roster_hash = collective_setup_roster_hash_fixture(participant_count);
+    // The setup profile hash is a roster family: distinct per n, byte-identical
+    // to the historical first-profile binding at n = 10. The verifier checks
+    // setupContext.setupProfileHash against setup_profile_hash_for_roster, so the
+    // fixture must bind the roster-derived hash here. The Q_share, carry-aware
+    // VSS relation, and commitment profile hashes are roster-independent, so
+    // those still come straight from the profile description.
+    let setup_profile_hash = crate::bgv::setup::accepted_setup::setup_profile_hash_for_roster(
+        &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+            participant_count,
+        ),
+    )
+    .expect("roster-derived setup profile hash");
+    let setup_profile_hash = setup_profile_hash.as_str();
+    let q_share_hash = profile["qShareHash"].as_str().expect("Q_share hash");
+    let carry_aware_vss_relation_profile_hash = profile["carryAwareVssShareRelationProfileHash"]
+        .as_str()
+        .expect("carry-aware VSS relation profile hash");
+    let commitment_profile_hash = profile["commitmentProfileHash"]
+        .as_str()
+        .expect("commitment profile hash");
+    let setup_epoch = "setup-epoch-1";
+    let setup_context = collective_setup_context_fixture(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        participant_count,
+    );
+    let mut previous_phase_root = serde_json::Value::Null;
+    let phase_transcript = profile["phaseOrder"]
+        .as_array()
+        .expect("phase order")
+        .iter()
+        .map(|phase| {
+            let phase_identifier = phase["phaseId"].as_str().expect("phase id");
+            let phase_number = phase["phaseNumber"].as_u64().expect("phase number");
+            let participant_phase_objects = (0..participant_count)
+                .map(|roster_position| {
+                    let trustee_identity = format!("trustee-{roster_position}");
+                    let signature_seed_label =
+                        setup_trustee_signature_seed_label(&trustee_identity);
+                    let signing_public_key_hash =
+                        create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
+                            .expect("signature key fixture");
+                    let mut phase_payload = serde_json::json!({
+                        "objectType": "SetupPhaseParticipantObject",
+                        "objectVersion": 1,
+                        "phaseId": phase_identifier,
+                        "phaseNumber": phase_number,
+                        "ceremonyId": ceremony_id,
+                        "manifestHash": manifest_hash,
+                        "rosterHash": roster_hash,
+                        "setupProfileHash": setup_profile_hash,
+                        "commitmentProfileHash": commitment_profile_hash,
+                        "setupEpoch": setup_epoch,
+                        "signerRole": "Trustee",
+                        "trusteeIdentity": trustee_identity,
+                        "rosterPosition": roster_position,
+                        "recoveryEpoch": 0,
+                        "deviceEpoch": 0,
+                        "signingPublicKeyHash": signing_public_key_hash,
+                    });
+                    if phase_identifier == "setupIntent" {
+                        phase_payload["privateVssMailboxPublicKeyHash"] =
+                            serde_json::json!(private_vss_mailbox_public_key_hash(roster_position));
+                        phase_payload["privateVssMailboxPublicKeyBytesHash"] = serde_json::json!(
+                            private_vss_mailbox_public_key_bytes_hash(roster_position)
+                        );
+                    }
+                    let phase_object_root = derive_protocol_hash(
+                        "SetupPhaseObjectHash",
+                        &phase_payload,
+                    )
+                    .expect("phase object root");
+                    let phase_object_byte_length =
+                        u64::try_from(canonical_json(&phase_payload).expect("phase payload").len())
+                            .expect("phase payload length");
+                    let phase_signature_context_hash = derive_protocol_hash(
+                        "SetupPhaseObjectHash",
+                        &serde_json::json!({
+                            "purpose": "setup-phase-signature-context",
+                            "phaseId": phase_identifier,
+                            "phaseNumber": phase_number,
+                            "ceremonyId": ceremony_id,
+                            "manifestHash": manifest_hash,
+                            "rosterHash": roster_hash,
+                            "setupProfileHash": setup_profile_hash,
+                            "qShareHash": q_share_hash,
+                            "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
+                            "commitmentProfileHash": commitment_profile_hash,
+                            "setupEpoch": setup_epoch,
+                            "trusteeIdentity": trustee_identity,
+                            "rosterPosition": roster_position,
+                            "phaseObjectRoot": phase_object_root,
+                        }),
+                    )
+                    .expect("phase signature context hash");
+                    let signature_fixture = create_protocol_signature_fixture(
+                        &signature_seed_label,
+                        serde_json::json!({
+                            "objectType": "SetupPhaseParticipantObject",
+                            "objectVersion": 1,
+                            "ceremonyId": ceremony_id,
+                            "manifestHash": manifest_hash,
+                            "boardHeadHash": null,
+                            "objectRoot": phase_object_root,
+                            "chunkMerkleRoot": null,
+                            "byteLength": phase_object_byte_length,
+                            "signerRole": "Trustee",
+                            "signerIdentity": trustee_identity,
+                            "recoveryEpoch": 0,
+                            "deviceEpoch": 0,
+                            "contextHash": phase_signature_context_hash,
+                        }),
+                    )
+                    .expect("phase signature fixture");
+                    let signature_envelope = signature_fixture.envelope;
+                    let signature_envelope_hash = signature_envelope["signatureHash"].clone();
+                    let mut participant_phase_object = serde_json::json!({
+                        "objectType": "SetupPhaseParticipantObject",
+                        "objectVersion": 1,
+                        "phaseId": phase_identifier,
+                        "phaseNumber": phase_number,
+                        "ceremonyId": ceremony_id,
+                        "manifestHash": manifest_hash,
+                        "rosterHash": roster_hash,
+                        "setupProfileHash": setup_profile_hash,
+                        "setupEpoch": setup_epoch,
+                        "signerRole": "Trustee",
+                        "trusteeIdentity": trustee_identity,
+                        "rosterPosition": roster_position,
+                        "recoveryEpoch": 0,
+                        "deviceEpoch": 0,
+                        "signingPublicKeyHash": signing_public_key_hash,
+                        "phaseObjectRoot": phase_object_root,
+                        "phaseObjectByteLength": phase_object_byte_length,
+                        "phaseSignatureContextHash": phase_signature_context_hash,
+                        "signatureEnvelopeHash": signature_envelope_hash,
+                        "signatureEnvelope": signature_envelope,
+                    });
+                    if phase_identifier == "setupIntent" {
+                        participant_phase_object["privateVssMailboxPublicKeyHash"] =
+                            serde_json::json!(private_vss_mailbox_public_key_hash(roster_position));
+                        participant_phase_object["privateVssMailboxPublicKeyBytesHash"] =
+                            serde_json::json!(private_vss_mailbox_public_key_bytes_hash(
+                                roster_position
+                            ));
+                    }
+
+                    participant_phase_object
+                })
+                .collect::<Vec<_>>();
+            let mut phase_record = serde_json::json!({
+                "phaseId": phase_identifier,
+                "phaseNumber": phase_number,
+                "ceremonyId": ceremony_id,
+                "manifestHash": manifest_hash,
+                "rosterHash": roster_hash,
+                "setupProfileHash": setup_profile_hash,
+                "qShareHash": q_share_hash,
+                "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
+                "commitmentProfileHash": commitment_profile_hash,
+                "setupEpoch": setup_epoch,
+                "previousPhaseRoot": previous_phase_root.clone(),
+                "participantPhaseObjects": participant_phase_objects,
+            });
+            let phase_root =
+                derive_protocol_hash("SetupPhaseRoot", &phase_record).expect("phase root");
+            phase_record["phaseRoot"] = serde_json::json!(phase_root.clone());
+            previous_phase_root = serde_json::json!(phase_root);
+
+            phase_record
+        })
+        .collect::<Vec<_>>();
+    let common_randomness = common_randomness_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        setup_epoch,
+        participant_count,
+    );
+    let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
+        .as_str()
+        .expect("public matrix seed hash");
+    // Both the profile-ring terminal path and the reduced-ring dynamic-roster
+    // accept path need the streamed VSS material so the package carries the
+    // transported coefficient commitment material the accepted-setup verifier
+    // streams. Reduced-ring tests pass a purpose so repeated fixture builds at
+    // the same roster size never share live derivation state.
+    let stream_vss_material = (vss_material_ring_degree == POLYNOMIAL_DEGREE
+        && vss_material_ring_degree_status == "profile-ring")
+        || vss_material_ring_degree_status == DEVELOPMENT_REDUCED_RING_STREAMED_STATUS;
+    let vss_components = if stream_vss_material {
+        let derivation_id = if vss_material_ring_degree_status == "profile-ring" {
+            "terminal-profile-ring-vss-material-stream".to_string()
+        } else {
+            let stream_derivation_purpose =
+                stream_derivation_purpose.expect("reduced-ring streamed VSS fixture purpose");
+            format!(
+                "development-reduced-ring-vss-material-stream-{stream_derivation_purpose}-n{participant_count}-r{vss_material_ring_degree}"
+            )
+        };
+        streamed_vss_coefficient_commitments_object(
+            ceremony_id,
+            &manifest_hash,
+            &roster_hash,
+            setup_profile_hash,
+            q_share_hash,
+            carry_aware_vss_relation_profile_hash,
+            commitment_profile_hash,
+            setup_epoch,
+            public_matrix_seed_hash,
+            vss_material_ring_degree,
+            &derivation_id,
+            participant_count,
+        )
+    } else {
+        let (vss_coefficient_commitments, vss_coefficient_commitment_material) =
+            vss_coefficient_commitments_object(
+                ceremony_id,
+                &manifest_hash,
+                &roster_hash,
+                setup_profile_hash,
+                q_share_hash,
+                carry_aware_vss_relation_profile_hash,
+                commitment_profile_hash,
+                setup_epoch,
+                public_matrix_seed_hash,
+                vss_material_ring_degree,
+                vss_material_ring_degree_status,
+                participant_count,
+            );
+        let threshold_share_commitments =
+            derive_threshold_share_commitments_from_request(&serde_json::json!({
+                "setupContext": setup_context.clone(),
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "sourceTrusteeCoefficientCommitmentRecords": vss_coefficient_commitments["sourceTrusteeRecords"].clone(),
+                "coefficientCommitments": vss_coefficient_commitment_material["coefficientCommitments"].clone(),
+            }))
+            .expect("threshold-share commitments")["thresholdShareCommitments"]
+                .clone();
+        VssMaterialPackageComponents {
+            vss_coefficient_commitments,
+            vss_coefficient_commitment_material,
+            threshold_share_commitments,
+            transported_vss_coefficient_commitment_material: None,
+            verified_vss_coefficient_commitment_material: None,
+        }
+    };
+    let vss_coefficient_commitments = vss_components.vss_coefficient_commitments.clone();
+    let vss_coefficient_commitment_material =
+        vss_components.vss_coefficient_commitment_material.clone();
+    let threshold_share_commitments = vss_components.threshold_share_commitments.clone();
+    let private_vss_envelope_commitments = private_vss_envelope_commitments_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        &common_randomness,
+        &vss_coefficient_commitments,
+        participant_count,
+    );
+    let private_vss_envelope_commitment_root =
+        private_vss_envelope_commitments["privateVssEnvelopeCommitmentRoot"]
+            .as_str()
+            .expect("private VSS envelope commitment root")
+            .to_string();
+    let vss_share_acceptances = vss_share_acceptances_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        &private_vss_envelope_commitments,
+        &vss_coefficient_commitments,
+        participant_count,
+    );
+    let same_secret_consistency = same_secret_consistency_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        &vss_coefficient_commitments,
+        participant_count,
+    );
+    let public_key_shares = public_key_shares_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        &common_randomness,
+        &same_secret_consistency,
+        participant_count,
+    );
+    let public_key_share_proofs = public_key_share_proofs_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        &common_randomness,
+        &same_secret_consistency,
+        &public_key_shares,
+        participant_count,
+    );
+    let evaluator_key_schedule = evaluator_key_schedule_object(
+        ceremony_id,
+        &manifest_hash,
+        &roster_hash,
+        setup_profile_hash,
+        q_share_hash,
+        carry_aware_vss_relation_profile_hash,
+        commitment_profile_hash,
+        setup_epoch,
+        &profile,
+        &common_randomness,
+        &same_secret_consistency,
+        &public_key_shares,
+        &public_key_share_proofs,
+        participant_count,
+    );
+    let setup_commitment_security_certificate =
+        setup_commitment_security_certificate_fixture(&profile, participant_count);
+    let setup_commitment_security_certificate_hash = setup_commitment_security_certificate
+        .get("setupCommitmentSecurityCertificateHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("setup commitment security certificate hash")
+        .to_string();
+    let setup_transport_certificate = match &vss_components
+        .transported_vss_coefficient_commitment_material
+    {
+        Some(transported_vss_coefficient_commitment_material) => {
+            setup_transport_certificate_for_transported_vss_material(
+                &profile,
+                &vss_coefficient_commitment_material,
+                transported_vss_coefficient_commitment_material,
+            )
+        }
+        None => setup_transport_certificate_fixture(&profile, &vss_coefficient_commitment_material),
+    };
+    let setup_transport_certificate_hash = setup_transport_certificate
+        .get("setupTransportCertificateHash")
+        .and_then(serde_json::Value::as_str)
+        .expect("setup transport certificate hash")
+        .to_string();
+    let setup_proof_accounting_certificate_hash_value =
+        setup_proof_accounting_certificate_hash().expect("setup proof accounting certificate hash");
+    let mut setup_proof_accounting_certificate =
+        setup_proof_accounting_certificate_value().expect("setup proof accounting certificate");
+    setup_proof_accounting_certificate["setupProofAccountingCertificateHash"] =
+        serde_json::json!(setup_proof_accounting_certificate_hash_value.clone());
+    // The HE security certificate binds the roster public-key-share count, so it
+    // is built for this package's roster to match the verifier's per-roster
+    // recompute (accepted_certificates::accepted_he_security_certificate_value_for_roster).
+    let he_security_roster =
+        crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+            participant_count,
+        );
+    let he_security_certificate_hash =
+        crate::bgv::setup::accepted_setup::accepted_he_security_certificate_hash_for_roster(
+            &he_security_roster,
+        )
+        .expect("HE security certificate hash");
+    let mut he_security_certificate =
+        crate::bgv::setup::accepted_setup::accepted_he_security_certificate_value_for_roster(
+            &he_security_roster,
+        )
+        .expect("HE security certificate");
+    he_security_certificate["heSecurityCertificateHash"] =
+        serde_json::json!(he_security_certificate_hash.clone());
+    let mut package = serde_json::json!({
+        "objectType": "SetupPackage",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupContext": setup_context,
+        "qShare": profile["qShare"].clone(),
+        "phaseTranscript": phase_transcript,
+        "commonRandomness": common_randomness,
+        "vssCoefficientCommitments": vss_coefficient_commitments,
+        "vssCoefficientCommitmentMaterial": vss_coefficient_commitment_material,
+        "privateVssEnvelopeCommitments": private_vss_envelope_commitments,
+        "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
+        "vssShareAcceptances": vss_share_acceptances,
+        "thresholdShareCommitments": threshold_share_commitments,
+        "sameSecretConsistency": same_secret_consistency,
+        "publicKeyShares": public_key_shares,
+        "publicKeyShareProofs": public_key_share_proofs,
+        "evaluatorKeySchedule": evaluator_key_schedule,
+        "relinearizationKeyShareRounds": {},
+        "galoisKeyShareBatches": [],
+        "trusteeEvaluationKeyProofs": {},
+        "evaluationKeys": {},
+        "setupCommitmentSecurityCertificate": setup_commitment_security_certificate,
+        "setupCommitmentSecurityCertificateHash": setup_commitment_security_certificate_hash,
+        "setupTransportCertificate": setup_transport_certificate,
+        "setupTransportCertificateHash": setup_transport_certificate_hash,
+        "setupProofAccountingCertificate": setup_proof_accounting_certificate,
+        "setupProofAccountingCertificateHash": setup_proof_accounting_certificate_hash_value,
+        "heSecurityCertificate": he_security_certificate,
+        "heSecurityCertificateHash": he_security_certificate_hash,
+    });
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    CollectiveSetupPackageFixture {
+        package,
+        transported_vss_coefficient_commitment_material: vss_components
+            .transported_vss_coefficient_commitment_material,
+        verified_vss_coefficient_commitment_material: vss_components
+            .verified_vss_coefficient_commitment_material,
+    }
+}
+
+pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
+    SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_same_secret_proof_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
+    let mut package = minimal_collective_setup_package_for_participant_count(
+        FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+    );
+    package["sameSecretProofs"] = same_secret_proofs_object(&package);
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    package
+}
+
+pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
+{
+    PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_public_key_share_succinct_proof_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
+    let mut package = build_same_secret_proof_bearing_collective_setup_package();
+    replace_public_key_share_hashes_with_material_hashes(&mut package);
+    package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
+    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    package
+}
+
+pub(super) fn collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
+    COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
+        .get_or_init(build_collective_public_key_bearing_collective_setup_package)
+        .clone()
+}
+
+fn build_collective_public_key_bearing_collective_setup_package() -> serde_json::Value {
+    let mut package = build_public_key_share_succinct_proof_bearing_collective_setup_package();
+    package["collectivePublicKey"] = collective_public_key_object(&package);
+    package["collectivePublicKeyRoot"] =
+        package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
+    rebind_active_static_setup_theorem_certificate(&mut package);
+    rebind_collective_setup_package_hash(&mut package);
+
+    package
+}
+
+mod certificates;
+mod common_randomness;
+mod private_vss_envelopes;
+mod public_key_shares;
+mod same_secret_consistency;
+mod vss_coefficient_commitments;
+
+pub(super) use certificates::*;
+use common_randomness::*;
+pub(super) use private_vss_envelopes::*;
+use public_key_shares::*;
+use same_secret_consistency::*;
+pub(super) use vss_coefficient_commitments::*;

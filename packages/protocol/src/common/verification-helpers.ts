@@ -73,6 +73,14 @@ export const signedObjectRootByteLength = 64;
 export const isProtocolHashString = (value: unknown): value is string =>
     typeof value === 'string' && /^[0-9a-f]{128}$/u.test(value);
 
+export const isRecord = (
+    value: unknown,
+): value is Readonly<Record<string, unknown>> =>
+    typeof value === 'object' && value !== null;
+
+export const isNonEmptyString = (value: unknown): value is string =>
+    typeof value === 'string' && value.length > 0;
+
 export const isNonNegativeInteger = (value: number): boolean =>
     Number.isSafeInteger(value) && value >= 0 && !Object.is(value, -0);
 

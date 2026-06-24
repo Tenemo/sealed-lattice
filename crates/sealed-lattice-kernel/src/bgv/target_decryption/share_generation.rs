@@ -45,6 +45,7 @@ pub(super) fn generate_target_decryption_share(
         "electionManifestHash": setup_binding.election_manifest_hash,
         "trusteeIdentity": participant.trustee_identity,
         "rosterPosition": participant.roster_position,
+        "boardPosition": participant.board_position,
         "interpolationPoint": participant.interpolation_point,
         "recoveryEpoch": participant.recovery_epoch,
         "deviceEpoch": participant.device_epoch,
@@ -67,14 +68,8 @@ pub(super) fn generate_target_decryption_share(
         "thresholdShareVerificationKeyRoot": setup_binding.threshold_verification.threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": setup_binding.threshold_verification.threshold_share_verification_key_hash,
         "trusteeThresholdVerificationKeyHash": participant.trustee_threshold_verification_key_hash,
-        "shareEquation": TARGET_SHARE_EQUATION,
         "shareRoot": share_root,
         "sharePayload": payload,
-        "statusLabels": [
-            "TargetBoundPartDecComputed",
-            "AcceptedTargetContextBound",
-            "ShareProofCertificationPending"
-        ],
     }))
 }
 
@@ -87,19 +82,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
     minimum_shares_for_interpolation: usize,
     level: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    if level >= DATA_PRIMES.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target decryption ciphertext level is outside the selected data basis",
-        ));
-    }
     let secret = evaluator_key.secret();
-    if secret.len() != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "target decryption secret width does not match the selected BGV profile",
-        ));
-    }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -142,6 +125,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 }
 
 #[allow(clippy::too_many_arguments)]
+// Development-only dealer: this reshares the actual secret coefficient (Shamir constant term) with a per-prime degree-(t-1) polynomial derived deterministically from private_setup_seed, so reconstruction at x=0 returns s. This is a centralized dealer simulating a DKG, not a real distributed key generation; the shares are only as private as the seed.
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
     setup_package_hash: &str,
@@ -156,8 +140,8 @@ pub(super) fn derive_threshold_secret_share_limb(
         .iter()
         .map(|coefficient| signed_residue(*coefficient, modulus))
         .collect::<Vec<_>>();
-    let x = interpolation_point % modulus;
-    let mut x_power = x;
+    let evaluation_point = interpolation_point % modulus;
+    let mut evaluation_point_power = evaluation_point;
     let limb_index_bytes = (limb_index as u64).to_le_bytes();
     let modulus_bytes = modulus.to_le_bytes();
     for polynomial_degree in 1..minimum_shares_for_interpolation {
@@ -175,15 +159,16 @@ pub(super) fn derive_threshold_secret_share_limb(
         );
         let coefficients = sampler.uniform_residues(modulus, POLYNOMIAL_DEGREE);
         for (share_coefficient, polynomial_coefficient) in share.iter_mut().zip(coefficients) {
-            let term = mul_mod_fast(polynomial_coefficient, x_power, modulus);
+            let term = mul_mod_fast(polynomial_coefficient, evaluation_point_power, modulus);
             *share_coefficient = add_mod_fast(*share_coefficient, term, modulus);
         }
-        x_power = mul_mod(x_power, x, modulus)?;
+        evaluation_point_power = mul_mod(evaluation_point_power, evaluation_point, modulus)?;
     }
 
     Ok(share)
 }
 
+// PROTOTYPE GAP (labeled, not a hidden flaw): partial shares are released as bare c1*s_i with no smudging / noise-flooding term. Threshold-BGV simulation security requires adding flooding noise E_i super-polynomially larger than the decryption noise; without it the released shares leak c1*s_i exactly. There is no producer-set flag gating this path; read_setup_binding in bindings.rs accepts the setup package by recomputed profile-binding hashes and roots alone, and the gap is disclosed only in prose, not in any bound status field. The C1-C4 smudging/noise closure is the open work.
 pub(super) fn partial_decryption_by_limb(
     ciphertext: &Ciphertext,
     secret_share_by_limb: &[Vec<u64>],

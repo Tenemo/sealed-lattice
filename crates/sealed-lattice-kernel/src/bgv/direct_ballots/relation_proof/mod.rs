@@ -51,8 +51,6 @@ const DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS: u32 = 128;
 const DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS: usize = 360;
 const DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
 const DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS: u32 = 16;
-const DIRECT_BALLOT_RELATION_PROOF_GREEN_BYTES: usize = 5 * 1024 * 1024;
-const DIRECT_BALLOT_RELATION_PROOF_YELLOW_BYTES: usize = 20 * 1024 * 1024;
 const DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
 
@@ -69,7 +67,6 @@ pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) relation_commitment_polynomial_count: usize,
     pub(super) shared_response_polynomial_count: usize,
     pub(super) shared_response_scalar_count: usize,
-    pub(super) proof_gate: &'static str,
 }
 
 #[derive(Debug)]

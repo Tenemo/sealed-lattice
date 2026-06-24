@@ -38,7 +38,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &json!({
             "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "profileStatus": "target-decryption-profile-binding",
         }),
     )?;
     let public_common_random_polynomial_root = public_common_random_polynomial_root(input)?;
@@ -176,46 +175,11 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "evaluationKeys": evaluation_keys,
         "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
-        "trustedDealerBoundary": {
-            "transcriptValidCentralizedSecretReconstruction": false,
-            "centralizedSecretFixtureMayProduceAcceptedRoots": false,
-            "rawSecretSharesExported": false,
-            "forbiddenRequestFields": forbidden_setup_field_names(),
-        },
         "targetDecryptionStatus": {
             "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
             "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
-            "setupMaterialMatchesTargetDecryption": true,
-            "targetPartDecImplemented": true,
-            "targetC1C4StatusAccepted": false,
         },
-        "statusLabels": [
-            "PassiveBgvSetupGenerated",
-            "PassiveSetupDevelopmentFixtureOnly",
-            "FullRosterSetupMaterialGenerated",
-            "CollectivePublicKeyRootBound",
-            "BgvPublicKeyCoefficientMaterialBound",
-            "ThresholdVerificationMaterialBound",
-            "EvaluationKeyRootBound",
-            "TargetDecryptionSetupMaterialMatched",
-            "TargetPartDecAndRecombinationImplemented",
-            "PassiveSetupInputReady",
-            "DirectEvaluatorReplayHeSecurityAccepted",
-            "FinalTargetSecurityPendingTargetModulus"
-        ],
-        "nonClaims": [
-            "ActiveMaliciousSetupProofMissing",
-            "BgvAlgebraicPublicKeyProofMissing",
-            "MaliciousEvaluationKeyProofMissing",
-            "TargetShareProofNotCertified",
-            "TargetC1C4NotCertified",
-            "FinalTargetSecurityPendingTargetModulus",
-            "DirectEvaluatorReplayNoiseClosurePending",
-            "EvaluatorReplayNotClosed",
-            "TargetDecryptionNotClosed",
-            "ActiveMaliciousSetupNotClosed"
-        ],
     });
     let setup_package_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &package)?;
     package["setupPackageHash"] = Value::String(setup_package_hash);

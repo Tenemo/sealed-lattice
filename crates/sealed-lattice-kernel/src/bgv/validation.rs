@@ -29,9 +29,6 @@ pub(crate) fn bgv_profile_rejection(
         "acceptedHashes": [],
         "refusedObjects": [refused_object],
         "unresolvedReason": "BGVProfileRejected",
-        "statusLabels": [
-            "BGVProfileRejected"
-        ],
     })
 }
 
@@ -68,11 +65,6 @@ pub(crate) fn validate_plaintext_hex(
         "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
         "plaintextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
-        "statusLabels": [
-            "BGVProfileVerified",
-            "CoefficientDomainCanonical",
-            "PlaintextRootBound"
-        ],
     }))
 }
 
@@ -124,107 +116,12 @@ pub(crate) fn validate_ciphertext_hex(
         "layoutHash": first.encrypted_ballot_aggregate_layout_hash,
         "ciphertextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
-        "statusLabels": [
-            "BGVProfileVerified",
-            "CoefficientDomainCanonical",
-            "CiphertextRootBound"
-        ],
     }))
-}
-
-pub(crate) fn reject_reference_oracle_artifact(artifact: &Value) -> Value {
-    let artifact_kind = artifact
-        .get("artifactKind")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown-reference-artifact");
-
-    json!({
-        "ok": false,
-        "artifactKind": artifact_kind,
-        "acceptedAsProtocolEvidence": false,
-        "statusLabels": [
-            "ReferenceOracleRejected",
-            "LattigoSerializationRejected",
-            "RuntimeOracleDependencyRejected"
-        ],
-        "refusedObjects": [
-            {
-                "code": "ReferenceOracleBoundary",
-                "message": "Lattigo, Docker, and oracle vectors are development-only parity material and are not sealed-lattice transcript objects."
-            }
-        ],
-    })
-}
-
-pub(crate) fn reject_if_oracle_boundary_fields_present(request: &Value) -> CanonicalResult<()> {
-    const FORBIDDEN_FIELDS: [&str; 14] = [
-        "lattigoObject",
-        "lattigoPublicKey",
-        "lattigoRelinearizationKey",
-        "lattigoRotationKey",
-        "lattigoSerializationHex",
-        "lattigoSetupKeyVector",
-        "lattigoKeySerialization",
-        "dockerOracleOutput",
-        "oracleSetupSerializer",
-        "oracleKeySerializer",
-        "oracleVector",
-        "referenceOracleVectorRoot",
-        "referenceOracleProfileHash",
-        "oracleAcceptedAsEvidence",
-    ];
-    for field_name in FORBIDDEN_FIELDS {
-        if request.get(field_name).is_some() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{field_name} is development-only oracle material and cannot be accepted by BGV object validation"
-                ),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
-pub(crate) fn reject_unexpected_bgv_request_fields(
-    request: &Value,
-    allowed_fields: &[&str],
-    operation: &str,
-) -> CanonicalResult<()> {
-    reject_if_oracle_boundary_fields_present(request)?;
-    let Some(request_object) = request.as_object() else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!("{operation} request must be a JSON object"),
-        ));
-    };
-    for field_name in request_object.keys() {
-        if field_name == "command" {
-            continue;
-        }
-        if !allowed_fields
-            .iter()
-            .any(|allowed_field_name| allowed_field_name == field_name)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "{operation} request field {field_name} is not part of the accepted BGV request schema"
-                ),
-            ));
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        reject_if_oracle_boundary_fields_present, reject_reference_oracle_artifact,
-        reject_unexpected_bgv_request_fields, validate_plaintext_hex,
-    };
+    use super::validate_plaintext_hex;
     use crate::bgv::{
         encoding::encode_batch_plaintext_slots,
         serialization::{BgvObjectKind, canonical_bytes_hex, plaintext_root, serialize_bgv_object},
@@ -244,60 +141,5 @@ mod tests {
                 .expect("ok")
         );
         assert!(validate_plaintext_hex(&canonical_bytes_hex, Some("wrong")).is_err());
-    }
-
-    #[test]
-    fn oracle_boundary_material_is_rejected() {
-        for field_name in [
-            "referenceOracleVectorRoot",
-            "lattigoSetupKeyVector",
-            "lattigoPublicKey",
-            "lattigoRelinearizationKey",
-            "lattigoRotationKey",
-            "lattigoKeySerialization",
-            "oracleSetupSerializer",
-            "oracleKeySerializer",
-        ] {
-            assert!(
-                reject_if_oracle_boundary_fields_present(&serde_json::json!({
-                    field_name: "abc"
-                }))
-                .is_err(),
-                "{field_name} should be rejected"
-            );
-        }
-        assert_eq!(
-            reject_reference_oracle_artifact(&serde_json::json!({
-                "artifactKind": "lattigo-vector"
-            }))["acceptedAsProtocolEvidence"],
-            false
-        );
-    }
-
-    #[test]
-    fn bgv_request_field_allowlist_rejects_future_oracle_fields() {
-        assert!(
-            reject_unexpected_bgv_request_fields(
-                &serde_json::json!({
-                    "command": "ValidateBgvPlaintextObject",
-                    "canonicalBytesHex": "00",
-                    "futureOracleTranscript": "abc"
-                }),
-                &["canonicalBytesHex"],
-                "validateBgvPlaintextObject"
-            )
-            .is_err()
-        );
-        assert!(
-            reject_unexpected_bgv_request_fields(
-                &serde_json::json!({
-                    "command": "ValidateBgvPlaintextObject",
-                    "canonicalBytesHex": "00"
-                }),
-                &["canonicalBytesHex"],
-                "validateBgvPlaintextObject"
-            )
-            .is_ok()
-        );
     }
 }

@@ -1,17 +1,16 @@
 import {
-    createLocalRunLog,
-    currentProcessExitCode,
     removeRunLogArguments,
     runLogDisabledByArguments,
 } from './local-run-log.js';
 import {
-    createPackageManagerCommand,
     resolvePackageManagerRunner,
-    runCommandsInParallel,
-    runCommandsInSeries,
-    type CommandInvocation,
     type PackageManagerRunner,
-} from './run-command.js';
+} from './package-manager-runner.js';
+import { type CommandInvocation } from './run-command.js';
+import {
+    buildVitestProjectCommand,
+    runWorkspaceBuildThenParallelCommands,
+} from './run-vitest-lanes.js';
 import {
     defaultNodeTestLanes,
     nodeTestLaneDefinitions,
@@ -64,35 +63,20 @@ export const buildNodeTestCommands = (
     const buildCommand = (lane: NodeTestLane): CommandInvocation => {
         const laneDefinition = nodeTestLaneDefinitions[lane];
 
-        return createPackageManagerCommand(
-            laneDefinition.commandDescription,
-            [
-                'exec',
-                'vitest',
-                '--project',
-                laneDefinition.projectName,
-                '--run',
-            ],
-            {
-                logFileSlug: laneDefinition.projectName,
-                packageManagerRunner,
-            },
-        );
+        return buildVitestProjectCommand({
+            commandDescription: laneDefinition.commandDescription,
+            packageManagerRunner,
+            projectName: laneDefinition.projectName,
+        });
     };
 
     return lanes.map((lane) => buildCommand(lane));
 };
 
-const buildWorkspaceBuildCommand = (
-    packageManagerRunner: PackageManagerRunner,
-): CommandInvocation =>
-    createPackageManagerCommand('Build workspace packages', ['run', 'build'], {
-        logFileSlug: 'build',
-        packageManagerRunner,
-    });
-
 const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string =>
-    lanes.length === 1 ? `test:node:${lanes[0]}` : 'test:node';
+    lanes.length === 1
+        ? `test:node:${lanes[0].replace('-', ':')}`
+        : 'test:node';
 
 const nodeTestRunShouldLog = (
     lanes: readonly NodeTestLane[],
@@ -105,35 +89,14 @@ const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     const commandArguments = removeRunLogArguments(rawArguments);
     const lanes = parseRequestedNodeTestLanes(commandArguments);
-    const packageManagerRunner = resolvePackageManagerRunner();
-    const runLog = nodeTestRunShouldLog(lanes, rawArguments)
-        ? await createLocalRunLog({
-              commandLineArguments: rawArguments,
-              lanes,
-              scriptName: nodeTestScriptName(lanes),
-          })
-        : undefined;
-
-    try {
-        const buildExitCode = await runCommandsInSeries(
-            [buildWorkspaceBuildCommand(packageManagerRunner)],
-            { runLog },
-        );
-        if (buildExitCode !== 0) {
-            process.exitCode = buildExitCode;
-
-            return;
-        }
-        process.exitCode = await runCommandsInParallel(
-            buildNodeTestCommands({
-                lanes,
-                packageManagerRunner,
-            }),
-            { runLog },
-        );
-    } finally {
-        await runLog?.finish({ exitCode: currentProcessExitCode() });
-    }
+    await runWorkspaceBuildThenParallelCommands({
+        buildCommands: (packageManagerRunner) =>
+            buildNodeTestCommands({ lanes, packageManagerRunner }),
+        commandLineArguments: rawArguments,
+        lanes,
+        scriptName: nodeTestScriptName(lanes),
+        shouldCreateRunLog: nodeTestRunShouldLog(lanes, rawArguments),
+    });
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

@@ -40,11 +40,9 @@ pub(super) fn verify_direct_ballot_aggregation(
         ciphertext_canonical_bytes_hex(&aggregate_ciphertext)?;
 
     let report = json!({
-        "result": "Verified the supplied direct ballot proofs, aggregated their ciphertexts, and privately checked the aggregate against the plaintext oracle without publishing aggregate scores.",
         "ballotCount": encrypted_ballots.len(),
         "aggregateCiphertextRoot": aggregate_ciphertext_root,
-        "aggregateCiphertextCanonicalByteLength": aggregate_ciphertext_canonical_bytes_hex.len() / 2,
-        "privateCorrectnessCheck": "aggregate score slots matched the plaintext oracle"
+        "aggregateCiphertextCanonicalByteLength": aggregate_ciphertext_canonical_bytes_hex.len() / 2
     });
 
     Ok(DirectBallotAggregationResult {

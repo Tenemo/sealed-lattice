@@ -19,14 +19,30 @@ use crate::{
             parse_bgv_object_hex, plaintext_root, serialize_bgv_object,
         },
         setup::{
-            describe_passive_setup_object_model, generate_passive_setup_package_from_request,
+            abort_threshold_share_commitment_transport_derivation_stream_request,
+            absorb_setup_proof_material_transport_stream_chunk_request,
+            absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
+            begin_setup_proof_material_transport_stream_request,
+            begin_threshold_share_commitment_transport_derivation_stream_request,
+            compute_setup_commitment_from_opening_request,
+            derive_collective_bgv_setup_public_derivations_from_request,
+            derive_threshold_share_commitments_from_request,
+            derive_threshold_share_commitments_from_transport_request,
+            describe_collective_bgv_setup_profile, describe_passive_setup_object_model,
+            finish_setup_proof_material_transport_stream_request,
+            finish_threshold_share_commitment_transport_derivation_stream_request,
+            generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
+            generate_private_vss_share_proof_from_request,
+            generate_trustee_evaluation_key_proof_from_request,
+            release_verified_transported_vss_material_request,
+            verify_collective_bgv_setup_package_from_request,
+            verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
+            verify_private_vss_share_envelope_from_request,
+            verify_trustee_evaluation_key_proof_from_request,
         },
-        validation::{
-            bgv_profile_rejection, reject_reference_oracle_artifact,
-            reject_unexpected_bgv_request_fields, validate_ciphertext_hex, validate_plaintext_hex,
-        },
+        validation::{bgv_profile_rejection, validate_ciphertext_hex, validate_plaintext_hex},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -82,9 +98,6 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
             "operation": "validateBgvEvaluatorOperation",
             "acceptedOperation": operation_name,
             "allowedEvaluatorOpsHash": crate::bgv::profile::allowed_operation_registry_hash()?,
-            "statusLabels": [
-                "BGVEvaluatorOperationAllowed"
-            ],
         }));
     }
 
@@ -114,12 +127,106 @@ pub(crate) fn describe_bgv_passive_setup_object_model() -> CanonicalResult<Value
     describe_passive_setup_object_model()
 }
 
+pub(crate) fn describe_collective_bgv_setup_profile_from_request() -> CanonicalResult<Value> {
+    describe_collective_bgv_setup_profile()
+}
+
+pub(crate) fn derive_collective_bgv_setup_public_derivations(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    derive_collective_bgv_setup_public_derivations_from_request(request)
+}
+
 pub(crate) fn generate_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
     generate_passive_setup_package_from_request(request)
 }
 
 pub(crate) fn verify_bgv_passive_setup_from_request(request: &Value) -> CanonicalResult<Value> {
     verify_passive_setup_package_from_request(request)
+}
+
+pub(crate) fn verify_collective_bgv_setup_from_request(request: &Value) -> CanonicalResult<Value> {
+    verify_collective_bgv_setup_package_from_request(request)
+}
+
+pub(crate) fn verify_private_vss_share_envelope(request: &Value) -> CanonicalResult<Value> {
+    verify_private_vss_share_envelope_from_request(request)
+}
+
+pub(crate) fn generate_private_vss_share_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_private_vss_share_proof_from_request(request)
+}
+
+pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_trustee_evaluation_key_proof_from_request(request)
+}
+
+pub(crate) fn verify_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
+    verify_trustee_evaluation_key_proof_from_request(request)
+}
+
+pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
+    compute_setup_commitment_from_opening_request(request)
+}
+
+pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalResult<Value> {
+    derive_threshold_share_commitments_from_request(request)
+}
+
+pub(crate) fn derive_threshold_share_commitments_from_transport(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    derive_threshold_share_commitments_from_transport_request(request)
+}
+
+pub(crate) fn begin_threshold_share_commitments_from_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    begin_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn absorb_threshold_share_commitments_from_transport_stream_chunk(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(request)
+}
+
+pub(crate) fn finish_threshold_share_commitments_from_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    finish_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn abort_threshold_share_commitments_from_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    abort_threshold_share_commitment_transport_derivation_stream_request(request)
+}
+
+pub(crate) fn release_verified_transported_vss_material(request: &Value) -> CanonicalResult<Value> {
+    release_verified_transported_vss_material_request(request)
+}
+
+pub(crate) fn begin_setup_proof_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    begin_setup_proof_material_transport_stream_request(request)
+}
+
+pub(crate) fn absorb_setup_proof_material_transport_stream_chunk(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    absorb_setup_proof_material_transport_stream_chunk_request(request)
+}
+
+pub(crate) fn finish_setup_proof_material_transport_stream(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    finish_setup_proof_material_transport_stream_request(request)
+}
+
+pub(crate) fn verify_local_trustee_setup_state(request: &Value) -> CanonicalResult<Value> {
+    verify_local_trustee_setup_state_from_request(request)
 }
 
 pub(crate) fn generate_bgv_evaluation_key_material_from_request(
@@ -129,16 +236,6 @@ pub(crate) fn generate_bgv_evaluation_key_material_from_request(
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &[
-            "includeCanonicalBytesHex",
-            "layoutBinding",
-            "level",
-            "slots",
-        ],
-        "encodeBgvBatchPlaintext",
-    )?;
     validate_batch_layout_binding(request)?;
     let slots = read_slots(request)?;
     let level = request
@@ -188,12 +285,6 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "sampledSlots": sample_positions(&encoded.slots),
         "sampledCoefficientsModPlaintext": sample_positions(&encoded.coefficients_mod_plaintext),
         "validation": validation,
-        "statusLabels": [
-            "BGVBatchEncoded",
-            "DirectEncryptedBallotAggregateLayoutBound",
-            "NativeDecodeRoundTripMatched",
-            "PlaintextRootBound"
-        ],
     });
     if include_canonical_bytes_hex {
         value["canonicalBytesHex"] = Value::String(canonical_bytes_hex(&canonical_bytes));
@@ -221,11 +312,6 @@ fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
 }
 
 pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["canonicalBytesHex", "expectedPlaintextRoot"],
-        "validateBgvPlaintextObject",
-    )?;
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let expected_plaintext_root = request.get("expectedPlaintextRoot").and_then(Value::as_str);
 
@@ -233,11 +319,6 @@ pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalR
 }
 
 pub(crate) fn validate_bgv_ciphertext_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["canonicalBytesHex", "expectedCiphertextRoot"],
-        "validateBgvCiphertextObject",
-    )?;
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let expected_ciphertext_root = request
         .get("expectedCiphertextRoot")
@@ -249,11 +330,6 @@ pub(crate) fn validate_bgv_ciphertext_from_request(request: &Value) -> Canonical
 pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["includeCanonicalBytesHex", "leftSlots", "rightSlots"],
-        "generateBgvCiphertextConventionFixture",
-    )?;
     let left_slots = read_named_slots(request, "leftSlots")?;
     let right_slots = read_named_slots(request, "rightSlots")?;
     let left = encode_batch_plaintext_slots(&left_slots, 0)?;
@@ -271,11 +347,6 @@ pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
         "canonicalByteLength": canonical_bytes.len(),
         "componentCount": 2,
         "validation": validation,
-        "statusLabels": [
-            "CiphertextConventionFixture",
-            "NotEncryptionEvidence",
-            "CiphertextRootBound"
-        ],
     });
     if request
         .get("includeCanonicalBytesHex")
@@ -291,7 +362,6 @@ pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
 pub(crate) fn generate_bgv_base_conversion_fixture_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(request, &["slots"], "generateBgvBaseConversionFixture")?;
     let slots = read_slots(request)?;
     let encoded = encode_batch_plaintext_slots(&slots, 0)?;
     let converted = convert_plaintext_lifted_basis(&encoded.polynomial, BgvBasisKind::Extended, 1)?;
@@ -311,26 +381,10 @@ pub(crate) fn generate_bgv_base_conversion_fixture_from_request(
         "convertedBasisId": converted.basis_id,
         "convertedModulusCount": converted.moduli.len(),
         "sampledConvertedResidues": sample_positions(&converted.residues_by_modulus[1]),
-        "statusLabels": [
-            "PlaintextLiftedBaseConversion",
-            "GenericKeySwitchSurfaceNotExported"
-        ],
     }))
 }
 
-pub(crate) fn reject_bgv_reference_oracle_artifact_from_request(request: &Value) -> Value {
-    let fallback_artifact = json!({ "artifactKind": "unspecified" });
-    let artifact = request.get("artifact").unwrap_or(&fallback_artifact);
-
-    reject_reference_oracle_artifact(artifact)
-}
-
 pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> CanonicalResult<Value> {
-    reject_unexpected_bgv_request_fields(
-        request,
-        &["canonicalBytesHex"],
-        "analyzeBgvCanonicalObject",
-    )?;
     let canonical_bytes_hex = read_string_field(request, "canonicalBytesHex")?;
     let object = parse_bgv_object_hex(canonical_bytes_hex)?;
 
@@ -342,10 +396,6 @@ pub(crate) fn analyze_bgv_canonical_object_from_request(request: &Value) -> Cano
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
         "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
-        "statusLabels": [
-            "BGVCanonicalObjectParsed",
-            "CoefficientDomainCanonical"
-        ],
     }))
 }
 
@@ -442,14 +492,6 @@ mod tests {
         .expect("encode command");
         assert_eq!(encoded["validation"]["ok"], true);
         assert!(
-            encoded["statusLabels"]
-                .as_array()
-                .expect("labels")
-                .contains(&serde_json::json!(
-                    "DirectEncryptedBallotAggregateLayoutBound"
-                ))
-        );
-        assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
                 "slots": [1, 2, 3],
                 "level": 0
@@ -520,18 +562,11 @@ mod tests {
 
     #[test]
     fn commands_produce_convention_and_base_conversion_fixtures_without_claiming_encryption() {
-        let ciphertext =
-            generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
-                "leftSlots": [1, 2, 3],
-                "rightSlots": [4, 5, 6]
-            }))
-            .expect("ciphertext fixture");
-        assert!(
-            ciphertext["statusLabels"]
-                .as_array()
-                .expect("labels")
-                .contains(&serde_json::json!("NotEncryptionEvidence"))
-        );
+        generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
+            "leftSlots": [1, 2, 3],
+            "rightSlots": [4, 5, 6]
+        }))
+        .expect("ciphertext fixture");
 
         let base_conversion =
             generate_bgv_base_conversion_fixture_from_request(&serde_json::json!({

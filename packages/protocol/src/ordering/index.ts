@@ -9,6 +9,7 @@ import type {
 import {
     compareCanonicalStrings,
     createRefusal,
+    isNonEmptyString,
     isNonNegativeInteger,
     uniqueStrings,
     verificationExceptionMessage,
@@ -34,9 +35,6 @@ const candidateConflictKey = (candidate: ValidatedFirstValidObject): string =>
         candidate.objectType,
         candidate.contextHash,
     ].join('\u0000');
-
-const isNonEmptyString = (value: unknown): value is string =>
-    typeof value === 'string' && value.length > 0;
 
 const validateFirstValidObjectShape = (
     candidate: ValidatedFirstValidObject,
@@ -271,7 +269,6 @@ const deriveValidatedFirstValidOrderUnchecked = (
 
     return {
         ok: refusedObjects.length === 0,
-        statusLabels: [],
         acceptedHashes: uniqueStrings([
             firstValidOrderHash,
             ...orderedCandidates.map((candidate) => candidate.objectHash),
@@ -291,7 +288,6 @@ export const deriveValidatedFirstValidOrder = (
     } catch (error) {
         return {
             ok: false,
-            statusLabels: [],
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -306,7 +302,3 @@ export const deriveValidatedFirstValidOrder = (
         };
     }
 };
-
-export const verifyFirstValidPolicy = (
-    input: FirstValidOrderingInput,
-): FirstValidOrderingVerification => deriveValidatedFirstValidOrder(input);

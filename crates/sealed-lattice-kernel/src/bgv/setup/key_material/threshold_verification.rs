@@ -40,7 +40,6 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
             "profile-binding",
             "recovery-device-epoch-binding"
         ],
-        "maliciousDkgProofIncluded": false,
     });
     let threshold_share_verification_key_root =
         derive_protocol_hash("ThresholdShareVerificationKeyRoot", &verification_key_set)?;
@@ -58,10 +57,5 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
         "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": threshold_share_verification_key_hash,
         "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
-        "statusLabels": [
-            "ThresholdVerificationMaterialBound",
-            "PassiveSetupVerificationScopeOnly",
-            "TargetDecryptionVerificationRootsBound"
-        ],
     }))
 }

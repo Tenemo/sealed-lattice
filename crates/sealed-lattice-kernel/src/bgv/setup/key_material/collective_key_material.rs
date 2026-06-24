@@ -1,4 +1,10 @@
-use super::*;
+﻿use super::*;
+use crate::bgv::coefficient_codec::{
+    coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
+};
+
+const PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1";
 
 pub(in crate::bgv::setup) fn collective_public_key(
     input: &PassiveSetupInput,
@@ -50,9 +56,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "publicKeyComponentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
         "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
         "participantCount": public_key_share_roots.len(),
-        "centralizedSecretReconstruction": false,
-        "rawSecretShareExported": false,
-        "maliciousDkgProofIncluded": false,
     });
     let collective_public_key_root =
         derive_protocol_hash("CollectivePublicKeyRoot", &record_without_roots)?;
@@ -73,12 +76,6 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
-        "statusLabels": [
-            "CollectivePublicKeyShareAggregationBound",
-            "BgvPublicKeyCoefficientMaterialBound",
-            "BgvAlgebraicPublicKeyProofMissing",
-            "NoTrustedDealerSecretReconstruction"
-        ],
     }))
 }
 
@@ -140,13 +137,19 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficients_from_table(
     compare_hash_at_path(
         table,
         &["componentZeroCoefficientHash512"],
-        &coefficient_vector_hash512(&component_zero_coefficients),
+        &coefficient_vector_hash512(
+            &component_zero_coefficients,
+            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
+        ),
         "collective public key component-zero coefficient hash",
     )?;
     compare_hash_at_path(
         table,
         &["componentOneCoefficientHash512"],
-        &coefficient_vector_hash512(&component_one_coefficients),
+        &coefficient_vector_hash512(
+            &component_one_coefficients,
+            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
+        ),
         "collective public key component-one coefficient hash",
     )?;
 
@@ -237,7 +240,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
         "coefficientCount": POLYNOMIAL_DEGREE,
         "componentModel": DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL,
         "componentDerivation": "public-coefficients-generated-from-private-setup-witness-and-bound-in-setup-package",
-        "fullCoefficientVectorHashesComputed": true,
         "fullCoefficientExpansionOwner": "passive setup package public key material",
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
@@ -245,8 +247,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(
         "participants": participant_descriptors,
         "modulusSummaries": modulus_summaries,
         "coefficientTables": coefficient_tables,
-        "algebraicPublicKeyProofStatus": "BgvAlgebraicPublicKeyProofMissing",
-        "rawSecretShareExported": false,
     }))
 }
 
@@ -265,8 +265,14 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_table(
 
     Ok(json!({
         "modulus": modulus,
-        "componentZeroCoefficientHash512": coefficient_vector_hash512(&coefficients.component_zero_coefficients),
-        "componentOneCoefficientHash512": coefficient_vector_hash512(&coefficients.component_one_coefficients),
+        "componentZeroCoefficientHash512": coefficient_vector_hash512(
+            &coefficients.component_zero_coefficients,
+            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
+        ),
+        "componentOneCoefficientHash512": coefficient_vector_hash512(
+            &coefficients.component_one_coefficients,
+            PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN,
+        ),
         "componentZeroCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_zero_coefficients),
         "componentOneCoefficientsLeHex": coefficient_vector_le_hex(&coefficients.component_one_coefficients),
         "coefficientByteLength": POLYNOMIAL_DEGREE * 8,
@@ -328,7 +334,6 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficient_derivation_summar
             coefficient_table,
             &["componentOneCoefficientHash512"],
         )?,
-        "fullCoefficientVectorHashStatus": "bound-in-setup-package",
     }))
 }
 
@@ -346,44 +351,10 @@ pub(super) fn read_public_key_coefficient_vector(
             ));
         }
     };
-    let bytes = crate::transcript_core::decode_hex(string_at_path(table, &[hex_field_name])?)?;
-    if bytes.len() != POLYNOMIAL_DEGREE * 8 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "collective public key coefficient vector width does not match the selected BGV profile",
-        ));
-    }
-    let coefficients = bytes
-        .chunks_exact(8)
-        .map(|chunk| {
-            let mut coefficient_bytes = [0_u8; 8];
-            coefficient_bytes.copy_from_slice(chunk);
-            u64::from_le_bytes(coefficient_bytes)
-        })
-        .collect::<Vec<_>>();
-
-    Ok(coefficients)
-}
-
-pub(super) fn coefficient_vector_bytes(coefficients: &[u64]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(coefficients.len() * 8);
-    for coefficient in coefficients {
-        bytes.extend(coefficient.to_le_bytes());
-    }
-
-    bytes
-}
-
-pub(super) fn coefficient_vector_le_hex(coefficients: &[u64]) -> String {
-    crate::transcript_core::encode_hex(&coefficient_vector_bytes(coefficients))
-}
-
-pub(super) fn coefficient_vector_hash512(coefficients: &[u64]) -> String {
-    let bytes = coefficient_vector_bytes(coefficients);
-
-    hash512_hex(
-        "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1",
-        &[&bytes],
+    coefficient_vector_from_le_hex(
+        string_at_path(table, &[hex_field_name])?,
+        POLYNOMIAL_DEGREE,
+        "collective public key coefficient vector width does not match the selected BGV profile",
     )
 }
 

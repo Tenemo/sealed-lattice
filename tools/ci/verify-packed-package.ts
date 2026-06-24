@@ -17,10 +17,9 @@ import {
     resolvePackageManagerRunner,
     resolvePackageManagerRunnerFromArguments,
     resolvePackageManagerRunnerForPackageManager,
-    runPackageManager,
-    runPackageManagerAndCaptureOutput,
     type PackageManager,
-} from './run-command.js';
+} from './package-manager-runner.js';
+import { runPackageManagerAndCaptureOutput } from './run-command.js';
 import {
     getRootPackageJsonPath,
     getRootReadmePath,
@@ -269,7 +268,7 @@ export const validatePublishedKernelIntegrity = (
 };
 
 const runPublint = (packageDirectory: string): void => {
-    runPackageManager(
+    runPackageManagerAndCaptureOutput(
         resolvePackageManagerRunner(),
         [
             'exec',
@@ -388,7 +387,7 @@ const main = async (): Promise<void> => {
             throw new Error(kernelIntegrityFailures.join('\n'));
         }
 
-        runPackageManager(
+        runPackageManagerAndCaptureOutput(
             packageManagerRunner,
             createPackArguments(packDirectory),
             packageDirectory,
@@ -423,7 +422,7 @@ const main = async (): Promise<void> => {
             join(consumerDirectory, 'smoke.mjs'),
         );
 
-        runPackageManager(
+        runPackageManagerAndCaptureOutput(
             packageManagerRunner,
             createInstallArguments(packageManagerRunner.kind, tarballPath),
             consumerDirectory,

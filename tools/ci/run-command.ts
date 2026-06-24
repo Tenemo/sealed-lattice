@@ -4,14 +4,13 @@ import {
     type ChildProcess,
     type SpawnOptions,
 } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { createWriteStream, type WriteStream } from 'node:fs';
-import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
 import type { ActiveLocalRunLog, CommandLogFiles } from './local-run-log.js';
-
-export type PackageManager = 'npm' | 'pnpm';
+import { resolvePackageManagerRunner } from './package-manager-runner.js';
+import type { PackageManagerRunner } from './package-manager-runner.js';
+import { createTerminalLineFilter } from './terminal-line-filter.js';
 
 export type CommandInvocation = {
     readonly args: readonly string[];
@@ -51,209 +50,10 @@ export type CommandRunObserver = {
     readonly onCommandStart?: (event: CommandStartEvent) => void;
 };
 
-export type PackageManagerRunner = {
-    readonly command: string;
-    readonly commandArgumentsPrefix: readonly string[];
-    readonly kind: PackageManager;
-};
-
 export type PackageManagerSpawnCommand = {
     readonly args: readonly string[];
     readonly command: string;
     readonly description: string;
-};
-
-export const parsePackageManagerOverride = (
-    commandLineArguments: readonly string[],
-): PackageManager | undefined => {
-    const packageManagerIndex =
-        commandLineArguments.indexOf('--package-manager');
-    if (packageManagerIndex === -1) {
-        return undefined;
-    }
-
-    const packageManager = commandLineArguments[packageManagerIndex + 1];
-    if (packageManager === undefined) {
-        throw new Error('--package-manager requires a value');
-    }
-    if (packageManager !== 'npm') {
-        throw new Error(
-            `Unsupported package manager override: ${packageManager}`,
-        );
-    }
-
-    return packageManager;
-};
-
-export const detectPackageManager = (
-    packageManagerEntryPointPath: string,
-): PackageManager => {
-    const normalizedEntryPointPath = packageManagerEntryPointPath.toLowerCase();
-    if (normalizedEntryPointPath.includes('pnpm')) {
-        return 'pnpm';
-    }
-    if (normalizedEntryPointPath.includes('npm')) {
-        return 'npm';
-    }
-
-    throw new Error(
-        `Unsupported package manager entry point: ${packageManagerEntryPointPath}`,
-    );
-};
-
-export const buildPackageManagerEntryPointCandidates = (
-    packageManager: PackageManager,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-): readonly string[] => {
-    const nodeDirectoryPath = path.dirname(nodeExecutablePath);
-    const pathDirectoryPaths = pathEnvironment
-        .split(path.delimiter)
-        .filter((directoryPath) => directoryPath.length > 0);
-    const baseDirectoryPaths = [nodeDirectoryPath, ...pathDirectoryPaths];
-    const relativeEntryPointPaths =
-        packageManager === 'npm'
-            ? [
-                  path.join('node_modules', 'npm', 'bin', 'npm-cli.js'),
-                  path.join(
-                      '..',
-                      'lib',
-                      'node_modules',
-                      'npm',
-                      'bin',
-                      'npm-cli.js',
-                  ),
-              ]
-            : [
-                  path.join('node_modules', 'corepack', 'dist', 'pnpm.js'),
-                  path.join('node_modules', 'pnpm', 'bin', 'pnpm.cjs'),
-                  path.join(
-                      '..',
-                      'lib',
-                      'node_modules',
-                      'pnpm',
-                      'bin',
-                      'pnpm.cjs',
-                  ),
-              ];
-
-    return baseDirectoryPaths.flatMap((baseDirectoryPath) =>
-        relativeEntryPointPaths.map((relativeEntryPointPath) =>
-            path.resolve(baseDirectoryPath, relativeEntryPointPath),
-        ),
-    );
-};
-
-export const resolvePackageManagerEntryPoint = (
-    packageManager: PackageManager,
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): string => {
-    if (packageManagerEntryPointPath !== undefined) {
-        try {
-            if (
-                detectPackageManager(packageManagerEntryPointPath) ===
-                packageManager
-            ) {
-                return packageManagerEntryPointPath;
-            }
-        } catch {
-            // Keep searching for a real Node entry point below.
-        }
-    }
-
-    const entryPointPath = buildPackageManagerEntryPointCandidates(
-        packageManager,
-        pathEnvironment,
-        nodeExecutablePath,
-    ).find(pathExists);
-
-    if (entryPointPath === undefined) {
-        throw new Error(
-            `Cannot find a Node entry point for ${packageManager}. Avoid shell shims and run through npm_execpath or a Node-installed package-manager CLI.`,
-        );
-    }
-
-    return entryPointPath;
-};
-
-export const resolvePackageManagerRunner = (
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): PackageManagerRunner => {
-    const resolvedPackageManagerEntryPointPath =
-        packageManagerEntryPointPath ??
-        resolvePackageManagerEntryPoint(
-            'pnpm',
-            undefined,
-            pathEnvironment,
-            nodeExecutablePath,
-            pathExists,
-        );
-
-    return {
-        command: nodeExecutablePath,
-        commandArgumentsPrefix: [resolvedPackageManagerEntryPointPath],
-        kind: detectPackageManager(resolvedPackageManagerEntryPointPath),
-    };
-};
-
-export const resolvePackageManagerRunnerForPackageManager = (
-    packageManager: PackageManager,
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): PackageManagerRunner => {
-    const entryPointPath = resolvePackageManagerEntryPoint(
-        packageManager,
-        packageManagerEntryPointPath,
-        pathEnvironment,
-        nodeExecutablePath,
-        pathExists,
-    );
-
-    return {
-        command: nodeExecutablePath,
-        commandArgumentsPrefix: [entryPointPath],
-        kind: packageManager,
-    };
-};
-
-export const resolvePackageManagerRunnerFromArguments = (
-    commandLineArguments: readonly string[],
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): PackageManagerRunner => {
-    const packageManagerOverride =
-        parsePackageManagerOverride(commandLineArguments);
-    if (packageManagerOverride !== undefined) {
-        return resolvePackageManagerRunnerForPackageManager(
-            packageManagerOverride,
-            packageManagerEntryPointPath,
-            pathEnvironment,
-            nodeExecutablePath,
-            pathExists,
-        );
-    }
-
-    if (packageManagerEntryPointPath === undefined) {
-        throw new Error(
-            'npm_execpath is required to run package manager commands when --package-manager is not provided',
-        );
-    }
-
-    return {
-        command: nodeExecutablePath,
-        commandArgumentsPrefix: [packageManagerEntryPointPath],
-        kind: detectPackageManager(packageManagerEntryPointPath),
-    };
 };
 
 export const createPackageManagerCommand = (
@@ -278,20 +78,6 @@ export const createPackageManagerCommand = (
         env: input.env,
         logFileSlug: input.logFileSlug,
     };
-};
-
-export const runCommand = (invocation: CommandInvocation): number => {
-    console.log(`\n${invocation.description}`);
-    const result = spawnSync(invocation.command, invocation.args, {
-        env: invocation.env ?? process.env,
-        stdio: 'inherit',
-    });
-
-    if (result.error !== undefined) {
-        throw result.error;
-    }
-
-    return result.status ?? 1;
 };
 
 export const createPackageManagerSpawnCommand = (
@@ -348,18 +134,6 @@ export const runPackageManagerAndCaptureOutput = (
     }
 
     return result.stdout ?? '';
-};
-
-export const runPackageManager = (
-    runner: PackageManagerRunner,
-    commandArguments: readonly string[],
-    workingDirectoryPath: string,
-): void => {
-    runPackageManagerAndCaptureOutput(
-        runner,
-        commandArguments,
-        workingDirectoryPath,
-    );
 };
 
 type KillableChildProcess = Pick<ChildProcess, 'kill' | 'pid'>;
@@ -542,10 +316,15 @@ const runCommandWithOptionalLog = async (
         readonly outputMode?: CommandOutputMode;
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
+        readonly terminalOutputFilter?: (line: string) => boolean;
     } = {},
 ): Promise<number> => {
     const outputMode = input.outputMode ?? 'inherit';
-    if (input.runLog === undefined && outputMode === 'inherit') {
+    if (
+        input.runLog === undefined &&
+        outputMode === 'inherit' &&
+        input.terminalOutputFilter === undefined
+    ) {
         return runCommandWithInheritedOutput(
             invocation,
             input.signal,
@@ -608,6 +387,34 @@ const runCommandWithOptionalLog = async (
             killProcessTree(childProcess);
         };
         input.signal?.addEventListener('abort', onAbort, { once: true });
+        // When a terminal output filter is supplied, the child's terminal echo
+        // is reassembled into whole lines per stream so the filter can drop
+        // specific noise lines (for example libtest's slow-test notices). Log
+        // files and observers still receive the raw, unfiltered chunks.
+        const terminalLineFilters =
+            outputMode === 'inherit' && input.terminalOutputFilter !== undefined
+                ? {
+                      stderr: createTerminalLineFilter(
+                          input.terminalOutputFilter,
+                      ),
+                      stdout: createTerminalLineFilter(
+                          input.terminalOutputFilter,
+                      ),
+                  }
+                : undefined;
+        const flushTerminalLineFilters = (): void => {
+            if (terminalLineFilters === undefined) {
+                return;
+            }
+            const stdoutRemainder = terminalLineFilters.stdout.flush();
+            if (stdoutRemainder.length > 0) {
+                process.stdout.write(stdoutRemainder);
+            }
+            const stderrRemainder = terminalLineFilters.stderr.flush();
+            if (stderrRemainder.length > 0) {
+                process.stderr.write(stderrRemainder);
+            }
+        };
         const writeChunk = (
             streamName: CommandOutputStreamName,
             chunk: string,
@@ -619,7 +426,11 @@ const runCommandWithOptionalLog = async (
                     ? commandLogStreams?.stdout
                     : commandLogStreams?.stderr;
             if (outputMode === 'inherit') {
-                terminalStream.write(chunk);
+                terminalStream.write(
+                    terminalLineFilters === undefined
+                        ? chunk
+                        : terminalLineFilters[streamName].push(chunk),
+                );
             }
             childStream?.write(chunk);
             commandLogStreams?.combined.write(chunk);
@@ -647,6 +458,7 @@ const runCommandWithOptionalLog = async (
             input.signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
+                    flushTerminalLineFilters();
                     input.observer?.onCommandExit?.({
                         durationMilliseconds: Math.round(
                             performance.now() - startedAtMilliseconds,
@@ -671,6 +483,7 @@ const runCommandWithOptionalLog = async (
             input.signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
+                    flushTerminalLineFilters();
                     const resolvedExitCode =
                         terminationSignal === null ? (exitCode ?? 1) : 1;
                     if (terminationSignal !== null) {
@@ -716,6 +529,7 @@ export const runCommandsInParallel = async (
         readonly outputMode?: CommandOutputMode;
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
+        readonly terminalOutputFilter?: (line: string) => boolean;
     } = {},
 ): Promise<number> => {
     const exitCodes = await Promise.all(
@@ -734,6 +548,7 @@ export const runCommandsInSeries = async (
         readonly outputMode?: CommandOutputMode;
         readonly runLog?: ActiveLocalRunLog;
         readonly signal?: AbortSignal;
+        readonly terminalOutputFilter?: (line: string) => boolean;
     } = {},
 ): Promise<number> => {
     for (const invocation of invocations) {
@@ -747,4 +562,25 @@ export const runCommandsInSeries = async (
     }
 
     return 0;
+};
+
+export const runCommandsAfterSeriesGate = async (
+    input: {
+        readonly gateCommands: readonly CommandInvocation[];
+        readonly parallelCommands: readonly CommandInvocation[];
+    },
+    options: {
+        readonly observer?: CommandRunObserver;
+        readonly outputMode?: CommandOutputMode;
+        readonly runLog?: ActiveLocalRunLog;
+        readonly signal?: AbortSignal;
+        readonly terminalOutputFilter?: (line: string) => boolean;
+    } = {},
+): Promise<number> => {
+    const gateExitCode = await runCommandsInSeries(input.gateCommands, options);
+    if (gateExitCode !== 0) {
+        return gateExitCode;
+    }
+
+    return runCommandsInParallel(input.parallelCommands, options);
 };

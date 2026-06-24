@@ -1,6 +1,6 @@
 ---
 title: sealed-lattice
-description: Documentation for the sealed-lattice direct encrypted ballot direction.
+description: Documentation for the sealed-lattice mobile-first voting library workspace.
 template: splash
 editUrl: false
 head:
@@ -8,30 +8,30 @@ head:
       content: sealed-lattice
 hero:
     title: sealed-lattice
-    tagline: Direct BGV-encrypted ballot direction for mobile verification.
+    tagline: Mobile-first threshold homomorphic voting verification.
     image:
         html: |
             <div class="landing-hero-panel">
               <div class="landing-hero-panel__card">
                 <p class="landing-hero-panel__eyebrow">Selected direction</p>
-                <h2 class="landing-hero-panel__title">verify direct encrypted ballots</h2>
+                <h2 class="landing-hero-panel__title">Verify direct encrypted ballots</h2>
                 <ol class="landing-hero-panel__list">
                   <li>Install <code>sealed-lattice</code>.</li>
                   <li>Use the current verification helpers for development and integration work.</li>
-                  <li>Track the direct encrypted ballot path: proof, aggregation, replay, finality, and target decryption.</li>
-                  <li>Keep production election use out of scope until the complete direct path is implemented, measured, audited, and certified.</li>
+                  <li>Track the current package boundary before relying on any verification result.</li>
+                  <li>Keep production election use out of scope until the complete workflow is implemented.</li>
                 </ol>
               </div>
               <div class="landing-hero-panel__facts">
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Runtime</span>
                   <strong>Node and browsers</strong>
-                  <small>ES modules with bundled WASM verification</small>
+                  <small>ES modules with packaged verification</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Current direction</span>
-                  <strong>direct encrypted ballots</strong>
-                  <small>BGV ballots, public aggregation, mobile replay</small>
+                  <strong>mobile-first ceremony</strong>
+                  <small>Every participant is both voter and trustee</small>
                 </div>
                 <div class="landing-hero-panel__fact">
                   <span class="landing-hero-panel__label">Package</span>
@@ -39,9 +39,9 @@ hero:
                   <small>One supported npm import path</small>
                 </div>
                 <div class="landing-hero-panel__fact">
-                  <span class="landing-hero-panel__label">Status</span>
-                  <strong>not production-audited</strong>
-                  <small>Use for development and verification tooling</small>
+                  <span class="landing-hero-panel__label">Boundary</span>
+                  <strong>development only</strong>
+                  <small>Read the security guide before relying on evidence</small>
                 </div>
               </div>
             </div>
@@ -53,7 +53,7 @@ hero:
         - text: Browse the API reference
           link: ./api/
           variant: secondary
-        - text: Read safety boundaries
+        - text: Read security and non-goals
           link: ./guides/security-and-non-goals/
           variant: minimal
 ---
@@ -64,9 +64,10 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
   <div class="landing-section__header">
     <h2>Selected direction</h2>
     <p>
-      The active construction is direct BGV-encrypted ballots, public ciphertext
-      aggregation, deterministic mobile evaluator replay, target finality, and
-      target-bound threshold decryption.
+      The active construction is a mobile-browser-first voting workflow where
+      each roster participant also acts as a trustee. Untrusted services may
+      store transcript objects, but participant clients must verify the ceremony
+      locally.
     </p>
   </div>
 
@@ -74,13 +75,14 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Direct encrypted ballot path">
       <div class="landing-card-copy">
         <p>
-          Each voter publishes one encrypted ballot. Verification must
-          check the ballot proof, select the first valid ballot per voter, and
-          recompute the encrypted ballot aggregate from public ciphertexts.
+          Each voter publishes one encrypted ballot. Verification must check
+          setup evidence, ballot validity, first-valid ballot selection, public
+          aggregation, replayed evaluation, finality, target-bound decryption,
+          and decoded result checks.
         </p>
         <p>
-          The evaluator is checked by deterministic mobile replay. Only the
-          finalized and replay-matched <code>C_target</code> can be decrypted.
+          No trusted tally server, special verifier, heavy external prover, or
+          desktop-class auditor is part of the intended verification path.
         </p>
       </div>
     </Card>
@@ -88,17 +90,16 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <Card title="Current limits">
       <div class="landing-card-copy">
         <p>
-          The direct proof, aggregation, and browser evidence are internal
-          development evidence. They are not supported-phone evidence, production
-          readiness, or a complete public voting API.
+          The current package is for development verification and integration
+          work. The complete public voting API is not available yet.
         </p>
         <p>
-          Ballot proof soundness, zero-knowledge accounting, public proof
-          transport, sparse target projection, mobile replay, and target-bound
-          decryption remain open.
+          The security guide points to the canonical threat model, retry
+          policy, audit statement, and cryptographic caveats.
         </p>
       </div>
     </Card>
+
   </div>
 </section>
 
@@ -107,7 +108,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <h2>Use the package</h2>
     <p>
       Start with installation and the public root import. Complete voting
-      entry points remain unavailable until the direct path is implemented and
+      entry points remain unavailable until the complete workflow is implemented and
       verified.
     </p>
   </div>
@@ -121,7 +122,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
       3. **Verify current public evidence.**
          Use the current helpers for development verification and package integration.
       4. **Keep the current limits explicit.**
-         Ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release are not complete public APIs yet.
+         Setup, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release are not complete public APIs yet.
     </Steps>
   </div>
 </section>
@@ -139,7 +140,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Get started"
       href="./guides/getting-started/"
-      description="Install the package and understand the current direct-path boundary."
+      description="Install the package and understand the current package boundary."
     />
     <LinkCard
       title="API reference"
@@ -149,7 +150,7 @@ import { Card, CardGrid, LinkCard, Steps } from "@astrojs/starlight/components";
     <LinkCard
       title="Security and non-goals"
       href="./guides/security-and-non-goals/"
-      description="Read what the current package does and does not claim."
+      description="Find the canonical repository security policy."
     />
     <LinkCard
       title="Development workflow"

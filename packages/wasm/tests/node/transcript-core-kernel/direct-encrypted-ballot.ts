@@ -5,17 +5,12 @@ import type {
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
 } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
-import { suppliedOrFreshRandomnessHex } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 import {
     resolveKernelBytes,
     resolveMemory,
     resolveNumberExport,
     runKernelCommand,
 } from '#packages/wasm/src/transcript-core-bridge/kernel-runtime';
-import {
-    captureRuntimeMemorySnapshot,
-    type RuntimeMemorySnapshot,
-} from '#tests/support/proof-benchmark-memory';
 
 const wasmKernelUrl = new URL(
     '../../../dist/sealed-lattice-kernel.wasm',
@@ -23,6 +18,24 @@ const wasmKernelUrl = new URL(
 );
 
 export const directBallotSetupSeed = 'direct-encrypted-ballot-node-wasm-seed';
+
+const createFreshRandomnessHex = (): string => {
+    const cryptoProvider = globalThis.crypto;
+    if (cryptoProvider === undefined) {
+        throw new Error(
+            'Proof generation requires Web Crypto getRandomValues for fresh randomness.',
+        );
+    }
+    const randomBytes = new Uint8Array(32);
+    cryptoProvider.getRandomValues(randomBytes);
+
+    return Array.from(randomBytes, (byte) =>
+        byte.toString(16).padStart(2, '0'),
+    ).join('');
+};
+
+const suppliedOrFreshRandomnessHex = (value: string | undefined): string =>
+    value ?? createFreshRandomnessHex();
 
 export const directBallotScores = [
     10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10,
@@ -33,9 +46,10 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly scoreDomainMax: number;
     readonly tiePolicy: string;
     readonly workingLevel: number;
+    readonly evaluationKeyMaterialSource: string;
+    readonly publicEvaluationKeyMaterialHash?: string;
     readonly packedScoreRoot: string;
     readonly rankRoot: string;
-    readonly targetProjection: string;
     readonly targetLayoutHash: string;
     readonly targetIdRoot: string;
     readonly targetOrderRoot: string;
@@ -45,7 +59,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly targetProposal:
         | {
               readonly status: string;
-              readonly requiredForFinality: string;
           }
         | {
               readonly targetProposalHash: string;
@@ -60,8 +73,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
               readonly evaluatorReplayProfileHash: string;
               readonly targetFinalityPolicyHash: string;
           };
-    readonly privateCorrectnessCheck: string;
-    readonly timingStatus: string;
     readonly replayTimeMilliseconds: string;
 };
 
@@ -88,7 +99,6 @@ export type DirectEncryptedBallotResult = {
         };
     };
     readonly proofAttempt: {
-        readonly coverage: string;
         readonly proofCount: number;
         readonly rnsLimbCount: number;
         readonly responseEncoding: string;
@@ -99,12 +109,9 @@ export type DirectEncryptedBallotResult = {
         readonly totalProofBytes: number;
         readonly proofBytesHash: string;
         readonly proofGate: string;
-        readonly timingStatus: string;
-        readonly challengeSoundness: string;
         readonly proofAccounting: {
             readonly challengeBits: number;
             readonly nominalChallengeBits: number;
-            readonly proofModelAccepted: boolean;
             readonly weakestCheckedRelation: string;
             readonly weakestRelationEffectiveBitsPerCheck: number;
             readonly supportRelationModulusBits: number;
@@ -118,18 +125,14 @@ export type DirectEncryptedBallotResult = {
             readonly supportUnionLossBits: number;
             readonly targetClassicalSoundnessBits: number;
             readonly minimumIndependentRepetitionsForTarget: number | null;
-            readonly minimumIndependentRepetitionsStatus: string;
             readonly estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses: number;
             readonly estimatedRepeatedProofSizeBytes: number;
             readonly estimatedRepeatedTotalProofBytes: number;
             readonly witnessBoundBitsForMaskShiftAccounting: number;
             readonly zeroKnowledgeShiftSlackBitsAfterResponseUnionBound: number;
-            readonly decision: string;
         };
         readonly proofTransport: {
             readonly encoding: string;
-            readonly status: string;
-            readonly retention: string;
             readonly chunkSizeBytes: number;
             readonly chunksPerProof: number;
             readonly chunksForBatch: number;
@@ -155,23 +158,11 @@ export type DirectEncryptedBallotResult = {
         readonly ballotCount: number;
         readonly aggregateCiphertextRoot: string;
         readonly aggregateCiphertextCanonicalByteLength: number;
-        readonly privateCorrectnessCheck: string;
-        readonly result: string;
     };
     readonly evaluatorReplay:
         | string
         | DirectEncryptedBallotEvaluatorReplayResult
         | readonly DirectEncryptedBallotEvaluatorReplayResult[];
-};
-
-export type DirectEncryptedBallotMeasurement = {
-    readonly result: DirectEncryptedBallotResult;
-    readonly memory: {
-        readonly runtimeBefore: RuntimeMemorySnapshot;
-        readonly runtimeAfter: RuntimeMemorySnapshot;
-        readonly wasmLinearMemoryBytesBefore: number;
-        readonly wasmLinearMemoryBytesAfter: number;
-    };
 };
 
 export const createDirectBallotSetupPackage = (
@@ -372,19 +363,14 @@ const createProofMaskRandomness = (
     };
 };
 
-export const runMeasuredInternalKernelCommand = async <Result>(
+export const runInternalKernelCommand = async <Result>(
     request: Record<string, unknown>,
-): Promise<{
-    readonly result: Result;
-    readonly memory: DirectEncryptedBallotMeasurement['memory'];
-}> => {
-    const runtimeBefore = captureRuntimeMemorySnapshot();
+): Promise<Result> => {
     const bytes = await resolveKernelBytes(wasmKernelUrl);
     const instantiatedSource = await WebAssembly.instantiate(bytes, {});
     const exports = instantiatedSource.instance
         .exports as TranscriptCoreKernelExports;
     const memory = resolveMemory(exports);
-    const wasmLinearMemoryBytesBefore = memory.buffer.byteLength;
     const allocate = resolveNumberExport(
         exports,
         'sealed_lattice_allocate',
@@ -402,33 +388,13 @@ export const runMeasuredInternalKernelCommand = async <Result>(
         outputLengthPointer: number,
     ) => number;
 
-    const result = await runKernelCommand<Result>(
+    return runKernelCommand<Result>(
         memory,
         allocate,
         deallocate,
         commandWithLength,
         request as unknown as TranscriptCoreKernelCommand,
     );
-    const runtimeAfter = captureRuntimeMemorySnapshot();
-    const wasmLinearMemoryBytesAfter = memory.buffer.byteLength;
-
-    return {
-        result,
-        memory: {
-            runtimeBefore,
-            runtimeAfter,
-            wasmLinearMemoryBytesBefore,
-            wasmLinearMemoryBytesAfter,
-        },
-    };
-};
-
-export const runInternalKernelCommand = async <Result>(
-    request: Record<string, unknown>,
-): Promise<Result> => {
-    const measured = await runMeasuredInternalKernelCommand<Result>(request);
-
-    return measured.result;
 };
 
 export const runDirectEncryptedBallot = (input: {
@@ -440,6 +406,7 @@ export const runDirectEncryptedBallot = (input: {
     readonly setupSeed?: string;
     readonly topCount?: number;
     readonly topCounts?: readonly number[];
+    readonly publicEvaluationKeyMaterial?: Record<string, unknown>;
     readonly targetFinalityPolicyHash?: string;
 }): Promise<DirectEncryptedBallotResult> => {
     const ballots = input.ballots ?? defaultDirectBallotInputs();
@@ -466,48 +433,12 @@ export const runDirectEncryptedBallot = (input: {
         ...(input.topCounts === undefined
             ? {}
             : { topCounts: input.topCounts }),
-        ...(input.targetFinalityPolicyHash === undefined
+        ...(input.publicEvaluationKeyMaterial === undefined
             ? {}
-            : { targetFinalityPolicyHash: input.targetFinalityPolicyHash }),
-        ballots,
-    });
-};
-
-export const runMeasuredDirectEncryptedBallot = async (input: {
-    readonly ballots?: readonly DirectEncryptedBallotInput[];
-    readonly ballotEncryptionSeedHexes?: readonly string[];
-    readonly ballotProofRandomnessHexes?: readonly string[];
-    readonly developmentRandomnessOverrideAcknowledged?: boolean;
-    readonly setupPackage: BgvPassiveSetupPackage;
-    readonly setupSeed?: string;
-    readonly topCount?: number;
-    readonly topCounts?: readonly number[];
-    readonly targetFinalityPolicyHash?: string;
-}): Promise<DirectEncryptedBallotMeasurement> => {
-    const ballots = input.ballots ?? defaultDirectBallotInputs();
-
-    return runMeasuredInternalKernelCommand<DirectEncryptedBallotResult>({
-        command: 'RunDirectEncryptedBallot',
-        setupPackage: input.setupPackage,
-        setupPrivateWitness: {
-            setupSeed: input.setupSeed ?? directBallotSetupSeed,
-        },
-        ballotEncryptionRandomness: createBallotEncryptionRandomness({
-            ballotCount: ballots.length,
-            ballotEncryptionSeedHexes: input.ballotEncryptionSeedHexes,
-            developmentRandomnessOverrideAcknowledged:
-                input.developmentRandomnessOverrideAcknowledged,
-        }),
-        proofMaskRandomness: createProofMaskRandomness({
-            ballotCount: ballots.length,
-            ballotProofRandomnessHexes: input.ballotProofRandomnessHexes,
-            developmentRandomnessOverrideAcknowledged:
-                input.developmentRandomnessOverrideAcknowledged,
-        }),
-        ...(input.topCount === undefined ? {} : { topCount: input.topCount }),
-        ...(input.topCounts === undefined
-            ? {}
-            : { topCounts: input.topCounts }),
+            : {
+                  publicEvaluationKeyMaterial:
+                      input.publicEvaluationKeyMaterial,
+              }),
         ...(input.targetFinalityPolicyHash === undefined
             ? {}
             : { targetFinalityPolicyHash: input.targetFinalityPolicyHash }),

@@ -12,9 +12,9 @@ The repo is a private workspace with one published package, four private TypeScr
 - `packages/sdk`: the only published package directory, with the public package name `sealed-lattice`
 - `packages/types`: canonical shared type definitions inlined into the published package during SDK builds
 - `packages/protocol`: deterministic election model and transcript verification helpers
-- `packages/crypto`: internal Hash512, hash, ML-DSA-65 profile, fixture signing, and signed-root verification wrappers
-- `packages/wasm`: typed Rust/WASM loader for transcript-core analysis, protocol hash derivation, direct ballot proof work, and kernel checks
-- `crates/sealed-lattice-kernel`: Rust transcript-core, proof, and BGV kernel crate that exports the WASM command path for transcript fixtures, reserved hash derivation, direct ballot proof experiments, and field checks
+- `packages/crypto`: internal canonical hashing, signing, and encrypted envelope helpers
+- `packages/wasm`: typed Rust/WASM loader for package verification helpers
+- `crates/sealed-lattice-kernel`: Rust transcript, proof, and BGV kernel crate
 
 ## Dependency direction
 
@@ -27,7 +27,7 @@ The repo is a private workspace with one published package, four private TypeScr
 
 ## Why the public facade stays narrow
 
-The goal of the current release is to keep package boundaries safe while the direct encrypted ballot API is still being built. The final public surface will expose direct-path voting and verification operations only after their proof, replay, target finality, decryption, and supported-phone mobile evidence gates close.
+The goal of the current release is to keep package boundaries safe while the complete voting API is still being built. The final public surface will expose voting and verification operations only after the matching package APIs are implemented; the security-evidence boundary is maintained in the repository security policy.
 
 ## Enforcement
 

@@ -5,11 +5,11 @@ sidebar:
     order: 1
 ---
 
-`sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting prototype.
+`sealed-lattice` provides development verification helpers for a mobile-first post-quantum threshold homomorphic voting library.
 
-The selected direction is direct BGV-encrypted ballots, public ciphertext aggregation, mandatory mobile evaluator replay, target finality, and target-bound threshold decryption.
+Every roster participant is intended to be both voter and trustee. The design does not rely on a trusted tally server, special verifier role, heavy external prover, or desktop-class auditor in the verification path.
 
-The package is under active implementation and has not been independently audited. Use it for development, integration experiments, and verification tooling, not production elections.
+The package is under active implementation. Use it for development, integration experiments, and verification tooling, not production elections, and read the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md) before treating any verification result as security evidence.
 
 ## Install
 
@@ -50,38 +50,43 @@ const thresholdProfile = deriveThresholdProfile({
 
 ```typescript
 import {
+    createSetupPackageVerificationInput,
     deriveThresholdProfile,
     validatePollSpec,
     verifyBoardConsistency,
+    verifyFoundationTranscript,
+    verifyPrivateVssShare,
+    verifySetupPackage,
     verifyTargetFinality,
     verifyTranscriptCoreFixture,
 } from "sealed-lattice";
 ```
 
-These helpers are useful for current development verification and package integration. Complete direct encrypted ballot voting entry points are not public yet.
+These helpers are useful for current development verification and package integration. Complete active-static direct encrypted ballot voting entry points are not public yet.
 
 ## What you can use today
 
 - poll specification validation and canonical hash derivation
 - threshold and frozen roster profile derivation
-- lifecycle label, lifecycle transition, and action capability checks
+- lifecycle transition and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
-- transcript-core fixture verification through the bundled Rust/WASM kernel
+- setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling
+- foundation transcript verification through the packaged kernel
 - package-boundary and public API smoke coverage
 
 ## What is not available yet
 
-- production ballot generation or casting APIs
-- public direct ballot proof construction APIs
+- production setup ceremony, ballot generation, or casting APIs
+- public encrypted ballot package creation or verification APIs
 - public encrypted ballot aggregation APIs
-- public mobile evaluator replay APIs
+- public bounded-domain mobile evaluator replay APIs
 - production target-bound decryption or result release
-- production-readiness, audit, certification, or supported-phone claims
+- production security claims; see the [security policy](https://github.com/Tenemo/sealed-lattice/blob/master/SECURITY.md)
 
-Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching direct-path layer exists.
+Reserved complete-protocol entry points fail closed with `OperationUnavailable` until the matching functionality is implemented and verified.
 
 ## Next reads
 
 - [API reference](../../api/) for the public function and type surface
-- [Security and non-goals](../security-and-non-goals/) for current safety boundaries
+- [Security and non-goals](../security-and-non-goals/) for the canonical security policy pointer
 - [Development workflow](../development-workflow/) for local build and verification commands

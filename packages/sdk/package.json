@@ -1,6 +1,7 @@
 {
     "name": "sealed-lattice",
     "version": "0.0.17",
+    "description": "Browser-first post-quantum threshold homomorphic voting verification helpers.",
     "author": "Piotr Piech <piotr@piech.dev>",
     "license": "MPL-2.0",
     "type": "module",

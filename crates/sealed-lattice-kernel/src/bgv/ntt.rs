@@ -18,8 +18,22 @@ pub(crate) fn forward_negacyclic_ntt(
     transform_negacyclic(coefficients, modulus, TransformDirection::Forward)
 }
 
+pub(crate) fn forward_negacyclic_ntt_in_place(
+    coefficients: &mut [u64],
+    modulus: u64,
+) -> CanonicalResult<()> {
+    transform_negacyclic_in_place(coefficients, modulus, TransformDirection::Forward)
+}
+
 pub(crate) fn inverse_negacyclic_ntt(values: &[u64], modulus: u64) -> CanonicalResult<Vec<u64>> {
     transform_negacyclic(values, modulus, TransformDirection::Inverse)
+}
+
+pub(crate) fn inverse_negacyclic_ntt_in_place(
+    values: &mut [u64],
+    modulus: u64,
+) -> CanonicalResult<()> {
+    transform_negacyclic_in_place(values, modulus, TransformDirection::Inverse)
 }
 
 // Negacyclic (X^N+1) transform reduced to a cyclic NTT: weight the input by
@@ -31,12 +45,24 @@ fn transform_negacyclic(
     modulus: u64,
     direction: TransformDirection,
 ) -> CanonicalResult<Vec<u64>> {
+    let mut transformed = values.to_vec();
+    transform_negacyclic_in_place(&mut transformed, modulus, direction)?;
+
+    Ok(transformed)
+}
+
+fn transform_negacyclic_in_place(
+    values: &mut [u64],
+    modulus: u64,
+    direction: TransformDirection,
+) -> CanonicalResult<()> {
     validate_transform_length(values.len())?;
     validate_residues(values, modulus)?;
     if values.len() == POLYNOMIAL_DEGREE {
         let plan = full_degree_ntt_plan(modulus)?;
 
-        return transform_with_plan(values, plan, direction);
+        transform_with_plan_in_place(values, plan, direction);
+        return Ok(());
     }
 
     let root_parameters = root_parameters_for_modulus(modulus).ok_or_else(|| {
@@ -47,25 +73,17 @@ fn transform_negacyclic(
     })?;
     let plan = build_ntt_plan(root_parameters, values.len())?;
 
-    transform_with_plan(values, &plan, direction)
+    transform_with_plan_in_place(values, &plan, direction);
+
+    Ok(())
 }
 
-fn transform_with_plan(
-    values: &[u64],
-    plan: &NttPlan,
-    direction: TransformDirection,
-) -> CanonicalResult<Vec<u64>> {
-    let mut transformed = values.to_vec();
-
+fn transform_with_plan_in_place(values: &mut [u64], plan: &NttPlan, direction: TransformDirection) {
     match direction {
         TransformDirection::Forward => {
-            multiply_by_cached_powers(
-                &mut transformed,
-                &plan.forward_negacyclic_powers,
-                plan.modulus,
-            );
+            multiply_by_cached_powers(values, &plan.forward_negacyclic_powers, plan.modulus);
             cyclic_ntt_with_twiddles(
-                &mut transformed,
+                values,
                 &plan.bit_reverse_swaps,
                 &plan.forward_stage_twiddles,
                 plan.modulus,
@@ -74,21 +92,15 @@ fn transform_with_plan(
         }
         TransformDirection::Inverse => {
             cyclic_ntt_with_twiddles(
-                &mut transformed,
+                values,
                 &plan.bit_reverse_swaps,
                 &plan.inverse_stage_twiddles,
                 plan.modulus,
                 Some(plan.inverse_length),
             );
-            multiply_by_cached_powers(
-                &mut transformed,
-                &plan.inverse_negacyclic_powers,
-                plan.modulus,
-            );
+            multiply_by_cached_powers(values, &plan.inverse_negacyclic_powers, plan.modulus);
         }
     }
-
-    Ok(transformed)
 }
 
 fn full_degree_ntt_plans() -> &'static [NttPlan] {
@@ -307,11 +319,14 @@ pub(crate) fn negacyclic_convolution_for_tests(
 
 #[cfg(test)]
 mod tests {
-    use super::{forward_negacyclic_ntt, inverse_negacyclic_ntt, negacyclic_convolution_for_tests};
+    use super::{
+        forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
+        inverse_negacyclic_ntt_in_place, negacyclic_convolution_for_tests,
+    };
     use crate::{
         bgv::{
             modular_arithmetic::sub_mod,
-            profile::{DATA_PRIMES, SPECIAL_PRIME},
+            profile::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
         },
         encoding::CanonicalResult,
     };
@@ -353,6 +368,34 @@ mod tests {
     }
 
     #[test]
+    fn ntt_round_trips_full_degree_vectors_for_every_selected_prime() {
+        for modulus in selected_ntt_moduli() {
+            let input = full_degree_fixture_vector(modulus);
+            let transformed = forward_negacyclic_ntt(&input, modulus).expect("full NTT should run");
+            assert_ne!(transformed, input);
+            let recovered =
+                inverse_negacyclic_ntt(&transformed, modulus).expect("full INTT should run");
+
+            assert_eq!(recovered, input);
+        }
+    }
+
+    #[test]
+    fn in_place_ntt_matches_allocating_wrappers_for_every_selected_prime() {
+        for modulus in selected_ntt_moduli() {
+            let input = full_degree_fixture_vector(modulus);
+            let expected_forward =
+                forward_negacyclic_ntt(&input, modulus).expect("full NTT should run");
+            let mut in_place = input.clone();
+            forward_negacyclic_ntt_in_place(&mut in_place, modulus).expect("in-place NTT");
+            assert_eq!(in_place, expected_forward);
+
+            inverse_negacyclic_ntt_in_place(&mut in_place, modulus).expect("in-place INTT");
+            assert_eq!(in_place, input);
+        }
+    }
+
+    #[test]
     fn ntt_rejects_wrong_lengths_residues_and_unselected_moduli() {
         for modulus in selected_ntt_moduli() {
             assert!(forward_negacyclic_ntt(&[], modulus).is_err());
@@ -364,6 +407,15 @@ mod tests {
 
     fn selected_ntt_moduli() -> Vec<u64> {
         DATA_PRIMES.into_iter().chain([SPECIAL_PRIME]).collect()
+    }
+
+    fn full_degree_fixture_vector(modulus: u64) -> Vec<u64> {
+        (0..POLYNOMIAL_DEGREE)
+            .map(|coefficient_index| {
+                let coefficient = coefficient_index as u64;
+                (coefficient * 131 + coefficient.rotate_left(7) + 17) % modulus
+            })
+            .collect()
     }
 
     fn direct_negacyclic_product(

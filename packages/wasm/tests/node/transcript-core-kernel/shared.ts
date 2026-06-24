@@ -3,57 +3,30 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import {
-    type GoldenTranscriptCoreFixture,
-    type MalformedObjectFixture,
-} from '@sealed-lattice/types';
 import { afterEach, vi } from 'vitest';
 
 import {
     createTranscriptCoreKernelLoader,
     type TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge';
-import goldenTranscriptCoreFixturesJson from '#test-vectors/transcript-core/golden-transcript-core.json';
-import malformedObjectFixturesJson from '#test-vectors/transcript-core/malformed-objects.json';
-
-type NamedFixture = {
-    readonly caseName: string;
-};
-
-const goldenTranscriptCoreFixtures =
-    goldenTranscriptCoreFixturesJson as readonly GoldenTranscriptCoreFixture[];
-
-const malformedObjectFixtures =
-    malformedObjectFixturesJson as readonly MalformedObjectFixture[];
-
-const findFixture = <Fixture extends NamedFixture>(
-    fixtures: readonly Fixture[],
-    caseName: string,
-): Fixture => {
-    const fixture = fixtures.find(
-        (candidate) => candidate.caseName === caseName,
-    );
-    if (fixture === undefined) {
-        throw new Error(`Missing fixture: ${caseName}`);
-    }
-
-    return fixture;
-};
+import {
+    createFoundationTranscriptCoreFixture,
+    createFoundationTranscriptFixture,
+    createInvalidFoundationTranscriptStatusFixture,
+} from '#tests/support/foundation-transcript-fixture';
 
 const cloneJsonValue = <JsonValue>(value: JsonValue): JsonValue =>
     JSON.parse(JSON.stringify(value)) as JsonValue;
 
-const fullyVerifiedPassiveMhePrototypeFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'fully-verified-passive-mhe-prototype-transcript-core',
+const foundationTranscriptFixture = createFoundationTranscriptFixture();
+
+const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
+    foundationTranscriptFixture.expectedHashes,
 );
 
-const fullyVerifiedActiveFixture = findFixture(
-    goldenTranscriptCoreFixtures,
-    'fully-verified-active-malicious-transcript-core',
+const invalidEnumFixture = createInvalidFoundationTranscriptStatusFixture(
+    foundationTranscriptFixture.expectedHashes,
 );
-
-const invalidEnumFixture = findFixture(malformedObjectFixtures, 'invalid-enum');
 
 const singleZeroByteSha256Hex =
     '6e340b9cffb37a989ca544e6bb780a2c78901d3fb33738768511a30617afa01d';
@@ -85,7 +58,7 @@ const createMockKernelExports = ({
     readonly commandPointer?: number;
     readonly commandResponse?: unknown;
     readonly expectedKernelSha256Hex?: string;
-    readonly onCommand?: () => void;
+    readonly onCommand?: (command: unknown) => void;
     readonly outputLengthAllocationPointer?: number;
     readonly roundTripPointer?: number;
 } = {}): {
@@ -121,11 +94,18 @@ const createMockKernelExports = ({
                 sealed_lattice_deallocate: deallocate,
                 sealed_lattice_transcript_core_command_with_length: vi.fn(
                     (
-                        _pointer: number,
-                        _length: number,
+                        pointer: number,
+                        length: number,
                         outputLengthPointer: number,
                     ) => {
-                        onCommand?.();
+                        const encodedCommand = new Uint8Array(
+                            memory.buffer,
+                            pointer,
+                            length,
+                        );
+                        onCommand?.(
+                            JSON.parse(textDecoder.decode(encodedCommand)),
+                        );
                         new Uint8Array(memory.buffer).set(
                             encodedCommandResponse,
                             commandPointer,
@@ -190,14 +170,11 @@ afterEach(() => {
 });
 
 export {
-    findFixture,
     cloneJsonValue,
-    fullyVerifiedPassiveMhePrototypeFixture,
-    fullyVerifiedActiveFixture,
+    foundationTranscriptCoreFixture,
     invalidEnumFixture,
     textEncoder,
     textDecoder,
     wasmHeader,
     createMockKernelExports,
 };
-export type { NamedFixture };

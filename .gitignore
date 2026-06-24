@@ -5,19 +5,16 @@ npm-debug.log
 pnpm-debug.log*
 .tmp/
 .tmp-*
-sh.exe.stackdump
 debug.log
+*.stackdump
 
 # Build
 dist/
-coverage/
 target/
 .turbo/
 *.tsbuildinfo
 docs/.astro/
 docs/dist/
-docs/public/coverage-badge.json
-docs/public/coverage-summary.json
 docs/src/content/docs/api/reference/
 .vitest-attachments/
 **/__screenshots__/
@@ -26,6 +23,7 @@ docs/src/content/docs/api/reference/
 # Miscellaneous
 .DS_Store
 __pycache__/
+.ignore
 
 # Temporary files
 logs/

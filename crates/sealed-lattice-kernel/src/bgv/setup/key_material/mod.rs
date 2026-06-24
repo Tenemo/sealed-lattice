@@ -4,8 +4,9 @@ use crate::bgv::evaluator::{
     prg::DeterministicSampler,
     records::MAXIMUM_OPTION_COUNT,
     top_k::{
-        DIRECT_COMPARISON_OUTPUT_LEVEL, direct_score_packing_basis_galois_elements,
-        packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
+        DIRECT_COMPARISON_OUTPUT_LEVEL, SELECTED_EVALUATOR_WORKING_LEVEL,
+        direct_score_packing_basis_galois_elements, packed_rank_forward_basis_galois_elements,
+        packed_rank_return_basis_galois_elements,
     },
 };
 use crate::bgv::setup::sampling::{

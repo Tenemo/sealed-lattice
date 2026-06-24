@@ -8,7 +8,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-aes = "0.8"
+fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-65"] }
 num-bigint = "0.4"
 num-traits = "0.2"
 serde = { version = "1", features = ["derive"] }

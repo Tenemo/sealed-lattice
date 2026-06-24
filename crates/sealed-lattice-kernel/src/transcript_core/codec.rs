@@ -1,14 +1,16 @@
 use serde_json::Value;
 
+#[cfg(test)]
 use super::rng::DeterministicFixtureRng;
+#[cfg(test)]
+use super::types::TranscriptCoreProfile;
 use super::types::{
-    ACTIVE_MALICIOUS_MHE_PROFILE_ID, BaseClaimProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS,
-    FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS, FIELD_TAGS, FIELD_TITLE,
-    FOUNDATION_ONLY_PROFILE_ID, MAGIC, MANDATORY_EVALUATOR_REPLAY_PROFILE_ID, MheSecurityClosure,
+    BaseProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS, FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS,
+    FIELD_TAGS, FIELD_TITLE, FOUNDATION_ONLY_PROFILE_ID, FOUNDATION_TRANSCRIPT_PROFILE_ID, MAGIC,
     NO_DECRYPTION_PROOF_PROFILE_ID, NO_EVALUATOR_REPLAY_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
-    PASSIVE_MHE_PROTOTYPE_PROFILE_ID, REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE,
-    TRANSCRIPT_CORE_OBJECT_VERSION, TranscriptCoreAnalysis, TranscriptCoreObject,
-    TranscriptCoreProfile, TranscriptCoreStatus,
+    REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
+    TranscriptCoreAnalysis, TranscriptCoreObject, TranscriptCoreSecurityClosure,
+    TranscriptCoreStatus,
 };
 use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_bytes,
@@ -59,71 +61,30 @@ pub fn decode_hex(hex: &str) -> CanonicalResult<Vec<u8>> {
     Ok(bytes)
 }
 
+#[cfg(test)]
 pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> TranscriptCoreObject {
     let mut fixture_rng = DeterministicFixtureRng::new(&profile.seed_label());
-    let base_claim_profile = profile.base_claim_profile;
-    let mhe_security_closure = profile.mhe_security_closure;
+    let base_profile = profile.base_profile;
+    let security_closure = profile.security_closure;
 
     TranscriptCoreObject {
-        base_claim_profile,
-        mhe_security_closure,
-        base_claim_profile_id: base_claim_profile.expected_profile_id().to_string(),
-        mhe_security_profile_id: mhe_security_closure.expected_profile_id().to_string(),
+        base_profile,
+        security_closure,
+        base_profile_id: base_profile.expected_profile_id().to_string(),
+        security_profile_id: security_closure.expected_profile_id().to_string(),
         he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
-        evaluator_replay_profile_id: MANDATORY_EVALUATOR_REPLAY_PROFILE_ID.to_string(),
+        evaluator_replay_profile_id: NO_EVALUATOR_REPLAY_PROFILE_ID.to_string(),
         decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
-        title: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FoundationTranscript, MheSecurityClosure::FoundationOnly) => {
-                "Transcript core foundation transcript".to_string()
-            }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
-                "Transcript core fully verified passive MHE prototype".to_string()
-            }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => {
-                "Transcript core fully verified active malicious".to_string()
-            }
-            _ => panic!("unsupported transcript core profile"),
-        },
-        sequence: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FoundationTranscript, MheSecurityClosure::FoundationOnly) => 10,
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => 44,
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => 45,
-            _ => 0,
-        },
+        title: "Foundation transcript roots".to_string(),
+        sequence: 10,
         payload: fixture_rng.next_bytes(6),
         status: TranscriptCoreStatus::TranscriptCoreVerified,
-        tags: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FoundationTranscript, MheSecurityClosure::FoundationOnly) => {
-                vec!["canonical".to_string(), "foundation-transcript".to_string()]
-            }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
-                vec![
-                    "canonical".to_string(),
-                    "fully-verified".to_string(),
-                    "passive-mhe-prototype".to_string(),
-                    "mandatory-evaluator-replay-profile".to_string(),
-                ]
-            }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => vec![
-                "canonical".to_string(),
-                "fully-verified".to_string(),
-                "active-malicious".to_string(),
-                "mandatory-evaluator-replay-profile".to_string(),
-            ],
-            _ => panic!("unsupported transcript core profile"),
-        },
-        checkpoints: match (base_claim_profile, mhe_security_closure) {
-            (BaseClaimProfile::FoundationTranscript, MheSecurityClosure::FoundationOnly) => {
-                vec![10, 20, 10]
-            }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::PassiveMhePrototype) => {
-                vec![3, 6, 9, 12, 15]
-            }
-            (BaseClaimProfile::FullyVerifiedResult, MheSecurityClosure::ActiveMalicious) => {
-                vec![5, 10, 15, 20, 25]
-            }
-            _ => vec![],
-        },
+        tags: vec![
+            "canonical".to_string(),
+            "foundation-transcript".to_string(),
+            "direct-route".to_string(),
+        ],
+        checkpoints: vec![10, 20, 10],
     }
 }
 
@@ -135,10 +96,10 @@ pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8
     append_varuint(&mut output, ENVELOPE_VERSION);
     append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut output, object.base_claim_profile.code());
-    append_varuint(&mut output, object.mhe_security_closure.code());
-    append_string(&mut output, &object.base_claim_profile_id);
-    append_string(&mut output, &object.mhe_security_profile_id);
+    append_varuint(&mut output, object.base_profile.code());
+    append_varuint(&mut output, object.security_closure.code());
+    append_string(&mut output, &object.base_profile_id);
+    append_string(&mut output, &object.security_profile_id);
     append_string(&mut output, &object.he_setup_proof_profile_id);
     append_string(&mut output, &object.evaluator_replay_profile_id);
     append_string(&mut output, &object.decryption_proof_profile_id);
@@ -199,18 +160,18 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         ));
     }
 
-    let base_claim_profile = parse_base_claim_profile(reader.read_varuint()?)?;
-    let mhe_security_closure = parse_mhe_security_closure(reader.read_varuint()?)?;
-    let base_claim_profile_id = reader.read_string()?;
-    let mhe_security_profile_id = reader.read_string()?;
+    let base_profile = parse_base_profile(reader.read_varuint()?)?;
+    let security_closure = parse_security_closure(reader.read_varuint()?)?;
+    let base_profile_id = reader.read_string()?;
+    let security_profile_id = reader.read_string()?;
     let he_setup_proof_profile_id = reader.read_string()?;
     let evaluator_replay_profile_id = reader.read_string()?;
     let decryption_proof_profile_id = reader.read_string()?;
     validate_profiles(
-        base_claim_profile,
-        mhe_security_closure,
-        &base_claim_profile_id,
-        &mhe_security_profile_id,
+        base_profile,
+        security_closure,
+        &base_profile_id,
+        &security_profile_id,
         &he_setup_proof_profile_id,
         &evaluator_replay_profile_id,
         &decryption_proof_profile_id,
@@ -268,10 +229,10 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     }
 
     let object = TranscriptCoreObject {
-        base_claim_profile,
-        mhe_security_closure,
-        base_claim_profile_id,
-        mhe_security_profile_id,
+        base_profile,
+        security_closure,
+        base_profile_id,
+        security_profile_id,
         he_setup_proof_profile_id,
         evaluator_replay_profile_id,
         decryption_proof_profile_id,
@@ -283,6 +244,7 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         checkpoints: checkpoints.ok_or_else(|| missing_field("checkpoints"))?,
     };
 
+    // Canonical-form gate: an object is accepted only if it re-serializes byte-identically to the input, guaranteeing one unique encoding per object for stable hashing.
     if serialize_transcript_core_object(&object) != bytes {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -315,17 +277,14 @@ pub fn analyze_canonical_object(
         canonical_bytes_hex: encode_hex(bytes),
         object_type: "TranscriptCore",
         object_version: TRANSCRIPT_CORE_OBJECT_VERSION,
-        base_claim_profile: object.base_claim_profile.label(),
-        mhe_security_closure: object.mhe_security_closure.label(),
-        base_claim_profile_id: object.base_claim_profile_id,
-        mhe_security_profile_id: object.mhe_security_profile_id,
+        base_profile_id: object.base_profile_id,
+        security_profile_id: object.security_profile_id,
         he_setup_proof_profile_id: object.he_setup_proof_profile_id,
         evaluator_replay_profile_id: object.evaluator_replay_profile_id,
         decryption_proof_profile_id: object.decryption_proof_profile_id,
         object_hash512: object_root(bytes),
         chunk_root: chunk_root(bytes, chunk_size_usize)?,
         chunk_size,
-        status_labels: vec![object.status.label()],
         title: object.title,
         sequence: object.sequence,
         payload_hex: encode_hex(&object.payload),
@@ -349,25 +308,22 @@ pub fn analyze_canonical_object_hex(
     analyze_canonical_object(&bytes, chunk_size)?.to_json_value()
 }
 
-fn parse_base_claim_profile(value: u64) -> CanonicalResult<BaseClaimProfile> {
+fn parse_base_profile(value: u64) -> CanonicalResult<BaseProfile> {
     match value {
-        1 => Ok(BaseClaimProfile::FoundationTranscript),
-        2 => Ok(BaseClaimProfile::FullyVerifiedResult),
+        1 => Ok(BaseProfile::FoundationTranscript),
         _ => Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownBaseClaimProfile,
+            CanonicalErrorCode::UnknownBaseProfile,
             "base claim profile is not supported",
         )),
     }
 }
 
-fn parse_mhe_security_closure(value: u64) -> CanonicalResult<MheSecurityClosure> {
+fn parse_security_closure(value: u64) -> CanonicalResult<TranscriptCoreSecurityClosure> {
     match value {
-        1 => Ok(MheSecurityClosure::PassiveMhePrototype),
-        2 => Ok(MheSecurityClosure::ActiveMalicious),
-        3 => Ok(MheSecurityClosure::FoundationOnly),
+        3 => Ok(TranscriptCoreSecurityClosure::FoundationOnly),
         _ => Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownMheSecurityClosure,
-            "MHE security closure is not supported",
+            CanonicalErrorCode::UnknownSecurityClosure,
+            "transcript-core security closure is not supported",
         )),
     }
 }
@@ -383,35 +339,37 @@ fn parse_status(value: u64) -> CanonicalResult<TranscriptCoreStatus> {
 }
 
 fn validate_profiles(
-    base_claim_profile: BaseClaimProfile,
-    mhe_security_closure: MheSecurityClosure,
-    base_claim_profile_id: &str,
-    mhe_security_profile_id: &str,
+    base_profile: BaseProfile,
+    security_closure: TranscriptCoreSecurityClosure,
+    base_profile_id: &str,
+    security_profile_id: &str,
     he_setup_proof_profile_id: &str,
     evaluator_replay_profile_id: &str,
     decryption_proof_profile_id: &str,
 ) -> CanonicalResult<()> {
-    if base_claim_profile_id != base_claim_profile.expected_profile_id() {
+    if base_profile_id != base_profile.expected_profile_id() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::UnknownProofProfile,
             "base claim profile ID is not supported",
         ));
     }
-    if mhe_security_profile_id != mhe_security_closure.expected_profile_id() {
+    if security_profile_id != security_closure.expected_profile_id() {
         let allowed = [
             FOUNDATION_ONLY_PROFILE_ID,
-            PASSIVE_MHE_PROTOTYPE_PROFILE_ID,
-            ACTIVE_MALICIOUS_MHE_PROFILE_ID,
+            FOUNDATION_TRANSCRIPT_PROFILE_ID,
+            NO_HE_SETUP_PROOF_PROFILE_ID,
+            NO_EVALUATOR_REPLAY_PROFILE_ID,
+            NO_DECRYPTION_PROOF_PROFILE_ID,
         ];
-        if !allowed.contains(&mhe_security_profile_id) {
+        if !allowed.contains(&security_profile_id) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::UnknownProofProfile,
-                "MHE security profile ID is not supported",
+                "transcript-core security profile ID is not supported",
             ));
         }
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "MHE security profile ID does not match MHE security closure",
+            "transcript-core security profile ID does not match the security closure",
         ));
     }
     if he_setup_proof_profile_id != NO_HE_SETUP_PROOF_PROFILE_ID
@@ -422,40 +380,29 @@ fn validate_profiles(
             "one or more reserved proof profile IDs are not supported",
         ));
     }
-    match base_claim_profile {
-        BaseClaimProfile::FoundationTranscript => {
-            if mhe_security_closure != MheSecurityClosure::FoundationOnly {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "foundation transcript requires the foundation-only closure",
-                ));
-            }
-            if evaluator_replay_profile_id != NO_EVALUATOR_REPLAY_PROFILE_ID {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "foundation transcript requires the no-evaluator-replay profile",
-                ));
-            }
-        }
-        BaseClaimProfile::FullyVerifiedResult => {
-            if mhe_security_closure == MheSecurityClosure::FoundationOnly {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "fullyVerified requires an MHE security closure",
-                ));
-            }
-            if evaluator_replay_profile_id != MANDATORY_EVALUATOR_REPLAY_PROFILE_ID {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "fullyVerified requires the mandatory evaluator-replay profile",
-                ));
-            }
-        }
+    if base_profile != BaseProfile::FoundationTranscript {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "transcript-core only accepts foundation transcript objects",
+        ));
+    }
+    if security_closure != TranscriptCoreSecurityClosure::FoundationOnly {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "foundation transcript requires the foundation-only closure",
+        ));
+    }
+    if evaluator_replay_profile_id != NO_EVALUATOR_REPLAY_PROFILE_ID {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "foundation transcript requires the no-evaluator-replay profile",
+        ));
     }
 
     Ok(())
 }
 
+// Each list item is at least one encoded byte, so a count exceeding the remaining bytes is malformed; reject before allocating to avoid an OOM from a forged length.
 fn read_list_count(reader: &mut CanonicalReader<'_>, item_name: &str) -> CanonicalResult<usize> {
     let count = reader.read_varuint()?;
     let count_usize = usize::try_from(count).map_err(|_| {
@@ -501,20 +448,22 @@ fn missing_field(field_name: &str) -> CanonicalError {
     )
 }
 
+#[cfg(test)]
 pub(super) fn append_transcript_core_header(output: &mut Vec<u8>, object: &TranscriptCoreObject) {
     output.extend(MAGIC);
     append_varuint(output, ENVELOPE_VERSION);
     append_varuint(output, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(output, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(output, object.base_claim_profile.code());
-    append_varuint(output, object.mhe_security_closure.code());
-    append_string(output, &object.base_claim_profile_id);
-    append_string(output, &object.mhe_security_profile_id);
+    append_varuint(output, object.base_profile.code());
+    append_varuint(output, object.security_closure.code());
+    append_string(output, &object.base_profile_id);
+    append_string(output, &object.security_profile_id);
     append_string(output, &object.he_setup_proof_profile_id);
     append_string(output, &object.evaluator_replay_profile_id);
     append_string(output, &object.decryption_proof_profile_id);
 }
 
+#[cfg(test)]
 pub(super) fn header_length_before_field_count(object: &TranscriptCoreObject) -> usize {
     let mut bytes = Vec::new();
     append_transcript_core_header(&mut bytes, object);

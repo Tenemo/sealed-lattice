@@ -10,6 +10,8 @@ import type {
     ThresholdProfileFamily,
 } from '@sealed-lattice/types';
 
+import { isRecord } from '../common/verification-helpers.js';
+
 import {
     defaultDuplicateBallotPolicy,
     defaultRosterPolicy,
@@ -20,9 +22,6 @@ import {
     maximumSupportedRosterSize,
     minimumSupportedRosterSize,
 } from './profiles.js';
-
-const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
-    typeof value === 'object' && value !== null;
 
 const isSupportedScoreDomain = (scoreDomain: unknown): boolean =>
     scoreDomain === undefined ||
@@ -232,7 +231,7 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
             code: 'InvalidRosterBounds',
             field: 'minRosterSize',
             message:
-                'Roster bounds must be integer bounds in 3..50 with minRosterSize not greater than maxRosterSize.',
+                'Roster bounds must be integer bounds in 3..20 with minRosterSize not greater than maxRosterSize.',
         });
     }
 

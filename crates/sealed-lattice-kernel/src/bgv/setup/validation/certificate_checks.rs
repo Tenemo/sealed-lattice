@@ -29,12 +29,6 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         hash_at_path(certificates, &["evaluationKeySizeProfileHash"])?,
         "evaluation key size profile hash",
     )?;
-    compare_derived_hash(
-        "BGVHeSecurityCertificateHash",
-        value_at_path(certificates, &["heSecurityCertificate"])?,
-        hash_at_path(certificates, &["heSecurityCertificateHash"])?,
-        "HE security certificate hash",
-    )?;
     let evaluation_key_streaming_commitment_hash =
         validate_evaluation_key_streaming_commitment(certificates)?;
     compare_hash_at_path(
@@ -72,12 +66,6 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
             &["targetThresholdDecryptabilityCertificateHash"],
         )?,
         "setup parameter target-threshold decryptability certificate hash",
-    )?;
-    compare_hash_at_path(
-        value_at_path(certificates, &["setupParameterCertificate"])?,
-        &["heSecurityCertificateHash"],
-        hash_at_path(certificates, &["heSecurityCertificateHash"])?,
-        "setup parameter HE security certificate hash",
     )?;
     compare_derived_hash(
         "BGVSetupParameterCertificateHash",
@@ -141,18 +129,6 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
         &chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?,
         "evaluation key streaming commitment chunk root",
     )?;
-    let total_evaluation_key_byte_estimate = usize_at_path(
-        commitment_record,
-        &["storageQuotaDecision", "totalEvaluationKeyByteEstimate"],
-    )?;
-    let quota_bytes = usize_at_path(commitment_record, &["storageQuotaDecision", "quotaBytes"])?;
-    let accepted = bool_at_path(commitment_record, &["storageQuotaDecision", "accepted"])?;
-    if accepted != (total_evaluation_key_byte_estimate <= quota_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "evaluation key streaming commitment storage quota decision is inconsistent",
-        ));
-    }
     let commitment_hash = derive_protocol_hash("EvaluationKeySetHash", commitment_record)?;
     compare_hash_at_path(
         wrapped_commitment,
@@ -173,14 +149,6 @@ fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalRe
         "development-collective-public-key-encryption-fixture",
         "development encryption fixture scope",
     )?;
-    if bool_at_path(fixture_record, &["directProofClaim"])?
-        || bool_at_path(fixture_record, &["directEvaluatorReplayClaim"])?
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "development encryption fixture must not claim direct proof or evaluator replay closure",
-        ));
-    }
     compare_hash_at_path(
         fixture_record,
         &["collectivePublicKeyRoot"],
@@ -207,14 +175,5 @@ fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalRe
             "development encryption fixture canonical byte length must be non-zero",
         ));
     }
-    for relation_check in array_at_path(fixture_record, &["sampledPublicRelationChecks"])? {
-        if !bool_at_path(relation_check, &["relationMatches"])? {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "development encryption fixture contains a failed public relation check",
-            ));
-        }
-    }
-
     Ok(())
 }

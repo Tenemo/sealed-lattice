@@ -24,7 +24,7 @@ export default defineConfig({
         StarlightIntegration({
             title: 'sealed-lattice',
             description:
-                'Documentation for the sealed-lattice direct encrypted ballot direction and current verification boundary.',
+                'Documentation for the sealed-lattice active-static direct encrypted ballot direction and current verification boundary.',
             disable404Route: true,
             components: {
                 ThemeSelect: './src/components/ThemeToggle.astro',

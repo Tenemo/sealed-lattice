@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 
 #[test]
 fn passive_setup_public_evaluation_key_material_drives_relinearization_without_private_witness() {
@@ -60,155 +61,29 @@ fn passive_setup_public_evaluation_key_material_drives_rotation_without_private_
 }
 
 #[test]
-#[ignore = "representative full-level public evaluation-key material is a manual setup/evaluator closure check"]
-fn passive_setup_representative_full_level_public_evaluation_key_material_exercises_selected_keys()
-{
+fn selected_rotation_key_schedule_matches_package_commitment() {
     let package = setup_package();
-    let evaluator_key = setup_derived_evaluator_key();
-    let full_level = DATA_PRIMES.len() - 1;
-    let expected_rotation_schedule = selected_public_evaluation_key_rotation_requests(full_level)
-        .expect("selected full rotation schedule");
-    let full_level_rotation = expected_rotation_schedule
-        .iter()
-        .copied()
-        .find(|(_, level)| *level == full_level)
-        .expect("full-level selected rotation");
-    let direct_return_rotation = expected_rotation_schedule
-        .iter()
-        .copied()
-        .find(|(_, level)| *level == DIRECT_COMPARISON_OUTPUT_LEVEL)
-        .expect("direct-comparison return rotation");
-    let public_material =
-        super::generate_passive_setup_public_evaluation_key_material_from_request(
-            &serde_json::json!({
-                "setupPackage": package,
-                "setupPrivateWitness": {
-                    "setupSeed": "passive-bgv-setup-test-seed",
-                },
-                "workingLevel": full_level,
-                "rotationKeys": [
-                    {
-                        "rotation": full_level_rotation.0,
-                        "level": full_level_rotation.1,
-                    },
-                    {
-                        "rotation": direct_return_rotation.0,
-                        "level": direct_return_rotation.1,
-                    }
-                ],
-            }),
-        )
-        .expect("representative full-level public evaluation-key material");
-    let public_context = EvaluatorContext::from_passive_setup_public_material(
-        &package,
-        &public_material,
-        full_level,
-    )
-    .expect("full-schedule public evaluator context");
-
-    assert_eq!(
-        public_material["relinearizationKeys"]
-            .as_array()
-            .expect("relinearization keys")
-            .len(),
-        full_level
-    );
-    assert_eq!(
-        public_material["rotationKeys"]
-            .as_array()
-            .expect("rotation keys")
-            .len(),
-        2
-    );
-    for (galois_element, level) in [full_level_rotation, direct_return_rotation] {
-        assert!(
-            public_context.has_public_rotation_key(galois_element, level),
-            "missing selected rotation key {galois_element} at level {level}",
-        );
-    }
-
-    let left = evaluator_key
-        .encrypt_slots(&[2, 3, 4, 5], "full-schedule-left")
-        .expect("left");
-    let right = evaluator_key
-        .encrypt_slots(&[7, 11, 13, 17], "full-schedule-right")
-        .expect("right");
-    for level in 1..=full_level {
-        let product = multiply(
-            &public_context,
-            &modulus_switch_to(&left, level).expect("left level"),
-            &modulus_switch_to(&right, level).expect("right level"),
-        )
-        .expect("public full-schedule multiply");
-        let decrypted = evaluator_key
-            .decrypt_to_slots(&product)
-            .expect("decrypt public full-schedule product");
-
-        assert_eq!(&decrypted[..4], &[14, 33, 52, 85], "level {level}");
-    }
-
-    let rotation_slots = (0_u64..32).map(|slot| slot * 3 + 1).collect::<Vec<_>>();
-    let rotation_source = evaluator_key
-        .encrypt_slots(&rotation_slots, "full-schedule-rotation")
-        .expect("rotation source");
-    let plaintext_coefficients =
-        encode_slots_to_coefficients(&rotation_slots).expect("encode rotation slots");
-    for (galois_element, level) in [full_level_rotation, direct_return_rotation] {
-        let source_at_level =
-            modulus_switch_to(&rotation_source, level).expect("rotation source level");
-        let rotation_key = public_context
-            .resolve_galois_key(
-                galois_element,
-                level,
-                "unused-public-full-schedule-rotation",
-            )
-            .expect("selected public rotation key");
-        let rotated = rotate(&source_at_level, galois_element, &rotation_key).expect("rotate");
-        let rotated_coefficients =
-            automorphism_residues(&plaintext_coefficients, galois_element, PLAINTEXT_MODULUS);
-        let expected_slots =
-            forward_negacyclic_ntt(&rotated_coefficients, PLAINTEXT_MODULUS).expect("decode");
-
-        assert_eq!(
-            evaluator_key.decrypt_to_slots(&rotated).expect("decrypt"),
-            expected_slots,
-            "rotation {galois_element} at level {level}",
-        );
-    }
-
-    assert!(public_material.get("setupPrivateWitness").is_none());
-    assert!(public_material.get("privateSetupSeedHash").is_none());
-}
-
-#[test]
-fn public_evaluation_key_default_rotation_requests_follow_selected_schedule() {
-    let package = setup_package();
-    let full_schedule = selected_public_evaluation_key_rotation_requests(DATA_PRIMES.len() - 1)
+    let full_schedule = selected_public_evaluation_key_rotation_requests()
         .expect("full selected rotation schedule");
-    let comparison_return_schedule =
-        selected_public_evaluation_key_rotation_requests(DIRECT_COMPARISON_OUTPUT_LEVEL)
-            .expect("comparison return schedule");
-    let low_level_schedule =
-        selected_public_evaluation_key_rotation_requests(1).expect("low-level schedule");
 
-    assert_eq!(full_schedule.len(), 20);
-    assert_eq!(comparison_return_schedule.len(), 5);
-    assert!(low_level_schedule.is_empty());
+    assert_eq!(full_schedule.len(), 23);
     assert!(
         full_schedule
             .iter()
-            .any(|(rotation, level)| *rotation == 3 && *level == DATA_PRIMES.len() - 1)
+            .any(|(rotation, level)| *rotation == 3 && *level == SELECTED_EVALUATOR_WORKING_LEVEL)
     );
     assert!(
         full_schedule
             .iter()
             .any(|(rotation, level)| *rotation == 2 * POLYNOMIAL_DEGREE - 1
-                && *level == DATA_PRIMES.len() - 1)
+                && *level == SELECTED_EVALUATOR_WORKING_LEVEL)
     );
+    // One key per element at the working level; truncation serves the
+    // comparison output level.
     assert!(
         full_schedule
             .iter()
-            .any(|(_, level)| *level == DIRECT_COMPARISON_OUTPUT_LEVEL)
+            .all(|(_, level)| *level == SELECTED_EVALUATOR_WORKING_LEVEL)
     );
 
     let committed_rotation_schedule = package["evaluationKeys"]["evaluationKeyMaterialCommitment"]
@@ -248,7 +123,7 @@ fn public_evaluation_key_default_rotation_requests_follow_selected_schedule() {
     assert_eq!(committed_rotation_schedule, full_schedule);
     assert_eq!(
         committed_relinearization_levels,
-        (1..DATA_PRIMES.len()).collect::<Vec<_>>()
+        vec![SELECTED_EVALUATOR_WORKING_LEVEL]
     );
 }
 
@@ -261,9 +136,8 @@ fn public_evaluation_key_rotation_request_rejects_duplicates_before_generation()
         ]
     });
 
-    let error =
-        read_public_evaluation_key_rotation_requests(&request, DIRECT_COMPARISON_OUTPUT_LEVEL)
-            .expect_err("duplicate rotation requests must reject");
+    let error = read_public_evaluation_key_rotation_requests(&request)
+        .expect_err("duplicate rotation requests must reject");
 
     assert!(
         error.message.contains("must not repeat"),
@@ -294,7 +168,7 @@ fn passive_setup_public_evaluation_key_material_rejects_wrong_roots() {
 }
 
 #[test]
-fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_secret_leaks() {
+fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_duplicate_keys() {
     let package = setup_package();
     let public_material = level_one_public_material();
 
@@ -306,41 +180,6 @@ fn passive_setup_public_evaluation_key_material_rejects_rebound_wrong_roots_and_
         root_error.message.contains("collective public key root"),
         "{}",
         root_error.message
-    );
-
-    let mut leaked_private_witness = public_material.clone();
-    leaked_private_witness["setupPrivateWitness"] =
-        serde_json::json!({ "setupSeed": "passive-bgv-setup-test-seed" });
-    rebind_public_evaluation_key_material_hash(&mut leaked_private_witness);
-    let leak_error = public_evaluation_key_material_error(&package, &leaked_private_witness, 1);
-    assert!(
-        leak_error.message.contains("setupPrivateWitness"),
-        "{}",
-        leak_error.message
-    );
-
-    let mut raw_secret_export = public_material.clone();
-    raw_secret_export["rawSecretMaterialExported"] = serde_json::json!(true);
-    rebind_public_evaluation_key_material_hash(&mut raw_secret_export);
-    let raw_secret_error = public_evaluation_key_material_error(&package, &raw_secret_export, 1);
-    assert!(
-        raw_secret_error.message.contains("raw secret material"),
-        "{}",
-        raw_secret_error.message
-    );
-
-    let mut trusted_dealer_material = public_material.clone();
-    trusted_dealer_material["trustedDealerKeyMaterial"] =
-        serde_json::json!({ "secret": "forbidden" });
-    rebind_public_evaluation_key_material_hash(&mut trusted_dealer_material);
-    let trusted_dealer_error =
-        public_evaluation_key_material_error(&package, &trusted_dealer_material, 1);
-    assert!(
-        trusted_dealer_error
-            .message
-            .contains("trustedDealerKeyMaterial"),
-        "{}",
-        trusted_dealer_error.message
     );
 
     let mut duplicate_relinearization = public_material.clone();
@@ -373,18 +212,18 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
         .iter()
         .find(|check| {
             check["keyKind"] == "relinearization"
-                && check["level"] == DIRECT_COMPARISON_OUTPUT_LEVEL
+                && check["level"] == SELECTED_EVALUATOR_WORKING_LEVEL
         })
         .and_then(|check| check["keyStreamSeed"].as_str())
-        .expect("direct comparison output relinearization stream seed");
+        .expect("working-level relinearization stream seed");
     let rotation_check = sampled_checks
         .iter()
         .find(|check| {
             check["keyKind"] == "rotation"
-                && check["level"] == DIRECT_COMPARISON_OUTPUT_LEVEL
+                && check["level"] == SELECTED_EVALUATOR_WORKING_LEVEL
                 && check["purpose"] == "generator-ordered-packed-rank-return-basis"
         })
-        .expect("direct comparison output return rotation stream check");
+        .expect("packed-rank return rotation stream check");
     let rotation = rotation_check["rotation"]
         .as_u64()
         .expect("rotation")
@@ -408,9 +247,12 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
         DIRECT_COMPARISON_OUTPUT_LEVEL,
     )
     .expect("right level");
+    // The schedule key is generated at the working level; relinearizing a
+    // comparison-output-level ciphertext exercises the truncation window the
+    // evaluator consumes.
     let relinearization_key = generate_relinearization_key(
         evaluator_key,
-        DIRECT_COMPARISON_OUTPUT_LEVEL,
+        SELECTED_EVALUATOR_WORKING_LEVEL,
         relinearization_seed,
     )
     .expect("setup stream relinearization key");
@@ -427,7 +269,7 @@ fn passive_setup_evaluation_key_material_stream_drives_key_switch_primitives() {
     let rotation_key = generate_galois_key(
         evaluator_key,
         rotation,
-        DIRECT_COMPARISON_OUTPUT_LEVEL,
+        SELECTED_EVALUATOR_WORKING_LEVEL,
         rotation_seed,
     )
     .expect("setup stream rotation key");

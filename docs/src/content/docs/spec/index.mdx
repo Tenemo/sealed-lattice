@@ -9,10 +9,10 @@ This page collects the stable rules of the current `sealed-lattice` release boun
 ## Public package surface
 
 - The only committed public package name is `sealed-lattice`.
-- The current public runtime facade is a development verification surface while the final direct encrypted ballot API is being built.
+- The current public runtime facade is a development verification surface while the final active-static direct encrypted ballot API is being built.
 - No public subpaths are promised yet.
-- The selected protocol direction is direct BGV-encrypted ballots, public ciphertext aggregation, deterministic mobile evaluator replay, target finality, and target-bound threshold decryption.
-- Complete ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release APIs are not published yet.
+- The selected protocol direction is a mobile-first direct encrypted ballot workflow where every participant is also a trustee.
+- A complete setup ceremony, ballot generation, casting, aggregation, evaluator replay, target-bound decryption, and result release API is not published yet.
 
 ## Private workspace surface
 
@@ -31,6 +31,6 @@ This page collects the stable rules of the current `sealed-lattice` release boun
 
 - Node tests, browser tests, public package behavior checks, vector manifest verification, docs verification, pack smoke checks, and release-smoke checks must continue to pass.
 - The Rust transcript-core must keep building for native tests and `wasm32-unknown-unknown`.
-- The internal WASM loader must keep loading the transcript-core artifact in both Node and browser tests.
-- Direct ballot proof, encrypted aggregation, evaluator replay, target finality, and target-bound decryption checks must stay direct-path-only as those surfaces are implemented.
+- The packaged verification path must keep working in both Node and browser tests.
+- Active setup, direct ballot proof, encrypted aggregation, evaluator replay, target finality, and target-bound decryption checks must stay on the selected direct path as those surfaces are implemented.
 - Default, release, docs, package-smoke, browser, and mobile gates should verify only the selected direct path and shared substrate.
