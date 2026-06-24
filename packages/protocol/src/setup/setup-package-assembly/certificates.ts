@@ -23,7 +23,6 @@ import {
     hashField,
     optionalNestedHashValue,
     optionalTopLevelHashValue,
-    setupProfileId,
 } from './constants-and-assertions.js';
 import { setupCertificateTransportedObjectsFromPackageInput } from './transported-material.js';
 import type {
@@ -269,7 +268,6 @@ const setupKeyCorrectnessCertificateBody = (
     return {
         objectType: 'SetupKeyCorrectnessCertificate',
         objectVersion: 1,
-        setupProfileId,
         ...contextFieldsForCertificate(input.setupContext),
         setupProofProfileBinding:
             'fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate',
@@ -377,7 +375,6 @@ const activeStaticSetupTheoremCertificateBody = (
     return {
         objectType: 'ActiveStaticSetupTheoremCertificate',
         objectVersion: 1,
-        setupProfileId,
         ...contextFieldsForCertificate(
             setupContext as unknown as CollectiveBgvSetupContext,
         ),

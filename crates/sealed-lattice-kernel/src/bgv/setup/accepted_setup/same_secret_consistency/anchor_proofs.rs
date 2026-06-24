@@ -56,9 +56,6 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
     }
     let anchor_accounting_hash = succinct_same_secret_linkage_anchor_accounting_hash()?;
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
         ("proofAccountingHash", anchor_accounting_hash.as_str()),
     ] {
@@ -271,12 +268,7 @@ fn verify_same_secret_anchor_proof_record(
         ));
     }
     verify_same_secret_context(proof_record, context.setup_context)?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

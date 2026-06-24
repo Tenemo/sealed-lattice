@@ -22,7 +22,6 @@ use super::{
         PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
         verify_private_vss_share_succinct_relation_proof,
     },
-    setup_proof::SETUP_PROOF_PROFILE_ID,
     sharing::canonical_trustee_point,
     vss::carry_aware_vss_share_relation_profile_hash,
 };

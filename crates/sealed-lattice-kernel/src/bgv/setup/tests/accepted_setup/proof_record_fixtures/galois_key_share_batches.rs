@@ -69,8 +69,6 @@ fn galois_key_share_batches_object_inner(
                     let mut material_record = serde_json::json!({
                         "objectType": "GaloisKeyShareMaterial",
                         "objectVersion": 1,
-                        "setupProfileId": "CollectiveBgvSetup-v1",
-                        "setupProofProfileId": "SealedLattice-SetupProof-v1",
                         "proofFamily": "galois-key-share",
                         "trusteeIdentity": trustee_identity,
                         "trusteeRosterPosition": trustee_roster_position,
@@ -113,8 +111,6 @@ fn galois_key_share_batches_object_inner(
             let mut batch = serde_json::json!({
                 "objectType": "GaloisKeyShareBatch",
                 "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-SetupProof-v1",
                 "proofFamily": "galois-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],

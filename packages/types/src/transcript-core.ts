@@ -41,11 +41,6 @@ export type GoldenTranscriptCoreFixture = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseProfileId: string;
-    readonly securityProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluatorReplayProfileId: string;
-    readonly decryptionProofProfileId: string;
     readonly expectedObjectHash512: string;
     readonly expectedChunkRoot: string;
     readonly chunkSize: number;
@@ -70,11 +65,6 @@ export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseProfileId: string;
-    readonly securityProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluatorReplayProfileId: string;
-    readonly decryptionProofProfileId: string;
     readonly objectHash512: string;
     readonly chunkRoot: string;
     readonly chunkSize: number;

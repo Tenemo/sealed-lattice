@@ -133,8 +133,8 @@ describe('direct encrypted ballot kernel command', () => {
         );
 
         expect(setupPackage).toMatchObject({
-            setupProfileId:
-                'sealed-lattice-bgv-rns-passive-full-roster-setup-v1',
+            objectType: 'BgvPassiveSetupPackage',
+            setupMode: 'passive-full-roster-development',
         } satisfies Partial<BgvPassiveSetupPackage>);
     });
 

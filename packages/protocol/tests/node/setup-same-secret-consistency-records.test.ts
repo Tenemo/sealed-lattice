@@ -10,8 +10,6 @@ import {
     sameSecretProofFamily,
     sameSecretRelation,
     sameSecretTargetDecryptionBindingPolicy,
-    setupCommitmentProfileId,
-    setupProofProfileId,
     type SameSecretConsistencyStatementRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
@@ -179,8 +177,6 @@ describe('same-secret consistency statement builders', () => {
             {
                 objectType: 'SameSecretProofFamilyBinding',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
                 sameSecretRelation,
                 anchorArgument: sameSecretAnchorArgument,
@@ -196,15 +192,12 @@ describe('same-secret consistency statement builders', () => {
             {
                 objectType: 'TrusteeSecretCommitment',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                commitmentProfileId: setupCommitmentProfileId,
-                setupProofProfileId,
                 ...setupContext,
-                trusteeIdentity: firstSourceTrusteeRecord.sourceTrusteeIdentity,
+                trusteeIdentity: firstStatementRecord.trusteeIdentity,
                 trusteeRosterPosition:
-                    firstSourceTrusteeRecord.sourceTrusteeRosterPosition,
+                    firstStatementRecord.trusteeRosterPosition,
                 vssSourceTrusteeCommitmentRoot:
-                    firstSourceTrusteeRecord.sourceTrusteeCommitmentRoot,
+                    firstStatementRecord.vssSourceTrusteeCommitmentRoot,
                 constantCoefficientCommitmentRoots:
                     firstStatementRecord.constantCoefficientCommitmentRoots,
             },

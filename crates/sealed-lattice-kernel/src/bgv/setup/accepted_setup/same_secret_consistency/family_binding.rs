@@ -38,8 +38,6 @@ fn same_secret_proof_family_binding_value() -> Value {
     json!({
         "objectType": SAME_SECRET_PROOF_FAMILY_BINDING_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "proofFamily": "same-secret-linkage-anchor",
         "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",

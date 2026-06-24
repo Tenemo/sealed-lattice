@@ -94,10 +94,8 @@ export type {
     CloseRecordVerificationInput,
     ConflictingHeadEvidence,
     ConflictingManifestEvidence,
-    DuplicateBallotPolicy,
     ElectionManifest,
     DecryptionShareFilteringMode,
-    DecryptionShareSelectionRule,
     FoundationTranscriptComponentResults,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
@@ -141,7 +139,6 @@ export type {
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
     RosterProfileKind,
-    RosterPolicy,
     ScoreDomain,
     SignatureVerificationResult,
     SignedBoardHead,
@@ -156,10 +153,8 @@ export type {
     TargetFinalityVerificationInput,
     TargetProposal,
     ThresholdProfile,
-    ThresholdProfileFamily,
     ThresholdProfileInput,
     ThresholdWarning,
-    TiePolicy,
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
@@ -293,9 +288,6 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
-    }>;
-    readonly futureTargetDecryptionHandoff: Readonly<{
-        readonly targetDecryptionProfileId: string;
     }>;
     readonly certificateRoots: Readonly<{
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;

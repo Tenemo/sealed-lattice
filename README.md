@@ -149,15 +149,10 @@ pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 
-The native Rust heavy lane now has constrained free-runner-knob evidence. On
-June 21, 2026, `pnpm run test:rust:kernel:heavy -- --no-run-log` completed with
-`57 passed; 0 failed` under `CARGO_INCREMENTAL=0`, `RAYON_NUM_THREADS=4`,
-`SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT=1`,
-`SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE=1`,
-`SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE=2`, and no checkpoint resume. The
-run finished in `17978.14s` and the measured process-tree peak RSS was
-`9.97 GiB`. This is native CI-runner setup/proof/key-transport evidence only; it
-is not browser, WASM, or supported-phone mobile runtime evidence.
+Heavy proof lanes are development verification for setup/proof changes. They do
+not replace supported-phone runtime evidence or production security review; see
+[SECURITY.md](SECURITY.md) for the public boundary. Detailed maintainer evidence
+is kept separately from the public security posture.
 
 Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
 

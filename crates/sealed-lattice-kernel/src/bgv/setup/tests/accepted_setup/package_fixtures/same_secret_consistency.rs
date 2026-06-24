@@ -21,8 +21,6 @@ pub(super) fn same_secret_consistency_object(
         &serde_json::json!({
             "objectType": "SameSecretProofFamilyBinding",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
             "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
@@ -70,9 +68,6 @@ pub(super) fn same_secret_consistency_object(
         let trustee_secret_commitment_payload = serde_json::json!({
             "objectType": "TrusteeSecretCommitment",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -94,9 +89,6 @@ pub(super) fn same_secret_consistency_object(
         let mut statement_record = serde_json::json!({
             "objectType": "SameSecretConsistencyStatement",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
@@ -136,9 +128,6 @@ pub(super) fn same_secret_consistency_object(
     let mut same_secret_consistency = serde_json::json!({
         "objectType": "SameSecretConsistencyStatementSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,

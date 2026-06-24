@@ -1265,9 +1265,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 &serde_json::json!({
                     "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
-                    "proofProfileId": proof_record["proofProfileId"],
                     "proofFamily": "vss-opening-carry",
                     "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
                     "statementHash": proof_record["statementHash"],
@@ -1303,8 +1300,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
             serde_json::json!({
                 "objectType": "SetupTransportedPrivateVssShareProofMaterial",
                 "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-SetupProof-v1",
                 "proofFamily": "vss-opening-carry",
                 "proofMaterialRoot": proof_material_root,
                 "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1328,8 +1323,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
     serde_json::json!({
         "objectType": "SetupTransportedPrivateVssShareProofMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "vss-opening-carry",
         "proofMaterials": proof_materials,
     })

@@ -52,11 +52,10 @@ const assertPollSpecShape = (pollSpec: PollSpec): void => {
     if (
         pollSpec.scoreDomain.min !== 1 ||
         pollSpec.scoreDomain.max !== 10 ||
-        pollSpec.scoreDomain.skippedOptionScore !== 1 ||
-        pollSpec.tiePolicy !== 'HigherScoreThenLowerOptionIndex'
+        pollSpec.scoreDomain.skippedOptionScore !== 1
     ) {
         throw new RangeError(
-            'Plaintext oracle requires the frozen 1..10 score domain and higher-score tie policy.',
+            'Plaintext oracle requires the frozen 1..10 score domain.',
         );
     }
     if (

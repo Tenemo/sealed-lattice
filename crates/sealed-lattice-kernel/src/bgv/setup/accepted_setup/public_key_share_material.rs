@@ -103,8 +103,6 @@ pub(super) fn verify_collective_public_key_material(
         )?));
     }
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
         (
             "materialEncoding",
@@ -1033,14 +1031,6 @@ fn verify_public_key_share_material_set_transport_reference(
             "publicKeyShareMaterial.transport must be an object",
         ));
     }
-    if transport.get("transportProfileId").and_then(Value::as_str)
-        != Some(SETUP_TRANSPORT_PROFILE_ID)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial.transport.transportProfileId must match the setup transport profile",
-        ));
-    }
     verify_public_key_share_material_transport_hash_fields(
         transport,
         transport_hashes,
@@ -1190,8 +1180,6 @@ fn decode_public_key_share_material_bindings(
         let material_record = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "public-key-share",
             "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,
@@ -1275,11 +1263,7 @@ pub(super) fn verify_public_key_share_material_set(
         ));
     }
     verify_same_secret_context(material_set, setup_context)?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "public-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -1418,8 +1402,6 @@ fn verify_public_key_share_material_record(
     }
     verify_same_secret_context(material_record, setup_context)?;
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
         (
             "materialEncoding",

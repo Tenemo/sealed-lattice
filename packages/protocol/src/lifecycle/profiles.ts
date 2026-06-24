@@ -1,11 +1,7 @@
 import type {
-    DuplicateBallotPolicy,
     HeBackendCorruptionModel,
-    RosterPolicy,
     ScoreDomain,
     SmallRosterPolicy,
-    ThresholdProfileFamily,
-    TiePolicy,
 } from '@sealed-lattice/types';
 export {
     targetDecryptionProfileId,
@@ -21,18 +17,6 @@ export const defaultScoreDomain = {
     max: 10,
     skippedOptionScore: 1,
 } as const satisfies ScoreDomain;
-
-export const defaultDuplicateBallotPolicy =
-    'FirstValidBeforeVotingClosedCounts' as const satisfies DuplicateBallotPolicy;
-
-export const defaultTiePolicy =
-    'HigherScoreThenLowerOptionIndex' as const satisfies TiePolicy;
-
-export const defaultRosterPolicy =
-    'OpenLinkPublicRoster' as const satisfies RosterPolicy;
-
-export const defaultThresholdProfileFamily =
-    'BalancedDefault' as const satisfies ThresholdProfileFamily;
 
 export const defaultSmallRosterPolicy =
     'ForbidMicroRoster' as const satisfies SmallRosterPolicy;

@@ -167,7 +167,6 @@ pub(super) fn vss_coefficient_commitments_object(
         "setupProfileHash": setup_profile_hash,
         "qShareHash": q_share_hash,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "commitmentProfileHash": commitment_profile_hash,
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,

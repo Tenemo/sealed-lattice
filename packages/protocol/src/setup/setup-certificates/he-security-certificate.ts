@@ -1,6 +1,6 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
-import { setupProfileId, targetDecryptionProfileId } from './constants.js';
+import { dataBasisId } from './constants.js';
 import {
     acceptedCertificateTemplate,
     keySwitchComponentPolynomialCount,
@@ -322,9 +322,6 @@ const bgvHeSecurityCertificateBody = (
     return {
         objectType: 'BgvHeSecurityCertificate',
         objectVersion: 1,
-        setupProfileId,
-        profileId: bgvProfile.profile.profileId,
-        backendProfileId: bgvProfile.profile.backendProfileId,
         setupProfileHash: setupProfile.setupProfileHash,
         qShareHash: setupProfile.qShareHash,
         setupProofProfileHash: setupProfile.setupProofProfileHash,
@@ -333,7 +330,7 @@ const bgvHeSecurityCertificateBody = (
         assessedRing: {
             polynomialDegree: bgvProfile.profile.polynomialDegree,
             plaintextModulus: bgvProfile.profile.plaintextModulus,
-            dataBasisId: bgvProfile.profile.dataBasisId,
+            dataBasisId,
             dataPrimeCount: dataPrimes.length,
             dataPrimeProductDecimal,
             dataPrimeCeilLog2Product: largestExposedModulusBits,
@@ -407,9 +404,6 @@ const bgvHeSecurityCertificateBody = (
             largestExposedModulusBits,
             extendedUtilityCeilLog2Product,
         ),
-        targetDecryptionStatus: {
-            targetDecryptionProfileId,
-        },
     };
 };
 

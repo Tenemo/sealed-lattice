@@ -149,7 +149,6 @@ pub(super) fn common_randomness_object(
     let public_matrix_seed_hash = derive_protocol_hash(
         "SetupPublicMatrixSeedHash",
         &serde_json::json!({
-            "setupProfileId": "CollectiveBgvSetup-v1",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,

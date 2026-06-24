@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     foundationTranscriptCoreFixture,
-    invalidEnumFixture,
     textDecoder,
     textEncoder,
     wasmHeader,
@@ -205,9 +204,9 @@ describe('transcript-core kernel in Node', () => {
             chunkSize: foundationTranscriptCoreFixture.chunkSize,
         });
 
-        expect(foundationAnalysis.evaluatorReplayProfileId).toBe(
-            'transcript-core-no-evaluator-replay-proof-v1',
-        );
+        expect(foundationAnalysis.tags).toContain('direct-route');
+        expect(foundationAnalysis.title).toBe('Foundation transcript roots');
+        expect(foundationAnalysis.sequence).toBe(10);
     });
 
     it('derives protocol Hashes and field results through WASM', async () => {
@@ -512,37 +511,32 @@ describe('transcript-core kernel in Node', () => {
                 foundationTranscriptCoreFixture.expectedObjectHash512,
             chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
         });
-        expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
-            caseName: 'invalid-enum',
-            expectedErrorCode: 'InvalidEnum',
-        });
     });
 
     it('maps canonical rejection errors from command responses', async () => {
         const kernel = await loadTranscriptCoreKernel();
+        const malformedMagicHex = '42414421';
 
         expect(() =>
             kernel.analyzeCanonicalObject({
-                canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
+                canonicalBytesHex: malformedMagicHex,
                 chunkSize: 8,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
 
-        let invalidEnumError: unknown;
+        let canonicalError: unknown;
         try {
             kernel.analyzeCanonicalObject({
-                canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
+                canonicalBytesHex: malformedMagicHex,
                 chunkSize: 8,
             });
         } catch (error) {
-            invalidEnumError = error;
+            canonicalError = error;
         }
-        expect(invalidEnumError).toBeInstanceOf(
-            TranscriptCoreKernelCommandError,
+        expect(canonicalError).toBeInstanceOf(TranscriptCoreKernelCommandError);
+        expect((canonicalError as TranscriptCoreKernelCommandError).code).toBe(
+            'MalformedMagic',
         );
-        expect(
-            (invalidEnumError as TranscriptCoreKernelCommandError).code,
-        ).toBe('InvalidEnum');
     });
 
     it('keeps byte round-trip as an allocation smoke path', async () => {

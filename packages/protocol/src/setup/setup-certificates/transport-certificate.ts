@@ -2,13 +2,11 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    setupProfileId,
     setupTransportChunkSizeBytes,
     setupTransportCopyCountLimit,
     setupTransportedObjectLoadingPolicy,
     setupTransportLargestSingleBufferBytes,
     setupTransportLazyLoadingPolicy,
-    setupTransportProfileId,
     setupTransportResumePolicy,
     setupTransportStorageQuotaBytes,
     setupTransportStreamOrder,
@@ -35,8 +33,6 @@ function setupTransportChunkManifestRoot(
     return deriveProtocolHash('SetupTransportChunkManifestRoot', {
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
-        setupProfileId,
-        transportProfileId: setupTransportProfileId,
         chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
@@ -156,8 +152,6 @@ const setupTransportCertificateBody = (
         {
             objectType: 'SetupTransportFullObjectSet',
             objectVersion: 1,
-            setupProfileId,
-            transportProfileId: setupTransportProfileId,
             transportedObjects: transportedObjects.map((transportedObject) => ({
                 objectName: transportedObject.objectName,
                 objectRole: transportedObject.objectRole,
@@ -183,8 +177,6 @@ const setupTransportCertificateBody = (
     return {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
-        setupProfileId,
-        transportProfileId: setupTransportProfileId,
         setupTransportProfileHash: setupProfile.setupTransportProfileHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',

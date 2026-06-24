@@ -82,13 +82,11 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPublicDerivations';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly bgvPublicA: Readonly<
             JsonRecord & {
                 readonly objectType: 'BgvPublicAPolynomial';
                 readonly objectVersion: 1;
-                readonly setupProfileId: 'CollectiveBgvSetup-v1';
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicPolynomialRoot: ProtocolHash;
             }
@@ -97,7 +95,6 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicMatrixMaterial';
                 readonly objectVersion: 1;
-                readonly setupProfileId: 'CollectiveBgvSetup-v1';
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicMatricesRoot: ProtocolHash;
             }
@@ -398,11 +395,6 @@ const assertPublicDerivationsMatchKernelShape = (
     if (publicDerivations.objectVersion !== 1) {
         throw new Error('publicDerivations.objectVersion must be 1.');
     }
-    if (publicDerivations.setupProfileId !== 'CollectiveBgvSetup-v1') {
-        throw new Error(
-            'publicDerivations.setupProfileId must be CollectiveBgvSetup-v1.',
-        );
-    }
     if (publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash) {
         throw new Error(
             'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
@@ -416,7 +408,6 @@ const assertPublicDerivationsMatchKernelShape = (
     if (
         bgvPublicA.objectType !== 'BgvPublicAPolynomial' ||
         bgvPublicA.objectVersion !== 1 ||
-        bgvPublicA.setupProfileId !== 'CollectiveBgvSetup-v1' ||
         bgvPublicA.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -435,7 +426,6 @@ const assertPublicDerivationsMatchKernelShape = (
     if (
         publicMatrices.objectType !== 'SetupPublicMatrixMaterial' ||
         publicMatrices.objectVersion !== 1 ||
-        publicMatrices.setupProfileId !== 'CollectiveBgvSetup-v1' ||
         publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
@@ -702,7 +692,6 @@ export const createSetupCommonRandomness = (
     const publicMatrixSeedHash = deriveProtocolHash(
         'SetupPublicMatrixSeedHash',
         {
-            setupProfileId: 'CollectiveBgvSetup-v1',
             ceremonyId: input.setupContext.ceremonyId,
             manifestHash: input.setupContext.manifestHash,
             rosterHash: input.setupContext.rosterHash,

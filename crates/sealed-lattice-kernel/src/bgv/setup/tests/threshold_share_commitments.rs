@@ -699,8 +699,6 @@ fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> S
     let mut commitment_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "publicMatrixSeedHash": request["publicMatrixSeedHash"],
         "participantCount": 10,
         "thresholdDegree": 4,

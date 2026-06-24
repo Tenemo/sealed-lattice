@@ -85,7 +85,6 @@ pub(super) fn validate_collective_public_key(
             "collectivePublicKeyCoefficientRoot": expected_coefficient_root,
             "profileHash": profile_hash,
             "backendProfileHash": backend_profile_hash,
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         }),
     )?;
     compare_hash_at_path(
@@ -117,12 +116,6 @@ fn validate_collective_public_key_coefficient_material(
             "collective public key coefficient material shape does not match the selected setup profile",
         ));
     }
-    compare_string_at_path(
-        coefficient_material,
-        &["basisId"],
-        BgvBasisKind::Data.basis_id(),
-        "collective public key coefficient basis",
-    )?;
     compare_string_at_path(
         coefficient_material,
         &["fullCoefficientExpansionOwner"],

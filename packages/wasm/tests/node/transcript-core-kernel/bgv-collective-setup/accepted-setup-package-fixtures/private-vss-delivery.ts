@@ -139,8 +139,6 @@ function packageShapePrivateVssEnvelopeAad(input: {
     return {
         objectType: 'PrivateVssEnvelopeAad',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
         privateEnvelopeObjectType: 'PrivateVssShareEnvelope',
         ciphertextContentType: 'private-vss-share-envelope',
         ceremonyId: input.setupContext.ceremonyId,

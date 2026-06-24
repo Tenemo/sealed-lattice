@@ -181,7 +181,6 @@ export function acceptedCommonRandomness(
     const publicMatrixSeedHash = kernel.deriveProtocolHash({
         namespace: 'SetupPublicMatrixSeedHash',
         value: {
-            setupProfileId: 'CollectiveBgvSetup-v1',
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,

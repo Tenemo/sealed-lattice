@@ -36,7 +36,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
     let target_decryption_profile_binding_hash = derive_protocol_hash(
         "TargetDecryptionProfileBindingHash",
         &json!({
-            "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
         }),
     )?;
@@ -141,16 +140,12 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
     let mut package = json!({
         "objectType": "BgvPassiveSetupPackage",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "setupMode": "passive-full-roster-development",
         "setupInputs": setup_inputs,
         "profileBindings": {
-            "profileId": PROFILE_ID,
-            "backendProfileId": BACKEND_PROFILE_ID,
             "profileHash": profile_hash,
             "backendProfileHash": backend_profile_hash,
             "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
-            "batchEncoderId": BATCH_ENCODER_ID,
             "batchEncoderHash": batch_encoder_hash()?,
             "batchLayoutBindingHash": batch_layout_binding_hash()?,
             "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
@@ -176,7 +171,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
         "targetDecryptionStatus": {
-            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
             "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         },

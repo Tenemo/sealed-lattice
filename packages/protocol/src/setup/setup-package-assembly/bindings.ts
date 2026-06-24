@@ -17,7 +17,6 @@ import {
     assertObjectType,
     hashField,
     requiredSetupPhases,
-    setupProfileId,
 } from './constants-and-assertions.js';
 import type {
     SetupPackageCertificateRecords,
@@ -268,7 +267,6 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
     if (
         publicDerivations.objectType !== 'SetupPublicDerivations' ||
         publicDerivations.objectVersion !== 1 ||
-        publicDerivations.setupProfileId !== setupProfileId ||
         publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(

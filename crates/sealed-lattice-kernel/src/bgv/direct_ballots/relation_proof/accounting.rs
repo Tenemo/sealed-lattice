@@ -9,9 +9,9 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     )
 }
 
-// Binds the operative shape of the internal direct-ballot validity relation proof: profile
-// id, statement version, encoding, challenge size and domain, proof-bytes domain, relation
-// shape, ring degree, and data prime count.
+// Binds the operative shape of the internal direct-ballot validity relation proof: statement
+// version, encoding, challenge size and domain, proof-bytes domain, relation shape, ring
+// degree, and data prime count.
 //
 // Scope, kept in prose rather than a bound field: this is an internal relation-shape proof.
 // Its claim soundness and support zero-knowledge are not established. The weakest checked
@@ -23,7 +23,6 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_profile_hash(
     derive_protocol_hash(
         "BallotValidityProofProfileHash",
         &json!({
-            "profileId": "direct-encrypted-ballot-validity-relation-v1",
             "statementVersion": 3,
             "proofEncoding": "binary relation transcript",
             "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,

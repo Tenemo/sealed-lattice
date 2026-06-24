@@ -347,8 +347,6 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
         &json!({
             "objectType": "PrivateVssShareProofRandomnessBinding",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "vss-opening-carry",
             "setupContext": setup_context,
             "publicMatrixSeedHash": public_matrix_seed_hash,

@@ -1,7 +1,6 @@
 import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 
 import {
@@ -256,8 +255,6 @@ export const evaluationKeyShareComponentVectorRoot = (
     deriveProtocolHash('EvaluationKeyShareComponentVectorRoot', {
         objectType: 'EvaluationKeyShareComponentVectorSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
@@ -325,8 +322,6 @@ export const evaluationKeyShareComponentMaterialTransportHashes = (
         {
             objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily,
             keySwitchMaterialEncoding:
                 evaluationKeyShareComponentMaterialEncoding,
@@ -357,8 +352,6 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
     deriveProtocolHash('EvaluationKeyShareComponentMaterialRoot', {
         objectType: 'EvaluationKeyShareComponentMaterialReference',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         trusteeIdentity,

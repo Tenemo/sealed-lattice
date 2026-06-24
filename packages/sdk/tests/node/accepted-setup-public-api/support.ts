@@ -416,8 +416,6 @@ const relinearizationKeySwitchSeed = (
     protocolHashFromKernel(kernel, 'RelinearizationKeyShareSeed', {
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -435,8 +433,6 @@ const galoisKeySwitchSeed = (
     protocolHashFromKernel(kernel, 'GaloisKeyShareSeed', {
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,

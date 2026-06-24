@@ -40,12 +40,6 @@ pub(super) fn validate_participant_setup_records(
         }
         compare_string_at_path(
             participant_record,
-            &["setupProfileId"],
-            PASSIVE_SETUP_PROFILE_ID,
-            "participant setup profile id",
-        )?;
-        compare_string_at_path(
-            participant_record,
             &["ceremonyId"],
             ceremony_id,
             "participant ceremony id",
@@ -140,8 +134,6 @@ pub(super) fn validate_participant_setup_records(
         let trustee_threshold_verification_key = json!({
             "objectType": "TrusteeThresholdVerificationKey",
             "objectVersion": 1,
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
             "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
             "ceremonyId": ceremony_id,

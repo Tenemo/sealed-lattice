@@ -918,8 +918,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
             {
                 objectType: 'TrusteeEvaluationKeyProofMaterialReference',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: trusteeEvaluationKeyProofFamily,
                 trusteeIdentity: proofRecord.trusteeIdentity,
                 trusteeRosterPosition: proofRecord.trusteeRosterPosition,

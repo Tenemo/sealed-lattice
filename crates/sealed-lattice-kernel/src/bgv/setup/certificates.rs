@@ -54,9 +54,6 @@ pub(super) fn setup_certificates(
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "profileId": PROFILE_ID,
-        "backendProfileId": BACKEND_PROFILE_ID,
         "profileHash": profile_hash()?,
         "backendProfileHash": backend_profile_hash()?,
         "polynomialDegree": POLYNOMIAL_DEGREE,
@@ -70,7 +67,6 @@ pub(super) fn setup_certificates(
         ),
         "qpPublicBits": null,
         "qTargetBits": null,
-        "publicEvaluationKeyBasis": BgvBasisKind::Data.basis_id(),
         "collectiveSecretDistributionCertificateHash": collective_secret_distribution_certificate_hash,
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
@@ -133,9 +129,7 @@ pub(super) fn collective_secret_distribution_certificate(
     Ok(json!({
         "objectType": "CollectiveSecretDistributionCertificate",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "localShareSampler": {
-            "samplerId": "hash-derived-owner-routed-standard-ternary-collective-share-v1",
             "support": [-1, 0, 1],
             "probabilityNumeratorBySupport": [1, 1, 1],
             "probabilityDenominator": 3,
@@ -165,9 +159,7 @@ pub(super) fn error_distribution_certificate() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "ErrorDistributionCertificate",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "errorSampler": {
-            "samplerId": "centered-binomial-eta2-development-v1",
             "support": [-2, -1, 0, 1, 2],
             "weights": ["1", "4", "6", "4", "1"],
             "totalWeight": "16"
@@ -191,9 +183,7 @@ pub(super) fn error_distribution_certificate() -> CanonicalResult<Value> {
         },
         "crpPublicSampleDistribution": {
             "distributionKind": "hash-to-modulus-rejection-sampled-uniform-public-sample",
-            "samplerId": "hash-derived-rejection-sampled-public-residue-v2",
             "candidateBits": 64,
-            "basisId": BgvBasisKind::Data.basis_id()
         },
         "rejectionSamplingRules": [
             "small-distribution-candidates-outside-largest-multiple-of-support-width-are-rehashed",
@@ -206,21 +196,18 @@ pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "BgvKeySwitchDecompositionProfile",
         "objectVersion": 1,
-        "profileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
-        "basisId": BgvBasisKind::Data.basis_id(),
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
     }))
 }
 
-// Identity of the target-decryption profile: its profile id, the bound BGV profile
+// Identity of the target-decryption profile: the bound BGV profile
 // hash, the secret-share domain, and the async-Lagrange target direction. Implementation
 // and certification state (partial/final decryption maturity, C1-C4 certification, whether
 // Q_target is known) is not asserted as bound flags here; that scope lives in the README
 // safety boundaries and the target-decryption implementation notes.
 pub(super) fn target_decryption_profile(profile_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
-        "profileId": TARGET_DECRYPTION_PROFILE_ID,
         "bgvProfileHash": profile_hash,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "asyncLagrangeTargetDirection": true,
@@ -256,9 +243,6 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
     target_decryption_profile_binding_hash: &str,
 ) -> CanonicalResult<Value> {
     let setup_binding = json!({
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "bgvProfileId": PROFILE_ID,
-        "backendProfileId": BACKEND_PROFILE_ID,
         "bgvProfileHash": profile_hash()?,
         "rustBgvBackendProfileHash": backend_profile_hash()?,
         "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
@@ -283,7 +267,6 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
     let ciphertext_profile = json!({
         "plaintextModulus": PLAINTEXT_MODULUS,
         "polynomialDegree": POLYNOMIAL_DEGREE,
-        "basisId": BgvBasisKind::Data.basis_id(),
         "level": DATA_PRIMES.len() - 1,
         "dataPrimeCount": DATA_PRIMES.len(),
         "ciphertextComponentCount": 2,
@@ -293,7 +276,6 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "directComparisonProfileHash": direct_comparison_profile_hash()?,
     });
     let threshold_binding = json!({
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
         "targetDecryptionProfileHash": target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "thresholdShareVerificationKeyRoot": string_at_path(
@@ -330,7 +312,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let evaluator_binding_context = json!({
         "objectType": "PassiveSetupEvaluatorBindingContext",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
         "manifestHash": string_at_path(setup_inputs, &["manifestHash"])?,
         "rosterHash": string_at_path(setup_inputs, &["rosterHash"])?,
@@ -345,7 +326,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
         "inputLayoutHash": direct_comparison_profile_hash()?,
@@ -355,7 +335,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
         "comparisonInputDerivationCircuitHash": derive_protocol_hash(
@@ -368,7 +347,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     let sparse_target_projection_record = json!({
         "objectType": "EncryptedSparseTargetProjectionBinding",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "targetLayoutHash": target_layout_hash(MAXIMUM_OPTION_COUNT)?,
         "directComparisonProfileHash": direct_comparison_profile_hash()?,
@@ -387,7 +365,6 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         &sparse_target_projection_record,
     )?;
     let binding_record = json!({
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
         "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
@@ -421,11 +398,9 @@ pub(super) fn public_common_random_polynomial_root(
         &json!({
             "objectType": "BgvPublicCommonRandomPolynomial",
             "objectVersion": 1,
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
             "ceremonyId": input.ceremony_id,
             "rosterHash": input.roster_hash,
             "setupSeedHash": input.setup_seed_hash,
-            "basisId": BgvBasisKind::Data.basis_id(),
             "level": DATA_PRIMES.len() - 1,
             "coefficientCount": POLYNOMIAL_DEGREE,
             "sampledResidues": sample_public_residues(

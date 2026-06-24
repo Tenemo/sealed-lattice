@@ -121,7 +121,6 @@ export const targetBoundShareSelectionProfile = {
     minimumSharesForInterpolation: 7,
     minimumArrivalsForRobustDecode: 9,
     invalidShareFilteringMode: 'ProofVerifiedSharesOnly',
-    selectedShareRule: 'FirstValidSharesInCanonicalBoardOrder',
 } as const;
 export const witnessPublicKeyHashes = Object.fromEntries(
     witnessIdentities.map((witnessIdentity) => [

@@ -22,8 +22,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
         &json!({
             "objectType": "EvaluationKeyShareComponentVectorSet",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family.proof_family(),
             "keySwitchDomain": key_switch_domain,
             "keySwitchSeedHex": key_switch_seed_hex,
@@ -218,8 +216,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_transport_h
         &json!({
             "objectType": "EvaluationKeyShareComponentMaterialChunkManifest",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family.proof_family(),
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "chunkSizeBytes": chunk_size_bytes,
@@ -392,8 +388,6 @@ fn verified_evaluation_key_share_component_material_store_metadata(
     json!({
         "objectType": "VerifiedEvaluationKeyShareComponentMaterialStoreEntry",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         "keySwitchComponentMaterialRoot": material_root,
         "totalByteLength": transport_hashes.total_byte_length,
@@ -491,8 +485,6 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
         &json!({
             "objectType": "EvaluationKeyShareComponentMaterialReference",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family.proof_family(),
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "trusteeIdentity": string_field(proof_record, "trusteeIdentity")?,
@@ -726,12 +718,6 @@ fn component_b_vectors_from_transported_material(
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
         || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || material_set.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
     {
         return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material set header is invalid",
@@ -814,14 +800,6 @@ fn verify_evaluation_key_share_component_material_header(
             .get("objectVersion")
             .and_then(Value::as_u64)
             != Some(1)
-        || component_material
-            .get("setupProfileId")
-            .and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || component_material
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || component_material
             .get("proofFamily")
             .and_then(Value::as_str)

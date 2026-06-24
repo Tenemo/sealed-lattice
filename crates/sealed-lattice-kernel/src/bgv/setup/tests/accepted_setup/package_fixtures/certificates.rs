@@ -31,9 +31,7 @@ pub(super) fn setup_commitment_security_certificate_fixture(
     let certificate = serde_json::json!({
         "objectType": "SetupCommitmentSecurityCertificate",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProfileHash": profile["setupProfileHash"],
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "commitmentProfileHash": profile["commitmentProfileHash"],
         "qShareHash": profile["qShareHash"],
         "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
@@ -169,8 +167,6 @@ pub(in super::super) fn setup_transport_chunk_manifest_root_fixture(
         &serde_json::json!({
             "objectType": "SetupTransportChunkManifest",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
             "chunkSizeBytes": 1_048_576_u64,
             "chunkCount": chunk_count,
             "totalByteLength": total_byte_length,
@@ -232,8 +228,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         &serde_json::json!({
             "objectType": "SetupTransportChunkManifest",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
             "chunkSizeBytes": chunk_size_bytes,
             "chunkCount": chunk_count,
             "totalByteLength": total_byte_length,
@@ -264,8 +258,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         &serde_json::json!({
             "objectType": "SetupTransportFullObjectSet",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
             "transportedObjects": [{
                 "objectName": "vssCoefficientCommitmentMaterial",
                 "objectRole": "public-vss-coefficient-commitment-material",
@@ -287,8 +279,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         &serde_json::json!({
             "objectType": "SetupTransportChunkManifest",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
             "chunkSizeBytes": chunk_size_bytes,
             "chunkCount": chunk_count,
             "totalByteLength": total_byte_length,
@@ -300,8 +290,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
     let mut certificate = serde_json::json!({
         "objectType": "SetupTransportCertificate",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
         "setupTransportProfileHash": profile["setupTransportProfileHash"],
         "largeObjectEncoding": "binary",
         "chunking": "required",

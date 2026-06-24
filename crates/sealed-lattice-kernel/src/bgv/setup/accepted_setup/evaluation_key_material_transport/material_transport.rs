@@ -30,8 +30,6 @@ pub(in super::super) fn transported_evaluation_key_share_component_material_from
     Ok(Some(json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "componentMaterials": component_materials,
     })))
 }
@@ -92,14 +90,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
             .get("objectVersion")
             .and_then(Value::as_u64)
             != Some(1)
-        || transported_material_set
-            .get("setupProfileId")
-            .and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || transported_material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || transported_material_set
             .get("materialEncoding")
             .and_then(Value::as_str)
@@ -324,12 +314,6 @@ fn transported_evaluation_key_share_component_material_roots_from_request(
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
         || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || material_set.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -426,12 +410,6 @@ fn verify_public_evaluation_key_material_entry_header(
     if material_entry.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE)
         || material_entry.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || material_entry.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_entry
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || material_entry
             .get("materialEncoding")
             .and_then(Value::as_str)
@@ -574,8 +552,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
         &json!({
             "objectType": "PublicEvaluationKeyMaterialChunkManifest",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": chunk_hashes.len(),
@@ -704,8 +680,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
         &json!({
             "objectType": "PublicEvaluationKeyMaterialReference",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
             "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
             "manifestHash": value_string(evaluation_keys, "manifestHash")?,

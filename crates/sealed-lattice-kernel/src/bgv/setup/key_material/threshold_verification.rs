@@ -23,8 +23,6 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
     let verification_key_set = json!({
         "objectType": "ThresholdShareVerificationKeySet",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
         "targetDecryptionProfileHash": target_decryption_profile_hash,
         "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
         "ceremonyId": input.ceremony_id,

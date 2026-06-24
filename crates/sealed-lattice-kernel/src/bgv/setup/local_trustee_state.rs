@@ -183,13 +183,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
         ));
     }
     compare_context_fields(local_state, setup_context, "localStateCommitment")?;
-    if local_state.get("setupProfileId").and_then(Value::as_str)
-        != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-    {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.setupProfileId must be CollectiveBgvSetup-v1",
-        ));
-    }
     if local_state.get("exportPolicy").and_then(Value::as_str) != Some(LOCAL_STATE_EXPORT_POLICY) {
         return Err(invalid_local_state_input(
             "localStateCommitment.exportPolicy must forbid raw share and opening export",

@@ -11,137 +11,21 @@ pub(super) const TRANSCRIPT_CORE_OBJECT_VERSION: u64 = 1;
 pub(super) const FIELD_TITLE: u64 = 1;
 pub(super) const FIELD_SEQUENCE: u64 = 2;
 pub(super) const FIELD_PAYLOAD: u64 = 3;
-pub(super) const FIELD_STATUS: u64 = 4;
-pub(super) const FIELD_TAGS: u64 = 5;
-pub(super) const FIELD_CHECKPOINTS: u64 = 6;
-pub(super) const REQUIRED_FIELDS: [u64; 6] = [
+pub(super) const FIELD_TAGS: u64 = 4;
+pub(super) const FIELD_CHECKPOINTS: u64 = 5;
+pub(super) const REQUIRED_FIELDS: [u64; 5] = [
     FIELD_TITLE,
     FIELD_SEQUENCE,
     FIELD_PAYLOAD,
-    FIELD_STATUS,
     FIELD_TAGS,
     FIELD_CHECKPOINTS,
 ];
 
-pub const FOUNDATION_TRANSCRIPT_PROFILE_ID: &str =
-    "transcript-core-foundation-transcript-profile-v1";
-pub const FOUNDATION_ONLY_PROFILE_ID: &str = "transcript-core-foundation-only-profile-v1";
-pub const NO_HE_SETUP_PROOF_PROFILE_ID: &str = "transcript-core-no-he-setup-proof-v1";
-pub const NO_EVALUATOR_REPLAY_PROFILE_ID: &str = "transcript-core-no-evaluator-replay-proof-v1";
-pub const NO_DECRYPTION_PROOF_PROFILE_ID: &str = "transcript-core-no-decryption-proof-v1";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum BaseProfile {
-    FoundationTranscript,
-}
-
-impl BaseProfile {
-    pub fn code(self) -> u64 {
-        match self {
-            Self::FoundationTranscript => 1,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::FoundationTranscript => "FoundationTranscript",
-        }
-    }
-
-    pub fn expected_profile_id(self) -> &'static str {
-        match self {
-            Self::FoundationTranscript => FOUNDATION_TRANSCRIPT_PROFILE_ID,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum TranscriptCoreSecurityClosure {
-    FoundationOnly,
-}
-
-impl TranscriptCoreSecurityClosure {
-    pub fn code(self) -> u64 {
-        match self {
-            Self::FoundationOnly => 3,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::FoundationOnly => "FoundationOnly",
-        }
-    }
-
-    pub fn expected_profile_id(self) -> &'static str {
-        match self {
-            Self::FoundationOnly => FOUNDATION_ONLY_PROFILE_ID,
-        }
-    }
-}
-
-#[cfg(test)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TranscriptCoreProfile {
-    pub base_profile: BaseProfile,
-    pub security_closure: TranscriptCoreSecurityClosure,
-}
-
-#[cfg(test)]
-impl TranscriptCoreProfile {
-    pub const fn new(
-        base_profile: BaseProfile,
-        security_closure: TranscriptCoreSecurityClosure,
-    ) -> Self {
-        Self {
-            base_profile,
-            security_closure,
-        }
-    }
-
-    pub(super) fn seed_label(self) -> String {
-        format!(
-            "{}:{}",
-            self.base_profile.label(),
-            self.security_closure.label()
-        )
-    }
-}
-
-#[cfg(test)]
-pub const FOUNDATION_TRANSCRIPT_CORE_PROFILE: TranscriptCoreProfile = TranscriptCoreProfile::new(
-    BaseProfile::FoundationTranscript,
-    TranscriptCoreSecurityClosure::FoundationOnly,
-);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum TranscriptCoreStatus {
-    TranscriptCoreVerified,
-}
-
-impl TranscriptCoreStatus {
-    pub fn code(self) -> u64 {
-        match self {
-            Self::TranscriptCoreVerified => 1,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TranscriptCoreObject {
-    pub base_profile: BaseProfile,
-    pub security_closure: TranscriptCoreSecurityClosure,
-    pub base_profile_id: String,
-    pub security_profile_id: String,
-    pub he_setup_proof_profile_id: String,
-    pub evaluator_replay_profile_id: String,
-    pub decryption_proof_profile_id: String,
     pub title: String,
     pub sequence: u64,
     pub payload: Vec<u8>,
-    pub status: TranscriptCoreStatus,
     pub tags: Vec<String>,
     pub checkpoints: Vec<u64>,
 }
@@ -154,16 +38,6 @@ pub struct TranscriptCoreAnalysis {
     pub object_type: &'static str,
     #[serde(rename = "objectVersion")]
     pub object_version: u64,
-    #[serde(rename = "baseProfileId")]
-    pub base_profile_id: String,
-    #[serde(rename = "securityProfileId")]
-    pub security_profile_id: String,
-    #[serde(rename = "heSetupProofProfileId")]
-    pub he_setup_proof_profile_id: String,
-    #[serde(rename = "evaluatorReplayProfileId")]
-    pub evaluator_replay_profile_id: String,
-    #[serde(rename = "decryptionProofProfileId")]
-    pub decryption_proof_profile_id: String,
     #[serde(rename = "objectHash512")]
     pub object_hash512: String,
     #[serde(rename = "chunkRoot")]

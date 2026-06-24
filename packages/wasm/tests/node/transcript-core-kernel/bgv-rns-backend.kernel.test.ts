@@ -74,7 +74,6 @@ describe('BGV-RNS backend kernel commands', () => {
         };
 
         expect(profile.profile).toMatchObject({
-            profileId: 'sealed-lattice-bgv-rns-v1',
             polynomialDegree: 32_768,
             plaintextModulus: 65_537,
             dataPrimeBitLength: 47,
@@ -101,10 +100,6 @@ describe('BGV-RNS backend kernel commands', () => {
             expectProtocolHash(value, label);
         }
         expect(profile.batchLayoutBinding).toMatchObject({
-            layoutKind: 'DirectEncryptedBallotAggregateLayout-v1',
-            coordinateOrder:
-                'encrypted-score-then-one-hot-score-buckets-per-option',
-            oneHotBucketOrder: 'ascending-score-1-through-10',
             scoreBucketCount: 10,
             scalarOnlyAggregateLayout: false,
         });

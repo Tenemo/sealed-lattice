@@ -93,8 +93,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
         &json!({
             "objectType": "PublicKeyShareSuccinctProofMaterialReference",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "public-key-share",
             "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
             "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
@@ -275,8 +273,6 @@ fn verify_transported_public_key_share_proof_material_set_header(
             "objectType",
             PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE,
         ),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -301,8 +297,6 @@ fn verify_transported_public_key_share_proof_material_set_header(
 fn verify_transported_public_key_share_proof_material_header(value: &Value) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {

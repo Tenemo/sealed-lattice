@@ -77,8 +77,6 @@ pub(super) fn private_vss_envelope_commitments_object(
                 let private_envelope_aad = serde_json::json!({
                     "objectType": "PrivateVssEnvelopeAad",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "mailboxEncryptionProfileId": "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1",
                     "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
                     "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,
@@ -123,7 +121,6 @@ pub(super) fn private_vss_envelope_commitments_object(
                 let mut encrypted_envelope = serde_json::json!({
                     "objectType": "EncryptedPrivateVssShareEnvelope",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
                     "mailboxEncryptionProfileId": "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1",
                     "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,

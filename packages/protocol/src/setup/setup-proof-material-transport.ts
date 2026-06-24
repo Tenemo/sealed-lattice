@@ -3,7 +3,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 type JsonRecord = Record<string, unknown>;
 
-const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const setupProofTransportChunkSizeBytes = 1_048_576;
 
 const textEncoder = new TextEncoder();
@@ -64,7 +63,6 @@ export const setupProofChunkManifestRoot = (
     deriveProtocolHash('SetupProofChunkManifestRoot', {
         objectType: 'SetupProofMaterialChunkManifest',
         objectVersion: 1,
-        setupProofProfileId,
         proofFamily,
         chunkSizeBytes: setupProofTransportChunkSizeBytes,
         chunkCount: chunkHashes.length,
@@ -80,7 +78,7 @@ export type TransportedSetupProofMaterialSet<
         readonly objectType: ObjectType;
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly proofFamily: string;
         readonly proofMaterials: readonly JsonRecord[];
     }
@@ -91,7 +89,7 @@ export type VerifiedSetupProofMaterial = Readonly<
         readonly objectType: 'VerifiedSetupProofMaterial';
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly verificationId: string;
         readonly proofFamily: string;
         readonly proofMaterialRoot: ProtocolHash;
@@ -110,7 +108,7 @@ export type VerifiedSetupProofMaterialSet = Readonly<
         readonly objectType: 'VerifiedSetupProofMaterialSet';
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly proofMaterials: readonly VerifiedSetupProofMaterial[];
     }
 >;

@@ -38,17 +38,6 @@ pub(super) fn verify_binary_vss_material_transport_reference(
             "setupPackage.vssCoefficientCommitmentMaterial.transport",
         )));
     };
-    if transport_object
-        .get("transportProfileId")
-        .and_then(Value::as_str)
-        != Some(SETUP_TRANSPORT_PROFILE_ID)
-    {
-        return Ok(Err(Refusal::new(
-            "vssMaterialTransportReferenceProfileMismatch",
-            "vssCoefficientCommitmentMaterial.transport.transportProfileId must match the setup transport profile",
-            "setupPackage.vssCoefficientCommitmentMaterial.transport.transportProfileId",
-        )));
-    }
     for (field_name, expected_value) in [
         ("chunkSizeBytes", SETUP_TRANSPORT_CHUNK_SIZE_BYTES),
         ("chunkCount", expected_chunk_count),
@@ -241,8 +230,6 @@ pub(super) fn setup_transport_full_object_set_hash(
         &json!({
             "objectType": "SetupTransportFullObjectSet",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
             "transportedObjects": transported_object_values,
             "totalByteLength": total_byte_length,
             "chunkCount": chunk_count,
@@ -263,8 +250,6 @@ pub(in super::super) fn setup_transport_chunk_manifest_root(
         &json!({
             "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
             "chunkSizeBytes": chunk_size_bytes,
             "chunkCount": chunk_count,
             "totalByteLength": total_byte_length,

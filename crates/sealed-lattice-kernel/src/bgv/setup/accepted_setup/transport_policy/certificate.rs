@@ -69,18 +69,6 @@ fn verify_transport_certificate_body(
             "setupTransportCertificate.objectType must be SetupTransportCertificate",
         ),
         (
-            "setupProfileId",
-            COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportSetupProfileMismatch",
-            "setupTransportCertificate.setupProfileId must match CollectiveBgvSetup-v1",
-        ),
-        (
-            "transportProfileId",
-            SETUP_TRANSPORT_PROFILE_ID,
-            "transportProfileMismatch",
-            "setupTransportCertificate must use verifier-enforced binary/chunked transport",
-        ),
-        (
             "largeObjectEncoding",
             "binary",
             "transportEncodingMismatch",

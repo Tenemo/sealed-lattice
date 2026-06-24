@@ -124,10 +124,6 @@ fn passive_setup_marks_default_development_seed_usage() {
 fn passive_setup_uses_rejection_sampled_setup_distributions() {
     let package = setup_package();
     assert_eq!(
-        package["certificates"]["collectiveSecretDistributionCertificate"]["localShareSampler"]["samplerId"],
-        "hash-derived-owner-routed-standard-ternary-collective-share-v1"
-    );
-    assert_eq!(
         package["certificates"]["errorDistributionCertificate"]["crpPublicSampleDistribution"]["distributionKind"],
         "hash-to-modulus-rejection-sampled-uniform-public-sample"
     );
@@ -165,11 +161,9 @@ fn public_common_random_polynomial_uses_its_own_root_namespace() {
     let common_random_polynomial_record = serde_json::json!({
         "objectType": "BgvPublicCommonRandomPolynomial",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": package["setupInputs"]["ceremonyId"],
         "rosterHash": package["setupInputs"]["rosterHash"],
         "setupSeedHash": setup_seed_hash,
-        "basisId": "sealed-lattice-bgv-rns-data-basis-v1",
         "level": DATA_PRIMES.len() - 1,
         "coefficientCount": POLYNOMIAL_DEGREE,
         "sampledResidues": sample_public_residues(

@@ -182,8 +182,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     }
     let expected_accounting_hash = succinct_public_key_share_accounting_hash()?;
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
         ("proofAccountingHash", expected_accounting_hash.as_str()),
     ] {
@@ -416,11 +414,7 @@ fn verify_public_key_share_succinct_proof_record(
         ));
     }
     verify_same_secret_context(proof_record, context.setup_context)?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,

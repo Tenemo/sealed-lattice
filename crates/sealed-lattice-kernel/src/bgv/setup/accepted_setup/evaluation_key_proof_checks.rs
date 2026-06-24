@@ -121,11 +121,7 @@ fn verify_trustee_evaluation_key_proof_set(
     })?;
     let roster = super::accepted_roster_from_package(setup_package);
     verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -379,11 +375,7 @@ fn verify_trustee_evaluation_key_proof_record(
         ));
     }
     verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -934,8 +926,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
         &json!({
             "objectType": "TrusteeEvaluationKeyProofMaterialReference",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
             "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
@@ -1021,12 +1011,6 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
         || material_set_proof_family == Some(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY);
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
-        || material_set.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || !material_set_family_matches
     {
         return Err(CanonicalError::new(
@@ -1047,12 +1031,6 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
     for proof_material in proof_materials {
         if proof_material.get("objectType").and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-            || proof_material.get("setupProfileId").and_then(Value::as_str)
-                != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-            || proof_material
-                .get("setupProofProfileId")
-                .and_then(Value::as_str)
-                != Some(SETUP_PROOF_PROFILE_ID)
             || proof_material
                 .get("proofBytesEncoding")
                 .and_then(Value::as_str)

@@ -22,18 +22,6 @@ pub(super) fn validate_setup_package_internal_bindings(
 ) -> CanonicalResult<()> {
     let profile_hash = profile_hash()?;
     let backend_profile_hash = backend_profile_hash()?;
-    compare_string_at_path(
-        setup_package,
-        &["profileBindings", "profileId"],
-        PROFILE_ID,
-        "profile id",
-    )?;
-    compare_string_at_path(
-        setup_package,
-        &["profileBindings", "backendProfileId"],
-        BACKEND_PROFILE_ID,
-        "backend profile id",
-    )?;
     compare_hash_at_path(
         setup_package,
         &["profileBindings", "profileHash"],
@@ -124,15 +112,8 @@ pub(super) fn validate_setup_package_internal_bindings(
     let target_decryption_profile_binding_hash = derive_protocol_hash(
         "TargetDecryptionProfileBindingHash",
         &json!({
-            "profileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
         }),
-    )?;
-    compare_string_at_path(
-        setup_package,
-        &["targetDecryptionStatus", "targetDecryptionProfileId"],
-        TARGET_DECRYPTION_PROFILE_ID,
-        "target decryption profile id",
     )?;
     compare_hash_at_path(
         setup_package,
@@ -178,8 +159,6 @@ pub(super) fn validate_setup_package_internal_bindings(
 pub(super) fn validate_setup_package_shape(setup_package: &Value) -> CanonicalResult<()> {
     if setup_package.get("objectType").and_then(Value::as_str) != Some("BgvPassiveSetupPackage")
         || setup_package.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || setup_package.get("setupProfileId").and_then(Value::as_str)
-            != Some(PASSIVE_SETUP_PROFILE_ID)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

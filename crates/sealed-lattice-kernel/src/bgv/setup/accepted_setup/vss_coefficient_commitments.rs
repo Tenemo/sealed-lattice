@@ -225,17 +225,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
         )?));
     }
     if material_set
-        .get("commitmentProfileId")
-        .and_then(Value::as_str)
-        != Some(SETUP_COMMITMENT_PROFILE_ID)
-    {
-        return Ok(Some(vss_material_refusal(
-            "vssCoefficientCommitmentMaterialProfileMismatch",
-            "vssCoefficientCommitmentMaterial.commitmentProfileId must match the accepted setup commitment profile",
-            "setupPackage.vssCoefficientCommitmentMaterial.commitmentProfileId",
-        )?));
-    }
-    if material_set
         .get("commitmentProfileHash")
         .and_then(Value::as_str)
         != Some(setup_commitment_profile_hash()?.as_str())
@@ -447,14 +436,6 @@ fn verify_binary_vss_material_transport_metadata(material_set: &Value) -> Canoni
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "binary VSS material transport metadata must be an object",
-        ));
-    }
-    if transport.get("transportProfileId").and_then(Value::as_str)
-        != Some(SETUP_TRANSPORT_PROFILE_ID)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "binary VSS material transportProfileId must match the accepted setup transport profile",
         ));
     }
     if transport.get("chunkSizeBytes").and_then(Value::as_u64)

@@ -141,9 +141,6 @@ export function acceptedSetupTransportCertificate(
         value: {
             objectType: 'SetupTransportFullObjectSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
             transportedObjects: [
                 {
                     objectName: transportedVssObject.objectName,
@@ -166,9 +163,6 @@ export function acceptedSetupTransportCertificate(
         value: {
             objectType: 'SetupTransportChunkManifest',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
             chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: setupTransportChunkCount,
             totalByteLength: setupTransportTotalByteLength,
@@ -248,7 +242,6 @@ export function acceptedActiveStaticSetupTheoremCertificate(
     const certificate = {
         objectType: 'ActiveStaticSetupTheoremCertificate',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
         rosterHash: setupContext.rosterHash,

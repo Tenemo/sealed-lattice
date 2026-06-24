@@ -103,12 +103,6 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
         "BgvEvaluationKeyStreamingCommitment",
         "evaluation key streaming commitment object type",
     )?;
-    compare_string_at_path(
-        commitment_record,
-        &["commitmentId"],
-        EVALUATION_KEY_STREAMING_COMMITMENT_ID,
-        "evaluation key streaming commitment id",
-    )?;
     if usize_at_path(commitment_record, &["chunkSizeBytes"])? != EVALUATION_KEY_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidChunkSize,

@@ -10,7 +10,6 @@ pub(super) fn direct_ballot_relation_statement_hash(
         "objectType": "DirectEncryptedBallotValidityRelationStatement",
         "objectVersion": 3,
         "setupPackageHash": setup_package_hash(setup_package)?,
-        "profileId": PROFILE_ID,
         "profileHash": profile_hash()?,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,

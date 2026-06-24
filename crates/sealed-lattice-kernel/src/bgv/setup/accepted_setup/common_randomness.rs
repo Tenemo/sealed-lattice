@@ -161,7 +161,6 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
     let expected_public_matrix_seed_hash = derive_protocol_hash(
         "SetupPublicMatrixSeedHash",
         &json!({
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
@@ -263,7 +262,6 @@ pub(in crate::bgv::setup) fn derive_collective_bgv_setup_public_derivations(
     let mut derivations = json!({
         "objectType": "SetupPublicDerivations",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "bgvPublicA": bgv_public_a,
         "publicMatrices": public_matrices,
@@ -302,7 +300,6 @@ pub(super) fn derive_bgv_public_a_polynomial(
     let mut public_a = json!({
         "objectType": "BgvPublicAPolynomial",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "derivationLabel": "accepted-bgv-public-a",
         "basisId": BgvBasisKind::Data.basis_id(),
@@ -331,7 +328,6 @@ fn derive_setup_public_matrices(
     let mut public_matrices = json!({
         "objectType": "SetupPublicMatrixMaterial",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "commitmentMatrix": commitment_matrix,
     });
@@ -350,9 +346,7 @@ fn derive_setup_commitment_matrix(
     let mut matrix = json!({
         "objectType": "SetupPublicMatrix",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "matrixKind": "commitment",
-        "profileId": SETUP_COMMITMENT_PROFILE_ID,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
         "commitmentModuleRank": SETUP_COMMITMENT_MODULE_RANK,
@@ -397,7 +391,6 @@ fn setup_public_derivation_root(
         &json!({
             "objectType": "SetupPublicDerivation",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "componentName": component_name,
         }),

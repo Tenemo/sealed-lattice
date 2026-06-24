@@ -11,7 +11,7 @@ fn first_profile_setup_profile_hash_is_byte_stable() {
         profile["setupProfileHash"]
             .as_str()
             .expect("setup profile hash"),
-        "65468c7fa358d8d9acbb86e1986daf009ab11f0f01ad0078eb22c9c4aeac4fba0cd3fcd5d0539d323c26258d0dae8fa50e4cc87f660b6348b4fd4c96aaf8d3a9",
+        "26cd09939173a8d0b4dc395e32663e69b80e12111e904e906108a5ea661e32e1a15c2dc216f379eb1140b1dcdae2c4f9cb889f10a6cad783b29cfe7eabfaba3b",
     );
 }
 
@@ -90,10 +90,6 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     assert_eq!(
         profile["setupProofProfile"]["objectType"],
         "SetupProofProfile"
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["profileId"],
-        "SealedLattice-SetupProof-v1"
     );
     let setup_proof_families = profile["setupProofProfile"]["proofFamilies"]
         .as_array()

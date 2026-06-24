@@ -5,7 +5,6 @@ import type {
     ProtocolHash,
     TargetBoundShareSelectionProfile,
     DecryptionShareFilteringMode,
-    DecryptionShareSelectionRule,
     HeBackendCorruptionModel,
     RosterProfileKind,
     ThresholdProfile,
@@ -70,11 +69,6 @@ const supportedDecryptionShareFilteringModes =
     new Set<DecryptionShareFilteringMode>([
         'ProofVerifiedSharesOnly',
         'RobustDecodeAfterInvalidShareFiltering',
-    ]);
-
-const supportedDecryptionShareSelectionRules =
-    new Set<DecryptionShareSelectionRule>([
-        'FirstValidSharesInCanonicalBoardOrder',
     ]);
 
 const normalizeTargetBoundShareSelectionProfile = (
@@ -162,13 +156,6 @@ const normalizeTargetBoundShareSelectionProfile = (
             'Target-bound share-selection profile uses an unsupported invalid-share filtering mode.',
         );
     }
-    if (
-        !supportedDecryptionShareSelectionRules.has(profile.selectedShareRule)
-    ) {
-        throw new Error(
-            'Target-bound share-selection profile uses an unsupported selected-share rule.',
-        );
-    }
 
     return {
         profileId: profile.profileId,
@@ -179,7 +166,6 @@ const normalizeTargetBoundShareSelectionProfile = (
         minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
         minimumArrivalsForRobustDecode: profile.minimumArrivalsForRobustDecode,
         invalidShareFilteringMode: profile.invalidShareFilteringMode,
-        selectedShareRule: profile.selectedShareRule,
     };
 };
 
@@ -328,8 +314,6 @@ export const deriveThresholdProfileHash = (input: {
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
     readonly thresholdProfile: ThresholdProfile;
-    readonly rosterPolicy: PollSpec['rosterPolicy'];
-    readonly thresholdProfileFamily: PollSpec['thresholdProfileFamily'];
     readonly smallRosterPolicy: PollSpec['smallRosterPolicy'];
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
@@ -352,7 +336,6 @@ export const deriveThresholdProfileHash = (input: {
         privacyCorruptionBound: input.thresholdProfile.privacyCorruptionBound,
         releaseQuorum: input.thresholdProfile.releaseQuorum,
         rosterHash: input.rosterHash,
-        rosterPolicy: input.rosterPolicy,
         rosterProfileKind: input.thresholdProfile.rosterProfileKind,
         rosterSize: input.thresholdProfile.rosterSize,
         setupCompletionQuorum: input.thresholdProfile.setupCompletionQuorum,
@@ -361,7 +344,6 @@ export const deriveThresholdProfileHash = (input: {
             input.thresholdProfile.structuralCorruptionBound,
         targetBoundShareSelectionProfile:
             input.thresholdProfile.targetBoundShareSelectionProfile,
-        thresholdProfileFamily: input.thresholdProfileFamily,
         warnings: input.thresholdProfile.warnings,
     });
 
@@ -420,10 +402,8 @@ export const deriveFrozenRosterProfile = (input: {
         minRosterSize: pollSpec.minRosterSize,
         pollSpecHash,
         rosterHash: input.rosterHash,
-        rosterPolicy: pollSpec.rosterPolicy,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
         thresholdProfile,
-        thresholdProfileFamily: pollSpec.thresholdProfileFamily,
     });
 
     return {
@@ -433,8 +413,6 @@ export const deriveFrozenRosterProfile = (input: {
         pollSpecHash,
         rosterHash: input.rosterHash,
         rosterSize,
-        rosterPolicy: pollSpec.rosterPolicy,
-        thresholdProfileFamily: pollSpec.thresholdProfileFamily,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
         minRosterSize: pollSpec.minRosterSize,
         maxRosterSize: pollSpec.maxRosterSize,

@@ -144,11 +144,8 @@ export const bgvProfileForCertificates = (
         'bgvProfile',
     ) as BgvRnsProfileForCertificates;
     const profile = objectField(bgvProfile, 'profile', 'bgvProfile');
-    stringField(profile, 'profileId', 'bgvProfile.profile');
-    stringField(profile, 'backendProfileId', 'bgvProfile.profile');
     positiveNumberField(profile, 'polynomialDegree', 'bgvProfile.profile');
     positiveNumberField(profile, 'plaintextModulus', 'bgvProfile.profile');
-    stringField(profile, 'dataBasisId', 'bgvProfile.profile');
     const dataPrimes = numberArrayField(
         profile,
         'dataPrimes',

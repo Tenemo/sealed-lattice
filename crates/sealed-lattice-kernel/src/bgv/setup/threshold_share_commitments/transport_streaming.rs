@@ -86,15 +86,6 @@ pub(crate) fn with_verified_transported_vss_material<T>(
             "verifiedVssCoefficientCommitmentMaterial.objectVersion must be 1",
         ));
     }
-    if verified_material_reference
-        .get("setupProfileId")
-        .and_then(Value::as_str)
-        != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-    {
-        return Err(invalid_threshold_commitment_input(
-            "verified VSS material setupProfileId must match CollectiveBgvSetup-v1",
-        ));
-    }
     let verification_id =
         derivation_stream_id_field(verified_material_reference, "verificationId")?;
     for field_name in [
@@ -156,14 +147,12 @@ pub(super) fn verified_transported_vss_material_reference_value(
     json!({
         "objectType": VERIFIED_VSS_MATERIAL_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "verificationId": verification_id,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
         "vssCoefficientCommitmentMaterialRoot": vss_coefficient_commitment_material_root,
         "thresholdShareCommitmentRoot": threshold_share_commitment_root,
-        "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
         "transportChunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "transportChunkCount": hashes.chunk_hashes.len(),
         "transportTotalByteLength": hashes.total_byte_length,
@@ -1158,8 +1147,6 @@ fn threshold_share_commitment_set_from_transport_accumulators(
         let mut recipient_record = json!({
             "objectType": THRESHOLD_SHARE_RECIPIENT_COMMITMENT_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
             "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "recipientIdentity": recipient_identity,
@@ -1179,8 +1166,6 @@ fn threshold_share_commitment_set_from_transport_accumulators(
     let mut commitment_set = json!({
         "objectType": THRESHOLD_SHARE_COMMITMENT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": roster.participant_count,

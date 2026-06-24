@@ -56,8 +56,6 @@ const setupTransportChunkManifestRoot = (input: {
     deriveProtocolHash('SetupTransportChunkManifestRoot', {
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: setupTransportProfileId,
         chunkSizeBytes: input.chunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,

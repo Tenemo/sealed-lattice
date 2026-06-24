@@ -178,7 +178,6 @@ pub(super) fn direct_ballot_public_proof_transport_hash(
             "ciphertextRoot": input.ballot.ciphertext_root,
             "voterIdentity": input.ballot.input.voter_identity,
             "actionContextHash": input.ballot.input.action_context_hash,
-            "profileId": PROFILE_ID,
             "profileHash": profile_hash()?,
             "collectivePublicKeyRoot": collective_public_key_root,
             "ballotLayoutHash": ballot_layout_hash,

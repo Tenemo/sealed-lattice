@@ -437,14 +437,11 @@ describe('VSS coefficient commitment builders', () => {
 
         expect(transport.materialSet).toMatchObject({
             objectType: 'VssCoefficientCommitmentMaterialSet',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             materialEncoding:
                 'binary-chunked-full-public-setup-commitment-values',
             binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
             materialRecordCount: bundle.materialSet.materialRecordCount,
             transport: {
-                transportProfileId:
-                    'sealed-lattice-setup-binary-chunked-transport-v1',
                 chunkSizeBytes: setupTransportChunkSizeBytes,
                 chunkCount:
                     transport.transportedVssCoefficientCommitmentMaterial

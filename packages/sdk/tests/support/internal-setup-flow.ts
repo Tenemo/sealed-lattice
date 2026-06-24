@@ -256,7 +256,6 @@ export type SetupCommonRandomness = Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicDerivations';
                 readonly objectVersion: 1;
-                readonly setupProfileId: 'CollectiveBgvSetup-v1';
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicDerivationRoot: ProtocolHash;
             }

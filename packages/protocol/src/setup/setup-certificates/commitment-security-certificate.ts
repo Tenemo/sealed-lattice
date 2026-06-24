@@ -1,6 +1,5 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
-import { setupCommitmentProfileId, setupProfileId } from './constants.js';
 import {
     acceptedCertificateTemplate,
     ceilLog2Bigint,
@@ -46,9 +45,7 @@ const setupCommitmentSecurityCertificateBody = (
     return {
         objectType: 'SetupCommitmentSecurityCertificate',
         objectVersion: 1,
-        setupProfileId,
         setupProfileHash: setupProfile.setupProfileHash,
-        commitmentProfileId: setupCommitmentProfileId,
         commitmentProfileHash: setupProfile.commitmentProfileHash,
         qShareHash: setupProfile.qShareHash,
         carryAwareVssShareRelationProfileHash:

@@ -60,14 +60,12 @@ struct VerifiedSetupProofMaterial {
 }
 
 pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
-    setup_profile_id: &str,
+    _setup_profile_id: &str,
     setup_proof_profile_hash: &str,
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofRecordBinding",
         "objectVersion": 1,
-        "setupProfileId": setup_profile_id,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "setupProofProfileHash": setup_proof_profile_hash,
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
@@ -755,8 +753,6 @@ fn verified_setup_proof_material_reference_value(
     json!({
         "objectType": VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "verificationId": verification_id,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
@@ -777,17 +773,15 @@ fn verify_verified_setup_proof_material_set_header(value: &Value) -> CanonicalRe
             "verifiedSetupProofMaterials must be an object",
         ));
     }
-    for (field_name, expected_value) in [
-        ("objectType", VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-    ] {
-        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("verifiedSetupProofMaterials.{field_name} must be {expected_value}"),
-            ));
-        }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!(
+                "verifiedSetupProofMaterials.objectType must be {VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE}"
+            ),
+        ));
     }
     if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Err(CanonicalError::new(
@@ -811,8 +805,6 @@ fn verify_verified_setup_proof_material_header(
     }
     for (field_name, expected_value) in [
         ("objectType", VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofBytesEncoding", SETUP_PROOF_MATERIAL_ENCODING),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -1017,7 +1009,6 @@ fn setup_proof_material_chunk_manifest_root(
         &json!({
             "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family,
             "chunkSizeBytes": chunk_size_bytes,
             "chunkCount": chunk_count,
@@ -1054,8 +1045,6 @@ mod tests {
         let transported_proof_material = json!({
             "objectType": "SetupTransportedSameSecretProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family,
             "proofMaterialRoot": proof_material_root,
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1087,8 +1076,6 @@ mod tests {
             "verifiedSetupProofMaterials": {
                 "objectType": VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE,
                 "objectVersion": 1,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "proofMaterials": [
                     verified_setup_proof_material
                 ],
@@ -1121,8 +1108,6 @@ mod tests {
         let mut transported_proof_material = json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family,
             "proofMaterialRoot": proof_material_root,
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1153,8 +1138,6 @@ mod tests {
             "verifiedSetupProofMaterials": {
                 "objectType": VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE,
                 "objectVersion": 1,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "proofMaterials": [
                     finished["verifiedSetupProofMaterial"].clone()
                 ],

@@ -260,8 +260,6 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
         &serde_json::json!({
             "objectType": "RelinearizationKeySwitchPublicSampleSeed",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "relinearization-key-share",
             "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
             "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
@@ -283,8 +281,6 @@ pub(in super::super) fn galois_key_switch_seed_for_test(
         &serde_json::json!({
             "objectType": "GaloisKeySwitchPublicSampleSeed",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "galois-key-share",
             "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
             "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],

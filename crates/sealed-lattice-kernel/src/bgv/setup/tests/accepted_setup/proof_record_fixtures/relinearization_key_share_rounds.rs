@@ -90,8 +90,6 @@ fn relinearization_key_share_rounds_object_inner(
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundOne",
                 "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-SetupProof-v1",
                 "proofFamily": "relinearization-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
@@ -169,8 +167,6 @@ fn relinearization_key_share_rounds_object_inner(
             &serde_json::json!({
                 "objectType": "RelinearizationRoundOneAggregate",
                 "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-SetupProof-v1",
                 "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                 "level": level,
                 "roundOneRecordRoots": round_one_roots_by_level
@@ -228,8 +224,6 @@ fn relinearization_key_share_rounds_object_inner(
             let mut record = serde_json::json!({
                 "objectType": "RelinearizationKeyShareRoundTwo",
                 "objectVersion": 1,
-                "setupProfileId": "CollectiveBgvSetup-v1",
-                "setupProofProfileId": "SealedLattice-SetupProof-v1",
                 "proofFamily": "relinearization-key-share",
                 "ceremonyId": setup_context["ceremonyId"],
                 "manifestHash": setup_context["manifestHash"],
@@ -313,8 +307,6 @@ fn relinearization_key_share_rounds_object_inner(
                 &serde_json::json!({
                     "objectType": "RelinearizationRoundTwoAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "level": level,
                     "roundOneAggregateRoot": round_one_aggregate_root_by_level
@@ -336,8 +328,6 @@ fn relinearization_key_share_rounds_object_inner(
     let mut rounds = serde_json::json!({
         "objectType": "RelinearizationKeyShareRounds",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "relinearization-key-share",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],

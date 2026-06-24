@@ -52,12 +52,7 @@ pub(in super::super) fn verify_same_secret_consistency(
             "setupPackage.sameSecretConsistency",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if statement_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
                 "sameSecretConsistencyProfileMismatch",
@@ -244,12 +239,7 @@ fn verify_same_secret_statement_record(
             "setupPackage.sameSecretConsistency.statementRecords",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if statement_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
                 "sameSecretStatementProfileMismatch",
@@ -500,9 +490,6 @@ fn trustee_secret_commitment_payload(
     Ok(json!({
         "objectType": TRUSTEE_SECRET_COMMITMENT_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,

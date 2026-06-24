@@ -7,14 +7,10 @@ import {
 import {
     createFoundationTranscriptCoreFixture,
     createFoundationTranscriptFixture,
-    createInvalidFoundationTranscriptStatusFixture,
 } from '#tests/support/foundation-transcript-fixture';
 
 const foundationTranscriptFixture = createFoundationTranscriptFixture();
 const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
-    foundationTranscriptFixture.expectedHashes,
-);
-const invalidEnumFixture = createInvalidFoundationTranscriptStatusFixture(
     foundationTranscriptFixture.expectedHashes,
 );
 const protocolHashPattern = /^[a-f0-9]{128}$/u;
@@ -74,7 +70,7 @@ describe('transcript-core kernel in browsers', () => {
 
         expect(() =>
             kernel.analyzeCanonicalObject({
-                canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
+                canonicalBytesHex: '42414421',
                 chunkSize: 8,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);

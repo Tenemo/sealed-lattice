@@ -69,6 +69,10 @@ Relevant caveats include:
   performance details.
 - Repeated multiparty participation can become a share-leakage surface unless the
   retry path is explicitly designed, proven, and implemented for that setting.
+- Public evaluation-key material for relinearization, Galois, or key-switching is
+  secret-dependent and relies on the selected HE construction's KDM/circular
+  security assumption unless a later public security note cites a theorem that
+  avoids that assumption.
 
 These warnings follow the same class of caveats documented by production FHE
 libraries such as Lattigo, Microsoft SEAL, and OpenFHE, and by the CPAD and
@@ -98,6 +102,7 @@ Severity rubric:
 | `SEC-008` | `P2`     | Supported-phone runtime evidence is missing.                                             | Native, Node, desktop-browser, and mobile-emulated runs do not count as supported-phone evidence.                                                                                                                                                        |
 | `SEC-009` | `P2`     | The project has not completed independent audit, certification, or production hardening. | Any production deployment would need separate review, operational hardening, and deployment-specific risk analysis.                                                                                                                                      |
 | `SEC-010` | `P2`     | Profiles outside the first target profile have no security or runtime claim.             | The setup and target-decryption code derive roster parameters for `3 <= n <= 20`, but only the first target profile has current benchmark and certificate work.                                                                                          |
+| `SEC-011` | `P1/P2`  | Secret-dependent evaluation-key material depends on an HE KDM/circular-security assumption. | Current setup/evaluator evidence treats this as part of the selected HE construction's assumption set. A future construction theorem can replace the assumption only if it is explicitly cited and bound into the security evidence.                      |
 
 Do not add signer-to-roster binding, witness-key binding, or Unicode
 canonicalization as open issues unless a new code review finds a specific current

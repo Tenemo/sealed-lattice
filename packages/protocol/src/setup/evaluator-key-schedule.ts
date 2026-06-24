@@ -33,7 +33,6 @@ export type RequiredGaloisSet = Readonly<
     JsonRecord & {
         readonly objectType: 'RequiredGaloisSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay';
         readonly packingProfile: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly rnsLimbCount: number;
@@ -189,7 +188,6 @@ export const createRequiredGaloisSet = (
     return {
         objectType: 'RequiredGaloisSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay',
         packingProfile:
             'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing',

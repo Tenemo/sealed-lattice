@@ -62,11 +62,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
             "setupPackage.relinearizationKeyShareRounds",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "relinearization-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "relinearization-key-share")] {
         if rounds.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
                 "relinearizationKeyShareRoundsProfileMismatch",
@@ -221,8 +217,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
             &json!({
                 "objectType": "RelinearizationRoundOneAggregate",
                 "objectVersion": 1,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                 "level": level,
                 "roundOneRecordRoots": record_roots,
@@ -311,8 +305,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
             &json!({
                 "objectType": "RelinearizationRoundTwoAggregate",
                 "objectVersion": 1,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                 "level": level,
                 // Chaining round two onto the accepted round-one aggregate root binds the rounds together, so round-two material proven against a substituted or rolled-back round-one transcript cannot verify.
@@ -561,8 +553,6 @@ pub(super) fn expected_relinearization_key_switch_seed(
         &json!({
             "objectType": "RelinearizationKeySwitchPublicSampleSeed",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "relinearization-key-share",
             "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
             "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
@@ -583,8 +573,6 @@ pub(super) fn expected_galois_key_switch_seed(
         &json!({
             "objectType": "GaloisKeySwitchPublicSampleSeed",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "galois-key-share",
             "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
             "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
@@ -980,13 +968,7 @@ fn verify_galois_key_share_material_record(
             "Galois key share material objectVersion must be 1",
         ));
     }
-    for field_name in [
-        "setupProfileId",
-        "setupProofProfileId",
-        "proofFamily",
-        "trusteeIdentity",
-        "trusteeRosterPosition",
-    ] {
+    for field_name in ["proofFamily", "trusteeIdentity", "trusteeRosterPosition"] {
         if material_record.get(field_name) != batch.get(field_name) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,
@@ -1038,11 +1020,7 @@ fn verify_evaluation_key_record_object(
             "evaluation-key share objectVersion must be 1",
         ));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", expected_proof_family),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", expected_proof_family)] {
         if record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::ProfileComponentMismatch,

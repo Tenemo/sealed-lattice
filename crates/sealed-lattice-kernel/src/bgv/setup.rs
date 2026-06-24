@@ -86,8 +86,8 @@ use crate::{
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
         profile::{
-            BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
-            POLYNOMIAL_DEGREE, PROFILE_ID, allowed_operation_registry_hash, backend_profile_hash,
+            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
+            allowed_operation_registry_hash, backend_profile_hash,
             ballot_score_encoding_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
             canonical_ciphertext_convention_hash, data_basis_modulus_bits,
             direct_aggregate_layout_hash, direct_comparison_profile_hash,
@@ -121,8 +121,6 @@ const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
 const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
     "sealed-lattice-passive-bgv-setup-development-encryption-fixture-v1";
-const EVALUATION_KEY_STREAMING_COMMITMENT_ID: &str =
-    "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-commitment-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
 
 #[derive(Clone)]

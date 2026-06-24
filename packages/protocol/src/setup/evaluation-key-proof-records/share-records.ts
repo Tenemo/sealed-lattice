@@ -237,8 +237,6 @@ const relinearizationKeySwitchSeed = (
     deriveProtocolHash('RelinearizationKeyShareSeed', {
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -255,8 +253,6 @@ const galoisKeySwitchSeed = (
     deriveProtocolHash('GaloisKeyShareSeed', {
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -552,8 +548,6 @@ export const createRelinearizationKeyShareRounds = (
             {
                 objectType: 'RelinearizationRoundOneAggregate',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                 level,
@@ -666,8 +660,6 @@ export const createRelinearizationKeyShareRounds = (
             {
                 objectType: 'RelinearizationRoundTwoAggregate',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 evaluatorKeyScheduleRoot:
                     input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
                 level,

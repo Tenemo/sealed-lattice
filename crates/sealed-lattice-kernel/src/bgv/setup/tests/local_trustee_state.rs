@@ -114,7 +114,6 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
     let mut local_state = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateCommitment",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

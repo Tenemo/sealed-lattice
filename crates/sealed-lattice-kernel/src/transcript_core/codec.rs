@@ -2,15 +2,10 @@ use serde_json::Value;
 
 #[cfg(test)]
 use super::rng::DeterministicFixtureRng;
-#[cfg(test)]
-use super::types::TranscriptCoreProfile;
 use super::types::{
-    BaseProfile, ENVELOPE_VERSION, FIELD_CHECKPOINTS, FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_STATUS,
-    FIELD_TAGS, FIELD_TITLE, FOUNDATION_ONLY_PROFILE_ID, FOUNDATION_TRANSCRIPT_PROFILE_ID, MAGIC,
-    NO_DECRYPTION_PROOF_PROFILE_ID, NO_EVALUATOR_REPLAY_PROFILE_ID, NO_HE_SETUP_PROOF_PROFILE_ID,
-    REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
-    TranscriptCoreAnalysis, TranscriptCoreObject, TranscriptCoreSecurityClosure,
-    TranscriptCoreStatus,
+    ENVELOPE_VERSION, FIELD_CHECKPOINTS, FIELD_PAYLOAD, FIELD_SEQUENCE, FIELD_TAGS, FIELD_TITLE,
+    MAGIC, REQUIRED_FIELDS, TRANSCRIPT_CORE_OBJECT_TYPE, TRANSCRIPT_CORE_OBJECT_VERSION,
+    TranscriptCoreAnalysis, TranscriptCoreObject,
 };
 use crate::encoding::{
     CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_bytes,
@@ -62,23 +57,13 @@ pub fn decode_hex(hex: &str) -> CanonicalResult<Vec<u8>> {
 }
 
 #[cfg(test)]
-pub fn canonical_transcript_core_object(profile: TranscriptCoreProfile) -> TranscriptCoreObject {
-    let mut fixture_rng = DeterministicFixtureRng::new(&profile.seed_label());
-    let base_profile = profile.base_profile;
-    let security_closure = profile.security_closure;
+pub fn canonical_transcript_core_object() -> TranscriptCoreObject {
+    let mut fixture_rng = DeterministicFixtureRng::new("transcript-core-foundation");
 
     TranscriptCoreObject {
-        base_profile,
-        security_closure,
-        base_profile_id: base_profile.expected_profile_id().to_string(),
-        security_profile_id: security_closure.expected_profile_id().to_string(),
-        he_setup_proof_profile_id: NO_HE_SETUP_PROOF_PROFILE_ID.to_string(),
-        evaluator_replay_profile_id: NO_EVALUATOR_REPLAY_PROFILE_ID.to_string(),
-        decryption_proof_profile_id: NO_DECRYPTION_PROOF_PROFILE_ID.to_string(),
         title: "Foundation transcript roots".to_string(),
         sequence: 10,
         payload: fixture_rng.next_bytes(6),
-        status: TranscriptCoreStatus::TranscriptCoreVerified,
         tags: vec![
             "canonical".to_string(),
             "foundation-transcript".to_string(),
@@ -96,13 +81,6 @@ pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8
     append_varuint(&mut output, ENVELOPE_VERSION);
     append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(&mut output, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(&mut output, object.base_profile.code());
-    append_varuint(&mut output, object.security_closure.code());
-    append_string(&mut output, &object.base_profile_id);
-    append_string(&mut output, &object.security_profile_id);
-    append_string(&mut output, &object.he_setup_proof_profile_id);
-    append_string(&mut output, &object.evaluator_replay_profile_id);
-    append_string(&mut output, &object.decryption_proof_profile_id);
     append_varuint(&mut output, REQUIRED_FIELDS.len() as u64);
 
     append_varuint(&mut output, FIELD_TITLE);
@@ -111,8 +89,6 @@ pub fn serialize_transcript_core_object(object: &TranscriptCoreObject) -> Vec<u8
     append_varuint(&mut output, object.sequence);
     append_varuint(&mut output, FIELD_PAYLOAD);
     append_bytes(&mut output, &object.payload);
-    append_varuint(&mut output, FIELD_STATUS);
-    append_varuint(&mut output, object.status.code());
     append_varuint(&mut output, FIELD_TAGS);
     append_varuint(&mut output, object.tags.len() as u64);
     for tag in &object.tags {
@@ -160,30 +136,12 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
         ));
     }
 
-    let base_profile = parse_base_profile(reader.read_varuint()?)?;
-    let security_closure = parse_security_closure(reader.read_varuint()?)?;
-    let base_profile_id = reader.read_string()?;
-    let security_profile_id = reader.read_string()?;
-    let he_setup_proof_profile_id = reader.read_string()?;
-    let evaluator_replay_profile_id = reader.read_string()?;
-    let decryption_proof_profile_id = reader.read_string()?;
-    validate_profiles(
-        base_profile,
-        security_closure,
-        &base_profile_id,
-        &security_profile_id,
-        &he_setup_proof_profile_id,
-        &evaluator_replay_profile_id,
-        &decryption_proof_profile_id,
-    )?;
-
     let field_count = reader.read_varuint()?;
 
     let mut previous_field_id = 0_u64;
     let mut title = None;
     let mut sequence = None;
     let mut payload = None;
-    let mut status = None;
     let mut tags = None;
     let mut checkpoints = None;
 
@@ -209,7 +167,6 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
             FIELD_TITLE => title = Some(reader.read_string()?),
             FIELD_SEQUENCE => sequence = Some(reader.read_varuint()?),
             FIELD_PAYLOAD => payload = Some(reader.read_bytes()?),
-            FIELD_STATUS => status = Some(parse_status(reader.read_varuint()?)?),
             FIELD_TAGS => tags = Some(read_string_list(&mut reader)?),
             FIELD_CHECKPOINTS => checkpoints = Some(read_varuint_list(&mut reader)?),
             _ => {
@@ -229,17 +186,9 @@ pub fn parse_transcript_core_object(bytes: &[u8]) -> CanonicalResult<TranscriptC
     }
 
     let object = TranscriptCoreObject {
-        base_profile,
-        security_closure,
-        base_profile_id,
-        security_profile_id,
-        he_setup_proof_profile_id,
-        evaluator_replay_profile_id,
-        decryption_proof_profile_id,
         title: title.ok_or_else(|| missing_field("title"))?,
         sequence: sequence.ok_or_else(|| missing_field("sequence"))?,
         payload: payload.ok_or_else(|| missing_field("payload"))?,
-        status: status.ok_or_else(|| missing_field("status"))?,
         tags: tags.ok_or_else(|| missing_field("tags"))?,
         checkpoints: checkpoints.ok_or_else(|| missing_field("checkpoints"))?,
     };
@@ -277,11 +226,6 @@ pub fn analyze_canonical_object(
         canonical_bytes_hex: encode_hex(bytes),
         object_type: "TranscriptCore",
         object_version: TRANSCRIPT_CORE_OBJECT_VERSION,
-        base_profile_id: object.base_profile_id,
-        security_profile_id: object.security_profile_id,
-        he_setup_proof_profile_id: object.he_setup_proof_profile_id,
-        evaluator_replay_profile_id: object.evaluator_replay_profile_id,
-        decryption_proof_profile_id: object.decryption_proof_profile_id,
         object_hash512: object_root(bytes),
         chunk_root: chunk_root(bytes, chunk_size_usize)?,
         chunk_size,
@@ -306,100 +250,6 @@ pub fn analyze_canonical_object_hex(
     let bytes = decode_hex(canonical_bytes_hex)?;
 
     analyze_canonical_object(&bytes, chunk_size)?.to_json_value()
-}
-
-fn parse_base_profile(value: u64) -> CanonicalResult<BaseProfile> {
-    match value {
-        1 => Ok(BaseProfile::FoundationTranscript),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownBaseProfile,
-            "base claim profile is not supported",
-        )),
-    }
-}
-
-fn parse_security_closure(value: u64) -> CanonicalResult<TranscriptCoreSecurityClosure> {
-    match value {
-        3 => Ok(TranscriptCoreSecurityClosure::FoundationOnly),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownSecurityClosure,
-            "transcript-core security closure is not supported",
-        )),
-    }
-}
-
-fn parse_status(value: u64) -> CanonicalResult<TranscriptCoreStatus> {
-    match value {
-        1 => Ok(TranscriptCoreStatus::TranscriptCoreVerified),
-        _ => Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidEnum,
-            "transcript core status is not supported",
-        )),
-    }
-}
-
-fn validate_profiles(
-    base_profile: BaseProfile,
-    security_closure: TranscriptCoreSecurityClosure,
-    base_profile_id: &str,
-    security_profile_id: &str,
-    he_setup_proof_profile_id: &str,
-    evaluator_replay_profile_id: &str,
-    decryption_proof_profile_id: &str,
-) -> CanonicalResult<()> {
-    if base_profile_id != base_profile.expected_profile_id() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownProofProfile,
-            "base claim profile ID is not supported",
-        ));
-    }
-    if security_profile_id != security_closure.expected_profile_id() {
-        let allowed = [
-            FOUNDATION_ONLY_PROFILE_ID,
-            FOUNDATION_TRANSCRIPT_PROFILE_ID,
-            NO_HE_SETUP_PROOF_PROFILE_ID,
-            NO_EVALUATOR_REPLAY_PROFILE_ID,
-            NO_DECRYPTION_PROOF_PROFILE_ID,
-        ];
-        if !allowed.contains(&security_profile_id) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::UnknownProofProfile,
-                "transcript-core security profile ID is not supported",
-            ));
-        }
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "transcript-core security profile ID does not match the security closure",
-        ));
-    }
-    if he_setup_proof_profile_id != NO_HE_SETUP_PROOF_PROFILE_ID
-        || decryption_proof_profile_id != NO_DECRYPTION_PROOF_PROFILE_ID
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::UnknownProofProfile,
-            "one or more reserved proof profile IDs are not supported",
-        ));
-    }
-    if base_profile != BaseProfile::FoundationTranscript {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "transcript-core only accepts foundation transcript objects",
-        ));
-    }
-    if security_closure != TranscriptCoreSecurityClosure::FoundationOnly {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "foundation transcript requires the foundation-only closure",
-        ));
-    }
-    if evaluator_replay_profile_id != NO_EVALUATOR_REPLAY_PROFILE_ID {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "foundation transcript requires the no-evaluator-replay profile",
-        ));
-    }
-
-    Ok(())
 }
 
 // Each list item is at least one encoded byte, so a count exceeding the remaining bytes is malformed; reject before allocating to avoid an OOM from a forged length.
@@ -449,24 +299,17 @@ fn missing_field(field_name: &str) -> CanonicalError {
 }
 
 #[cfg(test)]
-pub(super) fn append_transcript_core_header(output: &mut Vec<u8>, object: &TranscriptCoreObject) {
+pub(super) fn append_transcript_core_header(output: &mut Vec<u8>) {
     output.extend(MAGIC);
     append_varuint(output, ENVELOPE_VERSION);
     append_varuint(output, TRANSCRIPT_CORE_OBJECT_TYPE);
     append_varuint(output, TRANSCRIPT_CORE_OBJECT_VERSION);
-    append_varuint(output, object.base_profile.code());
-    append_varuint(output, object.security_closure.code());
-    append_string(output, &object.base_profile_id);
-    append_string(output, &object.security_profile_id);
-    append_string(output, &object.he_setup_proof_profile_id);
-    append_string(output, &object.evaluator_replay_profile_id);
-    append_string(output, &object.decryption_proof_profile_id);
 }
 
 #[cfg(test)]
-pub(super) fn header_length_before_field_count(object: &TranscriptCoreObject) -> usize {
+pub(super) fn header_length_before_field_count() -> usize {
     let mut bytes = Vec::new();
-    append_transcript_core_header(&mut bytes, object);
+    append_transcript_core_header(&mut bytes);
 
     bytes.len()
 }

@@ -544,9 +544,6 @@ const trusteeSecretCommitmentPayload = (
 ): JsonRecord => ({
     objectType: 'TrusteeSecretCommitment',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    commitmentProfileId: setupCommitmentProfileId,
-    setupProofProfileId,
     ...contextFields(setupContext),
     trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
     trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
@@ -558,8 +555,6 @@ const trusteeSecretCommitmentPayload = (
 const sameSecretProofFamilyBindingPayload = (): JsonRecord => ({
     objectType: 'SameSecretProofFamilyBinding',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    setupProofProfileId,
     proofFamily: sameSecretProofFamily,
     sameSecretRelation,
     anchorArgument: sameSecretAnchorArgument,
@@ -961,8 +956,6 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                 {
                     objectType: 'SameSecretLinkageAnchorProofMaterialReference',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: sameSecretProofFamily,
                     trusteeIdentity: proofMaterial.trusteeIdentity,
                     trusteeRosterPosition: proofMaterial.trusteeRosterPosition,

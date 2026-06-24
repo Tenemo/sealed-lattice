@@ -28,7 +28,6 @@ export type ThresholdShareCommitmentLimb = Readonly<
     JsonRecord & {
         readonly objectType: 'ThresholdShareCommitment';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -37,7 +36,6 @@ export type ThresholdShareCommitmentLimb = Readonly<
         readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
         readonly commitmentProfileHash: ProtocolHash;
         readonly setupEpoch: string;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly derivationRule: typeof thresholdShareDerivationRule;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly recipientIdentity: string;
@@ -58,7 +56,6 @@ export type ThresholdShareCommitmentRecipient = Readonly<
     JsonRecord & {
         readonly objectType: 'TrusteeThresholdShareCommitments';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -67,7 +64,6 @@ export type ThresholdShareCommitmentRecipient = Readonly<
         readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
         readonly commitmentProfileHash: ProtocolHash;
         readonly setupEpoch: string;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly derivationRule: typeof thresholdShareDerivationRule;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly recipientIdentity: string;
@@ -84,7 +80,6 @@ export type ThresholdShareCommitmentSet = Readonly<
     JsonRecord & {
         readonly objectType: 'ThresholdShareCommitmentSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -93,7 +88,6 @@ export type ThresholdShareCommitmentSet = Readonly<
         readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
         readonly commitmentProfileHash: ProtocolHash;
         readonly setupEpoch: string;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly derivationRule: typeof thresholdShareDerivationRule;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly participantCount: number;
@@ -134,7 +128,6 @@ type ParsedCommitmentMaterial = Readonly<{
     readonly commitment: SetupCommitmentValue;
 }>;
 
-const setupProfileId = 'CollectiveBgvSetup-v1';
 const thresholdShareDerivationRule =
     'sum-source-trustee-polynomial-commitments-at-trustee-point';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -348,11 +341,6 @@ const parseCommitmentValue = (
 ): SetupCommitmentValue => {
     const commitment = assertJsonRecord(commitmentValue, objectPath);
     assertObjectType(commitment, objectPath, 'SetupCommitment');
-    if (commitment.profileId !== setupCommitmentProfileId) {
-        throw new Error(
-            `${objectPath}.profileId must be ${setupCommitmentProfileId}.`,
-        );
-    }
     const sourceRnsLimbIndex = assertNonNegativeSafeInteger(
         commitment.sourceRnsLimbIndex,
         `${objectPath}.sourceRnsLimbIndex`,
@@ -454,7 +442,16 @@ const parseMaterialSet = (
         materialSet,
         'vssCoefficientCommitmentMaterial',
     );
-    if (materialSet.commitmentProfileId !== setupCommitmentProfileId) {
+    // The embedded full-value encoding carries the commitment profile identifier;
+    // the binary-chunked encoding binds the commitment profile through the
+    // setupContext commitmentProfileHash checked above, so it does not repeat the
+    // identifier. assertContextMatches already enforces commitmentProfileHash for
+    // both encodings.
+    if (
+        materialSet.materialEncoding ===
+            'full-public-setup-commitment-values' &&
+        materialSet.commitmentProfileId !== setupCommitmentProfileId
+    ) {
         throw new Error(
             `vssCoefficientCommitmentMaterial.commitmentProfileId must be ${setupCommitmentProfileId}.`,
         );
@@ -826,9 +823,7 @@ const aggregateThresholdCommitmentLimb = (
     const limbWithoutRoot = {
         objectType: 'ThresholdShareCommitment',
         objectVersion: 1,
-        setupProfileId,
         ...setupContextFields(setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash,
         recipientIdentity,
@@ -873,9 +868,7 @@ const deriveRecipientCommitment = (
     const recipientWithoutRoot = {
         objectType: 'TrusteeThresholdShareCommitments',
         objectVersion: 1,
-        setupProfileId,
         ...setupContextFields(setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash,
         recipientIdentity: recipientRecord.sourceTrusteeIdentity,
@@ -1042,9 +1035,7 @@ export const deriveThresholdShareCommitments = (
     const thresholdShareCommitmentsWithoutRoot = {
         objectType: 'ThresholdShareCommitmentSet',
         objectVersion: 1,
-        setupProfileId,
         ...setupContextFields(input.setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash:
             input.vssCoefficientCommitments.publicMatrixSeedHash,

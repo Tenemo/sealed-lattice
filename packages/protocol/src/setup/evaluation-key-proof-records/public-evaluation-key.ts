@@ -118,8 +118,6 @@ export function createPublicEvaluationKeySet(
                     {
                         objectType: 'RelinearizationKeyAggregate',
                         objectVersion: 1,
-                        setupProfileId: 'CollectiveBgvSetup-v1',
-                        setupProofProfileId,
                         materialEncoding: publicEvaluationKeyMaterialEncoding,
                         evaluatorKeyScheduleRoot:
                             input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -209,8 +207,6 @@ export function createPublicEvaluationKeySet(
                 const galoisKeyRoot = deriveProtocolHash('RotationKeyRoot', {
                     objectType: 'GaloisKeyAggregate',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
                     evaluatorKeyScheduleRoot:
                         input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -447,8 +443,6 @@ const publicEvaluationKeyMaterialManifest = (
 ): JsonRecord => ({
     objectType: 'PublicEvaluationKeyMaterialManifest',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    setupProofProfileId,
     materialEncoding: publicEvaluationKeyMaterialEncoding,
     materialTransportEncoding: publicEvaluationKeyTransportMaterialEncoding,
     ...contextFields(input.setupContext),
@@ -581,8 +575,6 @@ const publicEvaluationKeyMaterialTransportHashes = (
         {
             objectType: 'PublicEvaluationKeyMaterialChunkManifest',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
             chunkSizeBytes: setupProofTransportChunkSizeBytes,
             chunkCount: chunkHashes.length,
@@ -610,8 +602,6 @@ const publicEvaluationKeyMaterialReferenceRoot = (
     deriveProtocolHash('PublicEvaluationKeyMaterialRoot', {
         objectType: 'PublicEvaluationKeyMaterialReference',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         ceremonyId: evaluationKeys.ceremonyId,
         manifestHash: evaluationKeys.manifestHash,

@@ -63,8 +63,6 @@ pub(in super::super) fn collective_public_key_object(
     let mut collective_public_key = serde_json::json!({
         "objectType": "CollectivePublicKey",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "aggregationStatus": "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
@@ -193,8 +191,6 @@ pub(in super::super) fn public_key_share_material_object(
         let mut material_record = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
@@ -229,8 +225,6 @@ pub(in super::super) fn public_key_share_material_object(
     let mut material_set = serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
@@ -495,8 +489,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
@@ -546,8 +538,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
         "proofAccountingHash": succinct_public_key_share_accounting_hash()
             .expect("public-key share succinct accounting hash"),

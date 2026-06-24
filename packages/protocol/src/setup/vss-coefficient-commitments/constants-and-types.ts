@@ -34,9 +34,6 @@ export const acceptedBgvSetupQSharePrimes = [
 export const acceptedBgvSetupQShare = {
     objectType: 'QSharePrimeList',
     objectVersion: 1,
-    sharingDomain: 'per-rns-prime',
-    primeOrder: 'profile-order',
-    targetDecryptionReadiness: 'refused-until-q-target-certificate-closes',
     primes: acceptedBgvSetupQSharePrimes,
 } as const;
 
@@ -253,8 +250,6 @@ export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly commitmentProfileHash: ProtocolHash;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
@@ -268,7 +263,6 @@ export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
         readonly materialRecordCount: number;
         readonly transport: Readonly<
             JsonRecord & {
-                readonly transportProfileId: typeof setupTransportProfileId;
                 readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
                 readonly chunkCount: number;
                 readonly totalByteLength: number;

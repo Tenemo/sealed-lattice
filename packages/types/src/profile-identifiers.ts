@@ -29,25 +29,6 @@ export const evaluatorReplayProfileId =
 export const directComparisonProfileId =
     'direct-encrypted-ballot-comparison-v1';
 
-/** Foundation transcript profile emitted by transcript-core fixtures. */
-export const foundationTranscriptProfileId =
-    'transcript-core-foundation-transcript-profile-v1';
-
-/** Foundation-only profile emitted by transcript-core fixtures. */
-export const foundationOnlyProfileId =
-    'transcript-core-foundation-only-profile-v1';
-
-/** HE setup proof placeholder profile emitted by transcript-core fixtures. */
-export const noHeSetupProofProfileId = 'transcript-core-no-he-setup-proof-v1';
-
-/** Evaluator replay placeholder profile emitted by transcript-core fixtures. */
-export const noEvaluatorReplayProfileId =
-    'transcript-core-no-evaluator-replay-proof-v1';
-
-/** Decryption proof placeholder profile emitted by transcript-core fixtures. */
-export const noDecryptionProofProfileId =
-    'transcript-core-no-decryption-proof-v1';
-
 /** Mobile replay profile required by accepted manifests. */
 export const mobileProfileId = 'mobile-flagship-profile-v1';
 

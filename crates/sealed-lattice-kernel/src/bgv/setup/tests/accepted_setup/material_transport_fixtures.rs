@@ -234,8 +234,6 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
         &serde_json::json!({
             "objectType": "SetupTransportFullObjectSet",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
             "transportedObjects": transported_object_summaries,
             "totalByteLength": total_byte_length,
             "chunkCount": chunk_count,
@@ -460,8 +458,6 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         proof_materials.push(serde_json::json!({
             "objectType": "SetupTransportedSameSecretProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -486,8 +482,6 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
     serde_json::json!({
         "objectType": "SetupTransportedSameSecretProofMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "same-secret-linkage-anchor",
         "proofMaterials": proof_materials,
     })
@@ -551,8 +545,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
         proof_materials.push(serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
             "proofMaterialRoot": proof_record["proofMaterialRoot"],
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -578,8 +570,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
     serde_json::json!({
         "objectType": "SetupTransportedPublicKeyShareProofMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "proofMaterials": proof_materials,
     })
@@ -754,8 +744,6 @@ fn assemble_transported_public_setup_companions(
     let evaluation_key_share_component_material = serde_json::json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "componentMaterials": evaluation_key_transport_sinks.component_materials.clone(),
     });
     package["trusteeEvaluationKeyProofs"] =
@@ -782,8 +770,6 @@ fn assemble_transported_public_setup_companions(
     let evaluation_key_share_proof_material = serde_json::json!({
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "trustee-evaluation-key",
         "proofMaterials": evaluation_key_transport_sinks.proof_materials,
     });
@@ -1056,8 +1042,6 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
     let mut component_material = serde_json::json!({
             "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": proof_family.proof_family(),
             "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
             "trusteeIdentity": proof_record["trusteeIdentity"],
@@ -1102,8 +1086,6 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
     serde_json::json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "componentMaterials": [component_material],
     })
 }
@@ -1156,8 +1138,6 @@ fn move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(
     let mut proof_material = serde_json::json!({
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_record["proofMaterialRoot"],
@@ -1217,7 +1197,6 @@ pub(super) fn move_public_key_share_material_to_transport(
         material_set_object.insert(
             "transport".to_string(),
             serde_json::json!({
-                "transportProfileId": "sealed-lattice-setup-binary-chunked-transport-v1",
                 "chunkSizeBytes": 1_048_576,
                 "chunkCount": transport_hashes.chunk_hashes.len(),
                 "totalByteLength": transport_hashes.total_byte_length,

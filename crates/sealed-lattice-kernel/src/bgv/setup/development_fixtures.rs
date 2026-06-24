@@ -99,7 +99,6 @@ pub(super) fn development_encryption_fixture(
     let public_key_material_root = derive_protocol_hash(
         "BGVPublicKeyRoot",
         &json!({
-            "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
             "collectivePublicKeyRoot": string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?,
             "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
             "sampleModulus": modulus,
@@ -110,7 +109,6 @@ pub(super) fn development_encryption_fixture(
     let randomness_root = hash512_hex(
         "sealed-lattice-bgv-rns/development-encryption-randomness-root-v1",
         &[canonical_json(&json!({
-            "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
             "sampledRandomnessCoefficients": sample_signed_values(&encryption_randomness_coefficients),
             "sampledErrorZeroCoefficients": sample_signed_values(&encryption_error_zero_coefficients),
             "sampledErrorOneCoefficients": sample_signed_values(&encryption_error_one_coefficients),
@@ -119,8 +117,6 @@ pub(super) fn development_encryption_fixture(
     let fixture_record = json!({
         "objectType": "BgvDevelopmentEncryptionFixture",
         "objectVersion": 1,
-        "fixtureId": DEVELOPMENT_ENCRYPTION_FIXTURE_ID,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,

@@ -51,11 +51,8 @@ export type BgvRnsProfileForCertificates = Readonly<
     JsonRecord & {
         readonly profile: Readonly<
             JsonRecord & {
-                readonly profileId: string;
-                readonly backendProfileId: string;
                 readonly polynomialDegree: number;
                 readonly plaintextModulus: number;
-                readonly dataBasisId: string;
                 readonly dataPrimes: readonly number[];
                 readonly specialPrime: number;
             }
@@ -96,7 +93,6 @@ export type SetupCommitmentSecurityCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupCommitmentSecurityCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
     }
 >;
@@ -105,7 +101,6 @@ export type SetupCommitmentSecurityCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupCommitmentSecurityCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 
@@ -113,7 +108,6 @@ export type SetupTransportCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupTransportCertificateHash: ProtocolHash;
     }
 >;
@@ -122,7 +116,6 @@ export type SetupTransportCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 
@@ -130,7 +123,6 @@ export type SetupProofAccountingCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupProofAccountingCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofAccountingCertificateHash: ProtocolHash;
     }
 >;
@@ -139,7 +131,6 @@ export type SetupProofAccountingCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupProofAccountingCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 
@@ -147,7 +138,6 @@ export type BgvHeSecurityCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvHeSecurityCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly heSecurityCertificateHash: ProtocolHash;
     }
 >;
@@ -156,7 +146,6 @@ export type BgvHeSecurityCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvHeSecurityCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 

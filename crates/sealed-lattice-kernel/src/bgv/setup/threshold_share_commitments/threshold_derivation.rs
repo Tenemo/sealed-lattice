@@ -40,8 +40,6 @@ pub(super) fn threshold_share_commitment_set(
     let mut commitment_set = json!({
         "objectType": THRESHOLD_SHARE_COMMITMENT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "participantCount": roster.participant_count,
@@ -118,8 +116,6 @@ fn threshold_share_recipient_record(
     let mut recipient_record = json!({
         "objectType": THRESHOLD_SHARE_RECIPIENT_COMMITMENT_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "recipientIdentity": recipient_identity,
@@ -251,8 +247,6 @@ pub(super) fn threshold_limb_commitment_root_payload(
     let mut payload = json!({
         "objectType": THRESHOLD_SHARE_LIMB_COMMITMENT_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "derivationRule": THRESHOLD_SHARE_DERIVATION_RULE,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "recipientIdentity": recipient_identity,
@@ -337,8 +331,6 @@ pub(super) fn transported_vss_material_set_value(
     let mut material_set = json!({
         "objectType": "VssCoefficientCommitmentMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "materialEncoding": "binary-chunked-full-public-setup-commitment-values",
         "binaryFormat": VSS_MATERIAL_BINARY_FORMAT,
@@ -351,7 +343,6 @@ pub(super) fn transported_vss_material_set_value(
         "ringDegreeStatus": ring_degree_status,
         "materialRecordCount": material_record_count,
         "transport": {
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": hashes.chunk_hashes.len(),
             "totalByteLength": hashes.total_byte_length,

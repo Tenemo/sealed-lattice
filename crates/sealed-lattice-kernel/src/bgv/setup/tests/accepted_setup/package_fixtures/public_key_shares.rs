@@ -56,8 +56,6 @@ pub(super) fn public_key_shares_object(
         let mut share_record = serde_json::json!({
             "objectType": "PublicKeyShare",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
@@ -92,8 +90,6 @@ pub(super) fn public_key_shares_object(
     let mut share_set = serde_json::json!({
         "objectType": "PublicKeyShareSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofBindingStatus": "public-key-share-proof-required",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
@@ -160,8 +156,6 @@ pub(super) fn public_key_share_proofs_object(
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareProof",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
@@ -197,8 +191,6 @@ pub(super) fn public_key_share_proofs_object(
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareProofSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
@@ -249,8 +241,6 @@ pub(super) fn evaluator_key_schedule_object(
     let mut schedule = serde_json::json!({
         "objectType": "EvaluatorKeySchedule",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,

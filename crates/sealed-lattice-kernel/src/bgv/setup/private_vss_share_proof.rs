@@ -9,11 +9,7 @@ use crate::{
 
 use super::{
     accepted_setup::{COLLECTIVE_BGV_SETUP_PROFILE_ID, setup_proof_profile_hash},
-    commitment::{
-        SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue,
-        setup_commitment_root,
-    },
-    setup_proof::SETUP_PROOF_PROFILE_ID,
+    commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
     setup_proof::{
         SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         setup_proof_material_transport_hashes,
@@ -33,9 +29,6 @@ const PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPrivateVssShareProofMaterialSet";
 const PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedPrivateVssShareProofMaterial";
-
-pub(super) const PRIVATE_VSS_SHARE_PROOF_PROFILE_ID: &str =
-    "sealed-lattice-private-vss-share-proof-succinct-v1";
 
 pub(super) struct PrivateVssShareSuccinctProofVerificationInput<'a> {
     pub(super) setup_context: &'a Value,
@@ -240,18 +233,6 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
             "private VSS share proof objectVersion must be 1",
         ));
     }
-    expect_string_field(
-        proof_record,
-        "proofProfileId",
-        PRIVATE_VSS_SHARE_PROOF_PROFILE_ID,
-        "private VSS share proofProfileId does not match the accepted private proof profile",
-    )?;
-    expect_string_field(
-        proof_record,
-        "setupProofProfileId",
-        SETUP_PROOF_PROFILE_ID,
-        "private VSS share setupProofProfileId does not match the accepted setup-proof profile",
-    )?;
     expect_string_field(
         proof_record,
         "proofFamily",
@@ -526,8 +507,6 @@ fn verify_transported_private_vss_share_proof_material_set_header(
             "objectType",
             PRIVATE_VSS_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE,
         ),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", PRIVATE_VSS_SHARE_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -550,8 +529,6 @@ fn verify_transported_private_vss_share_proof_material_header(
 ) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", PRIVATE_VSS_SHARE_PROOF_TRANSPORT_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", PRIVATE_VSS_SHARE_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -733,11 +710,7 @@ fn private_vss_share_succinct_statement_value(
     Ok(json!({
         "objectType": "PrivateVssShareSuccinctProofStatement",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "setupProofBinding": setup_proof_binding,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
-        "proofProfileId": PRIVATE_VSS_SHARE_PROOF_PROFILE_ID,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofAccountingHash": succinct_private_vss_share_accounting_hash()?,
         "setupContext": input.setup_context,
@@ -775,9 +748,6 @@ pub(super) fn private_vss_share_succinct_proof_material_root(
         &json!({
             "objectType": "PrivateVssShareSuccinctProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofProfileId": PRIVATE_VSS_SHARE_PROOF_PROFILE_ID,
             "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
             "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
             "statementHash": statement_hash_hex,
@@ -798,9 +768,6 @@ fn private_vss_share_succinct_transported_proof_material_root(
         &json!({
             "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofProfileId": PRIVATE_VSS_SHARE_PROOF_PROFILE_ID,
             "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
             "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
             "statementHash": statement_hash_hex,
@@ -1007,8 +974,6 @@ pub(super) fn private_vss_share_succinct_proof_record(
     Ok(json!({
         "objectType": "PrivateVssShareProof",
         "objectVersion": 1,
-        "proofProfileId": PRIVATE_VSS_SHARE_PROOF_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
         "proofAccountingHash": proof_accounting_hash,

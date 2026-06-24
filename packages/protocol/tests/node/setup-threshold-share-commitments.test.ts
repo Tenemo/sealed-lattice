@@ -207,7 +207,6 @@ describe('threshold-share commitment derivation', () => {
 
         expect(thresholdShareCommitments).toMatchObject({
             objectType: 'ThresholdShareCommitmentSet',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             participantCount,
             thresholdDegree,
             rnsLimbCount: qSharePrimes.length,

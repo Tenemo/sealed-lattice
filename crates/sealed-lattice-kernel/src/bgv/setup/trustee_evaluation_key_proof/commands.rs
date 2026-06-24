@@ -20,7 +20,6 @@ use super::verifier::verify_evaluation_key_share;
 use super::*;
 use crate::bgv::profile::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
-use crate::bgv::setup::setup_proof::SETUP_PROOF_PROFILE_ID;
 use crate::hashing::{derive_protocol_hash, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
@@ -158,8 +157,6 @@ fn statement_bound_proof_randomness_seed_hex(
         &json!({
             "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": &statement.context.proof_family,
             "statementHash": statement_hash,
             "trusteeIdentity": &statement.context.trustee_identity,

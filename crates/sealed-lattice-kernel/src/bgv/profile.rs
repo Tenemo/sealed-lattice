@@ -6,7 +6,6 @@ use crate::{
 };
 
 pub(crate) const PROFILE_ID: &str = "sealed-lattice-bgv-rns-v1";
-pub(crate) const BACKEND_PROFILE_ID: &str = "sealed-lattice-rust-wasm-bgv-rns-v1";
 // Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
 pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
 // Plaintext modulus t. 65537 is the Fermat prime 2^16+1; t-1 = 2^16 is
@@ -15,20 +14,6 @@ pub(crate) const PLAINTEXT_MODULUS: u64 = 65_537;
 pub(crate) const DATA_BASIS_ID: &str = "sealed-lattice-bgv-rns-data-basis-v1";
 pub(crate) const EXTENDED_BASIS_ID: &str = "sealed-lattice-bgv-rns-extended-basis-v1";
 pub(crate) const SPECIAL_BASIS_ID: &str = "sealed-lattice-bgv-rns-special-basis-v1";
-pub(crate) const ENCRYPTED_BALLOT_AGGREGATE_LAYOUT_ID: &str =
-    "direct-encrypted-ballot-aggregate-layout-v1";
-pub(crate) const BATCH_ENCODER_ID: &str = "BGVBatchEncode_65537-v1";
-pub(crate) const CANONICAL_CIPHERTEXT_CONVENTION_ID: &str =
-    "sealed-lattice-coefficient-domain-rns-ciphertext-v1";
-pub(crate) const OPERATION_REGISTRY_ID: &str = "sealed-lattice-bgv-allowed-ops-v1";
-pub(crate) const BATCH_LAYOUT_KIND: &str = "DirectEncryptedBallotAggregateLayout-v1";
-pub(crate) const BALLOT_SCORE_ENCODING_PROFILE_ID: &str =
-    "ballot-score-encoding-profile-hidden-one-hot-v1";
-pub(crate) const ENCRYPTED_BALLOT_LAYOUT_PROFILE_ID: &str = "direct-encrypted-ballot-layout-v1";
-pub(crate) const ENCRYPTED_BALLOT_AGGREGATE_PROFILE_ID: &str =
-    "direct-encrypted-ballot-aggregate-v1";
-pub(crate) const DIRECT_AGGREGATE_LAYOUT_ID: &str = "direct-aggregate-layout-v1";
-pub(crate) const DIRECT_COMPARISON_PROFILE_ID: &str = "direct-encrypted-ballot-comparison-v1";
 
 mod root_parameters;
 
@@ -39,21 +24,13 @@ pub(crate) use root_parameters::{
 };
 pub(crate) fn selected_profile_value() -> Value {
     json!({
-        "profileId": PROFILE_ID,
-        "backendProfileId": BACKEND_PROFILE_ID,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
-        "dataBasisId": DATA_BASIS_ID,
-        "extendedBasisId": EXTENDED_BASIS_ID,
-        "specialBasisId": SPECIAL_BASIS_ID,
         "dataPrimes": DATA_PRIMES,
         "specialPrime": SPECIAL_PRIME,
         "dataPrimeBitLength": data_prime_bit_length(),
         "dataLevels": DATA_PRIMES.len(),
         "extendedLevels": DATA_PRIMES.len() + 1,
-        "encryptedBallotAggregateLayoutId": ENCRYPTED_BALLOT_AGGREGATE_LAYOUT_ID,
-        "batchEncoderId": BATCH_ENCODER_ID,
-        "canonicalCiphertextConventionId": CANONICAL_CIPHERTEXT_CONVENTION_ID,
         "nttRootParameters": ROOT_PARAMETERS.iter().map(|parameters| json!({
             "modulus": parameters.modulus,
             "primitiveGenerator": parameters.primitive_generator,
@@ -74,10 +51,7 @@ pub(crate) fn backend_profile_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "RustBgvBackendProfileHash",
         &json!({
-            "backendProfileId": BACKEND_PROFILE_ID,
             "profileHash": profile_hash()?,
-            "ownedBy": "sealed-lattice-rust-wasm",
-            "referenceOracleStatus": "development-only-not-runtime",
         }),
     )
 }
@@ -86,11 +60,9 @@ pub(crate) fn batch_encoder_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "BGVBatchEncoderHash",
         &json!({
-            "encoderId": BATCH_ENCODER_ID,
             "profileHash": profile_hash()?,
             "plaintextModulus": PLAINTEXT_MODULUS,
             "polynomialDegree": POLYNOMIAL_DEGREE,
-            "layoutId": ENCRYPTED_BALLOT_AGGREGATE_LAYOUT_ID,
             "layoutBindingHash": batch_layout_binding_hash()?,
         }),
     )
@@ -100,12 +72,8 @@ pub(crate) fn encrypted_ballot_aggregate_layout_hash() -> CanonicalResult<String
     derive_protocol_hash(
         "EncryptedBallotAggregateLayoutHash",
         &json!({
-            "layoutId": ENCRYPTED_BALLOT_AGGREGATE_LAYOUT_ID,
             "profileHash": profile_hash()?,
             "slotCount": POLYNOMIAL_DEGREE,
-            "coordinateField": "GF(65537)",
-            "source": "DirectEncryptedBallotAggregate",
-            "ballotPrivacy": "ciphertext-only-direct-ballots",
         }),
     )
 }
@@ -114,14 +82,11 @@ pub(crate) fn ballot_score_encoding_profile_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "BallotScoreEncodingProfileHash",
         &json!({
-            "profileId": BALLOT_SCORE_ENCODING_PROFILE_ID,
             "scoreRange": {
                 "minimum": 1,
                 "maximum": 10
             },
-            "encoding": "score-share-plus-hidden-one-hot-buckets",
             "bucketCount": 10,
-            "field": "GF(65537)",
         }),
     )
 }
@@ -130,31 +95,19 @@ pub(crate) fn encrypted_ballot_layout_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "EncryptedBallotLayoutHash",
         &json!({
-            "profileId": ENCRYPTED_BALLOT_LAYOUT_PROFILE_ID,
-            "coordinateOrder": "encrypted-score-then-one-hot-score-buckets-per-option",
             "coordinatesPerOption": 11,
-            "field": "GF(65537)",
         }),
     )
 }
 
 pub(crate) fn encrypted_ballot_aggregate_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EncryptedBallotAggregateProfileHash",
-        &json!({
-            "profileId": ENCRYPTED_BALLOT_AGGREGATE_PROFILE_ID,
-            "sourceRelation": "direct encrypted ballot aggregation",
-            "sourceObject": "DirectEncryptedBallotCiphertexts",
-            "ballotPrivacy": "ciphertext-only-direct-ballots",
-        }),
-    )
+    derive_protocol_hash("EncryptedBallotAggregateProfileHash", &json!({}))
 }
 
 pub(crate) fn direct_aggregate_layout_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "DirectAggregateLayoutHash",
         &json!({
-            "layoutId": DIRECT_AGGREGATE_LAYOUT_ID,
             "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
             "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
             "slotCount": POLYNOMIAL_DEGREE,
@@ -167,10 +120,8 @@ pub(crate) fn direct_comparison_profile_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "DirectComparisonProfileHash",
         &json!({
-            "layoutId": DIRECT_COMPARISON_PROFILE_ID,
             "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
             "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
-            "acceptedEvaluatorInput": "direct-encrypted-ballot-aggregate-score-coordinates",
             "rejectScalarOnlyAggregateLayouts": true,
         }),
     )
@@ -178,15 +129,12 @@ pub(crate) fn direct_comparison_profile_hash() -> CanonicalResult<String> {
 
 pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "layoutKind": BATCH_LAYOUT_KIND,
         "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
         "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
         "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
         "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
         "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
         "directComparisonProfileHash": direct_comparison_profile_hash()?,
-        "coordinateOrder": "encrypted-score-then-one-hot-score-buckets-per-option",
-        "oneHotBucketOrder": "ascending-score-1-through-10",
         "scoreBucketCount": 10,
         "scoreRange": {
             "minimum": 1,
@@ -207,12 +155,8 @@ pub(crate) fn canonical_ciphertext_convention_hash() -> CanonicalResult<String> 
     derive_protocol_hash(
         "CanonicalCiphertextConventionHash",
         &json!({
-            "conventionId": CANONICAL_CIPHERTEXT_CONVENTION_ID,
             "profileHash": profile_hash()?,
             "coefficientDomainOnly": true,
-            "publicKeyRelation": "componentZero=p*e-a*s,componentOne=a",
-            "encryptionRelation": "c0=componentZero*u+p*e0+m,c1=componentOne*u+p*e1",
-            "messageEmbedding": "least-significant-residue-mod-plaintext-modulus",
             "lattigoSerializationAccepted": false,
         }),
     )
@@ -220,7 +164,6 @@ pub(crate) fn canonical_ciphertext_convention_hash() -> CanonicalResult<String> 
 
 pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "operationRegistryId": OPERATION_REGISTRY_ID,
         "profileHash": profile_hash()?,
         "batchEncoderHash": batch_encoder_hash()?,
         "allowedOperations": [
@@ -259,7 +202,6 @@ pub(crate) fn security_estimator_input_hash() -> CanonicalResult<String> {
     Ok(hash512_hex(
         "sealed-lattice-bgv-rns/security-estimator-input-v1",
         &[
-            PROFILE_ID.as_bytes(),
             POLYNOMIAL_DEGREE.to_string().as_bytes(),
             PLAINTEXT_MODULUS.to_string().as_bytes(),
             DATA_PRIMES
@@ -535,15 +477,7 @@ mod tests {
     fn batch_layout_binding_rejects_scalar_only_layouts_by_construction() {
         let binding = batch_layout_binding_value().expect("layout binding");
 
-        assert_eq!(
-            binding["layoutKind"],
-            "DirectEncryptedBallotAggregateLayout-v1"
-        );
         assert_eq!(binding["scalarOnlyAggregateLayout"], false);
-        assert_eq!(
-            binding["coordinateOrder"],
-            "encrypted-score-then-one-hot-score-buckets-per-option"
-        );
         assert_eq!(binding["scoreBucketCount"], 10);
         assert!(
             binding["encryptedBallotAggregateLayoutHash"]

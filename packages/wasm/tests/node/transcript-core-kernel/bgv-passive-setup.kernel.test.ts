@@ -55,9 +55,12 @@ describe('BGV passive passive BGV setup kernel commands', () => {
 
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
-        expect(setup.targetDecryptionStatus).toMatchObject({
-            targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
-        });
+        expect(
+            setup.targetDecryptionStatus.targetDecryptionProfileHash,
+        ).toMatch(/^[a-f0-9]{128}$/u);
+        expect(
+            setup.targetDecryptionStatus.targetDecryptionProfileBindingHash,
+        ).toMatch(/^[a-f0-9]{128}$/u);
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
         });

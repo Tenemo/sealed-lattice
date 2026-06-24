@@ -372,14 +372,6 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
         "0.03348894742626385"
     );
     assert!(log2_string_field(published_reference_row, "weakestAttackCostLog2") >= 128.0);
-
-    // The forward-looking target-decryption profile identifier stays bound; the
-    // self-attested readiness/coverage flags around it were dropped.
-    assert!(
-        certificate["targetDecryptionStatus"]["targetDecryptionProfileId"]
-            .as_str()
-            .is_some_and(|profile_id| !profile_id.is_empty())
-    );
 }
 
 fn log2_string_field(row: &serde_json::Value, field_name: &str) -> f64 {

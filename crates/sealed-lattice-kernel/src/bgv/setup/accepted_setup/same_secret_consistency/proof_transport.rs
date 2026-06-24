@@ -86,8 +86,6 @@ pub(in crate::bgv::setup) fn same_secret_anchor_proof_material_root(
         &json!({
             "objectType": "SameSecretLinkageAnchorProofMaterialReference",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
             "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
@@ -257,8 +255,6 @@ fn transported_same_secret_proof_material_chunks(
 fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -281,8 +277,6 @@ fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> Ca
 fn verify_transported_same_secret_proof_material_header(value: &Value) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {

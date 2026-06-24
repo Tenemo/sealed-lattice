@@ -9,7 +9,6 @@ pub(super) fn public_rlwe_samples_by_basis(
 
     json!({
         "QData": {
-            "basisId": BgvBasisKind::Data.basis_id(),
             "modulusBits": q_data_bits,
             "publicKeyShares": participant_count,
             "collectivePublicKey": 1,
@@ -19,7 +18,6 @@ pub(super) fn public_rlwe_samples_by_basis(
             "keySwitchKeys": 1,
         },
         "QPPublic": {
-            "basisId": BgvBasisKind::Extended.basis_id(),
             "modulusBits": q_extended_utility_bits,
             "relinearizationKeys": 0,
             "rotationKeys": 0,
@@ -71,7 +69,6 @@ pub(super) fn evaluation_key_size_certificate(evaluation_keys: &Value) -> Canoni
     Ok(json!({
         "objectType": "EvaluationKeySizeCertificate",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "dataBasisPolynomialByteEstimate": polynomial_byte_estimate_data,
         "extendedBasisPolynomialByteEstimate": polynomial_byte_estimate_extended,
@@ -95,7 +92,6 @@ pub(super) fn evaluation_key_streaming_commitment(
     let stream_record = json!({
         "objectType": "BgvEvaluationKeyMaterialCommitmentStream",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "evaluationKeyRoot": evaluation_keys["evaluationKeyRoot"],
         "rotSetHash": evaluation_keys["rotSetHash"],
         "relinearizationKeyRoot": evaluation_keys["relinearizationKeyRoot"],
@@ -112,8 +108,6 @@ pub(super) fn evaluation_key_streaming_commitment(
     let commitment_record = json!({
         "objectType": "BgvEvaluationKeyStreamingCommitment",
         "objectVersion": 1,
-        "commitmentId": EVALUATION_KEY_STREAMING_COMMITMENT_ID,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "streamRecord": stream_record,
         "canonicalStreamByteLength": stream_bytes.len(),
         "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,

@@ -1,7 +1,6 @@
 use super::validation::*;
 use super::*;
 
-pub(in super::super) const SETUP_COMMITMENT_PROFILE_ID: &str = "SealedLattice-BDLOP-Commitment-v1";
 pub(in super::super) const SETUP_COMMITMENT_MODULE_RANK: usize = 2;
 pub(in super::super) const SETUP_COMMITMENT_RANDOMNESS_WIDTH: usize =
     (2 * SETUP_COMMITMENT_MODULE_RANK) + 1;
@@ -16,8 +15,6 @@ pub(in super::super) fn setup_commitment_profile_value() -> CanonicalResult<Valu
     Ok(json!({
         "objectType": "BdlopCommitmentProfile",
         "objectVersion": 1,
-        "profileId": SETUP_COMMITMENT_PROFILE_ID,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "construction": "BDLOP simplified matrix commitment",
         "ring": {
             "coefficientRing": "Z_q[X]/(X^N+1)",

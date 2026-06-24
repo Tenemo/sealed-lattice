@@ -15,21 +15,17 @@ const invalidDynamicRosterProfileCertificateHash = 'not-a-protocol-hash';
 const rosterHash = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 const pollSpec = {
-    duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
     maxRosterSize: 20,
     minRosterSize: 10,
     options: ['Alpha', 'Beta'],
     pollId: 'threshold-profile-test',
     question: 'Choose one',
-    rosterPolicy: 'OpenLinkPublicRoster',
     scoreDomain: {
         max: 10,
         min: 1,
         skippedOptionScore: 1,
     },
     smallRosterPolicy: 'ForbidMicroRoster',
-    thresholdProfileFamily: 'BalancedDefault',
-    tiePolicy: 'HigherScoreThenLowerOptionIndex',
     topOptionCount: 1,
 } as const satisfies PollSpec;
 

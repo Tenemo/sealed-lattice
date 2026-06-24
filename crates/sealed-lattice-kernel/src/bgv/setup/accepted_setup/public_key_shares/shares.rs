@@ -50,11 +50,8 @@ pub(in super::super) fn verify_public_key_shares(
             "setupPackage.publicKeyShares",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofBindingStatus", "public-key-share-proof-required"),
-    ] {
+    for (field_name, expected_value) in [("proofBindingStatus", "public-key-share-proof-required")]
+    {
         if share_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_refusal(
                 "publicKeyShareSetProfileMismatch",
@@ -215,8 +212,6 @@ fn verify_public_key_share_record(
         )?));
     }
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("shareComponent", "component-zero-b_i"),
         ("proofBindingStatus", "public-key-share-proof-required"),
     ] {

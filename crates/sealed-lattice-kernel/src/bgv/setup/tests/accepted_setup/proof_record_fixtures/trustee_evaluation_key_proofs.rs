@@ -117,8 +117,6 @@ fn trustee_evaluation_key_proofs_object_inner(
                 let record = serde_json::json!({
                     "objectType": "TrusteeEvaluationKeyProof",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
                     "ceremonyId": setup_context["ceremonyId"],
                     "manifestHash": setup_context["manifestHash"],
@@ -209,8 +207,6 @@ fn trustee_evaluation_key_proofs_object_inner(
     let mut proof_set = serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofAccountingHash": succinct_evaluation_key_proof_accounting_hash()
             .expect("succinct evaluation-key proof accounting hash"),
@@ -484,8 +480,6 @@ fn transported_trustee_evaluation_key_proof_material(
     serde_json::json!({
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_record["proofMaterialRoot"],

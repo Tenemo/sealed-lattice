@@ -324,8 +324,6 @@ fn setup_commitment_matrix_entry_hash(
         &json!({
             "objectType": "SetupCommitmentMatrixEntryDerivation",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "coordinate": coordinate,
             "coefficientValue": coefficient_value,

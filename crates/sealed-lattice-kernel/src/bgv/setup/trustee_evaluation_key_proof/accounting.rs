@@ -487,17 +487,17 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // magnitude-two centered-binomial witnesses (clear claim bound about 2^24,
     // per-claim statistical distance about 2^-68). The recipient-private VSS
     // family masks only the carry and the ternary opening-randomness columns: its
-    // message (Shamir coefficient) columns carry no consistency claim because the
-    // per-field opening rows plus the opening-randomness consistency already pin
-    // them across the commitment fields (see consistency_vector_count in
-    // relation.rs), so masking them would add leakage with no soundness gain. Its
-    // clear claim bound is therefore carry-driven (about 2^34) and its real
-    // per-claim leakage about 2^-58 (about 2^-41 across the first profile's ~2^17
-    // claims) -- still the leakage-dominating family of the four, but only mildly,
-    // not by the ~46 bits the message-masking variant cost. The smudging and
-    // integer-binding rows are recomputed from that carry bound below, sourced
-    // from the same helper masked_claim_bounds uses, so the disclosed figures stay
-    // honest and cannot diverge from the relation bound.
+    // message (Shamir coefficient) columns carry no consistency claim because
+    // their cross-field consistency is argued globally by carry consistency, the
+    // public range-checked share, and enough honest recipient checks. Masking
+    // them would add leakage with no soundness gain. Its clear claim bound is
+    // therefore carry-driven (about 2^34) and its real per-claim leakage about
+    // 2^-58 (about 2^-40 across the first profile's ~2^17.7 adversary-view
+    // claims) -- still the leakage-dominating family of the four, but only
+    // mildly, not by the ~46 bits the message-masking variant cost. The smudging
+    // and integer-binding rows are recomputed from that carry bound below,
+    // sourced from the same helper masked_claim_bounds uses, so the disclosed
+    // figures stay honest and cannot diverge from the relation bound.
     let mut accounting = migrated_family_accounting(
         "SuccinctPrivateVssShareAccounting",
         super::PRIVATE_VSS_SHARE_PROOF_FAMILY,

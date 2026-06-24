@@ -19,11 +19,11 @@
     },
     {
       "path": "plaintext-oracle/top-k.json",
-      "sha256": "3b84ba53c8af0946c1b62fa2c94f3c682c8f21ad4b51dda48dc053ff03f4f7d5"
+      "sha256": "a64b1ddeef0f6c23b96709c19d1678869aafe424eea08527accb38924975ce8a"
     },
     {
       "path": "succinct-setup-statement-hashes.json",
-      "sha256": "4ccf0ebc5bfdb791758f837058fb5f7f6dd6d4a3c2c1f734c9f9a8eb2828ca93"
+      "sha256": "6119d614ac8765c2e94beeeb17f20513e6147bb0c6088f937cc0c65f01df6086"
     }
   ]
 }

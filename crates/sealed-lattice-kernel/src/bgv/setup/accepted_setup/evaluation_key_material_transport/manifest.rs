@@ -7,8 +7,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
     Ok(json!({
         "objectType": "PublicEvaluationKeyMaterialManifest",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
         "materialTransportEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,

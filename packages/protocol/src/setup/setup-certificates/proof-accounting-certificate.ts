@@ -2,11 +2,9 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    setupProfileId,
     setupProofByteDecoder,
     setupProofBytesDomain,
     setupProofFamilies,
-    setupProofProfileId,
     setupProofSerialization,
     succinctEvaluationKeyProofAccountingHashNamespace,
     succinctPrivateVssShareAccountingHashNamespace,
@@ -17,7 +15,6 @@ import {
     acceptedCertificateTemplate,
     hashField,
     objectField,
-    stringField,
 } from './field-helpers.js';
 import type {
     CollectiveBgvSetupProfileForCertificates,
@@ -34,8 +31,6 @@ const setupProofRecordBindingForCertificate = (
     return {
         objectType: 'SetupProofRecordBinding',
         objectVersion: 1,
-        setupProfileId,
-        setupProofProfileId,
         setupProofProfileHash: setupProfile.setupProofProfileHash,
         proofBytesDomain: setupProofBytesDomain,
         proofSerialization: setupProofSerialization,
@@ -83,7 +78,6 @@ const setupProofFamilyAccounting = (
 const setupProofSuccinctTransportAccounting = (): JsonRecord => ({
     objectType: 'SetupProofSuccinctTransportAccounting',
     objectVersion: 1,
-    setupProofProfileId,
 });
 
 const setupProofSuccinctLeakageAccounting = (
@@ -94,7 +88,6 @@ const setupProofSuccinctLeakageAccounting = (
 ): JsonRecord => ({
     objectType: 'SetupProofSuccinctLeakageAccounting',
     objectVersion: 1,
-    setupProofProfileId,
     familyAccountingHashes: {
         sameSecretLinkageAnchor: sameSecretLinkageAnchorProofAccountingHash,
         publicKeyShare: publicKeyShareProofAccountingHash,
@@ -111,7 +104,6 @@ const setupProofFiatShamirTranscriptAccounting = (
 ): JsonRecord => ({
     objectType: 'SetupProofFiatShamirTranscriptAccounting',
     objectVersion: 1,
-    setupProofProfileId,
     familyAccountingHashes: {
         sameSecretLinkageAnchor: sameSecretLinkageAnchorProofAccountingHash,
         publicKeyShare: publicKeyShareProofAccountingHash,
@@ -130,7 +122,6 @@ const setupProofTheoremAccounting = (
 ): JsonRecord => ({
     objectType: 'SetupProofTheoremAccounting',
     objectVersion: 1,
-    setupProofProfileId,
     proofFamilies: [
         'same-secret-linkage-anchor',
         'public-key-share',
@@ -152,17 +143,6 @@ const setupProofAccountingCertificateBody = (
     trusteeEvaluationKeyProofAccounting: JsonRecord,
 ): SetupProofAccountingCertificateBody => {
     const setupProofProfile = setupProfile.setupProofProfile;
-    if (
-        stringField(
-            setupProofProfile,
-            'profileId',
-            'setupProfile.setupProofProfile',
-        ) !== setupProofProfileId
-    ) {
-        throw new Error(
-            `setupProfile.setupProofProfile.profileId must be ${setupProofProfileId}.`,
-        );
-    }
     const setupProofRecordBinding =
         setupProofRecordBindingForCertificate(setupProfile);
     const sameSecretLinkageAnchorProofAccountingHash = deriveProtocolHash(
@@ -203,9 +183,7 @@ const setupProofAccountingCertificateBody = (
     return {
         objectType: 'SetupProofAccountingCertificate',
         objectVersion: 1,
-        setupProfileId,
         setupProfileHash: setupProfile.setupProfileHash,
-        setupProofProfileId,
         setupProofProfileHash: setupProfile.setupProofProfileHash,
         setupProofRecordBinding,
         setupProofRecordBindingHash: deriveProtocolHash(

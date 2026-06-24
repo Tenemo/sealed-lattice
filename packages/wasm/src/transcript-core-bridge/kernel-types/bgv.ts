@@ -145,21 +145,13 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
 
 export type BgvRnsProfileDescription = {
     readonly profile: {
-        readonly profileId: string;
-        readonly backendProfileId: string;
         readonly polynomialDegree: number;
         readonly plaintextModulus: number;
-        readonly dataBasisId: string;
-        readonly extendedBasisId: string;
-        readonly specialBasisId: string;
         readonly dataPrimes: readonly number[];
         readonly specialPrime: number;
         readonly dataPrimeBitLength: number;
         readonly dataLevels: number;
         readonly extendedLevels: number;
-        readonly aggregateShareLayoutId: string;
-        readonly batchEncoderId: string;
-        readonly canonicalCiphertextConventionId: string;
     };
     readonly profileHash: ProtocolHash;
     readonly backendProfileHash: ProtocolHash;
@@ -318,7 +310,6 @@ export type BgvPassiveSetupPackage = {
     readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
     readonly targetDecryptionStatus: {
-        readonly targetDecryptionProfileId: string;
         readonly targetDecryptionProfileHash: ProtocolHash;
         readonly targetDecryptionProfileBindingHash: ProtocolHash;
     };
@@ -349,17 +340,12 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly qShare: {
         readonly objectType: 'QSharePrimeList';
         readonly objectVersion: 1;
-        readonly sharingDomain: 'per-rns-prime';
-        readonly primeOrder: 'profile-order';
-        readonly targetDecryptionReadiness: string;
         readonly primes: readonly number[];
     };
     readonly qShareHash: ProtocolHash;
     readonly carryAwareVssShareRelationProfile: {
         readonly objectType: 'CarryAwareVssShareRelationProfile';
         readonly objectVersion: 1;
-        readonly profileId: 'sealed-lattice-carry-aware-vss-share-opening-v1';
-        readonly sharingDomain: 'per-rns-prime';
         readonly trusteePointRule: 'roster-position-plus-one';
         readonly coefficientOrder: 'constant-first';
         readonly relation: string;
@@ -370,8 +356,6 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly commitmentProfile: {
         readonly objectType: 'BdlopCommitmentProfile';
         readonly objectVersion: 1;
-        readonly profileId: 'SealedLattice-BDLOP-Commitment-v1';
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly construction: string;
         readonly ring: Readonly<Record<string, unknown>>;
         readonly matrixShape: Readonly<Record<string, unknown>>;
@@ -385,7 +369,6 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly publicVssCommitmentMaterialSizeProfile: {
         readonly objectType: 'PublicVssCommitmentMaterialSizeProfile';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly measurementKind: string;
         readonly ringDegree: number;
         readonly ringDegreeStatus: 'profile-ring';
@@ -406,8 +389,6 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly setupProofProfile: {
         readonly objectType: 'SetupProofProfile';
         readonly objectVersion: 1;
-        readonly profileId: 'SealedLattice-SetupProof-v1';
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly proofBackendBoundary: string;
         readonly arbitraryRelationApi: string;
         readonly relationModel: Readonly<Record<string, unknown>>;
@@ -420,8 +401,6 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly setupTransportProfile: {
         readonly objectType: 'SetupTransportProfile';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly transportProfileId: 'sealed-lattice-setup-binary-chunked-transport-v1';
         readonly largeObjectEncoding: 'binary';
         readonly chunking: 'required';
         readonly chunkSizeBytes: number;
@@ -448,8 +427,6 @@ export type BgvCollectiveSetupProfileDescription = {
     readonly evaluatorKeyScheduleProfile: {
         readonly objectType: 'EvaluatorKeyScheduleProfile';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay';
         readonly packingProfile: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly participantCount: 10;
@@ -490,12 +467,10 @@ export type BgvCollectiveSetupProfileDescription = {
 export type BgvCollectiveSetupPublicDerivations = {
     readonly objectType: 'SetupPublicDerivations';
     readonly objectVersion: 1;
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly publicMatrixSeedHash: ProtocolHash;
     readonly bgvPublicA: {
         readonly objectType: 'BgvPublicAPolynomial';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly derivationLabel: 'accepted-bgv-public-a';
         readonly basisId: string;
@@ -515,7 +490,6 @@ export type BgvCollectiveSetupPublicDerivations = {
     readonly publicMatrices: {
         readonly objectType: 'SetupPublicMatrixMaterial';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly commitmentMatrix: BgvCollectiveSetupPublicMatrix;
         readonly publicMatricesRoot: ProtocolHash;
@@ -532,9 +506,7 @@ export type BgvCollectiveSetupPublicDerivations = {
 export type BgvCollectiveSetupPublicMatrix = {
     readonly objectType: 'SetupPublicMatrix';
     readonly objectVersion: 1;
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly matrixKind: 'commitment' | 'setupProof';
-    readonly profileId: string;
     readonly commitmentProfileHash?: ProtocolHash;
     readonly setupProofProfileHash?: ProtocolHash;
     readonly challengeDomainHash?: ProtocolHash;
@@ -590,9 +562,6 @@ export type BgvAcceptedSetupHandoff = {
         readonly trusteeEvaluationKeyProofSetRoot: ProtocolHash;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
-    };
-    readonly futureTargetDecryptionHandoff: {
-        readonly targetDecryptionProfileId: string;
     };
     readonly certificateRoots: {
         readonly setupCommitmentSecurityCertificateHash: ProtocolHash;

@@ -22,17 +22,9 @@ import {
     witnessPolicy,
     witnessPublicKeyHashes,
 } from '#packages/protocol/tests/node/election-foundation-test-helpers';
-import {
-    foundationOnlyProfileId,
-    foundationTranscriptProfileId,
-    noDecryptionProofProfileId,
-    noEvaluatorReplayProfileId,
-    noHeSetupProofProfileId,
-} from '#packages/types/src/index';
 import type {
     FoundationTranscriptInput,
     GoldenTranscriptCoreFixture,
-    MalformedObjectFixture,
     ProtocolHash,
     RegistrationEntry,
     RosterExternalAcceptance,
@@ -174,7 +166,6 @@ const transcriptCoreChunkRoot = (
 
 const encodeFoundationTranscriptCoreBytes = (
     payloadBytes: Uint8Array,
-    statusCode = 1,
 ): Uint8Array => {
     const bytes: number[] = [];
     const tags = [
@@ -192,14 +183,7 @@ const encodeFoundationTranscriptCoreBytes = (
     appendVarUint(bytes, 1);
     appendVarUint(bytes, 1);
     appendVarUint(bytes, 1);
-    appendVarUint(bytes, 1);
-    appendVarUint(bytes, 3);
-    appendString(bytes, foundationTranscriptProfileId);
-    appendString(bytes, foundationOnlyProfileId);
-    appendString(bytes, noHeSetupProofProfileId);
-    appendString(bytes, noEvaluatorReplayProfileId);
-    appendString(bytes, noDecryptionProofProfileId);
-    appendVarUint(bytes, 6);
+    appendVarUint(bytes, 5);
     appendVarUint(bytes, 1);
     appendString(bytes, 'Foundation transcript roots');
     appendVarUint(bytes, 2);
@@ -207,13 +191,11 @@ const encodeFoundationTranscriptCoreBytes = (
     appendVarUint(bytes, 3);
     appendBytes(bytes, payloadBytes);
     appendVarUint(bytes, 4);
-    appendVarUint(bytes, statusCode);
-    appendVarUint(bytes, 5);
     appendVarUint(bytes, tags.length);
     for (const tag of tags) {
         appendString(bytes, tag);
     }
-    appendVarUint(bytes, 6);
+    appendVarUint(bytes, 5);
     appendVarUint(bytes, checkpoints.length);
     for (const checkpoint of checkpoints) {
         appendVarUint(bytes, checkpoint);
@@ -243,41 +225,18 @@ export const createFoundationTranscriptCoreFixture = (
     const canonicalBytes = encodeFoundationTranscriptCoreBytes(payloadBytes);
 
     return {
-        baseProfileId: foundationTranscriptProfileId,
         canonicalBytesHex: bytesToHex(canonicalBytes),
         caseName: 'foundation-transcript-roots',
         chunkSize: transcriptCoreChunkSize,
-        decryptionProofProfileId: noDecryptionProofProfileId,
-        evaluatorReplayProfileId: noEvaluatorReplayProfileId,
         expectedChunkRoot: transcriptCoreChunkRoot(
             canonicalBytes,
             transcriptCoreChunkSize,
         ),
         expectedObjectHash512: transcriptCoreObjectRoot(canonicalBytes),
         fixtureVersion: 1,
-        heSetupProofProfileId: noHeSetupProofProfileId,
         kind: 'golden-transcript-core',
-        securityProfileId: foundationOnlyProfileId,
         objectType: 'TranscriptCore',
         objectVersion: 1,
-    };
-};
-
-export const createInvalidFoundationTranscriptStatusFixture = (
-    expectedHashes: FoundationTranscriptExpectedHashes,
-): MalformedObjectFixture => {
-    const payloadBytes = encodeFoundationTranscriptCorePayload(expectedHashes);
-    const canonicalBytes = encodeFoundationTranscriptCoreBytes(
-        payloadBytes,
-        99,
-    );
-
-    return {
-        canonicalBytesHex: bytesToHex(canonicalBytes),
-        caseName: 'invalid-enum',
-        expectedErrorCode: 'InvalidEnum',
-        fixtureVersion: 1,
-        kind: 'malformed-object',
     };
 };
 

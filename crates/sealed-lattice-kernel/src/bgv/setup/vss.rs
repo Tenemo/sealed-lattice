@@ -5,9 +5,6 @@ use crate::{encoding::CanonicalResult, hashing::derive_protocol_hash};
 #[cfg(test)]
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
 
-pub(super) const CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID: &str =
-    "sealed-lattice-carry-aware-vss-share-opening-v1";
-
 #[cfg(test)]
 use super::{
     commitment::{
@@ -55,8 +52,6 @@ pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
     json!({
         "objectType": "CarryAwareVssShareRelationProfile",
         "objectVersion": 1,
-        "profileId": CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID,
-        "sharingDomain": "per-rns-prime",
         "trusteePointRule": "roster-position-plus-one",
         "coefficientOrder": "constant-first",
         "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",

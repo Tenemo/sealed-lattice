@@ -60,7 +60,6 @@ export type SetupKeyCorrectnessCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupKeyCorrectnessCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
     }
 >;
@@ -69,7 +68,6 @@ export type SetupKeyCorrectnessCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupKeyCorrectnessCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 
@@ -77,7 +75,6 @@ export type ActiveStaticSetupTheoremCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'ActiveStaticSetupTheoremCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
     }
 >;
@@ -86,7 +83,6 @@ export type ActiveStaticSetupTheoremCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'ActiveStaticSetupTheoremCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 

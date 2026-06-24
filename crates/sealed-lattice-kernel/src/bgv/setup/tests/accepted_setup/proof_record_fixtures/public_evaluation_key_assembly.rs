@@ -41,8 +41,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 &serde_json::json!({
                     "objectType": "RelinearizationKeyAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
@@ -122,8 +120,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 &serde_json::json!({
                     "objectType": "GaloisKeyAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
@@ -152,8 +148,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
     let mut evaluation_keys = serde_json::json!({
         "objectType": "PublicEvaluationKeySet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "assemblyStatus": "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate",
         "materialEncoding": "root-bound-public-key-switch-component-roots",
         "materialSource": "verified-relinearization-and-galois-proof-records",
@@ -246,14 +240,10 @@ pub(in super::super) fn add_public_evaluation_key_material_transport(
     serde_json::json!({
         "objectType": PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "publicEvaluationKeyMaterials": [{
             "objectType": PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
             "ceremonyId": package["evaluationKeys"]["ceremonyId"],
             "manifestHash": package["evaluationKeys"]["manifestHash"],

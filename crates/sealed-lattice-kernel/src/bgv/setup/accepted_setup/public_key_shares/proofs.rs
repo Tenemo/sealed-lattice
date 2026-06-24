@@ -59,11 +59,7 @@ pub(in super::super) fn verify_public_key_share_proofs(
             "setupPackage.publicKeyShareProofs",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "public-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
                 "publicKeyShareProofSetProfileMismatch",
@@ -243,11 +239,7 @@ fn verify_public_key_share_proof_record(
             "setupPackage.publicKeyShareProofs.proofRecords",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "public-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
                 "publicKeyShareProofProfileMismatch",

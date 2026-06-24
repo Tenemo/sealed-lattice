@@ -215,9 +215,7 @@ fn setup_commitment_security_certificate_value_for_roster(
     Ok(json!({
         "objectType": SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "setupProfileHash": setup_profile_hash()?,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "qShareHash": q_share_hash()?,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
@@ -471,14 +469,12 @@ fn setup_proof_succinct_transport_accounting_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofSuccinctTransportAccounting",
         "objectVersion": 1,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
     }))
 }
 fn setup_proof_fiat_shamir_transcript_accounting_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofFiatShamirTranscriptAccounting",
         "objectVersion": 1,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "familyAccountingHashes": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
@@ -492,7 +488,6 @@ fn setup_proof_theorem_accounting_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofTheoremAccounting",
         "objectVersion": 1,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "proofFamilies": [
             "same-secret-linkage-anchor",
             "public-key-share",
@@ -511,7 +506,6 @@ fn setup_proof_succinct_leakage_accounting_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofSuccinctLeakageAccounting",
         "objectVersion": 1,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "familyAccountingHashes": {
             "sameSecretLinkageAnchor": crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
             "publicKeyShare": crate::bgv::setup::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
@@ -526,9 +520,7 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
     Ok(json!({
         "objectType": SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "setupProfileHash": setup_profile_hash()?,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "setupProofProfileHash": setup_proof_profile_hash()?,
         "setupProofRecordBinding": setup_proof_record_binding,
         "setupProofRecordBindingHash": setup_proof_record_binding_hash()?,
@@ -684,7 +676,6 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
     Ok(json!({
         "objectType": SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
@@ -804,7 +795,6 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
     Ok(json!({
         "objectType": ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
@@ -1110,9 +1100,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
     Ok(json!({
         "objectType": HE_SECURITY_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": PROFILE_ID,
-        "backendProfileId": BACKEND_PROFILE_ID,
         "setupProfileHash": setup_profile_hash()?,
         "qShareHash": q_share_hash()?,
         "setupProofProfileHash": setup_proof_profile_hash()?,
@@ -1189,9 +1176,6 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
             largest_exposed_modulus_bits,
             extended_basis_bits,
         ),
-        "targetDecryptionStatus": {
-            "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID
-        }
     }))
 }
 

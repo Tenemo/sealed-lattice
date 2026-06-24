@@ -790,8 +790,6 @@ pub(super) fn setup_transport_chunk_manifest_root(
         &json!({
             "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
             "chunkSizeBytes": chunk_size_bytes,
             "chunkCount": chunk_count,
             "totalByteLength": total_byte_length,

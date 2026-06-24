@@ -315,8 +315,6 @@ const privateEnvelopeObjectType = 'PrivateVssShareEnvelope';
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
 const localOpeningAcceptedStatus = 'accepted-local-private-vss-opening';
 const setupProfileId = 'CollectiveBgvSetup-v1';
-const privateVssShareProofProfileId =
-    'sealed-lattice-private-vss-share-proof-succinct-v1';
 const privateVssShareProofFamily = 'vss-opening-carry';
 const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
@@ -504,7 +502,6 @@ const setupProofChunkManifestRoot = (
         value: {
             objectType: 'SetupProofMaterialChunkManifest',
             objectVersion: 1,
-            setupProofProfileId,
             proofFamily,
             chunkSizeBytes: setupProofTransportChunkSizeBytes,
             chunkCount: chunkHashes.length,
@@ -703,8 +700,6 @@ const privateEnvelopeAad = (
 ): JsonRecord => ({
     objectType: privateEnvelopeAadObjectType,
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
     privateEnvelopeObjectType,
     ciphertextContentType: privateEnvelopeDeliveryContentType,
     ceremonyId: input.setupContext.ceremonyId,
@@ -805,9 +800,6 @@ const transportPrivateVssShareProofMaterial = (
         value: {
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             objectVersion: 1,
-            setupProfileId,
-            setupProofProfileId,
-            proofProfileId: privateVssShareProofProfileId,
             proofFamily: privateVssShareProofFamily,
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
             statementHash,

@@ -88,13 +88,11 @@ pub(super) fn evaluation_key_material_binding(
     let relinearization_stream_record = json!({
         "objectType": "BgvRelinearizationKeyMaterialStream",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Data.basis_id(),
         "componentOrder": ["componentZeroB", "componentOneA"],
         "gadget": "crt-idempotent-per-active-data-prime",
         "entries": relinearization_stream_entries,
@@ -102,14 +100,12 @@ pub(super) fn evaluation_key_material_binding(
     let rotation_stream_record = json!({
         "objectType": "BgvRotationKeyMaterialStream",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
         "rotSetHash": input.rot_set_hash,
         "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Data.basis_id(),
         "componentOrder": ["componentZeroB", "componentOneA"],
         "gadget": "crt-idempotent-per-active-data-prime",
         "entries": rotation_stream_entries,
@@ -124,13 +120,11 @@ pub(super) fn evaluation_key_material_binding(
     let relinearization_key_record = json!({
         "objectType": "BgvRelinearizationKey",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
         "bgvPublicKeyRoot": bgv_public_key_root,
         "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Data.basis_id(),
         "levelSchedule": relinearization_levels,
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?),
         "keyMaterialStreamHash": relinearization_stream_hash,
@@ -143,7 +137,6 @@ pub(super) fn evaluation_key_material_binding(
         let entry_stream_record = json!({
             "objectType": "BgvRotationKeyMaterialStreamEntry",
             "objectVersion": 1,
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
             "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
             "collectivePublicKeyRoot": collective_public_key_root,
             "bgvPublicKeyRoot": bgv_public_key_root,
@@ -164,7 +157,6 @@ pub(super) fn evaluation_key_material_binding(
         let record = json!({
             "objectType": "BgvRotationKey",
             "objectVersion": 1,
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
             "ceremonyId": input.ceremony_id,
             "rosterHash": input.roster_hash,
             "collectivePublicKeyRoot": collective_public_key_root,
@@ -173,7 +165,6 @@ pub(super) fn evaluation_key_material_binding(
             "level": entry.level,
             "purpose": entry.purpose,
             "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
-            "publicBasisId": BgvBasisKind::Data.basis_id(),
             "publicRlweSampleCount": entry.level + 1,
             "keyMaterialStreamHash": entry_stream_hash,
         });
@@ -189,7 +180,6 @@ pub(super) fn evaluation_key_material_binding(
     let key_switch_stream_record = json!({
         "objectType": "BgvEvaluationKeySwitchMaterialStream",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "streamPolicy": EVALUATION_KEY_STREAM_POLICY,
         "relinearizationStreamHash": relinearization_stream_hash,
         "rotationStreamHash": rotation_stream_hash,
@@ -200,12 +190,10 @@ pub(super) fn evaluation_key_material_binding(
     let key_switch_key_record = json!({
         "objectType": "BgvKeySwitchKey",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "collectivePublicKeyRoot": collective_public_key_root,
         "keySwitchDecompositionHash": input.key_switch_decomposition_hash,
-        "publicBasisId": BgvBasisKind::Data.basis_id(),
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?)
             + rotation_schedule.iter().map(|entry| entry.level + 1).sum::<usize>(),
         "keyMaterialStreamHash": key_switch_stream_hash,
@@ -215,7 +203,6 @@ pub(super) fn evaluation_key_material_binding(
     let record = json!({
         "objectType": "BgvEvaluationKeyMaterialCommitment",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,

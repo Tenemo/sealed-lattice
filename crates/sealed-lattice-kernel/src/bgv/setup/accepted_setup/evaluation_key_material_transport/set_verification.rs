@@ -80,11 +80,9 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING),
-    ] {
+    for (field_name, expected_value) in
+        [("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING)]
+    {
         if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
                 "evaluationKeysProfileMismatch",

@@ -25,10 +25,8 @@ import {
 import {
     acceptedBgvProfileRingDegree,
     setupCommitmentModulusLimbIndices,
-    setupCommitmentProfileId,
     setupCommitmentRowCount,
     setupTransportChunkSizeBytes,
-    setupTransportProfileId,
     vssCoefficientCommitmentMaterialBinaryFormat,
     vssCoefficientCommitmentMaterialBinaryMagic,
     type BinaryChunkedVssCoefficientCommitmentMaterialSet,
@@ -87,8 +85,6 @@ function setupTransportChunkManifestRoot(input: {
     return deriveProtocolHash('SetupTransportChunkManifestRoot', {
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: setupTransportProfileId,
         chunkSizeBytes: input.chunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
@@ -551,9 +547,7 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
     const materialSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ...contextFields(input.setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         commitmentProfileHash,
         materialEncoding: 'binary-chunked-full-public-setup-commitment-values',
         binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
@@ -569,7 +563,6 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
                 : 'development-reduced-ring',
         materialRecordCount: input.materialRecordCount,
         transport: {
-            transportProfileId: setupTransportProfileId,
             chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: input.chunkCount,
             totalByteLength: input.transportHashes.totalByteLength,

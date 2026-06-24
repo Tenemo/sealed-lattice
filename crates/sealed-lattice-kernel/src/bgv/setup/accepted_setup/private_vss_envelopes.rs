@@ -180,17 +180,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         )?));
     }
 
-    if commitment_set
-        .get("mailboxEncryptionProfileId")
-        .and_then(Value::as_str)
-        != Some(PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeMailboxProfileMismatch",
-            "privateVssEnvelopeCommitments.mailboxEncryptionProfileId must match the accepted private VSS mailbox profile",
-            "setupPackage.privateVssEnvelopeCommitments.mailboxEncryptionProfileId",
-        )?));
-    }
     let roster = super::accepted_roster_from_package(setup_package);
     if commitment_set
         .get("participantCount")
@@ -528,17 +517,6 @@ fn private_vss_envelope_binding_from_reference(
         "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
     ) {
         return Ok(Err(refusal));
-    }
-    if envelope_reference
-        .get("mailboxEncryptionProfileId")
-        .and_then(Value::as_str)
-        != Some(PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceMailboxProfileMismatch",
-            "private VSS envelope commitment must bind the accepted mailbox encryption profile",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.mailboxEncryptionProfileId",
-        )));
     }
     if envelope_reference
         .get("publicMatrixSeedHash")
@@ -918,11 +896,6 @@ fn verify_encrypted_private_vss_envelope(
     }
 
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        (
-            "mailboxEncryptionProfileId",
-            PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID,
-        ),
         ("ciphertextContentType", "private-vss-share-envelope"),
         ("publicMatrixSeedHash", public_matrix_seed_hash),
         (
@@ -1148,8 +1121,6 @@ fn private_vss_envelope_aad_value(
     Ok(json!({
         "objectType": PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "mailboxEncryptionProfileId": PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID,
         "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
         "ciphertextContentType": "private-vss-share-envelope",
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,

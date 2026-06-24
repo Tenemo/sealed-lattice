@@ -12,7 +12,6 @@ import {
 import {
     createFoundationTranscriptCoreFixture,
     createFoundationTranscriptFixture,
-    createInvalidFoundationTranscriptStatusFixture,
 } from '#tests/support/foundation-transcript-fixture';
 
 const cloneJsonValue = <JsonValue>(value: JsonValue): JsonValue =>
@@ -21,10 +20,6 @@ const cloneJsonValue = <JsonValue>(value: JsonValue): JsonValue =>
 const foundationTranscriptFixture = createFoundationTranscriptFixture();
 
 const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
-    foundationTranscriptFixture.expectedHashes,
-);
-
-const invalidEnumFixture = createInvalidFoundationTranscriptStatusFixture(
     foundationTranscriptFixture.expectedHashes,
 );
 
@@ -172,7 +167,6 @@ afterEach(() => {
 export {
     cloneJsonValue,
     foundationTranscriptCoreFixture,
-    invalidEnumFixture,
     textEncoder,
     textDecoder,
     wasmHeader,

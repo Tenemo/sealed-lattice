@@ -187,7 +187,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     let record = json!({
         "objectType": "PreparedBgvPublicEvaluationKeyMaterial",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "setupPackageHash": string_at_path(setup_package, &["setupPackageHash"])?,
         "collectivePublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "collectivePublicKeyRoot"])?,
         "bgvPublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
@@ -227,12 +226,6 @@ pub(crate) fn public_evaluation_keys_from_material(
             "public evaluation-key material object version is unsupported",
         ));
     }
-    compare_string_at_path(
-        material,
-        &["setupProfileId"],
-        PASSIVE_SETUP_PROFILE_ID,
-        "public evaluation-key material setup profile",
-    )?;
     compare_string_at_path(
         material,
         &["componentEncoding"],

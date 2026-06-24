@@ -57,8 +57,6 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
                 &json!({
                     "objectType": "RelinearizationKeyAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                    "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                     "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
                     "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                     "sameSecretProofFamilyBindingRoot": binding
@@ -180,8 +178,6 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
                 &json!({
                     "objectType": "GaloisKeyAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                    "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                     "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
                     "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
                     "sameSecretProofFamilyBindingRoot": binding

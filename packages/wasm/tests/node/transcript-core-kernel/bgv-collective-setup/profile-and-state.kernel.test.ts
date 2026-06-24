@@ -33,8 +33,6 @@ describe('collective BGV setup kernel commands', () => {
         });
         expect(profile.qShare).toMatchObject({
             objectType: 'QSharePrimeList',
-            sharingDomain: 'per-rns-prime',
-            primeOrder: 'profile-order',
         });
         expect(profile.qShare.primes.length).toBeGreaterThan(0);
         expect(profile.qShareHash).toHaveLength(128);
@@ -52,8 +50,6 @@ describe('collective BGV setup kernel commands', () => {
         );
         expect(profile.setupTransportProfile).toMatchObject({
             objectType: 'SetupTransportProfile',
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
             chunkSizeBytes: setupTransportChunkSizeBytes,
             storageQuotaBytes: 2_147_483_648,
             largestSingleBufferBytes: 1_572_864,
@@ -63,7 +59,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(profile.setupTransportProfileHash).toHaveLength(128);
         expect(profile.carryAwareVssShareRelationProfile).toMatchObject({
             objectType: 'CarryAwareVssShareRelationProfile',
-            sharingDomain: 'per-rns-prime',
             carryWitnessDomain: 'non-negative-bounded-integer',
         });
         expect(profile.carryAwareVssShareRelationProfileHash).toHaveLength(128);

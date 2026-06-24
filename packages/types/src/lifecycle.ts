@@ -16,10 +16,6 @@ export type DecryptionShareFilteringMode =
     | 'ProofVerifiedSharesOnly'
     | 'RobustDecodeAfterInvalidShareFiltering';
 
-/** Canonical rule used to select target-bound decryption shares. */
-export type DecryptionShareSelectionRule =
-    'FirstValidSharesInCanonicalBoardOrder';
-
 /** Certified target-bound decryption share-selection profile. */
 export type TargetBoundShareSelectionProfile = {
     readonly profileId: string;
@@ -30,7 +26,6 @@ export type TargetBoundShareSelectionProfile = {
     readonly minimumSharesForInterpolation: number;
     readonly minimumArrivalsForRobustDecode: number;
     readonly invalidShareFilteringMode: DecryptionShareFilteringMode;
-    readonly selectedShareRule: DecryptionShareSelectionRule;
 };
 
 /** Input used to derive a threshold profile from roster and backend assumptions. */
@@ -84,18 +79,6 @@ export type ScoreDomain = {
     readonly skippedOptionScore: 1;
 };
 
-/** Duplicate ballot policy currently supported by the public facade. */
-export type DuplicateBallotPolicy = 'FirstValidBeforeVotingClosedCounts';
-
-/** Tie-breaking policy currently supported by the public facade. */
-export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
-
-/** Public roster admission model selected at poll creation. */
-export type RosterPolicy = 'OpenLinkPublicRoster';
-
-/** Threshold/profile family selected at poll creation. */
-export type ThresholdProfileFamily = 'BalancedDefault';
-
 /** Policy for rosters below the dynamic supported-roster family. */
 export type SmallRosterPolicy =
     | 'ForbidMicroRoster'
@@ -109,12 +92,8 @@ export type PollSpecInput = {
     readonly options: readonly string[];
     readonly topOptionCount: number;
     readonly scoreDomain?: ScoreDomain;
-    readonly duplicateBallotPolicy?: DuplicateBallotPolicy;
-    readonly tiePolicy?: TiePolicy;
-    readonly rosterPolicy?: RosterPolicy;
     readonly minRosterSize?: number;
     readonly maxRosterSize?: number;
-    readonly thresholdProfileFamily?: ThresholdProfileFamily;
     readonly smallRosterPolicy?: SmallRosterPolicy;
 };
 
@@ -125,12 +104,8 @@ export type PollSpec = {
     readonly options: readonly string[];
     readonly topOptionCount: number;
     readonly scoreDomain: ScoreDomain;
-    readonly duplicateBallotPolicy: DuplicateBallotPolicy;
-    readonly tiePolicy: TiePolicy;
-    readonly rosterPolicy: RosterPolicy;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
-    readonly thresholdProfileFamily: ThresholdProfileFamily;
     readonly smallRosterPolicy: SmallRosterPolicy;
 };
 
@@ -142,8 +117,6 @@ export type FrozenRosterProfile = {
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
     readonly rosterSize: number;
-    readonly rosterPolicy: RosterPolicy;
-    readonly thresholdProfileFamily: ThresholdProfileFamily;
     readonly smallRosterPolicy: SmallRosterPolicy;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
@@ -160,11 +133,7 @@ export type PollSpecValidationErrorCode =
     | 'DuplicateOptionLabel'
     | 'InvalidTopOptionCount'
     | 'UnsupportedScoreDomain'
-    | 'UnsupportedDuplicateBallotPolicy'
-    | 'UnsupportedTiePolicy'
-    | 'UnsupportedRosterPolicy'
     | 'InvalidRosterBounds'
-    | 'UnsupportedThresholdProfileFamily'
     | 'UnsupportedSmallRosterPolicy';
 
 /** Structured poll specification validation error. */

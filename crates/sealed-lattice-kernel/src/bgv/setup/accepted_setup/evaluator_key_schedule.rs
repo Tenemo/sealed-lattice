@@ -51,18 +51,6 @@ pub(super) fn verify_evaluator_key_schedule(
         )?));
     }
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-    ] {
-        if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(evaluator_key_schedule_refusal(
-                "evaluatorKeyScheduleProfileMismatch",
-                format!("evaluatorKeySchedule.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluatorKeySchedule.{field_name}"),
-            )?));
-        }
-    }
-    for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
         ("rnsLimbCount", DATA_PRIMES.len() as u64),
     ] {

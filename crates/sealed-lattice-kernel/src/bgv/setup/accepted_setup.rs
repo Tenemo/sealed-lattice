@@ -155,12 +155,11 @@ use super::*;
 use super::{
     commitment::{
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-        SETUP_COMMITMENT_PROFILE_ID, SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
-        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
-        parse_setup_commitment_full_value, setup_commitment_matrix_sampled_entries,
-        setup_commitment_modulus_limb_values, setup_commitment_modulus_product,
-        setup_commitment_modulus_product_ceil_bits, setup_commitment_profile_hash,
-        setup_commitment_profile_value, setup_commitment_root,
+        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+        SETUP_COMMITMENT_ROW_COUNT, parse_setup_commitment_full_value,
+        setup_commitment_matrix_sampled_entries, setup_commitment_modulus_limb_values,
+        setup_commitment_modulus_product, setup_commitment_modulus_product_ceil_bits,
+        setup_commitment_profile_hash, setup_commitment_profile_value, setup_commitment_root,
     },
     evaluation_key_share_material::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -168,9 +167,9 @@ use super::{
         EvaluationKeyShareProofFamily, component_b_vectors_from_record,
     },
     setup_proof::{
-        SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID,
-        SETUP_PROOF_SERIALIZATION, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        setup_proof_material_transport_hashes, verified_setup_proof_material_chunks_from_request,
+        SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_transport_hashes,
+        verified_setup_proof_material_chunks_from_request,
     },
     threshold_share_commitments::{
         derive_threshold_share_commitment_set_from_parts,
@@ -376,8 +375,6 @@ const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE: &str =
     "public-evaluation-key-runtime-material";
 const SETUP_TRANSPORTED_OBJECT_LOADING_POLICY: &str = "stream-verified-before-object-use";
 const HE_SECURITY_CERTIFICATE_OBJECT_TYPE: &str = "BgvHeSecurityCertificate";
-const PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID: &str =
-    "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1";
 const PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER: u64 = 6;
 const PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER: u64 = 7;
 const EVALUATOR_REPLAY_PROFILE_LABEL: &str = "direct-encrypted-ballot-evaluator-replay";
@@ -896,11 +893,9 @@ pub(super) fn setup_profile_hash_for_roster(
 
 fn setup_profile_binding(roster: &AcceptedRosterParameters) -> CanonicalResult<Value> {
     Ok(json!({
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
         "sharingModel": "recipient-verified-vss",
-        "sharingDomain": "per-rns-prime",
         "participantCount": roster.participant_count,
         "qSetupComplete": roster.setup_completion_quorum,
         "qBallotRelease": roster.ballot_release_quorum,
@@ -973,7 +968,6 @@ fn public_vss_commitment_material_size_profile_value() -> CanonicalResult<Value>
     Ok(json!({
         "objectType": "PublicVssCommitmentMaterialSizeProfile",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "measurementKind": "static-full-profile-coefficient-byte-accounting",
         "ringDegree": POLYNOMIAL_DEGREE,
         "ringDegreeStatus": "profile-ring",
@@ -1002,8 +996,6 @@ fn setup_transport_profile_value_for_roster(
     Ok(json!({
         "objectType": "SetupTransportProfile",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
         "largeObjectEncoding": "binary",
         "chunking": "required",
         "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1043,8 +1035,6 @@ fn evaluator_key_schedule_profile_value_for_roster(
     Ok(json!({
         "objectType": "EvaluatorKeyScheduleProfile",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "evaluatorProfile": EVALUATOR_REPLAY_PROFILE_LABEL,
         "packingProfile": EVALUATOR_PACKING_PROFILE_LABEL,
         "participantCount": roster.participant_count,
@@ -1115,7 +1105,6 @@ fn required_galois_set_value(required_galois_key_schedule: Value) -> Value {
     json!({
         "objectType": REQUIRED_GALOIS_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "evaluatorProfile": EVALUATOR_REPLAY_PROFILE_LABEL,
         "packingProfile": EVALUATOR_PACKING_PROFILE_LABEL,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -1127,8 +1116,6 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofProfile",
         "objectVersion": 1,
-        "profileId": SETUP_PROOF_PROFILE_ID,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "proofBackendBoundary": "sealed-lattice-rust-wasm-fixed-relations-only",
         "arbitraryRelationApi": "not-exposed",
         "relationModel": {
@@ -1240,8 +1227,6 @@ fn setup_proof_family_profiles() -> CanonicalResult<Vec<Value>> {
                 "statement": statement,
                 "witness": witness,
                 "noWrapRule": no_wrap_rule,
-                "profileId": SETUP_PROOF_PROFILE_ID,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
                 "proofAccountingHash": proof_accounting_hash,
             }))
         })
@@ -1493,19 +1478,9 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "setupContext was required before accepted setup handoff construction",
         )
     })?;
-    let target_decryption_status = setup_package
-        .get("heSecurityCertificate")
-        .and_then(|certificate| certificate.get("targetDecryptionStatus"))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "heSecurityCertificate.targetDecryptionStatus was required before accepted setup handoff construction",
-            )
-        })?;
     let mut handoff = json!({
         "objectType": "CollectiveBgvAcceptedSetupHandoff",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
@@ -1563,12 +1538,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 setup_package,
                 "evaluationKeys",
                 "publicEvaluationKeyMaterialRoot",
-            )?,
-        },
-        "futureTargetDecryptionHandoff": {
-            "targetDecryptionProfileId": value_string(
-                target_decryption_status,
-                "targetDecryptionProfileId",
             )?,
         },
         "certificateRoots": {
