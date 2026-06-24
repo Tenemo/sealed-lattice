@@ -13,7 +13,7 @@ import {
 } from './constants.js';
 import { assertProtocolHash, hashField } from './field-helpers.js';
 import type {
-    CollectiveBgvSetupProfileForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     JsonRecord,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
@@ -109,12 +109,12 @@ function transportedObjectRecords(
 }
 
 const setupTransportCertificateBody = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     vssCoefficientCommitmentMaterial: JsonRecord,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificateBody => {
-    const publicVssMaterialSizeProfile =
-        setupProfile.publicVssCommitmentMaterialSizeProfile;
+    const publicVssMaterialSizeParameters =
+        setupParameters.publicVssCommitmentMaterialSize;
     const transportedObjects = transportedObjectRecords([
         {
             objectName: 'vssCoefficientCommitmentMaterial',
@@ -125,12 +125,12 @@ const setupTransportCertificateBody = (
                 'vssCoefficientCommitmentMaterial',
             ),
             byteLength:
-                publicVssMaterialSizeProfile.fullMaterialCoefficientBytes,
+                publicVssMaterialSizeParameters.fullMaterialCoefficientBytes,
             fullObjectHash: transportInput.fullObjectHash,
             chunkRoot: setupTransportChunkManifestRoot({
                 chunkCount: transportInput.chunkHashes.length,
                 totalByteLength:
-                    publicVssMaterialSizeProfile.fullMaterialCoefficientBytes,
+                    publicVssMaterialSizeParameters.fullMaterialCoefficientBytes,
                 chunkHashes: transportInput.chunkHashes,
                 fullObjectHash: transportInput.fullObjectHash,
             }),
@@ -177,7 +177,7 @@ const setupTransportCertificateBody = (
     return {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
-        setupTransportProfileHash: setupProfile.setupTransportProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
         chunkSizeBytes: setupTransportChunkSizeBytes,
@@ -197,12 +197,12 @@ const setupTransportCertificateBody = (
 };
 
 export const createSetupTransportCertificate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     vssCoefficientCommitmentMaterial: JsonRecord,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificate => {
     const certificateBody = setupTransportCertificateBody(
-        setupProfile,
+        setupParameters,
         vssCoefficientCommitmentMaterial,
         transportInput,
     );

@@ -4,10 +4,10 @@ pub(super) fn recombine_target_decryption_shares(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
+    target_share_parameters: &TargetShareParameters,
     mut shares: Vec<PartialDecryptionShare>,
 ) -> CanonicalResult<Value> {
-    if shares.len() < target_share_profile.minimum_shares_for_interpolation {
+    if shares.len() < target_share_parameters.minimum_shares_for_interpolation {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "target recombination requires at least minimumSharesForInterpolation valid shares",
@@ -23,7 +23,7 @@ pub(super) fn recombine_target_decryption_shares(
             || !board_positions.insert(share.board_position)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "target recombination rejects duplicate trustee, roster-position, or board-position shares",
             ));
         }
@@ -32,7 +32,7 @@ pub(super) fn recombine_target_decryption_shares(
     shares.sort_by_key(|share| share.board_position);
     let selected = shares
         .into_iter()
-        .take(target_share_profile.minimum_shares_for_interpolation)
+        .take(target_share_parameters.minimum_shares_for_interpolation)
         .collect::<Vec<_>>();
     let selected_roster_positions = selected
         .iter()
@@ -61,7 +61,7 @@ pub(super) fn recombine_target_decryption_shares(
             "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
             "targetContextHash": target_accepted.target_context_hash,
             "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-            "targetShareProfileHash": target_share_profile.hash,
+            "targetShareParametersHash": target_share_parameters.hash,
             "selectedBoardPositions": selected_board_positions,
             "selectedRosterPositions": selected_roster_positions,
             "decodedTargetIds": decoded_target_ids,
@@ -77,11 +77,11 @@ pub(super) fn recombine_target_decryption_shares(
         "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
         "targetContextHash": target_accepted.target_context_hash,
         "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
-        "decryptionThreshold": target_share_profile.decryption_threshold,
-        "decryptionShareQuorum": target_share_profile.decryption_share_quorum,
+        "targetShareParametersHash": target_share_parameters.hash,
+        "targetDecryptionParametersHash": target_accepted.target_decryption_parameters_hash,
+        "minimumSharesForInterpolation": target_share_parameters.minimum_shares_for_interpolation,
+        "decryptionThreshold": target_share_parameters.decryption_threshold,
+        "decryptionShareQuorum": target_share_parameters.decryption_share_quorum,
         "selectedBoardPositions": selected_board_positions,
         "selectedRosterPositions": selected_roster_positions,
         "decodedTargetIds": decoded_target_ids,
@@ -120,7 +120,7 @@ where
     }
     let coefficients = decryption_accumulator_to_coefficients(ciphertext, &accumulator)?;
 
-    forward_negacyclic_ntt(&coefficients, crate::bgv::profile::PLAINTEXT_MODULUS)
+    forward_negacyclic_ntt(&coefficients, crate::bgv::parameters::PLAINTEXT_MODULUS)
 }
 
 // Interpolation is per RNS prime field, so abscissae must stay distinct mod each prime; the reduction is identity for the tiny roster points but the check is required in general.
@@ -146,7 +146,7 @@ pub(super) fn lagrange_coefficients_at_zero_mod(
             let x_j = other_share.interpolation_point % modulus;
             if x_j == 0 || x_i == x_j {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "target decryption interpolation points must be non-zero and distinct",
                 ));
             }

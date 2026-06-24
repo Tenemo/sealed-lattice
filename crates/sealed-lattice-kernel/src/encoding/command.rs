@@ -12,11 +12,11 @@ enum TranscriptCoreCommand {
     InterpolateShamirConstantTerm,
     EvaluatePlaintextComparison,
     VerifyFixture,
-    DescribeBgvRnsProfile,
+    DescribeBgvRnsParameters,
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
     DescribeBgvPassiveSetupObjectModel,
-    DescribeCollectiveBgvSetupProfile,
+    DescribeCollectiveBgvSetupParameters,
     DeriveCollectiveBgvSetupPublicDerivations,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
@@ -203,11 +203,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
 
             verify_fixture(&fixture)
         }
-        TranscriptCoreCommand::DescribeBgvRnsProfile
+        TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
         | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
-        | TranscriptCoreCommand::DescribeCollectiveBgvSetupProfile
+        | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
         | TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
@@ -245,8 +245,8 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
 
 fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
     match command {
-        TranscriptCoreCommand::DescribeBgvRnsProfile => {
-            crate::bgv::commands::describe_bgv_rns_profile()
+        TranscriptCoreCommand::DescribeBgvRnsParameters => {
+            crate::bgv::commands::describe_bgv_rns_parameters()
         }
         TranscriptCoreCommand::DescribeBgvOperationRegistry => {
             crate::bgv::commands::describe_bgv_operation_registry()
@@ -257,8 +257,8 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
             crate::bgv::commands::describe_bgv_passive_setup_object_model()
         }
-        TranscriptCoreCommand::DescribeCollectiveBgvSetupProfile => {
-            crate::bgv::commands::describe_collective_bgv_setup_profile_from_request()
+        TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
+            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request()
         }
         TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations => {
             crate::bgv::commands::derive_collective_bgv_setup_public_derivations(request)

@@ -7,7 +7,7 @@ import {
     derivedCollectivePublicKey,
     resolveSetupCertificateRecords,
 } from './certificates.js';
-import { hashField, setupProfileId } from './constants-and-assertions.js';
+import { hashField } from './constants-and-assertions.js';
 import type {
     SetupPackage,
     SetupPackageInput,
@@ -74,7 +74,6 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
     const packageWithoutActiveStaticCertificate = {
         objectType: 'SetupPackage',
         objectVersion: 1,
-        setupProfileId,
         setupContext: input.setupContext,
         qShare: input.qShare,
         phaseTranscript: input.phaseTranscript,

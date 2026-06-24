@@ -1,8 +1,8 @@
 use super::*;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
-static TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
-    TerminalProfileRingSetupPackageFixture,
+static TERMINAL_FULL_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
+    TerminalFullRingSetupPackageFixture,
 > = OnceLock::new();
 static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
@@ -13,7 +13,7 @@ static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<se
     OnceLock::new();
 
 #[derive(Clone)]
-pub(super) struct TerminalProfileRingSetupPackageFixture {
+pub(super) struct TerminalFullRingSetupPackageFixture {
     pub(super) package: serde_json::Value,
     pub(super) transported_vss_coefficient_commitment_material: serde_json::Value,
     pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
@@ -121,24 +121,24 @@ pub(super) fn minimal_collective_setup_package_for_participant_count(
     build_collective_setup_package_fixture(128, "development-reduced-ring", participant_count)
 }
 
-pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
--> TerminalProfileRingSetupPackageFixture {
-    TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
+pub(super) fn terminal_full_ring_minimal_collective_setup_package_fixture()
+-> TerminalFullRingSetupPackageFixture {
+    TERMINAL_FULL_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
             let package_fixture = build_collective_setup_package_fixture_parts(
                 POLYNOMIAL_DEGREE,
-                "profile-ring",
+                "full-ring",
                 FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
                 None,
             );
-            TerminalProfileRingSetupPackageFixture {
+            TerminalFullRingSetupPackageFixture {
                 package: package_fixture.package,
                 transported_vss_coefficient_commitment_material: package_fixture
                     .transported_vss_coefficient_commitment_material
-                    .expect("profile-ring VSS transport reference"),
+                    .expect("full-ring VSS transport reference"),
                 verified_vss_coefficient_commitment_material: package_fixture
                     .verified_vss_coefficient_commitment_material
-                    .expect("profile-ring verified VSS material reference"),
+                    .expect("full-ring verified VSS material reference"),
             }
         })
         .clone()
@@ -149,19 +149,19 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
 /// carries the transported and verified coefficient commitment material the
 /// terminal accepted-setup verifier streams. Used by the dynamic-roster fixture
 /// to drive every roster-dependent binding for any supported n without the
-/// heavy profile ring. At n = 10 the package shape matches the first-closure
+/// heavy full ring. At n = 10 the package shape matches the first-closure
 /// streamed path.
 pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
     participant_count: u64,
     stream_derivation_purpose: &str,
-) -> TerminalProfileRingSetupPackageFixture {
+) -> TerminalFullRingSetupPackageFixture {
     let package_fixture = build_collective_setup_package_fixture_parts(
         128,
         DEVELOPMENT_REDUCED_RING_STREAMED_STATUS,
         participant_count,
         Some(stream_derivation_purpose),
     );
-    TerminalProfileRingSetupPackageFixture {
+    TerminalFullRingSetupPackageFixture {
         package: package_fixture.package,
         transported_vss_coefficient_commitment_material: package_fixture
             .transported_vss_coefficient_commitment_material
@@ -187,17 +187,13 @@ fn build_collective_setup_package_fixture(
 }
 
 // The collective setup context shared by the package fixtures. Every fixture
-// builds the same first-profile context shape, so this keeps one definition of
+// builds the same first-closure context shape, so this keeps one definition of
 // it instead of repeating the json! block at each construction site.
-#[allow(clippy::too_many_arguments)]
 fn collective_setup_context_fixture(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
-    setup_profile_hash: &str,
-    q_share_hash: &str,
-    carry_aware_vss_relation_profile_hash: &str,
-    commitment_profile_hash: &str,
+    setup_parameters_hash: &str,
     setup_epoch: &str,
     participant_count: u64,
 ) -> serde_json::Value {
@@ -209,10 +205,7 @@ fn collective_setup_context_fixture(
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "participantCount": participant_count,
         "qSetupComplete": participant_count,
@@ -228,7 +221,7 @@ fn build_collective_setup_package_fixture_parts(
     participant_count: u64,
     stream_derivation_purpose: Option<&str>,
 ) -> CollectiveSetupPackageFixture {
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_protocol_hash(
         "ElectionManifestHash",
@@ -236,40 +229,32 @@ fn build_collective_setup_package_fixture_parts(
     )
     .expect("manifest hash");
     let roster_hash = collective_setup_roster_hash_fixture(participant_count);
-    // The setup profile hash is a roster family: distinct per n, byte-identical
-    // to the historical first-profile binding at n = 10. The verifier checks
-    // setupContext.setupProfileHash against setup_profile_hash_for_roster, so the
-    // fixture must bind the roster-derived hash here. The Q_share, carry-aware
-    // VSS relation, and commitment profile hashes are roster-independent, so
-    // those still come straight from the profile description.
-    let setup_profile_hash = crate::bgv::setup::accepted_setup::setup_profile_hash_for_roster(
-        &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
-            participant_count,
-        ),
-    )
-    .expect("roster-derived setup profile hash");
-    let setup_profile_hash = setup_profile_hash.as_str();
-    let q_share_hash = profile["qShareHash"].as_str().expect("Q_share hash");
-    let carry_aware_vss_relation_profile_hash = profile["carryAwareVssShareRelationProfileHash"]
-        .as_str()
-        .expect("carry-aware VSS relation profile hash");
-    let commitment_profile_hash = profile["commitmentProfileHash"]
-        .as_str()
-        .expect("commitment profile hash");
+    // The setup parameters hash is a roster family: distinct per n,
+    // byte-identical to the historical first-closure binding at n = 10. It
+    // subsumes the former per-component parameter hashes (Q_share, carry-aware VSS
+    // relation, commitment, setup proof, transport, evaluator key schedule) and
+    // the BGV parameters. The verifier checks setupContext.setupParametersHash
+    // against setup_parameters_hash_for_roster, so the fixture binds the
+    // roster-derived hash here.
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+                participant_count,
+            ),
+        )
+        .expect("roster-derived setup parameters hash");
+    let setup_parameters_hash = setup_parameters_hash.as_str();
     let setup_epoch = "setup-epoch-1";
     let setup_context = collective_setup_context_fixture(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         participant_count,
     );
     let mut previous_phase_root = serde_json::Value::Null;
-    let phase_transcript = profile["phaseOrder"]
+    let phase_transcript = setup_parameters["phaseOrder"]
         .as_array()
         .expect("phase order")
         .iter()
@@ -292,8 +277,7 @@ fn build_collective_setup_package_fixture_parts(
                         "ceremonyId": ceremony_id,
                         "manifestHash": manifest_hash,
                         "rosterHash": roster_hash,
-                        "setupProfileHash": setup_profile_hash,
-                        "commitmentProfileHash": commitment_profile_hash,
+                        "setupParametersHash": setup_parameters_hash,
                         "setupEpoch": setup_epoch,
                         "signerRole": "Trustee",
                         "trusteeIdentity": trustee_identity,
@@ -326,10 +310,7 @@ fn build_collective_setup_package_fixture_parts(
                             "ceremonyId": ceremony_id,
                             "manifestHash": manifest_hash,
                             "rosterHash": roster_hash,
-                            "setupProfileHash": setup_profile_hash,
-                            "qShareHash": q_share_hash,
-                            "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                            "commitmentProfileHash": commitment_profile_hash,
+                            "setupParametersHash": setup_parameters_hash,
                             "setupEpoch": setup_epoch,
                             "trusteeIdentity": trustee_identity,
                             "rosterPosition": roster_position,
@@ -366,7 +347,7 @@ fn build_collective_setup_package_fixture_parts(
                         "ceremonyId": ceremony_id,
                         "manifestHash": manifest_hash,
                         "rosterHash": roster_hash,
-                        "setupProfileHash": setup_profile_hash,
+                        "setupParametersHash": setup_parameters_hash,
                         "setupEpoch": setup_epoch,
                         "signerRole": "Trustee",
                         "trusteeIdentity": trustee_identity,
@@ -398,10 +379,7 @@ fn build_collective_setup_package_fixture_parts(
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "rosterHash": roster_hash,
-                "setupProfileHash": setup_profile_hash,
-                "qShareHash": q_share_hash,
-                "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                "commitmentProfileHash": commitment_profile_hash,
+                "setupParametersHash": setup_parameters_hash,
                 "setupEpoch": setup_epoch,
                 "previousPhaseRoot": previous_phase_root.clone(),
                 "participantPhaseObjects": participant_phase_objects,
@@ -418,24 +396,24 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         participant_count,
     );
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    // Both the profile-ring terminal path and the reduced-ring dynamic-roster
+    // Both the full-ring terminal path and the reduced-ring dynamic-roster
     // accept path need the streamed VSS material so the package carries the
     // transported coefficient commitment material the accepted-setup verifier
     // streams. Reduced-ring tests pass a purpose so repeated fixture builds at
     // the same roster size never share live derivation state.
     let stream_vss_material = (vss_material_ring_degree == POLYNOMIAL_DEGREE
-        && vss_material_ring_degree_status == "profile-ring")
+        && vss_material_ring_degree_status == "full-ring")
         || vss_material_ring_degree_status == DEVELOPMENT_REDUCED_RING_STREAMED_STATUS;
     let vss_components = if stream_vss_material {
-        let derivation_id = if vss_material_ring_degree_status == "profile-ring" {
-            "terminal-profile-ring-vss-material-stream".to_string()
+        let derivation_id = if vss_material_ring_degree_status == "full-ring" {
+            "terminal-full-ring-vss-material-stream".to_string()
         } else {
             let stream_derivation_purpose =
                 stream_derivation_purpose.expect("reduced-ring streamed VSS fixture purpose");
@@ -447,10 +425,7 @@ fn build_collective_setup_package_fixture_parts(
             ceremony_id,
             &manifest_hash,
             &roster_hash,
-            setup_profile_hash,
-            q_share_hash,
-            carry_aware_vss_relation_profile_hash,
-            commitment_profile_hash,
+            setup_parameters_hash,
             setup_epoch,
             public_matrix_seed_hash,
             vss_material_ring_degree,
@@ -463,10 +438,7 @@ fn build_collective_setup_package_fixture_parts(
                 ceremony_id,
                 &manifest_hash,
                 &roster_hash,
-                setup_profile_hash,
-                q_share_hash,
-                carry_aware_vss_relation_profile_hash,
-                commitment_profile_hash,
+                setup_parameters_hash,
                 setup_epoch,
                 public_matrix_seed_hash,
                 vss_material_ring_degree,
@@ -498,10 +470,7 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         &common_randomness,
         &vss_coefficient_commitments,
@@ -516,10 +485,7 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         &private_vss_envelope_commitments,
         &vss_coefficient_commitments,
@@ -529,10 +495,7 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         &vss_coefficient_commitments,
         participant_count,
@@ -541,10 +504,7 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         &common_randomness,
         &same_secret_consistency,
@@ -554,10 +514,7 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
         &common_randomness,
         &same_secret_consistency,
@@ -568,12 +525,9 @@ fn build_collective_setup_package_fixture_parts(
         ceremony_id,
         &manifest_hash,
         &roster_hash,
-        setup_profile_hash,
-        q_share_hash,
-        carry_aware_vss_relation_profile_hash,
-        commitment_profile_hash,
+        setup_parameters_hash,
         setup_epoch,
-        &profile,
+        &setup_parameters,
         &common_randomness,
         &same_secret_consistency,
         &public_key_shares,
@@ -581,24 +535,26 @@ fn build_collective_setup_package_fixture_parts(
         participant_count,
     );
     let setup_commitment_security_certificate =
-        setup_commitment_security_certificate_fixture(&profile, participant_count);
+        setup_commitment_security_certificate_fixture(&setup_parameters, participant_count);
     let setup_commitment_security_certificate_hash = setup_commitment_security_certificate
         .get("setupCommitmentSecurityCertificateHash")
         .and_then(serde_json::Value::as_str)
         .expect("setup commitment security certificate hash")
         .to_string();
-    let setup_transport_certificate = match &vss_components
-        .transported_vss_coefficient_commitment_material
-    {
-        Some(transported_vss_coefficient_commitment_material) => {
-            setup_transport_certificate_for_transported_vss_material(
-                &profile,
+    let setup_transport_certificate =
+        match &vss_components.transported_vss_coefficient_commitment_material {
+            Some(transported_vss_coefficient_commitment_material) => {
+                setup_transport_certificate_for_transported_vss_material(
+                    &setup_parameters,
+                    &vss_coefficient_commitment_material,
+                    transported_vss_coefficient_commitment_material,
+                )
+            }
+            None => setup_transport_certificate_fixture(
+                &setup_parameters,
                 &vss_coefficient_commitment_material,
-                transported_vss_coefficient_commitment_material,
-            )
-        }
-        None => setup_transport_certificate_fixture(&profile, &vss_coefficient_commitment_material),
-    };
+            ),
+        };
     let setup_transport_certificate_hash = setup_transport_certificate
         .get("setupTransportCertificateHash")
         .and_then(serde_json::Value::as_str)
@@ -632,9 +588,8 @@ fn build_collective_setup_package_fixture_parts(
     let mut package = serde_json::json!({
         "objectType": "SetupPackage",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
         "setupContext": setup_context,
-        "qShare": profile["qShare"].clone(),
+        "qShare": setup_parameters["qShare"].clone(),
         "phaseTranscript": phase_transcript,
         "commonRandomness": common_randomness,
         "vssCoefficientCommitments": vss_coefficient_commitments,

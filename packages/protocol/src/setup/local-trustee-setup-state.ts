@@ -18,7 +18,7 @@ type JsonRecord = Record<string, unknown>;
 
 export const localTrusteeSetupStateExportPolicy =
     'roots-only-no-raw-share-or-opening-export';
-export const localTrusteeSetupStateStorageProfile =
+export const localTrusteeSetupStateStorageRequirement =
     'encrypted-local-device-state-required';
 export const localTrusteeSetupStateDeletionBoundary =
     'after-private-vss-aggregation';
@@ -95,10 +95,7 @@ export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -114,14 +111,10 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateCommitment';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -133,7 +126,7 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly deletionReceiptRoot: ProtocolHash;
         readonly deletionReceipt: LocalTrusteeSetupStateDeletionReceipt;
         readonly exportPolicy: typeof localTrusteeSetupStateExportPolicy;
-        readonly storageProfile: typeof localTrusteeSetupStateStorageProfile;
+        readonly storageRequirement: typeof localTrusteeSetupStateStorageRequirement;
         readonly localStateRoot: ProtocolHash;
     }
 >;
@@ -144,10 +137,7 @@ const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -266,11 +256,7 @@ const setupContextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -343,7 +329,6 @@ export const createLocalTrusteeSetupStateCommitment = (
     const localStateWithoutRoot = {
         objectType: 'LocalTrusteeSetupStateCommitment',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ...setupContextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
@@ -356,7 +341,7 @@ export const createLocalTrusteeSetupStateCommitment = (
         deletionReceiptRoot: deletionReceipt.deletionReceiptRoot,
         deletionReceipt,
         exportPolicy: localTrusteeSetupStateExportPolicy,
-        storageProfile: localTrusteeSetupStateStorageProfile,
+        storageRequirement: localTrusteeSetupStateStorageRequirement,
     } as const satisfies JsonRecord;
 
     return {
@@ -756,7 +741,6 @@ const aggregateVerifiedPrivateVssMaterial = (
     const localEnvelopeReferences =
         sourcePrivateEnvelopeReferences(envelopeReferences);
     const materialCommonFields = {
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ...setupContextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
@@ -855,7 +839,6 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
     const localStatePlaintext = {
         objectType: 'LocalTrusteeSetupStateSealedPayload',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,

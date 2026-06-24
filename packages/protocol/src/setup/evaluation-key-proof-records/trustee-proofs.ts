@@ -5,7 +5,6 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import {
     setupProofChunkManifestRoot,
     setupProofMaterialChunkHash,
@@ -755,8 +754,6 @@ export const createTrusteeEvaluationKeyProofs = (
         const recordWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProof',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
@@ -797,8 +794,6 @@ export const createTrusteeEvaluationKeyProofs = (
     const proofSetWithoutRoot = {
         objectType: 'TrusteeEvaluationKeyProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: trusteeEvaluationKeyProofFamily,
         proofAccountingHash,
         ...contextFields(input.setupContext),
@@ -935,8 +930,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
             proofBytesEncoding: setupProofMaterialTransportEncoding,
             proofMaterialRoot,
@@ -990,8 +983,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
         transportedEvaluationKeyShareProofMaterial: {
             objectType: evaluationKeyShareProofTransportSetObjectType,
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
             proofMaterials: transportedProofMaterials,
         },

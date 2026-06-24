@@ -11,14 +11,14 @@ import (
 	"github.com/tuneinsight/lattigo/v6/ring"
 )
 
-// BGV RNS profile parameters (N=32768) that must byte-mirror the Rust/WASM kernel.
+// BGV RNS parameters (N=32768) that must byte-mirror the Rust/WASM kernel.
 // This Go oracle exists only to cross-check ring/NTT arithmetic parity; pinnedCommit
 // pins the Lattigo revision the parity check was validated against.
 const polynomialDegree = 32768
 const pinnedCommit = "5dbffbdea05394de2ca3a432ed5318aa832e3f40"
 const canonicalMaterialFixturePath = "sealed-lattice-canonical-rns-fixtures.json"
 
-// 17-entry data+special prime basis (~2^47 NTT-friendly primes) of the BGV RNS profile.
+// 17-entry data+special prime basis (~2^47 NTT-friendly primes) of the BGV RNS parameters.
 var selectedModuli = []uint64{
 	140737487306753,
 	140737486716929,

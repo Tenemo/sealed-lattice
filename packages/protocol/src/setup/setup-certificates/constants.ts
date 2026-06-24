@@ -1,4 +1,3 @@
-export const setupProfileId = 'CollectiveBgvSetup-v1';
 export const dataBasisId = 'sealed-lattice-bgv-rns-data-basis-v1';
 export const setupProofBytesDomain =
     'sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1';

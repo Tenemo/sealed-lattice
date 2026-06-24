@@ -18,10 +18,7 @@ export type CollectiveBgvSetupContext = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
     }
 >;
@@ -151,10 +148,7 @@ type VssShareVerificationPayloadFields = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -171,10 +165,7 @@ const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -262,11 +253,7 @@ const shareVerificationPayloadFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
     sourceTrusteeIdentity: envelopeReference.sourceTrusteeIdentity,
     sourceTrusteeRosterPosition: envelopeReference.sourceTrusteeRosterPosition,
@@ -403,11 +390,7 @@ export const createVssShareAcceptanceSet = (input: {
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,
@@ -570,11 +553,7 @@ export const createVssComplaintSet = (input: {
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,

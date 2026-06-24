@@ -219,9 +219,8 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
 fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
     let package = setup_package();
     for field_name in [
+        "bgvParametersHash",
         "evaluatorBindingContextHash",
-        "encryptedBallotAggregateLayoutHash",
-        "directAggregateLayoutHash",
         "comparisonInputDerivationCircuitHash",
         "encryptedComparisonInputHash",
         "encryptedSparseTargetProjectionHash",
@@ -229,7 +228,7 @@ fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
         "passiveSetupEvaluatorContextBindingHash",
     ] {
         let mut mutated_package = package.clone();
-        mutated_package["profileBindings"][field_name] = serde_json::json!(valid_hash('b'));
+        mutated_package["parameterBindings"][field_name] = serde_json::json!(valid_hash('b'));
         assert_setup_package_payload_is_rejected(mutated_package, field_name);
     }
 }
@@ -288,7 +287,6 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
             "setupInputs": {
                 "participantCount": invalid_participant_count,
             },
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         });
         assert!(
             validate_setup_package_shape(&minimally_shaped_package).is_err(),
@@ -297,7 +295,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
     }
 
     let mut malformed_threshold_hash_request = request();
-    malformed_threshold_hash_request["thresholdProfileHash"] = serde_json::json!("not-a-hash");
+    malformed_threshold_hash_request["thresholdParametersHash"] = serde_json::json!("not-a-hash");
     assert!(
         generate_passive_setup_package_from_request(&malformed_threshold_hash_request).is_err()
     );

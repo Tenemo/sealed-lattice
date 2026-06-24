@@ -8,13 +8,13 @@ use super::sharing::{
 use super::validation::{validate_setup_package_internal_bindings, validate_setup_package_shape};
 use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
-    DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE,
+    DATA_PRIMES, POLYNOMIAL_DEGREE,
     abort_threshold_share_commitment_transport_derivation_stream_request,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request, data_basis_modulus_bits,
     dense_centered_binomial_coefficients, derive_threshold_share_commitments_from_request,
     derive_threshold_share_commitments_from_transport_request,
-    describe_collective_bgv_setup_profile, development_evaluator_key_from_passive_setup_package,
+    describe_collective_bgv_setup_parameters, development_evaluator_key_from_passive_setup_package,
     extended_basis_modulus_bits,
     finish_threshold_share_commitment_transport_derivation_stream_request,
     generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
@@ -46,7 +46,7 @@ use crate::bgv::evaluator::{
 };
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
 use crate::bgv::ntt::forward_negacyclic_ntt;
-use crate::bgv::profile::PLAINTEXT_MODULUS;
+use crate::bgv::parameters::PLAINTEXT_MODULUS;
 use crate::hashing::{derive_protocol_hash, hash512};
 use std::sync::OnceLock;
 
@@ -63,7 +63,7 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "af54bdc99206c7378f3d965526bf505ab3889f1742068080a0b74192795621d8b41a01fb646a7543e711ce039f5eff9f348550c56ce5e8a76c828fbf964ab610";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "f2cfb616ac70044921b2b5a2fd3e61f112bc83886e08a80ac5df5adabe814c5d5b42025b370e7a40a1635aacc8a0b59e691df460661e0fe4b786253165766d75";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -83,8 +83,8 @@ fn request() -> serde_json::Value {
             "RosterHash",
             &serde_json::json!({ "roster": "passive-bgv-setup-test" }),
         ).expect("roster hash"),
-        "thresholdProfileHash": derive_protocol_hash(
-            "ThresholdProfileHash",
+        "thresholdParametersHash": derive_protocol_hash(
+            "ThresholdParametersHash",
             &serde_json::json!({ "threshold": "passive-bgv-setup-test" }),
         ).expect("threshold hash"),
         "participants": [

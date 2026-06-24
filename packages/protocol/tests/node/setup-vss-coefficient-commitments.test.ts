@@ -635,7 +635,6 @@ describe('VSS coefficient commitment builders', () => {
                     verifiedVssCoefficientCommitmentMaterial: {
                         objectType: 'VerifiedVssCoefficientCommitmentMaterial',
                         objectVersion: 1,
-                        setupProfileId: 'CollectiveBgvSetup-v1',
                         verificationId: 'vss-transport-1',
                         materialBinaryFormat:
                             'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
@@ -649,7 +648,7 @@ describe('VSS coefficient commitment builders', () => {
                                 .vssCoefficientCommitmentMaterialRoot,
                         thresholdShareCommitmentRoot:
                             thresholdShareCommitments.thresholdShareCommitmentRoot,
-                        transportProfileId:
+                        transportSchemeId:
                             'sealed-lattice-setup-binary-chunked-transport-v1',
                         transportChunkSizeBytes: 1_048_576,
                         transportChunkCount:

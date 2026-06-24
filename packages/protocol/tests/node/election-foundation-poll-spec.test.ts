@@ -77,7 +77,7 @@ describe('election foundation poll-spec validation', () => {
         });
     });
 
-    it('accepts explicit roster bounds and profile family policy', () => {
+    it('accepts explicit roster bounds and parameter family policy', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 maxRosterSize: 20,

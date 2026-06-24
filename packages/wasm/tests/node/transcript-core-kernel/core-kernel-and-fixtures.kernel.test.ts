@@ -46,11 +46,8 @@ type SetupCommitmentKernel = Readonly<{
 }>;
 
 type ThresholdShareTransportStreamKernel = Readonly<{
-    readonly describeCollectiveBgvSetupProfile: () => {
-        readonly setupProfileHash: string;
-        readonly qShareHash: string;
-        readonly carryAwareVssShareRelationProfileHash: string;
-        readonly commitmentProfileHash: string;
+    readonly describeCollectiveBgvSetupParameters: () => {
+        readonly setupParametersHash: string;
     };
     readonly beginThresholdShareCommitmentsFromTransportStream: (input: {
         readonly derivationId: string;
@@ -371,16 +368,12 @@ describe('transcript-core kernel in Node', () => {
     it('exposes chunk-fed VSS threshold derivation stream commands through WASM', async () => {
         const kernel =
             (await loadTranscriptCoreKernel()) as ThresholdShareTransportStreamKernel;
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
         const setupContext = {
             ceremonyId: 'ceremony-main',
             manifestHash: 'a'.repeat(128),
             rosterHash: 'b'.repeat(128),
-            setupProfileHash: profile.setupProfileHash,
-            qShareHash: profile.qShareHash,
-            carryAwareVssShareRelationProfileHash:
-                profile.carryAwareVssShareRelationProfileHash,
-            commitmentProfileHash: profile.commitmentProfileHash,
+            setupParametersHash: parameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',
         };
         const derivationId = 'wasm-vss-stream-smoke';
@@ -447,8 +440,6 @@ describe('transcript-core kernel in Node', () => {
             transportedSetupProofMaterial: {
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,

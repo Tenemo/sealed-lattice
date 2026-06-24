@@ -85,7 +85,7 @@ pub(in super::super) fn verify_public_evaluation_key_set(
     {
         if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
-                "evaluationKeysProfileMismatch",
+                "evaluationKeysParametersMismatch",
                 format!("evaluationKeys.{field_name} must be {expected_value}"),
                 format!("setupPackage.evaluationKeys.{field_name}"),
             )?));
@@ -164,8 +164,8 @@ pub(in super::super) fn verify_public_evaluation_key_set(
     }
     if evaluation_keys.get("genericKeySwitchKeyRoots") != Some(&Value::Array(Vec::new())) {
         return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysGenericKeySwitchOutsideProfile",
-            "evaluationKeys.genericKeySwitchKeyRoots must be empty for the first profile",
+            "evaluationKeysGenericKeySwitchOutsideParameters",
+            "evaluationKeys.genericKeySwitchKeyRoots must be empty for the first roster",
             "setupPackage.evaluationKeys.genericKeySwitchKeyRoots",
         )?));
     }

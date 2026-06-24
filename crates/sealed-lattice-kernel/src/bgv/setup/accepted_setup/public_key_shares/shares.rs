@@ -54,7 +54,7 @@ pub(in super::super) fn verify_public_key_shares(
     {
         if share_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_refusal(
-                "publicKeyShareSetProfileMismatch",
+                "publicKeyShareSetParametersMismatch",
                 format!("publicKeyShares.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShares.{field_name}"),
             )?));
@@ -217,7 +217,7 @@ fn verify_public_key_share_record(
     ] {
         if share_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_refusal(
-                "publicKeyShareProfileMismatch",
+                "publicKeyShareParametersMismatch",
                 format!("public-key share {field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShares.shareRecords.{field_name}"),
             )?));

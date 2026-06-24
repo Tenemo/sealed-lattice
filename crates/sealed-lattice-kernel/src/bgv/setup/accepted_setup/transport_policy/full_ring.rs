@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::bgv::setup) fn verify_profile_ring_material(
+pub(in crate::bgv::setup) fn verify_full_ring_material(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let material_set = setup_package
@@ -8,48 +8,48 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "vssCoefficientCommitmentMaterial was required before profile-ring verification",
+                "vssCoefficientCommitmentMaterial was required before full-ring verification",
             )
         })?;
     if material_set.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
-        return Ok(Some(vss_material_outside_profile(
-            "vssCoefficientCommitmentMaterial must use the accepted profile ring degree",
+        return Ok(Some(vss_material_outside_full_ring(
+            "vssCoefficientCommitmentMaterial must use the accepted full ring degree",
             "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
         )?));
     }
     if let Some(proof_set) = setup_package.get("sameSecretProofs")
-        && let Some(response) = verify_profile_ring_records(
+        && let Some(response) = verify_full_ring_records(
             proof_set,
             "proofRecords",
-            "same-secret proof records must use the accepted profile ring degree before terminal setup acceptance",
+            "same-secret proof records must use the accepted full ring degree before terminal setup acceptance",
             "setupPackage.sameSecretProofs.proofRecords.ringDegree",
         )?
     {
         return Ok(Some(response));
     }
     if let Some(material_set) = setup_package.get("publicKeyShareMaterial")
-        && let Some(response) = verify_profile_ring_record(
+        && let Some(response) = verify_full_ring_record(
             material_set,
-            "public-key share material must use the accepted profile ring degree before terminal setup acceptance",
+            "public-key share material must use the accepted full ring degree before terminal setup acceptance",
             "setupPackage.publicKeyShareMaterial.ringDegree",
         )?
     {
         return Ok(Some(response));
     }
     if let Some(proof_set) = setup_package.get("publicKeyShareSuccinctProofs")
-        && let Some(response) = verify_profile_ring_records(
+        && let Some(response) = verify_full_ring_records(
             proof_set,
             "proofRecords",
-            "public-key succinct proof records must use the accepted profile ring degree before terminal setup acceptance",
+            "public-key succinct proof records must use the accepted full ring degree before terminal setup acceptance",
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords.ringDegree",
         )?
     {
         return Ok(Some(response));
     }
     if let Some(collective_public_key) = setup_package.get("collectivePublicKey")
-        && let Some(response) = verify_profile_ring_record(
+        && let Some(response) = verify_full_ring_record(
             collective_public_key,
-            "collective public-key material must use the accepted profile ring degree before terminal setup acceptance",
+            "collective public-key material must use the accepted full ring degree before terminal setup acceptance",
             "setupPackage.collectivePublicKey.ringDegree",
         )?
     {
@@ -57,10 +57,10 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
     }
     if let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") {
         for field_name in ["roundOneRecords", "roundTwoRecords"] {
-            if let Some(response) = verify_profile_ring_records(
+            if let Some(response) = verify_full_ring_records(
                 rounds,
                 field_name,
-                "relinearization key-share proof records must use the accepted profile ring degree before terminal setup acceptance",
+                "relinearization key-share proof records must use the accepted full ring degree before terminal setup acceptance",
                 format!("setupPackage.relinearizationKeyShareRounds.{field_name}.ringDegree"),
             )? {
                 return Ok(Some(response));
@@ -72,10 +72,10 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
         .and_then(Value::as_array)
     {
         for batch in galois_batches {
-            if let Some(response) = verify_profile_ring_records(
+            if let Some(response) = verify_full_ring_records(
                 batch,
                 "galoisKeyShareMaterialRecords",
-                "Galois key-share material records must use the accepted profile ring degree before terminal setup acceptance",
+                "Galois key-share material records must use the accepted full ring degree before terminal setup acceptance",
                 "setupPackage.galoisKeyShareBatches.galoisKeyShareMaterialRecords.ringDegree",
             )? {
                 return Ok(Some(response));
@@ -86,7 +86,7 @@ pub(in crate::bgv::setup) fn verify_profile_ring_material(
     Ok(None)
 }
 
-fn verify_profile_ring_records(
+fn verify_full_ring_records(
     record_set: &Value,
     records_field_name: &str,
     message: impl Into<String> + Clone,
@@ -94,7 +94,7 @@ fn verify_profile_ring_records(
 ) -> CanonicalResult<Option<Value>> {
     for record in array_value(record_set, records_field_name)? {
         if let Some(response) =
-            verify_profile_ring_record(record, message.clone(), object_path.clone())?
+            verify_full_ring_record(record, message.clone(), object_path.clone())?
         {
             return Ok(Some(response));
         }
@@ -103,28 +103,28 @@ fn verify_profile_ring_records(
     Ok(None)
 }
 
-fn verify_profile_ring_record(
+fn verify_full_ring_record(
     record: &Value,
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Option<Value>> {
     if record.get("ringDegree").and_then(Value::as_u64) != Some(POLYNOMIAL_DEGREE as u64) {
-        return Ok(Some(vss_material_outside_profile(message, object_path)?));
+        return Ok(Some(vss_material_outside_full_ring(message, object_path)?));
     }
 
     Ok(None)
 }
 
-fn vss_material_outside_profile(
+fn vss_material_outside_full_ring(
     message: impl Into<String>,
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::OutsideProfile,
+        VerifierStatus::OutsideAcceptedParameters,
         Some("vssCoefficientCommitments"),
         Vec::new(),
         vec![Refusal::new(
-            "vssCoefficientCommitmentMaterialOutsideProfile",
+            "vssCoefficientCommitmentMaterialOutsideAcceptedRing",
             message,
             object_path,
         )],

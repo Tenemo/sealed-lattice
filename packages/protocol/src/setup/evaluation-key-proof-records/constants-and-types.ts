@@ -5,7 +5,6 @@ import {
     type RelinearizationLevelScheduleEntry,
     type RequiredGaloisKeyScheduleEntry,
 } from '../evaluator-key-schedule.js';
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
@@ -57,10 +56,7 @@ export const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -135,8 +131,6 @@ export type RelinearizationKeyShareRoundOneRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'RelinearizationKeyShareRoundOne';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -163,8 +157,6 @@ export type RelinearizationKeyShareRoundTwoRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'RelinearizationKeyShareRoundTwo';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -194,8 +186,6 @@ export type RelinearizationKeyShareRounds = Readonly<
     JsonRecord & {
         readonly objectType: 'RelinearizationKeyShareRounds';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'relinearization-key-share';
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -231,8 +221,6 @@ export type GaloisKeyShareMaterialRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'GaloisKeyShareMaterial';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'galois-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -250,8 +238,6 @@ export type GaloisKeyShareBatch = Readonly<
     JsonRecord & {
         readonly objectType: 'GaloisKeyShareBatch';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: 'galois-key-share';
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -291,8 +277,6 @@ export type TrusteeEvaluationKeyProofRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'TrusteeEvaluationKeyProof';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -314,8 +298,6 @@ export type TrusteeEvaluationKeyProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'TrusteeEvaluationKeyProofSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
@@ -459,8 +441,6 @@ export type PublicEvaluationKeySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicEvaluationKeySet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly assemblyStatus: typeof publicEvaluationKeyAssemblyStatus;
         readonly materialEncoding: typeof publicEvaluationKeyMaterialEncoding;
         readonly materialSource: typeof publicEvaluationKeyMaterialSource;
@@ -506,8 +486,6 @@ export type TransportedEvaluationKeyShareProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof evaluationKeyShareProofTransportSetObjectType;
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
         readonly proofMaterials: readonly JsonRecord[];
     }
@@ -517,8 +495,6 @@ export type TransportedEvaluationKeyShareComponentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof evaluationKeyShareComponentMaterialTransportSetObjectType;
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly componentMaterials: readonly JsonRecord[];
     }
 >;
@@ -527,16 +503,11 @@ export type TransportedPublicEvaluationKeyMaterial = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportObjectType;
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot: ProtocolHash;
@@ -557,8 +528,6 @@ export type TransportedPublicEvaluationKeyMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: typeof publicEvaluationKeyMaterialTransportSetObjectType;
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly materialEncoding: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterials: readonly TransportedPublicEvaluationKeyMaterial[];
         readonly componentMaterials?: readonly JsonRecord[];

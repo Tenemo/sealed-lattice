@@ -10,7 +10,7 @@ import type {
     BgvBaseConversionFixture,
     BgvBatchPlaintextEncoding,
     BgvCiphertextConventionFixture,
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -22,8 +22,8 @@ import type {
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
-    BgvProfileRejection,
-    BgvRnsProfileDescription,
+    BgvOperationRejection,
+    BgvRnsParametersDescription,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
@@ -254,9 +254,9 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyFixture',
                         fixture,
                     }),
-                describeBgvRnsProfile: (): BgvRnsProfileDescription =>
-                    executeCommand<BgvRnsProfileDescription>({
-                        command: 'DescribeBgvRnsProfile',
+                describeBgvRnsParameters: (): BgvRnsParametersDescription =>
+                    executeCommand<BgvRnsParametersDescription>({
+                        command: 'DescribeBgvRnsParameters',
                     }),
                 describeBgvOperationRegistry: (): unknown =>
                     executeCommand<unknown>({
@@ -273,11 +273,13 @@ export const createTranscriptCoreKernelLoader = (
                     executeCommand<unknown>({
                         command: 'DescribeBgvPassiveSetupObjectModel',
                     }),
-                describeCollectiveBgvSetupProfile:
-                    (): BgvCollectiveSetupProfileDescription =>
-                        executeCommand<BgvCollectiveSetupProfileDescription>({
-                            command: 'DescribeCollectiveBgvSetupProfile',
-                        }),
+                describeCollectiveBgvSetupParameters:
+                    (): BgvCollectiveSetupParametersDescription =>
+                        executeCommand<BgvCollectiveSetupParametersDescription>(
+                            {
+                                command: 'DescribeCollectiveBgvSetupParameters',
+                            },
+                        ),
                 deriveCollectiveBgvSetupPublicDerivations: (
                     input,
                 ): BgvCollectiveSetupPublicDerivations =>
@@ -291,7 +293,7 @@ export const createTranscriptCoreKernelLoader = (
                         ceremonyId: input.ceremonyId,
                         manifestHash: input.manifestHash,
                         rosterHash: input.rosterHash,
-                        thresholdProfileHash: input.thresholdProfileHash,
+                        thresholdParametersHash: input.thresholdParametersHash,
                         participants: input.participants,
                         setupSeed: input.setupSeed,
                     }),
@@ -315,7 +317,7 @@ export const createTranscriptCoreKernelLoader = (
                         targetAcceptedRecord: input.targetAcceptedRecord,
                         targetCiphertextBinding: input.targetCiphertextBinding,
                         targetCiphertexts: input.targetCiphertexts,
-                        targetShareProfile: input.targetShareProfile,
+                        targetShareParameters: input.targetShareParameters,
                         trusteeIdentity: input.trusteeIdentity,
                     }),
                 recombineBgvTargetDecryptionShares: (
@@ -327,7 +329,7 @@ export const createTranscriptCoreKernelLoader = (
                         targetAcceptedRecord: input.targetAcceptedRecord,
                         targetCiphertextBinding: input.targetCiphertextBinding,
                         targetCiphertexts: input.targetCiphertexts,
-                        targetShareProfile: input.targetShareProfile,
+                        targetShareParameters: input.targetShareParameters,
                         decryptionShares: input.decryptionShares,
                     }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
@@ -589,9 +591,9 @@ export const createTranscriptCoreKernelLoader = (
                     }),
                 encodeBgvBatchPlaintext: (
                     input,
-                ): BgvBatchPlaintextEncoding | BgvProfileRejection =>
+                ): BgvBatchPlaintextEncoding | BgvOperationRejection =>
                     executeCommand<
-                        BgvBatchPlaintextEncoding | BgvProfileRejection
+                        BgvBatchPlaintextEncoding | BgvOperationRejection
                     >({
                         command: 'EncodeBgvBatchPlaintext',
                         slots: input.slots,
@@ -602,25 +604,30 @@ export const createTranscriptCoreKernelLoader = (
                     }),
                 validateBgvPlaintextObject: (
                     input,
-                ): BgvObjectValidation | BgvProfileRejection =>
-                    executeCommand<BgvObjectValidation | BgvProfileRejection>({
-                        command: 'ValidateBgvPlaintextObject',
-                        canonicalBytesHex: input.canonicalBytesHex,
-                        expectedPlaintextRoot: input.expectedPlaintextRoot,
-                    }),
+                ): BgvObjectValidation | BgvOperationRejection =>
+                    executeCommand<BgvObjectValidation | BgvOperationRejection>(
+                        {
+                            command: 'ValidateBgvPlaintextObject',
+                            canonicalBytesHex: input.canonicalBytesHex,
+                            expectedPlaintextRoot: input.expectedPlaintextRoot,
+                        },
+                    ),
                 validateBgvCiphertextObject: (
                     input,
-                ): BgvObjectValidation | BgvProfileRejection =>
-                    executeCommand<BgvObjectValidation | BgvProfileRejection>({
-                        command: 'ValidateBgvCiphertextObject',
-                        canonicalBytesHex: input.canonicalBytesHex,
-                        expectedCiphertextRoot: input.expectedCiphertextRoot,
-                    }),
+                ): BgvObjectValidation | BgvOperationRejection =>
+                    executeCommand<BgvObjectValidation | BgvOperationRejection>(
+                        {
+                            command: 'ValidateBgvCiphertextObject',
+                            canonicalBytesHex: input.canonicalBytesHex,
+                            expectedCiphertextRoot:
+                                input.expectedCiphertextRoot,
+                        },
+                    ),
                 generateBgvCiphertextConventionFixture: (
                     input,
-                ): BgvCiphertextConventionFixture | BgvProfileRejection =>
+                ): BgvCiphertextConventionFixture | BgvOperationRejection =>
                     executeCommand<
-                        BgvCiphertextConventionFixture | BgvProfileRejection
+                        BgvCiphertextConventionFixture | BgvOperationRejection
                     >({
                         command: 'GenerateBgvCiphertextConventionFixture',
                         leftSlots: input.leftSlots,
@@ -630,18 +637,18 @@ export const createTranscriptCoreKernelLoader = (
                     }),
                 generateBgvBaseConversionFixture: (
                     input,
-                ): BgvBaseConversionFixture | BgvProfileRejection =>
+                ): BgvBaseConversionFixture | BgvOperationRejection =>
                     executeCommand<
-                        BgvBaseConversionFixture | BgvProfileRejection
+                        BgvBaseConversionFixture | BgvOperationRejection
                     >({
                         command: 'GenerateBgvBaseConversionFixture',
                         slots: input.slots,
                     }),
                 analyzeBgvCanonicalObject: (
                     input,
-                ): BgvCanonicalObjectAnalysis | BgvProfileRejection =>
+                ): BgvCanonicalObjectAnalysis | BgvOperationRejection =>
                     executeCommand<
-                        BgvCanonicalObjectAnalysis | BgvProfileRejection
+                        BgvCanonicalObjectAnalysis | BgvOperationRejection
                     >({
                         command: 'AnalyzeBgvCanonicalObject',
                         canonicalBytesHex: input.canonicalBytesHex,

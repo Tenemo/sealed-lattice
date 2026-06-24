@@ -140,7 +140,7 @@ const requiredGaloisKeySchedule = [
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
 describe('evaluator key schedule builder', () => {
-    it('creates a deterministic root-bound first-profile schedule', () => {
+    it('creates a deterministic root-bound first-parameters schedule', () => {
         const sameSecretStatements = sameSecretConsistency();
         const { publicKeyShares, publicKeyShareProofs } =
             publicKeyShareObjects(sameSecretStatements);

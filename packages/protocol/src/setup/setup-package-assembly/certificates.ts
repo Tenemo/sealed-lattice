@@ -1,6 +1,6 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
-import { firstProfileRosterSize } from '../../lifecycle/profiles.js';
+import { firstClosureRosterSize } from '../../lifecycle/roster-policy.js';
 import type { GaloisKeyShareBatch } from '../evaluation-key-proof-records.js';
 import type {
     CollectivePublicKey,
@@ -269,8 +269,8 @@ const setupKeyCorrectnessCertificateBody = (
         objectType: 'SetupKeyCorrectnessCertificate',
         objectVersion: 1,
         ...contextFieldsForCertificate(input.setupContext),
-        setupProofProfileBinding:
-            'fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate',
+        setupProofBinding:
+            'fixed-setup-proof-bound-by-setup-proof-accounting-certificate',
         keyCorrectnessScope:
             'collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records',
         keyCorrectnessTheorem: {
@@ -366,10 +366,11 @@ const activeStaticSetupTheoremCertificateBody = (
         Number.isInteger(declaredParticipantCount) &&
         declaredParticipantCount > 0
             ? declaredParticipantCount
-            : firstProfileRosterSize;
+            : firstClosureRosterSize;
     // q_dec = floor(n/3)+1, full-roster quorums = n; mirrors the kernel's
-    // roster-derived ActiveStaticSetupTheoremCertificate so n=10 stays
-    // byte-identical and any 3..20 package assembles to the right values.
+    // current roster-derived ActiveStaticSetupTheoremCertificate convention so
+    // n=10 stays byte-identical. Dynamic 3..20 packages still need their own
+    // certificate if a later parameter set uses stricter backend threshold semantics.
     const decryptionThreshold = Math.floor(participantCount / 3) + 1;
 
     return {

@@ -208,7 +208,7 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
         .collect()
 }
 
-pub(super) fn accepted_setup_evaluation_key_records_use_profile_ring(
+pub(super) fn accepted_setup_evaluation_key_records_use_full_ring(
     setup_package: &Value,
 ) -> CanonicalResult<bool> {
     let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") else {

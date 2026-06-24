@@ -13,7 +13,7 @@ import type {
     BgvCanonicalObjectAnalysis,
     BgvCiphertextConventionFixture,
     BgvCollectiveSetupTransportCompanions,
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     BgvTransportedVssCoefficientCommitmentMaterial,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
@@ -30,8 +30,8 @@ import type {
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
-    BgvProfileRejection,
-    BgvRnsProfileDescription,
+    BgvOperationRejection,
+    BgvRnsParametersDescription,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
@@ -56,7 +56,7 @@ export type {
     BgvBatchPlaintextEncoding,
     BgvCanonicalObjectAnalysis,
     BgvCiphertextConventionFixture,
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -72,8 +72,8 @@ export type {
     BgvPassiveSetupVerification,
     BgvPrivateVssShareEnvelopeVerification,
     BgvPrivateVssShareProofGeneration,
-    BgvProfileRejection,
-    BgvRnsProfileDescription,
+    BgvOperationRejection,
+    BgvRnsParametersDescription,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
@@ -132,10 +132,10 @@ export type TranscriptCoreKernel = {
     verifyFixture(
         fixture: TranscriptCoreFixture,
     ): TranscriptCoreFixtureVerification;
-    describeBgvRnsProfile(): BgvRnsProfileDescription;
+    describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeBgvOperationRegistry(): unknown;
     describeBgvPassiveSetupObjectModel(): unknown;
-    describeCollectiveBgvSetupProfile(): BgvCollectiveSetupProfileDescription;
+    describeCollectiveBgvSetupParameters(): BgvCollectiveSetupParametersDescription;
     deriveCollectiveBgvSetupPublicDerivations(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
     }): BgvCollectiveSetupPublicDerivations;
@@ -143,7 +143,7 @@ export type TranscriptCoreKernel = {
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly thresholdProfileHash: ProtocolHash;
+        readonly thresholdParametersHash: ProtocolHash;
         readonly participants: readonly BgvPassiveSetupParticipantInput[];
         readonly setupSeed?: string;
     }): BgvPassiveSetupPackage;
@@ -166,7 +166,7 @@ export type TranscriptCoreKernel = {
         readonly targetAcceptedRecord: unknown;
         readonly targetCiphertextBinding: unknown;
         readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-        readonly targetShareProfile: unknown;
+        readonly targetShareParameters: unknown;
         readonly trusteeIdentity: string;
     }): BgvTargetDecryptionShare;
     recombineBgvTargetDecryptionShares(input: {
@@ -174,7 +174,7 @@ export type TranscriptCoreKernel = {
         readonly targetAcceptedRecord: unknown;
         readonly targetCiphertextBinding: unknown;
         readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-        readonly targetShareProfile: unknown;
+        readonly targetShareParameters: unknown;
         readonly decryptionShares: readonly BgvTargetDecryptionShare[];
     }): BgvTargetDecryptionResult;
     verifyBgvPassiveSetup(input: {
@@ -314,26 +314,26 @@ export type TranscriptCoreKernel = {
         readonly level?: number;
         readonly layoutBinding: unknown;
         readonly includeCanonicalBytesHex?: boolean;
-    }): BgvBatchPlaintextEncoding | BgvProfileRejection;
+    }): BgvBatchPlaintextEncoding | BgvOperationRejection;
     validateBgvPlaintextObject(input: {
         readonly canonicalBytesHex: string;
         readonly expectedPlaintextRoot?: string;
-    }): BgvObjectValidation | BgvProfileRejection;
+    }): BgvObjectValidation | BgvOperationRejection;
     validateBgvCiphertextObject(input: {
         readonly canonicalBytesHex: string;
         readonly expectedCiphertextRoot?: string;
-    }): BgvObjectValidation | BgvProfileRejection;
+    }): BgvObjectValidation | BgvOperationRejection;
     generateBgvCiphertextConventionFixture(input: {
         readonly leftSlots: readonly number[];
         readonly rightSlots: readonly number[];
         readonly includeCanonicalBytesHex?: boolean;
-    }): BgvCiphertextConventionFixture | BgvProfileRejection;
+    }): BgvCiphertextConventionFixture | BgvOperationRejection;
     generateBgvBaseConversionFixture(input: {
         readonly slots: readonly number[];
-    }): BgvBaseConversionFixture | BgvProfileRejection;
+    }): BgvBaseConversionFixture | BgvOperationRejection;
     analyzeBgvCanonicalObject(input: {
         readonly canonicalBytesHex: string;
-    }): BgvCanonicalObjectAnalysis | BgvProfileRejection;
+    }): BgvCanonicalObjectAnalysis | BgvOperationRejection;
     validateBgvEvaluatorOperation(input: {
         readonly operation: string;
     }): BgvEvaluatorOperationValidation;
@@ -380,7 +380,7 @@ type TranscriptCoreKernelCommand =
           readonly fixture: TranscriptCoreFixture;
       }
     | {
-          readonly command: 'DescribeBgvRnsProfile';
+          readonly command: 'DescribeBgvRnsParameters';
       }
     | {
           readonly command: 'DescribeBgvOperationRegistry';
@@ -393,7 +393,7 @@ type TranscriptCoreKernelCommand =
           readonly command: 'DescribeBgvPassiveSetupObjectModel';
       }
     | {
-          readonly command: 'DescribeCollectiveBgvSetupProfile';
+          readonly command: 'DescribeCollectiveBgvSetupParameters';
       }
     | {
           readonly command: 'DeriveCollectiveBgvSetupPublicDerivations';
@@ -404,7 +404,7 @@ type TranscriptCoreKernelCommand =
           readonly ceremonyId: string;
           readonly manifestHash: ProtocolHash;
           readonly rosterHash: ProtocolHash;
-          readonly thresholdProfileHash: ProtocolHash;
+          readonly thresholdParametersHash: ProtocolHash;
           readonly participants: readonly BgvPassiveSetupParticipantInput[];
           readonly setupSeed?: string;
       }
@@ -429,7 +429,7 @@ type TranscriptCoreKernelCommand =
           readonly targetAcceptedRecord: unknown;
           readonly targetCiphertextBinding: unknown;
           readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-          readonly targetShareProfile: unknown;
+          readonly targetShareParameters: unknown;
           readonly trusteeIdentity: string;
       }
     | {
@@ -438,7 +438,7 @@ type TranscriptCoreKernelCommand =
           readonly targetAcceptedRecord: unknown;
           readonly targetCiphertextBinding: unknown;
           readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-          readonly targetShareProfile: unknown;
+          readonly targetShareParameters: unknown;
           readonly decryptionShares: readonly BgvTargetDecryptionShare[];
       }
     | {

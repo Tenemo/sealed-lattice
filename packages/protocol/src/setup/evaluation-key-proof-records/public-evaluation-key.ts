@@ -5,7 +5,6 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 
 import {
@@ -290,8 +289,6 @@ export function createPublicEvaluationKeySet(
     const evaluationKeysWithoutHash = {
         objectType: 'PublicEvaluationKeySet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         assemblyStatus: publicEvaluationKeyAssemblyStatus,
         materialEncoding: publicEvaluationKeyMaterialEncoding,
         materialSource: publicEvaluationKeyMaterialSource,
@@ -606,11 +603,7 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         ceremonyId: evaluationKeys.ceremonyId,
         manifestHash: evaluationKeys.manifestHash,
         rosterHash: evaluationKeys.rosterHash,
-        setupProfileHash: evaluationKeys.setupProfileHash,
-        qShareHash: evaluationKeys.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            evaluationKeys.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: evaluationKeys.commitmentProfileHash,
+        setupParametersHash: evaluationKeys.setupParametersHash,
         setupEpoch: evaluationKeys.setupEpoch,
         evaluatorKeyScheduleRoot: evaluationKeys.evaluatorKeyScheduleRoot,
         sameSecretProofFamilyBindingRoot:
@@ -760,15 +753,11 @@ export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
     const transportedPublicEvaluationKeyMaterial = {
         objectType: publicEvaluationKeyMaterialTransportSetObjectType,
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
         publicEvaluationKeyMaterials: [
             {
                 objectType: publicEvaluationKeyMaterialTransportObjectType,
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
                 ...contextFields(input.setupContext),
                 evaluationKeySetHash: evaluationKeys.evaluationKeySetHash,

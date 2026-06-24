@@ -29,7 +29,7 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
             >= 128
     );
     let report = super::accounting::succinct_proof_soundness_report(
-        crate::bgv::profile::POLYNOMIAL_DEGREE / 2,
+        crate::bgv::parameters::POLYNOMIAL_DEGREE / 2,
     )
     .expect("typed soundness report");
     assert_eq!(
@@ -39,7 +39,7 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
             .expect("JSON effective soundness")
     );
     super::accounting::enforce_current_succinct_proof_soundness_policy(
-        crate::bgv::profile::POLYNOMIAL_DEGREE / 2,
+        crate::bgv::parameters::POLYNOMIAL_DEGREE / 2,
     )
     .expect("conjectured classical policy floor");
     assert_eq!(
@@ -58,7 +58,7 @@ fn proof_accounting_closes_every_theorem_row_with_margin() {
     );
     assert_eq!(
         accounting["argumentShape"]["traceSize"],
-        serde_json::json!(crate::bgv::profile::POLYNOMIAL_DEGREE / 2)
+        serde_json::json!(crate::bgv::parameters::POLYNOMIAL_DEGREE / 2)
     );
 }
 

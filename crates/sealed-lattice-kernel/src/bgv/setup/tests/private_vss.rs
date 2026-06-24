@@ -51,13 +51,13 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
 }
 
 #[test]
-#[ignore = "first-profile recipient-private VSS verification at the full ring degree"]
-fn private_vss_share_envelope_verifier_accepts_first_profile_succinct_private_share_proofs() {
+#[ignore = "first-roster recipient-private VSS verification at the full ring degree"]
+fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_share_proofs() {
     let request =
-        proof_shaped_private_vss_share_envelope_request(crate::bgv::profile::POLYNOMIAL_DEGREE);
+        proof_shaped_private_vss_share_envelope_request(crate::bgv::parameters::POLYNOMIAL_DEGREE);
 
     let result = verify_private_vss_share_envelope_from_request(&request)
-        .expect("first-profile private VSS envelope verification");
+        .expect("first-roster private VSS envelope verification");
 
     assert_eq!(result["verifierStatus"], "accepted");
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
@@ -73,7 +73,7 @@ fn private_vss_share_envelope_verifier_accepts_first_profile_succinct_private_sh
         DATA_PRIMES.len()
     );
     // The recipient-local verification root and envelope hash are the integration
-    // handles a signed VssShareAcceptance commits to, so the first-profile path
+    // handles a signed VssShareAcceptance commits to, so the first-roster path
     // produces the same accepted evidence the reduced-ring path does at scale.
     assert_eq!(
         result["localVerificationRoot"]
@@ -250,7 +250,7 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
 // not pin the Shamir coefficients across the RNS commitment fields, so soundness
 // comes from >= t honest recipients each verifying the same source commitment. This
 // test exercises that structure: one committed degree-(t-1) polynomial, verified
-// at the four distinct recipient points of the first-profile decryption threshold
+// at the four distinct recipient points of the first-roster decryption threshold
 // (t_secret = 4), all accepting. The shares differ per recipient (distinct
 // evaluation points) yet every proof binds the identical coefficient commitments.
 //
@@ -321,8 +321,8 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
         .map(|commitment| setup_commitment_root(commitment).expect("commitment root"))
         .collect::<Vec<_>>();
 
-    // Four distinct recipient points (the first-profile decryption threshold),
-    // each inside the first accepted profile roster (positions < 10).
+    // Four distinct recipient points (the first-roster decryption threshold),
+    // each inside the first accepted roster (positions < 10).
     for recipient_roster_position in [1_usize, 3, 5, 8] {
         let (share_values, carry_strings) = share_values_and_carries(
             &coefficient_messages_by_shamir_index,
@@ -868,7 +868,6 @@ fn assert_private_vss_share_proof_refusal_contains(
 }
 
 fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_protocol_hash(
         "ElectionManifestHash",
@@ -880,25 +879,18 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         &serde_json::json!({ "roster": "private-vss-envelope-test" }),
     )
     .expect("roster hash");
-    let setup_profile_hash = profile["setupProfileHash"]
-        .as_str()
-        .expect("setup profile hash");
-    let q_share_hash = profile["qShareHash"].as_str().expect("Q_share hash");
-    let carry_aware_vss_relation_profile_hash = profile["carryAwareVssShareRelationProfileHash"]
-        .as_str()
-        .expect("carry-aware VSS relation profile hash");
-    let commitment_profile_hash = profile["commitmentProfileHash"]
-        .as_str()
-        .expect("commitment profile hash");
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(10),
+        )
+        .expect("roster-derived setup parameters hash");
+    let setup_parameters_hash = setup_parameters_hash.as_str();
     let setup_epoch = "setup-epoch-1";
     let setup_context = serde_json::json!({
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
     });
     let public_matrix_seed_hash = derive_protocol_hash(
@@ -908,7 +900,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
         }),
     )
@@ -960,10 +952,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "rosterHash": roster_hash,
-                "setupProfileHash": setup_profile_hash,
-                "qShareHash": q_share_hash,
-                "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                "commitmentProfileHash": commitment_profile_hash,
+                "setupParametersHash": setup_parameters_hash,
                 "setupEpoch": setup_epoch,
                 "sourceTrusteeIdentity": "trustee-0",
                 "sourceTrusteeRosterPosition": 0,
@@ -995,10 +984,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "ceremonyId": ceremony_id,
                 "manifestHash": manifest_hash,
                 "rosterHash": roster_hash,
-                "setupProfileHash": setup_profile_hash,
-                "qShareHash": q_share_hash,
-                "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                "commitmentProfileHash": commitment_profile_hash,
+                "setupParametersHash": setup_parameters_hash,
                 "setupEpoch": setup_epoch,
                 "sourceTrusteeIdentity": "trustee-0",
                 "sourceTrusteeRosterPosition": 0,
@@ -1048,10 +1034,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "sourceTrusteeIdentity": "trustee-0",
         "sourceTrusteeRosterPosition": 0,
@@ -1069,10 +1052,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "privateEnvelopeAadHash": private_envelope_aad_hash,

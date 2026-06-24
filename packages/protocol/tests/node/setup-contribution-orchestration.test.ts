@@ -16,17 +16,13 @@ import {
 
 const fixtureHash = makeSetupFixtureHash('setup-contribution-orchestration');
 
-const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
+const setupContext = makeSetupContext(fixtureHash);
 
 const contextFields = {
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 } as const;
 
@@ -112,7 +108,6 @@ const complaintRecord = {
 const localStateCommitment = {
     objectType: 'LocalTrusteeSetupStateCommitment',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
     ...contextFields,
     trusteeIdentity: 'trustee-3',
     trusteeRosterPosition: 3,
@@ -124,7 +119,7 @@ const localStateCommitment = {
     deletionReceiptRoot: fixtureHash('deletion-receipt'),
     deletionReceipt: {},
     exportPolicy: 'roots-only-no-raw-share-or-opening-export',
-    storageProfile: 'encrypted-local-device-state-required',
+    storageRequirement: 'encrypted-local-device-state-required',
     localStateRoot: fixtureHash('local-state'),
 } as unknown as LocalTrusteeSetupStateCommitment;
 
@@ -146,7 +141,6 @@ describe('setup contribution orchestration', () => {
 
         expect(assembly).toMatchObject({
             objectType: 'SetupContributionAssembly',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,
             vssSourceTrusteeCommitmentRoot:

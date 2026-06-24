@@ -1,7 +1,7 @@
 import { validHash } from '../../bgv-passive-setup-fixtures.js';
 import {
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
+    firstRosterDecryptionThreshold,
+    firstRosterParticipantCount,
     hexToBytes,
     jsonRecord,
     textEncoder,
@@ -13,7 +13,6 @@ import {
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
     sameSecretProofFamily,
-    setupProofProfileId,
     type SameSecretConsistencyStatementSet,
     type SameSecretProofMaterial,
     type SameSecretProofSet,
@@ -27,20 +26,20 @@ import {
 } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
 export function acceptedSameSecretConsistency(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     vssCoefficientCommitments: VssCoefficientCommitmentSet,
 ): SameSecretConsistencyStatementSet {
     return createSameSecretConsistencyStatementSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
-        thresholdDegree: firstProfileDecryptionThreshold,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
+        thresholdDegree: firstRosterDecryptionThreshold,
         vssCoefficientCommitments,
     });
 }
@@ -52,7 +51,7 @@ const sameSecretProofBytesHash = (proofBytesHex: string): string =>
     );
 
 export function sameSecretProofsWithDriftedStatementHashes(
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     setupPackage: JsonRecord,
 ): SameSecretProofSet {
     const sameSecretConsistency =
@@ -64,7 +63,6 @@ export function sameSecretProofsWithDriftedStatementHashes(
     const proofBytesHex = '00';
     const proofMaterials: SameSecretProofMaterial[] =
         sameSecretConsistency.statementRecords.map((statementRecord) => ({
-            setupProofProfileId,
             proofFamily: sameSecretProofFamily,
             trusteeIdentity: statementRecord.trusteeIdentity,
             trusteeRosterPosition: statementRecord.trusteeRosterPosition,
@@ -76,8 +74,8 @@ export function sameSecretProofsWithDriftedStatementHashes(
 
     return createSameSecretProofSet({
         setupContext: setupPackage.setupContext as CollectiveBgvSetupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         sameSecretConsistency,
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
@@ -120,7 +118,7 @@ const centeredTernaryFromResidue = (
 
 export function sameSecretProofsWithGeneratedProofs(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     setupPackage: JsonRecord,
     vssCoefficientCommitmentBundle: VssCoefficientCommitmentBundle,
 ): SameSecretProofSet {
@@ -158,7 +156,7 @@ export function sameSecretProofsWithGeneratedProofs(
                             firstLimbOpening.rnsPrime,
                         ),
                     );
-                const constantCommitments = profile.qShare.primes.map(
+                const constantCommitments = parameters.qShare.primes.map(
                     (_rnsPrime, rnsLimbIndex) => {
                         const materialRecord =
                             sourceTrusteeOpeningMaterial.sourceTrusteeCoefficientCommitmentMaterialRecords.find(
@@ -177,7 +175,7 @@ export function sameSecretProofsWithGeneratedProofs(
                         return materialRecord.commitment;
                     },
                 );
-                const openingRandomnessByLimb = profile.qShare.primes.map(
+                const openingRandomnessByLimb = parameters.qShare.primes.map(
                     (_rnsPrime, rnsLimbIndex) =>
                         requiredVssOpening(
                             sourceTrusteeOpeningMaterial,
@@ -237,7 +235,6 @@ export function sameSecretProofsWithGeneratedProofs(
                 }
 
                 return {
-                    setupProofProfileId,
                     proofFamily: sameSecretProofFamily,
                     trusteeIdentity:
                         sourceTrusteeOpeningMaterial.sourceTrusteeIdentity,
@@ -255,8 +252,8 @@ export function sameSecretProofsWithGeneratedProofs(
 
     return createSameSecretProofSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         sameSecretConsistency:
             setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet,
         vssCoefficientCommitmentMaterial:

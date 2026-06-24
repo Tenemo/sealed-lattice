@@ -1,9 +1,6 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
-import {
-    setupProofProfileId,
-    type SameSecretConsistencyStatementRecord,
-} from '../same-secret-consistency-records.js';
+import { type SameSecretConsistencyStatementRecord } from '../same-secret-consistency-records.js';
 
 import {
     publicKeyShareProofBindingStatus,
@@ -164,8 +161,6 @@ export const createPublicKeyShareSet = (
             const shareRecordWithoutRoot = {
                 objectType: 'PublicKeyShare',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: contribution.trusteeIdentity,
                 trusteeRosterPosition: contribution.trusteeRosterPosition,
@@ -198,8 +193,6 @@ export const createPublicKeyShareSet = (
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofBindingStatus: publicKeyShareProofBindingStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -287,8 +280,6 @@ export const createPublicKeyShareProofSet = (
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareProof',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -322,8 +313,6 @@ export const createPublicKeyShareProofSet = (
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

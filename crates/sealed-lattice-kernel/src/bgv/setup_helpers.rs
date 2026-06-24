@@ -100,7 +100,7 @@ pub(super) fn compare_expected_string(
         validate_hash_string(expected, expected_field_name)?;
         if expected != actual {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("BGV passive setup {description} does not match {expected_field_name}"),
             ));
         }
@@ -201,7 +201,7 @@ pub(super) fn compare_required_string(
 ) -> CanonicalResult<()> {
     if actual != expected {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("passive BGV setup package {description} does not match its canonical binding"),
         ));
     }
@@ -236,7 +236,7 @@ pub(super) fn compare_derived_hash(
     let expected_hash = derive_protocol_hash(namespace, value)?;
     if actual_hash != expected_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("passive BGV setup package {description} does not match its canonical payload"),
         ));
     }

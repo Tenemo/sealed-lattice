@@ -1,9 +1,7 @@
 use super::*;
 use crate::bgv::{
-    evaluator::engine::encode_slots_to_coefficients,
-    evaluator::records::target_layout_hash,
-    profile::{direct_comparison_profile_hash, profile_hash},
-    setup::generate_passive_setup_package_from_request,
+    evaluator::engine::encode_slots_to_coefficients, evaluator::records::target_layout_hash,
+    parameters::bgv_parameters_hash, setup::generate_passive_setup_package_from_request,
 };
 
 mod recombination;
@@ -19,8 +17,8 @@ fn setup_request() -> Value {
             "RosterHash",
             &json!({ "roster": "target-decryption-test" }),
         ).expect("roster hash"),
-        "thresholdProfileHash": derive_protocol_hash(
-            "ThresholdProfileHash",
+        "thresholdParametersHash": derive_protocol_hash(
+            "ThresholdParametersHash",
             &json!({ "threshold": "target-decryption-test" }),
         ).expect("threshold hash"),
         "participants": [
@@ -36,22 +34,22 @@ fn setup_package() -> Value {
     generate_passive_setup_package_from_request(&setup_request()).expect("setup package")
 }
 
-fn target_share_profile(setup_package: &Value) -> Value {
-    let profile = json!({
-        "objectType": "TargetDecryptionShareProfile",
+fn target_share_parameters(setup_package: &Value) -> Value {
+    let share_parameters = json!({
+        "objectType": "TargetDecryptionShareParameters",
         "objectVersion": 1,
-        "thresholdProfileHash": setup_package["setupInputs"]["thresholdProfileHash"],
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "targetDecryptionProfileHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileHash"],
-        "targetDecryptionProfileBindingHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileBindingHash"],
+        "thresholdParametersHash": setup_package["setupInputs"]["thresholdParametersHash"],
+        "targetDecryptionId": TARGET_DECRYPTION_ID,
+        "targetDecryptionParametersHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersHash"],
+        "targetDecryptionParametersBindingHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersBindingHash"],
         "decryptionThreshold": 2,
         "minimumSharesForInterpolation": 2,
         "decryptionShareQuorum": 2,
     });
-    let mut with_hash = profile;
-    with_hash["targetShareProfileHash"] = json!(
-        derive_protocol_hash("TargetDecryptionShareProfileHash", &with_hash)
-            .expect("target share profile hash")
+    let mut with_hash = share_parameters;
+    with_hash["targetShareParametersHash"] = json!(
+        derive_protocol_hash("TargetDecryptionShareParametersHash", &with_hash)
+            .expect("target share parameters hash")
     );
     with_hash
 }
@@ -111,16 +109,16 @@ fn accepted_record(
             "TargetFinalityCheckpointHash",
             &json!({ "finality": "checkpoint" }),
         ).expect("checkpoint hash"),
-        "evaluatorReplayProfileHash": direct_comparison_profile_hash()
-            .expect("direct comparison profile hash"),
+        "evaluatorReplayParametersHash": bgv_parameters_hash()
+            .expect("BGV parameters hash"),
         "targetPreimageHash": derive_protocol_hash(
             "TargetPreimageHash",
             &json!({ "preimage": "accepted" }),
         ).expect("preimage hash"),
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,
-        "targetDecryptionProfileHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileHash"],
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
+        "targetDecryptionParametersHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersHash"],
+        "targetDecryptionId": TARGET_DECRYPTION_ID,
         "targetBasisHash": derive_protocol_hash(
             "TargetBasisHash",
             &json!({ "basis": "test" }),
@@ -193,7 +191,7 @@ fn generate_share(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    target_share_profile: &Value,
+    target_share_parameters: &Value,
     trustee_identity: &str,
 ) -> Value {
     generate_bgv_target_decryption_share_from_request(&json!({
@@ -204,7 +202,7 @@ fn generate_share(
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
+        "targetShareParameters": target_share_parameters,
         "trusteeIdentity": trustee_identity,
     }))
     .expect("generate share")

@@ -7,9 +7,9 @@ import {
 } from './field-helpers.js';
 import { createBgvHeSecurityCertificate } from './he-security-certificate.js';
 import {
-    bgvProfileForCertificates,
-    setupProfileForCertificates,
-} from './profile-derivations.js';
+    bgvParametersForCertificates,
+    setupParametersForCertificates,
+} from './parameter-derivations.js';
 import { createSetupProofAccountingCertificate } from './proof-accounting-certificate.js';
 import { createSetupTransportCertificate } from './transport-certificate.js';
 import type { SetupCertificates, SetupCertificatesInput } from './types.js';
@@ -17,8 +17,10 @@ import type { SetupCertificates, SetupCertificatesInput } from './types.js';
 export const createSetupCertificates = (
     input: SetupCertificatesInput,
 ): SetupCertificates => {
-    const setupProfile = setupProfileForCertificates(input.setupProfile);
-    const bgvProfile = bgvProfileForCertificates(input.bgvProfile);
+    const setupParameters = setupParametersForCertificates(
+        input.setupParameters,
+    );
+    const bgvParameters = bgvParametersForCertificates(input.bgvParameters);
     const vssCoefficientCommitmentMaterial = assertObjectRecord(
         input.vssCoefficientCommitmentMaterial,
         'vssCoefficientCommitmentMaterial',
@@ -32,14 +34,14 @@ export const createSetupCertificates = (
 
     return {
         setupCommitmentSecurityCertificate:
-            createSetupCommitmentSecurityCertificate(setupProfile),
+            createSetupCommitmentSecurityCertificate(setupParameters),
         setupTransportCertificate: createSetupTransportCertificate(
-            setupProfile,
+            setupParameters,
             vssCoefficientCommitmentMaterial,
             transportInput,
         ),
         setupProofAccountingCertificate: createSetupProofAccountingCertificate(
-            setupProfile,
+            setupParameters,
             input.sameSecretLinkageAnchorProofAccounting === undefined
                 ? undefined
                 : assertObjectRecord(
@@ -60,8 +62,8 @@ export const createSetupCertificates = (
                   ),
         ),
         heSecurityCertificate: createBgvHeSecurityCertificate(
-            setupProfile,
-            bgvProfile,
+            setupParameters,
+            bgvParameters,
         ),
     };
 };

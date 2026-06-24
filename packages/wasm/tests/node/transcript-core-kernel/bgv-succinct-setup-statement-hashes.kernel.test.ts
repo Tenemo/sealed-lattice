@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 // Single source of truth shared with the Rust kernel test
@@ -83,36 +83,32 @@ const zeroSetupCommitment = (
 };
 
 const setupContext = (
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
 ): JsonRecord => ({
     ceremonyId: 'statement-vector-ceremony',
     manifestHash: repeatedHash('10'),
     rosterHash: repeatedHash('20'),
-    setupProfileHash: profile.setupProfileHash,
-    qShareHash: profile.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        profile.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: profile.commitmentProfileHash,
+    setupParametersHash: parameters.setupParametersHash,
     setupEpoch: 'statement-vector-epoch',
 });
 
 const privateVssRequest = (
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
 ): PrivateVssProofInput => {
-    const currentSetupContext = setupContext(profile);
+    const currentSetupContext = setupContext(parameters);
     const publicMatrixSeedHash = repeatedHash('40');
     const coefficientCommitments: JsonRecord[] = [];
     const materialRecords: JsonRecord[] = [];
     const coefficientCommitmentRoots: string[] = [];
-    const firstQSharePrime = profile.qShare.primes[0];
+    const firstQSharePrime = parameters.qShare.primes[0];
     if (firstQSharePrime === undefined) {
         throw new Error(
-            'Collective setup profile must include Q_share primes.',
+            'Collective setup parameters must include Q_share primes.',
         );
     }
 
-    profile.qShare.primes.forEach((rnsPrime, rnsLimbIndex) => {
+    parameters.qShare.primes.forEach((rnsPrime, rnsLimbIndex) => {
         Array.from({ length: 4 }, (_unused, shamirCoefficientIndex) => {
             const { commitment, commitmentRoot } = zeroSetupCommitment(kernel, {
                 publicMatrixSeedHash,
@@ -129,12 +125,7 @@ const privateVssRequest = (
                 ceremonyId: 'statement-vector-ceremony',
                 manifestHash: repeatedHash('10'),
                 rosterHash: repeatedHash('20'),
-                setupProfileHash: currentSetupContext.setupProfileHash,
-                qShareHash: currentSetupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    currentSetupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash:
-                    currentSetupContext.commitmentProfileHash,
+                setupParametersHash: currentSetupContext.setupParametersHash,
                 setupEpoch: 'statement-vector-epoch',
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
@@ -150,12 +141,7 @@ const privateVssRequest = (
                 ceremonyId: 'statement-vector-ceremony',
                 manifestHash: repeatedHash('10'),
                 rosterHash: repeatedHash('20'),
-                setupProfileHash: currentSetupContext.setupProfileHash,
-                qShareHash: currentSetupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    currentSetupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash:
-                    currentSetupContext.commitmentProfileHash,
+                setupParametersHash: currentSetupContext.setupParametersHash,
                 setupEpoch: 'statement-vector-epoch',
                 sourceTrusteeIdentity: 'statement-vector-trustee',
                 sourceTrusteeRosterPosition: 0,
@@ -175,11 +161,7 @@ const privateVssRequest = (
         ceremonyId: 'statement-vector-ceremony',
         manifestHash: repeatedHash('10'),
         rosterHash: repeatedHash('20'),
-        setupProfileHash: currentSetupContext.setupProfileHash,
-        qShareHash: currentSetupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            currentSetupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: currentSetupContext.commitmentProfileHash,
+        setupParametersHash: currentSetupContext.setupParametersHash,
         setupEpoch: 'statement-vector-epoch',
         sourceTrusteeIdentity: 'statement-vector-trustee',
         sourceTrusteeRosterPosition: 0,
@@ -219,13 +201,13 @@ const privateVssRequest = (
 describe('succinct setup statement hash vectors', () => {
     it('matches Rust native vectors for every current setup proof family', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
         const publicMatrixSeedHash = repeatedHash('40');
-        const qSharePrimes = profile.qShare.primes;
+        const qSharePrimes = parameters.qShare.primes;
         const firstQSharePrime = qSharePrimes[0];
         if (firstQSharePrime === undefined) {
             throw new Error(
-                'Collective setup profile must include Q_share primes.',
+                'Collective setup parameters must include Q_share primes.',
             );
         }
 
@@ -301,7 +283,7 @@ describe('succinct setup statement hash vectors', () => {
         );
 
         const privateVssShare = kernel.generatePrivateVssShareProof(
-            privateVssRequest(kernel, profile),
+            privateVssRequest(kernel, parameters),
         );
         expect(privateVssShare.privateVssShareProof.proofFamily).toBe(
             'vss-opening-carry',

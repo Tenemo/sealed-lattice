@@ -2,23 +2,23 @@ import type { PollSpec } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
-    dynamicRosterProfileCertificateHash,
-    targetBoundShareSelectionProfile,
+    dynamicRosterParametersCertificateHash,
+    targetBoundShareSelectionParameters,
 } from './election-foundation-fixture-constants.js';
 
 import {
-    deriveFrozenRosterProfile,
-    deriveThresholdProfile,
+    deriveFrozenRosterParameters,
+    deriveThresholdParameters,
 } from '#packages/protocol/src/index';
 
-const invalidDynamicRosterProfileCertificateHash = 'not-a-protocol-hash';
+const invalidDynamicRosterParametersCertificateHash = 'not-a-protocol-hash';
 const rosterHash = 'b'.repeat(128);
 const casualMicroRosterSizes = [3, 4, 5, 6, 7, 8, 9] as const;
 const pollSpec = {
     maxRosterSize: 20,
     minRosterSize: 10,
     options: ['Alpha', 'Beta'],
-    pollId: 'threshold-profile-test',
+    pollId: 'threshold-thresholdParameters-test',
     question: 'Choose one',
     scoreDomain: {
         max: 10,
@@ -29,37 +29,37 @@ const pollSpec = {
     topOptionCount: 1,
 } as const satisfies PollSpec;
 
-const retiredThresholdDecryptionProfileId =
-    'unsupported-target-decryption-profile-v0';
+const retiredThresholdDecryptionId =
+    'unsupported-target-decryption-thresholdParameters-v0';
 
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor(rosterSize / 3) + 1;
-    const profile = deriveThresholdProfile({
+    const thresholdParameters = deriveThresholdParameters({
         casualMicroRosterAcknowledged: rosterSize < 10,
-        dynamicRosterProfileCertificateHash:
+        dynamicRosterParametersCertificateHash:
             rosterSize >= 10 && rosterSize !== 10
-                ? dynamicRosterProfileCertificateHash
+                ? dynamicRosterParametersCertificateHash
                 : undefined,
         rosterSize,
-        targetBoundShareSelectionProfile: {
-            ...targetBoundShareSelectionProfile,
+        targetBoundShareSelectionParameters: {
+            ...targetBoundShareSelectionParameters,
             decryptionShareQuorum: rosterSize,
             minimumSharesForInterpolation: decryptionThreshold,
             minimumArrivalsForRobustDecode: rosterSize,
         },
     });
 
-    expect(rosterSize - profile.activeFaultBound).toBeGreaterThanOrEqual(
-        profile.decryptionThreshold,
+    expect(
+        rosterSize - thresholdParameters.activeFaultBound,
+    ).toBeGreaterThanOrEqual(thresholdParameters.decryptionThreshold);
+    expect(thresholdParameters.decryptionShareQuorum).toBeGreaterThanOrEqual(
+        thresholdParameters.decryptionThreshold,
     );
-    expect(profile.decryptionShareQuorum).toBeGreaterThanOrEqual(
-        profile.decryptionThreshold,
-    );
-    expect(profile.maximumRaceShares).toBe(rosterSize);
-    expect(profile.setupCompletionQuorum).toBe(rosterSize);
+    expect(thresholdParameters.maximumRaceShares).toBe(rosterSize);
+    expect(thresholdParameters.setupCompletionQuorum).toBe(rosterSize);
 };
 
-describe('election foundation threshold profiles', () => {
+describe('election foundation threshold parameters', () => {
     it.each([
         {
             rosterSize: 10,
@@ -98,31 +98,34 @@ describe('election foundation threshold profiles', () => {
             activeFaultBound,
             releaseQuorum,
         }) => {
-            const profile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash:
+            const thresholdParameters = deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash:
                     rosterSize === 10
                         ? undefined
-                        : dynamicRosterProfileCertificateHash,
+                        : dynamicRosterParametersCertificateHash,
                 rosterSize,
             });
 
-            expect(profile).toMatchObject({
+            expect(thresholdParameters).toMatchObject({
                 rosterSize,
                 privacyCorruptionBound,
                 decryptionCorruptionBound: privacyCorruptionBound,
                 decryptionThreshold: threshold,
                 decryptionShareQuorum: null,
-                targetBoundShareSelectionProfile: null,
+                targetBoundShareSelectionParameters: null,
                 activeFaultBound,
                 releaseQuorum,
             });
-            expect(profile.warnings).toContain('ShareSelectionProfileRequired');
+            expect(thresholdParameters.warnings).toContain(
+                'ShareSelectionParametersRequired',
+            );
         },
     );
 
     it('keeps roster size 18 at privacy corruption bound 6 under structural one-third', () => {
         expect(
-            deriveThresholdProfile({ rosterSize: 18 }).privacyCorruptionBound,
+            deriveThresholdParameters({ rosterSize: 18 })
+                .privacyCorruptionBound,
         ).toBe(6);
     });
 
@@ -134,7 +137,7 @@ describe('election foundation threshold profiles', () => {
     );
 
     it('rejects roster sizes below three', () => {
-        expect(() => deriveThresholdProfile({ rosterSize: 2 })).toThrow(
+        expect(() => deriveThresholdParameters({ rosterSize: 2 })).toThrow(
             'Roster size must be at least 3.',
         );
     });
@@ -142,8 +145,8 @@ describe('election foundation threshold profiles', () => {
     it.each(casualMicroRosterSizes)(
         'requires explicit casual micro-roster acknowledgement for roster size %d',
         (rosterSize) => {
-            expect(() => deriveThresholdProfile({ rosterSize })).toThrow(
-                'Casual micro-roster profiles require explicit acknowledgement.',
+            expect(() => deriveThresholdParameters({ rosterSize })).toThrow(
+                'Casual micro-roster parameter sets require explicit acknowledgement.',
             );
         },
     );
@@ -159,218 +162,244 @@ describe('election foundation threshold profiles', () => {
     ])(
         'marks acknowledged roster size $rosterSize as a casual micro-roster',
         ({ rosterSize, threshold }) => {
-            const profile = deriveThresholdProfile({
+            const thresholdParameters = deriveThresholdParameters({
                 casualMicroRosterAcknowledged: true,
                 rosterSize,
             });
 
-            expect(profile.rosterProfileKind).toBe('CasualMicroRoster');
-            expect(profile.releaseQuorum).toBe(rosterSize);
-            expect(profile.setupCompletionQuorum).toBe(rosterSize);
-            expect(profile.decryptionThreshold).toBe(threshold);
-            expect(profile.warnings).toContain('CasualMicroRoster');
+            expect(thresholdParameters.rosterParametersKind).toBe(
+                'CasualMicroRoster',
+            );
+            expect(thresholdParameters.releaseQuorum).toBe(rosterSize);
+            expect(thresholdParameters.setupCompletionQuorum).toBe(rosterSize);
+            expect(thresholdParameters.decryptionThreshold).toBe(threshold);
+            expect(thresholdParameters.warnings).toContain('CasualMicroRoster');
         },
     );
 
-    it('marks roster size 10 as the first profile roster', () => {
-        const profile = deriveThresholdProfile({ rosterSize: 10 });
+    it('marks roster size 10 as the first thresholdParameters roster', () => {
+        const thresholdParameters = deriveThresholdParameters({
+            rosterSize: 10,
+        });
 
-        expect(profile.rosterProfileKind).toBe('FirstProfileRoster');
-        expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
-        expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
+        expect(thresholdParameters.rosterParametersKind).toBe(
+            'FirstParametersRoster',
+        );
+        expect(
+            thresholdParameters.dynamicRosterParametersCertificateHash,
+        ).toBeNull();
+        expect(thresholdParameters.warnings).toEqual([
+            'ShareSelectionParametersRequired',
+        ]);
     });
 
-    it('keeps first profile rosters independent from dynamic roster certificate inputs', () => {
-        const baselineProfile = deriveThresholdProfile({ rosterSize: 10 });
-        const profileWithCertificate = deriveThresholdProfile({
-            dynamicRosterProfileCertificateHash,
+    it('keeps first thresholdParameters rosters independent from dynamic roster certificate inputs', () => {
+        const baselineParameters = deriveThresholdParameters({
+            rosterSize: 10,
+        });
+        const parametersWithCertificate = deriveThresholdParameters({
+            dynamicRosterParametersCertificateHash,
             rosterSize: 10,
         });
 
-        expect(profileWithCertificate).toEqual(baselineProfile);
+        expect(parametersWithCertificate).toEqual(baselineParameters);
 
-        const baselineFrozenRosterProfile = deriveFrozenRosterProfile({
+        const baselineFrozenRosterParameters = deriveFrozenRosterParameters({
             pollSpec,
             rosterHash,
             rosterSize: 10,
         });
-        const frozenRosterProfileWithCertificate = deriveFrozenRosterProfile({
-            dynamicRosterProfileCertificateHash,
-            pollSpec,
-            rosterHash,
-            rosterSize: 10,
-        });
+        const frozenRosterParametersWithCertificate =
+            deriveFrozenRosterParameters({
+                dynamicRosterParametersCertificateHash,
+                pollSpec,
+                rosterHash,
+                rosterSize: 10,
+            });
 
-        expect(frozenRosterProfileWithCertificate).toEqual(
-            baselineFrozenRosterProfile,
+        expect(frozenRosterParametersWithCertificate).toEqual(
+            baselineFrozenRosterParameters,
         );
     });
 
-    it('does not carry invalid dynamic roster certificate hashes into first profile rosters', () => {
-        const profile = deriveThresholdProfile({
-            dynamicRosterProfileCertificateHash:
-                invalidDynamicRosterProfileCertificateHash,
+    it('does not carry invalid dynamic roster certificate hashes into first thresholdParameters rosters', () => {
+        const thresholdParameters = deriveThresholdParameters({
+            dynamicRosterParametersCertificateHash:
+                invalidDynamicRosterParametersCertificateHash,
             rosterSize: 10,
         });
 
-        expect(profile.rosterProfileKind).toBe('FirstProfileRoster');
-        expect(profile.dynamicRosterProfileCertificateHash).toBeNull();
+        expect(thresholdParameters.rosterParametersKind).toBe(
+            'FirstParametersRoster',
+        );
+        expect(
+            thresholdParameters.dynamicRosterParametersCertificateHash,
+        ).toBeNull();
 
-        const frozenRosterProfile = deriveFrozenRosterProfile({
-            dynamicRosterProfileCertificateHash:
-                invalidDynamicRosterProfileCertificateHash,
+        const frozenRosterParameters = deriveFrozenRosterParameters({
+            dynamicRosterParametersCertificateHash:
+                invalidDynamicRosterParametersCertificateHash,
             pollSpec,
             rosterHash,
             rosterSize: 10,
         });
 
         expect(
-            frozenRosterProfile.dynamicRosterProfileCertificateHash,
+            frozenRosterParameters.dynamicRosterParametersCertificateHash,
         ).toBeNull();
         expect(
-            frozenRosterProfile.thresholdProfile
-                .dynamicRosterProfileCertificateHash,
+            frozenRosterParameters.thresholdParameters
+                .dynamicRosterParametersCertificateHash,
         ).toBeNull();
         expect(() =>
-            deriveFrozenRosterProfile({
-                dynamicRosterProfileCertificateHash:
-                    invalidDynamicRosterProfileCertificateHash,
+            deriveFrozenRosterParameters({
+                dynamicRosterParametersCertificateHash:
+                    invalidDynamicRosterParametersCertificateHash,
                 pollSpec,
                 rosterHash,
                 rosterSize: 20,
             }),
         ).toThrow(
-            'Dynamic roster profiles require parameter certificate coverage for the frozen roster size.',
+            'Dynamic roster parameter sets require parameter certificate coverage for the frozen roster size.',
         );
     });
 
     it.each([11, 16, 20])(
-        'marks roster size %d as a certified dynamic profile',
+        'marks roster size %d as a certified dynamic thresholdParameters',
         (rosterSize) => {
-            const profile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            const thresholdParameters = deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize,
             });
 
-            expect(profile.rosterProfileKind).toBe(
+            expect(thresholdParameters.rosterParametersKind).toBe(
                 'SupportedDynamicRosterRange',
             );
-            expect(profile.warnings).toEqual(['ShareSelectionProfileRequired']);
+            expect(thresholdParameters.warnings).toEqual([
+                'ShareSelectionParametersRequired',
+            ]);
         },
     );
 
     it.each([11, 16, 19, 20])(
         'marks roster size %d as uncertified without dynamic evidence',
         (rosterSize) => {
-            const profile = deriveThresholdProfile({ rosterSize });
+            const thresholdParameters = deriveThresholdParameters({
+                rosterSize,
+            });
 
-            expect(profile.rosterProfileKind).toBe('UncertifiedDynamicRoster');
-            expect(profile.warnings).toEqual([
-                'DynamicRosterProfileCertificateRequired',
-                'ShareSelectionProfileRequired',
+            expect(thresholdParameters.rosterParametersKind).toBe(
+                'UncertifiedDynamicRoster',
+            );
+            expect(thresholdParameters.warnings).toEqual([
+                'DynamicRosterParametersCertificateRequired',
+                'ShareSelectionParametersRequired',
             ]);
         },
     );
 
     it('rejects roster sizes above twenty', () => {
-        expect(() => deriveThresholdProfile({ rosterSize: 21 })).toThrow(
+        expect(() => deriveThresholdParameters({ rosterSize: 21 })).toThrow(
             'Roster size must be at most 20.',
         );
     });
 
     it('warns when a certified backend bound exceeds the structural bound', () => {
-        const profile = deriveThresholdProfile({
-            dynamicRosterProfileCertificateHash,
+        const thresholdParameters = deriveThresholdParameters({
+            dynamicRosterParametersCertificateHash,
             rosterSize: 20,
             heBackendCorruptionModel: {
                 kind: 'CertifiedCustom',
                 backendCorruptionBound: 8,
-                certificateHash: 'certified-profile-hash',
+                certificateHash: 'certified-thresholdParameters-hash',
             },
         });
 
-        expect(profile.structuralCorruptionBound).toBe(6);
-        expect(profile.backendCorruptionBound).toBe(8);
-        expect(profile.privacyCorruptionBound).toBe(6);
-        expect(profile.warnings).toContain('BackendCorruptionBoundTooHigh');
+        expect(thresholdParameters.structuralCorruptionBound).toBe(6);
+        expect(thresholdParameters.backendCorruptionBound).toBe(8);
+        expect(thresholdParameters.privacyCorruptionBound).toBe(6);
+        expect(thresholdParameters.warnings).toContain(
+            'BackendCorruptionBoundTooHigh',
+        );
     });
 
     it('uses target-bound share-selection output for decryption share quorum', () => {
-        const profile = deriveThresholdProfile({
-            dynamicRosterProfileCertificateHash,
+        const thresholdParameters = deriveThresholdParameters({
+            dynamicRosterParametersCertificateHash,
             rosterSize: 20,
-            targetBoundShareSelectionProfile,
+            targetBoundShareSelectionParameters,
         });
 
-        expect(profile.decryptionThreshold).toBe(7);
-        expect(profile.decryptionShareQuorum).toBe(9);
-        expect(profile.targetBoundShareSelectionProfile).toEqual(
-            targetBoundShareSelectionProfile,
+        expect(thresholdParameters.decryptionThreshold).toBe(7);
+        expect(thresholdParameters.decryptionShareQuorum).toBe(9);
+        expect(thresholdParameters.targetBoundShareSelectionParameters).toEqual(
+            targetBoundShareSelectionParameters,
         );
-        expect(profile.warnings).not.toContain('ShareSelectionProfileRequired');
+        expect(thresholdParameters.warnings).not.toContain(
+            'ShareSelectionParametersRequired',
+        );
     });
 
-    it('rejects unsupported target-bound share-selection profile and target-basis bindings', () => {
+    it('rejects unsupported target-bound share-selection thresholdParameters and target-basis bindings', () => {
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
-                    profileId: 'arbitrary-profile',
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
+                    selectionId: 'arbitrary-selection',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile uses an unsupported ID.',
+            'Target-bound share-selection parameters uses an unsupported ID.',
         );
 
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
-                    targetDecryptionProfileId: 'arbitrary-target-profile',
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
+                    targetDecryptionId: 'arbitrary-target-thresholdParameters',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile uses an unsupported target decryption profile ID.',
+            'Target-bound share-selection parameters uses an unsupported target decryption parameters ID.',
         );
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
-                    targetDecryptionProfileId:
-                        retiredThresholdDecryptionProfileId,
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
+                    targetDecryptionId: retiredThresholdDecryptionId,
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile uses an unsupported target decryption profile ID.',
+            'Target-bound share-selection parameters uses an unsupported target decryption parameters ID.',
         );
 
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
                     targetBasisHash: '',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile requires a target-basis hash.',
+            'Target-bound share-selection parameters requires a target-basis hash.',
         );
     });
 
-    it('rejects target-bound share-selection profiles that cannot certify safe recombination', () => {
+    it('rejects target-bound share-selection parameters that cannot certify safe recombination', () => {
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
                     decryptionShareQuorum: 6,
                 },
             }),
@@ -379,24 +408,24 @@ describe('election foundation threshold profiles', () => {
         );
 
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
                     certificateHash: '',
                 },
             }),
         ).toThrow(
-            'Target-bound share-selection profile requires a certificate hash.',
+            'Target-bound share-selection parameters requires a certificate hash.',
         );
 
         expect(() =>
-            deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 20,
-                targetBoundShareSelectionProfile: {
-                    ...targetBoundShareSelectionProfile,
+                targetBoundShareSelectionParameters: {
+                    ...targetBoundShareSelectionParameters,
                     minimumArrivalsForRobustDecode: 8,
                 },
             }),

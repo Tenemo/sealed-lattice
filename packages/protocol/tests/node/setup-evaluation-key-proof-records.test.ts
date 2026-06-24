@@ -26,7 +26,6 @@ import {
     type EvaluatorKeySchedule,
     type RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
-import { setupProofProfileId } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -71,8 +70,6 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         ...setupContext,
         participantCount,
         rnsLimbCount: qSharePrimes.length,
@@ -1455,8 +1452,6 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     componentMaterials: [
                         { keySwitchComponentMaterialRoot: fixtureHash('x') },
                     ],

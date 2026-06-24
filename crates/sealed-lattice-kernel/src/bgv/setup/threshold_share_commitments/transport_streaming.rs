@@ -105,7 +105,7 @@ pub(crate) fn with_verified_transported_vss_material<T>(
         != SETUP_TRANSPORT_CHUNK_SIZE_BYTES
     {
         return Err(invalid_threshold_commitment_input(
-            "verified VSS material transportChunkSizeBytes must match the setup transport profile",
+            "verified VSS material transportChunkSizeBytes must match the setup transport parameters",
         ));
     }
     if u64_field(verified_material_reference, "transportChunkCount")? == 0 {
@@ -215,7 +215,6 @@ pub(super) fn absorb_threshold_share_commitment_transport_chunk(
     Ok(json!({
         "ok": true,
         "operation": "absorbThresholdShareCommitmentsFromTransportStreamChunk",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "absorbedChunkIndex": chunk_index,
         "absorbedByteLength": chunk.len(),
         "nextChunkIndex": session.next_chunk_index,
@@ -398,7 +397,6 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
     Ok(json!({
         "ok": true,
         "operation": "finishThresholdShareCommitmentsFromTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "derivationId": derivation_id,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
@@ -408,7 +406,7 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
         "thresholdDegree": roster.decryption_threshold,
         "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
         "transport": {
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+            "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": session.transport_header.chunk_count,
             "totalByteLength": hashes.total_byte_length,
@@ -554,7 +552,7 @@ impl StreamingVssThresholdMaterialParser {
         }
 
         let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-            "profile-ring"
+            "full-ring"
         } else {
             "development-reduced-ring"
         };
@@ -721,12 +719,12 @@ impl StreamingVssThresholdMaterialParser {
         }
         if participant_count != self.roster.participant_count {
             return Err(invalid_threshold_commitment_input(
-                "transported VSS material participant count does not match the accepted profile",
+                "transported VSS material participant count does not match the accepted parameters",
             ));
         }
         if threshold_degree != self.roster.decryption_threshold {
             return Err(invalid_threshold_commitment_input(
-                "transported VSS material threshold degree does not match the accepted profile",
+                "transported VSS material threshold degree does not match the accepted parameters",
             ));
         }
         if rns_limb_count != DATA_PRIMES.len() as u64 {
@@ -736,12 +734,12 @@ impl StreamingVssThresholdMaterialParser {
         }
         if commitment_limb_count != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64 {
             return Err(invalid_threshold_commitment_input(
-                "transported VSS material commitment limb count does not match the commitment profile",
+                "transported VSS material commitment limb count does not match the commitment parameters",
             ));
         }
         if commitment_row_count != SETUP_COMMITMENT_ROW_COUNT as u64 {
             return Err(invalid_threshold_commitment_input(
-                "transported VSS material row count does not match the commitment profile",
+                "transported VSS material row count does not match the commitment parameters",
             ));
         }
 
@@ -784,12 +782,12 @@ pub(super) fn read_constant_vss_commitments_from_transport_bytes(
     }
     if reader.read_varuint()? != roster.participant_count {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material participant count does not match the accepted profile",
+            "transported VSS material participant count does not match the accepted parameters",
         ));
     }
     if reader.read_varuint()? != roster.decryption_threshold {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material threshold degree does not match the accepted profile",
+            "transported VSS material threshold degree does not match the accepted parameters",
         ));
     }
     if reader.read_varuint()? != DATA_PRIMES.len() as u64 {
@@ -800,12 +798,12 @@ pub(super) fn read_constant_vss_commitments_from_transport_bytes(
     let ring_degree = reader.read_usize("ringDegree")?;
     if reader.read_varuint()? != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64 {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material commitment limb count does not match the commitment profile",
+            "transported VSS material commitment limb count does not match the commitment parameters",
         ));
     }
     if reader.read_varuint()? != SETUP_COMMITMENT_ROW_COUNT as u64 {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material row count does not match the commitment profile",
+            "transported VSS material row count does not match the commitment parameters",
         ));
     }
 
@@ -872,7 +870,7 @@ pub(super) fn read_constant_vss_commitments_from_transport_bytes(
     Ok(TransportConstantVssMaterial {
         ring_degree,
         ring_degree_status: if ring_degree == POLYNOMIAL_DEGREE {
-            "profile-ring"
+            "full-ring"
         } else {
             "development-reduced-ring"
         },
@@ -901,12 +899,12 @@ pub(super) fn derive_threshold_share_commitment_set_from_transport_bytes(
     }
     if reader.read_varuint()? != roster.participant_count {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material participant count does not match the accepted profile",
+            "transported VSS material participant count does not match the accepted parameters",
         ));
     }
     if reader.read_varuint()? != roster.decryption_threshold {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material threshold degree does not match the accepted profile",
+            "transported VSS material threshold degree does not match the accepted parameters",
         ));
     }
     if reader.read_varuint()? != DATA_PRIMES.len() as u64 {
@@ -917,12 +915,12 @@ pub(super) fn derive_threshold_share_commitment_set_from_transport_bytes(
     let ring_degree = reader.read_usize("ringDegree")?;
     if reader.read_varuint()? != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64 {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material commitment limb count does not match the commitment profile",
+            "transported VSS material commitment limb count does not match the commitment parameters",
         ));
     }
     if reader.read_varuint()? != SETUP_COMMITMENT_ROW_COUNT as u64 {
         return Err(invalid_threshold_commitment_input(
-            "transported VSS material row count does not match the commitment profile",
+            "transported VSS material row count does not match the commitment parameters",
         ));
     }
 
@@ -997,7 +995,7 @@ pub(super) fn derive_threshold_share_commitment_set_from_transport_bytes(
         ));
     }
     let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-        "profile-ring"
+        "full-ring"
     } else {
         "development-reduced-ring"
     };

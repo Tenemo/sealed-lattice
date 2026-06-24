@@ -36,14 +36,17 @@ const verifyTranscript =
 
 const requiredPublicFunctions = [
     [
-        'deriveFrozenRosterProfile',
-        publicApiRuntimeRecord.deriveFrozenRosterProfile,
+        'deriveFrozenRosterParameters',
+        publicApiRuntimeRecord.deriveFrozenRosterParameters,
     ],
     ['derivePollSpecHash', publicApiRuntimeRecord.derivePollSpecHash],
-    ['deriveThresholdProfile', publicApiRuntimeRecord.deriveThresholdProfile],
     [
-        'deriveThresholdProfileHash',
-        publicApiRuntimeRecord.deriveThresholdProfileHash,
+        'deriveThresholdParameters',
+        publicApiRuntimeRecord.deriveThresholdParameters,
+    ],
+    [
+        'deriveThresholdParametersHash',
+        publicApiRuntimeRecord.deriveThresholdParametersHash,
     ],
     [
         'deriveValidatedFirstValidOrder',

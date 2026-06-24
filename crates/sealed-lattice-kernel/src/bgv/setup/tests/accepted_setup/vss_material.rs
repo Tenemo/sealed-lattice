@@ -57,7 +57,7 @@ fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
         "tampered threshold share commitment ring-degree status",
         |package| {
             package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"][0]["ringDegreeStatus"] =
-                serde_json::json!("profile-ring");
+                serde_json::json!("full-ring");
             rebind_collective_threshold_share_commitment_root(package);
         },
         "thresholdShareCommitmentSetMismatch",
@@ -85,9 +85,11 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
         transport_derivation["vssCoefficientCommitmentMaterial"].clone();
     package["thresholdShareCommitments"] =
         transport_derivation["thresholdShareCommitments"].clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
@@ -147,9 +149,11 @@ fn collective_setup_verifier_uses_stream_verified_vss_material_without_chunk_sid
     package["vssCoefficientCommitmentMaterial"] =
         stream_derivation["vssCoefficientCommitmentMaterial"].clone();
     package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
@@ -191,9 +195,11 @@ fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
     package["vssCoefficientCommitmentMaterial"] =
         stream_derivation["vssCoefficientCommitmentMaterial"].clone();
     package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();

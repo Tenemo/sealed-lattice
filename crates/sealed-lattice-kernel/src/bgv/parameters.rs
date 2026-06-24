@@ -1,11 +1,7 @@
 use serde_json::{Value, json};
 
-use crate::{
-    encoding::CanonicalResult,
-    hashing::{derive_protocol_hash, hash512_hex},
-};
+use crate::{encoding::CanonicalResult, hashing::derive_protocol_hash};
 
-pub(crate) const PROFILE_ID: &str = "sealed-lattice-bgv-rns-v1";
 // Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
 pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
 // Plaintext modulus t. 65537 is the Fermat prime 2^16+1; t-1 = 2^16 is
@@ -22,7 +18,14 @@ pub(crate) use root_parameters::{
     data_basis_modulus_bits, data_prime_bit_length, extended_basis_modulus_bits,
     root_parameters_for_modulus,
 };
-pub(crate) fn selected_profile_value() -> Value {
+// The single canonical identity for the fixed BGV parameter set, in the style of
+// a SEAL parms_id: one object that unions the full BGV configuration. It binds
+// the ring parameters, the ballot/score/layout data, the aggregate/comparison
+// flags, the ciphertext convention flags, and the evaluator operation policy.
+// Every part is a pure deterministic function of the fixed parameters, so one
+// hash over the whole set is the strongest identity and replaces the former
+// collection of per-component hashes.
+pub(crate) fn bgv_parameters_value() -> Value {
     json!({
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
@@ -40,179 +43,71 @@ pub(crate) fn selected_profile_value() -> Value {
             "inverseCyclicRoot": parameters.inverse_cyclic_root,
             "inversePolynomialDegree": parameters.inverse_polynomial_degree,
         })).collect::<Vec<_>>(),
-    })
-}
-
-pub(crate) fn profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash("BGVProfileHash", &selected_profile_value())
-}
-
-pub(crate) fn backend_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "RustBgvBackendProfileHash",
-        &json!({
-            "profileHash": profile_hash()?,
-        }),
-    )
-}
-
-pub(crate) fn batch_encoder_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "BGVBatchEncoderHash",
-        &json!({
-            "profileHash": profile_hash()?,
-            "plaintextModulus": PLAINTEXT_MODULUS,
-            "polynomialDegree": POLYNOMIAL_DEGREE,
-            "layoutBindingHash": batch_layout_binding_hash()?,
-        }),
-    )
-}
-
-pub(crate) fn encrypted_ballot_aggregate_layout_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EncryptedBallotAggregateLayoutHash",
-        &json!({
-            "profileHash": profile_hash()?,
-            "slotCount": POLYNOMIAL_DEGREE,
-        }),
-    )
-}
-
-pub(crate) fn ballot_score_encoding_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "BallotScoreEncodingProfileHash",
-        &json!({
-            "scoreRange": {
-                "minimum": 1,
-                "maximum": 10
-            },
-            "bucketCount": 10,
-        }),
-    )
-}
-
-pub(crate) fn encrypted_ballot_layout_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EncryptedBallotLayoutHash",
-        &json!({
-            "coordinatesPerOption": 11,
-        }),
-    )
-}
-
-pub(crate) fn encrypted_ballot_aggregate_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash("EncryptedBallotAggregateProfileHash", &json!({}))
-}
-
-pub(crate) fn direct_aggregate_layout_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "DirectAggregateLayoutHash",
-        &json!({
-            "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
-            "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
-            "slotCount": POLYNOMIAL_DEGREE,
-            "scalarOnlyAggregateLayout": false,
-        }),
-    )
-}
-
-pub(crate) fn direct_comparison_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "DirectComparisonProfileHash",
-        &json!({
-            "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
-            "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
-            "rejectScalarOnlyAggregateLayouts": true,
-        }),
-    )
-}
-
-pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
-    Ok(json!({
-        "ballotScoreEncodingProfileHash": ballot_score_encoding_profile_hash()?,
-        "encryptedBallotLayoutHash": encrypted_ballot_layout_hash()?,
-        "encryptedBallotAggregateProfileHash": encrypted_ballot_aggregate_profile_hash()?,
-        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
-        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
-        "directComparisonProfileHash": direct_comparison_profile_hash()?,
-        "scoreBucketCount": 10,
         "scoreRange": {
             "minimum": 1,
             "maximum": 10
         },
+        "bucketCount": 10,
+        "coordinatesPerOption": 11,
+        "slotCount": POLYNOMIAL_DEGREE,
+        "scalarOnlyAggregateLayout": false,
+        "rejectScalarOnlyAggregateLayouts": true,
+        "coefficientDomainOnly": true,
+        "lattigoSerializationAccepted": false,
+        "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
+        "forbiddenOperations": FORBIDDEN_EVALUATOR_OPERATIONS,
+    })
+}
+
+pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
+    derive_protocol_hash("BGVParametersHash", &bgv_parameters_value())
+}
+
+// Layout data only, with no embedded sub-hashes. Used by the encode command's
+// layout-binding equality check.
+pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
+    Ok(json!({
+        "scoreRange": {
+            "minimum": 1,
+            "maximum": 10
+        },
+        "bucketCount": 10,
+        "slotCount": POLYNOMIAL_DEGREE,
+        "coordinatesPerOption": 11,
         "scalarOnlyAggregateLayout": false,
     }))
 }
 
-pub(crate) fn batch_layout_binding_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "BGVBatchEncoderLayoutBindingHash",
-        &batch_layout_binding_value()?,
-    )
-}
+const ALLOWED_EVALUATOR_OPERATIONS: &[&str] = &[
+    "encodeDirectEncryptedBallotAggregate",
+    "validateCoefficientDomainPlaintext",
+    "validateCoefficientDomainCiphertext",
+    "homomorphicEncryptedBallotAggregation",
+    "interpolationCoefficientScalarMultiplication",
+    "comparisonInputDerivationCircuitInputPreparation",
+    "encryptedRankAccumulationSupport",
+    "encryptedSparseTargetProjectionSupport",
+    "canonicalTargetCiphertextSelection",
+];
 
-pub(crate) fn canonical_ciphertext_convention_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "CanonicalCiphertextConventionHash",
-        &json!({
-            "profileHash": profile_hash()?,
-            "coefficientDomainOnly": true,
-            "lattigoSerializationAccepted": false,
-        }),
-    )
-}
+const FORBIDDEN_EVALUATOR_OPERATIONS: &[&str] = &[
+    "rawDecrypt",
+    "rawThresholdDecrypt",
+    "rawRnsLimbAccess",
+    "rawNttTranscriptRoot",
+    "scalarDegree360Comparator",
+    "uncertifiedComparisonInputDerivationOperation",
+    "lattigoRuntimeObjectImport",
+    "referenceOracleVectorAcceptance",
+    "genericFheApiSurface",
+];
 
+// Operations-list data only. Used by validate_bgv_evaluator_operation.
 pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "profileHash": profile_hash()?,
-        "batchEncoderHash": batch_encoder_hash()?,
-        "allowedOperations": [
-            "encodeDirectEncryptedBallotAggregate",
-            "validateCoefficientDomainPlaintext",
-            "validateCoefficientDomainCiphertext",
-            "homomorphicEncryptedBallotAggregation",
-            "interpolationCoefficientScalarMultiplication",
-            "comparisonInputDerivationCircuitInputPreparation",
-            "encryptedRankAccumulationSupport",
-            "encryptedSparseTargetProjectionSupport",
-            "canonicalTargetCiphertextSelection"
-        ],
-        "forbiddenOperations": [
-            "rawDecrypt",
-            "rawThresholdDecrypt",
-            "rawRnsLimbAccess",
-            "rawNttTranscriptRoot",
-            "scalarDegree360Comparator",
-            "uncertifiedComparisonInputDerivationOperation",
-            "lattigoRuntimeObjectImport",
-            "referenceOracleVectorAcceptance",
-            "genericFheApiSurface"
-        ],
+        "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
+        "forbiddenOperations": FORBIDDEN_EVALUATOR_OPERATIONS,
     }))
-}
-
-pub(crate) fn allowed_operation_registry_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "AllowedEvaluatorOpsHash",
-        &allowed_operation_registry_value()?,
-    )
-}
-
-pub(crate) fn security_estimator_input_hash() -> CanonicalResult<String> {
-    Ok(hash512_hex(
-        "sealed-lattice-bgv-rns/security-estimator-input-v1",
-        &[
-            POLYNOMIAL_DEGREE.to_string().as_bytes(),
-            PLAINTEXT_MODULUS.to_string().as_bytes(),
-            DATA_PRIMES
-                .iter()
-                .map(u64::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-                .as_bytes(),
-            SPECIAL_PRIME.to_string().as_bytes(),
-        ],
-    ))
 }
 
 #[cfg(test)]
@@ -220,13 +115,8 @@ mod tests {
     use super::root_parameters::moduli_bit_length_sum;
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        allowed_operation_registry_hash, ballot_score_encoding_profile_hash, batch_encoder_hash,
-        batch_layout_binding_hash, batch_layout_binding_value,
-        canonical_ciphertext_convention_hash, data_basis_modulus_bits,
-        direct_aggregate_layout_hash, direct_comparison_profile_hash,
-        encrypted_ballot_aggregate_layout_hash, encrypted_ballot_aggregate_profile_hash,
-        encrypted_ballot_layout_hash, extended_basis_modulus_bits, profile_hash,
-        root_parameters_for_modulus, security_estimator_input_hash,
+        batch_layout_binding_value, bgv_parameters_hash, data_basis_modulus_bits,
+        extended_basis_modulus_bits, root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -426,51 +316,19 @@ mod tests {
     }
 
     #[test]
-    fn selected_profile_hashes_are_hex_roots() {
-        let selected_hashes = [
-            ("profile", profile_hash()),
-            ("batch encoder", batch_encoder_hash()),
-            ("layout", encrypted_ballot_aggregate_layout_hash()),
-            ("batch layout binding", batch_layout_binding_hash()),
-            (
-                "ballot score encoding profile",
-                ballot_score_encoding_profile_hash(),
-            ),
-            ("encrypted ballot layout", encrypted_ballot_layout_hash()),
-            (
-                "encrypted ballot aggregate profile",
-                encrypted_ballot_aggregate_profile_hash(),
-            ),
-            ("direct aggregate layout", direct_aggregate_layout_hash()),
-            (
-                "top-k evaluator input layout",
-                direct_comparison_profile_hash(),
-            ),
-            (
-                "canonical ciphertext convention",
-                canonical_ciphertext_convention_hash(),
-            ),
-            (
-                "allowed operation registry",
-                allowed_operation_registry_hash(),
-            ),
-            ("security estimator input", security_estimator_input_hash()),
-        ];
-
-        for (profile_hash_label, actual_hash) in selected_hashes {
-            let actual_hash = actual_hash.expect("hash should derive");
-            assert_eq!(
-                actual_hash.len(),
-                128,
-                "{profile_hash_label} should be a SHA-512 hex root"
-            );
-            assert!(
-                actual_hash
-                    .bytes()
-                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-                "{profile_hash_label} should be lower-case hex"
-            );
-        }
+    fn bgv_parameters_hash_is_a_lower_case_hex_root() {
+        let actual_hash = bgv_parameters_hash().expect("hash should derive");
+        assert_eq!(
+            actual_hash.len(),
+            128,
+            "BGV parameters hash should be a SHA-512 hex root"
+        );
+        assert!(
+            actual_hash
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
+            "BGV parameters hash should be lower-case hex"
+        );
     }
 
     #[test]
@@ -478,13 +336,8 @@ mod tests {
         let binding = batch_layout_binding_value().expect("layout binding");
 
         assert_eq!(binding["scalarOnlyAggregateLayout"], false);
-        assert_eq!(binding["scoreBucketCount"], 10);
-        assert!(
-            binding["encryptedBallotAggregateLayoutHash"]
-                .as_str()
-                .expect("target hash")
-                .chars()
-                .all(|character| character.is_ascii_hexdigit())
-        );
+        assert_eq!(binding["bucketCount"], 10);
+        assert_eq!(binding["slotCount"], POLYNOMIAL_DEGREE);
+        assert_eq!(binding["coordinatesPerOption"], 11);
     }
 }

@@ -478,7 +478,7 @@ fn verify_cross_limb_consistency(
         }
     }
     for residues in residues_by_global_id.values() {
-        // The first two residues are the two smallest profile limbs by
+        // The first two residues are the two smallest BGV limbs by
         // construction, so their product exceeds twice the claim bound and the
         // centered lift is the unique integer; the range guard below enforces
         // this rather than assuming it.

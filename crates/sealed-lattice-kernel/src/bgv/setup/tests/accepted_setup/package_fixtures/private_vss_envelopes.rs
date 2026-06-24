@@ -5,10 +5,7 @@ pub(super) fn private_vss_envelope_commitments_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
-    setup_profile_hash: &str,
-    q_share_hash: &str,
-    carry_aware_vss_relation_profile_hash: &str,
-    commitment_profile_hash: &str,
+    setup_parameters_hash: &str,
     setup_epoch: &str,
     common_randomness: &serde_json::Value,
     vss_coefficient_commitments: &serde_json::Value,
@@ -82,10 +79,7 @@ pub(super) fn private_vss_envelope_commitments_object(
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "phaseOrderHash": phase_order_hash.as_str(),
                     "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -121,15 +115,11 @@ pub(super) fn private_vss_envelope_commitments_object(
                 let mut encrypted_envelope = serde_json::json!({
                     "objectType": "EncryptedPrivateVssShareEnvelope",
                     "objectVersion": 1,
-                    "mailboxEncryptionProfileId": "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1",
                     "ciphertextContentType": "private-vss-share-envelope",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
@@ -163,14 +153,10 @@ pub(super) fn private_vss_envelope_commitments_object(
                 let mut envelope_reference = serde_json::json!({
                     "objectType": "PrivateVssEnvelopeCommitment",
                     "objectVersion": 1,
-                    "mailboxEncryptionProfileId": "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1",
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "publicMatrixSeedHash": public_matrix_seed_hash,
                     "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
@@ -205,14 +191,10 @@ pub(super) fn private_vss_envelope_commitments_object(
     let mut commitment_set = serde_json::json!({
         "objectType": "PrivateVssEnvelopeCommitmentSet",
         "objectVersion": 1,
-        "mailboxEncryptionProfileId": "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitment_root,
@@ -238,10 +220,7 @@ pub(super) fn vss_share_acceptances_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
-    setup_profile_hash: &str,
-    q_share_hash: &str,
-    carry_aware_vss_relation_profile_hash: &str,
-    commitment_profile_hash: &str,
+    setup_parameters_hash: &str,
     setup_epoch: &str,
     private_vss_envelope_commitments: &serde_json::Value,
     vss_coefficient_commitments: &serde_json::Value,
@@ -257,20 +236,21 @@ pub(super) fn vss_share_acceptances_object(
     let acceptance_records = (0..participant_count)
         .flat_map(|source_trustee_roster_position| {
             let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-            let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
-                [source_trustee_roster_position as usize]["sourceTrusteeCommitmentRoot"]
-                .as_str()
-                .expect("source trustee commitment root")
-                .to_string();
+            let source_trustee_commitment_root =
+                vss_coefficient_commitments["sourceTrusteeRecords"]
+                    [source_trustee_roster_position as usize]["sourceTrusteeCommitmentRoot"]
+                    .as_str()
+                    .expect("source trustee commitment root")
+                    .to_string();
             (0..participant_count).map(move |recipient_roster_position| {
                 let recipient_identity = format!("trustee-{recipient_roster_position}");
-                let signature_seed_label =
-                    setup_trustee_signature_seed_label(&recipient_identity);
+                let signature_seed_label = setup_trustee_signature_seed_label(&recipient_identity);
                 let signing_public_key_hash =
                     create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
                         .expect("signature key fixture");
-                let envelope_sequence_number =
-                    (source_trustee_roster_position * participant_count + recipient_roster_position) as usize;
+                let envelope_sequence_number = (source_trustee_roster_position * participant_count
+                    + recipient_roster_position)
+                    as usize;
                 let envelope_reference = &envelope_references[envelope_sequence_number];
                 let private_envelope_hash = envelope_reference["privateEnvelopeHash"]
                     .as_str()
@@ -284,10 +264,7 @@ pub(super) fn vss_share_acceptances_object(
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "sourceTrusteeIdentity": source_trustee_identity,
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -304,9 +281,12 @@ pub(super) fn vss_share_acceptances_object(
                 let acceptance_root =
                     derive_protocol_hash("VssShareAcceptanceRoot", &acceptance_payload)
                         .expect("acceptance root");
-                let acceptance_byte_length =
-                    u64::try_from(canonical_json(&acceptance_payload).expect("acceptance payload").len())
-                        .expect("acceptance payload length");
+                let acceptance_byte_length = u64::try_from(
+                    canonical_json(&acceptance_payload)
+                        .expect("acceptance payload")
+                        .len(),
+                )
+                .expect("acceptance payload length");
                 let acceptance_context_hash = derive_protocol_hash(
                     "VssShareAcceptanceRoot",
                     &serde_json::json!({
@@ -314,10 +294,7 @@ pub(super) fn vss_share_acceptances_object(
                         "ceremonyId": ceremony_id,
                         "manifestHash": manifest_hash,
                         "rosterHash": roster_hash,
-                        "setupProfileHash": setup_profile_hash,
-                        "qShareHash": q_share_hash,
-                        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                        "commitmentProfileHash": commitment_profile_hash,
+                        "setupParametersHash": setup_parameters_hash,
                         "setupEpoch": setup_epoch,
                         "sourceTrusteeIdentity": source_trustee_identity,
                         "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -371,10 +348,7 @@ pub(super) fn vss_share_acceptances_object(
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "acceptanceRecords": acceptance_records,
@@ -403,17 +377,9 @@ pub(in super::super) fn vss_complaints_object(
         .as_str()
         .expect("manifest hash");
     let roster_hash = setup_context["rosterHash"].as_str().expect("roster hash");
-    let setup_profile_hash = setup_context["setupProfileHash"]
+    let setup_parameters_hash = setup_context["setupParametersHash"]
         .as_str()
-        .expect("setup profile hash");
-    let q_share_hash = setup_context["qShareHash"].as_str().expect("Q_share hash");
-    let carry_aware_vss_relation_profile_hash =
-        setup_context["carryAwareVssShareRelationProfileHash"]
-            .as_str()
-            .expect("carry-aware VSS relation profile hash");
-    let commitment_profile_hash = setup_context["commitmentProfileHash"]
-        .as_str()
-        .expect("commitment profile hash");
+        .expect("setup parameters hash");
     let setup_epoch = setup_context["setupEpoch"].as_str().expect("setup epoch");
     let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
     let recipient_identity = format!("trustee-{recipient_roster_position}");
@@ -449,10 +415,7 @@ pub(in super::super) fn vss_complaints_object(
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "sourceTrusteeIdentity": source_trustee_identity.as_str(),
         "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -482,10 +445,7 @@ pub(in super::super) fn vss_complaints_object(
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
-            "qShareHash": q_share_hash,
-            "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-            "commitmentProfileHash": commitment_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
             "sourceTrusteeIdentity": source_trustee_identity.as_str(),
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -534,10 +494,7 @@ pub(in super::super) fn vss_complaints_object(
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
         "complaintRecords": [complaint_record],

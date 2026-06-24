@@ -11,7 +11,7 @@ Use the root package name for every supported public import.
 ```typescript
 import {
     createSetupPackageVerificationInput,
-    deriveThresholdProfile,
+    deriveThresholdParameters,
     validatePollSpec,
     verifyBoardConsistency,
     verifyFoundationTranscript,
@@ -25,7 +25,7 @@ import {
 ## What lives here
 
 - poll specification validation and canonical hash derivation
-- threshold and frozen roster profile derivation
+- threshold and frozen roster parameter derivation
 - lifecycle transition and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
 - setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling

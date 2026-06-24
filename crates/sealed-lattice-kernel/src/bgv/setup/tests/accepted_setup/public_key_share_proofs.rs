@@ -754,10 +754,10 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
         .expect("verification response");
 
     assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(result["verifierStatus"], "outsideAcceptedParameters");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
 }
 
@@ -814,7 +814,7 @@ fn heavy_accepted_setup_collective_setup_public_key_loader_refuses_reduced_ring_
     assert!(
         error
             .message
-            .contains("requires profile-ring aggregate coefficients")
+            .contains("requires full-ring aggregate coefficients")
     );
 }
 

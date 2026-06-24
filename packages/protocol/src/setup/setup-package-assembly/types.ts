@@ -149,7 +149,6 @@ export type SetupPackage = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPackage';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupContext: CollectiveBgvSetupContext;
         readonly qShare: JsonRecord;
         readonly phaseTranscript: readonly SetupPhaseRecord[];

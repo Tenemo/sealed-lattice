@@ -8,8 +8,7 @@ const PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
 
 pub(in crate::bgv::setup) fn collective_public_key(
     input: &PassiveSetupInput,
-    profile_hash: &str,
-    backend_profile_hash: &str,
+    bgv_parameters_hash: &str,
     public_common_random_polynomial_root: &str,
     public_key_share_roots: &[String],
 ) -> CanonicalResult<Value> {
@@ -46,8 +45,7 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
         "rosterHash": input.roster_hash,
-        "profileHash": profile_hash,
-        "backendProfileHash": backend_profile_hash,
+        "bgvParametersHash": bgv_parameters_hash,
         "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
         "publicKeyShareRoots": public_key_share_roots,
         "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
@@ -63,8 +61,7 @@ pub(in crate::bgv::setup) fn collective_public_key(
         &json!({
             "collectivePublicKeyRoot": collective_public_key_root,
             "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
-            "profileHash": profile_hash,
-            "backendProfileHash": backend_profile_hash,
+            "bgvParametersHash": bgv_parameters_hash,
         }),
     )?;
 
@@ -124,7 +121,7 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficients_from_table(
     let modulus = unsigned_at_path(table, &["modulus"])?;
     if modulus != DATA_PRIMES[modulus_index] {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key coefficient table modulus does not match the selected data basis",
         ));
     }
@@ -350,7 +347,7 @@ pub(super) fn read_public_key_coefficient_vector(
     coefficient_vector_from_le_hex(
         string_at_path(table, &[hex_field_name])?,
         POLYNOMIAL_DEGREE,
-        "collective public key coefficient vector width does not match the selected BGV profile",
+        "collective public key coefficient vector width does not match the selected BGV parameters",
     )
 }
 

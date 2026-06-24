@@ -5,9 +5,7 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use crate::{
-    bgv::setup::accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID, transcript_core::decode_hex,
-};
+use crate::transcript_core::decode_hex;
 
 const VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE: &str = "VerifiedSetupProofMaterialSet";
 const VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE: &str = "VerifiedSetupProofMaterial";
@@ -60,13 +58,12 @@ struct VerifiedSetupProofMaterial {
 }
 
 pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
-    _setup_profile_id: &str,
-    setup_proof_profile_hash: &str,
+    setup_parameters_hash: &str,
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofRecordBinding",
         "objectVersion": 1,
-        "setupProofProfileHash": setup_proof_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_BYTE_DECODER,
@@ -120,8 +117,6 @@ pub(crate) fn begin_setup_proof_material_transport_stream_request(
     Ok(json!({
         "ok": true,
         "operation": "beginSetupProofMaterialTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "verificationId": verification_id,
         "proofFamily": header.proof_family,
         "proofMaterialRoot": header.proof_material_root,
@@ -269,7 +264,7 @@ pub(crate) fn setup_proof_material_transport_hashes(
 ) -> CanonicalResult<SetupProofMaterialTransportHashes> {
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(setup_proof_error(
-            "setup proof material proof family is not in the fixed setup-proof profile",
+            "setup proof material proof family is not in the fixed setup-proof parameters",
         ));
     }
     if chunk_size_bytes == 0 {
@@ -604,8 +599,6 @@ fn absorb_setup_proof_material_transport_stream_chunk(
     Ok(json!({
         "ok": true,
         "operation": "absorbSetupProofMaterialTransportStreamChunk",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "absorbedChunkIndex": chunk_index,
         "nextChunkIndex": session.next_chunk_index,
         "observedTotalByteLength": session.observed_total_byte_length,
@@ -726,8 +719,6 @@ fn finish_setup_proof_material_transport_stream(
     Ok(json!({
         "ok": true,
         "operation": "finishSetupProofMaterialTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "verificationId": verification_id,
         "proofFamily": session.header.proof_family,
         "proofMaterialRoot": session.header.proof_material_root,
@@ -863,7 +854,7 @@ fn validate_supported_setup_proof_transport_family(
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            format!("{object_path}.proofFamily is not in the setup proof transport profile"),
+            format!("{object_path}.proofFamily is not in the setup proof transport parameters"),
         ));
     }
 

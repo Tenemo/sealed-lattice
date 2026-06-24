@@ -12,12 +12,11 @@ import {
 } from '#packages/wasm/src/index';
 
 describe('collective BGV setup kernel commands', () => {
-    it('describes the accepted setup profile and compact verifier states', async () => {
+    it('describes the accepted setup parameters and compact verifier states', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
 
-        expect(profile).toMatchObject({
-            setupProfileId: 'CollectiveBgvSetup-v1',
+        expect(parameters).toMatchObject({
             objectType: 'SetupPackage',
             adversaryModel: 'active-static',
             livenessModel: 'secure-with-abort',
@@ -28,47 +27,42 @@ describe('collective BGV setup kernel commands', () => {
             qBallotRelease: 10,
             qFinal: 10,
             qDec: 4,
-            transportProfileId:
+            transportSchemeId:
                 'sealed-lattice-setup-binary-chunked-transport-v1',
         });
-        expect(profile.qShare).toMatchObject({
+        expect(parameters.qShare).toMatchObject({
             objectType: 'QSharePrimeList',
         });
-        expect(profile.qShare.primes.length).toBeGreaterThan(0);
-        expect(profile.qShareHash).toHaveLength(128);
-        expect(profile.publicVssCommitmentMaterialSizeProfile).toMatchObject({
-            objectType: 'PublicVssCommitmentMaterialSizeProfile',
+        expect(parameters.qShare.primes.length).toBeGreaterThan(0);
+        expect(parameters.setupParametersHash).toHaveLength(128);
+        expect(parameters.publicVssCommitmentMaterialSize).toMatchObject({
+            objectType: 'PublicVssCommitmentMaterialSize',
             ringDegree: 32768,
-            ringDegreeStatus: 'profile-ring',
+            ringDegreeStatus: 'full-ring',
             fullMaterialCoefficientBytes: 1_604_321_280,
             fullMaterialCoefficientMebibytes: 1530,
             streamingRequirement:
                 'binary-chunked-stream-verification-with-one-commitment-resident',
         });
-        expect(profile.publicVssCommitmentMaterialSizeProfileHash).toHaveLength(
-            128,
-        );
-        expect(profile.setupTransportProfile).toMatchObject({
-            objectType: 'SetupTransportProfile',
+        expect(parameters.setupTransport).toMatchObject({
+            objectType: 'SetupTransport',
             chunkSizeBytes: setupTransportChunkSizeBytes,
             storageQuotaBytes: 2_147_483_648,
             largestSingleBufferBytes: 1_572_864,
             streamVerificationOrder: 'ascending-chunk-index',
             lazyLoadingPolicy: 'root-addressed-large-object-loading',
         });
-        expect(profile.setupTransportProfileHash).toHaveLength(128);
-        expect(profile.carryAwareVssShareRelationProfile).toMatchObject({
-            objectType: 'CarryAwareVssShareRelationProfile',
+        expect(parameters.carryAwareVssShareRelation).toMatchObject({
+            objectType: 'CarryAwareVssShareRelation',
             carryWitnessDomain: 'non-negative-bounded-integer',
         });
-        expect(profile.carryAwareVssShareRelationProfileHash).toHaveLength(128);
-        expect(profile.commitmentProfile).toMatchObject({
-            objectType: 'BdlopCommitmentProfile',
+        expect(parameters.commitment).toMatchObject({
+            objectType: 'BdlopCommitment',
         });
-        expect(profile.commitmentProfile.messageEncoding).toMatchObject({
+        expect(parameters.commitment.messageEncoding).toMatchObject({
             integerEncoding: 'crt-lifted-integer-coefficients',
         });
-        expect(profile.commitmentProfile.assumptions).toMatchObject({
+        expect(parameters.commitment.assumptions).toMatchObject({
             hiding: 'Module-LWE over the selected commitment modulus limbs with short centered-ternary openings',
             binding:
                 'Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix',
@@ -77,47 +71,41 @@ describe('collective BGV setup kernel commands', () => {
                 'SetupProofAccountingCertificate',
             ],
         });
-        expect(profile.commitmentProfileHash).toHaveLength(128);
-        expect(profile.evaluatorKeyScheduleProfile).toMatchObject({
-            objectType: 'EvaluatorKeyScheduleProfile',
+        expect(parameters.evaluatorKeySchedule).toMatchObject({
+            objectType: 'EvaluatorKeySchedule',
             genericKeySwitchPolicy: 'refused-unless-explicitly-required',
         });
         expect(
-            profile.evaluatorKeyScheduleProfile.relinearizationLevelSchedule,
+            parameters.evaluatorKeySchedule.relinearizationLevelSchedule,
         ).not.toHaveLength(0);
         expect(
-            profile.evaluatorKeyScheduleProfile.requiredGaloisKeySchedule,
+            parameters.evaluatorKeySchedule.requiredGaloisKeySchedule,
         ).not.toHaveLength(0);
         expect(
-            profile.evaluatorKeyScheduleProfile.requiredGaloisSetHash,
+            parameters.evaluatorKeySchedule.requiredGaloisSetHash,
         ).toHaveLength(128);
-        expect(profile.evaluatorKeyScheduleProfileHash).toHaveLength(128);
-        expect(profile.verifierStatuses).toEqual([
+        expect(parameters.verifierStatuses).toEqual([
             'accepted',
             'pending',
             'refused',
             'aborted',
             'forkDetected',
-            'outsideProfile',
+            'outsideAcceptedParameters',
         ]);
-        expect(profile.phaseOrder).toHaveLength(15);
-        expect(profile.requiredFinalObjects).toContain(
+        expect(parameters.phaseOrder).toHaveLength(15);
+        expect(parameters.requiredFinalObjects).toContain(
             'setupTransportCertificate',
         );
     });
 
     it('verifies protocol-built local trustee setup state commitments', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
         const setupContext = {
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash: setupRequest.rosterHash,
-            setupProfileHash: profile.setupProfileHash,
-            qShareHash: profile.qShareHash,
-            carryAwareVssShareRelationProfileHash:
-                profile.carryAwareVssShareRelationProfileHash,
-            commitmentProfileHash: profile.commitmentProfileHash,
+            setupParametersHash: parameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',
         } satisfies CollectiveBgvSetupContext;
         const localStateCommitment = createLocalTrusteeSetupStateCommitment({

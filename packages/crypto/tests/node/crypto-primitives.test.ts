@@ -252,9 +252,6 @@ describe('crypto primitive boundary', () => {
         const privateEnvelopeAad = {
             objectType: 'PrivateVssEnvelopeAad',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            mailboxEncryptionProfileId:
-                'sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1',
             ceremonyId: 'ceremony',
             manifestHash: deriveProtocolHash('ElectionManifestHash', {
                 manifest: 'mailbox-test',
@@ -282,7 +279,7 @@ describe('crypto primitive boundary', () => {
                     privateVssShareProof: {
                         objectType: 'PrivateVssShareProof',
                         objectVersion: 1,
-                        proofProfileId:
+                        proofId:
                             'sealed-lattice-private-vss-share-proof-lnp-v1',
                         proofMaterialRoot: deriveProtocolHash(
                             'PrivateVssShareEnvelopeHash',
@@ -471,23 +468,9 @@ describe('crypto primitive boundary', () => {
             rosterHash: deriveProtocolHash('RosterHash', {
                 roster: 'local-state-storage-test',
             }),
-            setupProfileHash: deriveProtocolHash(
-                'CollectiveBgvSetupProfileHash',
-                {
-                    profile: 'local-state-storage-test',
-                },
-            ),
-            qShareHash: deriveProtocolHash('QSharePrimeListHash', {
-                qShare: 'local-state-storage-test',
+            setupParametersHash: deriveProtocolHash('SetupParametersHash', {
+                parameters: 'local-state-storage-test',
             }),
-            carryAwareVssShareRelationProfileHash: deriveProtocolHash(
-                'CarryAwareVssShareRelationProfileHash',
-                { relation: 'local-state-storage-test' },
-            ),
-            commitmentProfileHash: deriveProtocolHash(
-                'SetupCommitmentProfileHash',
-                { commitment: 'local-state-storage-test' },
-            ),
             setupEpoch: 'setup-epoch-1',
         };
         const thresholdShareCommitmentRecipientRoot = deriveProtocolHash(
@@ -532,12 +515,11 @@ describe('crypto primitive boundary', () => {
         const localStateCommitment = {
             objectType: 'LocalTrusteeSetupStateCommitment',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
             setupEpoch: setupContext.setupEpoch,
-            storageProfile: 'encrypted-local-device-state-required',
+            storageRequirement: 'encrypted-local-device-state-required',
             exportPolicy: 'roots-only-no-raw-share-or-opening-export',
             localStateRoot: deriveProtocolHash('LocalTrusteeSetupStateRoot', {
                 trustee: 'trustee-3',
@@ -552,7 +534,6 @@ describe('crypto primitive boundary', () => {
         const localStatePlaintext = {
             objectType: 'LocalTrusteeSetupStateSealedPayload',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,

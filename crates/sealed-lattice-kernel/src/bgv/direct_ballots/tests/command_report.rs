@@ -103,9 +103,9 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         128
     );
     assert_eq!(
-        result["proofAttempt"]["proofTransport"]["proofProfileHash"]
+        result["proofAttempt"]["proofTransport"]["proofParametersHash"]
             .as_str()
-            .expect("proof profile hash")
+            .expect("proof parameters hash")
             .len(),
         128
     );

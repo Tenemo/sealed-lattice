@@ -18,7 +18,7 @@ const rosterBoundActions = new Set<ProtocolAction>([
     'AcceptTarget',
     'CreateTargetBoundDecryptionShare',
     'VerifyDecryptionShare',
-    'VerifyTargetDecryptionProfile',
+    'VerifyTargetDecryptionParameters',
     'RecombineAcceptedTarget',
     'DecodeVerifiedTopK',
 ]);
@@ -29,11 +29,13 @@ const countAtLeast = (actual: number | undefined, required: number): boolean =>
 const getCertifiedDecryptionShareQuorum = (
     context: CapabilityContext,
 ): number | undefined => {
-    if (context.thresholdProfile.targetBoundShareSelectionProfile === null) {
+    if (
+        context.thresholdParameters.targetBoundShareSelectionParameters === null
+    ) {
         return undefined;
     }
 
-    return context.thresholdProfile.decryptionShareQuorum ?? undefined;
+    return context.thresholdParameters.decryptionShareQuorum ?? undefined;
 };
 
 const isRecoveryRefused = (
@@ -85,12 +87,12 @@ const evaluateOpenVoting = (
     }
     if (
         !nonEmptyHash(context.finalRosterHash) ||
-        !nonEmptyHash(context.frozenRosterProfileHash) ||
+        !nonEmptyHash(context.frozenRosterParametersHash) ||
         context.encryptedBallotLayoutFrozen !== true ||
-        context.ballotValidityProofProfileFrozen !== true ||
-        context.evaluatorReplayProfileFrozen !== true ||
+        context.ballotValidityProofParametersFrozen !== true ||
+        context.evaluatorReplayParametersFrozen !== true ||
         context.targetOutputLayoutFrozen !== true ||
-        context.targetDecryptionProfileReferencePresent !== true
+        context.targetDecryptionParametersReferencePresent !== true
     ) {
         return refuseAction(action, 'FrozenStateIncomplete');
     }
@@ -98,7 +100,7 @@ const evaluateOpenVoting = (
         context.trusteeSetupComplete !== true ||
         !countAtLeast(
             context.setupCompleteCount,
-            context.thresholdProfile.setupCompletionQuorum,
+            context.thresholdParameters.setupCompletionQuorum,
         )
     ) {
         return refuseAction(action, 'setupIncomplete');
@@ -123,7 +125,7 @@ const evaluateEncryptedBallotProofs = (
     if (
         !countAtLeast(
             context.setupCompleteCount,
-            context.thresholdProfile.setupCompletionQuorum,
+            context.thresholdParameters.setupCompletionQuorum,
         )
     ) {
         return refuseAction(action, 'setupIncomplete');
@@ -131,7 +133,7 @@ const evaluateEncryptedBallotProofs = (
     if (
         !countAtLeast(
             context.turnoutCount,
-            context.thresholdProfile.releaseQuorum,
+            context.thresholdParameters.releaseQuorum,
         )
     ) {
         return refuseAction(action, 'turnoutFloorNotReached');
@@ -211,7 +213,7 @@ const evaluateDecryptionShare = (
         return refuseAction(action, 'TargetNotAccepted');
     }
     if (getCertifiedDecryptionShareQuorum(context) === undefined) {
-        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
+        return refuseAction(action, 'TargetDecryptionParametersNotCertified');
     }
 
     const recoveryRefusal = isRecoveryRefused(context.recoveryState);
@@ -225,7 +227,7 @@ const evaluateDecryptionShare = (
     return allowAction(action);
 };
 
-const evaluateTargetDecryptionProfile = (
+const evaluateTargetDecryptionParameters = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => {
@@ -235,7 +237,7 @@ const evaluateTargetDecryptionProfile = (
     const certifiedDecryptionShareQuorum =
         getCertifiedDecryptionShareQuorum(context);
     if (certifiedDecryptionShareQuorum === undefined) {
-        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
+        return refuseAction(action, 'TargetDecryptionParametersNotCertified');
     }
     if (
         !countAtLeast(
@@ -269,13 +271,13 @@ const evaluateRecombination = (
     if (context.targetFinalityAccepted !== true) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.targetDecryptionProfileVerified !== true) {
-        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
+    if (context.targetDecryptionParametersVerified !== true) {
+        return refuseAction(action, 'TargetDecryptionParametersNotCertified');
     }
     const certifiedDecryptionShareQuorum =
         getCertifiedDecryptionShareQuorum(context);
     if (certifiedDecryptionShareQuorum === undefined) {
-        return refuseAction(action, 'TargetDecryptionProfileNotCertified');
+        return refuseAction(action, 'TargetDecryptionParametersNotCertified');
     }
     if (
         !countAtLeast(
@@ -317,8 +319,8 @@ const evaluateRosterBoundEnvironment = (
     ) {
         return refuseAction(action, 'RosterExternalAcceptanceHashMismatch');
     }
-    if (context.runtimeProfileSupported === false) {
-        return refuseAction(action, 'OutsideMeasuredRuntimeProfile');
+    if (context.runtimeParametersSupported === false) {
+        return refuseAction(action, 'OutsideMeasuredRuntimeParameters');
     }
     return undefined;
 };
@@ -378,8 +380,8 @@ export const evaluateActionCapability = (
         case 'CreateTargetBoundDecryptionShare':
         case 'VerifyDecryptionShare':
             return evaluateDecryptionShare(action, context);
-        case 'VerifyTargetDecryptionProfile':
-            return evaluateTargetDecryptionProfile(action, context);
+        case 'VerifyTargetDecryptionParameters':
+            return evaluateTargetDecryptionParameters(action, context);
         case 'RecombineAcceptedTarget':
             return evaluateRecombination(action, context);
         case 'DecodeVerifiedTopK':

@@ -11,8 +11,8 @@ use super::relation::{
     round_one_aggregate_diagonal_from_components,
 };
 use super::verifier::verify_evaluation_key_share;
-use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
-use crate::bgv::setup::accepted_setup::describe_collective_bgv_setup_profile;
+use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+use crate::bgv::setup::accepted_setup::describe_collective_bgv_setup_parameters;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
     SetupCommitmentValue, setup_commitment_full_value, setup_commitment_root,
@@ -377,15 +377,12 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
 }
 
 fn private_vss_setup_context_vector() -> serde_json::Value {
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     serde_json::json!({
         "ceremonyId": "statement-vector-ceremony",
         "manifestHash": repeated_hash("10"),
         "rosterHash": repeated_hash("20"),
-        "setupProfileHash": profile["setupProfileHash"],
-        "qShareHash": profile["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": profile["commitmentProfileHash"],
+        "setupParametersHash": setup_parameters["setupParametersHash"],
         "setupEpoch": "statement-vector-epoch",
     })
 }
@@ -411,10 +408,7 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
                 "ceremonyId": "statement-vector-ceremony",
                 "manifestHash": repeated_hash("10"),
                 "rosterHash": repeated_hash("20"),
-                "setupProfileHash": setup_context["setupProfileHash"],
-                "qShareHash": setup_context["qShareHash"],
-                "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-                "commitmentProfileHash": setup_context["commitmentProfileHash"],
+                "setupParametersHash": setup_context["setupParametersHash"],
                 "setupEpoch": "statement-vector-epoch",
                 "sourceTrusteeIdentity": "statement-vector-trustee",
                 "sourceTrusteeRosterPosition": 0,
@@ -430,10 +424,7 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
                 "ceremonyId": "statement-vector-ceremony",
                 "manifestHash": repeated_hash("10"),
                 "rosterHash": repeated_hash("20"),
-                "setupProfileHash": setup_context["setupProfileHash"],
-                "qShareHash": setup_context["qShareHash"],
-                "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-                "commitmentProfileHash": setup_context["commitmentProfileHash"],
+                "setupParametersHash": setup_context["setupParametersHash"],
                 "setupEpoch": "statement-vector-epoch",
                 "sourceTrusteeIdentity": "statement-vector-trustee",
                 "sourceTrusteeRosterPosition": 0,
@@ -452,10 +443,7 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
         "ceremonyId": "statement-vector-ceremony",
         "manifestHash": repeated_hash("10"),
         "rosterHash": repeated_hash("20"),
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": "statement-vector-epoch",
         "sourceTrusteeIdentity": "statement-vector-trustee",
         "sourceTrusteeRosterPosition": 0,

@@ -7,27 +7,27 @@ import {
 } from './field-helpers.js';
 import {
     commitmentModulusLimbs,
-    commitmentModulusProductForProfile,
-} from './profile-derivations.js';
+    commitmentModulusProductForParameters,
+} from './parameter-derivations.js';
 import type {
-    CollectiveBgvSetupProfileForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     SetupCommitmentSecurityCertificate,
     SetupCommitmentSecurityCertificateBody,
 } from './types.js';
 
 const setupCommitmentSecurityCertificateBody = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
 ): SetupCommitmentSecurityCertificateBody => {
-    const sourceRnsPrimes = setupProfile.qShare.primes;
+    const sourceRnsPrimes = setupParameters.qShare.primes;
     const maxSourceMessageModulus = Math.max(...sourceRnsPrimes);
     const recipientScalarSum = scalarPowerSum(
-        setupProfile.qDec,
-        setupProfile.participantCount,
+        setupParameters.qDec,
+        setupParameters.participantCount,
     );
     const thresholdScalarSum =
-        recipientScalarSum * BigInt(setupProfile.participantCount);
+        recipientScalarSum * BigInt(setupParameters.participantCount);
     const commitmentModulusProduct =
-        commitmentModulusProductForProfile(setupProfile);
+        commitmentModulusProductForParameters(setupParameters);
     const maxRecipientLiftedCoefficient =
         BigInt(maxSourceMessageModulus - 1) * recipientScalarSum;
     const maxThresholdLiftedCoefficient =
@@ -35,7 +35,7 @@ const setupCommitmentSecurityCertificateBody = (
     // No-wrap bound: the homomorphic threshold-share aggregate (sum of message * trusteePoint^i over all trustees) must stay below the commitment modulus product, or the re-derived commitment opening becomes ambiguous and binding fails.
     if (maxThresholdLiftedCoefficient >= commitmentModulusProduct) {
         throw new Error(
-            'setupProfile commitment modulus product must cover the threshold-share aggregate no-wrap bound.',
+            'setupParameters commitment modulus product must cover the threshold-share aggregate no-wrap bound.',
         );
     }
     const commitmentModulusProductBits = ceilLog2Bigint(
@@ -45,17 +45,13 @@ const setupCommitmentSecurityCertificateBody = (
     return {
         objectType: 'SetupCommitmentSecurityCertificate',
         objectVersion: 1,
-        setupProfileHash: setupProfile.setupProfileHash,
-        commitmentProfileHash: setupProfile.commitmentProfileHash,
-        qShareHash: setupProfile.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            setupProfile.carryAwareVssShareRelationProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         ringAndMatrixParameters: {
             coefficientRing: 'Z_q[X]/(X^N+1)',
             ringDegree: 32_768,
             sourceRnsLimbCount: sourceRnsPrimes.length,
             sourceRnsPrimes,
-            commitmentModulusLimbs: commitmentModulusLimbs(setupProfile),
+            commitmentModulusLimbs: commitmentModulusLimbs(setupParameters),
             commitmentModulusProductDecimal:
                 commitmentModulusProduct.toString(),
             commitmentModulusProductCeilBits: commitmentModulusProductBits,
@@ -86,14 +82,14 @@ const setupCommitmentSecurityCertificateBody = (
                 BigInt(maxSourceMessageModulus - 1) < commitmentModulusProduct,
         },
         aggregateOpeningBounds: {
-            shamirCoefficientCount: setupProfile.qDec,
-            maximumTrusteePoint: setupProfile.participantCount,
+            shamirCoefficientCount: setupParameters.qDec,
+            maximumTrusteePoint: setupParameters.participantCount,
             recipientScalarPowerSumDecimal: recipientScalarSum.toString(),
             recipientAggregateOpeningInfinityBound: Number(recipientScalarSum),
             maxRecipientLiftedCoefficientDecimal:
                 maxRecipientLiftedCoefficient.toString(),
             sourceTrusteeCountForThresholdAggregation:
-                setupProfile.participantCount,
+                setupParameters.participantCount,
             thresholdScalarPowerSumDecimal: thresholdScalarSum.toString(),
             thresholdShareOpeningInfinityBound: Number(thresholdScalarSum),
             maxThresholdLiftedCoefficientDecimal:
@@ -105,8 +101,8 @@ const setupCommitmentSecurityCertificateBody = (
         multiOpeningLeakage: {
             recipientAggregateOpeningsArePublic: false,
             recipientAggregateOpeningsAreMailboxPlaintext: false,
-            maxCorruptRecipientsBeforeThreshold: setupProfile.qDec - 1,
-            shamirPolynomialDegree: setupProfile.qDec - 1,
+            maxCorruptRecipientsBeforeThreshold: setupParameters.qDec - 1,
+            shamirPolynomialDegree: setupParameters.qDec - 1,
             rawCoefficientOpeningsExported: false,
             perCoefficientRandomnessExported: false,
             thresholdBoundary:
@@ -130,7 +126,7 @@ const setupCommitmentSecurityCertificateBody = (
         },
         estimatorRows: [
             {
-                rowId: 'first-profile-module-sis-binding-row',
+                rowId: 'first-roster-module-sis-binding-row',
                 problem: 'Module-SIS',
                 targetSecurityBits: 128,
                 ringDegree: 32_768,
@@ -141,7 +137,7 @@ const setupCommitmentSecurityCertificateBody = (
                     'accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds',
             },
             {
-                rowId: 'first-profile-module-lwe-hiding-row',
+                rowId: 'first-roster-module-lwe-hiding-row',
                 problem: 'Module-LWE',
                 targetSecurityBits: 128,
                 ringDegree: 32_768,
@@ -156,10 +152,10 @@ const setupCommitmentSecurityCertificateBody = (
 };
 
 export const createSetupCommitmentSecurityCertificate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
 ): SetupCommitmentSecurityCertificate => {
     const template = acceptedCertificateTemplate(
-        setupProfile,
+        setupParameters,
         'setupCommitmentSecurityCertificate',
         'SetupCommitmentSecurityCertificate',
         'setupCommitmentSecurityCertificateHash',
@@ -170,7 +166,7 @@ export const createSetupCommitmentSecurityCertificate = (
     }
 
     const certificateBody =
-        setupCommitmentSecurityCertificateBody(setupProfile);
+        setupCommitmentSecurityCertificateBody(setupParameters);
 
     return {
         ...certificateBody,

@@ -36,10 +36,10 @@ use crate::{
         },
         modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast},
         ntt::forward_negacyclic_ntt,
-        profile::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
-            TARGET_DECRYPTION_PROFILE_ID, development_evaluator_key_from_passive_setup_package,
+            TARGET_DECRYPTION_ID, development_evaluator_key_from_passive_setup_package,
             validate_passive_setup_package_for_encrypted_evaluation,
         },
         setup_helpers::{
@@ -61,7 +61,7 @@ const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1";
 
 #[derive(Clone)]
-struct TargetShareProfile {
+struct TargetShareParameters {
     decryption_threshold: usize,
     minimum_shares_for_interpolation: usize,
     decryption_share_quorum: usize,
@@ -87,9 +87,9 @@ struct SetupBinding {
     setup_package_hash: String,
     ceremony_id: String,
     election_manifest_hash: String,
-    threshold_profile_hash: String,
-    target_decryption_profile_hash: String,
-    target_decryption_profile_binding_hash: String,
+    threshold_parameters_hash: String,
+    target_decryption_parameters_hash: String,
+    target_decryption_parameters_binding_hash: String,
     participants: Vec<ParticipantBinding>,
     threshold_verification: ThresholdVerificationBinding,
 }
@@ -104,7 +104,7 @@ struct TargetAcceptedBinding {
     target_context_hash: String,
     target_ciphertext_hash: String,
     target_layout_hash: String,
-    target_decryption_profile_hash: String,
+    target_decryption_parameters_hash: String,
     target_basis_hash: String,
 }
 

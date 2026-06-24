@@ -67,11 +67,11 @@ mod tests {
     }
 
     #[test]
-    fn foundation_profile_analyzes_expected_boundary() {
+    fn foundation_parameters_analyze_expected_boundary() {
         let foundation_bytes =
             serialize_transcript_core_object(&canonical_transcript_core_object());
         let analysis = analyze_canonical_object(&foundation_bytes, 8)
-            .expect("foundation profile should analyze");
+            .expect("foundation parameters should analyze");
 
         assert!(analysis.tags.iter().any(|tag| tag == "direct-route"));
         assert_eq!(analysis.title, "Foundation transcript roots");

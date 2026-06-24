@@ -72,7 +72,6 @@ describe('accepted setup public package API in Node', () => {
 
         expect(setupContribution).toMatchObject({
             objectType: 'SetupContributionAssembly',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             trusteeIdentity,
             trusteeRosterPosition,
             vssSourceTrusteeCommitmentRoot:
@@ -92,8 +91,8 @@ describe('accepted setup public package API in Node', () => {
 
     it('assembles public key and evaluation-key records from proof material only', async () => {
         const kernel = await loadPublicTranscriptCoreKernel();
-        const setupProfile = kernel.describeCollectiveBgvSetupProfile();
-        const bgvProfile = kernel.describeBgvRnsProfile();
+        const setupParameters = kernel.describeCollectiveBgvSetupParameters();
+        const bgvParameters = kernel.describeBgvRnsParameters();
         const setupContext = setupContextFromKernel(kernel);
         const publicMatrixSeedHash = hashFromKernel(
             kernel,
@@ -372,7 +371,6 @@ describe('accepted setup public package API in Node', () => {
         const trusteeEvaluationKeyProofsWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProofSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
             relinearizationKeyShareRoundsRoot:
                 relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
             proofRecords: [],
@@ -390,7 +388,7 @@ describe('accepted setup public package API in Node', () => {
         );
         const setupTransportChunkCount = Math.ceil(
             Number(
-                setupProfile.publicVssCommitmentMaterialSizeProfile
+                setupParameters.publicVssCommitmentMaterialSize
                     .fullMaterialCoefficientBytes,
             ) / setupTransportChunkSizeBytes,
         );
@@ -476,8 +474,8 @@ describe('accepted setup public package API in Node', () => {
             transportedObjects: transportedCompanionObjects,
         };
         const setupCertificates = publicSetupApi.createSetupCertificates({
-            setupProfile,
-            bgvProfile,
+            setupParameters: setupParameters,
+            bgvParameters: bgvParameters,
             vssCoefficientCommitmentMaterial,
             transport: setupTransport,
             sameSecretLinkageAnchorProofAccounting: {
@@ -498,8 +496,8 @@ describe('accepted setup public package API in Node', () => {
         });
         expect(() =>
             publicSetupApi.createSetupCertificates({
-                setupProfile,
-                bgvProfile,
+                setupParameters: setupParameters,
+                bgvParameters: bgvParameters,
                 vssCoefficientCommitmentMaterial,
                 transport: {
                     ...setupTransport,
@@ -534,8 +532,8 @@ describe('accepted setup public package API in Node', () => {
         ).toThrow(/duplicate object roots/u);
         expect(() =>
             publicSetupApi.createSetupCertificates({
-                setupProfile,
-                bgvProfile,
+                setupParameters: setupParameters,
+                bgvParameters: bgvParameters,
                 vssCoefficientCommitmentMaterial,
                 transport: {
                     ...setupTransport,
@@ -607,7 +605,7 @@ describe('accepted setup public package API in Node', () => {
             ceremonyId: setupContext.ceremonyId,
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
-            setupProfileHash: setupContext.setupProfileHash,
+            setupParametersHash: setupContext.setupParametersHash,
             setupEpoch: setupContext.setupEpoch,
             publicMatrixSeedHash,
             publicDerivations,
@@ -616,7 +614,7 @@ describe('accepted setup public package API in Node', () => {
         } as const;
         const setupPackageInput = {
             setupContext,
-            qShare: setupProfile.qShare,
+            qShare: setupParameters.qShare,
             phaseTranscript: phaseTranscriptFixture(kernel, setupContext),
             commonRandomness: {
                 ...commonRandomnessWithoutRoot,
@@ -691,8 +689,8 @@ describe('accepted setup public package API in Node', () => {
             trusteeEvaluationKeyProofs,
             evaluationKeys: publicEvaluationKeys,
             setupCertificateInput: {
-                setupProfile,
-                bgvProfile,
+                setupParameters: setupParameters,
+                bgvParameters: bgvParameters,
                 transport: setupTransport,
             },
         };
@@ -723,7 +721,6 @@ describe('accepted setup public package API in Node', () => {
         });
         expect(setupPackage).toMatchObject({
             objectType: 'SetupPackage',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             setupContext,
             collectivePublicKey: {
                 objectType: 'CollectivePublicKey',
@@ -748,7 +745,7 @@ describe('accepted setup public package API in Node', () => {
                 setupTransportChunkCount + transportedCompanionObjects.length,
             totalByteLength:
                 Number(
-                    setupProfile.publicVssCommitmentMaterialSizeProfile
+                    setupParameters.publicVssCommitmentMaterialSize
                         .fullMaterialCoefficientBytes,
                 ) + transportedCompanionByteLength,
             chunkHashes: [

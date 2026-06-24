@@ -1,7 +1,6 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
 import { BinaryChunkWriter } from '../binary-chunk-writer.js';
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import { setupTransportChunkSizeBytes } from '../vss-coefficient-commitments.js';
 
 import {
@@ -153,8 +152,6 @@ export const publicKeyShareMaterialRecordsFromContributions = (
             const materialRecordWithoutRoot = {
                 objectType: 'PublicKeyShareMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
                 materialEncoding: publicKeyShareMaterialEncoding,
                 ...contextFields(input.setupContext),
@@ -228,8 +225,6 @@ export const createPublicKeyShareMaterialSet = (
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialEncoding,
         ...contextFields(input.setupContext),

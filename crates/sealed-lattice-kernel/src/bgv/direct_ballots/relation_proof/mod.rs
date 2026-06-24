@@ -34,7 +34,7 @@ use crate::{
     bgv::{
         evaluator::engine::{DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul},
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
-        profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, profile_hash},
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{canonical_json, derive_protocol_hash, hash512, hash512_hex, to_hex},

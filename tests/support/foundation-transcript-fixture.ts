@@ -55,7 +55,7 @@ export type FoundationTranscriptExpectedHashes = {
     readonly targetFinalityCheckpointHash: ProtocolHash;
     readonly targetFinalityRecordHash: ProtocolHash;
     readonly targetProposalHash: ProtocolHash;
-    readonly thresholdProfileHash: ProtocolHash;
+    readonly thresholdParametersHash: ProtocolHash;
 };
 
 const textEncoder = new TextEncoder();
@@ -451,8 +451,8 @@ export const createFoundationTranscriptFixture =
                         purpose: 'foundation-evaluator-replay-context',
                     },
                 ),
-                evaluatorReplayProfileHash:
-                    manifestOpaqueBindings.evaluatorReplayProfileHash,
+                evaluatorReplayParametersHash:
+                    manifestOpaqueBindings.evaluatorReplayParametersHash,
                 targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
                     electionManifestHash:
                         rosterManifestTranscript.electionManifest
@@ -462,9 +462,9 @@ export const createFoundationTranscriptFixture =
                 targetFinalityPolicyHash:
                     manifestPolicyHashes.targetFinalityPolicyHash,
                 targetLayoutHash: manifestOpaqueBindings.targetLayoutHash,
-                thresholdProfileHash:
-                    rosterManifestTranscript.frozenRosterProfile
-                        .thresholdProfileHash,
+                thresholdParametersHash:
+                    rosterManifestTranscript.frozenRosterParameters
+                        .thresholdParametersHash,
                 tiePolicyHash: foundationTiePolicyHash,
                 topOptionCount:
                     rosterManifestTranscript.pollSpec.topOptionCount,
@@ -522,9 +522,9 @@ export const createFoundationTranscriptFixture =
                 targetFinalityRecordHash:
                     targetFinalityRecord.targetFinalityRecordHash,
                 targetProposalHash: targetFinalityRecord.targetProposalHash,
-                thresholdProfileHash:
-                    rosterManifestTranscript.frozenRosterProfile
-                        .thresholdProfileHash,
+                thresholdParametersHash:
+                    rosterManifestTranscript.frozenRosterParameters
+                        .thresholdParametersHash,
             },
             input,
             targetFinality,

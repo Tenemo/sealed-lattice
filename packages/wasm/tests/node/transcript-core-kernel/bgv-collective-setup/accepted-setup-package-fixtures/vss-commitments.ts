@@ -1,7 +1,7 @@
 import {
     deterministicRandomBytes,
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
+    firstRosterDecryptionThreshold,
+    firstRosterParticipantCount,
     minimumSuccinctProofFixtureRingDegree,
 } from '../setup-fixture-primitives.js';
 
@@ -11,32 +11,32 @@ import {
     type VssCoefficientCommitmentBundle,
 } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
-import type { BgvCollectiveSetupProfileDescription } from '#packages/wasm/src/index';
+import type { BgvCollectiveSetupParametersDescription } from '#packages/wasm/src/index';
 import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
 
 export function acceptedVssCoefficientCommitments(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     publicMatrixSeedHash: string,
 ): VssCoefficientCommitmentBundle {
     return createVssCoefficientCommitmentBundle({
         setupContext,
         publicMatrixSeedHash,
         setupCommitmentComputer,
-        qSharePrimes: profile.qShare.primes,
+        qSharePrimes: parameters.qShare.primes,
         ringDegree: minimumSuccinctProofFixtureRingDegree,
-        participantCount: firstProfileParticipantCount,
-        thresholdDegree: firstProfileDecryptionThreshold,
+        participantCount: firstRosterParticipantCount,
+        thresholdDegree: firstRosterDecryptionThreshold,
         sourceTrusteeOpeningStates: Array.from(
-            { length: firstProfileParticipantCount },
+            { length: firstRosterParticipantCount },
             (_unusedSourceTrustee, sourceTrusteeRosterPosition) =>
                 createVssSourceTrusteeCoefficientOpeningState({
                     sourceTrusteeIdentity: `trustee-${String(sourceTrusteeRosterPosition)}`,
                     sourceTrusteeRosterPosition,
-                    participantCount: firstProfileParticipantCount,
-                    qSharePrimes: profile.qShare.primes,
+                    participantCount: firstRosterParticipantCount,
+                    qSharePrimes: parameters.qShare.primes,
                     ringDegree: minimumSuccinctProofFixtureRingDegree,
-                    thresholdDegree: firstProfileDecryptionThreshold,
+                    thresholdDegree: firstRosterDecryptionThreshold,
                     randomBytes: deterministicRandomBytes(
                         `trustee-${String(sourceTrusteeRosterPosition)}`,
                     ),

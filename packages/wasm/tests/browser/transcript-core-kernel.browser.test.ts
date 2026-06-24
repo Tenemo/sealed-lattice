@@ -78,16 +78,15 @@ describe('transcript-core kernel in browsers', () => {
 
     it('produces byte-identical BGV canonical roots through browser WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeBgvRnsProfile();
+        const parameters = kernel.describeBgvRnsParameters();
         const encodedResult = kernel.encodeBgvBatchPlaintext({
             slots: [0, 1, 65_536, 17, 99],
             level: 0,
-            layoutBinding: profile.batchLayoutBinding,
+            layoutBinding: parameters.batchLayoutBinding,
             includeCanonicalBytesHex: true,
         });
 
-        expect(profile.profileHash).toMatch(protocolHashPattern);
-        expect(profile.batchLayoutBindingHash).toMatch(protocolHashPattern);
+        expect(parameters.bgvParametersHash).toMatch(protocolHashPattern);
         expect(encodedResult).not.toMatchObject({ ok: false });
         const encoded = encodedResult as {
             readonly canonicalBytesHex: string;

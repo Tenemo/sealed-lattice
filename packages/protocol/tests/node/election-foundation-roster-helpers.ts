@@ -1,7 +1,7 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
-    FrozenRosterProfile,
+    FrozenRosterParameters,
     PollSpec,
     RegistrationEntry,
     RosterManifestTranscriptInput,
@@ -26,7 +26,7 @@ import {
     derivePollSpecHash,
     validatePollSpec,
 } from '#packages/protocol/src/lifecycle/poll-spec';
-import { deriveFrozenRosterProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import { deriveFrozenRosterParameters } from '#packages/protocol/src/lifecycle/thresholds';
 import {
     deriveElectionManifestHash,
     deriveRegistrationEntryHash,
@@ -48,7 +48,7 @@ export const createRosterPollSpec = (): PollSpec => {
         rosterPolicy: 'OpenLinkPublicRoster',
         scoreDomain: { max: 10, min: 1, skippedOptionScore: 1 },
         smallRosterPolicy: 'AllowMicroRoster',
-        thresholdProfileFamily: 'BalancedDefault',
+        thresholdParametersFamily: 'BalancedDefault',
         tiePolicy: 'HigherScoreThenLowerOptionIndex',
         topOptionCount: 10,
     });
@@ -60,18 +60,18 @@ export const createRosterPollSpec = (): PollSpec => {
     return validation.normalized;
 };
 
-const createFrozenRosterProfile = (
+const createFrozenRosterParameters = (
     pollSpec: PollSpec,
     registrations: readonly RegistrationEntry[],
-): FrozenRosterProfile => {
+): FrozenRosterParameters => {
     const rosterHash = deriveRosterHash(registrations);
     const rosterSize = registrations.length;
 
-    return deriveFrozenRosterProfile({
-        dynamicRosterProfileCertificateHash:
+    return deriveFrozenRosterParameters({
+        dynamicRosterParametersCertificateHash:
             rosterSize >= 10 && rosterSize !== 10
-                ? deriveProtocolHash('ThresholdProfileHash', {
-                      certificate: 'dynamic-roster-profile',
+                ? deriveProtocolHash('ThresholdParametersHash', {
+                      certificate: 'dynamic-roster-parameters',
                       rosterSize,
                   })
                 : undefined,
@@ -125,16 +125,12 @@ export const createTrusteeSetupEntry = (
         objectType: 'TrusteeSetupEntry',
         objectVersion: 1,
         ceremonyId,
-        setupProfileId: manifestOpaqueBindings.bgvPassiveSetupProfileId,
-        targetDecryptionProfileId:
-            manifestOpaqueBindings.targetDecryptionProfileId,
+        targetDecryptionId: manifestOpaqueBindings.targetDecryptionId,
         trusteeIdentity,
         trusteeSetupRoot: deriveProtocolHash('ParticipantBgvSetupRecordHash', {
             trusteeIdentity,
         }),
-        bgvProfileHash: manifestOpaqueBindings.bgvProfileHash,
-        rustBgvBackendProfileHash:
-            manifestOpaqueBindings.rustBgvBackendProfileHash,
+        bgvParametersHash: manifestOpaqueBindings.bgvParametersHash,
         participantSetupRecordHash: deriveProtocolHash(
             'ParticipantBgvSetupRecordHash',
             {
@@ -181,11 +177,11 @@ export const createElectionManifest = (
 ): ElectionManifest => {
     const pollSpec = createRosterPollSpec();
     const rosterHash = deriveRosterHash(registrations);
-    const thresholdProfileHash =
+    const thresholdParametersHash =
         registrations.length >= 3
-            ? createFrozenRosterProfile(pollSpec, registrations)
-                  .thresholdProfileHash
-            : deriveProtocolHash('ThresholdProfileHash', {
+            ? createFrozenRosterParameters(pollSpec, registrations)
+                  .thresholdParametersHash
+            : deriveProtocolHash('ThresholdParametersHash', {
                   fixture: 'below-minimum-roster',
                   rosterSize: registrations.length,
               });
@@ -195,7 +191,7 @@ export const createElectionManifest = (
         ceremonyId,
         pollSpecHash: derivePollSpecHash(pollSpec),
         rosterHash,
-        thresholdProfileHash,
+        thresholdParametersHash,
         manifestPolicyHashes,
         manifestOpaqueBindings,
         boardSequence: 3,
@@ -254,7 +250,7 @@ export const createRosterManifestTranscriptInput = (
         createBoardHeadWithObjects(1, genesisHead.headHash, setupObjects);
     const freezeHead = createBoardHead(2, setupHead.headHash);
     const pollSpec = createRosterPollSpec();
-    const frozenRosterProfile = createFrozenRosterProfile(
+    const frozenRosterParameters = createFrozenRosterParameters(
         pollSpec,
         rosterRegistrations,
     );
@@ -298,7 +294,7 @@ export const createRosterManifestTranscriptInput = (
         trusteeSetupEntries,
         trusteeSetupInclusionProofs,
         pollSpec,
-        frozenRosterProfile,
+        frozenRosterParameters,
         electionManifest: manifest,
         organizerPublicKeyHash,
         organizerIdentity: 'organizer',

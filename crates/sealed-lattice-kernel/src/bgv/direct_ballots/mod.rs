@@ -27,7 +27,7 @@ mod relation_proof;
 use relation_proof::{
     DirectBallotRelationProofGeneration, DirectBallotRelationProofVerification,
     direct_ballot_relation_proof_accounting, direct_ballot_relation_proof_bytes_hash,
-    direct_ballot_relation_proof_profile_hash, generate_direct_ballot_relation_proof,
+    direct_ballot_relation_proof_parameters_hash, generate_direct_ballot_relation_proof,
     verify_direct_ballot_relation_proof,
 };
 
@@ -49,10 +49,7 @@ use crate::{
             },
         },
         modular_arithmetic::add_mod,
-        profile::{
-            DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, PROFILE_ID,
-            direct_comparison_profile_hash, profile_hash,
-        },
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         setup::{
             development_evaluator_key_from_passive_setup_package,
             validate_passive_setup_package_for_encrypted_evaluation,

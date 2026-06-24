@@ -58,9 +58,8 @@ export {
     evaluatorKeyGenericSwitchPolicy,
 } from './setup/evaluator-key-schedule.js';
 export {
-    acceptedBgvProfileRingDegree,
+    acceptedBgvFullRingDegree,
     acceptedBgvSetupQShare,
-    acceptedBgvSetupQShareHash,
     acceptedBgvSetupQSharePrimes,
     binaryVssCoefficientCommitmentMaterialByteLength,
     createBinaryChunkedVssCoefficientCommitmentBundle,
@@ -71,11 +70,10 @@ export {
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
-    setupCommitmentProfileId,
     setupCommitmentRandomnessWidth,
     setupCommitmentRootPayload,
     setupTransportChunkSizeBytes,
-    setupTransportProfileId,
+    setupTransportSchemeId,
     vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
@@ -86,7 +84,7 @@ export {
     encryptLocalTrusteeSetupState,
     localTrusteeSetupStateDeletionBoundary,
     localTrusteeSetupStateExportPolicy,
-    localTrusteeSetupStateStorageProfile,
+    localTrusteeSetupStateStorageRequirement,
     retainedLocalTrusteeSetupMaterialClasses,
 } from './setup/local-trustee-setup-state.js';
 export {
@@ -116,7 +114,6 @@ export {
     sameSecretProofFamily,
     sameSecretRelation,
     sameSecretTargetDecryptionBindingPolicy,
-    setupProofProfileId,
 } from './setup/same-secret-consistency-records.js';
 export {
     createVssComplaintSet,
@@ -284,8 +281,8 @@ export type {
 } from './setup/setup-contribution-orchestration.js';
 export type {
     BgvHeSecurityCertificate,
-    BgvRnsProfileForCertificates,
-    CollectiveBgvSetupProfileForCertificates,
+    BgvRnsParametersForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
     SetupCertificates,
@@ -342,7 +339,7 @@ export type {
     VssShareComplaintRecordInput,
 } from './setup/vss-share-verification-records.js';
 export {
-    deriveFrozenRosterProfile,
-    deriveThresholdProfile,
-    deriveThresholdProfileHash,
+    deriveFrozenRosterParameters,
+    deriveThresholdParameters,
+    deriveThresholdParametersHash,
 } from './lifecycle/thresholds.js';

@@ -11,9 +11,9 @@ pub(in super::super) const SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND: i128 = 1;
 // carry relation is required above one q_l.
 pub(in super::super) const SETUP_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 
-pub(in super::super) fn setup_commitment_profile_value() -> CanonicalResult<Value> {
+pub(in super::super) fn setup_commitment_parameters_value() -> CanonicalResult<Value> {
     Ok(json!({
-        "objectType": "BdlopCommitmentProfile",
+        "objectType": "BdlopCommitment",
         "objectVersion": 1,
         "construction": "BDLOP simplified matrix commitment",
         "ring": {
@@ -61,13 +61,6 @@ pub(in super::super) fn setup_commitment_profile_value() -> CanonicalResult<Valu
             "coefficientVectorEncoding": "little-endian-u64-per-coefficient"
         }
     }))
-}
-
-pub(in super::super) fn setup_commitment_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupCommitmentProfileHash",
-        &setup_commitment_profile_value()?,
-    )
 }
 
 pub(in super::super) fn setup_commitment_modulus_limb_values() -> Vec<Value> {

@@ -1,4 +1,5 @@
 export const canonicalErrorCodeValues = [
+    'ComponentMismatch',
     'DuplicateField',
     'FieldOrder',
     'FixtureMismatch',
@@ -13,12 +14,9 @@ export const canonicalErrorCodeValues = [
     'MalformedVarUint',
     'MissingField',
     'NonCanonicalVarUint',
-    'ProfileComponentMismatch',
     'TrailingBytes',
-    'UnknownBaseProfile',
     'UnknownField',
     'UnknownSecurityClosure',
-    'UnknownProofProfile',
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
     'UnsupportedObjectVersion',

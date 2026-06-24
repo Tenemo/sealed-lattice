@@ -398,7 +398,6 @@ fn threshold_share_commitment_transport_refuses_chunk_hash_drift() {
 }
 
 fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_json::Value {
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_protocol_hash(
         "ElectionManifestHash",
@@ -410,25 +409,18 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
         &serde_json::json!({ "roster": "threshold-share-commitments-test" }),
     )
     .expect("roster hash");
-    let setup_profile_hash = profile["setupProfileHash"]
-        .as_str()
-        .expect("setup profile hash");
-    let q_share_hash = profile["qShareHash"].as_str().expect("Q_share hash");
-    let carry_aware_vss_relation_profile_hash = profile["carryAwareVssShareRelationProfileHash"]
-        .as_str()
-        .expect("carry-aware VSS relation profile hash");
-    let commitment_profile_hash = profile["commitmentProfileHash"]
-        .as_str()
-        .expect("commitment profile hash");
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(10),
+        )
+        .expect("roster-derived setup parameters hash");
+    let setup_parameters_hash = setup_parameters_hash.as_str();
     let setup_epoch = "setup-epoch-1";
     let setup_context = serde_json::json!({
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
     });
     let public_matrix_seed_hash = derive_protocol_hash(
@@ -438,7 +430,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
         }),
     )
@@ -485,10 +477,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -522,10 +511,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -544,10 +530,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
-            "qShareHash": q_share_hash,
-            "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-            "commitmentProfileHash": commitment_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
             "sourceTrusteeIdentity": source_trustee_identity,
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -709,10 +692,7 @@ fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> S
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         commitment_set[field_name] = setup_context[field_name].clone();

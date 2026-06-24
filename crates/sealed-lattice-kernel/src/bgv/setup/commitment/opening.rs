@@ -1,7 +1,7 @@
 #[cfg(test)]
-use super::computation::*;
+use super::commitment_parameters::*;
 #[cfg(test)]
-use super::profile::*;
+use super::computation::*;
 #[cfg(test)]
 use super::serialization::*;
 #[cfg(test)]

@@ -20,7 +20,7 @@ describe('direct encrypted ballot kernel command', () => {
         expect(result.operation).toBe('runDirectEncryptedBallot');
         expect(result.input.ballotCount).toBe(1);
         expect(result.ballotLayout.optionCount).toBe(20);
-        expect(result.profile.dataPrimeCount).toBe(17);
+        expect(result.parameters.dataPrimeCount).toBe(17);
         expect(result.proofAttempt).toMatchObject({
             proofCount: 1,
             rnsLimbCount: 17,
@@ -85,7 +85,7 @@ describe('direct encrypted ballot kernel command', () => {
             result.proofAttempt.proofTransport.firstProofStatementHash,
         ).toHaveLength(128);
         expect(
-            result.proofAttempt.proofTransport.proofProfileHash,
+            result.proofAttempt.proofTransport.proofParametersHash,
         ).toHaveLength(128);
         expect(result.proofAttempt.proofMaskRandomness).toMatchObject({
             source: 'fresh-csprng',

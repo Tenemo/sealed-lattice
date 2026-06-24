@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 
-use crate::{encoding::CanonicalResult, hashing::derive_protocol_hash};
-
+#[cfg(test)]
+use crate::encoding::CanonicalResult;
 #[cfg(test)]
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
 
@@ -48,9 +48,9 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) fresh_randomness_bound: i128,
 }
 
-pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
+pub(super) fn carry_aware_vss_share_relation_value() -> Value {
     json!({
-        "objectType": "CarryAwareVssShareRelationProfile",
+        "objectType": "CarryAwareVssShareRelation",
         "objectVersion": 1,
         "trusteePointRule": "roster-position-plus-one",
         "coefficientOrder": "constant-first",
@@ -59,13 +59,6 @@ pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
         "commitmentReductionRule": "prove-unreduced-lifted-share-with-hidden-carry-and-opening",
         "recipientWitnessDisclosure": "share-values-only; aggregate openings and carry witnesses are zero-knowledge proof witnesses",
     })
-}
-
-pub(super) fn carry_aware_vss_share_relation_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "CarryAwareVssShareRelationProfileHash",
-        &carry_aware_vss_share_relation_profile_value(),
-    )
 }
 
 #[cfg(test)]

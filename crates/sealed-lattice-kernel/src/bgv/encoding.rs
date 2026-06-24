@@ -2,10 +2,7 @@ use crate::{
     bgv::{
         base_conversion::lift_plaintext_coefficients_to_basis,
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{
-            BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-            encrypted_ballot_aggregate_layout_hash,
-        },
+        parameters::{BgvBasisKind, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
         rns::RnsPolynomial,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -43,7 +40,7 @@ pub(crate) fn encode_batch_plaintext_slots(
         &coefficients_mod_plaintext,
         BgvBasisKind::Data,
         target_level,
-        encrypted_ballot_aggregate_layout_hash()?,
+        bgv_parameters_hash()?,
     )?;
 
     Ok(EncodedBatchPlaintext {
@@ -88,7 +85,7 @@ pub(crate) fn decode_batch_plaintext_polynomial(
 #[cfg(test)]
 mod tests {
     use super::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots};
-    use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+    use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
 
     #[test]
     fn batch_encoder_round_trips_boundary_slots() {

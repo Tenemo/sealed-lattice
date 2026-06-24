@@ -2,8 +2,8 @@ use super::*;
 
 pub(in crate::bgv::setup) fn threshold_verification_material(
     input: &PassiveSetupInput,
-    target_decryption_profile_hash: &str,
-    target_decryption_profile_binding_hash: &str,
+    target_decryption_parameters_hash: &str,
+    target_decryption_parameters_binding_hash: &str,
     participant_setup_record_hashes: &[String],
     trustee_threshold_verification_key_hashes: &[String],
 ) -> CanonicalResult<Value> {
@@ -23,8 +23,8 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
     let verification_key_set = json!({
         "objectType": "ThresholdShareVerificationKeySet",
         "objectVersion": 1,
-        "targetDecryptionProfileHash": target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "ceremonyId": input.ceremony_id,
         "rosterHash": input.roster_hash,
         "participantSetupRecordHashes": participant_setup_record_hashes,
@@ -35,7 +35,7 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
             "transcript-binding",
             "identity-binding",
             "roster-binding",
-            "profile-binding",
+            "parameters-binding",
             "recovery-device-epoch-binding"
         ],
     });
@@ -45,8 +45,8 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
         "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+            "targetDecryptionParametersHash": target_decryption_parameters_hash,
+            "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         }),
     )?;
 

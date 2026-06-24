@@ -64,13 +64,13 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
               readonly targetProposalHash: string;
               readonly ceremonyId: string;
               readonly electionManifestHash: string;
-              readonly thresholdProfileHash: string;
+              readonly thresholdParametersHash: string;
               readonly evaluatorReplayContextHash: string;
               readonly evaluatorReplayRecordHash: string;
               readonly encryptedBallotAggregateHash: string;
               readonly targetCiphertextHash: string;
               readonly targetLayoutHash: string;
-              readonly evaluatorReplayProfileHash: string;
+              readonly evaluatorReplayParametersHash: string;
               readonly targetFinalityPolicyHash: string;
           };
     readonly replayTimeMilliseconds: string;
@@ -78,7 +78,7 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
 
 export type DirectEncryptedBallotResult = {
     readonly operation: 'runDirectEncryptedBallot';
-    readonly profile: {
+    readonly parameters: {
         readonly dataPrimeCount: number;
     };
     readonly ballotLayout: {
@@ -142,7 +142,7 @@ export type DirectEncryptedBallotResult = {
             readonly firstProofChunkHashes: readonly string[];
             readonly firstProofPublicTransportHash: string;
             readonly firstProofStatementHash: string;
-            readonly proofProfileHash: string;
+            readonly proofParametersHash: string;
         };
         readonly proofMaskRandomness: {
             readonly source:
@@ -176,7 +176,7 @@ export const createDirectBallotSetupPackage = (
         rosterHash: deriveProtocolHash('RosterHash', {
             roster: 'direct encrypted ballot node wasm smoke',
         }),
-        thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
+        thresholdParametersHash: deriveProtocolHash('ThresholdParametersHash', {
             threshold: 'direct encrypted ballot node wasm smoke',
         }),
         participants: [

@@ -135,11 +135,7 @@ describe('VSS share verification record builders', () => {
                     ceremonyId: setupContext.ceremonyId,
                     manifestHash: setupContext.manifestHash,
                     rosterHash: setupContext.rosterHash,
-                    setupProfileHash: setupContext.setupProfileHash,
-                    qShareHash: setupContext.qShareHash,
-                    carryAwareVssShareRelationProfileHash:
-                        setupContext.carryAwareVssShareRelationProfileHash,
-                    commitmentProfileHash: setupContext.commitmentProfileHash,
+                    setupParametersHash: setupContext.setupParametersHash,
                     setupEpoch: setupContext.setupEpoch,
                     sourceTrusteeIdentity: 'trustee-1',
                     sourceTrusteeRosterPosition: 1,
@@ -204,11 +200,7 @@ describe('VSS share verification record builders', () => {
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                qShareHash: setupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    setupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash: setupContext.commitmentProfileHash,
+                setupParametersHash: setupContext.setupParametersHash,
                 setupEpoch: setupContext.setupEpoch,
                 privateVssEnvelopeCommitmentRoot: fixtureHash(
                     'private-envelope-set',
@@ -330,11 +322,7 @@ describe('VSS share verification record builders', () => {
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                qShareHash: setupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    setupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash: setupContext.commitmentProfileHash,
+                setupParametersHash: setupContext.setupParametersHash,
                 setupEpoch: setupContext.setupEpoch,
                 privateVssEnvelopeCommitmentRoot: fixtureHash(
                     'private-envelope-set',
@@ -399,11 +387,7 @@ describe('VSS share verification record builders', () => {
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                qShareHash: setupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    setupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash: setupContext.commitmentProfileHash,
+                setupParametersHash: setupContext.setupParametersHash,
                 setupEpoch: setupContext.setupEpoch,
                 sourceTrusteeIdentity:
                     failedEnvelopeReference.sourceTrusteeIdentity,

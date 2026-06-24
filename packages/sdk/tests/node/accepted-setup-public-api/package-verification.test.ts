@@ -25,8 +25,6 @@ type SetupProofMaterialTransportCase = Readonly<{
         | 'trustee-evaluation-key';
 }>;
 
-const setupProofProfileId = 'SealedLattice-SetupProof-v1';
-
 const setupProofMaterialTransportCases = [
     {
         fieldName: 'transportedSameSecretProofMaterial',
@@ -64,15 +62,11 @@ const transportedSetupProofMaterialSet = (
     return {
         objectType: transportCase.materialSetObjectType,
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: transportCase.proofFamily,
         proofMaterials: [
             {
                 objectType: transportCase.materialObjectType,
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: 1_048_576,
@@ -99,16 +93,12 @@ const verifiedSetupProofMaterials = (
 ): JsonRecord => ({
     objectType: 'VerifiedSetupProofMaterialSet',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    setupProofProfileId,
     proofMaterials: setupProofMaterialTransportCases.map((transportCase) => {
         const proofMaterialRoot = proofMaterialRootForCase(transportCase);
 
         return {
             objectType: 'VerifiedSetupProofMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             verificationId: `sdk-public-${transportCase.proofFamily}`,
             proofFamily: transportCase.proofFamily,
             proofMaterialRoot,
@@ -145,14 +135,10 @@ const transportedPublicCompanions = (): Readonly<{
         transportedPublicKeyShareMaterial: {
             objectType: 'SetupTransportedPublicKeyShareMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             publicKeyShareMaterials: [
                 {
                     objectType: 'SetupTransportedPublicKeyShareMaterial',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     publicKeyShareMaterialRoot,
                     chunkSizeBytes: 1_048_576,
                     chunkCount: 1,
@@ -167,15 +153,11 @@ const transportedPublicCompanions = (): Readonly<{
             objectType:
                 'SetupTransportedEvaluationKeyShareComponentMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             componentMaterials: [
                 {
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterial',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     keySwitchComponentMaterialRoot: evaluationKeyComponentRoot,
                     chunkSizeBytes: 1_048_576,
                     chunkCount: 1,
@@ -189,16 +171,12 @@ const transportedPublicCompanions = (): Readonly<{
         transportedPublicEvaluationKeyMaterial: {
             objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             materialEncoding:
                 'sealed-lattice-public-evaluation-key-material-binary-v1',
             publicEvaluationKeyMaterials: [
                 {
                     objectType: 'SetupTransportedPublicEvaluationKeyMaterial',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     publicEvaluationKeyMaterialRoot,
                     chunkSizeBytes: 1_048_576,
                     chunkCount: 1,
@@ -247,7 +225,6 @@ describe('accepted setup public package API in Node', () => {
         const verifiedVssCoefficientCommitmentMaterial = {
             objectType: 'VerifiedVssCoefficientCommitmentMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
             verificationId: 'sdk-public-verification-input-test',
             materialBinaryFormat:
                 'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
@@ -255,7 +232,7 @@ describe('accepted setup public package API in Node', () => {
             vssCoefficientCommitmentRoot: transportHash,
             vssCoefficientCommitmentMaterialRoot: transportHash,
             thresholdShareCommitmentRoot: transportHash,
-            transportProfileId:
+            transportSchemeId:
                 'sealed-lattice-setup-binary-chunked-transport-v1',
             transportChunkSizeBytes: 1_048_576,
             transportChunkCount: 1,
@@ -297,7 +274,7 @@ describe('accepted setup public package API in Node', () => {
         expect(verification).toMatchObject({
             ok: false,
             operation: 'verifyCollectiveBgvSetupPackage',
-            verifierStatus: 'outsideProfile',
+            verifierStatus: 'outsideAcceptedParameters',
         });
         expect(verification.acceptedSetupHandoff).toBeUndefined();
     });

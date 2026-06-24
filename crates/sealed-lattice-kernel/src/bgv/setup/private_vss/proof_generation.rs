@@ -122,7 +122,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     if ring_degree == 0 || ring_degree > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "ringDegree is outside the selected setup profile",
+            "ringDegree is outside the selected setup parameters",
         ));
     }
     let share_values = u64_vector_field(
@@ -293,7 +293,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
     Ok(json!({
         "ok": true,
         "operation": "generatePrivateVssShareProof",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,
         "recipientIdentity": recipient_identity,

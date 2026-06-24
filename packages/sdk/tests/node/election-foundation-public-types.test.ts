@@ -58,12 +58,12 @@ type PublicFoundationTypes = [
     publicTypes.PollSpecInput,
     publicTypes.RegistrationEntry,
     publicTypes.RosterManifestTranscriptInput,
-    publicTypes.TargetBoundShareSelectionProfile,
+    publicTypes.TargetBoundShareSelectionParameters,
     publicTypes.TargetFinalityCheckpoint,
     publicTypes.TargetFinalityRecord,
     publicTypes.TargetFinalityVerificationInput,
     publicTypes.TargetProposal,
-    publicTypes.ThresholdProfile,
+    publicTypes.ThresholdParameters,
     publicTypes.TrusteeSetupEntry,
 ];
 
@@ -188,12 +188,12 @@ const publicFoundationTypeNames = [
     'PollSpecInput',
     'RegistrationEntry',
     'RosterManifestTranscriptInput',
-    'TargetBoundShareSelectionProfile',
+    'TargetBoundShareSelectionParameters',
     'TargetFinalityCheckpoint',
     'TargetFinalityRecord',
     'TargetFinalityVerificationInput',
     'TargetProposal',
-    'ThresholdProfile',
+    'ThresholdParameters',
     'TrusteeSetupEntry',
 ] as const satisfies PublicFoundationTypeNames;
 

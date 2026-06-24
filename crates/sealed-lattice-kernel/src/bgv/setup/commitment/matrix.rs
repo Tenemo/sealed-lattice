@@ -3,7 +3,7 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use super::profile::*;
+use super::commitment_parameters::*;
 use super::validation::*;
 use super::*;
 

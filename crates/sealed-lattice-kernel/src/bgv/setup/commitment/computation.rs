@@ -1,5 +1,5 @@
+use super::commitment_parameters::*;
 use super::matrix::*;
-use super::profile::*;
 use super::serialization::*;
 use super::validation::*;
 use super::*;
@@ -267,7 +267,6 @@ pub(crate) fn compute_setup_commitment_from_opening_request(
     Ok(json!({
         "ok": true,
         "operation": "computeSetupCommitmentFromOpening",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "commitment": setup_commitment_full_value(&commitment),
         "commitmentRoot": commitment_root,
         "commitmentChunkRoot": commitment_chunk_root,

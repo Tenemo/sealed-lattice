@@ -62,7 +62,7 @@ pub(in super::super) fn verify_public_key_share_proofs(
     for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
-                "publicKeyShareProofSetProfileMismatch",
+                "publicKeyShareProofSetParametersMismatch",
                 format!("publicKeyShareProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareProofs.{field_name}"),
             )?));
@@ -242,7 +242,7 @@ fn verify_public_key_share_proof_record(
     for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
-                "publicKeyShareProofProfileMismatch",
+                "publicKeyShareProofParametersMismatch",
                 format!("public-key share proof {field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareProofs.proofRecords.{field_name}"),
             )?));
@@ -452,7 +452,7 @@ fn public_key_share_bindings_from_package(
             .is_some()
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public-key share records contain a duplicate roster position",
             ));
         }

@@ -77,8 +77,6 @@ export type TransportedSetupProofMaterialSet<
     JsonRecord & {
         readonly objectType: ObjectType;
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly proofFamily: string;
         readonly proofMaterials: readonly JsonRecord[];
     }
@@ -88,8 +86,6 @@ export type VerifiedSetupProofMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedSetupProofMaterial';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly verificationId: string;
         readonly proofFamily: string;
         readonly proofMaterialRoot: ProtocolHash;
@@ -107,8 +103,6 @@ export type VerifiedSetupProofMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedSetupProofMaterialSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: 'SealedLattice-SetupProof-v1';
         readonly proofMaterials: readonly VerifiedSetupProofMaterial[];
     }
 >;

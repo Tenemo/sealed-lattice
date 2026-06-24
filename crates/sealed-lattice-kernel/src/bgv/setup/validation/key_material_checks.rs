@@ -7,8 +7,7 @@ use rayon::prelude::*;
 pub(super) fn validate_collective_public_key(
     setup_package: &Value,
     participant_bindings: &[VerifiedParticipantSetupBinding],
-    profile_hash: &str,
-    backend_profile_hash: &str,
+    bgv_parameters_hash: &str,
 ) -> CanonicalResult<()> {
     let collective_public_key = value_at_path(setup_package, &["collectivePublicKey"])?;
     let collective_public_key_record = value_at_path(collective_public_key, &["record"])?;
@@ -20,15 +19,9 @@ pub(super) fn validate_collective_public_key(
     )?;
     compare_hash_at_path(
         collective_public_key_record,
-        &["profileHash"],
-        profile_hash,
-        "collective public key profile hash",
-    )?;
-    compare_hash_at_path(
-        collective_public_key_record,
-        &["backendProfileHash"],
-        backend_profile_hash,
-        "collective public key backend profile hash",
+        &["bgvParametersHash"],
+        bgv_parameters_hash,
+        "collective public key BGV parameters hash",
     )?;
     if usize_at_path(collective_public_key_record, &["participantCount"])?
         != participant_bindings.len()
@@ -46,7 +39,7 @@ pub(super) fn validate_collective_public_key(
         != &expected_public_key_share_roots
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key share roots do not match participant records",
         ));
     }
@@ -83,8 +76,7 @@ pub(super) fn validate_collective_public_key(
         &json!({
             "collectivePublicKeyRoot": collective_public_key_root,
             "collectivePublicKeyCoefficientRoot": expected_coefficient_root,
-            "profileHash": profile_hash,
-            "backendProfileHash": backend_profile_hash,
+            "bgvParametersHash": bgv_parameters_hash,
         }),
     )?;
     compare_hash_at_path(
@@ -112,8 +104,8 @@ fn validate_collective_public_key_coefficient_material(
         || usize_at_path(coefficient_material, &["participantCount"])? != participant_bindings.len()
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "collective public key coefficient material shape does not match the selected setup profile",
+            CanonicalErrorCode::ComponentMismatch,
+            "collective public key coefficient material shape does not match the selected setup parameters",
         ));
     }
     compare_string_at_path(
@@ -130,7 +122,7 @@ fn validate_collective_public_key_coefficient_material(
         != &expected_public_key_share_roots
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key coefficient material share roots do not match participant records",
         ));
     }
@@ -156,7 +148,7 @@ fn validate_collective_public_key_coefficient_material(
         .collect::<Vec<_>>();
     if array_at_path(coefficient_material, &["participants"])? != &expected_participants {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key coefficient material participants do not match participant records",
         ));
     }
@@ -205,7 +197,7 @@ fn validate_coefficient_table_and_summary(
     validate_coefficient_table(coefficient_table, modulus)?;
     if unsigned_at_path(summary, &["modulus"])? != modulus {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key coefficient summary modulus does not match the selected data basis",
         ));
     }
@@ -229,7 +221,7 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
         || usize_at_path(table, &["coefficientByteLength"])? != POLYNOMIAL_DEGREE * 8
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key coefficient table shape does not match the selected data basis",
         ));
     }
@@ -268,8 +260,8 @@ fn validate_coefficient_table(table: &Value, expected_modulus: u64) -> Canonical
 pub(super) fn validate_threshold_verification_material(
     setup_package: &Value,
     participant_bindings: &[VerifiedParticipantSetupBinding],
-    target_decryption_profile_hash: &str,
-    target_decryption_profile_binding_hash: &str,
+    target_decryption_parameters_hash: &str,
+    target_decryption_parameters_binding_hash: &str,
 ) -> CanonicalResult<()> {
     let threshold_material = value_at_path(setup_package, &["thresholdVerificationMaterial"])?;
     let verification_key_set = value_at_path(threshold_material, &["verificationKeySet"])?;
@@ -295,7 +287,7 @@ pub(super) fn validate_threshold_verification_material(
         )? != &expected_trustee_threshold_verification_key_hashes
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "threshold verification material does not match participant setup records",
         ));
     }
@@ -316,7 +308,7 @@ pub(super) fn validate_threshold_verification_material(
         != &expected_interpolation_universe
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "threshold interpolation universe does not match participant setup records",
         ));
     }
@@ -333,8 +325,8 @@ pub(super) fn validate_threshold_verification_material(
         "ThresholdShareVerificationKeyHash",
         &json!({
             "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+            "targetDecryptionParametersHash": target_decryption_parameters_hash,
+            "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         }),
     )?;
     compare_hash_at_path(

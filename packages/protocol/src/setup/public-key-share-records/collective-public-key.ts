@@ -1,7 +1,5 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
-
 import { transportedPublicKeyShareMaterialReader } from './binary-material-transport.js';
 import {
     publicKeyShareMaterialEncoding,
@@ -100,7 +98,7 @@ const assertCollectivePublicKeySourceBindings = (
             input.publicAPolynomialRoot
     ) {
         throw new Error(
-            'publicKeyShareMaterial must bind the collective public-key profile and common randomness.',
+            'publicKeyShareMaterial must bind the collective public-key parameters and common randomness.',
         );
     }
 };
@@ -132,8 +130,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
     const collectivePublicKeyWithoutRoot = {
         objectType: 'CollectivePublicKey',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         aggregationStatus:
             'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
@@ -197,7 +193,7 @@ export const createCollectivePublicKey = (
                     input.qSharePrimes.length
             ) {
                 throw new Error(
-                    'publicKeyShareMaterial records must match the collective public-key profile.',
+                    'publicKeyShareMaterial records must match the collective public-key parameters.',
                 );
             }
             materialRecord.shareCoefficientVectorsByLimb.forEach(
@@ -363,8 +359,6 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),

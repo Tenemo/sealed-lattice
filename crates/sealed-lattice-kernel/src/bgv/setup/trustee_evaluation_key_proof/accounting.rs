@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::*;
-use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
 use crate::hashing::derive_protocol_hash;
 
 // Repo-owned accounting for the trustee-batched succinct evaluation-key
@@ -180,7 +180,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         2_u128 * POLYNOMIAL_DEGREE as u128 * u128::from(consistency_coefficient_bound);
     // Ceiling of the clear bound's bit length, again the conservative side.
     let clear_claim_bound_bits = i64::from(clear_claim_bound.ilog2()) + 1;
-    // Union budget over the first profile: limb fields, schedule keys,
+    // Union budget over the first roster: limb fields, schedule keys,
     // trustees, and accepted ceremony objects. Stated as a power-of-two
     // allowance the per-round bounds are discounted by.
     // Query-phase soundness under CS25 "Our Conjecture 3" (mutual correlated
@@ -213,11 +213,11 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     let union_budget_bits = soundness_report.union_budget_bits;
     let weakest_round_bits = soundness_report.weakest_round_bits;
     let effective_soundness_bits = soundness_report.effective_soundness_bits;
-    // Computed CMS19 QROM accounting. The t^2 * eps soundness term breaks at
-    // t about eps^(-1/2), so the achieved quantum soundness is the Grover
+    // Computed CMS19 QROM accounting. The q_H^2 * eps soundness term breaks at
+    // q_H about eps^(-1/2), so the achieved quantum soundness is the Grover
     // square-root (half in bits) of the classical round-by-round soundness; it
     // is derived from the same classical variables so the two can never drift.
-    // The t^3 / 2^lambda hash term is BHT quantum collision search on the
+    // The q_H^3 / 2^lambda hash term is BHT quantum collision search on the
     // SHAKE256 512-bit digest, about a third of the digest in bits.
     let achieved_quantum_soundness_bits = soundness_report.achieved_quantum_soundness_bits;
     let achieved_quantum_soundness_after_union_bits =
@@ -412,7 +412,7 @@ fn pending_desktop_browser_measurement() -> Value {
 fn recorded_desktop_browser_measurement(family_label: &str) -> Value {
     json!({
         "status": "desktop-browser-wasm-measurement-recorded-supported-phone-rows-open",
-        "recordedLane": format!("manual desktop Chromium vitest lane over the published WASM kernel artifact: one first-profile {family_label} prove and verify per run, logging per-trustee prove time, verify time, proof byte length, peak WASM linear memory, largest copied buffer, persistent storage footprint, and resume behavior"),
+        "recordedLane": format!("manual desktop Chromium vitest lane over the published WASM kernel artifact: one first-roster {family_label} prove and verify per run, logging per-trustee prove time, verify time, proof byte length, peak WASM linear memory, largest copied buffer, persistent storage footprint, and resume behavior"),
         "recordedRows": [
             "per-trustee prove time in desktop browser WASM",
             "proof verify time in desktop browser WASM",
@@ -492,7 +492,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // public range-checked share, and enough honest recipient checks. Masking
     // them would add leakage with no soundness gain. Its clear claim bound is
     // therefore carry-driven (about 2^34) and its real per-claim leakage about
-    // 2^-58 (about 2^-40 across the first profile's ~2^17.7 adversary-view
+    // 2^-58 (about 2^-40 across the first roster's ~2^17.7 adversary-view
     // claims) -- still the leakage-dominating family of the four, but only
     // mildly, not by the ~46 bits the message-masking variant cost. The smudging
     // and integer-binding rows are recomputed from that carry bound below,
@@ -506,7 +506,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
             "commitmentOpeningRows": "for every hidden Shamir coefficient polynomial F_k and every setup commitment row, the proof checks the published BDLOP commitment row against F_k and its ternary opening randomness over each commitment field",
             "liftedShareRelation": "for recipient trustee point alpha_j, the proof checks sum_k alpha_j^k F_k - q_l * carry = share_j over the commitment fields; the term q_l * carry is not dropped except in fields where q_l is the field modulus, and the other commitment fields bind the integer carry",
             "privacyBoundary": "coefficient messages, opening randomness, and carry vectors stay witness-private; the envelope publishes only share values, commitment roots, statement and proof hashes, proof bytes or chunk roots, and verification status",
-            "integerBinding": "full-size message residues use the shared masked-claim two-prime lift with a statement-specific bound based on the source limb modulus; carry columns use the explicit first-profile carry bound",
+            "integerBinding": "full-size message residues use the shared masked-claim two-prime lift with a statement-specific bound based on the source limb modulus; carry columns use the explicit first-roster carry bound",
         }),
         pending_desktop_browser_measurement(),
     )?;
@@ -537,18 +537,18 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // the magnitude-one randomness, so the clear bound is the worst-case carry
     // bound times the ring degree times the per-coefficient bound, mirroring the
     // private-VSS branch of masked_claim_bounds. Worst case over the first
-    // profile: the recipient trustee point is largest at the last roster position
+    // roster: the recipient trustee point is largest at the last roster position
     // (participant count ten minus one) and the Shamir coefficient count is the
     // decryption threshold (four). Sourcing the carry bound from the same helper
     // masked_claim_bounds uses keeps the relation bound and the disclosed figure
     // from diverging. This yields a clear bound about 2^34, so per-claim leakage
     // about 2^-58.
-    const FIRST_PROFILE_LARGEST_RECIPIENT_ROSTER_POSITION: u64 = 9;
-    const FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT: usize = 4;
+    const FIRST_ROSTER_LARGEST_RECIPIENT_ROSTER_POSITION: u64 = 9;
+    const FIRST_ROSTER_SHAMIR_COEFFICIENT_COUNT: usize = 4;
     let worst_case_carry_bound =
         u128::try_from(super::relation::private_vss_share_lifted_carry_bound(
-            FIRST_PROFILE_LARGEST_RECIPIENT_ROSTER_POSITION,
-            FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT,
+            FIRST_ROSTER_LARGEST_RECIPIENT_ROSTER_POSITION,
+            FIRST_ROSTER_SHAMIR_COEFFICIENT_COUNT,
         )?)
         .expect("the lifted carry bound is positive");
     let consistency_coefficient_bound = u128::from((1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1);
@@ -557,7 +557,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     let private_vss_clear_claim_bound_bits = i64::from(private_vss_clear_claim_bound.ilog2()) + 1;
     let per_claim_leakage_log2 = private_vss_clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64;
     // Union budget: the masked claims a c_priv-bounded adversary actually
-    // observes in the first profile. A corrupted recipient receives, from each of
+    // observes in the first roster. A corrupted recipient receives, from each of
     // the n sources, one envelope of DATA_PRIMES.len() limb proofs, each
     // publishing (4 Shamir coefficients * 5 opening-randomness columns + 1 carry)
     // * 20 repetitions = 420 masked claims (mirrors consistency_vector_count for
@@ -566,14 +566,14 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // conservative 18-bit budget, so the total statistical distance over the
     // adversary's view is about 2^-40. The earlier flat 2^17 budget under-counted
     // the bounded adversary's view (~2^17.7).
-    const FIRST_PROFILE_CORRUPTED_RECIPIENTS: u128 = 3;
-    const FIRST_PROFILE_ROSTER_SIZE: u128 = 10;
-    const FIRST_PROFILE_PRIVATE_VSS_CLAIMS_PER_LIMB_PROOF: u128 =
-        (FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT as u128 * 5 + 1) * CONSISTENCY_REPETITIONS as u128;
-    let adversary_view_claim_count = FIRST_PROFILE_CORRUPTED_RECIPIENTS
-        * FIRST_PROFILE_ROSTER_SIZE
+    const FIRST_ROSTER_CORRUPTED_RECIPIENTS: u128 = 3;
+    const FIRST_ROSTER_ROSTER_SIZE: u128 = 10;
+    const FIRST_ROSTER_PRIVATE_VSS_CLAIMS_PER_LIMB_PROOF: u128 =
+        (FIRST_ROSTER_SHAMIR_COEFFICIENT_COUNT as u128 * 5 + 1) * CONSISTENCY_REPETITIONS as u128;
+    let adversary_view_claim_count = FIRST_ROSTER_CORRUPTED_RECIPIENTS
+        * FIRST_ROSTER_ROSTER_SIZE
         * DATA_PRIMES.len() as u128
-        * FIRST_PROFILE_PRIVATE_VSS_CLAIMS_PER_LIMB_PROOF;
+        * FIRST_ROSTER_PRIVATE_VSS_CLAIMS_PER_LIMB_PROOF;
     let claim_budget_log2 = i64::from(adversary_view_claim_count.ilog2()) + 1;
     let total_leakage_log2 = per_claim_leakage_log2 + claim_budget_log2;
 

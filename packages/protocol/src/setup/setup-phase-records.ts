@@ -74,8 +74,7 @@ type SetupPhasePayload = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly signerRole: 'Trustee';
     readonly trusteeIdentity: string;
@@ -126,8 +125,7 @@ const phasePayload = (
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         signerRole: 'Trustee',
         trusteeIdentity: input.trusteeIdentity,
@@ -165,11 +163,7 @@ const phaseSignatureContextHash = (
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         trusteeIdentity: input.trusteeIdentity,
         rosterPosition: input.rosterPosition,
@@ -310,11 +304,7 @@ export const createSetupPhaseRecord = (input: {
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         previousPhaseRoot: input.previousPhaseRoot,
         participantPhaseObjects,

@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use crate::{
-    bgv::profile::POLYNOMIAL_DEGREE,
+    bgv::parameters::POLYNOMIAL_DEGREE,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_protocol_hash,
 };

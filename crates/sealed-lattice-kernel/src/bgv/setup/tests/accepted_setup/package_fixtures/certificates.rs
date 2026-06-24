@@ -1,7 +1,7 @@
 use super::*;
 
 pub(super) fn setup_commitment_security_certificate_fixture(
-    profile: &serde_json::Value,
+    parameters: &serde_json::Value,
     participant_count: u64,
 ) -> serde_json::Value {
     // Mirror the production roster-derived bounds (accepted_certificates.rs):
@@ -15,7 +15,7 @@ pub(super) fn setup_commitment_security_certificate_fixture(
     let recipient_scalar_sum_u64 = u64::try_from(recipient_scalar_sum).expect("recipient bound");
     let threshold_scalar_sum_u64 = u64::try_from(threshold_scalar_sum).expect("threshold bound");
     let commitment_modulus_product =
-        profile["commitmentProfile"]["messageEncoding"]["commitmentModulusLimbs"]
+        parameters["commitment"]["messageEncoding"]["commitmentModulusLimbs"]
             .as_array()
             .expect("commitment modulus limbs")
             .iter()
@@ -28,19 +28,23 @@ pub(super) fn setup_commitment_security_certificate_fixture(
     let commitment_modulus_product_bits = ceil_log2_fixture(&commitment_modulus_product);
     let fresh_message_no_wrap =
         BigUint::from(max_source_message_modulus - 1) < commitment_modulus_product.clone();
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+                participant_count,
+            ),
+        )
+        .expect("roster-derived setup parameters hash");
     let certificate = serde_json::json!({
         "objectType": "SetupCommitmentSecurityCertificate",
         "objectVersion": 1,
-        "setupProfileHash": profile["setupProfileHash"],
-        "commitmentProfileHash": profile["commitmentProfileHash"],
-        "qShareHash": profile["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
+        "setupParametersHash": setup_parameters_hash,
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,
             "sourceRnsLimbCount": DATA_PRIMES.len(),
             "sourceRnsPrimes": DATA_PRIMES,
-            "commitmentModulusLimbs": profile["commitmentProfile"]["messageEncoding"]["commitmentModulusLimbs"],
+            "commitmentModulusLimbs": parameters["commitment"]["messageEncoding"]["commitmentModulusLimbs"],
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
             "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
             "moduleRank": 2,
@@ -102,7 +106,7 @@ pub(super) fn setup_commitment_security_certificate_fixture(
         },
         "estimatorRows": [
             {
-                "rowId": "first-profile-module-sis-binding-row",
+                "rowId": "first-roster-module-sis-binding-row",
                 "problem": "Module-SIS",
                 "targetSecurityBits": 128,
                 "ringDegree": POLYNOMIAL_DEGREE,
@@ -112,7 +116,7 @@ pub(super) fn setup_commitment_security_certificate_fixture(
                 "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
-                "rowId": "first-profile-module-lwe-hiding-row",
+                "rowId": "first-roster-module-lwe-hiding-row",
                 "problem": "Module-LWE",
                 "targetSecurityBits": 128,
                 "ringDegree": POLYNOMIAL_DEGREE,
@@ -178,7 +182,7 @@ pub(in super::super) fn setup_transport_chunk_manifest_root_fixture(
 }
 
 pub(in super::super) fn setup_transport_certificate_fixture(
-    profile: &serde_json::Value,
+    _parameters: &serde_json::Value,
     vss_coefficient_commitment_material: &serde_json::Value,
 ) -> serde_json::Value {
     let chunk_size_bytes = 1_048_576_u64;
@@ -287,10 +291,17 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         }),
     )
     .expect("setup transport aggregate chunk root");
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
+                material_participant_count,
+            ),
+        )
+        .expect("roster-derived setup parameters hash");
     let mut certificate = serde_json::json!({
         "objectType": "SetupTransportCertificate",
         "objectVersion": 1,
-        "setupTransportProfileHash": profile["setupTransportProfileHash"],
+        "setupParametersHash": setup_parameters_hash,
         "largeObjectEncoding": "binary",
         "chunking": "required",
         "chunkSizeBytes": chunk_size_bytes,
@@ -315,12 +326,12 @@ pub(in super::super) fn setup_transport_certificate_fixture(
 }
 
 pub(in super::super) fn setup_transport_certificate_for_transported_vss_material(
-    profile: &serde_json::Value,
+    parameters: &serde_json::Value,
     vss_coefficient_commitment_material: &serde_json::Value,
     transported_vss_material: &serde_json::Value,
 ) -> serde_json::Value {
     let mut certificate =
-        setup_transport_certificate_fixture(profile, vss_coefficient_commitment_material);
+        setup_transport_certificate_fixture(parameters, vss_coefficient_commitment_material);
     let vss_transport_object = certificate["transportedObjects"][0]
         .as_object_mut()
         .expect("VSS transport certificate object");

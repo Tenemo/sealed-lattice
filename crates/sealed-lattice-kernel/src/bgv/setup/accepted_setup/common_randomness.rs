@@ -147,7 +147,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
     if ordered_reveal_hashes.len() != roster.participant_count as usize {
         return Ok(Some(common_randomness_refusal(
             "commonRandomnessRevealCoverageMismatch",
-            "commonRandomness.revealRecords must cover the full first-profile roster",
+            "commonRandomness.revealRecords must cover the full first roster",
             "setupPackage.commonRandomness.revealRecords",
         )?));
     }
@@ -164,7 +164,7 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
-            "setupProfileHash": setup_context["setupProfileHash"],
+            "setupParametersHash": setup_context["setupParametersHash"],
             "setupEpoch": setup_context["setupEpoch"],
             "orderedRevealHashes": ordered_reveal_hash_values,
         }),
@@ -347,7 +347,6 @@ fn derive_setup_commitment_matrix(
         "objectType": "SetupPublicMatrix",
         "objectVersion": 1,
         "matrixKind": "commitment",
-        "commitmentProfileHash": setup_commitment_profile_hash()?,
         "commitmentModulusLimbs": setup_commitment_modulus_limb_values(),
         "commitmentModuleRank": SETUP_COMMITMENT_MODULE_RANK,
         "commitmentRandomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
@@ -405,7 +404,7 @@ fn verify_common_randomness_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if value.get(field_name) != setup_context.get(field_name) {
@@ -560,7 +559,7 @@ fn verify_common_randomness_participant_record_shape(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if record.get(field_name) != setup_context.get(field_name) {
@@ -598,7 +597,7 @@ fn verify_common_randomness_participant_record_shape(
     if roster_position >= roster.participant_count {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            format!("{object_type}.rosterPosition is outside the first accepted profile"),
+            format!("{object_type}.rosterPosition is outside the first accepted roster"),
         ));
     }
     let Some(registration) = trustee_registrations.get(&roster_position) else {
@@ -643,7 +642,7 @@ fn common_randomness_commit_payload_value(record: &Value) -> CanonicalResult<Val
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
-        "setupProfileHash": value_string(record, "setupProfileHash")?,
+        "setupParametersHash": value_string(record, "setupParametersHash")?,
         "setupEpoch": value_string(record, "setupEpoch")?,
         "signerRole": "Trustee",
         "trusteeIdentity": value_string(record, "trusteeIdentity")?,
@@ -661,7 +660,7 @@ fn common_randomness_reveal_payload_value(record: &Value) -> CanonicalResult<Val
         "ceremonyId": value_string(record, "ceremonyId")?,
         "manifestHash": value_string(record, "manifestHash")?,
         "rosterHash": value_string(record, "rosterHash")?,
-        "setupProfileHash": value_string(record, "setupProfileHash")?,
+        "setupParametersHash": value_string(record, "setupParametersHash")?,
         "setupEpoch": value_string(record, "setupEpoch")?,
         "signerRole": "Trustee",
         "trusteeIdentity": value_string(record, "trusteeIdentity")?,
@@ -718,7 +717,7 @@ fn verify_common_randomness_signature(
             "ceremonyId": value_string(record, "ceremonyId")?,
             "manifestHash": value_string(record, "manifestHash")?,
             "rosterHash": value_string(record, "rosterHash")?,
-            "setupProfileHash": value_string(record, "setupProfileHash")?,
+            "setupParametersHash": value_string(record, "setupParametersHash")?,
             "setupEpoch": value_string(record, "setupEpoch")?,
             "trusteeIdentity": trustee_identity,
             "rosterPosition": roster_position,

@@ -1,7 +1,7 @@
 import {
     cloneJsonRecord,
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
+    firstRosterDecryptionThreshold,
+    firstRosterParticipantCount,
     jsonRecord,
     protocolHashPattern,
     setupTransportChunkCount,
@@ -13,7 +13,7 @@ import {
 import { publicPrivateVssEnvelopeCommitmentSet } from './common-randomness.js';
 
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
@@ -40,56 +40,56 @@ export function rebindCollectiveSetupPackageHash(
 }
 
 export function acceptedSetupCommitmentSecurityCertificate(
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
 ): JsonRecord {
     const acceptedCertificateTemplates = jsonRecord(
-        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
-        'profile.acceptedCertificateTemplates',
+        (parameters as unknown as JsonRecord).acceptedCertificateTemplates,
+        'parameters.acceptedCertificateTemplates',
     );
 
     return cloneJsonRecord(
         jsonRecord(
             acceptedCertificateTemplates.setupCommitmentSecurityCertificate,
-            'profile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
+            'parameters.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
         ),
     );
 }
 
 export function acceptedSetupProofAccountingCertificate(
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
 ): JsonRecord {
     const acceptedCertificateTemplates = jsonRecord(
-        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
-        'profile.acceptedCertificateTemplates',
+        (parameters as unknown as JsonRecord).acceptedCertificateTemplates,
+        'parameters.acceptedCertificateTemplates',
     );
 
     return cloneJsonRecord(
         jsonRecord(
             acceptedCertificateTemplates.setupProofAccountingCertificate,
-            'profile.acceptedCertificateTemplates.setupProofAccountingCertificate',
+            'parameters.acceptedCertificateTemplates.setupProofAccountingCertificate',
         ),
     );
 }
 
 export function acceptedHeSecurityCertificate(
-    setupProfile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
 ): JsonRecord {
     const acceptedCertificateTemplates = jsonRecord(
-        (setupProfile as unknown as JsonRecord).acceptedCertificateTemplates,
-        'setupProfile.acceptedCertificateTemplates',
+        (setupParameters as unknown as JsonRecord).acceptedCertificateTemplates,
+        'setupParameters.acceptedCertificateTemplates',
     );
 
     return cloneJsonRecord(
         jsonRecord(
             acceptedCertificateTemplates.heSecurityCertificate,
-            'setupProfile.acceptedCertificateTemplates.heSecurityCertificate',
+            'setupParameters.acceptedCertificateTemplates.heSecurityCertificate',
         ),
     );
 }
 
 export function acceptedSetupTransportCertificate(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     vssCoefficientCommitmentMaterial: JsonRecord,
 ): JsonRecord {
     const vssObjectFullObjectHash = kernel.deriveProtocolHash({
@@ -173,9 +173,8 @@ export function acceptedSetupTransportCertificate(
     const certificate = {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: 'sealed-lattice-setup-binary-chunked-transport-v1',
-        setupTransportProfileHash: profile.setupTransportProfileHash,
+        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
+        setupParametersHash: parameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
         chunkSizeBytes: setupTransportChunkSizeBytes,
@@ -245,21 +244,17 @@ export function acceptedActiveStaticSetupTheoremCertificate(
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
         rosterHash: setupContext.rosterHash,
-        setupProfileHash: setupContext.setupProfileHash,
-        qShareHash: setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: setupContext.commitmentProfileHash,
+        setupParametersHash: setupContext.setupParametersHash,
         setupEpoch: setupContext.setupEpoch,
         adversaryModel: {
             secretConfidentialityCorruptTrusteeBound:
-                firstProfileDecryptionThreshold - 1,
+                firstRosterDecryptionThreshold - 1,
             fullRosterSetupCompletionRequired: true,
         },
         livenessModel: {
             model: 'secure-with-abort',
-            setupCompletionQuorum: firstProfileParticipantCount,
-            participantCount: firstProfileParticipantCount,
+            setupCompletionQuorum: firstRosterParticipantCount,
+            participantCount: firstRosterParticipantCount,
         },
         dependencyHashes: {
             setupCommitmentSecurityCertificateHash:

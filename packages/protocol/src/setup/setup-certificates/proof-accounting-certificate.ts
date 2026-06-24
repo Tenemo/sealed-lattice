@@ -17,28 +17,28 @@ import {
     objectField,
 } from './field-helpers.js';
 import type {
-    CollectiveBgvSetupProfileForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     JsonRecord,
     SetupProofAccountingCertificate,
     SetupProofAccountingCertificateBody,
 } from './types.js';
 
 const setupProofRecordBindingForCertificate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
 ): JsonRecord => {
-    const setupProofProfile = setupProfile.setupProofProfile;
+    const setupProofParameters = setupParameters.setupProof;
 
     return {
         objectType: 'SetupProofRecordBinding',
         objectVersion: 1,
-        setupProofProfileHash: setupProfile.setupProofProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         proofBytesDomain: setupProofBytesDomain,
         proofSerialization: setupProofSerialization,
         proofByteDecoder: setupProofByteDecoder,
         privateVssShareProofAccountingHash: hashField(
-            setupProofProfile,
+            setupProofParameters,
             'privateVssShareProofAccountingHash',
-            'setupProfile.setupProofProfile',
+            'setupParameters.setupProof',
         ),
     };
 };
@@ -137,38 +137,38 @@ const setupProofTheoremAccounting = (
 });
 
 const setupProofAccountingCertificateBody = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     sameSecretLinkageAnchorProofAccounting: JsonRecord,
     publicKeyShareProofAccounting: JsonRecord,
     trusteeEvaluationKeyProofAccounting: JsonRecord,
 ): SetupProofAccountingCertificateBody => {
-    const setupProofProfile = setupProfile.setupProofProfile;
+    const setupProofParameters = setupParameters.setupProof;
     const setupProofRecordBinding =
-        setupProofRecordBindingForCertificate(setupProfile);
+        setupProofRecordBindingForCertificate(setupParameters);
     const sameSecretLinkageAnchorProofAccountingHash = deriveProtocolHash(
         succinctSameSecretLinkageAnchorAccountingHashNamespace,
         sameSecretLinkageAnchorProofAccounting,
     );
     const privateVssShareProofAccounting = objectField(
-        setupProofProfile,
+        setupProofParameters,
         'privateVssShareProofAccounting',
-        'setupProfile.setupProofProfile',
+        'setupParameters.setupProof',
     );
     const privateVssShareProofAccountingHash = deriveProtocolHash(
         succinctPrivateVssShareAccountingHashNamespace,
         privateVssShareProofAccounting,
     );
     const expectedPrivateVssShareProofAccountingHash = hashField(
-        setupProofProfile,
+        setupProofParameters,
         'privateVssShareProofAccountingHash',
-        'setupProfile.setupProofProfile',
+        'setupParameters.setupProof',
     );
     if (
         privateVssShareProofAccountingHash !==
         expectedPrivateVssShareProofAccountingHash
     ) {
         throw new Error(
-            'setupProfile.setupProofProfile.privateVssShareProofAccountingHash must match privateVssShareProofAccounting.',
+            'setupParameters.setupProof.privateVssShareProofAccountingHash must match privateVssShareProofAccounting.',
         );
     }
     const publicKeyShareProofAccountingHash = deriveProtocolHash(
@@ -183,8 +183,7 @@ const setupProofAccountingCertificateBody = (
     return {
         objectType: 'SetupProofAccountingCertificate',
         objectVersion: 1,
-        setupProfileHash: setupProfile.setupProfileHash,
-        setupProofProfileHash: setupProfile.setupProofProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         setupProofRecordBinding,
         setupProofRecordBindingHash: deriveProtocolHash(
             'SetupProofRecordBindingHash',
@@ -227,13 +226,13 @@ const setupProofAccountingCertificateBody = (
 };
 
 export const createSetupProofAccountingCertificate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     sameSecretLinkageAnchorProofAccounting: JsonRecord | undefined,
     publicKeyShareProofAccounting: JsonRecord | undefined,
     trusteeEvaluationKeyProofAccounting: JsonRecord | undefined,
 ): SetupProofAccountingCertificate => {
     const template = acceptedCertificateTemplate(
-        setupProfile,
+        setupParameters,
         'setupProofAccountingCertificate',
         'SetupProofAccountingCertificate',
         'setupProofAccountingCertificateHash',
@@ -259,7 +258,7 @@ export const createSetupProofAccountingCertificate = (
     }
 
     const certificateBody = setupProofAccountingCertificateBody(
-        setupProfile,
+        setupParameters,
         sameSecretLinkageAnchorProofAccounting,
         publicKeyShareProofAccounting,
         trusteeEvaluationKeyProofAccounting,

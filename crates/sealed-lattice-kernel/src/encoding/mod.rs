@@ -36,12 +36,10 @@ pub enum CanonicalErrorCode {
     MalformedVarUint,
     MissingField,
     NonCanonicalVarUint,
-    ProfileComponentMismatch,
+    ComponentMismatch,
     TrailingBytes,
     UnknownField,
-    UnknownBaseProfile,
     UnknownSecurityClosure,
-    UnknownProofProfile,
     UnsupportedCanonicalEnvelopeVersion,
     UnsupportedObjectType,
     UnsupportedObjectVersion,
@@ -67,12 +65,10 @@ pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
     CanonicalErrorCode::MalformedVarUint,
     CanonicalErrorCode::MissingField,
     CanonicalErrorCode::NonCanonicalVarUint,
-    CanonicalErrorCode::ProfileComponentMismatch,
+    CanonicalErrorCode::ComponentMismatch,
     CanonicalErrorCode::TrailingBytes,
     CanonicalErrorCode::UnknownField,
-    CanonicalErrorCode::UnknownBaseProfile,
     CanonicalErrorCode::UnknownSecurityClosure,
-    CanonicalErrorCode::UnknownProofProfile,
     CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
     CanonicalErrorCode::UnsupportedObjectType,
     CanonicalErrorCode::UnsupportedObjectVersion,
@@ -95,12 +91,10 @@ impl CanonicalErrorCode {
             Self::MalformedVarUint => "MalformedVarUint",
             Self::MissingField => "MissingField",
             Self::NonCanonicalVarUint => "NonCanonicalVarUint",
-            Self::ProfileComponentMismatch => "ProfileComponentMismatch",
+            Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
             Self::UnknownField => "UnknownField",
-            Self::UnknownBaseProfile => "UnknownBaseProfile",
             Self::UnknownSecurityClosure => "UnknownSecurityClosure",
-            Self::UnknownProofProfile => "UnknownProofProfile",
             Self::UnsupportedCanonicalEnvelopeVersion => "UnsupportedCanonicalEnvelopeVersion",
             Self::UnsupportedObjectType => "UnsupportedObjectType",
             Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
@@ -450,12 +444,10 @@ mod tests {
                 | CanonicalErrorCode::MalformedVarUint
                 | CanonicalErrorCode::MissingField
                 | CanonicalErrorCode::NonCanonicalVarUint
-                | CanonicalErrorCode::ProfileComponentMismatch
+                | CanonicalErrorCode::ComponentMismatch
                 | CanonicalErrorCode::TrailingBytes
                 | CanonicalErrorCode::UnknownField
-                | CanonicalErrorCode::UnknownBaseProfile
                 | CanonicalErrorCode::UnknownSecurityClosure
-                | CanonicalErrorCode::UnknownProofProfile
                 | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion
                 | CanonicalErrorCode::UnsupportedObjectType
                 | CanonicalErrorCode::UnsupportedObjectVersion => {}
@@ -466,6 +458,6 @@ mod tests {
             ensure_exhaustive(code.clone());
         }
 
-        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 23);
+        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 21);
     }
 }

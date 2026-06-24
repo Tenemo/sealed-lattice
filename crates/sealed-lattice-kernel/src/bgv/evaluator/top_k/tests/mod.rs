@@ -11,7 +11,7 @@ use super::{
 };
 use crate::bgv::evaluator::circuit::EvaluatorContext;
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, pow_mod};
-use crate::bgv::profile::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
+use crate::bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
 
 mod interpolation;
 mod packing_and_rotations;

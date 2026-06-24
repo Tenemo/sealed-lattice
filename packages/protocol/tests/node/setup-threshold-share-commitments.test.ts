@@ -23,7 +23,7 @@ const thresholdDegree = 2;
 
 const fixtureHash = makeSetupFixtureHash('setup-threshold-share-commitments');
 
-const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
+const setupContext = makeSetupContext(fixtureHash);
 
 const coefficientVectorBytes = (
     coefficients: readonly number[],

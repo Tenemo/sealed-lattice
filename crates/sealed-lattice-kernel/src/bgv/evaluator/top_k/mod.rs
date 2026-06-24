@@ -31,7 +31,7 @@ use crate::{
             },
         },
         modular_arithmetic::{add_mod, integer_square_root_ceil, inverse_mod, mul_mod, sub_mod},
-        profile::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -39,7 +39,7 @@ use crate::{
 // The deterministic tie policy: a higher aggregate score ranks first, and equal
 // scores are broken by the lower option index.
 pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
-// The frozen evaluator working level for the selected multi-ballot profile:
+// The frozen evaluator working level for the selected multi-ballot parameters:
 // the aggregate is mod-switched to this level before packing, every rotation
 // and multiplication happens at or below it, and one relinearization key plus
 // the packing/forward rotation keys are generated here (lower levels use the

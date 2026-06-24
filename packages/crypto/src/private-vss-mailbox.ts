@@ -9,8 +9,6 @@ import { deriveProtocolHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-export const privateVssMailboxEncryptionProfileId =
-    'sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1';
 const mlKem768SeedByteLength = ml_kem768.lengths.seed!;
 const mlKem768PublicKeyByteLength = ml_kem768.lengths.publicKey!;
 const mlKem768SecretKeyByteLength = ml_kem768.lengths.secretKey!;
@@ -23,10 +21,7 @@ const encryptedEnvelopeAadBindingFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
     'publicMatrixSeedHash',
     'vssCoefficientCommitmentRoot',
@@ -63,8 +58,6 @@ export type PrivateVssEncryptedEnvelope = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedPrivateVssShareEnvelope';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly mailboxEncryptionProfileId: typeof privateVssMailboxEncryptionProfileId;
         readonly ciphertextContentType: 'private-vss-share-envelope';
         readonly privateEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: unknown;
@@ -170,8 +163,6 @@ const deriveAesGcmKeyBytes = (
         textEncoder.encode(
             canonicalJson({
                 purpose: 'private-vss-mailbox-aes-256-gcm-key',
-                mailboxEncryptionProfileId:
-                    privateVssMailboxEncryptionProfileId,
                 privateEnvelopeAadHash,
                 recipientMailboxPublicKeyHash,
                 kemCiphertextHash,
@@ -315,8 +306,6 @@ export const encryptPrivateVssMailboxEnvelope = async (
     const envelopeWithoutHash = {
         objectType: 'EncryptedPrivateVssShareEnvelope',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
         ciphertextContentType: 'private-vss-share-envelope',
         ...aadBindingFields(input.privateEnvelopeAad),
         privateEnvelopeHash,

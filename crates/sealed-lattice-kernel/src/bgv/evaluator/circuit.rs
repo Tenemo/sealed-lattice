@@ -15,7 +15,7 @@ use crate::{
             },
         },
         modular_arithmetic::mul_mod,
-        profile::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -139,7 +139,7 @@ impl EvaluatorContext {
         if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
             if rotation_key.level < level {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "loaded rotation key level is below the requested evaluator level",
                 ));
             }
@@ -149,7 +149,7 @@ impl EvaluatorContext {
 
         let key = self.key.as_ref().ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public evaluation-key material is missing the requested rotation key",
             )
         })?;
@@ -206,7 +206,7 @@ impl EvaluatorContext {
         if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
             if rotation_key.level < level {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "loaded rotation key level is below the requested evaluator level",
                 ));
             }
@@ -597,7 +597,7 @@ mod tests {
     use std::sync::OnceLock;
 
     use super::{EvaluatorContext, evaluate_polynomial};
-    use crate::bgv::profile::PLAINTEXT_MODULUS;
+    use crate::bgv::parameters::PLAINTEXT_MODULUS;
 
     fn context() -> &'static EvaluatorContext {
         static CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();

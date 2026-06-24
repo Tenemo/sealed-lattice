@@ -3,7 +3,7 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from './constants.js';
 import type {
-    CollectiveBgvSetupProfileForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     JsonRecord,
     SetupCertificateTransportedObjectInput,
 } from './types.js';
@@ -28,7 +28,7 @@ export const assertProtocolHash = (value: string, fieldName: string): void => {
     }
 };
 
-export const stringField = (
+const stringField = (
     value: Readonly<Record<string, unknown>>,
     fieldName: string,
     objectPath: string,
@@ -53,39 +53,39 @@ export const hashField = (
 };
 
 export const acceptedCertificateTemplate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     templateFieldName: string,
     objectType: string,
     hashFieldName: string,
     hashNamespace: string,
 ): JsonRecord | null => {
-    const templates = setupProfile.acceptedCertificateTemplates;
+    const templates = setupParameters.acceptedCertificateTemplates;
     if (templates === undefined) {
         return null;
     }
     const certificate = assertObjectRecord(
         templates[templateFieldName],
-        `setupProfile.acceptedCertificateTemplates.${templateFieldName}`,
+        `setupParameters.acceptedCertificateTemplates.${templateFieldName}`,
     );
     if (certificate.objectType !== objectType) {
         throw new Error(
-            `setupProfile.acceptedCertificateTemplates.${templateFieldName}.objectType must be ${objectType}.`,
+            `setupParameters.acceptedCertificateTemplates.${templateFieldName}.objectType must be ${objectType}.`,
         );
     }
     const certificateHash = stringField(
         certificate,
         hashFieldName,
-        `setupProfile.acceptedCertificateTemplates.${templateFieldName}`,
+        `setupParameters.acceptedCertificateTemplates.${templateFieldName}`,
     );
     assertProtocolHash(
         certificateHash,
-        `setupProfile.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName}`,
+        `setupParameters.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName}`,
     );
     const hashInput = cloneJsonRecord(certificate);
     delete hashInput[hashFieldName];
     if (deriveProtocolHash(hashNamespace, hashInput) !== certificateHash) {
         throw new Error(
-            `setupProfile.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName} must match the certificate body.`,
+            `setupParameters.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName} must match the certificate body.`,
         );
     }
 
@@ -233,18 +233,6 @@ export const numberArrayField = (
     });
 };
 
-export const assertDerivedHashMatches = (
-    namespace: string,
-    value: JsonRecord,
-    expectedHash: ProtocolHash,
-    fieldName: string,
-): void => {
-    const observedHash = deriveProtocolHash(namespace, value);
-    if (observedHash !== expectedHash) {
-        throw new Error(`${fieldName} must match the supplied profile body.`);
-    }
-};
-
 export const scalarPowerSum = (
     coefficientCount: number,
     trusteePoint: number,
@@ -291,7 +279,7 @@ export const keySwitchComponentPolynomialCount = (
     entries.reduce((total, entry) => {
         if (!Number.isSafeInteger(entry.level) || entry.level < 0) {
             throw new TypeError(
-                'evaluatorKeyScheduleProfile levels must be non-negative safe integers.',
+                'evaluatorKeySchedule levels must be non-negative safe integers.',
             );
         }
         const digitCount = entry.level + 1;

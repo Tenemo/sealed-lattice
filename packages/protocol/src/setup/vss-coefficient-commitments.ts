@@ -6,13 +6,11 @@
 // commitment bundle constructors. This file keeps the original import path and
 // public surface unchanged.
 export {
-    setupCommitmentProfileId,
     setupCommitmentRandomnessWidth,
-    acceptedBgvProfileRingDegree,
+    acceptedBgvFullRingDegree,
     acceptedBgvSetupQSharePrimes,
     acceptedBgvSetupQShare,
-    acceptedBgvSetupQShareHash,
-    setupTransportProfileId,
+    setupTransportSchemeId,
     setupTransportChunkSizeBytes,
     vssCoefficientCommitmentMaterialBinaryFormat,
     type SetupCommitmentLimbValue,

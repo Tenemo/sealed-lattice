@@ -20,7 +20,7 @@ type CommonRandomnessContextFields = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
 }>;
 
@@ -188,7 +188,7 @@ const commonRandomnessContextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -197,7 +197,7 @@ const assertInputContext = (setupContext: CollectiveBgvSetupContext): void => {
         'ceremonyId',
         'manifestHash',
         'rosterHash',
-        'setupProfileHash',
+        'setupParametersHash',
         'setupEpoch',
     ] as const) {
         assertNonEmptyString(
@@ -411,7 +411,7 @@ const assertPublicDerivationsMatchKernelShape = (
         bgvPublicA.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            'publicDerivations.bgvPublicA must match the accepted public-a derivation profile.',
+            'publicDerivations.bgvPublicA must match the accepted public-a derivation parameters.',
         );
     }
     assertProtocolHash(
@@ -429,7 +429,7 @@ const assertPublicDerivationsMatchKernelShape = (
         publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            'publicDerivations.publicMatrices must match the accepted setup public matrix profile.',
+            'publicDerivations.publicMatrices must match the accepted setup public matrix parameters.',
         );
     }
     assertProtocolHash(
@@ -483,7 +483,7 @@ const commonRandomnessSignatureContextHash = (
         ceremonyId: payload.ceremonyId,
         manifestHash: payload.manifestHash,
         rosterHash: payload.rosterHash,
-        setupProfileHash: payload.setupProfileHash,
+        setupParametersHash: payload.setupParametersHash,
         setupEpoch: payload.setupEpoch,
         trusteeIdentity: payload.trusteeIdentity,
         rosterPosition: payload.rosterPosition,
@@ -695,7 +695,7 @@ export const createSetupCommonRandomness = (
             ceremonyId: input.setupContext.ceremonyId,
             manifestHash: input.setupContext.manifestHash,
             rosterHash: input.setupContext.rosterHash,
-            setupProfileHash: input.setupContext.setupProfileHash,
+            setupParametersHash: input.setupContext.setupParametersHash,
             setupEpoch: input.setupContext.setupEpoch,
             orderedRevealHashes,
         },

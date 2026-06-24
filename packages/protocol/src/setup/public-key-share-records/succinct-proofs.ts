@@ -5,10 +5,7 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import {
-    setupProofProfileId,
-    type SameSecretProofSet,
-} from '../same-secret-consistency-records.js';
+import { type SameSecretProofSet } from '../same-secret-consistency-records.js';
 import {
     setupProofChunkManifestRoot,
     setupProofMaterialChunkHash,
@@ -244,11 +241,6 @@ const validatePublicKeyShareSuccinctProofMaterial = (
     material: PublicKeyShareSuccinctProofMaterial,
     fieldName: string,
 ): void => {
-    if (material.setupProofProfileId !== setupProofProfileId) {
-        throw new Error(
-            `${fieldName}.setupProofProfileId must match setup proof profile.`,
-        );
-    }
     if (material.proofFamily !== publicKeyShareProofFamily) {
         throw new Error(`${fieldName}.proofFamily must be public-key share.`);
     }
@@ -495,8 +487,6 @@ export const createPublicKeyShareSuccinctProofSet = (
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareSuccinctProof',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -535,8 +525,6 @@ export const createPublicKeyShareSuccinctProofSet = (
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareSuccinctProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
@@ -660,8 +648,6 @@ export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
                 {
                     objectType: 'PublicKeyShareSuccinctProofMaterialReference',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: publicKeyShareProofFamily,
                     trusteeIdentity: proofMaterial.trusteeIdentity,
                     trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
@@ -679,8 +665,6 @@ export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
             transportedProofMaterials.push({
                 objectType: 'SetupTransportedPublicKeyShareProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,
@@ -716,8 +700,6 @@ export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
         transportedPublicKeyShareProofMaterial: {
             objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
             proofMaterials: transportedProofMaterials,
         },

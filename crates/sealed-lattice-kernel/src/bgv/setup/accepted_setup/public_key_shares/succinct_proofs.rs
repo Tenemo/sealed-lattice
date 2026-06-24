@@ -187,7 +187,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_succinct_proof_refusal(
-                "publicKeyShareSuccinctProofSetProfileMismatch",
+                "publicKeyShareSuccinctProofSetParametersMismatch",
                 format!("publicKeyShareSuccinctProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareSuccinctProofs.{field_name}"),
             )?));
@@ -487,7 +487,7 @@ fn verify_public_key_share_succinct_proof_record(
     ] {
         if proof_record.get(field_name) != public_key_share_proof_record.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "public-key share succinct proof {field_name} must match the proof statement"
                 ),
@@ -512,7 +512,7 @@ fn verify_public_key_share_succinct_proof_record(
         || proof_record.get("trusteeIdentity") != share_record.get("trusteeIdentity")
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share succinct proof must bind the accepted share, proof statement, material, and same-secret roots",
         ));
     }
@@ -548,7 +548,7 @@ fn verify_public_key_share_succinct_proof_record(
             != Some(same_secret_proof_binding.trustee_identity.as_str())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share succinct proof must bind the verified same-secret proof root",
         ));
     }

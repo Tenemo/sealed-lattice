@@ -109,7 +109,7 @@ fn verify_same_secret_proof_transport_reference(
     if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "same-secret proofChunkSizeBytes must match the setup proof transport profile",
+            "same-secret proofChunkSizeBytes must match the setup proof transport parameters",
         ));
     }
     let expected_chunk_count =
@@ -306,7 +306,7 @@ fn transported_same_secret_proof_chunks(value: &Value) -> CanonicalResult<Vec<Ve
     if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof material chunkSizeBytes must match the setup proof transport profile",
+            "transported same-secret proof material chunkSizeBytes must match the setup proof transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {

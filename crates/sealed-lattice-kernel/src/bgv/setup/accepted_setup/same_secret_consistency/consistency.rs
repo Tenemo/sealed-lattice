@@ -55,7 +55,7 @@ pub(in super::super) fn verify_same_secret_consistency(
     for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if statement_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
-                "sameSecretConsistencyProfileMismatch",
+                "sameSecretConsistencyParametersMismatch",
                 format!("sameSecretConsistency.{field_name} must be {expected_value}"),
                 format!("setupPackage.sameSecretConsistency.{field_name}"),
             )?));
@@ -242,7 +242,7 @@ fn verify_same_secret_statement_record(
     for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if statement_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
-                "sameSecretStatementProfileMismatch",
+                "sameSecretStatementParametersMismatch",
                 format!("same-secret statement {field_name} must be {expected_value}"),
                 format!("setupPackage.sameSecretConsistency.statementRecords.{field_name}"),
             )?));
@@ -281,7 +281,7 @@ fn verify_same_secret_statement_record(
     }
     let Some(binding) = trustee_bindings.get(&trustee_roster_position) else {
         return Ok(Some(same_secret_refusal(
-            "sameSecretStatementTrusteeOutsideProfile",
+            "sameSecretStatementTrusteeOutsideParameters",
             "same-secret statement trusteeRosterPosition is outside the accepted roster",
             "setupPackage.sameSecretConsistency.statementRecords.trusteeRosterPosition",
         )?));
@@ -403,7 +403,7 @@ fn same_secret_trustee_bindings_from_vss(
             != Some(trustee_identity.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "VSS source trustee record does not match the accepted setup roster",
             ));
         }
@@ -424,7 +424,7 @@ fn same_secret_trustee_bindings_from_vss(
             .is_some()
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "VSS source trustee records contain a duplicate roster position",
             ));
         }
@@ -468,7 +468,7 @@ fn same_secret_constant_commitment_roots_from_source_trustee(
             })?;
         if coefficient_record.get("rnsPrime").and_then(Value::as_u64) != Some(rns_prime) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "VSS constant coefficient commitment RNS prime does not match Q_share",
             ));
         }
@@ -493,13 +493,7 @@ fn trustee_secret_commitment_payload(
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
-        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
-        "qShareHash": value_string(setup_context, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(
-            setup_context,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "trusteeIdentity": binding.trustee_identity,
         "trusteeRosterPosition": binding.trustee_roster_position,

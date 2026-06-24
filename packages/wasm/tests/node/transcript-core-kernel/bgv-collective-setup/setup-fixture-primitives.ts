@@ -21,11 +21,11 @@ export const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
     JSON.parse(JSON.stringify(value)) as JsonRecord;
 
 export const textEncoder = new TextEncoder();
-// Reduced collective setup coverage still runs below the profile ring, but it
+// Reduced collective setup coverage still runs below the parameters ring, but it
 // must use a ring degree accepted by the succinct proof relation.
 export const minimumSuccinctProofFixtureRingDegree = 128;
-export const firstProfileParticipantCount = 10;
-export const firstProfileDecryptionThreshold = 4;
+export const firstRosterParticipantCount = 10;
+export const firstRosterDecryptionThreshold = 4;
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
 export const setupTransportChunkSizeBytes = 1_048_576;
 // The accepted transport certificate must bind the exact binary VSS coefficient
@@ -33,8 +33,8 @@ export const setupTransportChunkSizeBytes = 1_048_576;
 // fixture material.
 export const setupTransportTotalByteLength =
     binaryVssCoefficientCommitmentMaterialByteLength({
-        participantCount: firstProfileParticipantCount,
-        thresholdDegree: firstProfileDecryptionThreshold,
+        participantCount: firstRosterParticipantCount,
+        thresholdDegree: firstRosterDecryptionThreshold,
         rnsLimbCount: 17,
         ringDegree: minimumSuccinctProofFixtureRingDegree,
     });
@@ -52,7 +52,7 @@ type ProtocolHashDeriver = (input: {
 
 export const collectiveSetupRosterHash = (
     deriveProtocolHashForValue: ProtocolHashDeriver,
-    participantCount = firstProfileParticipantCount,
+    participantCount = firstRosterParticipantCount,
 ): string =>
     deriveProtocolHashForValue({
         namespace: 'CollectiveBgvSetupRosterHash',

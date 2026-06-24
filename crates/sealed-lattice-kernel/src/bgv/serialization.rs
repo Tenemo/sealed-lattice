@@ -1,6 +1,6 @@
 use crate::{
     bgv::{
-        profile::POLYNOMIAL_DEGREE,
+        parameters::POLYNOMIAL_DEGREE,
         rns::{PolynomialDomain, RnsPolynomial},
     },
     encoding::{
@@ -146,12 +146,11 @@ pub(crate) fn canonical_bytes_hash(canonical_bytes: &[u8]) -> String {
 }
 
 fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
-    append_string(output, &polynomial.profile_hash);
+    append_string(output, &polynomial.bgv_parameters_hash);
     append_string(output, &polynomial.basis_id);
     append_varuint(output, polynomial.level as u64);
     append_varuint(output, polynomial.coefficient_count as u64);
     append_string(output, polynomial.domain.as_str());
-    append_string(output, &polynomial.encrypted_ballot_aggregate_layout_hash);
     append_varuint(output, polynomial.moduli.len() as u64);
     for modulus in &polynomial.moduli {
         append_varuint(output, *modulus);
@@ -166,7 +165,7 @@ fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
 }
 
 fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolynomial> {
-    let profile_hash = reader.read_string()?;
+    let bgv_parameters_hash = reader.read_string()?;
     let basis_id = reader.read_string()?;
     let level = usize::try_from(reader.read_varuint()?).map_err(|_| {
         CanonicalError::new(
@@ -192,7 +191,6 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
             "BGV polynomial domain is not supported",
         )
     })?;
-    let encrypted_ballot_aggregate_layout_hash = reader.read_string()?;
     let modulus_count = read_bounded_count(reader, MAXIMUM_MODULUS_COUNT, "modulus")?;
     let mut moduli = Vec::with_capacity(modulus_count);
     for _ in 0..modulus_count {
@@ -227,12 +225,11 @@ fn read_polynomial(reader: &mut CanonicalReader<'_>) -> CanonicalResult<RnsPolyn
     }
 
     Ok(RnsPolynomial {
-        profile_hash,
+        bgv_parameters_hash,
         basis_id,
         level,
         coefficient_count,
         domain,
-        encrypted_ballot_aggregate_layout_hash,
         moduli,
         residues_by_modulus,
     })
@@ -286,7 +283,7 @@ mod tests {
     use crate::{
         bgv::{
             encoding::encode_batch_plaintext_slots,
-            profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         },
         encoding::{CanonicalErrorCode, append_string, append_varuint},
     };
@@ -322,8 +319,8 @@ mod tests {
         assert_eq!(parsed.object_kind, BgvObjectKind::Ciphertext);
         assert_eq!(parsed.components.len(), 2);
         assert_eq!(
-            parsed.components[0].encrypted_ballot_aggregate_layout_hash,
-            parsed.components[1].encrypted_ballot_aggregate_layout_hash
+            parsed.components[0].bgv_parameters_hash,
+            parsed.components[1].bgv_parameters_hash
         );
         assert_eq!(ciphertext_root(&canonical_bytes).len(), 128);
         assert!(serialize_bgv_object(BgvObjectKind::Ciphertext, &[left.polynomial]).is_err());
@@ -351,7 +348,7 @@ mod tests {
         append_varuint(&mut canonical_bytes, 1);
         append_string(&mut canonical_bytes, BgvObjectKind::Plaintext.as_str());
         append_varuint(&mut canonical_bytes, 1);
-        append_string(&mut canonical_bytes, "untrusted-profile-hash");
+        append_string(&mut canonical_bytes, "untrusted-parameters-hash");
         append_string(&mut canonical_bytes, "untrusted-basis");
         append_varuint(&mut canonical_bytes, 0);
         append_varuint(&mut canonical_bytes, (POLYNOMIAL_DEGREE as u64) + 1);

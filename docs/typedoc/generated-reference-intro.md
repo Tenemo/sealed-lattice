@@ -4,7 +4,7 @@ This section lists the exported symbols on the current public API surface.
 
 ## Public module map
 
-- `sealed-lattice`: published package facade with transcript-core fixture verification, deterministic election foundation helpers, and the current development verification surface for the active-static direct path
+- `sealed-lattice`: published package facade with transcript-core fixture verification, deterministic election foundation helpers, and the current development verification surface
 
 ## What this section contains
 

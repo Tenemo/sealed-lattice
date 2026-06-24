@@ -64,24 +64,16 @@ export const makeVssOpeningRandomBytes =
         };
     };
 
-// The collective BGV setup context shared by the setup test suites. Every hash
-// field is derived from the suite's own fixture hash, so distinct suites still
-// produce distinct contexts while sharing one structural definition. A few
-// suites seed the carry-aware relation hash from the shorter 'carry-aware'
-// label, so that label is parameterized to keep every produced context
-// byte-identical to its previous per-suite copy.
+// The collective BGV setup context shared by the setup test suites. The setup
+// parameters hash is derived from the suite's own fixture hash, so distinct
+// suites still produce distinct contexts while sharing one structural
+// definition.
 export const makeSetupContext = (
     fixtureHash: SetupFixtureHash,
-    carryAwareVssShareRelationProfileLabel = 'carry-aware-vss-share-relation-profile',
 ): CollectiveBgvSetupContext => ({
     ceremonyId: 'ceremony-1',
     manifestHash: fixtureHash('manifest'),
     rosterHash: fixtureHash('roster'),
-    setupProfileHash: fixtureHash('setup-profile'),
-    qShareHash: fixtureHash('q-share'),
-    carryAwareVssShareRelationProfileHash: fixtureHash(
-        carryAwareVssShareRelationProfileLabel,
-    ),
-    commitmentProfileHash: fixtureHash('commitment-profile'),
+    setupParametersHash: fixtureHash('setup-parameters'),
     setupEpoch: 'setup-epoch-1',
 });

@@ -15,7 +15,7 @@ export const setupRequest = {
     rosterHash: deriveProtocolHash('RosterHash', {
         roster: 'passive-bgv-setup-test',
     }),
-    thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
+    thresholdParametersHash: deriveProtocolHash('ThresholdParametersHash', {
         threshold: 'passive-bgv-setup-test',
     }),
     participants: [

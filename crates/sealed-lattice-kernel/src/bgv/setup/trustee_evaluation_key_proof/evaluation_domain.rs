@@ -1,10 +1,10 @@
 use super::*;
 use crate::bgv::{
     modular_arithmetic::{inverse_mod, pow_mod},
-    profile::{POLYNOMIAL_DEGREE, root_parameters_for_modulus},
+    parameters::{POLYNOMIAL_DEGREE, root_parameters_for_modulus},
 };
 
-// Cyclic NTT plan for one power-of-two transform length over one profile
+// Cyclic NTT plan for one power-of-two transform length over one BGV
 // prime. Stage s (block length 2^(s+1)) stores the powers of the stage root
 // root^(length / 2^(s+1)) up to half the block length, in natural order.
 struct CyclicTransformPlan {
@@ -134,13 +134,13 @@ impl EvaluationDomainPlan {
             ));
         }
         let root_parameters = root_parameters_for_modulus(modulus).ok_or_else(|| {
-            invalid_succinct_setup_proof("modulus is not part of the selected BGV-RNS profile")
+            invalid_succinct_setup_proof("modulus is not part of the selected BGV-RNS parameters")
         })?;
         let extension_size = trace_size * DOMAIN_BLOWUP;
         let full_order = 2 * POLYNOMIAL_DEGREE;
         if !full_order.is_multiple_of(extension_size) {
             return Err(invalid_succinct_setup_proof(
-                "extension size exceeds the guaranteed two-adicity of the profile primes",
+                "extension size exceeds the guaranteed two-adicity of the BGV primes",
             ));
         }
         // The negacyclic root has exact order 2 * POLYNOMIAL_DEGREE = 2^16, so
@@ -152,7 +152,7 @@ impl EvaluationDomainPlan {
         )?;
         let trace_root = pow_mod(extension_root, DOMAIN_BLOWUP as u64, modulus)?;
         // Coset disjointness from H requires the offset to generate all of
-        // F_p^* (order p-1), not just any unit; the profile's
+        // F_p^* (order p-1), not just any unit; the BGV prime's
         // primitive_generator is a full generator, so the coset stays outside
         // every 2-power subgroup and thus off H.
         let coset_offset = root_parameters.primitive_generator;
@@ -267,12 +267,12 @@ pub(super) fn negacyclic_ring_product(
         ));
     }
     let root_parameters = root_parameters_for_modulus(modulus).ok_or_else(|| {
-        invalid_succinct_setup_proof("modulus is not part of the selected BGV-RNS profile")
+        invalid_succinct_setup_proof("modulus is not part of the selected BGV-RNS parameters")
     })?;
     let full_order = 2 * POLYNOMIAL_DEGREE;
     if !full_order.is_multiple_of(2 * degree) {
         return Err(invalid_succinct_setup_proof(
-            "negacyclic product degree exceeds the profile two-adicity",
+            "negacyclic product degree exceeds the parameter two-adicity",
         ));
     }
     let psi = pow_mod(

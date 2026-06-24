@@ -12,7 +12,6 @@ import {
     type TransportedSetupProofMaterialSet,
 } from './setup-proof-material-transport.js';
 import {
-    setupCommitmentProfileId,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
@@ -22,7 +21,6 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 type JsonRecord = Record<string, unknown>;
 
-export const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretAnchorProofBytesHashDomain =
     'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
@@ -59,9 +57,6 @@ export type SameSecretConsistencyStatementRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretConsistencyStatement';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -81,9 +76,6 @@ export type SameSecretConsistencyStatementSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretConsistencyStatementSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -117,7 +109,6 @@ export type SameSecretProofByteMaterial =
 
 export type SameSecretProofMaterial = Readonly<
     SameSecretProofByteMaterial & {
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -132,9 +123,6 @@ export type SameSecretProofRecord = Readonly<
         SameSecretProofByteMaterial & {
             readonly objectType: 'SameSecretProof';
             readonly objectVersion: 1;
-            readonly setupProfileId: 'CollectiveBgvSetup-v1';
-            readonly commitmentProfileId: typeof setupCommitmentProfileId;
-            readonly setupProofProfileId: typeof setupProofProfileId;
             readonly proofFamily: typeof sameSecretProofFamily;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
@@ -159,9 +147,6 @@ export type SameSecretProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretProofSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
@@ -211,10 +196,7 @@ const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -275,11 +257,7 @@ const contextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -321,11 +299,6 @@ const validateSameSecretProofMaterial = (
     material: SameSecretProofMaterial,
     fieldName: string,
 ): void => {
-    if (material.setupProofProfileId !== setupProofProfileId) {
-        throw new Error(
-            `${fieldName}.setupProofProfileId must match setup proof profile.`,
-        );
-    }
     if (material.proofFamily !== sameSecretProofFamily) {
         throw new Error(
             `${fieldName}.proofFamily must be the same-secret linkage anchor family.`,
@@ -589,9 +562,6 @@ const createStatementRecord = (
     const statementRecordWithoutRoot = {
         objectType: 'SameSecretConsistencyStatement',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        commitmentProfileId: setupCommitmentProfileId,
-        setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ...contextFields(setupContext),
         trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
@@ -647,9 +617,6 @@ export const createSameSecretConsistencyStatementSet = (
     const statementSetWithoutRoot = {
         objectType: 'SameSecretConsistencyStatementSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        commitmentProfileId: setupCommitmentProfileId,
-        setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -805,9 +772,6 @@ export const createSameSecretProofSet = (
             const proofRecordWithoutRoot = {
                 objectType: 'SameSecretProof',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                commitmentProfileId: setupCommitmentProfileId,
-                setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: statementRecord.trusteeIdentity,
@@ -840,9 +804,6 @@ export const createSameSecretProofSet = (
     const proofSetWithoutRoot = {
         objectType: 'SameSecretProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        commitmentProfileId: setupCommitmentProfileId,
-        setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
@@ -973,8 +934,6 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
             transportedProofMaterials.push({
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,
@@ -1010,8 +969,6 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
         transportedSameSecretProofMaterial: {
             objectType: 'SetupTransportedSameSecretProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: sameSecretProofFamily,
             proofMaterials: transportedProofMaterials,
         },

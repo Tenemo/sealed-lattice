@@ -15,7 +15,7 @@ use crate::bgv::{
         key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64},
         prg::DeterministicSampler,
     },
-    profile::DATA_PRIMES,
+    parameters::DATA_PRIMES,
 };
 use crate::hashing::hash512;
 

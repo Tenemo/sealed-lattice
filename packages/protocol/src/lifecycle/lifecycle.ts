@@ -29,7 +29,7 @@ const transitionMap = {
     evaluatorReplayed: ['targetFinalityReached', 'pending', 'forkDetected'],
     targetFinalityReached: [
         'targetAccepted',
-        'outsideSupportedProfile',
+        'outsideSupportedParameters',
         'pending',
         'forkDetected',
     ],
@@ -37,14 +37,14 @@ const transitionMap = {
     decryptionPending: ['decryptionSharesReady', 'pending', 'forkDetected'],
     decryptionSharesReady: [
         'resultDecoded',
-        'outsideSupportedProfile',
+        'outsideSupportedParameters',
         'pending',
         'forkDetected',
     ],
     resultDecoded: ['fullyVerified', 'pending', 'forkDetected'],
     fullyVerified: [],
     pending: [],
-    outsideSupportedProfile: [],
+    outsideSupportedParameters: [],
     forkDetected: [],
 } as const satisfies Record<LifecycleState, readonly LifecycleState[]>;
 

@@ -6,8 +6,6 @@ const proofHash =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const alternateProofHash =
     'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
-const setupProofProfileId = 'SealedLattice-SetupProof-v1';
-
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
@@ -87,15 +85,11 @@ const transportedSetupProofMaterialSet = (
     ({
         objectType: transportCase.materialSetObjectType,
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: transportCase.proofFamily,
         proofMaterials: [
             {
                 objectType: transportCase.materialObjectType,
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
                 chunkSizeBytes: 1_048_576,
@@ -139,14 +133,10 @@ const verifiedSetupProofMaterials = (
     ({
         objectType: 'VerifiedSetupProofMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofMaterials: [
             {
                 objectType: 'VerifiedSetupProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 verificationId: 'caller-supplied-handle',
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
@@ -200,8 +190,6 @@ describe('setup proof material streaming in the public package', () => {
                             verifiedSetupProofMaterial: {
                                 objectType: 'VerifiedSetupProofMaterial',
                                 objectVersion: 1,
-                                setupProfileId: 'CollectiveBgvSetup-v1',
-                                setupProofProfileId,
                                 verificationId: input.verificationId,
                                 proofFamily: proofMaterial?.proofFamily,
                                 proofMaterialRoot:
@@ -225,7 +213,7 @@ describe('setup proof material streaming in the public package', () => {
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
                 ok: false,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                verifierStatus: 'outsideProfile',
+                verifierStatus: 'outsideAcceptedParameters',
                 observedInput: input,
             })),
         };
@@ -236,16 +224,15 @@ describe('setup proof material streaming in the public package', () => {
         const acceptedSetupHandoff = {
             objectType: 'CollectiveBgvAcceptedSetupHandoff',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
             acceptedSetupHandoffRoot,
             directBallotEncryption: {
                 collectivePublicKeyRoot: proofHash,
             },
             publicAggregation: {
-                aggregateCiphertextProfileRoot: proofHash,
+                aggregateCiphertextParametersRoot: proofHash,
             },
             boundedEvaluatorReplay: {
-                evaluatorProfileRoot: proofHash,
+                evaluatorParametersRoot: proofHash,
             },
             futureTargetDecryptionBoundary: {
                 qTargetState: 'downstream-null',
@@ -259,7 +246,6 @@ describe('setup proof material streaming in the public package', () => {
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
                 ok: true,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                setupProfileId: 'CollectiveBgvSetup-v1',
                 verifierStatus: 'accepted',
                 currentPhase: 'setupPackageVerification',
                 acceptedHashes: [acceptedSetupHandoffRoot],
@@ -347,8 +333,6 @@ describe('setup proof material streaming in the public package', () => {
                 {
                     objectType: 'VerifiedSetupProofMaterialSet',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofMaterials: [
                         expect.objectContaining({
                             objectType: 'VerifiedSetupProofMaterial',
@@ -415,8 +399,6 @@ describe('setup proof material streaming in the public package', () => {
         expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject({
             objectType: 'VerifiedSetupProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofMaterials: expectedVerifiedProofMaterials,
         });
     });

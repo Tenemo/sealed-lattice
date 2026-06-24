@@ -32,7 +32,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 .expect("round-two aggregate root");
             // The hash preimage must match the verifier's recompute in
             // accepted_setup::evaluation_key_material_transport::expected_roots
-            // exactly: object type/version, profile ids, the material encoding
+            // exactly: object type/version, parameter ids, the material encoding
             // constant, the three binding roots, the rounds root, the level, the
             // digit/limb counts, and the two aggregate roots. No extra narration
             // fields are bound.
@@ -154,10 +154,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": super::participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -248,10 +245,7 @@ pub(in super::super) fn add_public_evaluation_key_material_transport(
             "ceremonyId": package["evaluationKeys"]["ceremonyId"],
             "manifestHash": package["evaluationKeys"]["manifestHash"],
             "rosterHash": package["evaluationKeys"]["rosterHash"],
-            "setupProfileHash": package["evaluationKeys"]["setupProfileHash"],
-            "qShareHash": package["evaluationKeys"]["qShareHash"],
-            "carryAwareVssShareRelationProfileHash": package["evaluationKeys"]["carryAwareVssShareRelationProfileHash"],
-            "commitmentProfileHash": package["evaluationKeys"]["commitmentProfileHash"],
+            "setupParametersHash": package["evaluationKeys"]["setupParametersHash"],
             "setupEpoch": package["evaluationKeys"]["setupEpoch"],
             "evaluationKeySetHash": package["evaluationKeys"]["evaluationKeySetHash"],
             "publicEvaluationKeyMaterialRoot": package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"],

@@ -23,7 +23,7 @@ import {
 } from '#packages/wasm/src/index';
 
 describe('collective BGV setup kernel commands', () => {
-    it('classifies passive setup packages as outside profile', async () => {
+    it('classifies passive setup packages as outside parameters', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const passiveSetup = kernel.generateBgvPassiveSetup(setupRequest);
 
@@ -34,11 +34,10 @@ describe('collective BGV setup kernel commands', () => {
         expect(result).toMatchObject({
             ok: false,
             operation: 'verifyCollectiveBgvSetupPackage',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            verifierStatus: 'outsideProfile',
+            verifierStatus: 'outsideAcceptedParameters',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'outsideCollectiveBgvSetupProfile',
+            'outsideCollectiveBgvSetupParameters',
         );
         expect(result.acceptedSetupHandoff).toBeUndefined();
     });
@@ -68,10 +67,13 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.message).toContain('setupPackage is required');
     });
 
-    it('reports accepted-shaped setup as pending before reduced-ring public VSS profile checks', async () => {
+    it('reports accepted-shaped setup as pending before reduced-ring public VSS parameters checks', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
@@ -98,7 +100,7 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses protocol-built setup packages with malformed setup context before later pending', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
 
         for (const [fieldName, malformedValue] of [
             ['setupEpoch', 'setup-epoch 1'],
@@ -106,7 +108,7 @@ describe('collective BGV setup kernel commands', () => {
         ] as const) {
             const setupPackage = await acceptedShapedSetupPackage(
                 kernel,
-                profile,
+                parameters,
             );
             const setupContext = setupPackage.setupContext as JsonRecord;
             setupContext[fieldName] = malformedValue;
@@ -133,10 +135,16 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses protocol-built same-secret proofs with statement-hash drift before later pending', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
         setupPackage.sameSecretProofs =
-            sameSecretProofsWithDriftedStatementHashes(profile, setupPackage);
+            sameSecretProofsWithDriftedStatementHashes(
+                parameters,
+                setupPackage,
+            );
         const activeStaticSetupTheoremCertificate =
             acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
         setupPackage.activeStaticSetupTheoremCertificate =
@@ -166,32 +174,35 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses protocol-built public-key share succinct proofs with statement-hash drift before later pending', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
         const setupContext =
             setupPackage.setupContext as CollectiveBgvSetupContext;
         const commonRandomness = setupPackage.commonRandomness as JsonRecord;
         const vssCoefficientCommitmentBundle =
             acceptedVssCoefficientCommitments(
                 setupContext,
-                profile,
+                parameters,
                 String(commonRandomness.publicMatrixSeedHash),
             );
         setupPackage.sameSecretProofs = sameSecretProofsWithGeneratedProofs(
             kernel,
-            profile,
+            parameters,
             setupPackage,
             vssCoefficientCommitmentBundle,
         );
         setupPackage.publicKeyShareMaterial = acceptedPublicKeyShareMaterial(
             setupContext,
-            profile,
+            parameters,
             commonRandomness,
             setupPackage.publicKeyShares as PublicKeyShareSet,
         );
         setupPackage.publicKeyShareSuccinctProofs =
             publicKeyShareSuccinctProofsWithDriftedStatementHashes(
-                profile,
+                parameters,
                 setupPackage,
             );
         const activeStaticSetupTheoremCertificate =
@@ -223,8 +234,11 @@ describe('collective BGV setup kernel commands', () => {
 
     it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
         setupPackage.vssComplaints = await acceptedVssComplaintSet(
             setupPackage.setupContext as JsonRecord,
             setupPackage.privateVssEnvelopeCommitments as JsonRecord,

@@ -25,7 +25,7 @@ pub(super) struct BuiltTrusteeEvaluationKeyProofRecord {
 }
 
 // Maximum number of trustee evaluation-key provers that run concurrently while
-// assembling the first-profile package fixture. Each first-profile prover holds
+// assembling the first-roster package fixture. Each first-roster prover holds
 // its statement, witness, and proof working set, which is several gigabytes, so
 // proving all ten trustees at once needs far more than physical memory and
 // forces heavy paging. Generating the proofs in batches of this size keeps

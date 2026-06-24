@@ -77,17 +77,17 @@ pub(super) fn development_encryption_fixture(
         .zip(scaled_error_one_residues.iter())
         .map(|(product, scaled_error)| add_mod(*product, *scaled_error, modulus))
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let encrypted_ballot_aggregate_layout_hash = encrypted_ballot_aggregate_layout_hash()?;
+    let bgv_parameters_hash = bgv_parameters_hash()?;
     let component_zero = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         0,
-        encrypted_ballot_aggregate_layout_hash.clone(),
+        bgv_parameters_hash.clone(),
         vec![ciphertext_component_zero],
     )?;
     let component_one = RnsPolynomial::coefficient_domain(
         BgvBasisKind::Data,
         0,
-        encrypted_ballot_aggregate_layout_hash,
+        bgv_parameters_hash,
         vec![ciphertext_component_one],
     )?;
     let canonical_bytes =

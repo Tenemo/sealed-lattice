@@ -8,9 +8,9 @@ import { deriveProtocolHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-export const localTrusteeStateStorageProfileId =
+export const localTrusteeStateStorageFormat =
     'sealed-lattice-local-trustee-state-aes-256-gcm-hkdf-sha384-v1';
-export const localTrusteeSealedMaterialStorageProfileId =
+export const localTrusteeSealedMaterialStorageFormat =
     'sealed-lattice-local-trustee-setup-material-aes-256-gcm-hkdf-sha384-v1';
 const localStateCiphertextContentType = 'local-trustee-setup-state';
 const localSealedMaterialCiphertextContentType =
@@ -28,7 +28,7 @@ export type EncryptedLocalTrusteeSetupMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupMaterial';
         readonly objectVersion: 1;
-        readonly storageProfileId: typeof localTrusteeSealedMaterialStorageProfileId;
+        readonly storageScheme: typeof localTrusteeSealedMaterialStorageFormat;
         readonly ciphertextContentType: typeof localSealedMaterialCiphertextContentType;
         readonly materialClass: LocalTrusteeSetupStateSealedMaterialClass;
         readonly materialRoot: ProtocolHash;
@@ -60,7 +60,6 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -81,7 +80,6 @@ export type LocalTrusteeStateStorageEncryptionInput = {
         Record<string, unknown> & {
             readonly objectType: 'LocalTrusteeSetupStateCommitment';
             readonly objectVersion: 1;
-            readonly setupProfileId: 'CollectiveBgvSetup-v1';
             readonly ceremonyId: string;
             readonly manifestHash: ProtocolHash;
             readonly rosterHash: ProtocolHash;
@@ -93,7 +91,7 @@ export type LocalTrusteeStateStorageEncryptionInput = {
             readonly issuedVssAcceptanceRoot: ProtocolHash;
             readonly issuedVssComplaintRoots: readonly ProtocolHash[];
             readonly localStateRoot: ProtocolHash;
-            readonly storageProfile: 'encrypted-local-device-state-required';
+            readonly storageRequirement: 'encrypted-local-device-state-required';
             readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
         }
     >;
@@ -113,7 +111,7 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
         readonly objectVersion: 1;
-        readonly storageProfileId: typeof localTrusteeStateStorageProfileId;
+        readonly storageScheme: typeof localTrusteeStateStorageFormat;
         readonly ciphertextContentType: typeof localStateCiphertextContentType;
         readonly localStateRoot: ProtocolHash;
         readonly localStateCommitmentHash: ProtocolHash;
@@ -172,7 +170,6 @@ const setupContextFieldNames = [
 const localTrusteeSealedPayloadFieldNames = [
     'objectType',
     'objectVersion',
-    'setupProfileId',
     'ceremonyId',
     'manifestHash',
     'rosterHash',
@@ -198,7 +195,7 @@ const sealedMaterialFieldNames = [
 const encryptedSealedMaterialFieldNames = [
     'objectType',
     'objectVersion',
-    'storageProfileId',
+    'storageScheme',
     'ciphertextContentType',
     'materialClass',
     'materialRoot',
@@ -379,7 +376,7 @@ const storageAad = (
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeStateStorageAad',
     objectVersion: 1,
-    storageProfileId: localTrusteeStateStorageProfileId,
+    storageScheme: localTrusteeStateStorageFormat,
     ciphertextContentType: localStateCiphertextContentType,
     setupContext,
     localStateCommitment,
@@ -402,7 +399,7 @@ const sealedMaterialAad = (
 ): Readonly<Record<string, unknown>> => ({
     objectType: 'LocalTrusteeSetupSealedMaterialAad',
     objectVersion: 1,
-    storageProfileId: localTrusteeSealedMaterialStorageProfileId,
+    storageScheme: localTrusteeSealedMaterialStorageFormat,
     ciphertextContentType: localSealedMaterialCiphertextContentType,
     materialClass,
     materialRoot,
@@ -426,7 +423,7 @@ const deriveAesGcmKeyBytes = (
         textEncoder.encode(
             canonicalJson({
                 purpose: 'local-trustee-state-storage-aes-256-gcm-key',
-                storageProfileId: localTrusteeStateStorageProfileId,
+                storageScheme: localTrusteeStateStorageFormat,
                 localStateRoot,
                 storageAadHash,
             }),
@@ -446,7 +443,7 @@ const deriveSealedMaterialAesGcmKeyBytes = (
         textEncoder.encode(
             canonicalJson({
                 purpose: 'local-trustee-setup-sealed-material-aes-256-gcm-key',
-                storageProfileId: localTrusteeSealedMaterialStorageProfileId,
+                storageScheme: localTrusteeSealedMaterialStorageFormat,
                 materialRoot,
                 materialAadHash,
             }),
@@ -488,11 +485,11 @@ const assertCommitmentHeader = (
         throw new TypeError('localStateCommitment.objectVersion must be 1.');
     }
     if (
-        localStateCommitment.storageProfile !==
+        localStateCommitment.storageRequirement !==
         'encrypted-local-device-state-required'
     ) {
         throw new TypeError(
-            'localStateCommitment.storageProfile must require encrypted local device state.',
+            'localStateCommitment.storageRequirement must require encrypted local device state.',
         );
     }
     if (
@@ -507,11 +504,6 @@ const assertCommitmentHeader = (
         localStateCommitment.localStateRoot,
         'localStateCommitment.localStateRoot',
     );
-    if (localStateCommitment.setupProfileId !== 'CollectiveBgvSetup-v1') {
-        throw new TypeError(
-            'localStateCommitment.setupProfileId must be CollectiveBgvSetup-v1.',
-        );
-    }
     assertNonEmptyString(
         localStateCommitment.ceremonyId,
         'localStateCommitment.ceremonyId',
@@ -605,10 +597,10 @@ function validateEncryptedSealedMaterialEnvelope(
         throw new TypeError(`${objectPath}.objectVersion must be 1.`);
     }
     if (
-        encryptedMaterial.storageProfileId !==
-        localTrusteeSealedMaterialStorageProfileId
+        encryptedMaterial.storageScheme !==
+        localTrusteeSealedMaterialStorageFormat
     ) {
-        throw new TypeError(`${objectPath}.storageProfileId is not supported.`);
+        throw new TypeError(`${objectPath}.storageScheme is not supported.`);
     }
     if (
         encryptedMaterial.ciphertextContentType !==
@@ -815,11 +807,6 @@ const validateLocalStatePlaintext = (
     if (plaintext.objectVersion !== 1) {
         throw new TypeError('localStatePlaintext.objectVersion must be 1.');
     }
-    if (plaintext.setupProfileId !== 'CollectiveBgvSetup-v1') {
-        throw new TypeError(
-            'localStatePlaintext.setupProfileId must be CollectiveBgvSetup-v1.',
-        );
-    }
     for (const fieldName of setupContextFieldNames) {
         if (plaintext[fieldName] !== localStateCommitment[fieldName]) {
             throw new Error(
@@ -972,7 +959,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
     const encryptedMaterialWithoutHash = {
         objectType: 'EncryptedLocalTrusteeSetupMaterial',
         objectVersion: 1,
-        storageProfileId: localTrusteeSealedMaterialStorageProfileId,
+        storageScheme: localTrusteeSealedMaterialStorageFormat,
         ciphertextContentType: localSealedMaterialCiphertextContentType,
         materialClass: input.materialClass,
         materialRoot,
@@ -1083,7 +1070,7 @@ export const encryptLocalTrusteeState = async (
     const envelopeWithoutHash = {
         objectType: 'EncryptedLocalTrusteeSetupState',
         objectVersion: 1,
-        storageProfileId: localTrusteeStateStorageProfileId,
+        storageScheme: localTrusteeStateStorageFormat,
         ciphertextContentType: localStateCiphertextContentType,
         localStateRoot: input.localStateCommitment.localStateRoot,
         localStateCommitmentHash,
@@ -1125,11 +1112,11 @@ export const decryptLocalTrusteeState = async (
 ): Promise<LocalTrusteeStateStorageDecryptionResult> => {
     assertProtocolHash(input.expectedLocalStateRoot, 'expectedLocalStateRoot');
     if (
-        input.encryptedLocalState.storageProfileId !==
-        localTrusteeStateStorageProfileId
+        input.encryptedLocalState.storageScheme !==
+        localTrusteeStateStorageFormat
     ) {
         throw new TypeError(
-            'encryptedLocalState.storageProfileId is not supported.',
+            'encryptedLocalState.storageScheme is not supported.',
         );
     }
     if (

@@ -328,7 +328,7 @@ pub(super) fn read_binary_setup_commitment(
         let modulus = reader.read_u64_le("commitment modulus")?;
         if DATA_PRIMES.get(expected_commitment_modulus_index) != Some(&modulus) {
             return Err(invalid_threshold_commitment_input(
-                "transported commitment modulus does not match the commitment profile",
+                "transported commitment modulus does not match the commitment parameters",
             ));
         }
         let mut rows = Vec::with_capacity(SETUP_COMMITMENT_ROW_COUNT);

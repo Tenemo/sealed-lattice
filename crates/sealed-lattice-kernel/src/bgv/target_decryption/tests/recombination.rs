@@ -4,13 +4,13 @@ use super::*;
 fn target_partdec_recombines_selected_sparse_target() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
+    let target_share_parameters = target_share_parameters(&setup_package);
     let first_share = generate_share(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         "trustee-1",
     );
     let third_share = generate_share(
@@ -18,7 +18,7 @@ fn target_partdec_recombines_selected_sparse_target() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         "trustee-3",
     );
 
@@ -27,7 +27,7 @@ fn target_partdec_recombines_selected_sparse_target() {
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
+        "targetShareParameters": target_share_parameters,
         "decryptionShares": [third_share, first_share],
     }))
     .expect("recombine target");
@@ -54,20 +54,23 @@ fn target_partdec_recombines_selected_sparse_target() {
     assert_eq!(recombined["decryptScaling"], json!(1));
     assert_eq!(recombined["selectedBoardPositions"], json!([2, 3]));
     assert_eq!(recombined["selectedRosterPositions"], json!([2, 0]));
-    assert_eq!(profile_hash().expect("profile hash").len(), 128);
+    assert_eq!(
+        bgv_parameters_hash().expect("BGV parameters hash").len(),
+        128
+    );
 }
 
 #[test]
 fn target_recombination_selects_first_valid_shares_in_board_order() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
+    let target_share_parameters = target_share_parameters(&setup_package);
     let first_share = generate_share(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         "trustee-1",
     );
     let second_share = generate_share(
@@ -75,7 +78,7 @@ fn target_recombination_selects_first_valid_shares_in_board_order() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         "trustee-2",
     );
     let third_share = generate_share(
@@ -83,7 +86,7 @@ fn target_recombination_selects_first_valid_shares_in_board_order() {
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         "trustee-3",
     );
 
@@ -92,7 +95,7 @@ fn target_recombination_selects_first_valid_shares_in_board_order() {
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
+        "targetShareParameters": target_share_parameters,
         "decryptionShares": [first_share, third_share, second_share],
     }))
     .expect("recombine target");
@@ -105,13 +108,13 @@ fn target_recombination_selects_first_valid_shares_in_board_order() {
 fn target_recombination_rejects_wrong_target_and_duplicate_trustee() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
+    let target_share_parameters = target_share_parameters(&setup_package);
     let first_share = generate_share(
         &setup_package,
         &accepted_record,
         &target_ciphertext_binding,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         "trustee-1",
     );
     let mut wrong_record = accepted_record.clone();
@@ -126,7 +129,7 @@ fn target_recombination_rejects_wrong_target_and_duplicate_trustee() {
             "targetAcceptedRecord": wrong_record,
             "targetCiphertextBinding": target_ciphertext_binding,
             "targetCiphertexts": target_ciphertexts,
-            "targetShareProfile": target_share_profile,
+            "targetShareParameters": target_share_parameters,
             "trusteeIdentity": "trustee-2",
         }))
         .is_err()
@@ -138,7 +141,7 @@ fn target_recombination_rejects_wrong_target_and_duplicate_trustee() {
             "targetAcceptedRecord": accepted_record,
             "targetCiphertextBinding": target_ciphertext_binding,
             "targetCiphertexts": target_ciphertexts,
-            "targetShareProfile": target_share_profile,
+            "targetShareParameters": target_share_parameters,
             "decryptionShares": [first_share.clone(), first_share],
         }))
         .is_err()
@@ -146,21 +149,21 @@ fn target_recombination_rejects_wrong_target_and_duplicate_trustee() {
 }
 
 #[test]
-fn target_share_profile_rejects_threshold_downgrade() {
+fn target_share_parameters_rejects_threshold_downgrade() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
-    let mut downgraded_profile = target_share_profile(&setup_package);
-    downgraded_profile["decryptionThreshold"] = json!(1);
-    downgraded_profile["minimumSharesForInterpolation"] = json!(1);
-    downgraded_profile["decryptionShareQuorum"] = json!(1);
-    let mut hash_input = downgraded_profile.clone();
+    let mut downgraded_parameters = target_share_parameters(&setup_package);
+    downgraded_parameters["decryptionThreshold"] = json!(1);
+    downgraded_parameters["minimumSharesForInterpolation"] = json!(1);
+    downgraded_parameters["decryptionShareQuorum"] = json!(1);
+    let mut hash_input = downgraded_parameters.clone();
     hash_input
         .as_object_mut()
-        .expect("target share profile object")
-        .remove("targetShareProfileHash");
-    downgraded_profile["targetShareProfileHash"] = json!(
-        derive_protocol_hash("TargetDecryptionShareProfileHash", &hash_input)
-            .expect("downgraded profile hash")
+        .expect("target share parameters object")
+        .remove("targetShareParametersHash");
+    downgraded_parameters["targetShareParametersHash"] = json!(
+        derive_protocol_hash("TargetDecryptionShareParametersHash", &hash_input)
+            .expect("downgraded parameters hash")
     );
 
     let result = generate_bgv_target_decryption_share_from_request(&json!({
@@ -171,12 +174,12 @@ fn target_share_profile_rejects_threshold_downgrade() {
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": downgraded_profile,
+        "targetShareParameters": downgraded_parameters,
         "trusteeIdentity": "trustee-1",
     }));
 
-    let error = result.expect_err("downgraded target share profile must be refused");
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    let error = result.expect_err("downgraded target share parameters must be refused");
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(
         error
             .message

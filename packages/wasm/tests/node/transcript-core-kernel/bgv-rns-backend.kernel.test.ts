@@ -5,28 +5,28 @@ import {
     TranscriptCoreKernelCommandError,
 } from '#packages/wasm/src/index';
 
-type BgvProfileRejected = {
+type BgvParametersRejected = {
     readonly ok: false;
-    readonly unresolvedReason: 'BGVProfileRejected';
+    readonly unresolvedReason: 'BgvOperationRejected';
     readonly refusedObjects: readonly {
-        readonly code: 'BGVProfileRejected';
+        readonly code: 'BgvOperationRejected';
         readonly reasonCode: string;
         readonly message: string;
     }[];
 };
 
-const expectBgvProfileRejected = (
+const expectBgvParametersRejected = (
     value: unknown,
     reasonCode?: string,
-): BgvProfileRejected => {
+): BgvParametersRejected => {
     expect(value).toMatchObject({
         ok: false,
-        unresolvedReason: 'BGVProfileRejected',
+        unresolvedReason: 'BgvOperationRejected',
     });
-    const rejection = value as BgvProfileRejected;
+    const rejection = value as BgvParametersRejected;
     expect(
         rejection.refusedObjects.some(
-            (refusedObject) => refusedObject.code === 'BGVProfileRejected',
+            (refusedObject) => refusedObject.code === 'BgvOperationRejected',
         ),
     ).toBe(true);
     if (reasonCode !== undefined) {
@@ -57,63 +57,35 @@ const expectProtocolHash = (value: string, label: string): void => {
 };
 
 describe('BGV-RNS backend kernel commands', () => {
-    it('describes the BGV-RNS profile and operation boundary', async () => {
+    it('describes the BGV-RNS parameters and operation boundary', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeBgvRnsProfile();
+        const parameters = kernel.describeBgvRnsParameters();
         const operationRegistry = kernel.describeBgvOperationRegistry() as {
             readonly registry: {
                 readonly allowedOperations: readonly string[];
                 readonly forbiddenOperations: readonly string[];
             };
-            readonly allowedEvaluatorOpsHash: string;
-        };
-        const batchLayoutBinding = profile.batchLayoutBinding as {
-            readonly directAggregateLayoutHash: string;
-            readonly encryptedBallotAggregateLayoutHash: string;
-            readonly directComparisonProfileHash: string;
+            readonly bgvParametersHash: string;
         };
 
-        expect(profile.profile).toMatchObject({
+        expect(parameters.parameters).toMatchObject({
             polynomialDegree: 32_768,
             plaintextModulus: 65_537,
             dataPrimeBitLength: 47,
             dataLevels: 17,
             extendedLevels: 18,
         });
-        expect(profile.profile.dataPrimes).toHaveLength(17);
-        for (const [label, value] of [
-            ['profileHash', profile.profileHash],
-            ['batchEncoderHash', profile.batchEncoderHash],
-            ['batchLayoutBindingHash', profile.batchLayoutBindingHash],
-            ['directAggregateLayoutHash', profile.directAggregateLayoutHash],
-            [
-                'directComparisonProfileHash',
-                profile.directComparisonProfileHash,
-            ],
-            [
-                'canonicalCiphertextConventionHash',
-                profile.canonicalCiphertextConventionHash,
-            ],
-            ['allowedEvaluatorOpsHash', profile.allowedEvaluatorOpsHash],
-            ['securityEstimatorInputHash', profile.securityEstimatorInputHash],
-        ] as const) {
-            expectProtocolHash(value, label);
-        }
-        expect(profile.batchLayoutBinding).toMatchObject({
-            scoreBucketCount: 10,
+        expect(parameters.parameters.dataPrimes).toHaveLength(17);
+        expectProtocolHash(parameters.bgvParametersHash, 'bgvParametersHash');
+        expect(parameters.batchLayoutBinding).toMatchObject({
+            scoreRange: { minimum: 1, maximum: 10 },
+            bucketCount: 10,
+            slotCount: 32_768,
+            coordinatesPerOption: 11,
             scalarOnlyAggregateLayout: false,
         });
-        expect(operationRegistry.allowedEvaluatorOpsHash).toBe(
-            profile.allowedEvaluatorOpsHash,
-        );
-        expect(batchLayoutBinding.directAggregateLayoutHash).toBe(
-            profile.directAggregateLayoutHash,
-        );
-        expect(batchLayoutBinding.directComparisonProfileHash).toBe(
-            profile.directComparisonProfileHash,
-        );
-        expect(batchLayoutBinding.encryptedBallotAggregateLayoutHash).toBe(
-            profile.encryptedBallotAggregateLayoutHash,
+        expect(operationRegistry.bgvParametersHash).toBe(
+            parameters.bgvParametersHash,
         );
         expect(operationRegistry.registry.allowedOperations).toContain(
             'homomorphicEncryptedBallotAggregation',
@@ -128,18 +100,18 @@ describe('BGV-RNS backend kernel commands', () => {
 
     it('encodes direct encrypted ballot aggregate slots and validates roots byte-identically', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeBgvRnsProfile();
+        const parameters = kernel.describeBgvRnsParameters();
         const encodedResult = kernel.encodeBgvBatchPlaintext({
             slots: [0, 1, 65_536, 17, 99],
             level: 0,
-            layoutBinding: profile.batchLayoutBinding,
+            layoutBinding: parameters.batchLayoutBinding,
             includeCanonicalBytesHex: true,
         });
 
         expect(encodedResult).not.toMatchObject({ ok: false });
         const encoded = encodedResult as Exclude<
             typeof encodedResult,
-            BgvProfileRejected
+            BgvParametersRejected
         >;
         expect(encoded.validation.ok).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
@@ -148,10 +120,8 @@ describe('BGV-RNS backend kernel commands', () => {
             encoded.canonicalBytesHash512,
             'encoded plaintext canonical bytes hash',
         );
-        expect(encoded.canonicalByteLength).toBe(90_441);
-        expect(encoded.batchLayoutBindingHash).toBe(
-            profile.batchLayoutBindingHash,
-        );
+        expect(encoded.canonicalByteLength).toBe(90_311);
+        expect(encoded.bgvParametersHash).toBe(parameters.bgvParametersHash);
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
                 { position: 0, value: 0 },
@@ -187,52 +157,34 @@ describe('BGV-RNS backend kernel commands', () => {
                     canonicalBytesHex: encoded.canonicalBytesHex ?? '',
                     expectedPlaintextRoot: '0'.repeat(128),
                 }),
-            'ProfileComponentMismatch',
+            'ComponentMismatch',
             /plaintext root/u,
-        );
-        const layoutHashHex = Buffer.from(
-            profile.encryptedBallotAggregateLayoutHash,
-            'utf8',
-        ).toString('hex');
-        const wrongLayoutCanonicalBytesHex = (
-            encoded.canonicalBytesHex ?? ''
-        ).replace(
-            layoutHashHex,
-            Buffer.from('0'.repeat(128), 'utf8').toString('hex'),
-        );
-        expectKernelCommandError(
-            () =>
-                kernel.validateBgvPlaintextObject({
-                    canonicalBytesHex: wrongLayoutCanonicalBytesHex,
-                }),
-            'ProfileComponentMismatch',
-            /layout/u,
         );
 
         const layoutMutations: readonly Record<string, unknown>[] = [
             {
-                ...(profile.batchLayoutBinding as Record<string, unknown>),
-                coordinateOrder: 'one-hot-score-buckets-then-score-share',
+                ...parameters.batchLayoutBinding,
+                bucketCount: 9,
             },
             {
-                ...(profile.batchLayoutBinding as Record<string, unknown>),
-                oneHotBucketOrder: 'descending-score-10-through-1',
+                ...parameters.batchLayoutBinding,
+                coordinatesPerOption: 12,
             },
             {
-                ...(profile.batchLayoutBinding as Record<string, unknown>),
-                scoreBucketCount: 9,
+                ...parameters.batchLayoutBinding,
+                slotCount: 16_384,
             },
             {
-                ...(profile.batchLayoutBinding as Record<string, unknown>),
-                ballotScoreEncodingProfileHash: '0'.repeat(128),
+                ...parameters.batchLayoutBinding,
+                scoreRange: { minimum: 0, maximum: 10 },
             },
             {
-                ...(profile.batchLayoutBinding as Record<string, unknown>),
-                directAggregateLayoutHash: '0'.repeat(128),
-            },
-            {
-                ...(profile.batchLayoutBinding as Record<string, unknown>),
+                ...parameters.batchLayoutBinding,
                 scalarOnlyAggregateLayout: true,
+            },
+            {
+                ...parameters.batchLayoutBinding,
+                unexpectedLayoutField: 'rejected',
             },
         ];
         for (const layoutBinding of layoutMutations) {
@@ -243,7 +195,7 @@ describe('BGV-RNS backend kernel commands', () => {
                         level: 0,
                         layoutBinding,
                     }),
-                'ProfileComponentMismatch',
+                'ComponentMismatch',
                 /layout binding/u,
             );
         }
@@ -260,19 +212,19 @@ describe('BGV-RNS backend kernel commands', () => {
             ok: true,
             acceptedOperation: 'homomorphicEncryptedBallotAggregation',
         });
-        expectBgvProfileRejected(
+        expectBgvParametersRejected(
             kernel.validateBgvEvaluatorOperation({
                 operation: 'scalarDegree360Comparator',
             }),
             'ForbiddenEvaluatorOperation',
         );
-        expectBgvProfileRejected(
+        expectBgvParametersRejected(
             kernel.validateBgvEvaluatorOperation({
                 operation: 'uncertifiedScoreBitDerivationOperation',
             }),
             'UncertifiedEvaluatorOperation',
         );
-        expectBgvProfileRejected(
+        expectBgvParametersRejected(
             kernel.validateBgvEvaluatorOperation({
                 operation: 'adHocEncryptedComparator',
             }),
@@ -290,7 +242,7 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(fixtureResult).not.toMatchObject({ ok: false });
         const fixture = fixtureResult as Exclude<
             typeof fixtureResult,
-            BgvProfileRejected
+            BgvParametersRejected
         >;
 
         expectProtocolHash(fixture.ciphertextRoot, 'ciphertext root');
@@ -298,7 +250,7 @@ describe('BGV-RNS backend kernel commands', () => {
             fixture.canonicalBytesHash512,
             'ciphertext canonical bytes hash',
         );
-        expect(fixture.canonicalByteLength).toBe(180_781);
+        expect(fixture.canonicalByteLength).toBe(180_521);
         expect(fixture.validation).toMatchObject({
             ok: true,
             objectKind: 'ciphertext',
@@ -324,7 +276,7 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(baseConversionResult).not.toMatchObject({ ok: false });
         const baseConversion = baseConversionResult as Exclude<
             typeof baseConversionResult,
-            BgvProfileRejected
+            BgvParametersRejected
         >;
 
         expect(baseConversion).toMatchObject({

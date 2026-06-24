@@ -1,10 +1,10 @@
 import {
     createSetupPackageVerificationInput as createSetupPackageVerificationInputInternal,
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
-    deriveFrozenRosterProfile as deriveFrozenRosterProfileInternal,
+    deriveFrozenRosterParameters as deriveFrozenRosterParametersInternal,
     derivePollSpecHash as derivePollSpecHashInternal,
-    deriveThresholdProfile as deriveThresholdProfileInternal,
-    deriveThresholdProfileHash as deriveThresholdProfileHashInternal,
+    deriveThresholdParameters as deriveThresholdParametersInternal,
+    deriveThresholdParametersHash as deriveThresholdParametersHashInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
     verifyFoundationTranscript as verifyFoundationTranscriptInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
@@ -55,8 +55,8 @@ import type {
     ProtocolHash,
     RecoveryEpochVerification,
     RecoveryEpochVerificationInput,
-    ThresholdProfile,
-    ThresholdProfileInput,
+    ThresholdParameters,
+    ThresholdParametersInput,
     TranscriptCoreFixture,
     TranscriptCoreVerificationResult,
     RosterManifestTranscriptInput,
@@ -75,7 +75,7 @@ export type {
     ActionContext,
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
-    TargetBoundShareSelectionProfile,
+    TargetBoundShareSelectionParameters,
     AppendOnlyConsistencyProof,
     BoardConsistencyInput,
     BoardConsistencyVerification,
@@ -101,7 +101,7 @@ export type {
     FoundationTranscriptVerification,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
-    FrozenRosterProfile,
+    FrozenRosterParameters,
     FutureProtocolOperationResult,
     GoldenTranscriptCoreFixture,
     GoldenTranscriptCoreFixtureVerification,
@@ -138,7 +138,7 @@ export type {
     RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
-    RosterProfileKind,
+    RosterParametersKind,
     ScoreDomain,
     SignatureVerificationResult,
     SignedBoardHead,
@@ -152,8 +152,8 @@ export type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
     TargetProposal,
-    ThresholdProfile,
-    ThresholdProfileInput,
+    ThresholdParameters,
+    ThresholdParametersInput,
     ThresholdWarning,
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
@@ -171,10 +171,7 @@ export type CollectiveBgvSetupContext = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
 }>;
 
@@ -192,12 +189,11 @@ export type VerifyPrivateVssShareInput = Readonly<{
 export type PrivateVssShareVerification = Readonly<{
     readonly ok: boolean;
     readonly operation: 'verifyPrivateVssShareEnvelope';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly verifierStatus: 'accepted' | 'refused';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
-    readonly ringDegreeStatus?: 'profile-ring' | 'development-reduced-ring';
+    readonly ringDegreeStatus?: 'full-ring' | 'development-reduced-ring';
     readonly verifiedRnsLimbCount?: number;
     readonly verifiedShamirCoefficientCommitmentCount?: number;
     readonly verifiedPrivateVssShareProofCount?: number;
@@ -265,13 +261,10 @@ export type SetupPackageVerificationInputSource = Readonly<
 export type AcceptedSetupHandoff = Readonly<{
     readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
     readonly objectVersion: 1;
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly setupPackageHash: ProtocolHash;
     readonly directBallotEncryptionHandoff: Readonly<{
@@ -303,14 +296,13 @@ export type AcceptedSetupHandoff = Readonly<{
 export type SetupPackageVerification = Readonly<{
     readonly ok: boolean;
     readonly operation: 'verifyCollectiveBgvSetupPackage';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly verifierStatus:
         | 'accepted'
         | 'pending'
         | 'refused'
         | 'aborted'
         | 'forkDetected'
-        | 'outsideProfile';
+        | 'outsideAcceptedParameters';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
@@ -323,19 +315,21 @@ export type SetupPackageVerification = Readonly<{
     }>[];
 }>;
 
-/** Derives threshold, quorum, and warning parameters for a roster profile. */
-export const deriveThresholdProfile = (
-    input: ThresholdProfileInput,
-): ThresholdProfile => deriveThresholdProfileInternal(input);
+/** Derives threshold, quorum, and warning parameters for a roster. */
+export const deriveThresholdParameters = (
+    input: ThresholdParametersInput,
+): ThresholdParameters => deriveThresholdParametersInternal(input);
 
-/** Derives the concrete roster profile after registration closes and the roster freezes. */
-export const deriveFrozenRosterProfile = deriveFrozenRosterProfileInternal;
+/** Derives the concrete roster parameters after registration closes and the roster freezes. */
+export const deriveFrozenRosterParameters =
+    deriveFrozenRosterParametersInternal;
 
 /** Derives the canonical poll-spec hash including roster policy fields. */
 export const derivePollSpecHash = derivePollSpecHashInternal;
 
-/** Derives the canonical threshold-profile hash for a frozen roster profile. */
-export const deriveThresholdProfileHash = deriveThresholdProfileHashInternal;
+/** Derives the canonical threshold parameters hash for frozen roster parameters. */
+export const deriveThresholdParametersHash =
+    deriveThresholdParametersHashInternal;
 
 /** Validates and normalizes a poll specification from trusted or untrusted input. */
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
@@ -642,8 +636,6 @@ const prepareSetupPackageVerificationInputForKernel = (
     const verifiedSetupProofMaterials = {
         objectType: 'VerifiedSetupProofMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofMaterials: verifiedMaterials,
     } as const satisfies VerifiedSetupProofMaterialSet;
 

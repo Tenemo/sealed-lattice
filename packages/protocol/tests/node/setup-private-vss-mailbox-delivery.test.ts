@@ -13,7 +13,7 @@ import {
 
 const fixtureHash = makeSetupFixtureHash('setup-private-vss-mailbox-delivery');
 
-const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
+const setupContext = makeSetupContext(fixtureHash);
 
 describe('private VSS mailbox delivery', () => {
     it('refuses to build delivery envelopes without private share proof generation', async () => {
@@ -128,9 +128,7 @@ describe('private VSS mailbox delivery', () => {
             privateVssShareProofFactory: () => ({
                 objectType: 'PrivateVssShareProof',
                 objectVersion: 1,
-                proofProfileId:
-                    'sealed-lattice-private-vss-share-proof-succinct-v1',
-                setupProofProfileId: 'SealedLattice-SetupProof-v1',
+                proofId: 'sealed-lattice-private-vss-share-proof-succinct-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                 proofStatementRoot: fixtureHash('statement-root'),
@@ -244,9 +242,8 @@ describe('private VSS mailbox delivery', () => {
                 privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
                     objectType: 'PrivateVssShareProof',
                     objectVersion: 1,
-                    proofProfileId:
+                    proofId:
                         'sealed-lattice-private-vss-share-proof-succinct-v1',
-                    setupProofProfileId: 'SealedLattice-SetupProof-v1',
                     proofFamily: 'vss-opening-carry',
                     proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                     proofStatementRoot: fixtureHash(

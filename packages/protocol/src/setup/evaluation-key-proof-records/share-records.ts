@@ -2,7 +2,6 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { type EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
@@ -202,11 +201,7 @@ const contextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -499,8 +494,6 @@ export const createRelinearizationKeyShareRounds = (
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundOne',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -604,8 +597,6 @@ export const createRelinearizationKeyShareRounds = (
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundTwo',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -677,8 +668,6 @@ export const createRelinearizationKeyShareRounds = (
     const roundsWithoutRoot = {
         objectType: 'RelinearizationKeyShareRounds',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -793,8 +782,6 @@ export const createGaloisKeyShareBatches = (
                 return {
                     objectType: 'GaloisKeyShareMaterial',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: 'galois-key-share',
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -817,8 +804,6 @@ export const createGaloisKeyShareBatches = (
         const batchWithoutRoot = {
             objectType: 'GaloisKeyShareBatch',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: 'galois-key-share',
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,

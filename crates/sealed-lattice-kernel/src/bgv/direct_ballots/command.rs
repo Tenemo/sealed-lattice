@@ -127,9 +127,8 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
 
     Ok(json!({
         "operation": DIRECT_BALLOT_OPERATION,
-        "profile": {
-            "profileId": PROFILE_ID,
-            "profileHash": profile_hash()?,
+        "parameters": {
+            "bgvParametersHash": bgv_parameters_hash()?,
             "polynomialDegree": POLYNOMIAL_DEGREE,
             "plaintextModulus": PLAINTEXT_MODULUS,
             "dataPrimeCount": DATA_PRIMES.len()
@@ -180,7 +179,7 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
                 "firstProofChunkHashes": first_proof.proof_chunk_hashes,
                 "firstProofPublicTransportHash": first_proof.public_proof_transport_hash,
                 "firstProofStatementHash": first_proof.statement_hash_hex,
-                "proofProfileHash": direct_ballot_relation_proof_profile_hash()?
+                "proofParametersHash": direct_ballot_relation_proof_parameters_hash()?
             },
             "proofMaskRandomness": proof_mask_randomness.report_value(),
             "relationCommitmentPolynomialCount": first_proof.relation_commitment_polynomial_count,

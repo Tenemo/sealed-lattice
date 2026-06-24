@@ -8,14 +8,14 @@ use crate::{
     transcript_core::decode_hex,
 };
 
-pub(crate) fn bgv_profile_rejection(
+pub(crate) fn bgv_operation_rejection(
     operation: &str,
     reason_code: &str,
     message: impl Into<String>,
     object_hash: Option<&str>,
 ) -> Value {
     let mut refused_object = json!({
-        "code": "BGVProfileRejected",
+        "code": "BgvOperationRejected",
         "reasonCode": reason_code,
         "message": message.into(),
     });
@@ -28,7 +28,7 @@ pub(crate) fn bgv_profile_rejection(
         "operation": operation,
         "acceptedHashes": [],
         "refusedObjects": [refused_object],
-        "unresolvedReason": "BGVProfileRejected",
+        "unresolvedReason": "BgvOperationRejected",
     })
 }
 
@@ -49,7 +49,7 @@ pub(crate) fn validate_plaintext_hex(
         && expected_root != root
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "BGV plaintext root does not match the expected root",
         ));
     }
@@ -58,11 +58,10 @@ pub(crate) fn validate_plaintext_hex(
         "ok": true,
         "objectKind": "plaintext",
         "componentCount": object.components.len(),
-        "profileHash": object.components[0].profile_hash,
+        "bgvParametersHash": object.components[0].bgv_parameters_hash,
         "basisId": object.components[0].basis_id,
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
-        "layoutHash": object.components[0].encrypted_ballot_aggregate_layout_hash,
         "plaintextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
     }))
@@ -85,23 +84,21 @@ pub(crate) fn validate_ciphertext_hex(
         && expected_root != root
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "BGV ciphertext root does not match the expected root",
         ));
     }
     let first = &object.components[0];
     if object.components.iter().any(|component| {
-        component.profile_hash != first.profile_hash
+        component.bgv_parameters_hash != first.bgv_parameters_hash
             || component.basis_id != first.basis_id
             || component.level != first.level
             || component.coefficient_count != first.coefficient_count
-            || component.encrypted_ballot_aggregate_layout_hash
-                != first.encrypted_ballot_aggregate_layout_hash
             || component.moduli != first.moduli
     }) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "BGV ciphertext components do not share one canonical profile, basis, level, and layout",
+            CanonicalErrorCode::ComponentMismatch,
+            "BGV ciphertext components do not share one canonical parameter set, basis, and level",
         ));
     }
 
@@ -109,11 +106,10 @@ pub(crate) fn validate_ciphertext_hex(
         "ok": true,
         "objectKind": "ciphertext",
         "componentCount": object.components.len(),
-        "profileHash": first.profile_hash,
+        "bgvParametersHash": first.bgv_parameters_hash,
         "basisId": first.basis_id,
         "level": first.level,
         "coefficientCount": first.coefficient_count,
-        "layoutHash": first.encrypted_ballot_aggregate_layout_hash,
         "ciphertextRoot": root,
         "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
     }))

@@ -28,6 +28,8 @@ The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top
 
 The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and narrow setup-development verification helpers. Reserved complete-protocol entry points fail closed until the matching implementation and verification work is complete.
 
+Threshold derivation is a helper, not a security certificate. The first target profile above is the only current setup/evaluator evidence profile; other roster sizes returned by helper APIs need their own profile certificates, runtime measurements, and security review before they carry a security or mobile claim.
+
 Current package tests are development evidence only. They do not replace supported mobile runtime evidence, production hardening, or the complete protocol security boundary in [SECURITY.md](SECURITY.md).
 
 ## Installation
@@ -43,7 +45,7 @@ pnpm add sealed-lattice
 ## Basic usage
 
 ```typescript
-import { deriveThresholdProfile, validatePollSpec } from "sealed-lattice";
+import { deriveThresholdParameters, validatePollSpec } from "sealed-lattice";
 
 const pollValidation = validatePollSpec({
     pollId: "board-election-2026",
@@ -58,17 +60,17 @@ if (!pollValidation.ok) {
     );
 }
 
-const thresholdProfile = deriveThresholdProfile({
+const thresholdParameters = deriveThresholdParameters({
     rosterSize: 10,
 });
 ```
 
-`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdProfile` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
+`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdParameters` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
 
 ## What you can use today
 
 - poll specification validation and canonical hash derivation;
-- threshold and frozen roster profile derivation;
+- threshold and frozen roster parameter derivation;
 - lifecycle transition and action capability checks;
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
 - setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling;
@@ -149,10 +151,7 @@ pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 
-Heavy proof lanes are development verification for setup/proof changes. They do
-not replace supported-phone runtime evidence or production security review; see
-[SECURITY.md](SECURITY.md) for the public boundary. Detailed maintainer evidence
-is kept separately from the public security posture.
+Heavy proof lanes are development verification for setup/proof changes. They do not replace supported-phone runtime evidence or production security review; see [SECURITY.md](SECURITY.md) for the public boundary. Detailed maintainer evidence is kept separately from the public security posture.
 
 Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
 

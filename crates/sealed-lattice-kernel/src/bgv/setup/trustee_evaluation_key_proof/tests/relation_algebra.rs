@@ -4,7 +4,7 @@ use crate::bgv::modular_arithmetic::pow_mod;
 #[test]
 fn galois_transpose_matches_forward_automorphism_inner_product() {
     // The lincheck relies on <u, phi_g(s)> = <M_phi^T u, s>; check it for
-    // random vectors against the forward automorphism over a profile prime.
+    // random vectors against the forward automorphism over a BGV prime.
     let modulus = DATA_PRIMES[0];
     let degree = 64_usize;
     let mut seed_value = 0x9e3779b97f4a7c15_u64;
@@ -43,10 +43,10 @@ fn degree_t_sumcheck_residual_shifts_subgroup_constant() {
     let modulus = DATA_PRIMES[0];
     let trace_size = 64_usize;
     let trace_root = pow_mod(
-        crate::bgv::profile::root_parameters_for_modulus(modulus)
+        crate::bgv::parameters::root_parameters_for_modulus(modulus)
             .expect("root parameters")
             .negacyclic_root,
-        (2 * crate::bgv::profile::POLYNOMIAL_DEGREE / trace_size) as u64,
+        (2 * crate::bgv::parameters::POLYNOMIAL_DEGREE / trace_size) as u64,
         modulus,
     )
     .expect("trace root");

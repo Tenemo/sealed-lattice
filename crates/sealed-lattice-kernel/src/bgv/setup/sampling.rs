@@ -261,7 +261,7 @@ pub(super) fn dense_public_residues(seed_hash: &str, label: &str, modulus: u64) 
 }
 
 // Same per-position framing as `dense_public_residues` over an explicit
-// degree, so reduced development rings derive a prefix of the profile-ring
+// degree, so reduced development rings derive a prefix of the full-ring
 // residues instead of a differently framed vector.
 pub(super) fn dense_public_residues_with_degree(
     seed_hash: &str,

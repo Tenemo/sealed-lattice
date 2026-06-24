@@ -9,7 +9,6 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
 
     assert_eq!(result["ok"], true);
     assert_eq!(result["operation"], "verifyLocalTrusteeSetupState");
-    assert_eq!(result["setupProfileId"], "CollectiveBgvSetup-v1");
     assert_eq!(result["trusteeIdentity"], "trustee-3");
     assert_eq!(result["trusteeRosterPosition"], 3);
     assert_eq!(result["trusteePoint"], 4);
@@ -44,7 +43,6 @@ fn local_trustee_setup_state_verifier_rejects_deletion_receipt_drift() {
 }
 
 fn local_trustee_setup_state_request() -> serde_json::Value {
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
     let manifest_hash = derive_protocol_hash(
         "ElectionManifestHash",
@@ -56,25 +54,18 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         &serde_json::json!({ "roster": "local-trustee-state-test" }),
     )
     .expect("roster hash");
-    let setup_profile_hash = profile["setupProfileHash"]
-        .as_str()
-        .expect("setup profile hash");
-    let q_share_hash = profile["qShareHash"].as_str().expect("Q_share hash");
-    let carry_aware_vss_relation_profile_hash = profile["carryAwareVssShareRelationProfileHash"]
-        .as_str()
-        .expect("carry-aware VSS relation profile hash");
-    let commitment_profile_hash = profile["commitmentProfileHash"]
-        .as_str()
-        .expect("commitment profile hash");
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(10),
+        )
+        .expect("roster-derived setup parameters hash");
+    let setup_parameters_hash = setup_parameters_hash.as_str();
     let setup_epoch = "setup-epoch-1";
     let setup_context = serde_json::json!({
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
     });
     let trustee_identity = "trustee-3";
@@ -86,10 +77,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": trustee_roster_position,
@@ -117,10 +105,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": trustee_roster_position,
@@ -132,7 +117,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "deletionReceiptRoot": deletion_receipt["deletionReceiptRoot"],
         "deletionReceipt": deletion_receipt,
         "exportPolicy": "roots-only-no-raw-share-or-opening-export",
-        "storageProfile": "encrypted-local-device-state-required",
+        "storageRequirement": "encrypted-local-device-state-required",
     });
     local_state["localStateRoot"] = serde_json::json!(
         derive_protocol_hash("LocalTrusteeSetupStateRoot", &local_state).expect("local state root")

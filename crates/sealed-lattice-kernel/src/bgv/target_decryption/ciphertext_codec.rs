@@ -15,7 +15,7 @@ pub(super) fn read_target_ciphertext_pair(
     )?;
     if target_id.ciphertext.level != target_order.ciphertext.level {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "target id and target order ciphertexts must use the same BGV level",
         ));
     }
@@ -42,7 +42,7 @@ pub(super) fn read_target_ciphertext_pair(
     )?;
     if target_ciphertext_hash != target_accepted.target_ciphertext_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "target ciphertext pair does not match the accepted target ciphertext hash",
         ));
     }
@@ -93,7 +93,7 @@ pub(super) fn parse_target_ciphertext(
     for component in object.components {
         if component.level != level || component.basis_id != basis_id {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("{label} components must use the same data-basis level"),
             ));
         }

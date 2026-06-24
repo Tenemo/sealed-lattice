@@ -10,12 +10,12 @@ import {
 import {
     galoisScheduleEntries,
     relinearizationScheduleEntries,
-} from './profile-derivations.js';
+} from './parameter-derivations.js';
 import type {
     BgvHeSecurityCertificate,
     BgvHeSecurityCertificateBody,
-    BgvRnsProfileForCertificates,
-    CollectiveBgvSetupProfileForCertificates,
+    BgvRnsParametersForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
 } from './types.js';
 
 function heLatticeEstimatorRows(
@@ -301,35 +301,31 @@ function heLatticeEstimatorRows(
 }
 
 const bgvHeSecurityCertificateBody = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
-    bgvProfile: BgvRnsProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
+    bgvParameters: BgvRnsParametersForCertificates,
 ): BgvHeSecurityCertificateBody => {
-    const dataPrimes = bgvProfile.profile.dataPrimes;
+    const dataPrimes = bgvParameters.parameters.dataPrimes;
     const dataPrimeProductDecimal = modulusProductDecimal(dataPrimes);
     const largestExposedModulusBits = moduliBitLengthSum(dataPrimes);
     const extendedUtilityCeilLog2Product = moduliBitLengthSum([
         ...dataPrimes,
-        bgvProfile.profile.specialPrime,
+        bgvParameters.parameters.specialPrime,
     ]);
     const acceptedRelinearizationKeyPolynomials =
         keySwitchComponentPolynomialCount(
-            relinearizationScheduleEntries(setupProfile),
+            relinearizationScheduleEntries(setupParameters),
         );
     const acceptedGaloisKeyPolynomials = keySwitchComponentPolynomialCount(
-        galoisScheduleEntries(setupProfile),
+        galoisScheduleEntries(setupParameters),
     );
 
     return {
         objectType: 'BgvHeSecurityCertificate',
         objectVersion: 1,
-        setupProfileHash: setupProfile.setupProfileHash,
-        qShareHash: setupProfile.qShareHash,
-        setupProofProfileHash: setupProfile.setupProofProfileHash,
-        evaluatorKeyScheduleProfileHash:
-            setupProfile.evaluatorKeyScheduleProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         assessedRing: {
-            polynomialDegree: bgvProfile.profile.polynomialDegree,
-            plaintextModulus: bgvProfile.profile.plaintextModulus,
+            polynomialDegree: bgvParameters.parameters.polynomialDegree,
+            plaintextModulus: bgvParameters.parameters.plaintextModulus,
             dataBasisId,
             dataPrimeCount: dataPrimes.length,
             dataPrimeProductDecimal,
@@ -337,7 +333,7 @@ const bgvHeSecurityCertificateBody = (
             qSharePrimeCount: dataPrimes.length,
             qSharePrimeProductDecimal: dataPrimeProductDecimal,
             qShareCeilLog2Product: largestExposedModulusBits,
-            specialPrime: bgvProfile.profile.specialPrime,
+            specialPrime: bgvParameters.parameters.specialPrime,
             extendedUtilityCeilLog2Product,
             largestExposedBasisClass: 'Q_data',
             largestExposedModulusBits,
@@ -356,12 +352,13 @@ const bgvHeSecurityCertificateBody = (
         },
         publicSampleAccounting: {
             publicKeyCrpPolynomials: 1,
-            publicKeyShareCount: setupProfile.participantCount,
+            publicKeyShareCount: setupParameters.participantCount,
             acceptedRelinearizationKeyPolynomials,
             acceptedGaloisKeyPolynomials,
             scheduledRelinearizationLevelCount:
-                relinearizationScheduleEntries(setupProfile).length,
-            scheduledGaloisKeyCount: galoisScheduleEntries(setupProfile).length,
+                relinearizationScheduleEntries(setupParameters).length,
+            scheduledGaloisKeyCount:
+                galoisScheduleEntries(setupParameters).length,
         },
         publishedReferenceRows: {
             bcc25TernaryGaussian319Category128: {
@@ -392,7 +389,7 @@ const bgvHeSecurityCertificateBody = (
                 'recursively sorted JSON object keys, two-space indentation, trailing newline',
             estimatorOutputCanonicalSha256:
                 '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399',
-            securityEstimatorInputHash: bgvProfile.securityEstimatorInputHash,
+            bgvParametersHash: bgvParameters.bgvParametersHash,
             secretModel: 'ND.Ternary',
             errorModel: 'ND.CenteredBinomial(2)',
             sampleModel: 'm=+Infinity',
@@ -408,11 +405,11 @@ const bgvHeSecurityCertificateBody = (
 };
 
 export const createBgvHeSecurityCertificate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
-    bgvProfile: BgvRnsProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
+    bgvParameters: BgvRnsParametersForCertificates,
 ): BgvHeSecurityCertificate => {
     const template = acceptedCertificateTemplate(
-        setupProfile,
+        setupParameters,
         'heSecurityCertificate',
         'BgvHeSecurityCertificate',
         'heSecurityCertificateHash',
@@ -423,8 +420,8 @@ export const createBgvHeSecurityCertificate = (
     }
 
     const certificateBody = bgvHeSecurityCertificateBody(
-        setupProfile,
-        bgvProfile,
+        setupParameters,
+        bgvParameters,
     );
 
     return {

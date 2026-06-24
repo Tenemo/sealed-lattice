@@ -24,7 +24,7 @@ pnpm add sealed-lattice
 ## Validate a poll
 
 ```typescript
-import { deriveThresholdProfile, validatePollSpec } from "sealed-lattice";
+import { deriveThresholdParameters, validatePollSpec } from "sealed-lattice";
 
 const pollValidation = validatePollSpec({
     pollId: "board-election-2026",
@@ -39,19 +39,19 @@ if (!pollValidation.ok) {
     );
 }
 
-const thresholdProfile = deriveThresholdProfile({
+const thresholdParameters = deriveThresholdParameters({
     rosterSize: 10,
 });
 ```
 
-`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdProfile` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
+`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdParameters` contains derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size. It is not a security certificate; profiles outside the first target profile need their own certificate and runtime evidence before they carry a security or supported-phone claim.
 
 ## Import verification helpers
 
 ```typescript
 import {
     createSetupPackageVerificationInput,
-    deriveThresholdProfile,
+    deriveThresholdParameters,
     validatePollSpec,
     verifyBoardConsistency,
     verifyFoundationTranscript,
@@ -62,12 +62,12 @@ import {
 } from "sealed-lattice";
 ```
 
-These helpers are useful for current development verification and package integration. Complete active-static direct encrypted ballot voting entry points are not public yet.
+These helpers are useful for current development verification and package integration. Complete direct encrypted ballot voting entry points are not public yet.
 
 ## What you can use today
 
 - poll specification validation and canonical hash derivation
-- threshold and frozen roster profile derivation
+- threshold and frozen roster parameter derivation
 - lifecycle transition and action capability checks
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, and first-valid ordering checks
 - setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling

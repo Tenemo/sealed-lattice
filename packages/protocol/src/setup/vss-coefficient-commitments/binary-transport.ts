@@ -23,7 +23,7 @@ import {
     setupCommitmentRootPayload,
 } from './commitment-values.js';
 import {
-    acceptedBgvProfileRingDegree,
+    acceptedBgvFullRingDegree,
     setupCommitmentModulusLimbIndices,
     setupCommitmentRowCount,
     setupTransportChunkSizeBytes,
@@ -42,7 +42,6 @@ import {
     type VssSourceTrusteeCoefficientCommitmentRecord,
 } from './constants-and-types.js';
 import {
-    assertHashLike,
     assertJsonRecord,
     assertJsonRecordArray,
     bytesToHex,
@@ -542,13 +541,10 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
         readonly chunkCount: number;
     }>,
 ): BinaryChunkedVssCoefficientCommitmentMaterialSet => {
-    const commitmentProfileHash = input.setupContext.commitmentProfileHash;
-    assertHashLike(commitmentProfileHash, 'setupContext.commitmentProfileHash');
     const materialSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentMaterialSet',
         objectVersion: 1,
         ...contextFields(input.setupContext),
-        commitmentProfileHash,
         materialEncoding: 'binary-chunked-full-public-setup-commitment-values',
         binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -558,8 +554,8 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
         rnsLimbCount: input.rnsLimbCount,
         ringDegree: input.ringDegree,
         ringDegreeStatus:
-            input.ringDegree === acceptedBgvProfileRingDegree
-                ? 'profile-ring'
+            input.ringDegree === acceptedBgvFullRingDegree
+                ? 'full-ring'
                 : 'development-reduced-ring',
         materialRecordCount: input.materialRecordCount,
         transport: {
@@ -806,7 +802,7 @@ const readTransportedSetupCommitment = (
                 modulus
             ) {
                 throw new Error(
-                    'transported commitment modulus does not match the commitment profile.',
+                    'transported commitment modulus does not match the commitment parameters.',
                 );
             }
             const rows = Array.from({ length: setupCommitmentRowCount }, () =>
@@ -988,12 +984,12 @@ export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
         setupCommitmentModulusLimbIndices.length
     ) {
         throw new Error(
-            'transported VSS material commitment limb count does not match the commitment profile.',
+            'transported VSS material commitment limb count does not match the commitment parameters.',
         );
     }
     if (reader.readVaruint('rowCount') !== setupCommitmentRowCount) {
         throw new Error(
-            'transported VSS material row count does not match the commitment profile.',
+            'transported VSS material row count does not match the commitment parameters.',
         );
     }
 

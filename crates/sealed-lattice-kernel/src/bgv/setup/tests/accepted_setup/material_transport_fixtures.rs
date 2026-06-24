@@ -636,19 +636,18 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
 
 fn build_setup_package_with_transported_public_setup_companions()
 -> (serde_json::Value, TransportedPublicSetupCompanions) {
-    terminal_phase("start profile-ring package fixture");
-    let terminal_profile_ring_fixture =
-        terminal_profile_ring_minimal_collective_setup_package_fixture();
-    terminal_phase("built profile-ring package fixture");
-    assemble_transported_public_setup_companions(terminal_profile_ring_fixture)
+    terminal_phase("start full-ring package fixture");
+    let terminal_full_ring_fixture = terminal_full_ring_minimal_collective_setup_package_fixture();
+    terminal_phase("built full-ring package fixture");
+    assemble_transported_public_setup_companions(terminal_full_ring_fixture)
 }
 
 /// Reduced development-ring (128) terminal fixture for roster size n. Builds the
 /// streamed reduced-ring base package, then layers on the same proof families,
-/// evaluation-key records, and transported public companions as the profile-ring
+/// evaluation-key records, and transported public companions as the full-ring
 /// terminal path, so the full accepted-setup verifier exercises every
-/// roster-dependent binding for any supported n without the heavy profile ring.
-/// The terminal profile-ring claim gate then refuses the reduced ring, so this
+/// roster-dependent binding for any supported n without the heavy full ring.
+/// The terminal full-ring claim gate then refuses the reduced ring, so this
 /// reaches that gate rather than `accepted`.
 pub(super) fn reduced_ring_setup_package_with_transported_public_setup_companions(
     participant_count: u64,
@@ -664,16 +663,16 @@ pub(super) fn reduced_ring_setup_package_with_transported_public_setup_companion
 }
 
 fn assemble_transported_public_setup_companions(
-    base_fixture: TerminalProfileRingSetupPackageFixture,
+    base_fixture: TerminalFullRingSetupPackageFixture,
 ) -> (serde_json::Value, TransportedPublicSetupCompanions) {
-    let terminal_profile_ring_fixture = base_fixture;
-    let mut package = terminal_profile_ring_fixture.package.clone();
-    let transported_vss_material = terminal_profile_ring_fixture
+    let terminal_full_ring_fixture = base_fixture;
+    let mut package = terminal_full_ring_fixture.package.clone();
+    let transported_vss_material = terminal_full_ring_fixture
         .transported_vss_coefficient_commitment_material
         .clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     let setup_transport_certificate = setup_transport_certificate_for_transported_vss_material(
-        &profile,
+        &setup_parameters,
         &package["vssCoefficientCommitmentMaterial"],
         &transported_vss_material,
     );
@@ -796,7 +795,7 @@ fn assemble_transported_public_setup_companions(
             vss_coefficient_commitment_material: transported_material_reference_value(
                 &transported_vss_material,
             ),
-            verified_vss_coefficient_commitment_material: terminal_profile_ring_fixture
+            verified_vss_coefficient_commitment_material: terminal_full_ring_fixture
                 .verified_vss_coefficient_commitment_material,
             same_secret_proof_material,
             public_key_share_material,

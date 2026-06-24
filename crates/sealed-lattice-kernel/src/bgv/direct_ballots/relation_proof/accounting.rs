@@ -18,10 +18,10 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
 // subrelation runs modulo the about 16-bit plaintext modulus 65537, so a single transcript
 // yields only about 16 soundness bits against the 192-bit nominal challenge. See the README
 // safety boundaries for the full scope statement.
-pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_profile_hash()
+pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_hash()
 -> CanonicalResult<String> {
     derive_protocol_hash(
-        "BallotValidityProofProfileHash",
+        "BallotValidityProofParametersHash",
         &json!({
             "statementVersion": 3,
             "proofEncoding": "binary relation transcript",
@@ -122,7 +122,7 @@ fn zero_knowledge_shift_slack_bits_after_response_union_bound(
     u32::try_from(mask_coefficient_bits)
         .map_err(|_| {
             CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "direct ballot proof mask bit count does not fit proof accounting",
             )
         })?
@@ -131,7 +131,7 @@ fn zero_knowledge_shift_slack_bits_after_response_union_bound(
         .and_then(|slack| slack.checked_sub(response_union_loss_bits))
         .ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "direct ballot proof mask bit count is too small for zero-knowledge shift accounting",
             )
         })
@@ -143,11 +143,11 @@ mod tests {
     use crate::encoding::CanonicalErrorCode;
 
     #[test]
-    fn zero_knowledge_shift_slack_rejects_underflowing_profile_constants() {
+    fn zero_knowledge_shift_slack_rejects_underflowing_parameter_constants() {
         let error = zero_knowledge_shift_slack_bits_after_response_union_bound(1, 1)
             .expect_err("undersized mask bit count should reject");
 
-        assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+        assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
         assert!(
             error
                 .message

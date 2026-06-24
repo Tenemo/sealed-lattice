@@ -33,7 +33,7 @@ mod tests;
 
 pub(crate) use accepted_setup::{
     derive_collective_bgv_setup_public_derivations_from_request,
-    describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
+    describe_collective_bgv_setup_parameters, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
@@ -85,15 +85,9 @@ use crate::{
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-        profile::{
-            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-            allowed_operation_registry_hash, backend_profile_hash,
-            ballot_score_encoding_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
-            canonical_ciphertext_convention_hash, data_basis_modulus_bits,
-            direct_aggregate_layout_hash, direct_comparison_profile_hash,
-            encrypted_ballot_aggregate_layout_hash, encrypted_ballot_aggregate_profile_hash,
-            encrypted_ballot_layout_hash, extended_basis_modulus_bits, profile_hash,
-            security_estimator_input_hash,
+        parameters::{
+            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
+            data_basis_modulus_bits, extended_basis_modulus_bits,
         },
         rns::RnsPolynomial,
         serialization::{
@@ -111,10 +105,8 @@ use crate::{
     hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
 };
 
-pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
-    "sealed-lattice-bgv-rns-passive-full-roster-setup-v1";
-pub(crate) const TARGET_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-AsyncTargetDecryption-v1";
-pub(crate) const KEY_SWITCH_DECOMPOSITION_PROFILE_ID: &str =
+pub(crate) const TARGET_DECRYPTION_ID: &str = "BGV-RNS-AsyncTargetDecryption-v1";
+pub(crate) const KEY_SWITCH_DECOMPOSITION_SCHEME_ID: &str =
     "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
 pub(crate) const SELECTED_ROT_SET_ID: &str = "compact-generator-basis-packed-rank-rot-set-v1";
 const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
@@ -137,7 +129,7 @@ struct PassiveSetupInput {
     ceremony_id: String,
     manifest_hash: String,
     roster_hash: String,
-    threshold_profile_hash: String,
+    threshold_parameters_hash: String,
     setup_seed_provided: bool,
     setup_seed_hash: String,
     private_setup_seed_hash: String,
@@ -164,9 +156,8 @@ struct VerifiedParticipantSetupBinding {
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "keySwitchDecompositionProfileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
+        "targetDecryptionId": TARGET_DECRYPTION_ID,
+        "keySwitchDecompositionSchemeId": KEY_SWITCH_DECOMPOSITION_SCHEME_ID,
         "selectedRotSetId": SELECTED_ROT_SET_ID,
         "canonicalObjects": [
             "BgvPassiveSetupPackage",
@@ -205,7 +196,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "KeySwitchDecompositionHash",
             "EvalKeyRoot",
             "EvaluationKeySetHash",
-            "EvaluationKeySizeProfileHash",
+            "EvaluationKeySizeParametersHash",
             "CollectiveSecretDistributionCertificateHash",
             "ErrorDistributionCertificateHash",
             "BGVHeSecurityCertificateHash",
@@ -257,7 +248,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     let expected_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)?;
     if setup_package_hash != expected_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "BGV passive setup package hash does not match its canonical payload",
         ));
     }

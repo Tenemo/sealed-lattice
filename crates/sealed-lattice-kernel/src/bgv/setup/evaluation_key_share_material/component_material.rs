@@ -849,7 +849,7 @@ fn verify_evaluation_key_share_component_material_header(
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
     if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material chunkSizeBytes must match the setup transport profile",
+            "transported evaluation-key component material chunkSizeBytes must match the setup transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {

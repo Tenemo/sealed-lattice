@@ -4,24 +4,20 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 import type { JsonRecord } from './types.js';
 
-export const setupProfileId = 'CollectiveBgvSetup-v1';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
 export const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 const commonRandomnessContextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 export const requiredSetupPhases = [
@@ -91,10 +87,7 @@ export const assertContext = (
     for (const fieldName of [
         'manifestHash',
         'rosterHash',
-        'setupProfileHash',
-        'qShareHash',
-        'carryAwareVssShareRelationProfileHash',
-        'commitmentProfileHash',
+        'setupParametersHash',
     ] as const) {
         assertProtocolHash(
             setupContext[fieldName],

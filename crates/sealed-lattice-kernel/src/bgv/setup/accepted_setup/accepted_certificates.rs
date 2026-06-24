@@ -109,7 +109,7 @@ pub(super) fn verify_commitment_security_certificate(
     if certificate_body != expected_body {
         return Ok(Some(setup_commitment_certificate_refusal(
             "commitmentSecurityCertificatePayloadMismatch",
-            "setupCommitmentSecurityCertificate does not match the accepted commitment profile certificate",
+            "setupCommitmentSecurityCertificate does not match the accepted commitment parameters certificate",
             "setupPackage.setupCommitmentSecurityCertificate",
         )?));
     }
@@ -206,7 +206,7 @@ fn setup_commitment_security_certificate_value_for_roster(
     let commitment_modulus_product = setup_commitment_modulus_product();
     if BigUint::from(max_threshold_lifted_coefficient) >= commitment_modulus_product {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "commitment modulus product does not cover threshold-share aggregate no-wrap bound",
         ));
     }
@@ -215,10 +215,7 @@ fn setup_commitment_security_certificate_value_for_roster(
     Ok(json!({
         "objectType": SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileHash": setup_profile_hash()?,
-        "commitmentProfileHash": setup_commitment_profile_hash()?,
-        "qShareHash": q_share_hash()?,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
+        "setupParametersHash": setup_parameters_hash_for_roster(roster)?,
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,
@@ -287,7 +284,7 @@ fn setup_commitment_security_certificate_value_for_roster(
         },
         "estimatorRows": [
             {
-                "rowId": "first-profile-module-sis-binding-row",
+                "rowId": "first-roster-module-sis-binding-row",
                 "problem": "Module-SIS",
                 "targetSecurityBits": 128,
                 "ringDegree": POLYNOMIAL_DEGREE,
@@ -297,7 +294,7 @@ fn setup_commitment_security_certificate_value_for_roster(
                 "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
-                "rowId": "first-profile-module-lwe-hiding-row",
+                "rowId": "first-roster-module-lwe-hiding-row",
                 "problem": "Module-LWE",
                 "targetSecurityBits": 128,
                 "ringDegree": POLYNOMIAL_DEGREE,
@@ -520,8 +517,7 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
     Ok(json!({
         "objectType": SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileHash": setup_profile_hash()?,
-        "setupProofProfileHash": setup_proof_profile_hash()?,
+        "setupParametersHash": setup_parameters_hash()?,
         "setupProofRecordBinding": setup_proof_record_binding,
         "setupProofRecordBindingHash": setup_proof_record_binding_hash()?,
         "proofFamilies": ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES,
@@ -679,12 +675,9 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
-        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
-        "qShareHash": value_string(setup_context, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(setup_context, "carryAwareVssShareRelationProfileHash")?,
-        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
-        "setupProofProfileBinding": "fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate",
+        "setupProofBinding": "fixed-setup-proof-bound-by-setup-proof-accounting-certificate",
         "keyCorrectnessScope": "collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records",
         "keyCorrectnessTheorem": {
             "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
@@ -798,10 +791,7 @@ pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
-        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
-        "qShareHash": value_string(setup_context, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(setup_context, "carryAwareVssShareRelationProfileHash")?,
-        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "adversaryModel": {
             "secretConfidentialityCorruptTrusteeBound": roster.decryption_threshold - 1,
@@ -1100,10 +1090,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
     Ok(json!({
         "objectType": HE_SECURITY_CERTIFICATE_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileHash": setup_profile_hash()?,
-        "qShareHash": q_share_hash()?,
-        "setupProofProfileHash": setup_proof_profile_hash()?,
-        "evaluatorKeyScheduleProfileHash": evaluator_key_schedule_profile_hash()?,
+        "setupParametersHash": setup_parameters_hash_for_roster(roster)?,
         "assessedRing": {
             "polynomialDegree": POLYNOMIAL_DEGREE,
             "plaintextModulus": PLAINTEXT_MODULUS,
@@ -1164,7 +1151,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
             "command": "pnpm exec tsx ./tools/ci/run-he-lattice-estimator.ts",
             "estimatorOutputCanonicalization": "recursively sorted JSON object keys, two-space indentation, trailing newline",
             "estimatorOutputCanonicalSha256": "1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399",
-            "securityEstimatorInputHash": security_estimator_input_hash()?,
+            "bgvParametersHash": bgv_parameters_hash()?,
             "secretModel": "ND.Ternary",
             "errorModel": "ND.CenteredBinomial(2)",
             "sampleModel": "m=+Infinity",

@@ -54,7 +54,8 @@ describe('Lattigo oracle boundary tooling', () => {
             verification.referenceOracleHashBindings.referenceOracleVectorRoot,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
-            verification.referenceOracleHashBindings.referenceOracleProfileHash,
+            verification.referenceOracleHashBindings
+                .referenceOracleParametersHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
             buildReferenceOracleHashBindings(

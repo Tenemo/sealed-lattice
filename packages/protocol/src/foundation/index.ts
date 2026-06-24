@@ -193,17 +193,17 @@ const collectCrossBindingRefusals = (
 
     if (
         checkpoint.electionManifestHash !== manifest.electionManifestHash ||
-        checkpoint.thresholdProfileHash !==
-            input.rosterManifestTranscript.frozenRosterProfile
-                .thresholdProfileHash ||
-        checkpoint.evaluatorReplayProfileHash !==
-            manifestOpaqueBindings.evaluatorReplayProfileHash ||
+        checkpoint.thresholdParametersHash !==
+            input.rosterManifestTranscript.frozenRosterParameters
+                .thresholdParametersHash ||
+        checkpoint.evaluatorReplayParametersHash !==
+            manifestOpaqueBindings.evaluatorReplayParametersHash ||
         checkpoint.targetLayoutHash !== manifestOpaqueBindings.targetLayoutHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'TargetFinalityPolicyMismatch',
-                'Foundation target proposal must bind the accepted manifest, frozen roster profile, evaluator replay profile, and target layout.',
+                'Foundation target proposal must bind the accepted manifest, frozen roster parameters, evaluator replay parameters, and target layout.',
                 checkpoint.targetFinalityCheckpointHash,
                 'TargetFinalityCheckpoint',
             ),

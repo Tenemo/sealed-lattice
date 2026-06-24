@@ -143,7 +143,6 @@ describe('transcript-core kernel in Node', () => {
             value: {
                 ok: false,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                setupProfileId: 'CollectiveBgvSetup-v1',
                 verifierStatus: 'refused',
                 currentPhase: 'setupPackageVerification',
                 acceptedHashes: [],
@@ -181,8 +180,6 @@ describe('transcript-core kernel in Node', () => {
         const transportedSameSecretProofMaterial = {
             objectType: 'SetupTransportedSameSecretProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofFamily: 'same-secret-linkage-anchor',
             proofMaterials: [],
             marker: 'same-secret-proof',
@@ -203,8 +200,6 @@ describe('transcript-core kernel in Node', () => {
         const transportedPublicKeyShareProofMaterial = {
             objectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofFamily: 'public-key-share',
             proofMaterials: [],
             marker: 'public-key-proof',
@@ -212,8 +207,6 @@ describe('transcript-core kernel in Node', () => {
         const transportedEvaluationKeyShareProofMaterial = {
             objectType: 'SetupTransportedEvaluationKeyShareProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofFamily: 'evaluation-key-share',
             proofMaterials: [],
             marker: 'evaluation-key-proof',
@@ -222,16 +215,12 @@ describe('transcript-core kernel in Node', () => {
             objectType:
                 'SetupTransportedEvaluationKeyShareComponentMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             componentMaterials: [],
             marker: 'evaluation-key-component-material',
         } as const;
         const transportedPublicEvaluationKeyMaterial = {
             objectType: 'SetupTransportedPublicEvaluationKeyMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             materialEncoding:
                 'sealed-lattice-public-evaluation-key-material-binary-v1',
             publicEvaluationKeyMaterials: [],
@@ -241,14 +230,10 @@ describe('transcript-core kernel in Node', () => {
         const verifiedSetupProofMaterials = {
             objectType: 'VerifiedSetupProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofMaterials: [
                 {
                     objectType: 'VerifiedSetupProofMaterial',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId: 'SealedLattice-SetupProof-v1',
                     verificationId: 'same-secret-proof-0',
                     proofFamily: 'same-secret-linkage-anchor',
                     proofMaterialRoot: hashOne,
@@ -307,8 +292,6 @@ describe('transcript-core kernel in Node', () => {
             value: {
                 ok: true,
                 operation: 'beginSetupProofMaterialTransportStream',
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 verificationId: 'same-secret-proof-0',
                 proofFamily: 'same-secret-linkage-anchor',
                 proofMaterialRoot: hashOne,
@@ -328,8 +311,6 @@ describe('transcript-core kernel in Node', () => {
         const transportedSetupProofMaterial = {
             objectType: 'SetupTransportedSameSecretProofMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofFamily: 'same-secret-linkage-anchor',
             proofMaterialRoot: hashOne,
             chunkSizeBytes: 1_048_576,

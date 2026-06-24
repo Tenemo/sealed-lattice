@@ -1,10 +1,9 @@
 import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import {
     setupTransportChunkSizeBytes,
-    setupTransportProfileId,
+    setupTransportSchemeId,
 } from '../vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
@@ -181,8 +180,6 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialTransportEncoding,
         binaryFormat: publicKeyShareMaterialBinaryFormat,
@@ -196,7 +193,7 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
         publicKeyShareSetRoot: input.publicKeyShareSetRoot,
         publicKeyShareMaterialRoots: input.publicKeyShareMaterialRoots,
         transport: {
-            transportProfileId: setupTransportProfileId,
+            transportSchemeId: setupTransportSchemeId,
             chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: input.chunkCount,
             totalByteLength: input.transportHashes.totalByteLength,
@@ -451,7 +448,7 @@ const transportedPublicKeyShareMaterialChunks = (
     }
     if (transportedMaterial.chunkSizeBytes !== setupTransportChunkSizeBytes) {
         throw new Error(
-            'transportedPublicKeyShareMaterial.chunkSizeBytes must match the setup transport profile.',
+            'transportedPublicKeyShareMaterial.chunkSizeBytes must match the setup transport scheme.',
         );
     }
     if (!Array.isArray(transportedMaterial.chunks)) {
@@ -552,8 +549,8 @@ const transportedPublicKeyShareMaterialReader = (
         input.materialSet.materialEncoding !==
             publicKeyShareMaterialTransportEncoding ||
         input.materialSet.binaryFormat !== publicKeyShareMaterialBinaryFormat ||
-        input.materialSet.transport.transportProfileId !==
-            setupTransportProfileId ||
+        input.materialSet.transport.transportSchemeId !==
+            setupTransportSchemeId ||
         input.materialSet.transport.chunkSizeBytes !==
             setupTransportChunkSizeBytes ||
         input.materialSet.transport.chunkCount !== chunks.length ||
@@ -728,8 +725,6 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),

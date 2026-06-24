@@ -116,7 +116,7 @@ fn verify_public_key_share_succinct_proof_transport_reference(
     if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "public-key share proofChunkSizeBytes must match the setup proof transport profile",
+            "public-key share proofChunkSizeBytes must match the setup proof transport parameters",
         ));
     }
     let expected_chunk_count =
@@ -326,7 +326,7 @@ fn transported_public_key_share_proof_chunks(value: &Value) -> CanonicalResult<V
     if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof material chunkSizeBytes must match the setup proof transport profile",
+            "transported public-key share succinct proof material chunkSizeBytes must match the setup proof transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {

@@ -8,15 +8,12 @@ pub(in super::super) fn verify_same_secret_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if value.get(field_name) != setup_context.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("same-secret {field_name} must match setupContext"),
             ));
         }

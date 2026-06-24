@@ -205,9 +205,11 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
     // transported-material package regenerates its anchor proofs against the
     // transported material reference root.
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();

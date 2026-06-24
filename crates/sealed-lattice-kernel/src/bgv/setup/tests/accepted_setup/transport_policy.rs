@@ -1,11 +1,11 @@
 use super::*;
 
 #[test]
-fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
+fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "profile-ring",
+            "ringDegreeStatus": "full-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -17,14 +17,14 @@ fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
         },
     });
 
-    let response = verify_profile_ring_material(&package)
-        .expect("profile-ring verification")
+    let response = verify_full_ring_material(&package)
+        .expect("full-ring verification")
         .expect("reduced public-key material refusal");
 
-    assert_eq!(response["verifierStatus"], "outsideProfile");
+    assert_eq!(response["verifierStatus"], "outsideAcceptedParameters");
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],
@@ -33,11 +33,11 @@ fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
 }
 
 #[test]
-fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
+fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "profile-ring",
+            "ringDegreeStatus": "full-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -72,14 +72,14 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
         ],
     });
 
-    let response = verify_profile_ring_material(&package)
-        .expect("profile-ring verification")
+    let response = verify_full_ring_material(&package)
+        .expect("full-ring verification")
         .expect("reduced evaluation-key proof refusal");
 
-    assert_eq!(response["verifierStatus"], "outsideProfile");
+    assert_eq!(response["verifierStatus"], "outsideAcceptedParameters");
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],
@@ -439,9 +439,9 @@ fn collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidec
 }
 
 #[test]
-fn terminal_profile_ring_gate_refuses_reduced_vss_material() {
+fn terminal_full_ring_gate_refuses_reduced_vss_material() {
     let _accepted_setup_test_timing =
-        accepted_setup_test_timing("terminal_profile_ring_gate_refuses_reduced_vss_material");
+        accepted_setup_test_timing("terminal_full_ring_gate_refuses_reduced_vss_material");
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": 8,
@@ -449,14 +449,14 @@ fn terminal_profile_ring_gate_refuses_reduced_vss_material() {
         },
     });
 
-    let response = verify_profile_ring_material(&package)
-        .expect("profile-ring verification")
+    let response = verify_full_ring_material(&package)
+        .expect("full-ring verification")
         .expect("reduced VSS material refusal");
 
     assert_eq!(response["ok"], false);
-    assert_eq!(response["verifierStatus"], "outsideProfile");
+    assert_eq!(response["verifierStatus"], "outsideAcceptedParameters");
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
 }

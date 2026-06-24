@@ -93,10 +93,7 @@ export type CollectiveBgvSetupContext = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
 }>;
 
@@ -125,8 +122,7 @@ export type SetupPhaseParticipantObject = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly signerRole: 'Trustee';
         readonly trusteeIdentity: string;
@@ -159,10 +155,7 @@ export type SetupPhaseRecord = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly previousPhaseRoot: ProtocolHash | null;
         readonly participantPhaseObjects: readonly SetupPhaseParticipantObject[];
@@ -188,7 +181,7 @@ export type CommonRandomnessReveal = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly signerRole: 'Trustee';
         readonly trusteeIdentity: string;
@@ -220,7 +213,7 @@ export type CommonRandomnessCommit = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly signerRole: 'Trustee';
         readonly trusteeIdentity: string;
@@ -247,7 +240,7 @@ export type SetupCommonRandomness = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly commitRecords: readonly CommonRandomnessCommit[];
         readonly revealRecords: readonly CommonRandomnessReveal[];
@@ -271,10 +264,7 @@ export type PrivateVssEnvelopeVerificationReference = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
@@ -291,7 +281,6 @@ export type PrivateVssEnvelopeVerificationReference = Readonly<
 export type PrivateVssShareVerification = Readonly<{
     readonly ok: boolean;
     readonly operation: 'verifyPrivateVssShareEnvelope';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly verifierStatus: 'accepted' | 'refused';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
@@ -389,14 +378,10 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateCommitment';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -408,7 +393,7 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly deletionReceiptRoot: ProtocolHash;
         readonly deletionReceipt: LocalTrusteeSetupStateDeletionReceipt;
         readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-        readonly storageProfile: 'encrypted-local-device-state-required';
+        readonly storageRequirement: 'encrypted-local-device-state-required';
         readonly localStateRoot: ProtocolHash;
     }
 >;
@@ -428,7 +413,6 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -447,7 +431,7 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
         readonly objectVersion: 1;
-        readonly storageProfileId: string;
+        readonly storageScheme: string;
         readonly ciphertextContentType: 'local-trustee-setup-state';
         readonly localStateRoot: ProtocolHash;
         readonly localStateCommitmentHash: ProtocolHash;
@@ -484,14 +468,10 @@ export type SetupContribution = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupContributionAssembly';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -521,8 +501,8 @@ export type SetupCertificateTransportedObjectInput =
     ProtocolSetupCertificateTransportedObjectInput;
 
 export type SetupCertificatesInput = Readonly<{
-    readonly setupProfile: JsonRecord;
-    readonly bgvProfile: JsonRecord;
+    readonly setupParameters: JsonRecord;
+    readonly bgvParameters: JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
     readonly sameSecretLinkageAnchorProofAccounting?: JsonRecord;
@@ -691,21 +671,19 @@ export type RestoreLocalTrusteeSetupStateInput = Readonly<{
 export type LocalTrusteeSetupStateVerification = Readonly<{
     readonly ok: true;
     readonly operation: 'verifyLocalTrusteeSetupState';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
     readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-    readonly storageProfile: 'encrypted-local-device-state-required';
+    readonly storageRequirement: 'encrypted-local-device-state-required';
     readonly deletionBoundary: 'after-private-vss-aggregation';
 }>;
 
 export type RestoredLocalTrusteeSetupState = Readonly<{
     readonly ok: true;
     readonly operation: 'restoreLocalTrusteeSetupState';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload;
     readonly sealedLocalStatePayloadHash: ProtocolHash;
@@ -740,7 +718,7 @@ export const createSetupIntent = async (
         ...input,
         phaseId: 'setupIntent',
         phaseNumber: setupPhaseNumber(
-            kernel.describeCollectiveBgvSetupProfile().phaseOrder,
+            kernel.describeCollectiveBgvSetupParameters().phaseOrder,
             'setupIntent',
         ),
     } satisfies ProtocolSetupPhaseParticipantObjectInput) as Promise<SetupPhaseParticipantObject>;
@@ -769,11 +747,11 @@ export const createSetupCommonRandomness = async (
     input: SetupCommonRandomnessInput,
 ): Promise<SetupCommonRandomness> => {
     const kernel = await loadTranscriptCoreKernel();
-    const profile = kernel.describeCollectiveBgvSetupProfile();
+    const parameters = kernel.describeCollectiveBgvSetupParameters();
 
     return createSetupCommonRandomnessInternal({
         ...input,
-        participantCount: profile.participantCount,
+        participantCount: parameters.participantCount,
         derivePublicDerivations: (publicMatrixSeedHash: ProtocolHash) =>
             kernel.deriveCollectiveBgvSetupPublicDerivations({
                 publicMatrixSeedHash,
@@ -871,7 +849,7 @@ export const createSetupContribution = (
         input as unknown as SetupContributionAssemblyInput,
     );
 
-/** Creates root-bound setup certificates from profile and transport evidence. */
+/** Creates root-bound setup certificates from parameters and transport evidence. */
 export const createSetupCertificates = (
     input: SetupCertificatesInput,
 ): SetupCertificates => createSetupCertificatesInternal(input);
@@ -1138,7 +1116,6 @@ export const restoreLocalTrusteeSetupState = async (
     return {
         ok: true,
         operation: 'restoreLocalTrusteeSetupState',
-        setupProfileId: 'CollectiveBgvSetup-v1',
         localStateCommitment: input.localStateCommitment,
         sealedLocalStatePayload,
         sealedLocalStatePayloadHash: decryptedState.localStatePlaintextHash,

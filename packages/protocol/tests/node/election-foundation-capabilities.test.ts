@@ -2,26 +2,26 @@ import type { CapabilityContext } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
 import {
-    dynamicRosterProfileCertificateHash,
-    targetBoundShareSelectionProfile,
+    dynamicRosterParametersCertificateHash,
+    targetBoundShareSelectionParameters,
 } from './election-foundation-fixture-constants.js';
 
 import {
-    deriveThresholdProfile,
+    deriveThresholdParameters,
     evaluateActionCapability,
 } from '#packages/protocol/src/index';
 
-const thresholdProfile = deriveThresholdProfile({ rosterSize: 10 });
-const certifiedThresholdProfile = deriveThresholdProfile({
+const thresholdParameters = deriveThresholdParameters({ rosterSize: 10 });
+const certifiedThresholdParameters = deriveThresholdParameters({
     rosterSize: 10,
-    targetBoundShareSelectionProfile,
+    targetBoundShareSelectionParameters,
 });
 
 const createContext = (
     overrides: Partial<CapabilityContext> = {},
 ): CapabilityContext => ({
     lifecycleState: 'draft',
-    thresholdProfile,
+    thresholdParameters,
     pollSpecValid: true,
     localRosterAccepted: true,
     rosterExternalAcceptanceHash: 'accepted-roster-hash',
@@ -34,7 +34,7 @@ const targetAcceptedContext = (
 ): CapabilityContext =>
     createContext({
         lifecycleState: 'targetAccepted',
-        thresholdProfile: certifiedThresholdProfile,
+        thresholdParameters: certifiedThresholdParameters,
         targetFinalityAccepted: true,
         targetAccepted: true,
         targetDecryptionCertificatePresent: true,
@@ -49,8 +49,9 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     lifecycleState: 'votingClosed',
                     localRosterAccepted: false,
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
-                    turnoutCount: thresholdProfile.releaseQuorum,
+                    setupCompleteCount:
+                        thresholdParameters.setupCompletionQuorum,
+                    turnoutCount: thresholdParameters.releaseQuorum,
                     directProofTransportPresent: true,
                 }),
             ),
@@ -111,13 +112,14 @@ describe('election foundation capability evaluator', () => {
         ).toEqual({ allowed: true, action: 'SubmitVote' });
     });
 
-    it('opens voting only after the frozen roster profile and direct setup material are complete', () => {
+    it('opens voting only after the frozen roster parameters and direct setup material are complete', () => {
         expect(
             evaluateActionCapability(
                 'OpenVoting',
                 createContext({
                     lifecycleState: 'rosterFrozen',
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                    setupCompleteCount:
+                        thresholdParameters.setupCompletionQuorum,
                 }),
             ),
         ).toMatchObject({ reason: 'FrozenStateIncomplete' });
@@ -127,14 +129,15 @@ describe('election foundation capability evaluator', () => {
                 'OpenVoting',
                 createContext({
                     finalRosterHash: 'final-roster-hash',
-                    frozenRosterProfileHash: 'threshold-profile-hash',
+                    frozenRosterParametersHash: 'threshold-parameters-hash',
                     lifecycleState: 'rosterFrozen',
                     encryptedBallotLayoutFrozen: true,
-                    ballotValidityProofProfileFrozen: true,
-                    evaluatorReplayProfileFrozen: true,
+                    ballotValidityProofParametersFrozen: true,
+                    evaluatorReplayParametersFrozen: true,
                     targetOutputLayoutFrozen: true,
-                    targetDecryptionProfileReferencePresent: true,
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
+                    targetDecryptionParametersReferencePresent: true,
+                    setupCompleteCount:
+                        thresholdParameters.setupCompletionQuorum,
                     trusteeSetupComplete: true,
                 }),
             ),
@@ -154,8 +157,8 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     lifecycleState: 'votingClosed',
                     setupCompleteCount:
-                        thresholdProfile.setupCompletionQuorum - 1,
-                    turnoutCount: thresholdProfile.releaseQuorum,
+                        thresholdParameters.setupCompletionQuorum - 1,
+                    turnoutCount: thresholdParameters.releaseQuorum,
                     directProofTransportPresent: true,
                 }),
             ),
@@ -165,8 +168,9 @@ describe('election foundation capability evaluator', () => {
                 'VerifyEncryptedBallotProofs',
                 createContext({
                     lifecycleState: 'votingClosed',
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
-                    turnoutCount: thresholdProfile.releaseQuorum - 1,
+                    setupCompleteCount:
+                        thresholdParameters.setupCompletionQuorum,
+                    turnoutCount: thresholdParameters.releaseQuorum - 1,
                     directProofTransportPresent: true,
                 }),
             ),
@@ -176,8 +180,9 @@ describe('election foundation capability evaluator', () => {
                 'VerifyEncryptedBallotProofs',
                 createContext({
                     lifecycleState: 'votingClosed',
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
-                    turnoutCount: thresholdProfile.releaseQuorum,
+                    setupCompleteCount:
+                        thresholdParameters.setupCompletionQuorum,
+                    turnoutCount: thresholdParameters.releaseQuorum,
                 }),
             ),
         ).toMatchObject({ reason: 'MissingDirectProofTransport' });
@@ -186,8 +191,9 @@ describe('election foundation capability evaluator', () => {
                 'VerifyEncryptedBallotProofs',
                 createContext({
                     lifecycleState: 'votingClosed',
-                    setupCompleteCount: thresholdProfile.setupCompletionQuorum,
-                    turnoutCount: thresholdProfile.releaseQuorum,
+                    setupCompleteCount:
+                        thresholdParameters.setupCompletionQuorum,
+                    turnoutCount: thresholdParameters.releaseQuorum,
                     directProofTransportPresent: true,
                 }),
             ),
@@ -336,7 +342,7 @@ describe('election foundation capability evaluator', () => {
                     targetAccepted: true,
                 }),
             ),
-        ).toMatchObject({ reason: 'TargetDecryptionProfileNotCertified' });
+        ).toMatchObject({ reason: 'TargetDecryptionParametersNotCertified' });
         expect(
             evaluateActionCapability(
                 'CreateTargetBoundDecryptionShare',
@@ -373,86 +379,87 @@ describe('election foundation capability evaluator', () => {
         },
     );
 
-    it('verifies the target decryption profile only after enough certified shares and certificate evidence', () => {
+    it('verifies the target decryption parameters only after enough certified shares and certificate evidence', () => {
         expect(
             evaluateActionCapability(
-                'VerifyTargetDecryptionProfile',
+                'VerifyTargetDecryptionParameters',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile,
-                    decryptionShareCount: thresholdProfile.decryptionThreshold,
+                    thresholdParameters,
+                    decryptionShareCount:
+                        thresholdParameters.decryptionThreshold,
                     targetDecryptionCertificatePresent: true,
                 }),
             ),
         ).toMatchObject({
-            reason: 'TargetDecryptionProfileNotCertified',
+            reason: 'TargetDecryptionParametersNotCertified',
         });
         expect(
             evaluateActionCapability(
-                'VerifyTargetDecryptionProfile',
+                'VerifyTargetDecryptionParameters',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile: certifiedThresholdProfile,
+                    thresholdParameters: certifiedThresholdParameters,
                     decryptionShareCount:
-                        (certifiedThresholdProfile.decryptionShareQuorum ?? 0) -
-                        1,
+                        (certifiedThresholdParameters.decryptionShareQuorum ??
+                            0) - 1,
                     targetDecryptionCertificatePresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
         expect(
             evaluateActionCapability(
-                'VerifyTargetDecryptionProfile',
+                'VerifyTargetDecryptionParameters',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile: certifiedThresholdProfile,
+                    thresholdParameters: certifiedThresholdParameters,
                     decryptionShareCount:
-                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                        certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
             ),
         ).toMatchObject({ reason: 'MissingTargetDecryptionCertificate' });
         expect(
             evaluateActionCapability(
-                'VerifyTargetDecryptionProfile',
+                'VerifyTargetDecryptionParameters',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile: certifiedThresholdProfile,
+                    thresholdParameters: certifiedThresholdParameters,
                     decryptionShareCount:
-                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                        certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                     targetDecryptionCertificatePresent: true,
                 }),
             ),
         ).toEqual({
             allowed: true,
-            action: 'VerifyTargetDecryptionProfile',
+            action: 'VerifyTargetDecryptionParameters',
         });
     });
 
-    it('allows recombination only after target decryption profile and closure evidence', () => {
+    it('allows recombination only after target decryption parameters and closure evidence', () => {
         expect(
             evaluateActionCapability(
                 'RecombineAcceptedTarget',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile: certifiedThresholdProfile,
+                    thresholdParameters: certifiedThresholdParameters,
                     targetFinalityAccepted: true,
                     targetAccepted: true,
                     decryptionShareCount:
-                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                        certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
             ),
-        ).toMatchObject({ reason: 'TargetDecryptionProfileNotCertified' });
+        ).toMatchObject({ reason: 'TargetDecryptionParametersNotCertified' });
         expect(
             evaluateActionCapability(
                 'RecombineAcceptedTarget',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile: certifiedThresholdProfile,
+                    thresholdParameters: certifiedThresholdParameters,
                     targetFinalityAccepted: true,
                     targetAccepted: true,
-                    targetDecryptionProfileVerified: true,
+                    targetDecryptionParametersVerified: true,
                     decryptionShareCount:
-                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                        certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
             ),
         ).toMatchObject({ reason: 'TargetDecryptionClosureMissing' });
@@ -461,13 +468,13 @@ describe('election foundation capability evaluator', () => {
                 'RecombineAcceptedTarget',
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
-                    thresholdProfile: certifiedThresholdProfile,
+                    thresholdParameters: certifiedThresholdParameters,
                     targetFinalityAccepted: true,
                     targetAccepted: true,
-                    targetDecryptionProfileVerified: true,
+                    targetDecryptionParametersVerified: true,
                     targetDecryptionClosureApplied: true,
                     decryptionShareCount:
-                        certifiedThresholdProfile.decryptionShareQuorum ?? 0,
+                        certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'RecombineAcceptedTarget' });
@@ -476,14 +483,14 @@ describe('election foundation capability evaluator', () => {
     it.each([3, 4, 5, 6, 7, 8, 9])(
         'no longer gates target acceptance on roster certification: casual micro-roster size %d and certified dynamic rosters both pass',
         (rosterSize) => {
-            const casualThresholdProfile = deriveThresholdProfile({
+            const casualThresholdParameters = deriveThresholdParameters({
                 casualMicroRosterAcknowledged: true,
                 rosterSize,
             });
-            const dynamicThresholdProfile = deriveThresholdProfile({
-                dynamicRosterProfileCertificateHash,
+            const dynamicThresholdParameters = deriveThresholdParameters({
+                dynamicRosterParametersCertificateHash,
                 rosterSize: 16,
-                targetBoundShareSelectionProfile,
+                targetBoundShareSelectionParameters,
             });
 
             expect(
@@ -491,7 +498,7 @@ describe('election foundation capability evaluator', () => {
                     'AcceptTarget',
                     createContext({
                         lifecycleState: 'targetFinalityReached',
-                        thresholdProfile: casualThresholdProfile,
+                        thresholdParameters: casualThresholdParameters,
                         targetFinalityAccepted: true,
                         evaluatorReplaySucceeded: true,
                     }),
@@ -503,7 +510,7 @@ describe('election foundation capability evaluator', () => {
                     'AcceptTarget',
                     createContext({
                         lifecycleState: 'targetFinalityReached',
-                        thresholdProfile: dynamicThresholdProfile,
+                        thresholdParameters: dynamicThresholdParameters,
                         targetFinalityAccepted: true,
                         evaluatorReplaySucceeded: true,
                     }),
@@ -512,7 +519,7 @@ describe('election foundation capability evaluator', () => {
         },
     );
 
-    it('keeps measured runtime profiles as evidence, not browser-storage protocol gates', () => {
+    it('keeps measured runtime parameters as evidence, not browser-storage protocol gates', () => {
         expect(
             evaluateActionCapability(
                 'AcceptTarget',
@@ -520,10 +527,10 @@ describe('election foundation capability evaluator', () => {
                     lifecycleState: 'targetFinalityReached',
                     targetFinalityAccepted: true,
                     evaluatorReplaySucceeded: true,
-                    runtimeProfileSupported: false,
+                    runtimeParametersSupported: false,
                 }),
             ),
-        ).toMatchObject({ reason: 'OutsideMeasuredRuntimeProfile' });
+        ).toMatchObject({ reason: 'OutsideMeasuredRuntimeParameters' });
 
         expect(
             evaluateActionCapability(

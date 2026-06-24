@@ -17,13 +17,13 @@ pub(super) fn direct_ballot_target_proposal(
     let proposal_without_hash = json!({
         "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
         "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
-        "thresholdProfileHash": required_string_path(setup_package, &["setupInputs", "thresholdProfileHash"])?,
+        "thresholdParametersHash": required_string_path(setup_package, &["setupInputs", "thresholdParametersHash"])?,
         "evaluatorReplayContextHash": evaluator_replay_context_hash,
         "evaluatorReplayRecordHash": evaluator_replay_record_hash,
         "encryptedBallotAggregateHash": aggregate_ciphertext_root,
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,
-        "evaluatorReplayProfileHash": direct_comparison_profile_hash()?,
+        "evaluatorReplayParametersHash": bgv_parameters_hash()?,
         "targetFinalityPolicyHash": target_finality_policy_hash,
     });
     let target_proposal_hash = derive_protocol_hash("TargetProposalHash", &proposal_without_hash)?;
@@ -32,13 +32,13 @@ pub(super) fn direct_ballot_target_proposal(
         "targetProposalHash": target_proposal_hash,
         "ceremonyId": proposal_without_hash["ceremonyId"],
         "electionManifestHash": proposal_without_hash["electionManifestHash"],
-        "thresholdProfileHash": proposal_without_hash["thresholdProfileHash"],
+        "thresholdParametersHash": proposal_without_hash["thresholdParametersHash"],
         "evaluatorReplayContextHash": proposal_without_hash["evaluatorReplayContextHash"],
         "evaluatorReplayRecordHash": proposal_without_hash["evaluatorReplayRecordHash"],
         "encryptedBallotAggregateHash": proposal_without_hash["encryptedBallotAggregateHash"],
         "targetCiphertextHash": proposal_without_hash["targetCiphertextHash"],
         "targetLayoutHash": proposal_without_hash["targetLayoutHash"],
-        "evaluatorReplayProfileHash": proposal_without_hash["evaluatorReplayProfileHash"],
+        "evaluatorReplayParametersHash": proposal_without_hash["evaluatorReplayParametersHash"],
         "targetFinalityPolicyHash": proposal_without_hash["targetFinalityPolicyHash"],
     }))
 }

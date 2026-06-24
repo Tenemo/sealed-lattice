@@ -6,7 +6,7 @@ use crate::{
         },
         modular_arithmetic::{add_mod, add_mod_fast, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -678,7 +678,7 @@ mod tests {
             modulus_switch,
         },
         ntt::forward_negacyclic_ntt,
-        profile::PLAINTEXT_MODULUS,
+        parameters::PLAINTEXT_MODULUS,
     };
 
     const DEVELOPMENT_SEED: &str = "0011223344556677";

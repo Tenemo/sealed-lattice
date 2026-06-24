@@ -15,7 +15,7 @@ import {
     defaultSmallRosterPolicy,
     maximumSupportedRosterSize,
     minimumSupportedRosterSize,
-} from './profiles.js';
+} from './roster-policy.js';
 
 const isSupportedScoreDomain = (scoreDomain: unknown): boolean =>
     scoreDomain === undefined ||

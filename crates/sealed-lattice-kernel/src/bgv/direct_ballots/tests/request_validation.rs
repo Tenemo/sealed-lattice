@@ -339,7 +339,7 @@ fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
     }))
     .expect_err("wrong setup seed must reject before direct ballot encryption");
 
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(
         error
             .message

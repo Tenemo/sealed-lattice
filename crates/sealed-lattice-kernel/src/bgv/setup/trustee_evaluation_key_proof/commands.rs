@@ -18,7 +18,7 @@ use super::relation::{
 };
 use super::verifier::verify_evaluation_key_share;
 use super::*;
-use crate::bgv::profile::DATA_PRIMES;
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
 use crate::hashing::{derive_protocol_hash, to_hex};
 

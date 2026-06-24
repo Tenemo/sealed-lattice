@@ -64,7 +64,6 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
     const plaintext = {
         objectType: 'LocalTrusteeSetupStateSealedPayload',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ceremonyId: setupContext.ceremonyId,
         manifestHash: setupContext.manifestHash,
         rosterHash: setupContext.rosterHash,

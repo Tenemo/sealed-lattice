@@ -65,7 +65,7 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
     )?;
     if actual_material != &expected_material {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "evaluation key material commitment does not match the setup-derived key stream schedule",
         ));
     }
@@ -100,7 +100,7 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
         let expected_rotation_root_record = expected_rotation_key_roots[rotation_index].clone();
         if rotation_key_root_record != &expected_rotation_root_record {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "rotation key root record does not match the setup-derived key stream schedule",
             ));
         }
@@ -121,7 +121,7 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
     validate_required_rotation_groups(rot_set, &exported_rotation_values)?;
     if array_at_path(evaluation_key_record, &["rotationKeyRoots"])? != rotation_key_roots {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "evaluation key record rotation roots do not match exported rotation roots",
         ));
     }
@@ -167,7 +167,7 @@ fn validate_required_rotation_groups(
         .collect::<CanonicalResult<BTreeSet<_>>>()?;
     if &declared_rotations != exported_rotation_values {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "exported rotation keys must cover exactly the selected rotation set",
         ));
     }
@@ -185,8 +185,8 @@ fn validate_required_rotation_groups(
         let expected_group_rotations =
             expected_required_rotation_group(purpose).ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    format!("required rotation group {purpose} is not part of the passive BGV setup profile"),
+                    CanonicalErrorCode::ComponentMismatch,
+                    format!("required rotation group {purpose} is not part of the passive BGV setup parameters"),
                 )
             })?;
         let mut actual_group_rotations = BTreeSet::new();
@@ -202,7 +202,7 @@ fn validate_required_rotation_groups(
                 || !exported_rotation_values.contains(&rotation_value)
             {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     format!(
                         "required rotation group {purpose} is missing rotation {rotation_value}"
                     ),
@@ -211,7 +211,7 @@ fn validate_required_rotation_groups(
         }
         if actual_group_rotations != expected_group_rotations {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "required rotation group {purpose} does not match the selected BGV setup rotation set"
                 ),
@@ -225,7 +225,7 @@ fn validate_required_rotation_groups(
     ] {
         if !seen_purposes.contains(purpose) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("required rotation group {purpose} is missing"),
             ));
         }

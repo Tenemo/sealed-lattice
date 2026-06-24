@@ -1,14 +1,14 @@
 import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type {
-    FrozenRosterProfile,
+    FrozenRosterParameters,
     PollSpec,
     ProtocolHash,
-    TargetBoundShareSelectionProfile,
+    TargetBoundShareSelectionParameters,
     DecryptionShareFilteringMode,
     HeBackendCorruptionModel,
-    RosterProfileKind,
-    ThresholdProfile,
-    ThresholdProfileInput,
+    RosterParametersKind,
+    ThresholdParameters,
+    ThresholdParametersInput,
     ThresholdWarning,
 } from '@sealed-lattice/types';
 
@@ -19,16 +19,16 @@ import {
 
 import { derivePollSpecHash } from './poll-spec.js';
 import {
-    firstProfileRosterSize,
+    firstClosureRosterSize,
     maximumSupportedRosterSize,
     minimumDynamicRosterSize,
     minimumSupportedRosterSize,
     structuralOneThirdModel,
-    targetBoundShareSelectionProfileId,
-    targetDecryptionProfileId,
-} from './profiles.js';
+    targetBoundShareSelectionId,
+    targetDecryptionId,
+} from './roster-policy.js';
 
-const normalizeDynamicRosterProfileCertificateHash = (
+const normalizeDynamicRosterParametersCertificateHash = (
     hash: ProtocolHash | undefined,
 ): ProtocolHash | null => (isProtocolHashString(hash) ? hash : null);
 
@@ -55,7 +55,7 @@ const normalizeBackendCorruptionModel = (
         );
     }
     if (model.certificateHash.length === 0) {
-        throw new Error('Certified HE backend profile requires a hash.');
+        throw new Error('Certified HE backend parameters requires a hash.');
     }
 
     return {
@@ -71,110 +71,115 @@ const supportedDecryptionShareFilteringModes =
         'RobustDecodeAfterInvalidShareFiltering',
     ]);
 
-const normalizeTargetBoundShareSelectionProfile = (
+const normalizeTargetBoundShareSelectionParameters = (
     rosterSize: number,
     decryptionThreshold: number,
-    profile: TargetBoundShareSelectionProfile | undefined,
-): TargetBoundShareSelectionProfile | null => {
-    if (profile === undefined) {
+    parameters: TargetBoundShareSelectionParameters | undefined,
+): TargetBoundShareSelectionParameters | null => {
+    if (parameters === undefined) {
         return null;
     }
 
-    if (profile.profileId !== targetBoundShareSelectionProfileId) {
+    if (parameters.selectionId !== targetBoundShareSelectionId) {
         throw new Error(
-            'Target-bound share-selection profile uses an unsupported ID.',
+            'Target-bound share-selection parameters uses an unsupported ID.',
         );
     }
-    if (profile.certificateHash.trim().length === 0) {
+    if (parameters.certificateHash.trim().length === 0) {
         throw new Error(
-            'Target-bound share-selection profile requires a certificate hash.',
+            'Target-bound share-selection parameters requires a certificate hash.',
         );
     }
-    if (profile.targetDecryptionProfileId !== targetDecryptionProfileId) {
+    if (parameters.targetDecryptionId !== targetDecryptionId) {
         throw new Error(
-            'Target-bound share-selection profile uses an unsupported target decryption profile ID.',
+            'Target-bound share-selection parameters uses an unsupported target decryption parameters ID.',
         );
     }
-    if (profile.targetBasisHash.trim().length === 0) {
+    if (parameters.targetBasisHash.trim().length === 0) {
         throw new Error(
-            'Target-bound share-selection profile requires a target-basis hash.',
+            'Target-bound share-selection parameters requires a target-basis hash.',
         );
     }
-    if (!isNonNegativeInteger(profile.decryptionShareQuorum)) {
+    if (!isNonNegativeInteger(parameters.decryptionShareQuorum)) {
         throw new RangeError(
             'Target-bound decryption share quorum must be a non-negative integer.',
         );
     }
-    if (profile.decryptionShareQuorum < decryptionThreshold) {
+    if (parameters.decryptionShareQuorum < decryptionThreshold) {
         throw new RangeError(
             'Target-bound decryption share quorum must be at least the decryption threshold.',
         );
     }
-    if (profile.decryptionShareQuorum > rosterSize) {
+    if (parameters.decryptionShareQuorum > rosterSize) {
         throw new RangeError(
             'Target-bound decryption share quorum must not exceed rosterSize.',
         );
     }
-    if (!isNonNegativeInteger(profile.minimumSharesForInterpolation)) {
+    if (!isNonNegativeInteger(parameters.minimumSharesForInterpolation)) {
         throw new RangeError(
             'Target-bound interpolation share count must be a non-negative integer.',
         );
     }
-    if (profile.minimumSharesForInterpolation < decryptionThreshold) {
+    if (parameters.minimumSharesForInterpolation < decryptionThreshold) {
         throw new RangeError(
             'Target-bound interpolation share count must be at least the decryption threshold.',
         );
     }
-    if (profile.minimumSharesForInterpolation > profile.decryptionShareQuorum) {
+    if (
+        parameters.minimumSharesForInterpolation >
+        parameters.decryptionShareQuorum
+    ) {
         throw new RangeError(
             'Target-bound interpolation share count must not exceed the decryption share quorum.',
         );
     }
-    if (!isNonNegativeInteger(profile.minimumArrivalsForRobustDecode)) {
+    if (!isNonNegativeInteger(parameters.minimumArrivalsForRobustDecode)) {
         throw new RangeError(
             'Target-bound robust-decode arrival count must be a non-negative integer.',
         );
     }
     if (
-        profile.minimumArrivalsForRobustDecode < profile.decryptionShareQuorum
+        parameters.minimumArrivalsForRobustDecode <
+        parameters.decryptionShareQuorum
     ) {
         throw new RangeError(
             'Target-bound robust-decode arrival count must be at least the decryption share quorum.',
         );
     }
-    if (profile.minimumArrivalsForRobustDecode > rosterSize) {
+    if (parameters.minimumArrivalsForRobustDecode > rosterSize) {
         throw new RangeError(
             'Target-bound robust-decode arrival count must not exceed rosterSize.',
         );
     }
     if (
         !supportedDecryptionShareFilteringModes.has(
-            profile.invalidShareFilteringMode,
+            parameters.invalidShareFilteringMode,
         )
     ) {
         throw new Error(
-            'Target-bound share-selection profile uses an unsupported invalid-share filtering mode.',
+            'Target-bound share-selection parameters uses an unsupported invalid-share filtering mode.',
         );
     }
 
     return {
-        profileId: profile.profileId,
-        certificateHash: profile.certificateHash,
-        targetDecryptionProfileId: profile.targetDecryptionProfileId,
-        targetBasisHash: profile.targetBasisHash,
-        decryptionShareQuorum: profile.decryptionShareQuorum,
-        minimumSharesForInterpolation: profile.minimumSharesForInterpolation,
-        minimumArrivalsForRobustDecode: profile.minimumArrivalsForRobustDecode,
-        invalidShareFilteringMode: profile.invalidShareFilteringMode,
+        selectionId: parameters.selectionId,
+        certificateHash: parameters.certificateHash,
+        targetDecryptionId: parameters.targetDecryptionId,
+        targetBasisHash: parameters.targetBasisHash,
+        decryptionShareQuorum: parameters.decryptionShareQuorum,
+        minimumSharesForInterpolation: parameters.minimumSharesForInterpolation,
+        minimumArrivalsForRobustDecode:
+            parameters.minimumArrivalsForRobustDecode,
+        invalidShareFilteringMode: parameters.invalidShareFilteringMode,
     };
 };
 
-const deriveRosterProfile = (
+const deriveRosterParameters = (
     rosterSize: number,
-    input: ThresholdProfileInput,
+    input: ThresholdParametersInput,
 ): {
-    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
-    readonly rosterProfileKind: RosterProfileKind;
+    readonly dynamicRosterParametersCertificateHash: ProtocolHash | null;
+    readonly rosterParametersKind: RosterParametersKind;
     readonly warnings: readonly ThresholdWarning[];
 } => {
     if (!Number.isInteger(rosterSize)) {
@@ -186,66 +191,65 @@ const deriveRosterProfile = (
     if (rosterSize > maximumSupportedRosterSize) {
         throw new RangeError('Roster size must be at most 20.');
     }
-    const dynamicRosterProfileCertificateHash =
-        normalizeDynamicRosterProfileCertificateHash(
-            input.dynamicRosterProfileCertificateHash,
+    const dynamicRosterParametersCertificateHash =
+        normalizeDynamicRosterParametersCertificateHash(
+            input.dynamicRosterParametersCertificateHash,
         );
 
     if (rosterSize < minimumDynamicRosterSize) {
         if (input.casualMicroRosterAcknowledged !== true) {
             throw new Error(
-                'Casual micro-roster profiles require explicit acknowledgement.',
+                'Casual micro-roster parameter sets require explicit acknowledgement.',
             );
         }
 
         return {
-            dynamicRosterProfileCertificateHash: null,
-            rosterProfileKind: 'CasualMicroRoster',
+            dynamicRosterParametersCertificateHash: null,
+            rosterParametersKind: 'CasualMicroRoster',
             warnings: ['CasualMicroRoster'],
         };
     }
-    // Size 10 is the pre-certified first profile and is the only dynamic-range
-    // size that runs without a separate dynamic-roster parameter certificate.
-    if (rosterSize === firstProfileRosterSize) {
+    // Size 10 is the pre-certified first parameter set and is the only
+    // dynamic-range size that runs without a separate dynamic-roster
+    // parameter certificate.
+    if (rosterSize === firstClosureRosterSize) {
         return {
-            dynamicRosterProfileCertificateHash: null,
-            rosterProfileKind: 'FirstProfileRoster',
+            dynamicRosterParametersCertificateHash: null,
+            rosterParametersKind: 'FirstParametersRoster',
             warnings: [],
         };
     }
-    if (dynamicRosterProfileCertificateHash !== null) {
+    if (dynamicRosterParametersCertificateHash !== null) {
         return {
-            dynamicRosterProfileCertificateHash,
-            rosterProfileKind: 'SupportedDynamicRosterRange',
+            dynamicRosterParametersCertificateHash,
+            rosterParametersKind: 'SupportedDynamicRosterRange',
             warnings: [],
         };
     }
 
     return {
-        dynamicRosterProfileCertificateHash: null,
-        rosterProfileKind: 'UncertifiedDynamicRoster',
-        warnings: ['DynamicRosterProfileCertificateRequired'],
+        dynamicRosterParametersCertificateHash: null,
+        rosterParametersKind: 'UncertifiedDynamicRoster',
+        warnings: ['DynamicRosterParametersCertificateRequired'],
     };
 };
 
-export const deriveThresholdProfile = (
-    input: ThresholdProfileInput,
-): ThresholdProfile => {
+export const deriveThresholdParameters = (
+    input: ThresholdParametersInput,
+): ThresholdParameters => {
     const { rosterSize } = input;
-    const rosterProfile = deriveRosterProfile(rosterSize, input);
+    const rosterParameters = deriveRosterParameters(rosterSize, input);
     const backendCorruptionModel = normalizeBackendCorruptionModel(
         rosterSize,
         input.heBackendCorruptionModel,
     );
-    // floor(n/3): tolerate up to a third corrupt (BFT-style 1/3 corruption
-    // bound).
+    // floor(n/3): current structural one-third helper convention.
     const structuralCorruptionBound = Math.floor(rosterSize / 3);
-    // Structural one-third model uses floor(n/3): the default HE-backend
-    // corruption tolerance matches the structural bound, so the privacy bound
-    // is c_priv = floor(n/3) and the decryption threshold is q_dec =
-    // floor(n/3) + 1 (the stronger-privacy, non-degenerate convention; at n=3
-    // this is a real 2-of-3, never 1-of-3). This is sound under the
-    // secure-with-abort model, which does not require a strict n > 3f margin.
+    // The default HE-backend tolerance matches that helper convention, so
+    // q_dec = floor(n/3) + 1 (at n = 3 this is 2-of-3, never 1-of-3). This is
+    // parameter derivation only: parameter sets outside the first target
+    // parameter set need their own certificate if a stricter backend
+    // corruption theorem is used.
     const backendCorruptionBound =
         backendCorruptionModel.kind === 'StructuralOneThird'
             ? Math.floor(rosterSize / 3)
@@ -261,21 +265,21 @@ export const deriveThresholdProfile = (
     // can hold is needed before ballot release or target decryption proceeds.
     const ballotReleaseFloor = privacyCorruptionBound + 1;
     const decryptionThreshold = decryptionCorruptionBound + 1;
-    const targetBoundShareSelectionProfile =
-        normalizeTargetBoundShareSelectionProfile(
+    const targetBoundShareSelectionParameters =
+        normalizeTargetBoundShareSelectionParameters(
             rosterSize,
             decryptionThreshold,
-            input.targetBoundShareSelectionProfile,
+            input.targetBoundShareSelectionParameters,
         );
     // Full-roster ballot release for the secure-with-abort phase: q_ballot_release
     // = n. A flexible sub-unanimous turnout quorum (e.g. ceil(2n/3)) is a
-    // deferred future-profile concept and is intentionally not used here.
+    // deferred future-parameters concept and is intentionally not used here.
     const releaseQuorum = rosterSize;
     const decryptionShareQuorum =
-        targetBoundShareSelectionProfile?.decryptionShareQuorum ?? null;
+        targetBoundShareSelectionParameters?.decryptionShareQuorum ?? null;
     const maximumRaceShares = rosterSize;
     const setupCompletionQuorum = rosterSize;
-    const warnings = [...rosterProfile.warnings];
+    const warnings = [...rosterParameters.warnings];
 
     if (
         backendCorruptionModel.kind === 'CertifiedCustom' &&
@@ -284,15 +288,15 @@ export const deriveThresholdProfile = (
     ) {
         warnings.push('BackendCorruptionBoundTooHigh');
     }
-    if (targetBoundShareSelectionProfile === null) {
-        warnings.push('ShareSelectionProfileRequired');
+    if (targetBoundShareSelectionParameters === null) {
+        warnings.push('ShareSelectionParametersRequired');
     }
 
     return {
         rosterSize,
-        rosterProfileKind: rosterProfile.rosterProfileKind,
-        dynamicRosterProfileCertificateHash:
-            rosterProfile.dynamicRosterProfileCertificateHash,
+        rosterParametersKind: rosterParameters.rosterParametersKind,
+        dynamicRosterParametersCertificateHash:
+            rosterParameters.dynamicRosterParametersCertificateHash,
         structuralCorruptionBound,
         backendCorruptionBound,
         privacyCorruptionBound,
@@ -302,7 +306,7 @@ export const deriveThresholdProfile = (
         decryptionThreshold,
         releaseQuorum,
         decryptionShareQuorum,
-        targetBoundShareSelectionProfile,
+        targetBoundShareSelectionParameters,
         maximumRaceShares,
         setupCompletionQuorum,
         backendCorruptionModel,
@@ -310,55 +314,61 @@ export const deriveThresholdProfile = (
     };
 };
 
-export const deriveThresholdProfileHash = (input: {
+export const deriveThresholdParametersHash = (input: {
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly thresholdProfile: ThresholdProfile;
+    readonly thresholdParameters: ThresholdParameters;
     readonly smallRosterPolicy: PollSpec['smallRosterPolicy'];
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
 }): ProtocolHash =>
-    deriveProtocolHash('ThresholdProfileHash', {
-        activeFaultBound: input.thresholdProfile.activeFaultBound,
-        ballotReleaseFloor: input.thresholdProfile.ballotReleaseFloor,
-        backendCorruptionBound: input.thresholdProfile.backendCorruptionBound,
-        backendCorruptionModel: input.thresholdProfile.backendCorruptionModel,
+    // The preimage keys are the external ThresholdParametersHash field names and
+    // are kept verbatim so the hash value stays stable; only the source
+    // property names changed.
+    deriveProtocolHash('ThresholdParametersHash', {
+        activeFaultBound: input.thresholdParameters.activeFaultBound,
+        ballotReleaseFloor: input.thresholdParameters.ballotReleaseFloor,
+        backendCorruptionBound:
+            input.thresholdParameters.backendCorruptionBound,
+        backendCorruptionModel:
+            input.thresholdParameters.backendCorruptionModel,
         decryptionCorruptionBound:
-            input.thresholdProfile.decryptionCorruptionBound,
-        decryptionShareQuorum: input.thresholdProfile.decryptionShareQuorum,
-        decryptionThreshold: input.thresholdProfile.decryptionThreshold,
-        dynamicRosterProfileCertificateHash:
-            input.thresholdProfile.dynamicRosterProfileCertificateHash,
+            input.thresholdParameters.decryptionCorruptionBound,
+        decryptionShareQuorum: input.thresholdParameters.decryptionShareQuorum,
+        decryptionThreshold: input.thresholdParameters.decryptionThreshold,
+        dynamicRosterParametersCertificateHash:
+            input.thresholdParameters.dynamicRosterParametersCertificateHash,
         maxRosterSize: input.maxRosterSize,
-        maximumRaceShares: input.thresholdProfile.maximumRaceShares,
+        maximumRaceShares: input.thresholdParameters.maximumRaceShares,
         minRosterSize: input.minRosterSize,
         pollSpecHash: input.pollSpecHash,
-        privacyCorruptionBound: input.thresholdProfile.privacyCorruptionBound,
-        releaseQuorum: input.thresholdProfile.releaseQuorum,
+        privacyCorruptionBound:
+            input.thresholdParameters.privacyCorruptionBound,
+        releaseQuorum: input.thresholdParameters.releaseQuorum,
         rosterHash: input.rosterHash,
-        rosterProfileKind: input.thresholdProfile.rosterProfileKind,
-        rosterSize: input.thresholdProfile.rosterSize,
-        setupCompletionQuorum: input.thresholdProfile.setupCompletionQuorum,
+        rosterParametersKind: input.thresholdParameters.rosterParametersKind,
+        rosterSize: input.thresholdParameters.rosterSize,
+        setupCompletionQuorum: input.thresholdParameters.setupCompletionQuorum,
         smallRosterPolicy: input.smallRosterPolicy,
         structuralCorruptionBound:
-            input.thresholdProfile.structuralCorruptionBound,
-        targetBoundShareSelectionProfile:
-            input.thresholdProfile.targetBoundShareSelectionProfile,
-        warnings: input.thresholdProfile.warnings,
+            input.thresholdParameters.structuralCorruptionBound,
+        targetBoundShareSelectionParameters:
+            input.thresholdParameters.targetBoundShareSelectionParameters,
+        warnings: input.thresholdParameters.warnings,
     });
 
-export const deriveFrozenRosterProfile = (input: {
+export const deriveFrozenRosterParameters = (input: {
     readonly pollSpec: PollSpec;
     readonly rosterHash: ProtocolHash;
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
-    readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
-    readonly dynamicRosterProfileCertificateHash?: ProtocolHash;
-}): FrozenRosterProfile => {
+    readonly targetBoundShareSelectionParameters?: TargetBoundShareSelectionParameters;
+    readonly dynamicRosterParametersCertificateHash?: ProtocolHash;
+}): FrozenRosterParameters => {
     const { pollSpec, rosterSize } = input;
-    const dynamicRosterProfileCertificateHash =
-        normalizeDynamicRosterProfileCertificateHash(
-            input.dynamicRosterProfileCertificateHash,
+    const dynamicRosterParametersCertificateHash =
+        normalizeDynamicRosterParametersCertificateHash(
+            input.dynamicRosterParametersCertificateHash,
         );
 
     if (
@@ -374,50 +384,50 @@ export const deriveFrozenRosterProfile = (input: {
         pollSpec.smallRosterPolicy === 'ForbidMicroRoster'
     ) {
         throw new Error(
-            'Poll policy forbids freezing a casual micro-roster profile.',
+            'Poll policy forbids freezing a casual micro-roster parameters.',
         );
     }
     if (
         rosterSize >= minimumDynamicRosterSize &&
-        rosterSize !== firstProfileRosterSize &&
-        dynamicRosterProfileCertificateHash === null
+        rosterSize !== firstClosureRosterSize &&
+        dynamicRosterParametersCertificateHash === null
     ) {
         throw new Error(
-            'Dynamic roster profiles require parameter certificate coverage for the frozen roster size.',
+            'Dynamic roster parameter sets require parameter certificate coverage for the frozen roster size.',
         );
     }
 
-    const thresholdProfile = deriveThresholdProfile({
+    const thresholdParameters = deriveThresholdParameters({
         rosterSize,
         casualMicroRosterAcknowledged: rosterSize < minimumDynamicRosterSize,
-        dynamicRosterProfileCertificateHash:
-            dynamicRosterProfileCertificateHash ?? undefined,
+        dynamicRosterParametersCertificateHash:
+            dynamicRosterParametersCertificateHash ?? undefined,
         heBackendCorruptionModel: input.heBackendCorruptionModel,
-        targetBoundShareSelectionProfile:
-            input.targetBoundShareSelectionProfile,
+        targetBoundShareSelectionParameters:
+            input.targetBoundShareSelectionParameters,
     });
     const pollSpecHash = derivePollSpecHash(pollSpec);
-    const thresholdProfileHash = deriveThresholdProfileHash({
+    const thresholdParametersHash = deriveThresholdParametersHash({
         maxRosterSize: pollSpec.maxRosterSize,
         minRosterSize: pollSpec.minRosterSize,
         pollSpecHash,
         rosterHash: input.rosterHash,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
-        thresholdProfile,
+        thresholdParameters,
     });
 
     return {
-        objectType: 'FrozenRosterProfile',
+        objectType: 'FrozenRosterParameters',
         objectVersion: 1,
-        thresholdProfileHash,
+        thresholdParametersHash,
         pollSpecHash,
         rosterHash: input.rosterHash,
         rosterSize,
         smallRosterPolicy: pollSpec.smallRosterPolicy,
         minRosterSize: pollSpec.minRosterSize,
         maxRosterSize: pollSpec.maxRosterSize,
-        dynamicRosterProfileCertificateHash:
-            thresholdProfile.dynamicRosterProfileCertificateHash,
-        thresholdProfile,
+        dynamicRosterParametersCertificateHash:
+            thresholdParameters.dynamicRosterParametersCertificateHash,
+        thresholdParameters,
     };
 };

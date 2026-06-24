@@ -10,7 +10,7 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
         |package| {
             package["genericKeySwitchKeys"] = serde_json::json!({ "keyRoot": valid_hash('4') });
         },
-        "genericKeySwitchOutsideProfile",
+        "genericKeySwitchOutsideParameters",
     );
 }
 
@@ -216,7 +216,7 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
 }
 
 #[test]
-#[ignore = "terminal recomputed-root refusal matrix at profile ring"]
+#[ignore = "terminal recomputed-root refusal matrix at full ring"]
 fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "manual_accepted_setup_refuses_every_recomputed_accepted_root_drift",
@@ -279,7 +279,7 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     );
     assert!(
         covered_root_count >= 12,
-        "completeness floor: the terminal accepted package must bind the full first-profile root set, covered {covered_root_count}",
+        "completeness floor: the terminal accepted package must bind the full first-roster root set, covered {covered_root_count}",
     );
 
     // Drifting the outer package hash without recomputation is a package-hash
@@ -471,7 +471,7 @@ fn heavy_accepted_setup_collective_setup_public_galois_key_loader_refuses_reduce
     assert!(
         error
             .message
-            .contains("requires profile-ring component vectors")
+            .contains("requires full-ring component vectors")
     );
 }
 
@@ -498,7 +498,7 @@ fn heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refus
     assert!(
         error
             .message
-            .contains("requires profile-ring component vectors")
+            .contains("requires full-ring component vectors")
     );
 }
 
@@ -1104,15 +1104,15 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
 // generates and the accepted-setup verifier accepts every roster-dependent
 // binding for a roster size other than the first-closure n = 10. Two reduced
 // development-ring (128) packages are built and verified through the same
-// terminal entry point the profile-ring accept fixture uses: a smallest
+// terminal entry point the full-ring accept fixture uses: a smallest
 // supported roster (n = 3, q_dec = 2-of-3) and the largest supported roster
 // (n = 20, q_dec = 7-of-20).
 //
 // The reduced development ring keeps each proof-bearing build to seconds-to-low
-// minutes. Terminal `accepted` is deliberately profile-ring only: the terminal
-// profile-ring gate (verify_profile_ring_material) refuses development-reduced-ring
+// minutes. Terminal `accepted` is deliberately full-ring only: the terminal
+// full-ring gate (verify_full_ring_material) refuses development-reduced-ring
 // material so a reduced-ring package can never be presented as certified.
-// So the strongest reduced-ring outcome is reaching exactly that profile-ring
+// So the strongest reduced-ring outcome is reaching exactly that full-ring
 // gate after every roster-dependent phase has passed: setup context + derived
 // quorums, the full phase transcript, common randomness and the roster-derived
 // public matrix derivations, VSS coefficient commitments, the n*n private VSS
@@ -1121,27 +1121,27 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
 // the public evaluation-key set, the roster-derived commitment-security and HE
 // security certificates, the active-static and key-correctness certificates,
 // and the roster-and-ring-derived transported VSS material metadata. The only
-// remaining refusal is the roster-independent profile-ring boundary,
+// remaining refusal is the roster-independent full-ring boundary,
 // which proves the dynamic-roster machinery and the roster-derived certificates
-// accept n != 10 exactly as far as the profile-ring boundary permits. Genuine terminal
-// `accepted` at the profile ring for n != 10 is deferred until the n = 10
-// supported-mobile runtime evidence work; the certified closure profile
-// remains n = 10 only, so no profile-ring n != 10 fixture runs in any lane.
+// accept n != 10 exactly as far as the full-ring boundary permits. Genuine terminal
+// `accepted` at the full ring for n != 10 is deferred until the n = 10
+// supported-phone runtime evidence work; the certified setup/evaluator parameters
+// remain n = 10 only, so no full-ring n != 10 fixture runs in any lane.
 //
 // This is prototype, desktop-only, fixture-backed evidence, not benchmarked or
-// mobile-certified. It is deferred from both default test lanes: its name is not
+// supported-phone evidence. It is deferred from both default test lanes: its name is not
 // the `heavy_accepted_setup` heavy-lane filter, and `#[ignore]` keeps it out of
 // the cheap gate, so it adds no runtime to either lane and runs only on demand.
 //
 // Run with:
 //   cargo test -p sealed-lattice-kernel \
-//     accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate \
+//     accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_gate \
 //     -- --ignored --nocapture
 #[test]
 #[ignore = "dynamic-roster reduced-ring evidence; on-demand, deferred from default lanes"]
-fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate() {
+fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_gate() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate",
+        "accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_gate",
     );
 
     for participant_count in [3_u64, 20_u64] {
@@ -1189,7 +1189,7 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_clai
         // certificates, and the roster-and-ring-derived transported VSS material
         // metadata) must have been accepted for both the smallest and the
         // largest supported roster, so the only refusal is the roster-independent
-        // profile-ring claim gate. A roster-dependent refusal - or a fixture
+        // full-ring claim gate. A roster-dependent refusal - or a fixture
         // transport-uniqueness artifact such as a duplicate aggregate transport
         // chunk hash from two trustees' companions carrying byte-identical chunk
         // content - would be a real n != 10 regression.
@@ -1199,18 +1199,18 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_clai
             .to_string();
         assert_eq!(
             refusal_reason,
-            "vssCoefficientCommitmentMaterialOutsideProfile",
-            "n={participant_count}: the only refusal must be the profile-ring claim gate, got {refusal_reason}.{}",
+            "vssCoefficientCommitmentMaterialOutsideAcceptedRing",
+            "n={participant_count}: the only refusal must be the full-ring claim gate, got {refusal_reason}.{}",
             describe_duplicate_transport_chunk_hashes(&package),
         );
         assert_eq!(
             result["refusedObjects"][0]["objectPath"],
             "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
-            "n={participant_count}: the profile-ring claim gate refuses the reduced ring degree: {}",
+            "n={participant_count}: the full-ring claim gate refuses the reduced ring degree: {}",
             serde_json::to_string_pretty(&result).expect("verification result JSON")
         );
         terminal_phase(&format!(
-            "reduced-ring fixture for n={participant_count} reached the profile-ring claim gate cleanly"
+            "reduced-ring fixture for n={participant_count} reached the full-ring claim gate cleanly"
         ));
     }
 }

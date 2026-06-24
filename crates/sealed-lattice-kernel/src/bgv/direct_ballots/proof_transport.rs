@@ -157,11 +157,7 @@ pub(super) fn direct_ballot_public_proof_transport_hash(
         input.setup_package,
         &["collectivePublicKey", "collectivePublicKeyRoot"],
     )?;
-    let ballot_layout_hash = required_string_path(
-        input.setup_package,
-        &["profileBindings", "encryptedBallotLayoutHash"],
-    )?;
-    let proof_profile_hash = direct_ballot_relation_proof_profile_hash()?;
+    let proof_parameters_hash = direct_ballot_relation_proof_parameters_hash()?;
 
     derive_protocol_hash(
         "ProofBytesHash",
@@ -178,10 +174,9 @@ pub(super) fn direct_ballot_public_proof_transport_hash(
             "ciphertextRoot": input.ballot.ciphertext_root,
             "voterIdentity": input.ballot.input.voter_identity,
             "actionContextHash": input.ballot.input.action_context_hash,
-            "profileHash": profile_hash()?,
+            "bgvParametersHash": bgv_parameters_hash()?,
             "collectivePublicKeyRoot": collective_public_key_root,
-            "ballotLayoutHash": ballot_layout_hash,
-            "proofProfileHash": proof_profile_hash,
+            "proofParametersHash": proof_parameters_hash,
         }),
     )
 }

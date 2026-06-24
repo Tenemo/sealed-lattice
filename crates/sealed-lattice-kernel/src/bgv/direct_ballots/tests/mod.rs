@@ -164,8 +164,8 @@ fn setup_package_with_seed(setup_seed: &str) -> Value {
             "RosterHash",
             &json!({ "roster": "direct encrypted ballot test" }),
         ).expect("roster hash"),
-        "thresholdProfileHash": derive_protocol_hash(
-            "ThresholdProfileHash",
+        "thresholdParametersHash": derive_protocol_hash(
+            "ThresholdParametersHash",
             &json!({ "threshold": "direct encrypted ballot test" }),
         ).expect("threshold hash"),
         "participants": [

@@ -16,7 +16,7 @@ pub(crate) fn galois_automorphism_transpose_apply(
     }
     let mut transposed = Vec::with_capacity(degree);
     for index in 0..degree {
-        // The element acts modulo 2N, so a full-profile schedule value reduces
+        // The element acts modulo 2N, so a full schedule value reduces
         // to a valid automorphism on a smaller ring; the target >= N branch is
         // the negacyclic X^N = -1 sign fold.
         let target = (index * galois_element) % ring_order;

@@ -1,7 +1,7 @@
 import { validHash } from '../../bgv-passive-setup-fixtures.js';
 import {
     coefficientVectorLittleEndianHex,
-    firstProfileParticipantCount,
+    firstRosterParticipantCount,
     hexToBytes,
     jsonRecord,
     minimumSuccinctProofFixtureRingDegree,
@@ -25,12 +25,11 @@ import {
     type PublicKeyShareSuccinctProofSet,
 } from '#packages/protocol/src/setup/public-key-share-records';
 import {
-    setupProofProfileId,
     type SameSecretConsistencyStatementSet,
     type SameSecretProofSet,
 } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
-import type { BgvCollectiveSetupProfileDescription } from '#packages/wasm/src/index';
+import type { BgvCollectiveSetupParametersDescription } from '#packages/wasm/src/index';
 
 const publicKeyShareCoefficients = (
     trusteeRosterPosition: number,
@@ -50,14 +49,14 @@ const publicKeyShareCoefficients = (
     );
 
 const acceptedPublicKeyShareMaterialContributions = (
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
 ): PublicKeyShareMaterialContributionInput[] =>
     Array.from(
-        { length: firstProfileParticipantCount },
+        { length: firstRosterParticipantCount },
         (_unusedTrustee, trusteeRosterPosition) => ({
             trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
             trusteeRosterPosition,
-            shareCoefficientVectorsByLimb: profile.qShare.primes.map(
+            shareCoefficientVectorsByLimb: parameters.qShare.primes.map(
                 (rnsPrime, rnsLimbIndex) => {
                     const coefficients = publicKeyShareCoefficients(
                         trusteeRosterPosition,
@@ -101,7 +100,7 @@ const publicKeyShareContributionsFromMaterial = (
 
 export function acceptedPublicKeyShares(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
     sameSecretConsistency: SameSecretConsistencyStatementSet,
 ): PublicKeyShareSet {
@@ -114,21 +113,21 @@ export function acceptedPublicKeyShares(
 
     return createPublicKeyShareSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         publicMatrixSeedHash,
         publicKeyCrpRoot,
         publicAPolynomialRoot,
         sameSecretConsistency,
         shareContributions: publicKeyShareContributionsFromMaterial(
-            acceptedPublicKeyShareMaterialContributions(profile),
+            acceptedPublicKeyShareMaterialContributions(parameters),
         ),
     });
 }
 
 export function acceptedPublicKeyShareMaterial(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
     publicKeyShares: PublicKeyShareSet,
 ): PublicKeyShareMaterialSet {
@@ -139,21 +138,21 @@ export function acceptedPublicKeyShareMaterial(
 
     return createPublicKeyShareMaterialSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         ringDegree: minimumSuccinctProofFixtureRingDegree,
         publicMatrixSeedHash,
         publicKeyCrpRoot: String(crpRoots.publicKeyCrpRoot),
         publicAPolynomialRoot: String(publicA.publicPolynomialRoot),
         publicKeyShares,
         materialContributions:
-            acceptedPublicKeyShareMaterialContributions(profile),
+            acceptedPublicKeyShareMaterialContributions(parameters),
     });
 }
 
 export function acceptedPublicKeyShareProofs(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
     sameSecretConsistency: SameSecretConsistencyStatementSet,
     publicKeyShares: PublicKeyShareSet,
@@ -167,8 +166,8 @@ export function acceptedPublicKeyShareProofs(
 
     return createPublicKeyShareProofSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         publicMatrixSeedHash,
         publicKeyCrpRoot,
         publicAPolynomialRoot,
@@ -184,7 +183,7 @@ const publicKeyShareSuccinctProofBytesHash = (proofBytesHex: string): string =>
     );
 
 export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     setupPackage: JsonRecord,
 ): PublicKeyShareSuccinctProofSet {
     const setupContext = setupPackage.setupContext as CollectiveBgvSetupContext;
@@ -200,7 +199,6 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
     const proofBytesHex = '00';
     const proofMaterials: PublicKeyShareSuccinctProofMaterial[] =
         publicKeyShares.shareRecords.map((shareRecord) => ({
-            setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
             trusteeIdentity: shareRecord.trusteeIdentity,
             trusteeRosterPosition: shareRecord.trusteeRosterPosition,
@@ -212,8 +210,8 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
 
     return createPublicKeyShareSuccinctProofSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
         publicKeyCrpRoot: String(crpRoots.publicKeyCrpRoot),
         publicAPolynomialRoot: String(publicA.publicPolynomialRoot),

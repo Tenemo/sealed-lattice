@@ -15,7 +15,7 @@ import {
     createKeyFixture,
     deriveFixtureHash,
     createSignature,
-    defaultThresholdProfileHash,
+    defaultThresholdParametersHash,
     defaultEvaluatorReplayRecordHash,
     manifestOpaqueBindings,
     targetFinalityPolicyHash,
@@ -264,7 +264,7 @@ export const createTargetFinalityRecord = (
             ceremonyId,
             marker: 'default-manifest',
         }),
-        thresholdProfileHash: defaultThresholdProfileHash,
+        thresholdParametersHash: defaultThresholdParametersHash,
         evaluatorReplayContextHash: deriveProtocolHash(
             'EvaluatorReplayContextHash',
             {
@@ -284,8 +284,8 @@ export const createTargetFinalityRecord = (
         targetLayoutHash: deriveProtocolHash('TargetLayoutHash', {
             layout: 'direct-sparse-target-layout-v1',
         }),
-        evaluatorReplayProfileHash:
-            manifestOpaqueBindings.evaluatorReplayProfileHash,
+        evaluatorReplayParametersHash:
+            manifestOpaqueBindings.evaluatorReplayParametersHash,
         targetFinalityPolicyHash,
         topOptionCount: 2,
         tiePolicyHash: deriveFixtureHash('fixture-tie-policy-v1', {

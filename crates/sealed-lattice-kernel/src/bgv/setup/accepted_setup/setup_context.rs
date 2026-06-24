@@ -66,10 +66,7 @@ pub(super) fn verify_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if setup_context.get(field_name).is_none() {
@@ -82,14 +79,7 @@ pub(super) fn verify_context(
             )?));
         }
     }
-    for field_name in [
-        "manifestHash",
-        "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
-    ] {
+    for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
                 VerifierStatus::Refused,
@@ -133,8 +123,8 @@ pub(super) fn verify_context(
     // Roster parameters: accept any supported roster size 3 <= n <= 20 by
     // deriving the canonical full-roster quorums and decryption threshold from
     // participantCount. n != 10 is implementation-supported but not
-    // benchmarked, not mobile-certified, and not part of the first end-to-end
-    // closure profile (n = 10).
+    // benchmarked, not supported-phone evidence, and not part of the first
+    // setup/evaluator closure roster (n = 10).
     let Some(participant_count) = setup_context
         .get("participantCount")
         .and_then(Value::as_u64)
@@ -149,7 +139,7 @@ pub(super) fn verify_context(
     };
     if !participant_count_is_supported(participant_count) {
         return Ok(Some(verification_response(
-            VerifierStatus::OutsideProfile,
+            VerifierStatus::OutsideAcceptedParameters,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
@@ -171,7 +161,7 @@ pub(super) fn verify_context(
             Some(actual_value) if actual_value == expected_value => {}
             Some(_) => {
                 return Ok(Some(verification_response(
-                    VerifierStatus::OutsideProfile,
+                    VerifierStatus::OutsideAcceptedParameters,
                     Some("setupIntent"),
                     Vec::new(),
                     vec![Refusal::new(
@@ -195,67 +185,25 @@ pub(super) fn verify_context(
             }
         }
     }
-    let expected_setup_profile_hash = setup_profile_hash_for_roster(&roster)?;
+    // The setup parameters hash is a roster family (distinct per participant
+    // count), so it is compared against the hash derived from this setup
+    // context's roster. It subsumes the former per-component parameter hashes
+    // (Q_share, carry-aware VSS relation, commitment, setup proof, transport,
+    // evaluator key schedule) and the BGV parameters.
+    let expected_setup_parameters_hash = setup_parameters_hash_for_roster(&roster)?;
     if setup_context
-        .get("setupProfileHash")
+        .get("setupParametersHash")
         .and_then(Value::as_str)
-        != Some(expected_setup_profile_hash.as_str())
+        != Some(expected_setup_parameters_hash.as_str())
     {
         return Ok(Some(verification_response(
-            VerifierStatus::OutsideProfile,
+            VerifierStatus::OutsideAcceptedParameters,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
-                "setupProfileHashMismatch",
-                "setupContext.setupProfileHash does not match the roster-derived CollectiveBgvSetup-v1 profile",
-                "setupPackage.setupContext.setupProfileHash".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-    if setup_context.get("qShareHash").and_then(Value::as_str) != Some(q_share_hash()?.as_str()) {
-        return Ok(Some(verification_response(
-            VerifierStatus::OutsideProfile,
-            Some("setupIntent"),
-            Vec::new(),
-            vec![Refusal::new(
-                "qShareHashMismatch",
-                "setupContext.qShareHash does not match the accepted Q_share prime list",
-                "setupPackage.setupContext.qShareHash".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-    if setup_context
-        .get("carryAwareVssShareRelationProfileHash")
-        .and_then(Value::as_str)
-        != Some(carry_aware_vss_share_relation_profile_hash()?.as_str())
-    {
-        return Ok(Some(verification_response(
-            VerifierStatus::OutsideProfile,
-            Some("setupIntent"),
-            Vec::new(),
-            vec![Refusal::new(
-                "carryAwareVssRelationProfileHashMismatch",
-                "setupContext.carryAwareVssShareRelationProfileHash does not match the accepted carry-aware VSS relation profile",
-                "setupPackage.setupContext.carryAwareVssShareRelationProfileHash".to_string(),
-            )],
-            Vec::new(),
-        )?));
-    }
-    if setup_context
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Ok(Some(verification_response(
-            VerifierStatus::OutsideProfile,
-            Some("setupIntent"),
-            Vec::new(),
-            vec![Refusal::new(
-                "commitmentProfileHashMismatch",
-                "setupContext.commitmentProfileHash does not match the accepted setup commitment profile",
-                "setupPackage.setupContext.commitmentProfileHash".to_string(),
+                "setupParametersHashMismatch",
+                "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
+                "setupPackage.setupContext.setupParametersHash".to_string(),
             )],
             Vec::new(),
         )?));
@@ -284,7 +232,7 @@ pub(super) fn verify_q_share(setup_package: &Value) -> CanonicalResult<Option<Va
     };
     if q_share != &q_share_value() {
         return Ok(Some(verification_response(
-            VerifierStatus::OutsideProfile,
+            VerifierStatus::OutsideAcceptedParameters,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
@@ -297,10 +245,6 @@ pub(super) fn verify_q_share(setup_package: &Value) -> CanonicalResult<Option<Va
     }
 
     Ok(None)
-}
-
-pub(super) fn q_share_hash() -> CanonicalResult<String> {
-    derive_protocol_hash("QSharePrimeListHash", &q_share_value())
 }
 
 pub(super) fn q_share_value() -> Value {
@@ -332,7 +276,7 @@ fn compare_expected_hash(
         })?;
     if expected_hash != actual_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("setupContext.{context_field_name} does not match {expected_field_name}"),
         ));
     }

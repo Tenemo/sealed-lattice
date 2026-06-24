@@ -50,13 +50,13 @@ export type ReferenceOracleHashBindings = {
     readonly referenceOracleContainerHash: string;
     readonly referenceOracleCommandHash: string;
     readonly referenceOracleVectorRoot: string;
-    readonly referenceOracleProfileHash: string;
+    readonly referenceOracleParametersHash: string;
     readonly records: {
         readonly commitRecord: unknown;
         readonly containerRecord: unknown;
         readonly commandRecord: unknown;
         readonly vectorRecord: unknown;
-        readonly profileRecord: unknown;
+        readonly parametersRecord: unknown;
     };
 };
 
@@ -246,7 +246,7 @@ export const buildReferenceOracleHashBindings = (
         oracleVectorsAcceptedAsProtocolEvidence: false,
         protocolEvidenceUse: pinnedReference.protocolEvidenceUse,
     };
-    const profileRecord = {
+    const parametersRecord = {
         referenceName: pinnedReference.referenceName,
         allowedUse: pinnedReference.allowedUse,
         canonicalScopeNote: pinnedReference.canonicalScopeNote,
@@ -275,16 +275,19 @@ export const buildReferenceOracleHashBindings = (
             payload: vectorRecord,
             purpose: 'lattigo-reference-oracle-vector-root-v1',
         }),
-        referenceOracleProfileHash: deriveProtocolHash('ChallengeDomainHash', {
-            payload: profileRecord,
-            purpose: 'lattigo-reference-oracle-profile-v1',
-        }),
+        referenceOracleParametersHash: deriveProtocolHash(
+            'ChallengeDomainHash',
+            {
+                payload: parametersRecord,
+                purpose: 'lattigo-reference-oracle-parameters-v1',
+            },
+        ),
         records: {
             commitRecord,
             containerRecord,
             commandRecord,
             vectorRecord,
-            profileRecord,
+            parametersRecord,
         },
     };
 };

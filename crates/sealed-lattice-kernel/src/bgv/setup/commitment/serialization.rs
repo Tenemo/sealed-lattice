@@ -1,4 +1,4 @@
-use super::profile::*;
+use super::commitment_parameters::*;
 use super::validation::*;
 use super::*;
 
@@ -106,7 +106,7 @@ pub(in super::super) fn parse_setup_commitment_full_value(
         let commitment_modulus_index = read_usize(limb_value, "commitmentModulusIndex")?;
         if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
             return Err(invalid_commitment_input(
-                "setup commitment limb uses a modulus outside the accepted commitment profile",
+                "setup commitment limb uses a modulus outside the accepted commitment parameters",
             ));
         }
         if seen_limb_indices.contains(&commitment_modulus_index) {

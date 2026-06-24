@@ -6,7 +6,7 @@ use self::evaluation_keys::{
 };
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
-use crate::bgv::profile::SPECIAL_PRIME;
+use crate::bgv::parameters::SPECIAL_PRIME;
 use num_bigint::BigUint;
 
 #[allow(clippy::too_many_arguments)]
@@ -21,8 +21,8 @@ pub(super) fn setup_certificates(
     error_distribution_certificate_hash: &str,
     key_switch_decomposition: &Value,
     key_switch_decomposition_hash: &str,
-    target_decryption_profile_hash: &str,
-    target_decryption_profile_binding_hash: &str,
+    target_decryption_parameters_hash: &str,
+    target_decryption_parameters_binding_hash: &str,
     evaluation_keys: &Value,
     development_encryption_fixture: &Value,
 ) -> CanonicalResult<Value> {
@@ -34,8 +34,8 @@ pub(super) fn setup_certificates(
     let rotation_key_count = rotation_key_roots.len();
     let public_samples = public_rlwe_samples_by_basis(input.participants.len(), rotation_key_count);
     let evaluation_key_size_certificate = evaluation_key_size_certificate(evaluation_keys)?;
-    let evaluation_key_size_profile_hash = derive_protocol_hash(
-        "EvaluationKeySizeProfileHash",
+    let evaluation_key_size_parameters_hash = derive_protocol_hash(
+        "EvaluationKeySizeParametersHash",
         &evaluation_key_size_certificate,
     )?;
     let evaluation_key_streaming_commitment = evaluation_key_streaming_commitment(evaluation_keys)?;
@@ -44,8 +44,8 @@ pub(super) fn setup_certificates(
             setup_inputs,
             collective_public_key,
             threshold_verification_material,
-            target_decryption_profile_hash,
-            target_decryption_profile_binding_hash,
+            target_decryption_parameters_hash,
+            target_decryption_parameters_binding_hash,
         )?;
     let target_threshold_decryptability_certificate_hash = derive_protocol_hash(
         "TargetThresholdDecryptabilityCertificateHash",
@@ -54,8 +54,7 @@ pub(super) fn setup_certificates(
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
-        "profileHash": profile_hash()?,
-        "backendProfileHash": backend_profile_hash()?,
+        "bgvParametersHash": bgv_parameters_hash()?,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "qDataBits": q_data_bits,
@@ -70,12 +69,11 @@ pub(super) fn setup_certificates(
         "collectiveSecretDistributionCertificateHash": collective_secret_distribution_certificate_hash,
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
         "keySwitchDecompositionHash": key_switch_decomposition_hash,
-        "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
+        "evaluationKeySizeParametersHash": evaluation_key_size_parameters_hash,
         "evaluationKeyStreamingCommitmentHash": evaluation_key_streaming_commitment["commitmentHash"],
-        "targetDecryptionProfileHash": target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
-        "securityEstimatorInputHash": security_estimator_input_hash()?,
     });
     let setup_parameter_certificate_hash = derive_protocol_hash(
         "BGVSetupParameterCertificateHash",
@@ -95,7 +93,7 @@ pub(super) fn setup_certificates(
         "targetThresholdDecryptabilityCertificate": target_threshold_decryptability_certificate,
         "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
         "evaluationKeySizeCertificate": evaluation_key_size_certificate,
-        "evaluationKeySizeProfileHash": evaluation_key_size_profile_hash,
+        "evaluationKeySizeParametersHash": evaluation_key_size_parameters_hash,
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
         "developmentEncryptionFixtureHash": development_encryption_fixture["fixtureHash"],
     }))
@@ -192,23 +190,23 @@ pub(super) fn error_distribution_certificate() -> CanonicalResult<Value> {
     }))
 }
 
-pub(super) fn key_switch_decomposition_profile() -> CanonicalResult<Value> {
+pub(super) fn key_switch_decomposition_parameters() -> CanonicalResult<Value> {
     Ok(json!({
-        "objectType": "BgvKeySwitchDecompositionProfile",
+        "objectType": "BgvKeySwitchDecompositionParameters",
         "objectVersion": 1,
         "digitBaseBits": 23,
         "digitCountPerPrime": 3,
     }))
 }
 
-// Identity of the target-decryption profile: the bound BGV profile
+// Identity of the target-decryption parameters: the bound BGV parameters
 // hash, the secret-share domain, and the async-Lagrange target direction. Implementation
 // and certification state (partial/final decryption maturity, C1-C4 certification, whether
 // Q_target is known) is not asserted as bound flags here; that scope lives in the README
 // safety boundaries and the target-decryption implementation notes.
-pub(super) fn target_decryption_profile(profile_hash: &str) -> CanonicalResult<Value> {
+pub(super) fn target_decryption_parameters(bgv_parameters_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
-        "bgvProfileHash": profile_hash,
+        "bgvParametersHash": bgv_parameters_hash,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "asyncLagrangeTargetDirection": true,
     }))
@@ -223,13 +221,13 @@ pub(super) fn target_threshold_decryptability_certificate_from_setup_package(
         value_at_path(setup_package, &["thresholdVerificationMaterial"])?,
         string_at_path(
             setup_package,
-            &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+            &["targetDecryptionStatus", "targetDecryptionParametersHash"],
         )?,
         string_at_path(
             setup_package,
             &[
                 "targetDecryptionStatus",
-                "targetDecryptionProfileBindingHash",
+                "targetDecryptionParametersBindingHash",
             ],
         )?,
     )
@@ -239,16 +237,15 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
     setup_inputs: &Value,
     collective_public_key: &Value,
     threshold_verification_material: &Value,
-    target_decryption_profile_hash: &str,
-    target_decryption_profile_binding_hash: &str,
+    target_decryption_parameters_hash: &str,
+    target_decryption_parameters_binding_hash: &str,
 ) -> CanonicalResult<Value> {
     let setup_binding = json!({
-        "bgvProfileHash": profile_hash()?,
-        "rustBgvBackendProfileHash": backend_profile_hash()?,
+        "bgvParametersHash": bgv_parameters_hash()?,
         "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
         "manifestHash": string_at_path(setup_inputs, &["manifestHash"])?,
         "rosterHash": string_at_path(setup_inputs, &["rosterHash"])?,
-        "thresholdProfileHash": string_at_path(setup_inputs, &["thresholdProfileHash"])?,
+        "thresholdParametersHash": string_at_path(setup_inputs, &["thresholdParametersHash"])?,
         "participantCount": unsigned_at_path(setup_inputs, &["participantCount"])?,
     });
     let key_binding = json!({
@@ -264,20 +261,17 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "publicKeyConvention": "b = p * e - a * s",
         "decryptableCiphertextEquation": "c0 + c1 * s = m + p * noise",
     });
-    let ciphertext_profile = json!({
+    let ciphertext_parameters = json!({
         "plaintextModulus": PLAINTEXT_MODULUS,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "level": DATA_PRIMES.len() - 1,
         "dataPrimeCount": DATA_PRIMES.len(),
         "ciphertextComponentCount": 2,
-        "canonicalCiphertextConventionHash": canonical_ciphertext_convention_hash()?,
-        "batchEncoderHash": batch_encoder_hash()?,
-        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
-        "directComparisonProfileHash": direct_comparison_profile_hash()?,
+        "bgvParametersHash": bgv_parameters_hash()?,
     });
     let threshold_binding = json!({
-        "targetDecryptionProfileHash": target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "thresholdShareVerificationKeyRoot": string_at_path(
             threshold_verification_material,
             &["thresholdShareVerificationKeyRoot"],
@@ -301,7 +295,7 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "objectVersion": 1,
         "setupBinding": setup_binding,
         "keyBinding": key_binding,
-        "ciphertextProfile": ciphertext_profile,
+        "ciphertextParameters": ciphertext_parameters,
         "thresholdBinding": threshold_binding,
     }))
 }
@@ -315,7 +309,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "ceremonyId": string_at_path(setup_inputs, &["ceremonyId"])?,
         "manifestHash": string_at_path(setup_inputs, &["manifestHash"])?,
         "rosterHash": string_at_path(setup_inputs, &["rosterHash"])?,
-        "thresholdProfileHash": string_at_path(setup_inputs, &["thresholdProfileHash"])?,
+        "thresholdParametersHash": string_at_path(setup_inputs, &["thresholdParametersHash"])?,
         "participantCount": unsigned_at_path(setup_inputs, &["participantCount"])?,
         "setupSeedHash": string_at_path(setup_inputs, &["setupSeedHash"])?,
     });
@@ -323,14 +317,13 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "PassiveSetupEvaluatorBindingContextHash",
         &evaluator_binding_context,
     )?;
+    let bgv_parameters_hash = bgv_parameters_hash()?;
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
         "objectVersion": 1,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
-        "inputLayoutHash": direct_comparison_profile_hash()?,
-        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
-        "allowedEvaluatorOpsHash": allowed_operation_registry_hash()?,
+        "bgvParametersHash": &bgv_parameters_hash,
     });
     let encrypted_comparison_input_record = json!({
         "objectType": "EncryptedComparisonInputBinding",
@@ -341,15 +334,14 @@ pub(super) fn passive_setup_evaluator_context_bindings(
             "ComparisonInputDerivationCircuitHash",
             &comparison_input_derivation_record,
         )?,
-        "ciphertextConventionHash": canonical_ciphertext_convention_hash()?,
-        "packingLayoutHash": direct_comparison_profile_hash()?,
+        "bgvParametersHash": &bgv_parameters_hash,
     });
     let sparse_target_projection_record = json!({
         "objectType": "EncryptedSparseTargetProjectionBinding",
         "objectVersion": 1,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "targetLayoutHash": target_layout_hash(MAXIMUM_OPTION_COUNT)?,
-        "directComparisonProfileHash": direct_comparison_profile_hash()?,
+        "bgvParametersHash": &bgv_parameters_hash,
     });
 
     let comparison_input_derivation_circuit_hash = derive_protocol_hash(
@@ -366,8 +358,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
     )?;
     let binding_record = json!({
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
-        "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
-        "directAggregateLayoutHash": direct_aggregate_layout_hash()?,
+        "bgvParametersHash": &bgv_parameters_hash,
         "comparisonInputDerivationCircuitHash": comparison_input_derivation_circuit_hash,
         "encryptedComparisonInputHash": encrypted_comparison_input_hash,
         "encryptedSparseTargetProjectionHash": encrypted_sparse_target_projection_hash,
@@ -377,8 +368,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
 
     Ok(json!({
         "evaluatorBindingContextHash": binding_record["evaluatorBindingContextHash"],
-        "encryptedBallotAggregateLayoutHash": binding_record["encryptedBallotAggregateLayoutHash"],
-        "directAggregateLayoutHash": binding_record["directAggregateLayoutHash"],
+        "bgvParametersHash": binding_record["bgvParametersHash"],
         "comparisonInputDerivationCircuitHash": binding_record["comparisonInputDerivationCircuitHash"],
         "encryptedComparisonInputHash": binding_record["encryptedComparisonInputHash"],
         "encryptedSparseTargetProjectionHash": binding_record["encryptedSparseTargetProjectionHash"],

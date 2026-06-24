@@ -14,9 +14,8 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
-const retiredThresholdDecryptionProfileId =
-    'unsupported-target-decryption-profile-v0';
-const retiredBallotValidityProofProfileId = 'PQEvalProof-STARK-BGVReplay-v1';
+const retiredThresholdDecryptionId = 'unsupported-target-decryption-v0';
+const retiredBallotValidityProofId = 'PQEvalProof-STARK-BGVReplay-v1';
 
 describe('roster and manifest shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
@@ -89,36 +88,34 @@ describe('roster and manifest shells', () => {
         );
     });
 
-    it('rejects retired direct-path profile identifiers in certified manifests', () => {
+    it('rejects retired direct-path identifiers in certified manifests', () => {
         const registrations = [
             createRegistrationEntry('participant-1', 1, 0),
             createRegistrationEntry('participant-2', 1, 1),
             createRegistrationEntry('participant-3', 1, 2),
         ];
-        const oldThresholdProfileInput = createRosterManifestTranscriptInput(
+        const oldThresholdParametersInput = createRosterManifestTranscriptInput(
             registrations,
             {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    targetDecryptionProfileId:
-                        retiredThresholdDecryptionProfileId,
+                    targetDecryptionId: retiredThresholdDecryptionId,
                 },
             },
         );
-        const oldBallotProofProfileInput = createRosterManifestTranscriptInput(
+        const oldBallotProofIdInput = createRosterManifestTranscriptInput(
             registrations,
             {
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    ballotValidityProofProfileId:
-                        retiredBallotValidityProofProfileId,
+                    ballotValidityProofId: retiredBallotValidityProofId,
                 },
             },
         );
 
         for (const input of [
-            oldThresholdProfileInput,
-            oldBallotProofProfileInput,
+            oldThresholdParametersInput,
+            oldBallotProofIdInput,
         ]) {
             const result = verifyRosterManifestTranscript(input);
 
@@ -133,14 +130,14 @@ describe('roster and manifest shells', () => {
         }
     });
 
-    it('attributes frozen roster profile mismatches to the frozen profile', () => {
+    it('attributes frozen roster parameters mismatches to the frozen roster parameters', () => {
         const input = createRosterManifestTranscriptInput([
             createRegistrationEntry('participant-1', 1, 0),
             createRegistrationEntry('participant-2', 1, 1),
             createRegistrationEntry('participant-3', 1, 2),
         ]);
-        const changedFrozenRosterProfile = {
-            ...input.frozenRosterProfile,
+        const changedFrozenRosterParameters = {
+            ...input.frozenRosterParameters,
             pollSpecHash: deriveProtocolHash('PollSpecHash', {
                 poll: 'changed',
             }),
@@ -148,39 +145,40 @@ describe('roster and manifest shells', () => {
 
         const result = verifyRosterManifestTranscript({
             ...input,
-            frozenRosterProfile: changedFrozenRosterProfile,
+            frozenRosterParameters: changedFrozenRosterParameters,
         });
 
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
                     code: 'ManifestHashMismatch',
-                    objectHash: changedFrozenRosterProfile.thresholdProfileHash,
-                    objectType: 'FrozenRosterProfile',
+                    objectHash:
+                        changedFrozenRosterParameters.thresholdParametersHash,
+                    objectType: 'FrozenRosterParameters',
                 }),
             ]),
         );
     });
 
-    it('rejects frozen roster profiles with mismatched embedded threshold payloads', () => {
+    it('rejects frozen roster parameterss with mismatched embedded threshold payloads', () => {
         const input = createRosterManifestTranscriptInput([
             createRegistrationEntry('participant-1', 1, 0),
             createRegistrationEntry('participant-2', 1, 1),
             createRegistrationEntry('participant-3', 1, 2),
         ]);
-        const changedFrozenRosterProfile = {
-            ...input.frozenRosterProfile,
-            thresholdProfile: {
-                ...input.frozenRosterProfile.thresholdProfile,
+        const changedFrozenRosterParameters = {
+            ...input.frozenRosterParameters,
+            thresholdParameters: {
+                ...input.frozenRosterParameters.thresholdParameters,
                 releaseQuorum:
-                    input.frozenRosterProfile.thresholdProfile.releaseQuorum +
-                    1,
+                    input.frozenRosterParameters.thresholdParameters
+                        .releaseQuorum + 1,
             },
         };
 
         const result = verifyRosterManifestTranscript({
             ...input,
-            frozenRosterProfile: changedFrozenRosterProfile,
+            frozenRosterParameters: changedFrozenRosterParameters,
         });
 
         expect(result.refusedObjects).toEqual(
@@ -188,9 +186,10 @@ describe('roster and manifest shells', () => {
                 expect.objectContaining({
                     code: 'ManifestHashMismatch',
                     message:
-                        'Frozen roster profile payload must match the roster-freeze derived profile.',
-                    objectHash: changedFrozenRosterProfile.thresholdProfileHash,
-                    objectType: 'FrozenRosterProfile',
+                        'Frozen roster parameters payload must match the roster-freeze derived parameters.',
+                    objectHash:
+                        changedFrozenRosterParameters.thresholdParametersHash,
+                    objectType: 'FrozenRosterParameters',
                 }),
             ]),
         );
@@ -240,18 +239,20 @@ describe('roster and manifest shells', () => {
         ]);
         const changedManifest = createElectionManifest(registrations, {
             boardSequence: 4,
-            thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
-                profile: 'different-threshold-profile',
-            }),
+            thresholdParametersHash: deriveProtocolHash(
+                'ThresholdParametersHash',
+                {
+                    parameters: 'different-threshold-parameters',
+                },
+            ),
         });
-        const wrongFixedProfileManifest = createElectionManifest(
+        const wrongFixedParametersManifest = createElectionManifest(
             registrations,
             {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    evaluatorReplayProfileId:
-                        'unsupported-evaluator-replay-profile',
+                    evaluatorReplayId: 'unsupported-evaluator-replay',
                 },
             },
         );
@@ -264,7 +265,9 @@ describe('roster and manifest shells', () => {
                     unexpectedDirectBindingHash: deriveProtocolHash(
                         'ChallengeDomainHash',
                         {
-                            payload: { profile: 'unexpected-profile-binding' },
+                            payload: {
+                                parameters: 'unexpected-parameters-binding',
+                            },
                             purpose: 'fixture-unexpected-direct-binding-v1',
                         },
                     ),
@@ -274,7 +277,7 @@ describe('roster and manifest shells', () => {
         const incompleteOpaqueBindings = {
             ...manifestOpaqueBindings,
         } as Record<string, unknown>;
-        delete incompleteOpaqueBindings.encryptedBallotLayoutHash;
+        delete incompleteOpaqueBindings.bgvParametersHash;
         const manifestWithIncompleteOpaqueBindings = createElectionManifest(
             registrations,
             {
@@ -360,7 +363,7 @@ describe('roster and manifest shells', () => {
         expect(
             verifyRosterManifestTranscript({
                 ...input,
-                electionManifest: wrongFixedProfileManifest,
+                electionManifest: wrongFixedParametersManifest,
             }).refusedObjects,
         ).toEqual(
             expect.arrayContaining([

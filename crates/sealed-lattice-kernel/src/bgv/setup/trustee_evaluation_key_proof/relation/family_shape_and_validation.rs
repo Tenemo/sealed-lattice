@@ -377,7 +377,7 @@ impl TrusteeEvaluationKeyStatement {
                         || limb.rows.iter().any(|row| row.len() != self.ring_degree)
                     {
                         return Err(invalid_succinct_setup_proof(
-                            "same-secret linkage commitment limb shape does not match the profile",
+                            "same-secret linkage commitment limb shape does not match the parameters",
                         ));
                     }
                 }
@@ -464,7 +464,7 @@ fn validate_private_vss_share_statement(
                 || limb.rows.iter().any(|row| row.len() != ring_degree)
             {
                 return Err(invalid_succinct_setup_proof(
-                    "private VSS coefficient commitment limb shape does not match the profile",
+                    "private VSS coefficient commitment limb shape does not match the parameters",
                 ));
             }
         }

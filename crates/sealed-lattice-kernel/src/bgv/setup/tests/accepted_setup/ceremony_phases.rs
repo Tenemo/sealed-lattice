@@ -1,99 +1,85 @@
 use super::*;
 
 #[test]
-fn first_profile_setup_profile_hash_is_byte_stable() {
-    // Byte-identity guard for the current n=10 closure profile. This pin tracks
-    // the full n=10 binding, including proof-accounting sub-hashes and profile
-    // certificate roots; if those binding inputs intentionally change, re-pin to
-    // the new n=10 value and treat stale proof corpora as invalid.
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+fn first_closure_setup_parameters_hash_is_byte_stable() {
+    // Byte-identity guard for the current n=10 closure setup parameters. This
+    // pin tracks the full n=10 binding, including the inlined sub-configuration
+    // values, the proof-accounting sub-hashes, and the BGV parameters; if those
+    // binding inputs intentionally change, re-pin to the new n=10 value and
+    // treat stale proof corpora as invalid.
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     assert_eq!(
-        profile["setupProfileHash"]
+        setup_parameters["setupParametersHash"]
             .as_str()
-            .expect("setup profile hash"),
-        "26cd09939173a8d0b4dc395e32663e69b80e12111e904e906108a5ea661e32e1a15c2dc216f379eb1140b1dcdae2c4f9cb889f10a6cad783b29cfe7eabfaba3b",
+            .expect("setup parameters hash"),
+        "0e07eb07c3ca6afd66b83951397b6580857ceaea6c395ae45f557022687c5ba7be88febf3710272442e5a6bcf67d89e54ab8327c106dceee7190137b4395e12a",
     );
 }
 
 #[test]
-fn collective_setup_profile_exposes_first_profile_state_machine() {
-    let _accepted_setup_test_timing =
-        accepted_setup_test_timing("collective_setup_profile_exposes_first_profile_state_machine");
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+fn collective_setup_parameters_expose_first_closure_state_machine() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_parameters_expose_first_closure_state_machine",
+    );
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
-    assert_eq!(profile["setupProfileId"], "CollectiveBgvSetup-v1");
-    assert_eq!(profile["objectType"], "SetupPackage");
-    assert_eq!(profile["participantCount"], 10);
-    assert_eq!(profile["qSetupComplete"], 10);
-    assert_eq!(profile["qBallotRelease"], 10);
-    assert_eq!(profile["qFinal"], 10);
-    assert_eq!(profile["qDec"], 4);
-    assert_eq!(profile["qShare"]["objectType"], "QSharePrimeList");
+    assert_eq!(setup_parameters["objectType"], "SetupPackage");
+    assert_eq!(setup_parameters["participantCount"], 10);
+    assert_eq!(setup_parameters["qSetupComplete"], 10);
+    assert_eq!(setup_parameters["qBallotRelease"], 10);
+    assert_eq!(setup_parameters["qFinal"], 10);
+    assert_eq!(setup_parameters["qDec"], 4);
+    assert_eq!(setup_parameters["qShare"]["objectType"], "QSharePrimeList");
     assert_eq!(
-        profile["qShare"]["primes"]
+        setup_parameters["qShare"]["primes"]
             .as_array()
             .expect("Q_share primes")
             .len(),
         DATA_PRIMES.len()
     );
-    assert!(profile["qShareHash"].as_str().is_some());
     assert_eq!(
-        profile["carryAwareVssShareRelationProfile"]["objectType"],
-        "CarryAwareVssShareRelationProfile"
-    );
-    assert!(
-        profile["carryAwareVssShareRelationProfileHash"]
-            .as_str()
-            .is_some()
+        setup_parameters["carryAwareVssShareRelation"]["objectType"],
+        "CarryAwareVssShareRelation"
     );
     assert_eq!(
-        profile["commitmentProfile"]["objectType"],
-        "BdlopCommitmentProfile"
+        setup_parameters["commitment"]["objectType"],
+        "BdlopCommitment"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["hiding"],
+        setup_parameters["commitment"]["assumptions"]["hiding"],
         "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["binding"],
+        setup_parameters["commitment"]["assumptions"]["binding"],
         "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["requiredCertificates"],
+        setup_parameters["commitment"]["assumptions"]["requiredCertificates"],
         serde_json::json!([
             "SetupCommitmentSecurityCertificate",
             "SetupProofAccountingCertificate"
         ])
     );
-    assert!(profile["commitmentProfileHash"].as_str().is_some());
     assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["objectType"],
-        "PublicVssCommitmentMaterialSizeProfile"
+        setup_parameters["publicVssCommitmentMaterialSize"]["objectType"],
+        "PublicVssCommitmentMaterialSize"
     );
     assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["ringDegree"],
+        setup_parameters["publicVssCommitmentMaterialSize"]["ringDegree"],
         POLYNOMIAL_DEGREE
     );
     assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["fullMaterialCoefficientBytes"],
+        setup_parameters["publicVssCommitmentMaterialSize"]["fullMaterialCoefficientBytes"],
         serde_json::json!(1_604_321_280_u64)
     );
     assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["fullMaterialCoefficientMebibytes"],
+        setup_parameters["publicVssCommitmentMaterialSize"]["fullMaterialCoefficientMebibytes"],
         1_530
     );
-    assert!(
-        profile["publicVssCommitmentMaterialSizeProfileHash"]
-            .as_str()
-            .is_some()
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["objectType"],
-        "SetupProofProfile"
-    );
-    let setup_proof_families = profile["setupProofProfile"]["proofFamilies"]
+    assert_eq!(setup_parameters["setupProof"]["objectType"], "SetupProof");
+    let setup_proof_families = setup_parameters["setupProof"]["proofFamilies"]
         .as_array()
-        .expect("setup proof family profiles");
+        .expect("setup proof family parameters");
     assert_eq!(setup_proof_families.len(), 4);
     for expected_family in [
         "same-secret-linkage-anchor",
@@ -102,90 +88,86 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         "trustee-evaluation-key",
     ] {
         assert!(
-            setup_proof_families.iter().any(|family_profile| {
-                family_profile["proofFamily"]
+            setup_proof_families.iter().any(|family_parameters| {
+                family_parameters["proofFamily"]
                     .as_str()
                     .is_some_and(|proof_family| proof_family == expected_family)
             }),
-            "setup proof profile must list {expected_family}"
+            "setup proof parameters must list {expected_family}"
         );
     }
-    assert!(profile["setupProofProfileHash"].as_str().is_some());
     assert_eq!(
-        profile["setupTransportProfile"]["objectType"],
-        "SetupTransportProfile"
+        setup_parameters["setupTransport"]["objectType"],
+        "SetupTransport"
     );
     assert_eq!(
-        profile["setupTransportProfile"]["chunkSizeBytes"],
+        setup_parameters["setupTransport"]["chunkSizeBytes"],
         1_048_576
     );
     assert_eq!(
-        profile["setupTransportProfile"]["storageQuotaBytes"],
+        setup_parameters["setupTransport"]["storageQuotaBytes"],
         2_147_483_648_u64
     );
     assert_eq!(
-        profile["setupTransportProfile"]["streamVerificationOrder"],
+        setup_parameters["setupTransport"]["streamVerificationOrder"],
         "ascending-chunk-index"
     );
     assert_eq!(
-        profile["setupTransportProfile"]["lazyLoadingPolicy"],
+        setup_parameters["setupTransport"]["lazyLoadingPolicy"],
         "root-addressed-large-object-loading"
     );
-    assert!(profile["setupTransportProfileHash"].as_str().is_some());
     assert_eq!(
-        profile["evaluatorKeyScheduleProfile"]["objectType"],
-        "EvaluatorKeyScheduleProfile"
+        setup_parameters["evaluatorKeySchedule"]["objectType"],
+        "EvaluatorKeySchedule"
     );
     assert_eq!(
-        profile["evaluatorKeyScheduleProfile"]["genericKeySwitchPolicy"],
+        setup_parameters["evaluatorKeySchedule"]["genericKeySwitchPolicy"],
         "refused-unless-explicitly-required"
     );
     assert!(
-        !profile["evaluatorKeyScheduleProfile"]["relinearizationLevelSchedule"]
+        !setup_parameters["evaluatorKeySchedule"]["relinearizationLevelSchedule"]
             .as_array()
             .expect("relinearization schedule")
             .is_empty()
     );
     assert!(
-        !profile["evaluatorKeyScheduleProfile"]["requiredGaloisKeySchedule"]
+        !setup_parameters["evaluatorKeySchedule"]["requiredGaloisKeySchedule"]
             .as_array()
             .expect("required Galois schedule")
             .is_empty()
     );
     assert!(
-        profile["evaluatorKeyScheduleProfile"]["requiredGaloisSetHash"]
-            .as_str()
-            .is_some()
-    );
-    assert!(
-        profile["evaluatorKeyScheduleProfileHash"]
+        setup_parameters["evaluatorKeySchedule"]["requiredGaloisSetHash"]
             .as_str()
             .is_some()
     );
     assert_eq!(
-        profile["verifierStatuses"],
+        setup_parameters["verifierStatuses"],
         serde_json::json!([
             "accepted",
             "pending",
             "refused",
             "aborted",
             "forkDetected",
-            "outsideProfile"
+            "outsideAcceptedParameters"
         ])
     );
     assert_eq!(
-        profile["phaseOrder"].as_array().expect("phase order").len(),
+        setup_parameters["phaseOrder"]
+            .as_array()
+            .expect("phase order")
+            .len(),
         15
     );
     assert!(
-        profile["phaseOrder"]
+        setup_parameters["phaseOrder"]
             .as_array()
             .expect("phase order")
             .iter()
             .any(|phase| phase["phaseId"] == "trusteeEvaluationKeyProofs")
     );
-    assert!(profile["setupProfileHash"].as_str().is_some());
-    assert!(profile["phaseOrderHash"].as_str().is_some());
+    assert!(setup_parameters["setupParametersHash"].as_str().is_some());
+    assert!(setup_parameters["phaseOrderHash"].as_str().is_some());
 }
 
 #[test]
@@ -197,10 +179,10 @@ fn collective_setup_verifier_refuses_passive_setup_packages() {
         .expect("verification response");
 
     assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(result["verifierStatus"], "outsideAcceptedParameters");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "outsideCollectiveBgvSetupProfile"
+        "outsideCollectiveBgvSetupParameters"
     );
 }
 

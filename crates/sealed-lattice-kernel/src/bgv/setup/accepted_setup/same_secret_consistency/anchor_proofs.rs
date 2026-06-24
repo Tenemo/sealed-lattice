@@ -61,7 +61,7 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_proof_refusal(
-                "sameSecretProofSetProfileMismatch",
+                "sameSecretProofSetParametersMismatch",
                 format!("sameSecretProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.sameSecretProofs.{field_name}"),
             )?));

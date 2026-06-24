@@ -12,7 +12,7 @@ use sha3::{
 use crate::{
     bgv::{
         coefficient_codec::coefficient_vector_hash512,
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
     hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512_hex, to_hex},
@@ -21,17 +21,16 @@ use crate::{
 
 use super::{
     accepted_setup::{
-        AcceptedRosterParameters, COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash,
-        accepted_roster_from_setup_context, setup_profile_hash_for_roster,
+        AcceptedRosterParameters, accepted_roster_from_setup_context,
+        setup_parameters_hash_for_roster,
     },
     commitment::{
         SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
         SetupCommitmentValue, add_scaled_setup_commitment_in_place,
         linear_combination_setup_commitments, parse_setup_commitment_full_value,
-        setup_commitment_profile_hash, setup_commitment_root,
+        setup_commitment_root,
     },
     sharing::canonical_trustee_point,
-    vss::carry_aware_vss_share_relation_profile_hash,
 };
 
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
@@ -42,7 +41,7 @@ const THRESHOLD_SHARE_RECIPIENT_COMMITMENT_OBJECT_TYPE: &str = "TrusteeThreshold
 const THRESHOLD_SHARE_LIMB_COMMITMENT_OBJECT_TYPE: &str = "ThresholdShareCommitment";
 const THRESHOLD_SHARE_DERIVATION_RULE: &str =
     "sum-source-trustee-polynomial-commitments-at-trustee-point";
-const SETUP_TRANSPORT_PROFILE_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
+const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const VSS_MATERIAL_BINARY_OBJECT_TYPE: &str = "SetupTransportedVssCoefficientCommitmentMaterial";
@@ -125,7 +124,6 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
     Ok(json!({
         "ok": true,
         "operation": "deriveThresholdShareCommitments",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
         "participantCount": roster.participant_count,
@@ -196,7 +194,6 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
     Ok(json!({
         "ok": true,
         "operation": "deriveThresholdShareCommitmentsFromTransport",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
         "ringDegreeStatus": derivation.ring_degree_status,
@@ -205,7 +202,7 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         "thresholdDegree": roster.decryption_threshold,
         "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
         "transport": {
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+            "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": hashes.chunk_hashes.len(),
             "totalByteLength": hashes.total_byte_length,
@@ -277,11 +274,10 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
     Ok(json!({
         "ok": true,
         "operation": "beginThresholdShareCommitmentsFromTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "derivationId": derivation_id,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "transport": {
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
+            "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
             "chunkCount": transport_header.chunk_count,
             "totalByteLength": transport_header.total_byte_length,
@@ -302,7 +298,6 @@ pub(crate) fn abort_threshold_share_commitment_transport_derivation_stream_reque
     Ok(json!({
         "ok": true,
         "operation": "abortThresholdShareCommitmentsFromTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "derivationId": derivation_id,
         "aborted": aborted,
     }))
@@ -372,7 +367,6 @@ pub(crate) fn release_verified_transported_vss_material_request(
     Ok(json!({
         "ok": true,
         "operation": "releaseVerifiedTransportedVssMaterial",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "verificationId": verification_id,
         "released": released,
     }))
@@ -460,7 +454,7 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
         .map(|binding| binding.commitment.ring_degree)
         .ok_or_else(|| invalid_threshold_commitment_input("no coefficient commitments supplied"))?;
     let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-        "profile-ring"
+        "full-ring"
     } else {
         "development-reduced-ring"
     };

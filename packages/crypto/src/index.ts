@@ -22,14 +22,13 @@ export {
     createPrivateVssMailboxKeyPair,
     decryptPrivateVssMailboxEnvelope,
     encryptPrivateVssMailboxEnvelope,
-    privateVssMailboxEncryptionProfileId,
 } from './private-vss-mailbox.js';
 export {
     decryptLocalTrusteeState,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
-    localTrusteeSealedMaterialStorageProfileId,
-    localTrusteeStateStorageProfileId,
+    localTrusteeSealedMaterialStorageFormat,
+    localTrusteeStateStorageFormat,
 } from './local-trustee-state-storage.js';
 export type {
     PrivateVssEncryptedEnvelope,

@@ -18,15 +18,12 @@ pub(super) fn compare_context_fields(
     Ok(())
 }
 
-pub(super) fn setup_context_field_names() -> [&'static str; 8] {
+pub(super) fn setup_context_field_names() -> [&'static str; 5] {
     [
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ]
 }

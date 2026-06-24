@@ -30,16 +30,16 @@ describe('SDK bridge build helpers', () => {
     it('transpiles selected protocol runtime modules for SDK vendoring', () => {
         const outputText = transpileSdkInternalSource(
             `
-                import type { ThresholdProfile } from '@sealed-lattice/types';
+                import type { ThresholdParameters } from '@sealed-lattice/types';
 
-                export const isSupportedSafeRange = (profile: ThresholdProfile): boolean =>
-                    profile.rosterProfileKind === 'SupportedRosterRange';
+                export const isSupportedSafeRange = (parameters: ThresholdParameters): boolean =>
+                    parameters.rosterParametersKind === 'SupportedRosterRange';
             `,
             'packages/protocol/src/lifecycle/thresholds.ts',
         );
 
         expect(outputText).toContain('export const isSupportedSafeRange');
-        expect(outputText).not.toContain('ThresholdProfile');
+        expect(outputText).not.toContain('ThresholdParameters');
     });
 
     it('rewrites @sealed-lattice/types imports to a relative dist path', () => {

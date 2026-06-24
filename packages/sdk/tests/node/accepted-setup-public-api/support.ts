@@ -120,10 +120,7 @@ type SetupContextFixture = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: string;
     readonly rosterHash: string;
-    readonly setupProfileHash: string;
-    readonly qShareHash: string;
-    readonly carryAwareVssShareRelationProfileHash: string;
-    readonly commitmentProfileHash: string;
+    readonly setupParametersHash: string;
     readonly setupEpoch: string;
 }>;
 
@@ -142,17 +139,13 @@ export const hashFromKernel = (
 export const setupContextFromKernel = (
     kernel: TranscriptCoreKernel,
 ): SetupContextFixture => {
-    const profile = kernel.describeCollectiveBgvSetupProfile();
+    const parameters = kernel.describeCollectiveBgvSetupParameters();
 
     return {
         ceremonyId: 'ceremony-public-setup-api',
         manifestHash: hashFromKernel(kernel, 'manifest'),
         rosterHash: hashFromKernel(kernel, 'roster'),
-        setupProfileHash: profile.setupProfileHash,
-        qShareHash: profile.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            profile.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: profile.commitmentProfileHash,
+        setupParametersHash: parameters.setupParametersHash,
         setupEpoch: 'setup-epoch-1',
     } as const;
 };
@@ -163,11 +156,7 @@ export const contextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -187,7 +176,6 @@ export const participantCount = 2;
 export const vssFixtureRingDegree = 8;
 export const vssFixtureThresholdDegree = 2;
 export const setupTransportChunkSizeBytes = 1_048_576;
-const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const requiredGaloisKeySchedule = [
     {
         rotation: 3,
@@ -351,7 +339,6 @@ export const sameSecretProofMaterial = (
     const proofBytesHex = `aa55${proofRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
-        setupProofProfileId,
         proofFamily: 'same-secret-linkage-anchor',
         trusteeIdentity: statementRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
@@ -390,7 +377,6 @@ export const publicKeyShareSuccinctProofMaterial = (
     const proofBytesHex = `bb66${proofRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
-        setupProofProfileId,
         proofFamily: 'public-key-share',
         trusteeIdentity: proofRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
@@ -571,11 +557,11 @@ export const phaseTranscriptFixture = (
     kernel: TranscriptCoreKernel,
     setupContext: SetupContextFixture,
 ): readonly Record<string, unknown>[] => {
-    const profile = kernel.describeCollectiveBgvSetupProfile();
+    const parameters = kernel.describeCollectiveBgvSetupParameters();
     let previousPhaseRoot: string | null = null;
 
     return (
-        profile.phaseOrder as readonly {
+        parameters.phaseOrder as readonly {
             readonly phaseId: string;
             readonly phaseNumber: number;
         }[]

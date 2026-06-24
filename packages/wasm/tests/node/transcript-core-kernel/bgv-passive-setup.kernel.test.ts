@@ -19,19 +19,15 @@ describe('BGV passive passive BGV setup kernel commands', () => {
     it('describes the frozen passive setup object model', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
-            readonly setupProfileId: string;
             readonly reservedRootsAndHashes: readonly string[];
         };
 
-        expect(objectModel.setupProfileId).toBe(
-            'sealed-lattice-bgv-rns-passive-full-roster-setup-v1',
-        );
         expect(objectModel.reservedRootsAndHashes).toEqual(
             expect.arrayContaining([
                 'BGVPassiveSetupPackageHash',
                 'CollectiveSecretDistributionCertificateHash',
                 'BGVPublicCommonRandomPolynomialRoot',
-                'EvaluationKeySizeProfileHash',
+                'EvaluationKeySizeParametersHash',
                 'ThresholdShareVerificationKeyRoot',
             ]),
         );
@@ -56,10 +52,10 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
         expect(
-            setup.targetDecryptionStatus.targetDecryptionProfileHash,
+            setup.targetDecryptionStatus.targetDecryptionParametersHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
-            setup.targetDecryptionStatus.targetDecryptionProfileBindingHash,
+            setup.targetDecryptionStatus.targetDecryptionParametersBindingHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
@@ -447,7 +443,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             const mutatedSetup = structuredClone(setup);
             setPathValue(
                 mutatedSetup,
-                ['profileBindings', fieldName],
+                ['parameterBindings', fieldName],
                 validHash('8'),
             );
             expectReboundSetupPackageToBeRejected(kernel, mutatedSetup);

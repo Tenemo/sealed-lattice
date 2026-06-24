@@ -187,13 +187,7 @@ fn verify_phase_object_binding(
         ("ceremonyId", "ceremonyId"),
         ("manifestHash", "manifestHash"),
         ("rosterHash", "rosterHash"),
-        ("setupProfileHash", "setupProfileHash"),
-        ("qShareHash", "qShareHash"),
-        (
-            "carryAwareVssShareRelationProfileHash",
-            "carryAwareVssShareRelationProfileHash",
-        ),
-        ("commitmentProfileHash", "commitmentProfileHash"),
+        ("setupParametersHash", "setupParametersHash"),
         ("setupEpoch", "setupEpoch"),
     ] {
         let Some(phase_binding) = phase_value.get(field_name) else {
@@ -377,7 +371,7 @@ fn verify_participant_phase_object(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if participant_phase_object.get(field_name) != setup_context.get(field_name) {
@@ -436,8 +430,8 @@ fn verify_participant_phase_object(
     if roster_position >= roster.participant_count {
         return Ok(Some(phase_refusal(
             phase_identifier,
-            "phaseRosterPositionOutsideProfile",
-            "participant phase object rosterPosition is outside the first accepted profile",
+            "phaseRosterPositionOutsideParameters",
+            "participant phase object rosterPosition is outside the first accepted roster",
             format!("setupPackage.phaseTranscript.{phase_identifier}.participantPhaseObjects"),
         )?));
     }
@@ -742,8 +736,7 @@ fn phase_participant_payload_value(
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,
-        "setupProfileHash": setup_context_string(setup_context, "setupProfileHash")?,
-        "commitmentProfileHash": setup_context_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
         "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
         "signerRole": "Trustee",
         "trusteeIdentity": trustee_identity,
@@ -780,16 +773,7 @@ fn phase_signature_context_hash(
             "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
             "manifestHash": setup_context_string(setup_context, "manifestHash")?,
             "rosterHash": setup_context_string(setup_context, "rosterHash")?,
-            "setupProfileHash": setup_context_string(setup_context, "setupProfileHash")?,
-            "qShareHash": setup_context_string(setup_context, "qShareHash")?,
-            "carryAwareVssShareRelationProfileHash": setup_context_string(
-                setup_context,
-                "carryAwareVssShareRelationProfileHash",
-            )?,
-            "commitmentProfileHash": setup_context_string(
-                setup_context,
-                "commitmentProfileHash",
-            )?,
+            "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
             "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
             "trusteeIdentity": trustee_identity,
             "rosterPosition": roster_position,
@@ -962,7 +946,7 @@ pub(super) fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Opt
             Vec::new(),
             vec![Refusal::new(
                 "validComplaintPresent",
-                "a complaint aborts the first accepted setup profile",
+                "a complaint aborts the first accepted setup parameters",
                 "setupPackage.complaints".to_string(),
             )],
             Vec::new(),
@@ -979,7 +963,7 @@ pub(super) fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Opt
             Vec::new(),
             vec![Refusal::new(
                 "abortRecordPresent",
-                "an abort record prevents first-profile setup acceptance",
+                "an abort record prevents first-roster setup acceptance",
                 "setupPackage.abortRecords".to_string(),
             )],
             Vec::new(),

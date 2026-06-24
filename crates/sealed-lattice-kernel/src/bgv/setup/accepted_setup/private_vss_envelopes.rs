@@ -188,7 +188,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
     {
         return Ok(Some(private_vss_envelope_refusal(
             "privateVssEnvelopeParticipantCountMismatch",
-            "privateVssEnvelopeCommitments.participantCount must match the accepted setup profile",
+            "privateVssEnvelopeCommitments.participantCount must match the accepted setup parameters",
             "setupPackage.privateVssEnvelopeCommitments.participantCount",
         )?));
     }
@@ -340,10 +340,7 @@ fn verify_private_vss_envelope_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if value.get(field_name) != setup_context.get(field_name) {
@@ -1126,13 +1123,7 @@ fn private_vss_envelope_aad_value(
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,
-        "setupProfileHash": setup_context_string(setup_context, "setupProfileHash")?,
-        "qShareHash": setup_context_string(setup_context, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": setup_context_string(
-            setup_context,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": setup_context_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
         "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
         "phaseOrderHash": phase_order_hash()?,
         "publicMatrixSeedHash": public_matrix_seed_hash,

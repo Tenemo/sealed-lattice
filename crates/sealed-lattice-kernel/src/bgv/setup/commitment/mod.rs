@@ -10,27 +10,27 @@ use crate::{
         coefficient_codec::coefficient_vector_hash512,
         modular_arithmetic::{add_mod_fast, mul_mod_fast},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{derive_protocol_hash, hash512},
 };
 
-use super::{accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID, sampling::reduce_unbiased_u64};
+use super::sampling::reduce_unbiased_u64;
 
 mod algebra;
+mod commitment_parameters;
 mod computation;
 mod matrix;
 mod opening;
-mod profile;
 mod serialization;
 mod validation;
 
 pub(super) use algebra::*;
+pub(super) use commitment_parameters::*;
 pub(super) use matrix::*;
 #[cfg(test)]
 pub(super) use opening::*;
-pub(super) use profile::*;
 pub(super) use serialization::*;
 
 pub(crate) use computation::compute_setup_commitment_from_opening_request;
@@ -89,14 +89,14 @@ mod tests {
         SETUP_COMMITMENT_RANDOMNESS_WIDTH, compute_setup_commitment_for_degree,
         compute_setup_commitment_from_opening_request,
         compute_setup_signed_lifted_commitment_for_degree,
-        setup_coefficient_fits_commitment_modulus_product, setup_commitment_profile_hash,
-        setup_commitment_profile_value, setup_commitment_root, verify_setup_commitment_opening,
+        setup_coefficient_fits_commitment_modulus_product, setup_commitment_parameters_value,
+        setup_commitment_root, verify_setup_commitment_opening,
         verify_setup_lifted_commitment_opening, verify_setup_signed_lifted_commitment_opening,
     };
     use crate::{
         bgv::{
             modular_arithmetic::{add_mod_fast, mul_mod_fast},
-            profile::DATA_PRIMES,
+            parameters::DATA_PRIMES,
         },
         encoding::CanonicalResult,
     };
@@ -104,27 +104,26 @@ mod tests {
     const TEST_RING_DEGREE: usize = 8;
 
     #[test]
-    fn commitment_profile_binds_crt_lifted_message_space() {
-        let profile = setup_commitment_profile_value().expect("profile");
+    fn commitment_parameters_bind_crt_lifted_message_space() {
+        let commitment_parameters = setup_commitment_parameters_value().expect("parameters");
 
-        assert_eq!(profile["objectType"], "BdlopCommitmentProfile");
+        assert_eq!(commitment_parameters["objectType"], "BdlopCommitment");
         assert_eq!(
-            profile["messageEncoding"]["integerEncoding"],
+            commitment_parameters["messageEncoding"]["integerEncoding"],
             "crt-lifted-integer-coefficients"
         );
         assert_eq!(
-            profile["matrixShape"]["moduleRank"],
+            commitment_parameters["matrixShape"]["moduleRank"],
             SETUP_COMMITMENT_MODULE_RANK
         );
         assert!(
-            profile["messageEncoding"]["commitmentModulusProductDecimal"]
+            commitment_parameters["messageEncoding"]["commitmentModulusProductDecimal"]
                 .as_str()
                 .expect("product decimal")
                 .parse::<BigUint>()
                 .expect("product should parse")
                 > BigUint::from(DATA_PRIMES[0]) * BigUint::from(1000_u16)
         );
-        assert_eq!(setup_commitment_profile_hash().expect("hash").len(), 128);
     }
 
     #[test]

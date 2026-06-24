@@ -1,13 +1,12 @@
 import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
 import {
-    ballotValidityProofProfileId,
-    bgvPassiveSetupProfileId,
-    directComparisonProfileId,
-    encryptedBallotAggregateProfileId,
-    encryptedBallotLayoutProfileId,
-    evaluatorReplayProfileId,
-    mobileProfileId,
-    targetDecryptionProfileId,
+    ballotValidityProofId,
+    directComparisonId,
+    encryptedBallotAggregateId,
+    encryptedBallotLayoutId,
+    evaluatorReplayId,
+    mobileRuntimeId,
+    targetDecryptionId,
 } from '@sealed-lattice/types';
 import type {
     ElectionManifest,
@@ -39,50 +38,40 @@ import {
 // Exact-schema lock: the manifest's opaque bindings must carry precisely this
 // set of field names or it fails closed.
 const manifestOpaqueBindingFieldNames = new Set([
-    'bgvPassiveSetupProfileId',
-    'encryptedBallotLayoutProfileId',
-    'ballotValidityProofProfileId',
-    'encryptedBallotAggregateProfileId',
-    'evaluatorReplayProfileId',
-    'directComparisonProfileId',
-    'targetDecryptionProfileId',
-    'mobileProfileId',
+    'encryptedBallotLayoutId',
+    'ballotValidityProofId',
+    'encryptedBallotAggregateId',
+    'evaluatorReplayId',
+    'directComparisonId',
+    'targetDecryptionId',
+    'mobileRuntimeId',
     'heParamHash',
     'bgvPassiveSetupPackageHash',
     'bgvSetupParameterCertificateHash',
-    'bgvProfileHash',
-    'rustBgvBackendProfileHash',
+    'bgvParametersHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
     'collectiveSecretDistributionCertificateHash',
     'errorDistributionCertificateHash',
     'keySwitchDecompositionHash',
-    'canonicalCiphertextConventionHash',
-    'bgvBatchEncoderHash',
-    'encryptedBallotLayoutHash',
-    'ballotValidityProofProfileHash',
-    'encryptedBallotAggregateProfileHash',
-    'encryptedBallotAggregateLayoutHash',
-    'directAggregateLayoutHash',
+    'ballotValidityProofParametersHash',
     'comparisonInputDerivationCircuitHash',
     'encryptedComparisonInputHash',
     'encryptedSparseTargetProjectionHash',
     'targetLayoutHash',
-    'evaluatorReplayProfileHash',
-    'directComparisonProfileHash',
-    'evaluationNoiseProfileHash',
+    'evaluatorReplayParametersHash',
+    'evaluationNoiseParametersHash',
     'heEvaluationNoiseCertHash',
-    'allowedEvaluatorOpsHash',
     'rotSetHash',
     'evaluationKeyRoot',
-    'evaluationKeySizeProfileHash',
+    'evaluationKeySizeParametersHash',
     'thresholdShareVerificationKeyRoot',
     'thresholdShareVerificationKeyHash',
     'trusteeThresholdVerificationKeyHash',
-    'targetDecryptionProfileHash',
+    'targetDecryptionParametersHash',
     'targetThresholdDecryptabilityCertificateHash',
     'targetBasisHash',
-    'mobileProfileHash',
+    'mobileRuntimeParametersHash',
 ]);
 
 const manifestOpaqueBindingFieldCount = manifestOpaqueBindingFieldNames.size;
@@ -94,22 +83,18 @@ const collectManifestOpaqueBindingRefusals = (
     const bindings = manifest.manifestOpaqueBindings;
 
     if (
-        bindings.bgvPassiveSetupProfileId !== bgvPassiveSetupProfileId ||
-        bindings.encryptedBallotLayoutProfileId !==
-            encryptedBallotLayoutProfileId ||
-        bindings.ballotValidityProofProfileId !==
-            ballotValidityProofProfileId ||
-        bindings.encryptedBallotAggregateProfileId !==
-            encryptedBallotAggregateProfileId ||
-        bindings.evaluatorReplayProfileId !== evaluatorReplayProfileId ||
-        bindings.directComparisonProfileId !== directComparisonProfileId ||
-        bindings.targetDecryptionProfileId !== targetDecryptionProfileId ||
-        bindings.mobileProfileId !== mobileProfileId
+        bindings.encryptedBallotLayoutId !== encryptedBallotLayoutId ||
+        bindings.ballotValidityProofId !== ballotValidityProofId ||
+        bindings.encryptedBallotAggregateId !== encryptedBallotAggregateId ||
+        bindings.evaluatorReplayId !== evaluatorReplayId ||
+        bindings.directComparisonId !== directComparisonId ||
+        bindings.targetDecryptionId !== targetDecryptionId ||
+        bindings.mobileRuntimeId !== mobileRuntimeId
     ) {
         refusedObjects.push(
             createRefusal(
                 'ManifestHashMismatch',
-                'Election manifest must bind the fixed direct encrypted ballot, evaluator replay, target decryption, and mobile profile identifiers.',
+                'Election manifest must bind the fixed direct encrypted ballot, evaluator replay, target decryption, and mobile runtime identifiers.',
                 manifest.electionManifestHash,
                 'ElectionManifest',
             ),
@@ -139,39 +124,30 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.heParamHash,
         bindings.bgvPassiveSetupPackageHash,
         bindings.bgvSetupParameterCertificateHash,
-        bindings.bgvProfileHash,
-        bindings.rustBgvBackendProfileHash,
+        bindings.bgvParametersHash,
         bindings.bgvPublicKeyRoot,
         bindings.collectivePublicKeyRoot,
         bindings.collectiveSecretDistributionCertificateHash,
         bindings.errorDistributionCertificateHash,
         bindings.keySwitchDecompositionHash,
-        bindings.canonicalCiphertextConventionHash,
-        bindings.bgvBatchEncoderHash,
-        bindings.encryptedBallotLayoutHash,
-        bindings.ballotValidityProofProfileHash,
-        bindings.encryptedBallotAggregateProfileHash,
-        bindings.encryptedBallotAggregateLayoutHash,
-        bindings.directAggregateLayoutHash,
+        bindings.ballotValidityProofParametersHash,
         bindings.comparisonInputDerivationCircuitHash,
         bindings.encryptedComparisonInputHash,
         bindings.encryptedSparseTargetProjectionHash,
         bindings.targetLayoutHash,
-        bindings.evaluatorReplayProfileHash,
-        bindings.directComparisonProfileHash,
-        bindings.evaluationNoiseProfileHash,
+        bindings.evaluatorReplayParametersHash,
+        bindings.evaluationNoiseParametersHash,
         bindings.heEvaluationNoiseCertHash,
-        bindings.allowedEvaluatorOpsHash,
         bindings.rotSetHash,
         bindings.evaluationKeyRoot,
-        bindings.evaluationKeySizeProfileHash,
+        bindings.evaluationKeySizeParametersHash,
         bindings.thresholdShareVerificationKeyRoot,
         bindings.thresholdShareVerificationKeyHash,
         bindings.trusteeThresholdVerificationKeyHash,
-        bindings.targetDecryptionProfileHash,
+        bindings.targetDecryptionParametersHash,
         bindings.targetThresholdDecryptabilityCertificateHash,
         bindings.targetBasisHash,
-        bindings.mobileProfileHash,
+        bindings.mobileRuntimeParametersHash,
     ];
 
     if (
@@ -180,7 +156,7 @@ const collectManifestOpaqueBindingRefusals = (
         refusedObjects.push(
             createRefusal(
                 'ManifestHashMismatch',
-                'Election manifest opaque bindings must include canonical downstream profile and certificate Hashes.',
+                'Election manifest opaque bindings must include canonical downstream parameters and certificate Hashes.',
                 manifest.electionManifestHash,
                 'ElectionManifest',
             ),
@@ -284,7 +260,7 @@ export const verifyTrusteeSetupEntry = (
     const expectedHash = deriveTrusteeSetupEntryHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
-        bgvProfileHash: entry.bgvProfileHash,
+        bgvParametersHash: entry.bgvParametersHash,
         collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
@@ -295,9 +271,7 @@ export const verifyTrusteeSetupEntry = (
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
         rotSetHash: entry.rotSetHash,
-        rustBgvBackendProfileHash: entry.rustBgvBackendProfileHash,
-        setupProfileId: entry.setupProfileId,
-        targetDecryptionProfileId: entry.targetDecryptionProfileId,
+        targetDecryptionId: entry.targetDecryptionId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
         trusteeThresholdVerificationKeyHash:
@@ -319,8 +293,7 @@ export const verifyTrusteeSetupEntry = (
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
         entry.objectVersion !== 1 ||
-        entry.setupProfileId !== bgvPassiveSetupProfileId ||
-        entry.targetDecryptionProfileId !== targetDecryptionProfileId ||
+        entry.targetDecryptionId !== targetDecryptionId ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||
@@ -337,8 +310,7 @@ export const verifyTrusteeSetupEntry = (
     }
     const requiredSetupHashes = [
         entry.trusteeSetupRoot,
-        entry.bgvProfileHash,
-        entry.rustBgvBackendProfileHash,
+        entry.bgvParametersHash,
         entry.participantSetupRecordHash,
         entry.publicKeyShareRoot,
         entry.collectivePublicKeyRoot,
@@ -363,9 +335,7 @@ export const verifyTrusteeSetupEntry = (
     }
     const manifestBindings = input.electionManifest.manifestOpaqueBindings;
     if (
-        entry.bgvProfileHash !== manifestBindings.bgvProfileHash ||
-        entry.rustBgvBackendProfileHash !==
-            manifestBindings.rustBgvBackendProfileHash ||
+        entry.bgvParametersHash !== manifestBindings.bgvParametersHash ||
         entry.collectivePublicKeyRoot !==
             manifestBindings.collectivePublicKeyRoot ||
         entry.thresholdShareVerificationKeyRoot !==
@@ -450,7 +420,7 @@ export const verifyManifest = (
         objectVersion: manifest.objectVersion,
         pollSpecHash: manifest.pollSpecHash,
         rosterHash: manifest.rosterHash,
-        thresholdProfileHash: manifest.thresholdProfileHash,
+        thresholdParametersHash: manifest.thresholdParametersHash,
     });
 
     if (manifest.electionManifestHash !== expectedHash) {

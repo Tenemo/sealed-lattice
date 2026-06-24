@@ -256,7 +256,7 @@ pub(super) fn threshold_limb_commitment_root_payload(
         "rnsPrime": threshold_limb.rns_prime,
         "ringDegree": threshold_limb.commitment.ring_degree,
         "ringDegreeStatus": if threshold_limb.commitment.ring_degree == POLYNOMIAL_DEGREE {
-            "profile-ring"
+            "full-ring"
         } else {
             "development-reduced-ring"
         },
@@ -331,7 +331,6 @@ pub(super) fn transported_vss_material_set_value(
     let mut material_set = json!({
         "objectType": "VssCoefficientCommitmentMaterialSet",
         "objectVersion": 1,
-        "commitmentProfileHash": setup_commitment_profile_hash()?,
         "materialEncoding": "binary-chunked-full-public-setup-commitment-values",
         "binaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "publicMatrixSeedHash": public_matrix_seed_hash,

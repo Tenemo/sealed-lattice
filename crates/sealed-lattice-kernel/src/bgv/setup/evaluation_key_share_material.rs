@@ -45,7 +45,7 @@ use crate::{
     bgv::coefficient_codec::{
         coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
     },
-    bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint},
     hashing::{derive_protocol_hash, hash512_hex},
 };

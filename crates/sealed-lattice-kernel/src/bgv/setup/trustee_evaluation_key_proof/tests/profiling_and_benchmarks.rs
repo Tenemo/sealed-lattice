@@ -164,7 +164,7 @@ fn analyze_proof_size(
 // A statement carrying only the shape the size analyzer reads (key kinds and
 // levels, ring degree, and the linkage commitment count). Component vectors and
 // commitment contents are left empty because `LimbColumnLayout` never reads
-// them, so the full-profile shape can be analyzed at the production ring degree
+// them, so the full parameter-set shape can be analyzed at the production ring degree
 // without running the prover or allocating witness material.
 fn shape_only_trustee_statement(
     schedule: &[(EvaluationKeyShareKind, usize)],
@@ -214,10 +214,10 @@ fn shape_only_trustee_statement(
     }
 }
 
-// The frozen first-profile evaluation-key schedule shape: relinearization round
+// The frozen first-roster evaluation-key schedule shape: relinearization round
 // one and round two plus the deduplicated Galois rotation basis, every key at
 // the selected evaluator working level (mirrors `selected_rotation_schedule_entries`).
-fn full_profile_schedule_shape() -> Vec<(EvaluationKeyShareKind, usize)> {
+fn full_schedule_shape() -> Vec<(EvaluationKeyShareKind, usize)> {
     let level = SELECTED_EVALUATOR_WORKING_LEVEL;
     let mut schedule = vec![
         (EvaluationKeyShareKind::RelinearizationRoundOne, level),
@@ -334,14 +334,14 @@ fn profile_trustee_proof_size_breakdown() {
         100.0 * batched_node_ratio,
     );
 
-    // Full first-profile shape at the production ring degree. The analyzer gives
+    // Full first-roster shape at the production ring degree. The analyzer gives
     // the exact independent-path (post lever 1) size; the batched size is
     // estimated by scaling its path bytes by the measured node ratio. The
     // measurement ring is one binary level shallower than full size, and deeper
     // trees share proportionally fewer interior nodes (only the top log2(leaves)
     // levels overlap), so the true full-size batched total is marginally above
     // this estimate; the gate run records the exact value.
-    let schedule = full_profile_schedule_shape();
+    let schedule = full_schedule_shape();
     let linkage_commitment_count = schedule
         .iter()
         .map(|(_, level)| level + 1)

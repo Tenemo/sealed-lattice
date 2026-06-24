@@ -1,4 +1,4 @@
-import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
+import { canonicalJson } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { RequiredGaloisKeyScheduleEntry } from '../evaluator-key-schedule.js';
@@ -58,12 +58,6 @@ const assertPhaseTranscript = (
 const assertCommonBindings = (input: SetupPackageInput): void => {
     assertContext(input.setupContext);
     assertObjectType(input.qShare, 'qShare', 'QSharePrimeList');
-    if (
-        deriveProtocolHash('QSharePrimeListHash', input.qShare) !==
-        input.setupContext.qShareHash
-    ) {
-        throw new Error('qShare must match setupContext.qShareHash.');
-    }
     assertPhaseTranscript(input.setupContext, input.phaseTranscript);
     assertObjectType(
         input.commonRandomness,
@@ -270,7 +264,7 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
         publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            'commonRandomness.publicDerivations must match the accepted setup public derivation profile.',
+            'commonRandomness.publicDerivations must match the accepted setup public derivation parameters.',
         );
     }
 

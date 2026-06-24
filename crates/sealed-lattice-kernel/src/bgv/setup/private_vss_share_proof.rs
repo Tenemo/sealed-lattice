@@ -1,14 +1,14 @@
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::{derive_protocol_hash, to_hex},
     transcript_core::decode_hex,
 };
 
 use super::{
-    accepted_setup::{COLLECTIVE_BGV_SETUP_PROFILE_ID, setup_proof_profile_hash},
+    accepted_setup::setup_parameters_hash,
     commitment::{SETUP_COMMITMENT_RANDOMNESS_WIDTH, SetupCommitmentValue, setup_commitment_root},
     setup_proof::{
         SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -176,7 +176,7 @@ fn validate_private_vss_share_statement_material(
         || input.share_values.len() != input.ring_degree
     {
         return Err(invalid_private_vss_share_proof(
-            "private VSS share proof ring degree is outside the selected profile",
+            "private VSS share proof ring degree is outside the selected parameters",
         ));
     }
     if input
@@ -383,7 +383,7 @@ fn verify_private_vss_share_succinct_proof_transport_reference(
 ) -> CanonicalResult<()> {
     if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(invalid_private_vss_share_proof(
-            "private VSS share proofChunkSizeBytes must match the setup proof transport profile",
+            "private VSS share proofChunkSizeBytes must match the setup proof transport parameters",
         ));
     }
     let expected_chunk_count =
@@ -553,7 +553,7 @@ fn verify_transported_private_vss_share_proof_material_header(
 fn transported_private_vss_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
     if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(invalid_private_vss_share_proof(
-            "transported private VSS share proof material chunkSizeBytes must match the setup proof transport profile",
+            "transported private VSS share proof material chunkSizeBytes must match the setup proof transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
@@ -698,10 +698,8 @@ fn private_vss_share_succinct_statement_value(
             })
         })
         .collect::<Vec<_>>();
-    let setup_proof_binding = super::setup_proof::setup_proof_record_binding_value(
-        COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        &setup_proof_profile_hash()?,
-    )?;
+    let setup_proof_binding =
+        super::setup_proof::setup_proof_record_binding_value(&setup_parameters_hash()?)?;
     let carry_bound = private_vss_share_lifted_carry_bound(
         input.recipient_roster_position,
         input.coefficient_commitments.len(),

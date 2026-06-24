@@ -15,8 +15,7 @@ import {
 } from './binary-transport.js';
 import { computeSetupCommitmentWithKernel } from './commitment-values.js';
 import {
-    acceptedBgvProfileRingDegree,
-    setupCommitmentProfileId,
+    acceptedBgvFullRingDegree,
     setupTransportChunkSizeBytes,
     type BinaryChunkedVssCoefficientCommitmentBundle,
     type StreamingBinaryChunkedVssCoefficientCommitmentBundle,
@@ -427,7 +426,6 @@ export const createVssCoefficientCommitmentBundle = (
         objectType: 'VssCoefficientCommitmentMaterialSet',
         objectVersion: 1,
         ...context,
-        commitmentProfileId: setupCommitmentProfileId,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot:
             commitmentSet.vssCoefficientCommitmentRoot,
@@ -437,8 +435,8 @@ export const createVssCoefficientCommitmentBundle = (
         rnsLimbCount: input.qSharePrimes.length,
         ringDegree: input.ringDegree,
         ringDegreeStatus:
-            input.ringDegree === acceptedBgvProfileRingDegree
-                ? 'profile-ring'
+            input.ringDegree === acceptedBgvFullRingDegree
+                ? 'full-ring'
                 : 'development-reduced-ring',
         materialRecordCount: coefficientCommitmentMaterial.length,
         coefficientCommitments: coefficientCommitmentMaterial,

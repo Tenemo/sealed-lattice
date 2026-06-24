@@ -5,10 +5,7 @@ import type {
     PublicKeyShareProofSet,
     PublicKeyShareSet,
 } from './public-key-share-records.js';
-import {
-    setupProofProfileId,
-    type SameSecretConsistencyStatementSet,
-} from './same-secret-consistency-records.js';
+import type { SameSecretConsistencyStatementSet } from './same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -33,8 +30,8 @@ export type RequiredGaloisSet = Readonly<
     JsonRecord & {
         readonly objectType: 'RequiredGaloisSet';
         readonly objectVersion: 1;
-        readonly evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay';
-        readonly packingProfile: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
+        readonly evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay';
+        readonly packingScheme: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly rnsLimbCount: number;
         readonly entries: readonly RequiredGaloisKeyScheduleEntry[];
     }
@@ -44,8 +41,6 @@ export type EvaluatorKeySchedule = Readonly<
     JsonRecord & {
         readonly objectType: 'EvaluatorKeySchedule';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -80,10 +75,7 @@ const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -125,11 +117,7 @@ const contextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -188,8 +176,8 @@ export const createRequiredGaloisSet = (
     return {
         objectType: 'RequiredGaloisSet',
         objectVersion: 1,
-        evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay',
-        packingProfile:
+        evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay',
+        packingScheme:
             'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing',
         rnsLimbCount,
         entries: validateRequiredGaloisSchedule(entries),
@@ -281,8 +269,6 @@ export const createEvaluatorKeySchedule = (
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount,

@@ -9,9 +9,8 @@ use crate::{
             forward_negacyclic_ntt, forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt,
             inverse_negacyclic_ntt_in_place,
         },
-        profile::{
-            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE,
-            encrypted_ballot_aggregate_layout_hash,
+        parameters::{
+            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
         },
         rns::RnsPolynomial,
         serialization::{
@@ -537,7 +536,7 @@ mod tests {
         BgvPublicKey, Ciphertext, DevelopmentBgvKey, ciphertext_add, ciphertext_negate,
         ciphertext_sub, ciphertext_tensor, modulus_switch, plaintext_mul, scalar_mul,
     };
-    use crate::bgv::profile::PLAINTEXT_MODULUS;
+    use crate::bgv::parameters::PLAINTEXT_MODULUS;
 
     use std::sync::OnceLock;
 

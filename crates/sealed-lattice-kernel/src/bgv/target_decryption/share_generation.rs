@@ -4,7 +4,7 @@ pub(super) fn generate_target_decryption_share(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
+    target_share_parameters: &TargetShareParameters,
     participant: &ParticipantBinding,
     evaluator_key: &DevelopmentBgvKey,
     private_setup_seed: &str,
@@ -13,10 +13,10 @@ pub(super) fn generate_target_decryption_share(
     let secret_share = derive_threshold_secret_share_by_limb(
         evaluator_key,
         &setup_binding.setup_package_hash,
-        &target_share_profile.hash,
+        &target_share_parameters.hash,
         private_setup_seed,
         participant.interpolation_point,
-        target_share_profile.minimum_shares_for_interpolation,
+        target_share_parameters.minimum_shares_for_interpolation,
         level,
     )?;
     let target_id_partials =
@@ -29,7 +29,7 @@ pub(super) fn generate_target_decryption_share(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
+        target_share_parameters,
         participant,
         &share_root,
     );
@@ -61,9 +61,9 @@ pub(super) fn generate_target_decryption_share(
         "targetCiphertextBindingHash": target_ciphertexts.target_ciphertext_binding_hash,
         "targetIdRoot": target_ciphertexts.target_id_root,
         "targetOrderRoot": target_ciphertexts.target_order_root,
-        "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
-        "targetShareProfileHash": target_share_profile.hash,
+        "targetDecryptionParametersHash": target_accepted.target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": setup_binding.target_decryption_parameters_binding_hash,
+        "targetShareParametersHash": target_share_parameters.hash,
         "targetBasisHash": target_accepted.target_basis_hash,
         "thresholdShareVerificationKeyRoot": setup_binding.threshold_verification.threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": setup_binding.threshold_verification.threshold_share_verification_key_hash,
@@ -76,7 +76,7 @@ pub(super) fn generate_target_decryption_share(
 pub(super) fn derive_threshold_secret_share_by_limb(
     evaluator_key: &DevelopmentBgvKey,
     setup_package_hash: &str,
-    target_share_profile_hash: &str,
+    target_share_parameters_hash: &str,
     private_setup_seed: &str,
     interpolation_point: u64,
     minimum_shares_for_interpolation: usize,
@@ -93,7 +93,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
                 derive_threshold_secret_share_limb(
                     secret,
                     setup_package_hash,
-                    target_share_profile_hash,
+                    target_share_parameters_hash,
                     private_setup_seed,
                     interpolation_point,
                     minimum_shares_for_interpolation,
@@ -112,7 +112,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
                 derive_threshold_secret_share_limb(
                     secret,
                     setup_package_hash,
-                    target_share_profile_hash,
+                    target_share_parameters_hash,
                     private_setup_seed,
                     interpolation_point,
                     minimum_shares_for_interpolation,
@@ -129,7 +129,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
     setup_package_hash: &str,
-    target_share_profile_hash: &str,
+    target_share_parameters_hash: &str,
     private_setup_seed: &str,
     interpolation_point: u64,
     minimum_shares_for_interpolation: usize,
@@ -151,7 +151,7 @@ pub(super) fn derive_threshold_secret_share_limb(
             &[
                 private_setup_seed.as_bytes(),
                 setup_package_hash.as_bytes(),
-                target_share_profile_hash.as_bytes(),
+                target_share_parameters_hash.as_bytes(),
                 &limb_index_bytes,
                 &modulus_bytes,
                 &degree_bytes,
@@ -168,7 +168,7 @@ pub(super) fn derive_threshold_secret_share_limb(
     Ok(share)
 }
 
-// PROTOTYPE GAP (labeled, not a hidden flaw): partial shares are released as bare c1*s_i with no smudging / noise-flooding term. Threshold-BGV simulation security requires adding flooding noise E_i super-polynomially larger than the decryption noise; without it the released shares leak c1*s_i exactly. There is no producer-set flag gating this path; read_setup_binding in bindings.rs accepts the setup package by recomputed profile-binding hashes and roots alone, and the gap is disclosed only in prose, not in any bound status field. The C1-C4 smudging/noise closure is the open work.
+// PROTOTYPE GAP (labeled, not a hidden flaw): partial shares are released as bare c1*s_i with no smudging / noise-flooding term. Threshold-BGV simulation security requires adding flooding noise E_i super-polynomially larger than the decryption noise; without it the released shares leak c1*s_i exactly. There is no producer-set flag gating this path; read_setup_binding in bindings.rs accepts the setup package by recomputed parameter-binding hashes and roots alone, and the gap is disclosed only in prose, not in any bound status field. The C1-C4 smudging/noise closure is the open work.
 pub(super) fn partial_decryption_by_limb(
     ciphertext: &Ciphertext,
     secret_share_by_limb: &[Vec<u64>],

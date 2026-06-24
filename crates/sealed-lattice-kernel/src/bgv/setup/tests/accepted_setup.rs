@@ -32,7 +32,7 @@ use self::material_transport_fixtures::{
     transported_material_value, vss_material_binary_total_byte_length,
 };
 use self::package_fixtures::{
-    TerminalProfileRingSetupPackageFixture, accepted_vss_coefficient_message_fixture,
+    TerminalFullRingSetupPackageFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
     collective_public_key_bearing_collective_setup_package, minimal_collective_setup_package,
     public_key_share_succinct_proof_bearing_collective_setup_package,
@@ -40,7 +40,7 @@ use self::package_fixtures::{
     same_secret_proof_bearing_collective_setup_package, setup_transport_certificate_fixture,
     setup_transport_certificate_for_transported_vss_material,
     setup_transport_chunk_manifest_root_fixture,
-    terminal_profile_ring_minimal_collective_setup_package_fixture, vss_complaints_object,
+    terminal_full_ring_minimal_collective_setup_package_fixture, vss_complaints_object,
 };
 use self::proof_record_fixtures::{
     EvaluationKeyShareFixtureMaterial, RelinearizationKeyShareRoundsFixture,
@@ -97,7 +97,7 @@ use super::super::accepted_setup::{
     setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
     stored_verified_trustee_evaluation_key_proof_material_chunks_for_test,
     trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
-    verify_collective_bgv_setup_package, verify_profile_ring_material,
+    verify_collective_bgv_setup_package, verify_full_ring_material,
     verify_required_public_evaluation_key_set_for_test,
     verify_setup_key_correctness_certificate_for_test, verify_terminal_setup_transport_policy,
 };
@@ -234,7 +234,7 @@ fn set_first_masked_consistency_claim_to_noncanonical_modulus(proof_bytes: &mut 
     // Limb zero's claims live mod DATA_PRIMES[0]; writing that modulus as the
     // residue is noncanonical, since a residue must be strictly below it.
     proof_bytes[FIRST_MASKED_CONSISTENCY_CLAIM_OFFSET..end].copy_from_slice(
-        &crate::bgv::profile::DATA_PRIMES[0].to_le_bytes()[..PROOF_CODEC_FIELD_RESIDUE_BYTES],
+        &crate::bgv::parameters::DATA_PRIMES[0].to_le_bytes()[..PROOF_CODEC_FIELD_RESIDUE_BYTES],
     );
 }
 

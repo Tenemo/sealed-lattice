@@ -216,7 +216,7 @@ pub(super) fn validate_matrix_coordinate(
     }
     if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
         return Err(invalid_commitment_input(
-            "commitment matrix modulus limb is outside the commitment profile",
+            "commitment matrix modulus limb is outside the commitment parameters",
         ));
     }
     if matrix_row_index >= SETUP_COMMITMENT_ROW_COUNT {

@@ -37,14 +37,10 @@ export type SetupContributionAssembly = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupContributionAssembly';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -79,10 +75,7 @@ const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -115,11 +108,7 @@ const setupContextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -383,7 +372,6 @@ export const createSetupContributionAssembly = (
     const assemblyWithoutRoot = {
         objectType: 'SetupContributionAssembly',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ...setupContextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,

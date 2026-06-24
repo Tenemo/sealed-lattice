@@ -110,7 +110,7 @@ fn verify_trustee_evaluation_key_proof_set(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trusteeEvaluationKeyProofs objectType and objectVersion must match the accepted profile",
+            "trusteeEvaluationKeyProofs objectType and objectVersion must match the accepted parameters",
         ));
     }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
@@ -124,7 +124,7 @@ fn verify_trustee_evaluation_key_proof_set(
     for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
             ));
         }
@@ -134,7 +134,7 @@ fn verify_trustee_evaluation_key_proof_set(
         != Some(expected_accounting_hash.as_str())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trusteeEvaluationKeyProofs.proofAccountingHash must pin the repo-owned succinct evaluation-key proof accounting",
         ));
     }
@@ -144,7 +144,7 @@ fn verify_trustee_evaluation_key_proof_set(
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
             ));
         }
@@ -203,7 +203,7 @@ fn verify_trustee_evaluation_key_proof_set(
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "trusteeEvaluationKeyProofs.{field_name} must match the accepted setup binding"
                 ),
@@ -221,7 +221,7 @@ fn verify_trustee_evaluation_key_proof_set(
             .and_then(Value::as_str)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot must bind the verified share-record container",
         ));
     }
@@ -252,7 +252,7 @@ fn verify_trustee_evaluation_key_proof_set(
             )?)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "trusteeEvaluationKeyProofs.galoisKeyShareBatchRoots must match the verified Galois batches",
             ));
         }
@@ -371,14 +371,14 @@ fn verify_trustee_evaluation_key_proof_record(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proof objectType and objectVersion must match the accepted profile",
+            "trustee evaluation-key proof objectType and objectVersion must match the accepted parameters",
         ));
     }
     verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
     for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("trustee evaluation-key proof {field_name} must be {expected_value}"),
             ));
         }
@@ -386,7 +386,7 @@ fn verify_trustee_evaluation_key_proof_record(
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     let Some(same_secret_binding) = same_secret_proof_bindings.get(&trustee_roster_position) else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key proof trusteeRosterPosition must reference an accepted same-secret proof",
         ));
     };
@@ -410,7 +410,7 @@ fn verify_trustee_evaluation_key_proof_record(
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "trustee evaluation-key proof {field_name} must match the accepted trustee secret binding"
                 ),
@@ -422,13 +422,13 @@ fn verify_trustee_evaluation_key_proof_record(
         != Some(expected_statement_hash.as_str())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
         ));
     }
     if proof_record.get("keyCount").and_then(Value::as_u64) != Some(statement.keys.len() as u64) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key proof keyCount must match the frozen key schedule",
         ));
     }
@@ -472,13 +472,13 @@ fn verify_trustee_evaluation_key_proof_record(
     Ok(())
 }
 
-// The accepted key-switch decomposition profile hash the proof context binds:
-// recomputed from the repo-owned decomposition profile, never read from the
+// The accepted key-switch decomposition hash the proof context binds:
+// recomputed from the repo-owned decomposition parameters, never read from the
 // package.
 pub(in crate::bgv::setup) fn accepted_key_switch_decomposition_hash() -> CanonicalResult<String> {
     derive_protocol_hash(
         "KeySwitchDecompositionHash",
-        &crate::bgv::setup::certificates::key_switch_decomposition_profile()?,
+        &crate::bgv::setup::certificates::key_switch_decomposition_parameters()?,
     )
 }
 
@@ -507,7 +507,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     let Some(same_secret_binding) = same_secret_proof_bindings.get(&inputs.trustee_roster_position)
     else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key statement requires an accepted same-secret proof binding",
         ));
     };
@@ -716,7 +716,7 @@ fn evaluation_key_descriptor_from_record(
     match ring_degree {
         Some(existing_ring_degree) if *existing_ring_degree != record_ring_degree => {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "evaluation-key share records must agree on one ring degree",
             ));
         }

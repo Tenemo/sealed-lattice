@@ -15,7 +15,7 @@ import {
     createProtocolSignatureFixture,
 } from '#packages/crypto/tests/support/protocol-signature-fixtures';
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
@@ -38,7 +38,7 @@ function commonRandomnessSignatureContextHash(input: {
             ceremonyId: input.payload.ceremonyId,
             manifestHash: input.payload.manifestHash,
             rosterHash: input.payload.rosterHash,
-            setupProfileHash: input.payload.setupProfileHash,
+            setupParametersHash: input.payload.setupParametersHash,
             setupEpoch: input.payload.setupEpoch,
             trusteeIdentity: input.payload.trusteeIdentity,
             rosterPosition: input.payload.rosterPosition,
@@ -87,7 +87,7 @@ function commonRandomnessSignatureEnvelope(input: {
 
 export function acceptedCommonRandomness(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
 ): JsonRecord {
     const commitRecords: JsonRecord[] = [];
     const revealRecords: JsonRecord[] = [];
@@ -112,7 +112,7 @@ export function acceptedCommonRandomness(
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
-            setupProfileHash: profile.setupProfileHash,
+            setupParametersHash: setupParameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',
             signerRole: 'Trustee',
             trusteeIdentity,
@@ -148,7 +148,7 @@ export function acceptedCommonRandomness(
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
-            setupProfileHash: profile.setupProfileHash,
+            setupParametersHash: setupParameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',
             signerRole: 'Trustee',
             trusteeIdentity,
@@ -184,7 +184,7 @@ export function acceptedCommonRandomness(
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash,
-            setupProfileHash: String(profile.setupProfileHash),
+            setupParametersHash: String(setupParameters.setupParametersHash),
             setupEpoch: 'setup-epoch-1',
             orderedRevealHashes,
         },
@@ -202,7 +202,7 @@ export function acceptedCommonRandomness(
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
         rosterHash,
-        setupProfileHash: profile.setupProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         setupEpoch: 'setup-epoch-1',
         commitRecords,
         revealRecords,

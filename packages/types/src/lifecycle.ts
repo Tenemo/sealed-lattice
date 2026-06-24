@@ -1,6 +1,6 @@
 import type { ProtocolHash } from './protocol-hash.js';
 
-/** Backend corruption model used when deriving threshold profiles. */
+/** Backend corruption model used when deriving threshold parameters. */
 export type HeBackendCorruptionModel =
     | {
           readonly kind: 'StructuralOneThird';
@@ -16,11 +16,11 @@ export type DecryptionShareFilteringMode =
     | 'ProofVerifiedSharesOnly'
     | 'RobustDecodeAfterInvalidShareFiltering';
 
-/** Certified target-bound decryption share-selection profile. */
-export type TargetBoundShareSelectionProfile = {
-    readonly profileId: string;
+/** Certified target-bound decryption share-selection parameters. */
+export type TargetBoundShareSelectionParameters = {
+    readonly selectionId: string;
     readonly certificateHash: string;
-    readonly targetDecryptionProfileId: string;
+    readonly targetDecryptionId: string;
     readonly targetBasisHash: ProtocolHash;
     readonly decryptionShareQuorum: number;
     readonly minimumSharesForInterpolation: number;
@@ -28,34 +28,40 @@ export type TargetBoundShareSelectionProfile = {
     readonly invalidShareFilteringMode: DecryptionShareFilteringMode;
 };
 
-/** Input used to derive a threshold profile from roster and backend assumptions. */
-export type ThresholdProfileInput = {
+/** Input used to derive threshold parameters from roster and backend assumptions. */
+export type ThresholdParametersInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
-    readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
-    readonly dynamicRosterProfileCertificateHash?: ProtocolHash;
+    readonly targetBoundShareSelectionParameters?: TargetBoundShareSelectionParameters;
+    readonly dynamicRosterParametersCertificateHash?: ProtocolHash;
     readonly casualMicroRosterAcknowledged?: boolean;
 };
 
-/** Roster profile classification for the derived threshold parameters. */
-export type RosterProfileKind =
+/** Roster parameters classification for the derived threshold parameters. */
+export type RosterParametersKind =
     | 'CasualMicroRoster'
-    | 'FirstProfileRoster'
+    | 'FirstParametersRoster'
     | 'SupportedDynamicRosterRange'
     | 'UncertifiedDynamicRoster';
 
 /** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
     | 'CasualMicroRoster'
-    | 'DynamicRosterProfileCertificateRequired'
+    | 'DynamicRosterParametersCertificateRequired'
     | 'BackendCorruptionBoundTooHigh'
-    | 'ShareSelectionProfileRequired';
+    | 'ShareSelectionParametersRequired';
 
-/** Derived threshold, quorum, and corruption-bound parameters for one roster. */
-export type ThresholdProfile = {
+/**
+ * Derived threshold, quorum, and corruption-bound parameters for one roster.
+ *
+ * This is parameter derivation, not a security certificate. Dynamic roster
+ * parameter sets still need their own certificate and runtime evidence before
+ * they carry a security or supported-phone claim.
+ */
+export type ThresholdParameters = {
     readonly rosterSize: number;
-    readonly rosterProfileKind: RosterProfileKind;
-    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
+    readonly rosterParametersKind: RosterParametersKind;
+    readonly dynamicRosterParametersCertificateHash: ProtocolHash | null;
     readonly structuralCorruptionBound: number;
     readonly backendCorruptionBound: number;
     readonly privacyCorruptionBound: number;
@@ -65,7 +71,7 @@ export type ThresholdProfile = {
     readonly decryptionThreshold: number;
     readonly releaseQuorum: number;
     readonly decryptionShareQuorum: number | null;
-    readonly targetBoundShareSelectionProfile: TargetBoundShareSelectionProfile | null;
+    readonly targetBoundShareSelectionParameters: TargetBoundShareSelectionParameters | null;
     readonly maximumRaceShares: number;
     readonly setupCompletionQuorum: number;
     readonly backendCorruptionModel: HeBackendCorruptionModel;
@@ -109,19 +115,19 @@ export type PollSpec = {
     readonly smallRosterPolicy: SmallRosterPolicy;
 };
 
-/** Concrete threshold/profile output derived after roster freeze. */
-export type FrozenRosterProfile = {
-    readonly objectType: 'FrozenRosterProfile';
+/** Concrete threshold parameter output derived after roster freeze. */
+export type FrozenRosterParameters = {
+    readonly objectType: 'FrozenRosterParameters';
     readonly objectVersion: 1;
-    readonly thresholdProfileHash: ProtocolHash;
+    readonly thresholdParametersHash: ProtocolHash;
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
     readonly rosterSize: number;
     readonly smallRosterPolicy: SmallRosterPolicy;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
-    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
-    readonly thresholdProfile: ThresholdProfile;
+    readonly dynamicRosterParametersCertificateHash: ProtocolHash | null;
+    readonly thresholdParameters: ThresholdParameters;
 };
 
 /** Stable poll specification validation error code. */
@@ -174,7 +180,7 @@ export type LifecycleState =
     | 'resultDecoded'
     | 'fullyVerified'
     | 'pending'
-    | 'outsideSupportedProfile'
+    | 'outsideSupportedParameters'
     | 'forkDetected';
 
 /** Allowed lifecycle transition edge. */
@@ -201,7 +207,7 @@ export type ProtocolAction =
     | 'AcceptTarget'
     | 'CreateTargetBoundDecryptionShare'
     | 'VerifyDecryptionShare'
-    | 'VerifyTargetDecryptionProfile'
+    | 'VerifyTargetDecryptionParameters'
     | 'RecombineAcceptedTarget'
     | 'DecodeVerifiedTopK'
     | 'CreateRecoveryEpochUpdate'
@@ -219,16 +225,16 @@ export type RecoveryState =
 /** Context used to decide whether a protocol action is currently allowed. */
 export type CapabilityContext = {
     readonly lifecycleState: LifecycleState;
-    readonly thresholdProfile: ThresholdProfile;
+    readonly thresholdParameters: ThresholdParameters;
     readonly pollSpecValid: boolean;
     readonly finalRosterHash?: ProtocolHash;
-    readonly frozenRosterProfileHash?: ProtocolHash;
+    readonly frozenRosterParametersHash?: ProtocolHash;
     readonly trusteeSetupComplete?: boolean;
     readonly encryptedBallotLayoutFrozen?: boolean;
-    readonly ballotValidityProofProfileFrozen?: boolean;
-    readonly evaluatorReplayProfileFrozen?: boolean;
+    readonly ballotValidityProofParametersFrozen?: boolean;
+    readonly evaluatorReplayParametersFrozen?: boolean;
     readonly targetOutputLayoutFrozen?: boolean;
-    readonly targetDecryptionProfileReferencePresent?: boolean;
+    readonly targetDecryptionParametersReferencePresent?: boolean;
     readonly localRosterAccepted?: boolean;
     readonly rosterExternalAcceptanceHash?: ProtocolHash;
     readonly actionContextRosterExternalAcceptanceHash?: ProtocolHash | null;
@@ -240,8 +246,8 @@ export type CapabilityContext = {
     readonly evaluatorReplaySucceeded?: boolean;
     readonly targetFinalityAccepted?: boolean;
     readonly targetAccepted?: boolean;
-    readonly targetDecryptionProfileVerified?: boolean;
-    readonly runtimeProfileSupported?: boolean;
+    readonly targetDecryptionParametersVerified?: boolean;
+    readonly runtimeParametersSupported?: boolean;
     readonly directProofTransportPresent?: boolean;
     readonly mobileReplayEvidencePresent?: boolean;
     readonly targetDecryptionCertificatePresent?: boolean;
@@ -266,8 +272,8 @@ export type RefusalReason =
     | 'TargetFinalityCheckpointMissing'
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
-    | 'TargetDecryptionProfileNotCertified'
-    | 'OutsideMeasuredRuntimeProfile'
+    | 'TargetDecryptionParametersNotCertified'
+    | 'OutsideMeasuredRuntimeParameters'
     | 'MissingDirectProofTransport'
     | 'MissingMobileReplayEvidence'
     | 'MissingTargetDecryptionCertificate'

@@ -30,7 +30,7 @@ export const deriveTrusteeSetupEntryHash = (
     deriveProtocolHash('TrusteeSetupEntryHash', {
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
-        bgvProfileHash: entry.bgvProfileHash,
+        bgvParametersHash: entry.bgvParametersHash,
         collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
@@ -41,9 +41,7 @@ export const deriveTrusteeSetupEntryHash = (
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
         rotSetHash: entry.rotSetHash,
-        rustBgvBackendProfileHash: entry.rustBgvBackendProfileHash,
-        setupProfileId: entry.setupProfileId,
-        targetDecryptionProfileId: entry.targetDecryptionProfileId,
+        targetDecryptionId: entry.targetDecryptionId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
         trusteeThresholdVerificationKeyHash:
@@ -104,5 +102,5 @@ export const deriveElectionManifestHash = (
         objectVersion: manifest.objectVersion,
         pollSpecHash: manifest.pollSpecHash,
         rosterHash: manifest.rosterHash,
-        thresholdProfileHash: manifest.thresholdProfileHash,
+        thresholdParametersHash: manifest.thresholdParametersHash,
     });

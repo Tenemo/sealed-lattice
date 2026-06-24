@@ -84,19 +84,19 @@ fn verify_transport_certificate_body(
             "streamVerificationOrder",
             SETUP_TRANSPORT_STREAM_ORDER,
             "transportStreamOrderMismatch",
-            "setupTransportCertificate.streamVerificationOrder must match the setup transport profile",
+            "setupTransportCertificate.streamVerificationOrder must match the setup transport parameters",
         ),
         (
             "resumePolicy",
             SETUP_TRANSPORT_RESUME_POLICY,
             "transportResumePolicyMismatch",
-            "setupTransportCertificate.resumePolicy must match the setup transport profile",
+            "setupTransportCertificate.resumePolicy must match the setup transport parameters",
         ),
         (
             "lazyLoadingPolicy",
             SETUP_TRANSPORT_LAZY_LOADING_POLICY,
             "transportLazyLoadingPolicyMismatch",
-            "setupTransportCertificate.lazyLoadingPolicy must match the setup transport profile",
+            "setupTransportCertificate.lazyLoadingPolicy must match the setup transport parameters",
         ),
     ] {
         transport_try!(expect_transport_string(
@@ -119,41 +119,44 @@ fn verify_transport_certificate_body(
         "chunkSizeBytes",
         SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "transportChunkSizeMismatch",
-        "setupTransportCertificate.chunkSizeBytes must match the setup transport profile",
+        "setupTransportCertificate.chunkSizeBytes must match the setup transport parameters",
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
         "storageQuotaBytes",
         SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
         "transportStorageQuotaMismatch",
-        "setupTransportCertificate.storageQuotaBytes must match the setup transport profile",
+        "setupTransportCertificate.storageQuotaBytes must match the setup transport parameters",
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
         "largestSingleBufferBytes",
         SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
         "transportLargestBufferMismatch",
-        "setupTransportCertificate.largestSingleBufferBytes must match the setup transport profile",
+        "setupTransportCertificate.largestSingleBufferBytes must match the setup transport parameters",
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
         "copyCountLimit",
         SETUP_TRANSPORT_COPY_COUNT_LIMIT,
         "transportCopyCountMismatch",
-        "setupTransportCertificate.copyCountLimit must match the setup transport profile",
+        "setupTransportCertificate.copyCountLimit must match the setup transport parameters",
     ));
 
-    let setup_transport_profile_hash_value = transport_canonical_try!(require_transport_hash(
+    let setup_parameters_hash_value = transport_canonical_try!(require_transport_hash(
         transport_certificate,
-        "setupTransportProfileHash",
-        "transportProfileHashMissing",
-        "setupTransportCertificate.setupTransportProfileHash is required",
+        "setupParametersHash",
+        "transportSetupParametersHashMissing",
+        "setupTransportCertificate.setupParametersHash is required",
     ));
-    if setup_transport_profile_hash_value != setup_transport_profile_hash()?.as_str() {
+    let roster = super::super::accepted_roster_from_package(setup_package);
+    if setup_parameters_hash_value
+        != super::super::setup_parameters_hash_for_roster(&roster)?.as_str()
+    {
         return Ok(Err(Refusal::new(
-            "transportProfileHashMismatch",
-            "setupTransportCertificate.setupTransportProfileHash must match the accepted setup transport profile",
-            "setupPackage.setupTransportCertificate.setupTransportProfileHash",
+            "transportSetupParametersHashMismatch",
+            "setupTransportCertificate.setupParametersHash must match the roster-derived setup parameters",
+            "setupPackage.setupTransportCertificate.setupParametersHash",
         )));
     }
 
@@ -380,7 +383,7 @@ fn verify_setup_transported_objects(
     {
         return Ok(Err(Refusal::new(
             "transportedVssObjectMetadataMismatch",
-            "vssCoefficientCommitmentMaterial transported object metadata must match the accepted setup profile",
+            "vssCoefficientCommitmentMaterial transported object metadata must match the accepted setup parameters",
             "setupPackage.setupTransportCertificate.transportedObjects",
         )));
     }
@@ -496,7 +499,7 @@ fn setup_transported_object_binding(
         "loadingPolicy",
         SETUP_TRANSPORTED_OBJECT_LOADING_POLICY,
         "transportedObjectLoadingPolicyMismatch",
-        "transported object loading policy must match the setup transport profile",
+        "transported object loading policy must match the setup transport parameters",
         &object_path,
     ));
     let object_name = transport_try!(require_transport_non_empty_string_at(

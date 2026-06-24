@@ -4,10 +4,9 @@ import type { setupTransportedObjectLoadingPolicy } from './constants.js';
 
 export type JsonRecord = Record<string, unknown>;
 
-export type CollectiveBgvSetupProfileForCertificates = Readonly<
+export type CollectiveBgvSetupParametersForCertificates = Readonly<
     JsonRecord & {
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly participantCount: number;
         readonly qDec: number;
         readonly qShare: Readonly<
@@ -15,25 +14,20 @@ export type CollectiveBgvSetupProfileForCertificates = Readonly<
                 readonly primes: readonly number[];
             }
         >;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfile: Readonly<
+        readonly commitment: Readonly<
             JsonRecord & {
                 readonly messageEncoding: JsonRecord;
             }
         >;
-        readonly commitmentProfileHash: ProtocolHash;
-        readonly publicVssCommitmentMaterialSizeProfile: Readonly<
+        readonly publicVssCommitmentMaterialSize: Readonly<
             JsonRecord & {
                 readonly fullMaterialCoefficientBytes: number;
             }
         >;
-        readonly setupProofProfile: JsonRecord;
-        readonly setupProofProfileHash: ProtocolHash;
-        readonly setupTransportProfile: JsonRecord;
-        readonly setupTransportProfileHash: ProtocolHash;
+        readonly setupProof: JsonRecord;
+        readonly setupTransport: JsonRecord;
         readonly acceptedCertificateTemplates?: JsonRecord;
-        readonly evaluatorKeyScheduleProfile: Readonly<
+        readonly evaluatorKeySchedule: Readonly<
             JsonRecord & {
                 readonly relinearizationLevelSchedule: readonly Readonly<{
                     readonly level: number;
@@ -43,13 +37,12 @@ export type CollectiveBgvSetupProfileForCertificates = Readonly<
                 }>[];
             }
         >;
-        readonly evaluatorKeyScheduleProfileHash: ProtocolHash;
     }
 >;
 
-export type BgvRnsProfileForCertificates = Readonly<
+export type BgvRnsParametersForCertificates = Readonly<
     JsonRecord & {
-        readonly profile: Readonly<
+        readonly parameters: Readonly<
             JsonRecord & {
                 readonly polynomialDegree: number;
                 readonly plaintextModulus: number;
@@ -57,7 +50,7 @@ export type BgvRnsProfileForCertificates = Readonly<
                 readonly specialPrime: number;
             }
         >;
-        readonly securityEstimatorInputHash: string;
+        readonly bgvParametersHash: ProtocolHash;
     }
 >;
 
@@ -78,10 +71,10 @@ export type SetupCertificateTransportInput = Readonly<{
 }>;
 
 export type SetupCertificatesInput = Readonly<{
-    readonly setupProfile:
-        | CollectiveBgvSetupProfileForCertificates
+    readonly setupParameters:
+        | CollectiveBgvSetupParametersForCertificates
         | JsonRecord;
-    readonly bgvProfile: BgvRnsProfileForCertificates | JsonRecord;
+    readonly bgvParameters: BgvRnsParametersForCertificates | JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
     readonly sameSecretLinkageAnchorProofAccounting?: JsonRecord;

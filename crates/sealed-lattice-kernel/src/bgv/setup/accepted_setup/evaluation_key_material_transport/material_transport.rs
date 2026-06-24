@@ -217,7 +217,7 @@ pub(super) fn verify_public_evaluation_key_material_transport(
             "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
         )?));
     }
-    if accepted_setup_evaluation_key_records_use_profile_ring(setup_package)? {
+    if accepted_setup_evaluation_key_records_use_full_ring(setup_package)? {
         if let Err(error) =
             accepted_setup_public_relinearization_keys_from_transport(setup_package, request)
         {
@@ -424,17 +424,14 @@ fn verify_public_evaluation_key_material_entry_header(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
         "evaluationKeySetHash",
         "publicEvaluationKeyMaterialRoot",
     ] {
         if material_entry.get(field_name) != evaluation_keys.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "transported public evaluation-key material {field_name} must match evaluationKeys"
                 ),
@@ -449,7 +446,7 @@ fn public_evaluation_key_material_chunks(value: &Value) -> CanonicalResult<Vec<V
     if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "transported public evaluation-key material chunkSizeBytes must match the setup transport profile",
+            "transported public evaluation-key material chunkSizeBytes must match the setup transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
@@ -684,13 +681,7 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
             "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
             "manifestHash": value_string(evaluation_keys, "manifestHash")?,
             "rosterHash": value_string(evaluation_keys, "rosterHash")?,
-            "setupProfileHash": value_string(evaluation_keys, "setupProfileHash")?,
-            "qShareHash": value_string(evaluation_keys, "qShareHash")?,
-            "carryAwareVssShareRelationProfileHash": value_string(
-                evaluation_keys,
-                "carryAwareVssShareRelationProfileHash",
-            )?,
-            "commitmentProfileHash": value_string(evaluation_keys, "commitmentProfileHash")?,
+            "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
             "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
             "evaluatorKeyScheduleRoot": value_string(
                 evaluation_keys,

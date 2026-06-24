@@ -1,5 +1,5 @@
 use super::*;
-use crate::bgv::profile::{data_basis_modulus_bits, extended_basis_modulus_bits};
+use crate::bgv::parameters::{data_basis_modulus_bits, extended_basis_modulus_bits};
 
 const HE_LATTICE_ESTIMATOR_OUTPUT_CANONICAL_SHA256: &str =
     "1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399";
@@ -16,7 +16,7 @@ fn collective_setup_verifier_refuses_wrong_q_share_prime_list() {
 
     let result = verify_collective_setup_package(&package);
 
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(result["verifierStatus"], "outsideAcceptedParameters");
     assert_eq!(result["refusedObjects"][0]["reasonCode"], "qShareMismatch");
 }
 
@@ -419,10 +419,7 @@ fn compact_setup_key_correctness_certificate_package() -> serde_json::Value {
             "ceremonyId": "ceremony-main",
             "manifestHash": valid_hash('1'),
             "rosterHash": valid_hash('2'),
-            "setupProfileHash": valid_hash('3'),
-            "qShareHash": valid_hash('4'),
-            "carryAwareVssShareRelationProfileHash": valid_hash('5'),
-            "commitmentProfileHash": valid_hash('6'),
+            "setupParametersHash": valid_hash('3'),
             "setupEpoch": "setup-epoch-1",
         },
         "collectivePublicKey": {

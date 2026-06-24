@@ -2,16 +2,15 @@ use super::*;
 
 pub(super) fn validate_participant_setup_records(
     setup_package: &Value,
-    profile_hash: &str,
-    backend_profile_hash: &str,
-    target_decryption_profile_hash: &str,
-    target_decryption_profile_binding_hash: &str,
+    bgv_parameters_hash: &str,
+    target_decryption_parameters_hash: &str,
+    target_decryption_parameters_binding_hash: &str,
 ) -> CanonicalResult<Vec<VerifiedParticipantSetupBinding>> {
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?;
     let manifest_hash = hash_at_path(setup_package, &["setupInputs", "manifestHash"])?;
     let roster_hash = hash_at_path(setup_package, &["setupInputs", "rosterHash"])?;
-    let threshold_profile_hash =
-        hash_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?;
+    let threshold_parameters_hash =
+        hash_at_path(setup_package, &["setupInputs", "thresholdParametersHash"])?;
     let participants = array_at_path(setup_package, &["participants"])?;
     let participant_identities =
         array_at_path(setup_package, &["setupInputs", "participantIdentities"])?;
@@ -58,21 +57,15 @@ pub(super) fn validate_participant_setup_records(
         )?;
         compare_hash_at_path(
             participant_record,
-            &["thresholdProfileHash"],
-            threshold_profile_hash,
-            "participant threshold profile hash",
+            &["thresholdParametersHash"],
+            threshold_parameters_hash,
+            "participant threshold parameters hash",
         )?;
         compare_hash_at_path(
             participant_record,
-            &["profileHash"],
-            profile_hash,
-            "participant profile hash",
-        )?;
-        compare_hash_at_path(
-            participant_record,
-            &["backendProfileHash"],
-            backend_profile_hash,
-            "participant backend profile hash",
+            &["bgvParametersHash"],
+            bgv_parameters_hash,
+            "participant BGV parameters hash",
         )?;
         let trustee_identity = string_at_path(participant_record, &["trusteeIdentity"])?;
         ensure_nfc_identity(trustee_identity, "participant trusteeIdentity")?;
@@ -87,7 +80,7 @@ pub(super) fn validate_participant_setup_records(
         ensure_nfc_identity(listed_identity, "setupPackage participant identity")?;
         if listed_identity != trustee_identity {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "setupPackage participant identity order does not match participant records",
             ));
         }
@@ -134,8 +127,8 @@ pub(super) fn validate_participant_setup_records(
         let trustee_threshold_verification_key = json!({
             "objectType": "TrusteeThresholdVerificationKey",
             "objectVersion": 1,
-            "targetDecryptionProfileHash": target_decryption_profile_hash,
-            "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,
+            "targetDecryptionParametersHash": target_decryption_parameters_hash,
+            "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
             "ceremonyId": ceremony_id,
             "rosterHash": roster_hash,
             "trusteeIdentity": trustee_identity,

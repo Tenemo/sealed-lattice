@@ -70,18 +70,6 @@ pub(super) fn verify_vss_coefficient_commitments(
             "setupPackage.vssCoefficientCommitments.publicMatrixSeedHash",
         )?));
     }
-    if commitment_set
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Ok(Some(vss_commitment_refusal(
-            "vssCommitmentProfileHashMismatch",
-            "vssCoefficientCommitments.commitmentProfileHash must match the accepted setup commitment profile",
-            "setupPackage.vssCoefficientCommitments.commitmentProfileHash",
-        )?));
-    }
-
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
     let Some(source_trustee_records) = commitment_set
         .get("sourceTrusteeRecords")
@@ -158,15 +146,12 @@ fn verify_vss_commitment_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if commitment_set.get(field_name) != setup_context.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("vssCoefficientCommitments.{field_name} must match setupContext"),
             ));
         }
@@ -222,17 +207,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             "vssCoefficientCommitmentMaterialContextMismatch",
             error.message,
             "setupPackage.vssCoefficientCommitmentMaterial",
-        )?));
-    }
-    if material_set
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Ok(Some(vss_material_refusal(
-            "vssCoefficientCommitmentMaterialProfileHashMismatch",
-            "vssCoefficientCommitmentMaterial.commitmentProfileHash must match the accepted setup commitment profile hash",
-            "setupPackage.vssCoefficientCommitmentMaterial.commitmentProfileHash",
         )?));
     }
     let material_encoding = material_set
@@ -304,7 +278,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
     {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialParticipantCountMismatch",
-            "vssCoefficientCommitmentMaterial.participantCount must match the accepted setup profile",
+            "vssCoefficientCommitmentMaterial.participantCount must match the accepted setup parameters",
             "setupPackage.vssCoefficientCommitmentMaterial.participantCount",
         )?));
     }
@@ -313,7 +287,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
     {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialThresholdMismatch",
-            "vssCoefficientCommitmentMaterial.thresholdDegree must match the accepted setup profile",
+            "vssCoefficientCommitmentMaterial.thresholdDegree must match the accepted setup parameters",
             "setupPackage.vssCoefficientCommitmentMaterial.thresholdDegree",
         )?));
     }
@@ -443,7 +417,7 @@ fn verify_binary_vss_material_transport_metadata(material_set: &Value) -> Canoni
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "binary VSS material chunkSizeBytes must match the accepted setup transport profile",
+            "binary VSS material chunkSizeBytes must match the accepted setup transport parameters",
         ));
     }
     for field_name in ["chunkCount", "totalByteLength"] {
@@ -512,10 +486,7 @@ fn verify_vss_source_trustee_commitment_record(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if source_trustee_record.get(field_name) != setup_context.get(field_name) {
@@ -682,10 +653,7 @@ fn verify_vss_coefficient_commitment_record(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if coefficient_record.get(field_name) != setup_context.get(field_name) {
@@ -767,7 +735,7 @@ fn verify_vss_coefficient_commitment_record(
     if shamir_coefficient_index >= roster.decryption_threshold {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentShamirIndexInvalid",
-            "VSS coefficient commitment shamirCoefficientIndex is outside the first-profile threshold degree",
+            "VSS coefficient commitment shamirCoefficientIndex is outside the first-roster threshold degree",
             "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.shamirCoefficientIndex",
         )?));
     }

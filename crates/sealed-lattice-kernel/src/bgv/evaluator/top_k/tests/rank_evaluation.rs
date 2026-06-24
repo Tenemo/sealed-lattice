@@ -41,11 +41,11 @@ fn consumed_key_schedule_instrumentation() {
 // covered by the frozen key schedule through truncation.
 fn assert_consumed_schedule_within_frozen(working_level: usize) {
     let option_count = 20_usize;
-    // First-profile comparison domain: ten ballots with score span nine.
+    // First-roster comparison domain: ten ballots with score span nine.
     let score_domain_max = 90_u64;
     let context =
         EvaluatorContext::new("consumed-schedule-instrumentation", working_level).expect("context");
-    // Aggregate score slots inside the first-profile domain [10, 100].
+    // Aggregate score slots inside the first-roster domain [10, 100].
     let aggregate_scores = (0..option_count)
         .map(|option| 10 + ((option * 7) % 91) as u64)
         .collect::<Vec<_>>();

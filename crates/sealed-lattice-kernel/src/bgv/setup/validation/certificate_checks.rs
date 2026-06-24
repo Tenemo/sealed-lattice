@@ -24,10 +24,10 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         "key-switch decomposition hash",
     )?;
     compare_derived_hash(
-        "EvaluationKeySizeProfileHash",
+        "EvaluationKeySizeParametersHash",
         value_at_path(certificates, &["evaluationKeySizeCertificate"])?,
-        hash_at_path(certificates, &["evaluationKeySizeProfileHash"])?,
-        "evaluation key size profile hash",
+        hash_at_path(certificates, &["evaluationKeySizeParametersHash"])?,
+        "evaluation key size parameters hash",
     )?;
     let evaluation_key_streaming_commitment_hash =
         validate_evaluation_key_streaming_commitment(certificates)?;
@@ -45,7 +45,7 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         != &expected_target_threshold_decryptability_certificate
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "target-threshold decryptability certificate does not match setup key and threshold material",
         ));
     }

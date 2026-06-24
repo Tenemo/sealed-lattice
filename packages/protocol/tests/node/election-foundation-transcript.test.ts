@@ -80,8 +80,8 @@ describe('integrated election foundation transcript', () => {
             fixture.input.rosterManifestTranscript.pollSpec.topOptionCount,
         ).toBe(foundationTopOptionCount);
         expect(
-            fixture.input.rosterManifestTranscript.frozenRosterProfile
-                .thresholdProfile,
+            fixture.input.rosterManifestTranscript.frozenRosterParameters
+                .thresholdParameters,
         ).toMatchObject({
             rosterSize: foundationParticipantCount,
         });
@@ -543,32 +543,25 @@ describe('integrated election foundation transcript', () => {
             },
         };
         const manifestBindingInput = createManifestOpaqueBindingInput({
-            evaluatorReplayProfileId: 'unsupported-evaluator-replay-profile',
+            evaluatorReplayId: 'unsupported-evaluator-replay',
         });
-        const ballotProofProfileInput = createManifestOpaqueBindingInput({
-            ballotValidityProofProfileId:
-                'unsupported-ballot-validity-proof-profile',
+        const ballotProofIdInput = createManifestOpaqueBindingInput({
+            ballotValidityProofId: 'unsupported-ballot-validity-proof',
         });
-        const encryptedBallotLayoutInput = createManifestOpaqueBindingInput({
-            encryptedBallotLayoutHash: protocolHashFixture(
-                'wrong-encrypted-ballot-layout',
-            ),
+        const bgvParametersInput = createManifestOpaqueBindingInput({
+            bgvParametersHash: protocolHashFixture('wrong-bgv-parameters'),
         });
-        const encryptedAggregateProfileInput = createManifestOpaqueBindingInput(
-            {
-                encryptedBallotAggregateProfileHash: protocolHashFixture(
-                    'wrong-encrypted-ballot-aggregate-profile',
-                ),
-            },
-        );
-        const directComparisonProfileInput = createManifestOpaqueBindingInput({
-            directComparisonProfileId: 'unsupported-direct-comparison-profile',
+        const targetLayoutInput = createManifestOpaqueBindingInput({
+            targetLayoutHash: protocolHashFixture('wrong-target-layout'),
         });
-        const targetDecryptionProfileInput = createManifestOpaqueBindingInput({
-            targetDecryptionProfileId: 'unsupported-target-decryption-profile',
+        const directComparisonIdInput = createManifestOpaqueBindingInput({
+            directComparisonId: 'unsupported-direct-comparison',
         });
-        const mobileProfileInput = createManifestOpaqueBindingInput({
-            mobileProfileId: 'unsupported-mobile-profile',
+        const targetDecryptionIdInput = createManifestOpaqueBindingInput({
+            targetDecryptionId: 'unsupported-target-decryption',
+        });
+        const mobileRuntimeIdInput = createManifestOpaqueBindingInput({
+            mobileRuntimeId: 'unsupported-mobile-runtime',
         });
 
         const mutationCases = [
@@ -594,12 +587,12 @@ describe('integrated election foundation transcript', () => {
             [proposalNotIncludedInput, 'EvaluatorReplayRecordNotIncluded'],
             [wrongObjectTypeInput, 'WrongObjectType'],
             [manifestBindingInput, 'ManifestHashMismatch'],
-            [ballotProofProfileInput, 'ManifestHashMismatch'],
-            [encryptedBallotLayoutInput, 'ManifestHashMismatch'],
-            [encryptedAggregateProfileInput, 'ManifestHashMismatch'],
-            [directComparisonProfileInput, 'ManifestHashMismatch'],
-            [targetDecryptionProfileInput, 'ManifestHashMismatch'],
-            [mobileProfileInput, 'ManifestHashMismatch'],
+            [ballotProofIdInput, 'ManifestHashMismatch'],
+            [bgvParametersInput, 'ManifestHashMismatch'],
+            [targetLayoutInput, 'ManifestHashMismatch'],
+            [directComparisonIdInput, 'ManifestHashMismatch'],
+            [targetDecryptionIdInput, 'ManifestHashMismatch'],
+            [mobileRuntimeIdInput, 'ManifestHashMismatch'],
         ] as const satisfies readonly (readonly [
             FoundationTranscriptInput,
             ProtocolRefusalCode,

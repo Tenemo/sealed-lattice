@@ -50,7 +50,6 @@ describe('accepted setup public package API in Node', () => {
         const acceptedLocalVerification = {
             ok: true,
             operation: 'verifyPrivateVssShareEnvelope',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             verifierStatus: 'accepted',
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: envelopeReference.localVerificationRoot,
@@ -60,7 +59,6 @@ describe('accepted setup public package API in Node', () => {
         const refusedLocalVerification = {
             ok: false,
             operation: 'verifyPrivateVssShareEnvelope',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             verifierStatus: 'refused',
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: null,
