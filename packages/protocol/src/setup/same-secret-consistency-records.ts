@@ -51,7 +51,11 @@ export const sameSecretTargetDecryptionBindingPolicy =
 export const compactVssSameSecretBridgeRelation =
     'target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof';
 export const compactVssSameSecretBridgeProofBoundary =
-    'statement binding only; same-secret bridge proof backend is not implemented yet';
+    'restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence';
+export const compactVssSameSecretBridgeProofFamily =
+    'compact-same-secret-bridge';
+const compactVssSameSecretBridgeProofBytesHashDomain =
+    'sealed-lattice/setup/compact-same-secret-bridge/proof-bytes-v1';
 export const compactVssSameSecretBridgeIntegerSupport =
     'the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb';
 export const compactVssSameSecretBridgeSignedRepresentativeConvention =
@@ -271,6 +275,60 @@ export type CompactVssSameSecretBridgeStatementSet = Readonly<
     }
 >;
 
+export type CompactVssSameSecretBridgeProofRecordInput = Readonly<{
+    readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    readonly proofStatementHash: ProtocolHash;
+    readonly proofBytesHex: string;
+}>;
+
+export type CompactVssSameSecretBridgeProofRecord = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssSameSecretBridgeProofRecord';
+        readonly objectVersion: 1;
+        readonly proofFamily: typeof compactVssSameSecretBridgeProofFamily;
+        readonly proofBoundary: typeof compactVssSameSecretBridgeProofBoundary;
+        readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+        readonly proofStatementHash: ProtocolHash;
+        readonly proofByteLength: number;
+        readonly proofBytesHash: ProtocolHash;
+        readonly proofBytesHex: string;
+        readonly proofRecordRoot: ProtocolHash;
+    }
+>;
+
+export type CompactVssSameSecretBridgeProofMaterialSet = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssSameSecretBridgeProofMaterialSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly compactCommitmentProfileId: typeof compactVssCommitmentProfileId;
+        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
+        readonly setupProofProfileId: typeof setupProofProfileId;
+        readonly proofFamily: typeof compactVssSameSecretBridgeProofFamily;
+        readonly proofBoundary: typeof compactVssSameSecretBridgeProofBoundary;
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupProfileHash: ProtocolHash;
+        readonly qShareHash: ProtocolHash;
+        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly targetBasisHash: ProtocolHash;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly targetRnsLimbCount: number;
+        readonly thresholdDegree: number;
+        readonly compactCoefficientCommitmentRoot: ProtocolHash;
+        readonly sameSecretConsistencyRoot: ProtocolHash;
+        readonly sameSecretProofSetRoot: ProtocolHash;
+        readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+        readonly compactSameSecretBridgeStatementSetRoot: ProtocolHash;
+        readonly proofRecords: readonly CompactVssSameSecretBridgeProofRecord[];
+        readonly proofMaterialSetRoot: ProtocolHash;
+    }
+>;
+
 export type SameSecretConsistencyStatementSetInput = {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly qSharePrimes: readonly number[];
@@ -381,6 +439,25 @@ const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
+const hasSameSecretTransportReference = (record: JsonRecord): boolean =>
+    [
+        'proofMaterialRoot',
+        'proofChunkSizeBytes',
+        'proofChunkCount',
+        'proofTotalByteLength',
+        'proofFullObjectHash',
+        'proofChunkRoot',
+        'proofChunkHashes',
+    ].some((fieldName) => record[fieldName] !== undefined);
+
+type SameSecretProofTransportBinding = Readonly<{
+    fullObjectHash: ProtocolHash;
+    chunkHashes: readonly ProtocolHash[];
+    chunkRoot: ProtocolHash;
+    totalByteLength: number;
+    proofBytesHash: ProtocolHash;
+}>;
+
 const contextFields = (
     setupContext: CollectiveBgvSetupContext,
 ): Pick<
@@ -462,6 +539,15 @@ const validateSameSecretProofMaterial = (
     assertProtocolHash(material.proofBytesHash, `${fieldName}.proofBytesHash`);
     const proofBytesHex = (material as JsonRecord).proofBytesHex;
     if (proofBytesHex !== undefined) {
+        const materialRecord = material as JsonRecord;
+        if (
+            materialRecord.proofBytesEncoding !== undefined ||
+            hasSameSecretTransportReference(materialRecord)
+        ) {
+            throw new Error(
+                `${fieldName} must not mix proofBytesHex with transported proof material.`,
+            );
+        }
         if (typeof proofBytesHex !== 'string') {
             throw new TypeError(`${fieldName}.proofBytesHex must be a string.`);
         }
@@ -469,6 +555,16 @@ const validateSameSecretProofMaterial = (
         if (proofBytesHex.length / 2 !== material.proofSizeBytes) {
             throw new Error(
                 `${fieldName}.proofBytesHex must match proofSizeBytes.`,
+            );
+        }
+        const proofBytes = Buffer.from(proofBytesHex, 'hex');
+        const expectedProofBytesHash = hash512Hex(
+            sameSecretAnchorProofBytesHashDomain,
+            [proofBytes],
+        );
+        if (material.proofBytesHash !== expectedProofBytesHash) {
+            throw new Error(
+                `${fieldName}.proofBytesHash must match proofBytesHex.`,
             );
         }
     } else {
@@ -527,6 +623,329 @@ const validateSameSecretProofMaterial = (
                 `${fieldName}.proofChunkHashes must match proofChunkCount.`,
             );
         }
+    }
+};
+
+const assertTransportedSameSecretProofMaterialSetHeader = (
+    materialSet: TransportedSameSecretProofMaterialSet,
+): void => {
+    assertExactString(
+        materialSet.objectType,
+        'transportedSameSecretProofMaterial.objectType',
+        'SetupTransportedSameSecretProofMaterialSet',
+    );
+    if (materialSet.objectVersion !== 1) {
+        throw new TypeError(
+            'transportedSameSecretProofMaterial.objectVersion is not supported.',
+        );
+    }
+    assertExactString(
+        materialSet.setupProfileId,
+        'transportedSameSecretProofMaterial.setupProfileId',
+        'CollectiveBgvSetup-v1',
+    );
+    assertExactString(
+        materialSet.setupProofProfileId,
+        'transportedSameSecretProofMaterial.setupProofProfileId',
+        setupProofProfileId,
+    );
+    assertExactString(
+        materialSet.proofFamily,
+        'transportedSameSecretProofMaterial.proofFamily',
+        sameSecretProofFamily,
+    );
+    if (!Array.isArray(materialSet.proofMaterials)) {
+        throw new TypeError(
+            'transportedSameSecretProofMaterial.proofMaterials must be an array.',
+        );
+    }
+};
+
+const transportedSameSecretProofChunks = (
+    material: JsonRecord,
+    materialIndex: number,
+): Uint8Array[] => {
+    if (material.chunkSizeBytes !== setupProofTransportChunkSizeBytes) {
+        throw new Error(
+            'transported same-secret proof material chunkSizeBytes must match the setup proof transport profile.',
+        );
+    }
+    assertPositiveSafeInteger(
+        material.chunkCount as number,
+        `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunkCount`,
+    );
+    const chunkRecords = material.chunks;
+    if (!Array.isArray(chunkRecords)) {
+        throw new TypeError(
+            `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunks must be an array.`,
+        );
+    }
+    if (chunkRecords.length !== material.chunkCount) {
+        throw new Error(
+            'transported same-secret proof material chunks must match chunkCount.',
+        );
+    }
+
+    return chunkRecords.map((chunkRecord, expectedChunkIndex) => {
+        if (
+            typeof chunkRecord !== 'object' ||
+            chunkRecord === null ||
+            Array.isArray(chunkRecord)
+        ) {
+            throw new TypeError(
+                `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunks.${String(expectedChunkIndex)} must be an object.`,
+            );
+        }
+        const chunk = chunkRecord as JsonRecord;
+        if (chunk.chunkIndex !== expectedChunkIndex) {
+            throw new Error(
+                'transported same-secret proof material chunks must be supplied in ascending chunk-index order.',
+            );
+        }
+        if (typeof chunk.bytesHex !== 'string') {
+            throw new TypeError(
+                `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunks.${String(expectedChunkIndex)}.bytesHex must be a string.`,
+            );
+        }
+        const chunkBytes = bytesFromHex(
+            chunk.bytesHex,
+            `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunks.${String(expectedChunkIndex)}.bytesHex`,
+        );
+        if (
+            chunkBytes.byteLength === 0 ||
+            chunkBytes.byteLength > setupProofTransportChunkSizeBytes ||
+            (expectedChunkIndex + 1 < chunkRecords.length &&
+                chunkBytes.byteLength !== setupProofTransportChunkSizeBytes)
+        ) {
+            throw new Error(
+                'transported same-secret proof material chunks must match the setup proof transport profile.',
+            );
+        }
+
+        return chunkBytes;
+    });
+};
+
+const assertTransportedSameSecretProofMaterialHashes = (
+    material: JsonRecord,
+    binding: SameSecretProofTransportBinding,
+    materialIndex: number,
+): void => {
+    if (material.totalByteLength !== binding.totalByteLength) {
+        throw new Error(
+            'transported same-secret proof material totalByteLength must match supplied chunks.',
+        );
+    }
+    if (material.fullObjectHash !== binding.fullObjectHash) {
+        throw new Error(
+            'transported same-secret proof material fullObjectHash must match supplied chunks.',
+        );
+    }
+    if (material.chunkRoot !== binding.chunkRoot) {
+        throw new Error(
+            'transported same-secret proof material chunkRoot must match supplied chunks.',
+        );
+    }
+    const chunkHashes = material.chunkHashes;
+    if (!Array.isArray(chunkHashes)) {
+        throw new TypeError(
+            `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunkHashes must be an array.`,
+        );
+    }
+    if (chunkHashes.length !== binding.chunkHashes.length) {
+        throw new Error(
+            'transported same-secret proof material chunkHashes must match supplied chunks.',
+        );
+    }
+    chunkHashes.forEach((chunkHash, chunkIndex) => {
+        assertProtocolHash(
+            chunkHash as string,
+            `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.chunkHashes.${String(chunkIndex)}`,
+        );
+        if (chunkHash !== binding.chunkHashes[chunkIndex]) {
+            throw new Error(
+                'transported same-secret proof material chunkHashes must match supplied chunks.',
+            );
+        }
+    });
+};
+
+const sameSecretAnchorProofMaterialRoot = (
+    proofRecord: SameSecretProofRecord,
+    binding: SameSecretProofTransportBinding,
+): ProtocolHash =>
+    deriveProtocolHash('SameSecretLinkageAnchorProofMaterialRoot', {
+        objectType: 'SameSecretLinkageAnchorProofMaterialReference',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        trusteeIdentity: proofRecord.trusteeIdentity,
+        trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+        statementHash: proofRecord.statementHash,
+        proofSizeBytes: proofRecord.proofSizeBytes,
+        proofBytesHash: proofRecord.proofBytesHash,
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        chunkCount: binding.chunkHashes.length,
+        totalByteLength: binding.totalByteLength,
+        fullObjectHash: binding.fullObjectHash,
+        chunkRoot: binding.chunkRoot,
+        chunkHashes: binding.chunkHashes,
+    });
+
+const transportedSameSecretProofMaterialBinding = (
+    proofRecord: SameSecretProofRecord,
+    transportedMaterialSet: TransportedSameSecretProofMaterialSet | undefined,
+): SameSecretProofTransportBinding => {
+    const transportedProofRecord = proofRecord as SameSecretProofRecord &
+        SameSecretTransportedProofBytes;
+    if (transportedMaterialSet === undefined) {
+        throw new Error(
+            'transportedSameSecretProofMaterial is required by transported same-secret proof records.',
+        );
+    }
+    assertTransportedSameSecretProofMaterialSetHeader(transportedMaterialSet);
+    const matchingMaterials = transportedMaterialSet.proofMaterials.filter(
+        (material) =>
+            material.proofMaterialRoot ===
+            transportedProofRecord.proofMaterialRoot,
+    );
+    if (matchingMaterials.length !== 1) {
+        throw new Error(
+            'transportedSameSecretProofMaterial must contain exactly one proofMaterialRoot entry for each transported proof record.',
+        );
+    }
+    const material = matchingMaterials[0] as JsonRecord | undefined;
+    if (material === undefined) {
+        throw new Error(
+            'transportedSameSecretProofMaterial is missing the requested proofMaterialRoot.',
+        );
+    }
+    const materialIndex =
+        transportedMaterialSet.proofMaterials.indexOf(material);
+    assertExactString(
+        material.objectType as string,
+        `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.objectType`,
+        'SetupTransportedSameSecretProofMaterial',
+    );
+    if (material.objectVersion !== 1) {
+        throw new TypeError(
+            `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.objectVersion is not supported.`,
+        );
+    }
+    assertExactString(
+        material.setupProfileId as string,
+        `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.setupProfileId`,
+        'CollectiveBgvSetup-v1',
+    );
+    assertExactString(
+        material.setupProofProfileId as string,
+        `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.setupProofProfileId`,
+        setupProofProfileId,
+    );
+    assertExactString(
+        material.proofFamily as string,
+        `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.proofFamily`,
+        sameSecretProofFamily,
+    );
+    assertProtocolHash(
+        material.proofMaterialRoot as string,
+        `transportedSameSecretProofMaterial.proofMaterials.${String(materialIndex)}.proofMaterialRoot`,
+    );
+
+    const chunks = transportedSameSecretProofChunks(material, materialIndex);
+    const totalByteLength = chunks.reduce(
+        (byteLength, chunk) => byteLength + chunk.byteLength,
+        0,
+    );
+    const fullObjectHash = setupProofMaterialFullObjectHashHex(
+        sameSecretProofFamily,
+        totalByteLength,
+        chunks,
+    );
+    const chunkHashes = chunks.map((chunk, chunkIndex) =>
+        setupProofMaterialChunkHash(
+            sameSecretProofFamily,
+            fullObjectHash,
+            chunkIndex,
+            chunk,
+        ),
+    );
+    const binding = {
+        fullObjectHash,
+        chunkHashes,
+        chunkRoot: setupProofChunkManifestRoot(
+            sameSecretProofFamily,
+            chunkHashes,
+            fullObjectHash,
+            totalByteLength,
+        ),
+        totalByteLength,
+        proofBytesHash: hash512Hex(
+            sameSecretAnchorProofBytesHashDomain,
+            chunks,
+        ),
+    } satisfies SameSecretProofTransportBinding;
+    assertTransportedSameSecretProofMaterialHashes(
+        material,
+        binding,
+        materialIndex,
+    );
+
+    return binding;
+};
+
+const assertSameSecretProofRecordMatchesTransport = (
+    proofRecord: SameSecretProofRecord,
+    transportedMaterialSet: TransportedSameSecretProofMaterialSet | undefined,
+): void => {
+    const transportedProofRecord = proofRecord as SameSecretProofRecord &
+        SameSecretTransportedProofBytes;
+    const binding = transportedSameSecretProofMaterialBinding(
+        proofRecord,
+        transportedMaterialSet,
+    );
+    if (proofRecord.proofSizeBytes !== binding.totalByteLength) {
+        throw new Error(
+            'same-secret proof record proofSizeBytes must match transported proof byte length.',
+        );
+    }
+    if (
+        transportedProofRecord.proofTotalByteLength !== binding.totalByteLength
+    ) {
+        throw new Error(
+            'same-secret proof record proofTotalByteLength must match transported proof byte length.',
+        );
+    }
+    if (proofRecord.proofBytesHash !== binding.proofBytesHash) {
+        throw new Error(
+            'same-secret proof record proofBytesHash must match transported proof bytes.',
+        );
+    }
+    if (
+        transportedProofRecord.proofChunkSizeBytes !==
+            setupProofTransportChunkSizeBytes ||
+        transportedProofRecord.proofChunkCount !== binding.chunkHashes.length ||
+        transportedProofRecord.proofFullObjectHash !== binding.fullObjectHash ||
+        transportedProofRecord.proofChunkRoot !== binding.chunkRoot ||
+        transportedProofRecord.proofChunkHashes.length !==
+            binding.chunkHashes.length ||
+        transportedProofRecord.proofChunkHashes.some(
+            (chunkHash, chunkIndex) =>
+                chunkHash !== binding.chunkHashes[chunkIndex],
+        )
+    ) {
+        throw new Error(
+            'same-secret proof transport reference must match transported proof material.',
+        );
+    }
+    if (
+        transportedProofRecord.proofMaterialRoot !==
+        sameSecretAnchorProofMaterialRoot(proofRecord, binding)
+    ) {
+        throw new Error(
+            'same-secret proof record proofMaterialRoot must match the canonical transported proof material reference.',
+        );
     }
 };
 
@@ -1300,6 +1719,7 @@ const assertSameSecretEvidenceMatchesBridge = (input: {
     readonly statementSet: CompactVssSameSecretBridgeStatementSet;
     readonly sameSecretConsistency?: SameSecretConsistencyStatementSet;
     readonly sameSecretProofs?: SameSecretProofSet;
+    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
 }): void => {
     if (
         (input.sameSecretConsistency === undefined) !==
@@ -1434,6 +1854,16 @@ const assertSameSecretEvidenceMatchesBridge = (input: {
                 sameSecretProofRoot: _sameSecretProofRoot,
                 ...sameSecretProofWithoutRoot
             } = sameSecretProof;
+            validateSameSecretProofMaterial(
+                sameSecretProof,
+                'sameSecretProofs.proofRecords',
+            );
+            if ((sameSecretProof as JsonRecord).proofBytesHex === undefined) {
+                assertSameSecretProofRecordMatchesTransport(
+                    sameSecretProof,
+                    input.transportedSameSecretProofMaterial,
+                );
+            }
             if (
                 sameSecretProof.sameSecretProofRoot !==
                 deriveProtocolHash(
@@ -1499,6 +1929,7 @@ export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
     readonly statementSet: CompactVssSameSecretBridgeStatementSet;
     readonly sameSecretConsistency?: SameSecretConsistencyStatementSet;
     readonly sameSecretProofs?: SameSecretProofSet;
+    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
 }): CompactVssSameSecretBridgeStatementSet => {
     const { statementSet } = input;
     assertExactString(
@@ -1759,9 +2190,340 @@ export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
         statementSet,
         sameSecretConsistency: input.sameSecretConsistency,
         sameSecretProofs: input.sameSecretProofs,
+        transportedSameSecretProofMaterial:
+            input.transportedSameSecretProofMaterial,
     });
 
     return statementSet;
+};
+
+const compactVssSameSecretBridgeProofBytesHash = (
+    proofBytes: Uint8Array,
+): ProtocolHash =>
+    hash512Hex(compactVssSameSecretBridgeProofBytesHashDomain, [proofBytes]);
+
+const compactVssSameSecretBridgeProofInputsByStatementRoot = (
+    proofRecordInputs: readonly CompactVssSameSecretBridgeProofRecordInput[],
+): Map<ProtocolHash, CompactVssSameSecretBridgeProofRecordInput> => {
+    const proofInputsByStatementRoot = new Map<
+        ProtocolHash,
+        CompactVssSameSecretBridgeProofRecordInput
+    >();
+    const proofStatementHashes = new Set<ProtocolHash>();
+    proofRecordInputs.forEach((proofRecordInput, proofRecordIndex) => {
+        assertProtocolHash(
+            proofRecordInput.compactSameSecretBridgeStatementRoot,
+            `proofRecordInputs.${String(proofRecordIndex)}.compactSameSecretBridgeStatementRoot`,
+        );
+        assertProtocolHash(
+            proofRecordInput.proofStatementHash,
+            `proofRecordInputs.${String(proofRecordIndex)}.proofStatementHash`,
+        );
+        if (proofStatementHashes.has(proofRecordInput.proofStatementHash)) {
+            throw new Error(
+                'compact same-secret bridge proof record inputs must not repeat a proof statement hash.',
+            );
+        }
+        proofStatementHashes.add(proofRecordInput.proofStatementHash);
+        bytesFromHex(
+            proofRecordInput.proofBytesHex,
+            `proofRecordInputs.${String(proofRecordIndex)}.proofBytesHex`,
+        );
+        if (
+            proofInputsByStatementRoot.has(
+                proofRecordInput.compactSameSecretBridgeStatementRoot,
+            )
+        ) {
+            throw new Error(
+                'compact same-secret bridge proof record inputs must not repeat a bridge statement root.',
+            );
+        }
+        proofInputsByStatementRoot.set(
+            proofRecordInput.compactSameSecretBridgeStatementRoot,
+            proofRecordInput,
+        );
+    });
+
+    return proofInputsByStatementRoot;
+};
+
+export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
+    readonly statementSet: CompactVssSameSecretBridgeStatementSet;
+    readonly proofRecordInputs: readonly CompactVssSameSecretBridgeProofRecordInput[];
+}): CompactVssSameSecretBridgeProofMaterialSet => {
+    const statementSet = verifyCompactVssSameSecretBridgeStatementSet({
+        statementSet: input.statementSet,
+    });
+    const proofInputsByStatementRoot =
+        compactVssSameSecretBridgeProofInputsByStatementRoot(
+            input.proofRecordInputs,
+        );
+    if (proofInputsByStatementRoot.size !== statementSet.participantCount) {
+        throw new Error(
+            'compact same-secret bridge proof material inputs must contain one proof record per bridge statement.',
+        );
+    }
+
+    const proofRecords = statementSet.statementRecords.map(
+        (statementRecord) => {
+            const proofRecordInput = proofInputsByStatementRoot.get(
+                statementRecord.compactSameSecretBridgeStatementRoot,
+            );
+            if (proofRecordInput === undefined) {
+                throw new Error(
+                    'compact same-secret bridge proof material inputs must cover every bridge statement.',
+                );
+            }
+            const proofBytes = bytesFromHex(
+                proofRecordInput.proofBytesHex,
+                'compact same-secret bridge proofBytesHex',
+            );
+            const proofRecordWithoutRoot = {
+                objectType: 'CompactVssSameSecretBridgeProofRecord',
+                objectVersion: 1,
+                proofFamily: compactVssSameSecretBridgeProofFamily,
+                proofBoundary: compactVssSameSecretBridgeProofBoundary,
+                compactSameSecretBridgeStatementRoot:
+                    statementRecord.compactSameSecretBridgeStatementRoot,
+                proofStatementHash: proofRecordInput.proofStatementHash,
+                proofByteLength: proofBytes.byteLength,
+                proofBytesHash:
+                    compactVssSameSecretBridgeProofBytesHash(proofBytes),
+                proofBytesHex: proofRecordInput.proofBytesHex,
+            } as const satisfies Omit<
+                CompactVssSameSecretBridgeProofRecord,
+                'proofRecordRoot'
+            >;
+
+            return {
+                ...proofRecordWithoutRoot,
+                proofRecordRoot: deriveProtocolHash(
+                    'SetupProofRecordBindingHash',
+                    proofRecordWithoutRoot,
+                ),
+            };
+        },
+    );
+    const proofMaterialSetWithoutRoot = {
+        objectType: 'CompactVssSameSecretBridgeProofMaterialSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        compactCommitmentProfileId: compactVssCommitmentProfileId,
+        developmentScope: compactVssCommitmentDevelopmentScope,
+        setupProofProfileId,
+        proofFamily: compactVssSameSecretBridgeProofFamily,
+        proofBoundary: compactVssSameSecretBridgeProofBoundary,
+        ...contextFields(statementSet),
+        targetBasisHash: statementSet.targetBasisHash,
+        publicMatrixSeedHash: statementSet.publicMatrixSeedHash,
+        participantCount: statementSet.participantCount,
+        targetRnsLimbCount: statementSet.targetRnsLimbCount,
+        thresholdDegree: statementSet.thresholdDegree,
+        compactCoefficientCommitmentRoot:
+            statementSet.compactCoefficientCommitmentRoot,
+        sameSecretConsistencyRoot: statementSet.sameSecretConsistencyRoot,
+        sameSecretProofSetRoot: statementSet.sameSecretProofSetRoot,
+        sameSecretProofFamilyBindingRoot:
+            statementSet.sameSecretProofFamilyBindingRoot,
+        compactSameSecretBridgeStatementSetRoot:
+            statementSet.compactSameSecretBridgeStatementSetRoot,
+        proofRecords,
+    } as const satisfies Omit<
+        CompactVssSameSecretBridgeProofMaterialSet,
+        'proofMaterialSetRoot'
+    >;
+
+    return {
+        ...proofMaterialSetWithoutRoot,
+        proofMaterialSetRoot: deriveProtocolHash(
+            'SetupProofRecordBindingHash',
+            proofMaterialSetWithoutRoot,
+        ),
+    };
+};
+
+export const verifyCompactVssSameSecretBridgeProofMaterialSet = (input: {
+    readonly statementSet: CompactVssSameSecretBridgeStatementSet;
+    readonly proofMaterialSet: CompactVssSameSecretBridgeProofMaterialSet;
+}): CompactVssSameSecretBridgeProofMaterialSet => {
+    const statementSet = verifyCompactVssSameSecretBridgeStatementSet({
+        statementSet: input.statementSet,
+    });
+    const proofMaterialSet = input.proofMaterialSet;
+    assertExactString(
+        proofMaterialSet.objectType,
+        'compact same-secret bridge proof material set objectType',
+        'CompactVssSameSecretBridgeProofMaterialSet',
+    );
+    if (proofMaterialSet.objectVersion !== 1) {
+        throw new TypeError(
+            'compact same-secret bridge proof material set objectVersion is not supported.',
+        );
+    }
+    for (const [fieldName, expectedValue] of [
+        ['setupProfileId', statementSet.setupProfileId],
+        ['compactCommitmentProfileId', statementSet.compactCommitmentProfileId],
+        ['developmentScope', statementSet.developmentScope],
+        ['setupProofProfileId', statementSet.setupProofProfileId],
+        ['proofFamily', compactVssSameSecretBridgeProofFamily],
+        ['proofBoundary', compactVssSameSecretBridgeProofBoundary],
+        ['ceremonyId', statementSet.ceremonyId],
+        ['manifestHash', statementSet.manifestHash],
+        ['rosterHash', statementSet.rosterHash],
+        ['setupProfileHash', statementSet.setupProfileHash],
+        ['qShareHash', statementSet.qShareHash],
+        [
+            'carryAwareVssShareRelationProfileHash',
+            statementSet.carryAwareVssShareRelationProfileHash,
+        ],
+        ['commitmentProfileHash', statementSet.commitmentProfileHash],
+        ['setupEpoch', statementSet.setupEpoch],
+        ['targetBasisHash', statementSet.targetBasisHash],
+        ['publicMatrixSeedHash', statementSet.publicMatrixSeedHash],
+        [
+            'compactCoefficientCommitmentRoot',
+            statementSet.compactCoefficientCommitmentRoot,
+        ],
+        ['sameSecretConsistencyRoot', statementSet.sameSecretConsistencyRoot],
+        ['sameSecretProofSetRoot', statementSet.sameSecretProofSetRoot],
+        [
+            'sameSecretProofFamilyBindingRoot',
+            statementSet.sameSecretProofFamilyBindingRoot,
+        ],
+        [
+            'compactSameSecretBridgeStatementSetRoot',
+            statementSet.compactSameSecretBridgeStatementSetRoot,
+        ],
+    ] as const) {
+        if (proofMaterialSet[fieldName] !== expectedValue) {
+            throw new Error(
+                `compact same-secret bridge proof material set ${fieldName} must match the statement set.`,
+            );
+        }
+    }
+    if (
+        proofMaterialSet.participantCount !== statementSet.participantCount ||
+        proofMaterialSet.targetRnsLimbCount !==
+            statementSet.targetRnsLimbCount ||
+        proofMaterialSet.thresholdDegree !== statementSet.thresholdDegree
+    ) {
+        throw new Error(
+            'compact same-secret bridge proof material set must bind the statement dimensions.',
+        );
+    }
+    if (
+        proofMaterialSet.proofRecords.length !== statementSet.participantCount
+    ) {
+        throw new Error(
+            'compact same-secret bridge proof material set must contain one proof record per bridge statement.',
+        );
+    }
+    const proofStatementHashes = new Set<ProtocolHash>();
+    proofMaterialSet.proofRecords.forEach((proofRecord, proofRecordIndex) => {
+        const statementRecord = statementSet.statementRecords[proofRecordIndex];
+        if (statementRecord === undefined) {
+            throw new Error(
+                'compact same-secret bridge proof material set has no matching bridge statement.',
+            );
+        }
+        assertExactString(
+            proofRecord.objectType,
+            'compact same-secret bridge proof record objectType',
+            'CompactVssSameSecretBridgeProofRecord',
+        );
+        if (proofRecord.objectVersion !== 1) {
+            throw new TypeError(
+                'compact same-secret bridge proof record objectVersion is not supported.',
+            );
+        }
+        for (const [fieldName, expectedValue] of [
+            ['proofFamily', proofMaterialSet.proofFamily],
+            ['proofBoundary', proofMaterialSet.proofBoundary],
+            [
+                'compactSameSecretBridgeStatementRoot',
+                statementRecord.compactSameSecretBridgeStatementRoot,
+            ],
+        ] as const) {
+            if (proofRecord[fieldName] !== expectedValue) {
+                throw new Error(
+                    `compact same-secret bridge proof record ${fieldName} must match its proof material set and statement.`,
+                );
+            }
+        }
+        assertProtocolHash(
+            proofRecord.proofStatementHash,
+            'compact same-secret bridge proof record proofStatementHash',
+        );
+        if (proofStatementHashes.has(proofRecord.proofStatementHash)) {
+            throw new Error(
+                'compact same-secret bridge proof records must not repeat a proof statement hash.',
+            );
+        }
+        proofStatementHashes.add(proofRecord.proofStatementHash);
+        assertPositiveSafeInteger(
+            proofRecord.proofByteLength,
+            'compact same-secret bridge proof record proofByteLength',
+        );
+        assertProtocolHash(
+            proofRecord.proofBytesHash,
+            'compact same-secret bridge proof record proofBytesHash',
+        );
+        assertProtocolHash(
+            proofRecord.proofRecordRoot,
+            'compact same-secret bridge proof record proofRecordRoot',
+        );
+        const proofBytes = bytesFromHex(
+            proofRecord.proofBytesHex,
+            'compact same-secret bridge proof record proofBytesHex',
+        );
+        if (proofRecord.proofByteLength !== proofBytes.byteLength) {
+            throw new Error(
+                'compact same-secret bridge proof record proofByteLength must match proofBytesHex.',
+            );
+        }
+        if (
+            proofRecord.proofBytesHash !==
+            compactVssSameSecretBridgeProofBytesHash(proofBytes)
+        ) {
+            throw new Error(
+                'compact same-secret bridge proof record proofBytesHash must match proofBytesHex.',
+            );
+        }
+        const { proofRecordRoot: _proofRecordRoot, ...proofRecordWithoutRoot } =
+            proofRecord;
+        if (
+            proofRecord.proofRecordRoot !==
+            deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                proofRecordWithoutRoot,
+            )
+        ) {
+            throw new Error(
+                `compact same-secret bridge proof record ${String(proofRecordIndex)} root does not match its bound proof bytes.`,
+            );
+        }
+    });
+    assertProtocolHash(
+        proofMaterialSet.proofMaterialSetRoot,
+        'compact same-secret bridge proof material set proofMaterialSetRoot',
+    );
+    const {
+        proofMaterialSetRoot: _proofMaterialSetRoot,
+        ...proofMaterialSetWithoutRoot
+    } = proofMaterialSet;
+    if (
+        proofMaterialSet.proofMaterialSetRoot !==
+        deriveProtocolHash(
+            'SetupProofRecordBindingHash',
+            proofMaterialSetWithoutRoot,
+        )
+    ) {
+        throw new Error(
+            'compact same-secret bridge proof material set root does not match its bound proof records.',
+        );
+    }
+
+    return proofMaterialSet;
 };
 
 // Move embedded anchor proof bytes into binary chunked transport, mirroring

@@ -338,6 +338,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
             same_secret_linkage,
             private_vss_share: None,
             compact_vss_share_linkage: None,
+            compact_same_secret_bridge: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,
@@ -481,6 +482,7 @@ pub(crate) fn generate_development_public_key_share_instance(
             same_secret_linkage,
             private_vss_share: None,
             compact_vss_share_linkage: None,
+            compact_same_secret_bridge: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,

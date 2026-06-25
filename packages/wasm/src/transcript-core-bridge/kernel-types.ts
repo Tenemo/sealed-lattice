@@ -25,7 +25,15 @@ import type {
     BgvCompactVssCommitmentOpeningInput,
     BgvCompactVssCommitmentOpeningVerification,
     BgvCompactVssRecipientShareCommitmentSetVerification,
+    BgvCompactSameSecretBridgeProofGeneration,
+    BgvCompactSameSecretBridgeProofStatement,
+    BgvCompactSameSecretBridgeProofVerification,
+    BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
+    BgvCompactVssShareLinkageProofGeneration,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
+    BgvCompactVssShareLinkageProofStatement,
+    BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
     BgvTransportedVssCoefficientCommitmentMaterial,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -82,7 +90,15 @@ export type {
     BgvCompactVssCommitmentOpeningInput,
     BgvCompactVssCommitmentOpeningVerification,
     BgvCompactVssRecipientShareCommitmentSetVerification,
+    BgvCompactSameSecretBridgeProofGeneration,
+    BgvCompactSameSecretBridgeProofStatement,
+    BgvCompactSameSecretBridgeProofVerification,
+    BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
+    BgvCompactVssShareLinkageProofGeneration,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
+    BgvCompactVssShareLinkageProofStatement,
+    BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyProofVerification,
@@ -304,6 +320,42 @@ export type TranscriptCoreKernel = {
         readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
         readonly proofBytesHex: string;
     }): BgvTrusteeEvaluationKeyProofVerification;
+    generateCompactVssShareLinkageProof(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly compactVssShareLinkage: BgvCompactVssShareLinkageProofStatement;
+        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+        readonly recipientShareMessages: readonly number[];
+        readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+        readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
+        readonly carryWitnesses: readonly number[];
+        readonly proofRandomnessSource: string;
+        readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
+    }): BgvCompactVssShareLinkageProofGeneration;
+    verifyCompactVssShareLinkageProof(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly compactVssShareLinkage: BgvCompactVssShareLinkageProofStatement;
+        readonly proofBytesHex: string;
+    }): BgvCompactVssShareLinkageProofVerification;
+    generateCompactSameSecretBridgeProof(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly compactSameSecretBridge: BgvCompactSameSecretBridgeProofStatement;
+        readonly secretCoefficients: readonly number[];
+        readonly negativeIndicatorCoefficients: readonly number[];
+        readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+        readonly proofRandomnessSource: string;
+        readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
+    }): BgvCompactSameSecretBridgeProofGeneration;
+    verifyCompactSameSecretBridgeProof(input: {
+        readonly context: BgvTrusteeEvaluationKeyStatementContext;
+        readonly ringDegree: number;
+        readonly compactSameSecretBridge: BgvCompactSameSecretBridgeProofStatement;
+        readonly proofBytesHex: string;
+    }): BgvCompactSameSecretBridgeProofVerification;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
@@ -348,11 +400,33 @@ export type TranscriptCoreKernel = {
             Record<string, unknown>
         >;
     }): BgvCompactVssShareLinkageStatementVerification;
+    verifyCompactVssShareLinkageProofMaterialSet(input: {
+        readonly statement: Readonly<Record<string, unknown>>;
+        readonly proofMaterialSet: Readonly<Record<string, unknown>>;
+        readonly restrictedProofStatements?: readonly Readonly<
+            Record<string, unknown>
+        >[];
+    }): BgvCompactVssShareLinkageProofMaterialSetVerification;
     verifyCompactVssSameSecretBridgeStatementSet(input: {
         readonly statementSet: Readonly<Record<string, unknown>>;
         readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
         readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+        readonly transportedSameSecretProofMaterial?: Readonly<
+            Record<string, unknown>
+        >;
     }): BgvCompactVssSameSecretBridgeStatementSetVerification;
+    verifyCompactVssSameSecretBridgeProofMaterialSet(input: {
+        readonly statementSet: Readonly<Record<string, unknown>>;
+        readonly proofMaterialSet: Readonly<Record<string, unknown>>;
+        readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
+        readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+        readonly transportedSameSecretProofMaterial?: Readonly<
+            Record<string, unknown>
+        >;
+        readonly restrictedProofStatements?: readonly Readonly<
+            Record<string, unknown>
+        >[];
+    }): BgvCompactVssSameSecretBridgeProofMaterialSetVerification;
     deriveThresholdShareCommitments(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -647,6 +721,46 @@ type TranscriptCoreKernelCommand =
           readonly proofBytesHex: string;
       }
     | {
+          readonly command: 'GenerateCompactVssShareLinkageProof';
+          readonly context: BgvTrusteeEvaluationKeyStatementContext;
+          readonly ringDegree: number;
+          readonly compactVssShareLinkage: BgvCompactVssShareLinkageProofStatement;
+          readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+          readonly recipientShareMessages: readonly number[];
+          readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+          readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
+          readonly carryWitnesses: readonly number[];
+          readonly proofRandomnessSource: string;
+          readonly proofRandomnessSeedHex: string;
+          readonly proofRandomnessNonceHex: string;
+      }
+    | {
+          readonly command: 'VerifyCompactVssShareLinkageProof';
+          readonly context: BgvTrusteeEvaluationKeyStatementContext;
+          readonly ringDegree: number;
+          readonly compactVssShareLinkage: BgvCompactVssShareLinkageProofStatement;
+          readonly proofBytesHex: string;
+      }
+    | {
+          readonly command: 'GenerateCompactSameSecretBridgeProof';
+          readonly context: BgvTrusteeEvaluationKeyStatementContext;
+          readonly ringDegree: number;
+          readonly compactSameSecretBridge: BgvCompactSameSecretBridgeProofStatement;
+          readonly secretCoefficients: readonly number[];
+          readonly negativeIndicatorCoefficients: readonly number[];
+          readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+          readonly proofRandomnessSource: string;
+          readonly proofRandomnessSeedHex: string;
+          readonly proofRandomnessNonceHex: string;
+      }
+    | {
+          readonly command: 'VerifyCompactSameSecretBridgeProof';
+          readonly context: BgvTrusteeEvaluationKeyStatementContext;
+          readonly ringDegree: number;
+          readonly compactSameSecretBridge: BgvCompactSameSecretBridgeProofStatement;
+          readonly proofBytesHex: string;
+      }
+    | {
           readonly command: 'ComputeSetupCommitmentFromOpening';
           readonly publicMatrixSeedHash: ProtocolHash;
           readonly sourceRnsLimbIndex: number;
@@ -701,10 +815,34 @@ type TranscriptCoreKernelCommand =
           >;
       }
     | {
+          readonly command: 'VerifyCompactVssShareLinkageProofMaterialSet';
+          readonly statement: Readonly<Record<string, unknown>>;
+          readonly proofMaterialSet: Readonly<Record<string, unknown>>;
+          readonly restrictedProofStatements?: readonly Readonly<
+              Record<string, unknown>
+          >[];
+      }
+    | {
           readonly command: 'VerifyCompactVssSameSecretBridgeStatementSet';
           readonly statementSet: Readonly<Record<string, unknown>>;
           readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
           readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+          readonly transportedSameSecretProofMaterial?: Readonly<
+              Record<string, unknown>
+          >;
+      }
+    | {
+          readonly command: 'VerifyCompactVssSameSecretBridgeProofMaterialSet';
+          readonly statementSet: Readonly<Record<string, unknown>>;
+          readonly proofMaterialSet: Readonly<Record<string, unknown>>;
+          readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
+          readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+          readonly transportedSameSecretProofMaterial?: Readonly<
+              Record<string, unknown>
+          >;
+          readonly restrictedProofStatements?: readonly Readonly<
+              Record<string, unknown>
+          >[];
       }
     | {
           readonly command: 'DeriveThresholdShareCommitments';

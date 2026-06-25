@@ -20,7 +20,13 @@ import type {
     BgvCompactVssCoefficientCommitmentSetVerification,
     BgvCompactVssCommitmentOpeningVerification,
     BgvCompactVssRecipientShareCommitmentSetVerification,
+    BgvCompactSameSecretBridgeProofGeneration,
+    BgvCompactSameSecretBridgeProofVerification,
+    BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
+    BgvCompactVssShareLinkageProofGeneration,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
+    BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
     BgvTrusteeEvaluationKeyProofVerification,
@@ -460,6 +466,10 @@ export const createTranscriptCoreKernelLoader = (
                                 input.transportedPublicEvaluationKeyMaterial,
                             verifiedSetupProofMaterials:
                                 input.verifiedSetupProofMaterials,
+                            compactVssRestrictedProofStatements:
+                                input.compactVssRestrictedProofStatements,
+                            compactSameSecretBridgeProofStatements:
+                                input.compactSameSecretBridgeProofStatements,
                         },
                     ),
                 verifyPrivateVssShareEnvelope: (
@@ -538,6 +548,65 @@ export const createTranscriptCoreKernelLoader = (
                         sameSecretLinkage: input.sameSecretLinkage,
                         proofBytesHex: input.proofBytesHex,
                     }),
+                generateCompactVssShareLinkageProof: (
+                    input,
+                ): BgvCompactVssShareLinkageProofGeneration =>
+                    executeCommand<BgvCompactVssShareLinkageProofGeneration>({
+                        command: 'GenerateCompactVssShareLinkageProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        compactVssShareLinkage: input.compactVssShareLinkage,
+                        coefficientMessagesByShamirIndex:
+                            input.coefficientMessagesByShamirIndex,
+                        recipientShareMessages: input.recipientShareMessages,
+                        coefficientOpeningRandomnessByShamirIndex:
+                            input.coefficientOpeningRandomnessByShamirIndex,
+                        recipientShareOpeningRandomness:
+                            input.recipientShareOpeningRandomness,
+                        carryWitnesses: input.carryWitnesses,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                    }),
+                verifyCompactVssShareLinkageProof: (
+                    input,
+                ): BgvCompactVssShareLinkageProofVerification =>
+                    executeCommand<BgvCompactVssShareLinkageProofVerification>({
+                        command: 'VerifyCompactVssShareLinkageProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        compactVssShareLinkage: input.compactVssShareLinkage,
+                        proofBytesHex: input.proofBytesHex,
+                    }),
+                generateCompactSameSecretBridgeProof: (
+                    input,
+                ): BgvCompactSameSecretBridgeProofGeneration =>
+                    executeCommand<BgvCompactSameSecretBridgeProofGeneration>({
+                        command: 'GenerateCompactSameSecretBridgeProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        compactSameSecretBridge: input.compactSameSecretBridge,
+                        secretCoefficients: input.secretCoefficients,
+                        negativeIndicatorCoefficients:
+                            input.negativeIndicatorCoefficients,
+                        openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        proofRandomnessSource: input.proofRandomnessSource,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                    }),
+                verifyCompactSameSecretBridgeProof: (
+                    input,
+                ): BgvCompactSameSecretBridgeProofVerification =>
+                    executeCommand<BgvCompactSameSecretBridgeProofVerification>(
+                        {
+                            command: 'VerifyCompactSameSecretBridgeProof',
+                            context: input.context,
+                            ringDegree: input.ringDegree,
+                            compactSameSecretBridge:
+                                input.compactSameSecretBridge,
+                            proofBytesHex: input.proofBytesHex,
+                        },
+                    ),
                 computeSetupCommitmentFromOpening: (
                     input,
                 ): BgvSetupCommitmentOpeningComputation =>
@@ -655,6 +724,19 @@ export const createTranscriptCoreKernelLoader = (
                                 input.aggregateThresholdCommitmentSet,
                         },
                     ),
+                verifyCompactVssShareLinkageProofMaterialSet: (
+                    input,
+                ): BgvCompactVssShareLinkageProofMaterialSetVerification =>
+                    executeCommand<BgvCompactVssShareLinkageProofMaterialSetVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssShareLinkageProofMaterialSet',
+                            statement: input.statement,
+                            proofMaterialSet: input.proofMaterialSet,
+                            restrictedProofStatements:
+                                input.restrictedProofStatements,
+                        },
+                    ),
                 verifyCompactVssSameSecretBridgeStatementSet: (
                     input,
                 ): BgvCompactVssSameSecretBridgeStatementSetVerification =>
@@ -665,6 +747,25 @@ export const createTranscriptCoreKernelLoader = (
                             statementSet: input.statementSet,
                             sameSecretConsistency: input.sameSecretConsistency,
                             sameSecretProofs: input.sameSecretProofs,
+                            transportedSameSecretProofMaterial:
+                                input.transportedSameSecretProofMaterial,
+                        },
+                    ),
+                verifyCompactVssSameSecretBridgeProofMaterialSet: (
+                    input,
+                ): BgvCompactVssSameSecretBridgeProofMaterialSetVerification =>
+                    executeCommand<BgvCompactVssSameSecretBridgeProofMaterialSetVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssSameSecretBridgeProofMaterialSet',
+                            statementSet: input.statementSet,
+                            proofMaterialSet: input.proofMaterialSet,
+                            sameSecretConsistency: input.sameSecretConsistency,
+                            sameSecretProofs: input.sameSecretProofs,
+                            transportedSameSecretProofMaterial:
+                                input.transportedSameSecretProofMaterial,
+                            restrictedProofStatements:
+                                input.restrictedProofStatements,
                         },
                     ),
                 deriveThresholdShareCommitments: (

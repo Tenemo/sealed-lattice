@@ -351,8 +351,13 @@ pub(super) fn read_local_target_decryption_share_witness(
         &target_accepted.target_basis_hash,
         "local target-decryption share witness target basis hash",
     )?;
-    let public_matrix_seed_hash =
-        hash_at_path(compact_opening, &["publicMatrixSeedHash"])?.to_string();
+    compare_hash_field(
+        compact_opening,
+        "publicMatrixSeedHash",
+        &setup_binding.public_matrix_seed_hash,
+        "local target-decryption share witness public matrix seed hash",
+    )?;
+    let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root =
         hash_at_path(compact_opening, &["shareLinkageStatementRoot"])?.to_string();
     let aggregate_threshold_commitment_root =

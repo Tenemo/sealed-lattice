@@ -16,6 +16,24 @@ type CompactAggregateOpeningBinding = {
     readonly activeCredentialBindings: readonly unknown[];
 };
 
+type CompactAggregateOpeningWitnessCredentials = {
+    compactAggregateOpening: {
+        compactAggregateOpeningCredentials: unknown[];
+    };
+};
+
+type CompactAggregateOpeningWitnessSeed = {
+    compactAggregateOpening: {
+        publicMatrixSeedHash: string;
+    };
+};
+
+type SetupPackageWithCommonRandomness = {
+    commonRandomness: {
+        publicMatrixSeedHash: string;
+    };
+};
+
 const rebindProofStatementRoot = (
     kernel: TranscriptCoreKernel,
     proofStatement: BgvTargetDecryptionShareProofStatement,
@@ -38,6 +56,9 @@ describe('BGV target-decryption kernel commands', () => {
     it('generates and verifies target share proof statements from restored compact local state through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const fixture = kernel.generateBgvTargetDecryptionFixture();
+        const setupPublicMatrixSeedHash = (
+            fixture.setupPackage as unknown as SetupPackageWithCommonRandomness
+        ).commonRandomness.publicMatrixSeedHash;
 
         const seedShare = kernel.generateBgvTargetDecryptionShare({
             setupPackage: fixture.setupPackage,
@@ -77,6 +98,103 @@ describe('BGV target-decryption kernel commands', () => {
             }),
         );
 
+        const localWitnessWithoutCompactOpening = structuredClone(
+            fixture.localTargetShareWitness,
+        );
+        delete localWitnessWithoutCompactOpening.compactAggregateOpening;
+        let missingCompactOpeningError: unknown;
+        try {
+            kernel.generateBgvTargetDecryptionShareFromLocalShare({
+                setupPackage: fixture.setupPackage,
+                localTargetShareWitness: localWitnessWithoutCompactOpening,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+            });
+        } catch (error: unknown) {
+            missingCompactOpeningError = error;
+        }
+        expect(missingCompactOpeningError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (missingCompactOpeningError as TranscriptCoreKernelCommandError)
+                .code,
+        ).toBe('InvalidFixture');
+        expect(
+            (missingCompactOpeningError as TranscriptCoreKernelCommandError)
+                .message,
+        ).toContain('compactAggregateOpening');
+
+        const localWitnessWithoutOneOpeningCredential = structuredClone(
+            fixture.localTargetShareWitness,
+        ) as typeof fixture.localTargetShareWitness &
+            CompactAggregateOpeningWitnessCredentials;
+        localWitnessWithoutOneOpeningCredential.compactAggregateOpening.compactAggregateOpeningCredentials =
+            localWitnessWithoutOneOpeningCredential.compactAggregateOpening.compactAggregateOpeningCredentials.slice(
+                1,
+            );
+        let missingOpeningCredentialError: unknown;
+        try {
+            kernel.generateBgvTargetDecryptionShareFromLocalShare({
+                setupPackage: fixture.setupPackage,
+                localTargetShareWitness:
+                    localWitnessWithoutOneOpeningCredential,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+            });
+        } catch (error: unknown) {
+            missingOpeningCredentialError = error;
+        }
+        expect(missingOpeningCredentialError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (missingOpeningCredentialError as TranscriptCoreKernelCommandError)
+                .code,
+        ).toBe('MalformedLength');
+        expect(
+            (missingOpeningCredentialError as TranscriptCoreKernelCommandError)
+                .message,
+        ).toContain('missing active limb');
+
+        const localWitnessWithWrongPublicMatrixSeed = structuredClone(
+            fixture.localTargetShareWitness,
+        ) as typeof fixture.localTargetShareWitness &
+            CompactAggregateOpeningWitnessSeed;
+        localWitnessWithWrongPublicMatrixSeed.compactAggregateOpening.publicMatrixSeedHash =
+            '0'.repeat(128);
+        let wrongPublicMatrixSeedError: unknown;
+        try {
+            kernel.generateBgvTargetDecryptionShareFromLocalShare({
+                setupPackage: fixture.setupPackage,
+                localTargetShareWitness: localWitnessWithWrongPublicMatrixSeed,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+            });
+        } catch (error: unknown) {
+            wrongPublicMatrixSeedError = error;
+        }
+        expect(wrongPublicMatrixSeedError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (wrongPublicMatrixSeedError as TranscriptCoreKernelCommandError)
+                .code,
+        ).toBe('ProfileComponentMismatch');
+        expect(
+            (wrongPublicMatrixSeedError as TranscriptCoreKernelCommandError)
+                .message,
+        ).toContain('public matrix seed');
+
         const proofStatement =
             kernel.deriveBgvTargetDecryptionShareProofStatement({
                 setupPackage: fixture.setupPackage,
@@ -112,7 +230,7 @@ describe('BGV target-decryption kernel commands', () => {
         });
         expect(compactBinding).toMatchObject({
             witnessOwnership: 'recipient-owned-restorable-local-state',
-            publicMatrixSeedHash: '3'.repeat(128),
+            publicMatrixSeedHash: setupPublicMatrixSeedHash,
             shareLinkageStatementRoot: '4'.repeat(128),
             aggregateThresholdCommitmentRoot: '5'.repeat(128),
             activeCredentialBindingRoot: kernel.deriveProtocolHash({

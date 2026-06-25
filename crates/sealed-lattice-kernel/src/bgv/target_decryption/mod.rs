@@ -131,6 +131,7 @@ struct SetupBinding {
     threshold_profile_hash: String,
     target_decryption_profile_hash: String,
     target_decryption_profile_binding_hash: String,
+    public_matrix_seed_hash: String,
     participants: Vec<ParticipantBinding>,
     threshold_verification: ThresholdVerificationBinding,
 }

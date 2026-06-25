@@ -17,6 +17,8 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
 
 const browserServerHost = '127.0.0.1';
+const desktopBrowserApiPort = 55_117;
+const mobileBrowserApiPort = 55_118;
 
 const browserOptimizedDependencies = [
     '@noble/hashes/hkdf.js',
@@ -155,6 +157,7 @@ const makeNodeProject = ({
 });
 
 type BrowserProjectInput = {
+    readonly browserApiPort: number;
     readonly include: readonly string[];
     readonly instances: BrowserInstanceOption[];
     readonly projectName: string;
@@ -162,6 +165,7 @@ type BrowserProjectInput = {
 };
 
 const makeBrowserProject = ({
+    browserApiPort,
     include,
     instances,
     projectName,
@@ -176,6 +180,7 @@ const makeBrowserProject = ({
             enabled: true,
             api: {
                 host: browserServerHost,
+                port: browserApiPort,
                 strictPort: false,
             },
             provider,
@@ -199,10 +204,12 @@ export default defineConfig({
             ),
             makeBrowserProject({
                 ...browserTestLaneDefinitions.desktop,
+                browserApiPort: desktopBrowserApiPort,
                 instances: desktopBrowserInstances,
             }),
             makeBrowserProject({
                 ...browserTestLaneDefinitions.mobile,
+                browserApiPort: mobileBrowserApiPort,
                 instances: mobileBrowserInstances,
             }),
         ],

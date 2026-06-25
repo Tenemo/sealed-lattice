@@ -212,6 +212,7 @@ fn shape_only_trustee_statement(
         same_secret_linkage,
         private_vss_share: None,
         compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
     }
 }
 

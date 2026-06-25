@@ -114,6 +114,16 @@ pub(crate) struct CompactVssShareLinkageStatement {
     pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
 }
 
+pub(crate) struct CompactSameSecretBridgeStatement {
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) target_basis_hash: String,
+    pub(crate) target_rns_primes: Vec<u64>,
+    pub(crate) target_constant_commitment_roots: Vec<String>,
+    pub(crate) target_constant_commitments: Vec<CompactVssShareLinkageCommitment>,
+}
+
 // Ceremony context the proof is bound to: the shared base fields, the proof
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
@@ -144,6 +154,7 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) same_secret_linkage: Option<SameSecretLinkageStatement>,
     pub(crate) private_vss_share: Option<PrivateVssShareStatement>,
     pub(crate) compact_vss_share_linkage: Option<CompactVssShareLinkageStatement>,
+    pub(crate) compact_same_secret_bridge: Option<CompactSameSecretBridgeStatement>,
 }
 
 pub(crate) struct TrusteeEvaluationKeyWitness {
@@ -151,8 +162,9 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     // error_coefficients_by_key[key][digit] follows each key's digit count.
     pub(crate) error_coefficients_by_key: Vec<Vec<Vec<i64>>>,
     // Linkage witnesses, present exactly when the statement carries the
-    // same-secret linkage: the binary negative-indicator vector and the
-    // ternary opening randomness per Q_share limb and column.
+    // same-secret linkage or compact same-secret bridge: the binary
+    // negative-indicator vector and the ternary opening randomness per bound
+    // commitment and column.
     pub(crate) negative_indicator_coefficients: Vec<i64>,
     pub(crate) opening_randomness_by_limb: Vec<Vec<Vec<i64>>>,
     // Private VSS witnesses, present exactly for the recipient-private VSS
@@ -364,7 +376,10 @@ impl TrusteeEvaluationKeyStatement {
     // keyless same-secret linkage anchor statement is active exactly on the
     // commitment fields, where its opening relations live.
     pub(crate) fn limb_count(&self) -> usize {
-        if self.private_vss_share.is_some() || self.compact_vss_share_linkage.is_some() {
+        if self.private_vss_share.is_some()
+            || self.compact_vss_share_linkage.is_some()
+            || self.compact_same_secret_bridge.is_some()
+        {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
         }
         self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
@@ -394,12 +409,18 @@ impl TrusteeEvaluationKeyStatement {
     // the linkage relations live only in the commitment fields (the first
     // three data primes).
     pub(crate) fn linkage_randomness_count(&self, limb_index: usize) -> usize {
-        match &self.same_secret_linkage {
-            Some(linkage) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH
-            }
-            _ => 0,
+        if limb_index >= SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+            return 0;
         }
+        if let Some(linkage) = &self.same_secret_linkage {
+            return linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+        }
+        if let Some(bridge) = &self.compact_same_secret_bridge {
+            return bridge.target_constant_commitments.len()
+                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
+        }
+
+        0
     }
 
     pub(crate) fn private_vss_randomness_count(&self, limb_index: usize) -> usize {

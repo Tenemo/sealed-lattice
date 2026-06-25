@@ -699,6 +699,7 @@ fn private_vss_share_succinct_statement(
             coefficient_commitments: input.coefficient_commitments.to_vec(),
         }),
         compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
     };
     statement.validate_shape()?;
 

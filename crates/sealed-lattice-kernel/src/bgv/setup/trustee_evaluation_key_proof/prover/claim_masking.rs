@@ -161,7 +161,8 @@ pub(super) fn global_claim_integers(
                 signed_vectors.push(error_vector);
             }
         }
-        if statement.same_secret_linkage.is_some() {
+        if statement.same_secret_linkage.is_some() || statement.compact_same_secret_bridge.is_some()
+        {
             signed_vectors.push(&witness.negative_indicator_coefficients);
             for randomness_columns in &witness.opening_randomness_by_limb {
                 for column in randomness_columns {

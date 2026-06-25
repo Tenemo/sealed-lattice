@@ -462,6 +462,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             }),
             private_vss_share: None,
             compact_vss_share_linkage: None,
+            compact_same_secret_bridge: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients,

@@ -182,6 +182,7 @@ pub(super) fn validate_witness_support(
                 .compact_vss_recipient_share_opening_randomness
                 .is_empty()
             || !witness.compact_vss_carry_witnesses.is_empty()
+            || statement.compact_same_secret_bridge.is_some()
         {
             return Err(invalid_succinct_setup_proof(
                 "private VSS witness must not include key or same-secret linkage material",
@@ -208,6 +209,38 @@ pub(super) fn validate_witness_support(
         }
         return validate_compact_vss_witness(
             compact_vss_share_linkage,
+            witness,
+            statement.ring_degree,
+        );
+    }
+    if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge {
+        if !witness.error_coefficients_by_key.is_empty()
+            || !witness
+                .private_vss_coefficient_messages_by_shamir_index
+                .is_empty()
+            || !witness
+                .private_vss_opening_randomness_by_shamir_index
+                .is_empty()
+            || !witness.private_vss_carry_witnesses.is_empty()
+            || !witness
+                .compact_vss_coefficient_messages_by_shamir_index
+                .is_empty()
+            || !witness.compact_vss_recipient_share_messages.is_empty()
+            || !witness
+                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .is_empty()
+            || !witness
+                .compact_vss_recipient_share_opening_randomness
+                .is_empty()
+            || !witness.compact_vss_carry_witnesses.is_empty()
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact same-secret bridge witness must not include key, private VSS, or share-linkage material",
+            ));
+        }
+        return validate_linkage_witness(
+            compact_same_secret_bridge.target_constant_commitments.len(),
+            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
             witness,
             statement.ring_degree,
         );
@@ -254,32 +287,12 @@ pub(super) fn validate_witness_support(
     }
     match &statement.same_secret_linkage {
         Some(linkage) => {
-            if witness.negative_indicator_coefficients.len() != statement.ring_degree
-                || witness
-                    .negative_indicator_coefficients
-                    .iter()
-                    .any(|coefficient| !(0..=1).contains(coefficient))
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "witness negative indicator must be binary at the ring degree",
-                ));
-            }
-            if witness.opening_randomness_by_limb.len() != linkage.commitments.len()
-                || witness.opening_randomness_by_limb.iter().any(|columns| {
-                    columns.len()
-                        != crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH
-                        || columns.iter().any(|column| {
-                            column.len() != statement.ring_degree
-                                || column
-                                    .iter()
-                                    .any(|coefficient| !(-1..=1).contains(coefficient))
-                        })
-                })
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "witness opening randomness must be ternary per commitment and column",
-                ));
-            }
+            validate_linkage_witness(
+                linkage.commitments.len(),
+                crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
+                witness,
+                statement.ring_degree,
+            )?;
         }
         None => {
             if !witness.negative_indicator_coefficients.is_empty()
@@ -302,12 +315,48 @@ pub(super) fn validate_witness_support(
                     .compact_vss_recipient_share_opening_randomness
                     .is_empty()
                 || !witness.compact_vss_carry_witnesses.is_empty()
+                || statement.compact_same_secret_bridge.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
                     "witness linkage material requires a same-secret linkage statement",
                 ));
             }
         }
+    }
+
+    Ok(())
+}
+
+fn validate_linkage_witness(
+    commitment_count: usize,
+    randomness_column_count: usize,
+    witness: &TrusteeEvaluationKeyWitness,
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    if witness.negative_indicator_coefficients.len() != ring_degree
+        || witness
+            .negative_indicator_coefficients
+            .iter()
+            .any(|coefficient| !(0..=1).contains(coefficient))
+    {
+        return Err(invalid_succinct_setup_proof(
+            "witness negative indicator must be binary at the ring degree",
+        ));
+    }
+    if witness.opening_randomness_by_limb.len() != commitment_count
+        || witness.opening_randomness_by_limb.iter().any(|columns| {
+            columns.len() != randomness_column_count
+                || columns.iter().any(|column| {
+                    column.len() != ring_degree
+                        || column
+                            .iter()
+                            .any(|coefficient| !(-1..=1).contains(coefficient))
+                })
+        })
+    {
+        return Err(invalid_succinct_setup_proof(
+            "witness opening randomness must be ternary per commitment and column",
+        ));
     }
 
     Ok(())

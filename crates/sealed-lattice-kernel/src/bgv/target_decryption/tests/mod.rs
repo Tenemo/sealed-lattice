@@ -348,7 +348,7 @@ fn local_target_share_witness(
     )
     .expect("target share limbs");
     let setup_epoch = "target-decryption-test";
-    let public_matrix_seed_hash = "3".repeat(128);
+    let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root = "4".repeat(128);
     let aggregate_threshold_commitment_root = "5".repeat(128);
     let compact_aggregate_opening_credentials = share_by_limb
@@ -580,7 +580,7 @@ fn target_share_proof_statement_binds_compact_local_witness_and_share() {
     );
     assert_eq!(
         statement["compactAggregateOpeningBinding"]["publicMatrixSeedHash"],
-        json!("3".repeat(128))
+        setup_package["commonRandomness"]["publicMatrixSeedHash"]
     );
     assert_eq!(
         statement["compactAggregateOpeningBinding"]["shareLinkageStatementRoot"],
@@ -1107,6 +1107,36 @@ fn local_target_share_witness_rejects_wrong_target_basis() {
 
     assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
     assert!(error.message.contains("target basis"));
+}
+
+#[test]
+fn local_target_share_witness_rejects_wrong_public_matrix_seed_hash() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let mut witness = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+    witness["compactAggregateOpening"]["publicMatrixSeedHash"] = json!("0".repeat(128));
+
+    let error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
+        "setupPackage": setup_package,
+        "localTargetShareWitness": witness,
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+        "targetShareProfile": target_share_profile,
+        "trusteeIdentity": "trustee-1",
+    }))
+    .expect_err("wrong public matrix seed hash must be refused");
+
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(error.message.contains("public matrix seed"));
 }
 
 #[test]

@@ -638,6 +638,7 @@ fn verify_public_key_share_succinct_proof_record(
         }),
         private_vss_share: None,
         compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
     };
     let statement_hash_hex = statement
         .statement_hash()

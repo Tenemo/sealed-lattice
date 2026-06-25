@@ -579,6 +579,21 @@ describe('local trustee setup state storage', () => {
                     },
                 },
             }),
+        ).rejects.toThrow(/commitment canonical root must match/u);
+
+        await expect(
+            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+                ...generatedLocalStateInput(),
+                compactVssTargetProofWitness: {
+                    ...compactWitness,
+                    aggregateThresholdCommitmentSet: {
+                        ...compactWitness.aggregateThresholdCommitmentSet,
+                        aggregateThresholdCommitmentRoot: fixtureHash(
+                            'tampered-aggregate-set',
+                        ),
+                    },
+                },
+            }),
         ).rejects.toThrow(
             /aggregate threshold commitment set root does not match/u,
         );

@@ -66,6 +66,7 @@ pub(in super::super) fn same_secret_proofs_object(
             ),
             private_vss_share: None,
             compact_vss_share_linkage: None,
+            compact_same_secret_bridge: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients: (0..ring_degree)

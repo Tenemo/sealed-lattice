@@ -25,6 +25,10 @@ enum TranscriptCoreCommand {
     GeneratePrivateVssShareProof,
     GenerateTrusteeEvaluationKeyProof,
     VerifyTrusteeEvaluationKeyProof,
+    GenerateCompactVssShareLinkageProof,
+    VerifyCompactVssShareLinkageProof,
+    GenerateCompactSameSecretBridgeProof,
+    VerifyCompactSameSecretBridgeProof,
     ComputeSetupCommitmentFromOpening,
     ComputeCompactVssCommitmentFromOpening,
     EncodeCompactVssCommitmentBody,
@@ -34,7 +38,9 @@ enum TranscriptCoreCommand {
     VerifyCompactVssRecipientShareCommitmentSet,
     VerifyCompactVssAggregateThresholdCommitmentSet,
     VerifyCompactVssShareLinkageStatement,
+    VerifyCompactVssShareLinkageProofMaterialSet,
     VerifyCompactVssSameSecretBridgeStatementSet,
+    VerifyCompactVssSameSecretBridgeProofMaterialSet,
     DeriveThresholdShareCommitments,
     DeriveThresholdShareCommitmentsFromTransport,
     BeginThresholdShareCommitmentsFromTransportStream,
@@ -229,6 +235,10 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof
+        | TranscriptCoreCommand::GenerateCompactVssShareLinkageProof
+        | TranscriptCoreCommand::VerifyCompactVssShareLinkageProof
+        | TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof
+        | TranscriptCoreCommand::VerifyCompactSameSecretBridgeProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening
         | TranscriptCoreCommand::EncodeCompactVssCommitmentBody
@@ -238,7 +248,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyCompactVssRecipientShareCommitmentSet
         | TranscriptCoreCommand::VerifyCompactVssAggregateThresholdCommitmentSet
         | TranscriptCoreCommand::VerifyCompactVssShareLinkageStatement
+        | TranscriptCoreCommand::VerifyCompactVssShareLinkageProofMaterialSet
         | TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeStatementSet
+        | TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeProofMaterialSet
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
         | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
@@ -310,6 +322,18 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof => {
             crate::bgv::commands::verify_trustee_evaluation_key_proof(request)
         }
+        TranscriptCoreCommand::GenerateCompactVssShareLinkageProof => {
+            crate::bgv::commands::generate_compact_vss_share_linkage_proof(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssShareLinkageProof => {
+            crate::bgv::commands::verify_compact_vss_share_linkage_proof(request)
+        }
+        TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof => {
+            crate::bgv::commands::generate_compact_same_secret_bridge_proof(request)
+        }
+        TranscriptCoreCommand::VerifyCompactSameSecretBridgeProof => {
+            crate::bgv::commands::verify_compact_same_secret_bridge_proof(request)
+        }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::commands::compute_setup_commitment_from_opening(request)
         }
@@ -337,8 +361,14 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::VerifyCompactVssShareLinkageStatement => {
             crate::bgv::commands::verify_compact_vss_share_linkage_statement(request)
         }
+        TranscriptCoreCommand::VerifyCompactVssShareLinkageProofMaterialSet => {
+            crate::bgv::commands::verify_compact_vss_share_linkage_proof_material_set(request)
+        }
         TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeStatementSet => {
             crate::bgv::commands::verify_compact_vss_same_secret_bridge_statement_set(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeProofMaterialSet => {
+            crate::bgv::commands::verify_compact_vss_same_secret_bridge_proof_material_set(request)
         }
         TranscriptCoreCommand::DeriveThresholdShareCommitments => {
             crate::bgv::commands::derive_threshold_share_commitments(request)

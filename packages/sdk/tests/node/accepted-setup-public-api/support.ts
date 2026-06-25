@@ -1,3 +1,5 @@
+import { Buffer } from 'node:buffer';
+
 import {
     createSetupPackageVerificationInput,
     verifyPrivateVssShare,
@@ -188,6 +190,8 @@ export const vssFixtureRingDegree = 8;
 export const vssFixtureThresholdDegree = 2;
 export const setupTransportChunkSizeBytes = 1_048_576;
 const setupProofProfileId = 'SealedLattice-SetupProof-v1';
+const sameSecretProofBytesHashDomain =
+    'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
 export const requiredGaloisKeySchedule = [
     {
         rotation: 3,
@@ -237,6 +241,11 @@ const coefficientVectorBytes = (
 const coefficientVectorHash = (coefficients: readonly number[]): string =>
     hash512Hex(publicKeyShareCoefficientVectorHashDomain, [
         coefficientVectorBytes(coefficients),
+    ]);
+
+const sameSecretProofBytesHash = (proofBytesHex: string): string =>
+    hash512Hex(sameSecretProofBytesHashDomain, [
+        Buffer.from(proofBytesHex, 'hex'),
     ]);
 
 const publicKeyShareCoefficientVector = (
@@ -360,10 +369,7 @@ export const sameSecretProofMaterial = (
             `same-secret-proof-statement-${String(proofRosterPosition)}`,
         ),
         proofSizeBytes: proofBytesHex.length / 2,
-        proofBytesHash: hashFromKernel(
-            kernel,
-            `same-secret-proof-bytes-${String(proofRosterPosition)}`,
-        ),
+        proofBytesHash: sameSecretProofBytesHash(proofBytesHex),
         proofBytesHex,
     };
 };

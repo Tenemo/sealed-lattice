@@ -34,17 +34,23 @@ use crate::{
             encode_compact_vss_commitment_body_request,
             finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
+            generate_compact_same_secret_bridge_proof_from_request,
+            generate_compact_vss_share_linkage_proof_from_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             release_verified_transported_vss_material_request,
             verify_collective_bgv_setup_package_from_request,
+            verify_compact_same_secret_bridge_proof_from_request,
             verify_compact_vss_aggregate_threshold_commitment_set_request,
             verify_compact_vss_coefficient_commitment_set_request,
             verify_compact_vss_commitment_opening_request,
             verify_compact_vss_recipient_share_commitment_set_request,
+            verify_compact_vss_same_secret_bridge_proof_material_set_request,
             verify_compact_vss_same_secret_bridge_statement_set_request,
+            verify_compact_vss_share_linkage_proof_from_request,
+            verify_compact_vss_share_linkage_proof_material_set_request,
             verify_compact_vss_share_linkage_statement_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
@@ -174,6 +180,22 @@ pub(crate) fn verify_trustee_evaluation_key_proof(request: &Value) -> CanonicalR
     verify_trustee_evaluation_key_proof_from_request(request)
 }
 
+pub(crate) fn generate_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_compact_vss_share_linkage_proof_from_request(request)
+}
+
+pub(crate) fn verify_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
+    verify_compact_vss_share_linkage_proof_from_request(request)
+}
+
+pub(crate) fn generate_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_compact_same_secret_bridge_proof_from_request(request)
+}
+
+pub(crate) fn verify_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
+    verify_compact_same_secret_bridge_proof_from_request(request)
+}
+
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
     compute_setup_commitment_from_opening_request(request)
 }
@@ -220,10 +242,22 @@ pub(crate) fn verify_compact_vss_share_linkage_statement(
     verify_compact_vss_share_linkage_statement_request(request)
 }
 
+pub(crate) fn verify_compact_vss_share_linkage_proof_material_set(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    verify_compact_vss_share_linkage_proof_material_set_request(request)
+}
+
 pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set(
     request: &Value,
 ) -> CanonicalResult<Value> {
     verify_compact_vss_same_secret_bridge_statement_set_request(request)
+}
+
+pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    verify_compact_vss_same_secret_bridge_proof_material_set_request(request)
 }
 
 pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalResult<Value> {

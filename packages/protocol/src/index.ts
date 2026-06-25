@@ -89,7 +89,9 @@ export {
     compactVssCommitmentOutputCoordinateCount,
     compactVssCommitmentProfileId,
     compactVssCommitmentRandomnessColumnCount,
+    compactVssRestrictedShareLinkageProofBoundary,
     compactVssAggregateMessageCoefficientBound,
+    compactVssShareLinkageProofFamily,
     compactVssShareLinkageAggregateThresholdRule,
     compactVssShareLinkageCommonKeyRule,
     compactVssShareLinkageProofBatchingRule,
@@ -102,6 +104,7 @@ export {
     createCompactVssCoefficientCommitmentSet,
     createCompactVssRecipientShareCommitmentBundle,
     createCompactVssShareLinkageStatement,
+    createCompactVssShareLinkageProofMaterialSet,
     computeCompactVssCommitmentFromOpening,
     decodeCompactVssCommitmentBody,
     encodeCompactVssCommitmentBody,
@@ -110,6 +113,7 @@ export {
     verifyCompactVssAggregateThresholdCommitmentSet,
     verifyCompactVssAggregateOpeningCredential,
     verifyCompactVssShareLinkageStatement,
+    verifyCompactVssShareLinkageProofMaterialSet,
     verifyCompactVssCommitmentOpening,
     type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssAggregateThresholdOpeningCredential,
@@ -119,6 +123,11 @@ export {
     type CompactVssParameterCertificateInputBinding,
     type CompactVssRecipientShareOpeningCredential,
     type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageProofMaterial,
+    type CompactVssShareLinkageProofMaterialInput,
+    type CompactVssShareLinkageProofMaterialSet,
+    type CompactVssShareLinkageProofRecord,
+    type CompactVssShareLinkageProofRecordInput,
     type CompactVssShareLinkageStatement,
 } from './setup/compact-vss-commitments.js';
 export {
@@ -151,10 +160,12 @@ export {
 } from './setup/setup-package-assembly.js';
 export {
     createBinaryChunkedSameSecretProofMaterialTransport,
+    createCompactVssSameSecretBridgeProofMaterialSet,
     createCompactVssSameSecretBridgeStatementSet,
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
     compactVssSameSecretBridgeIntegerSupport,
+    compactVssSameSecretBridgeProofFamily,
     compactVssSameSecretBridgeProofBoundary,
     compactVssSameSecretBridgeRelation,
     compactVssSameSecretBridgeSignedRepresentativeConvention,
@@ -166,6 +177,7 @@ export {
     sameSecretRelation,
     sameSecretTargetDecryptionBindingPolicy,
     setupProofProfileId,
+    verifyCompactVssSameSecretBridgeProofMaterialSet,
     verifyCompactVssSameSecretBridgeStatementSet,
 } from './setup/same-secret-consistency-records.js';
 export {
@@ -360,6 +372,9 @@ export type {
 } from './setup/threshold-share-commitments.js';
 export type {
     BinaryChunkedSameSecretProofMaterialTransport,
+    CompactVssSameSecretBridgeProofMaterialSet,
+    CompactVssSameSecretBridgeProofRecord,
+    CompactVssSameSecretBridgeProofRecordInput,
     CompactVssSameSecretBridgeStatementRecord,
     CompactVssSameSecretBridgeStatementSet,
     CompactVssSameSecretBridgeStatementSetInput,

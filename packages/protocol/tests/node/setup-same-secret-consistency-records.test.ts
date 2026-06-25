@@ -1,13 +1,16 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
     createCompactVssCoefficientCommitmentSet,
+    createCompactVssSameSecretBridgeProofMaterialSet,
     createCompactVssSameSecretBridgeStatementSet,
+    createBinaryChunkedSameSecretProofMaterialTransport,
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
     createVssCoefficientCommitmentBundle,
     verifyCompactVssSameSecretBridgeStatementSet,
+    verifyCompactVssSameSecretBridgeProofMaterialSet,
     compactVssCommitmentBinaryFormat,
     compactVssSameSecretBridgeIntegerSupport,
     sameSecretAnchorArgument,
@@ -20,6 +23,8 @@ import {
     sameSecretTargetDecryptionBindingPolicy,
     setupCommitmentProfileId,
     setupProofProfileId,
+    type SameSecretProofMaterial,
+    type CompactVssSameSecretBridgeProofMaterialSet,
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
@@ -35,6 +40,13 @@ import {
 const qSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
 ] as const;
+const sameSecretProofBytesHashDomain =
+    'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
+
+const sameSecretProofBytesHash = (proofBytesHex: string): string =>
+    hash512Hex(sameSecretProofBytesHashDomain, [
+        Buffer.from(proofBytesHex, 'hex'),
+    ]);
 const ringDegree = 8;
 const participantCount = 3;
 const thresholdDegree = 2;
@@ -279,6 +291,23 @@ describe('same-secret consistency statement builders', () => {
             thresholdDegree,
             vssCoefficientCommitments: vssCoefficientBundle.commitmentSet,
         });
+        const sameSecretProofMaterials =
+            sameSecretConsistency.statementRecords.map(
+                (statementRecord) =>
+                    ({
+                        setupProofProfileId,
+                        proofFamily: sameSecretProofFamily,
+                        trusteeIdentity: statementRecord.trusteeIdentity,
+                        trusteeRosterPosition:
+                            statementRecord.trusteeRosterPosition,
+                        statementHash: fixtureHash(
+                            `same-secret-statement-${String(statementRecord.trusteeRosterPosition)}`,
+                        ),
+                        proofSizeBytes: 1,
+                        proofBytesHash: sameSecretProofBytesHash('00'),
+                        proofBytesHex: '00',
+                    }) satisfies SameSecretProofMaterial,
+            );
         const sameSecretProofs = createSameSecretProofSet({
             setupContext,
             qSharePrimes,
@@ -286,23 +315,7 @@ describe('same-secret consistency statement builders', () => {
             sameSecretConsistency,
             vssCoefficientCommitmentMaterial: vssCoefficientBundle.materialSet,
             proofAccountingHash: fixtureHash('same-secret-proof-accounting'),
-            proofMaterials: sameSecretConsistency.statementRecords.map(
-                (statementRecord) => ({
-                    setupProofProfileId,
-                    proofFamily: sameSecretProofFamily,
-                    trusteeIdentity: statementRecord.trusteeIdentity,
-                    trusteeRosterPosition:
-                        statementRecord.trusteeRosterPosition,
-                    statementHash: fixtureHash(
-                        `same-secret-statement-${String(statementRecord.trusteeRosterPosition)}`,
-                    ),
-                    proofSizeBytes: 1,
-                    proofBytesHash: fixtureHash(
-                        `same-secret-proof-bytes-${String(statementRecord.trusteeRosterPosition)}`,
-                    ),
-                    proofBytesHex: '00',
-                }),
-            ),
+            proofMaterials: sameSecretProofMaterials,
         });
         const compactPublicMatrixSeedHash = fixtureHash(
             'compact-public-matrix-seed',
@@ -425,6 +438,189 @@ describe('same-secret consistency statement builders', () => {
                 sameSecretProofs,
             }),
         ).toBe(bridgeStatementSet);
+        const bridgeProofMaterialSet =
+            createCompactVssSameSecretBridgeProofMaterialSet({
+                statementSet: bridgeStatementSet,
+                proofRecordInputs: bridgeStatementSet.statementRecords.map(
+                    (statementRecord, statementIndex) => ({
+                        compactSameSecretBridgeStatementRoot:
+                            statementRecord.compactSameSecretBridgeStatementRoot,
+                        proofStatementHash: fixtureHash(
+                            `compact-same-secret-bridge-proof-statement-${String(statementIndex)}`,
+                        ),
+                        proofBytesHex: `${String(statementIndex).padStart(2, '0')}aa55`,
+                    }),
+                ),
+            });
+        const firstBridgeProofRecord = bridgeProofMaterialSet.proofRecords[0];
+        if (firstBridgeProofRecord === undefined) {
+            throw new Error(
+                'compact same-secret bridge proof material fixture is missing a proof record.',
+            );
+        }
+        const {
+            proofRecordRoot: _firstBridgeProofRecordRoot,
+            ...firstBridgeProofRecordWithoutRoot
+        } = firstBridgeProofRecord;
+        const {
+            proofMaterialSetRoot: _bridgeProofMaterialSetRoot,
+            ...bridgeProofMaterialSetWithoutRoot
+        } = bridgeProofMaterialSet;
+        expect(firstBridgeProofRecord.proofBytesHash).toBe(
+            hash512Hex(
+                'sealed-lattice/setup/compact-same-secret-bridge/proof-bytes-v1',
+                [Buffer.from(firstBridgeProofRecord.proofBytesHex, 'hex')],
+            ),
+        );
+        expect(firstBridgeProofRecord.proofRecordRoot).toBe(
+            deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                firstBridgeProofRecordWithoutRoot,
+            ),
+        );
+        expect(bridgeProofMaterialSet.proofMaterialSetRoot).toBe(
+            deriveProtocolHash(
+                'SetupProofRecordBindingHash',
+                bridgeProofMaterialSetWithoutRoot,
+            ),
+        );
+        expect(
+            verifyCompactVssSameSecretBridgeProofMaterialSet({
+                statementSet: bridgeStatementSet,
+                proofMaterialSet: bridgeProofMaterialSet,
+            }),
+        ).toBe(bridgeProofMaterialSet);
+
+        const proofMaterialSetWithWrongHash = {
+            ...bridgeProofMaterialSet,
+            proofRecords: bridgeProofMaterialSet.proofRecords.map(
+                (proofRecord, proofRecordIndex) =>
+                    proofRecordIndex === 0
+                        ? {
+                              ...proofRecord,
+                              proofBytesHash: '0'.repeat(128),
+                          }
+                        : proofRecord,
+            ),
+        } as CompactVssSameSecretBridgeProofMaterialSet;
+        expect(() =>
+            verifyCompactVssSameSecretBridgeProofMaterialSet({
+                statementSet: bridgeStatementSet,
+                proofMaterialSet: proofMaterialSetWithWrongHash,
+            }),
+        ).toThrow(/proofBytesHash/u);
+
+        const proofMaterialSetWithWrongStatementRoot = {
+            ...bridgeProofMaterialSet,
+            proofRecords: bridgeProofMaterialSet.proofRecords.map(
+                (proofRecord, proofRecordIndex) =>
+                    proofRecordIndex === 0
+                        ? {
+                              ...proofRecord,
+                              compactSameSecretBridgeStatementRoot: '0'.repeat(
+                                  128,
+                              ),
+                          }
+                        : proofRecord,
+            ),
+        } as CompactVssSameSecretBridgeProofMaterialSet;
+        expect(() =>
+            verifyCompactVssSameSecretBridgeProofMaterialSet({
+                statementSet: bridgeStatementSet,
+                proofMaterialSet: proofMaterialSetWithWrongStatementRoot,
+            }),
+        ).toThrow(/statement/u);
+
+        const duplicateProofHashInputs =
+            bridgeStatementSet.statementRecords.map(
+                (statementRecord, statementIndex) => ({
+                    compactSameSecretBridgeStatementRoot:
+                        statementRecord.compactSameSecretBridgeStatementRoot,
+                    proofStatementHash:
+                        statementIndex === 0
+                            ? fixtureHash('duplicate-bridge-proof-statement')
+                            : fixtureHash('duplicate-bridge-proof-statement'),
+                    proofBytesHex: `${String(statementIndex).padStart(2, '0')}bb66`,
+                }),
+            );
+        expect(() =>
+            createCompactVssSameSecretBridgeProofMaterialSet({
+                statementSet: bridgeStatementSet,
+                proofRecordInputs: duplicateProofHashInputs,
+            }),
+        ).toThrow(/repeat a proof statement hash/u);
+
+        const transportedSameSecretProofMaterial =
+            createBinaryChunkedSameSecretProofMaterialTransport(
+                sameSecretProofMaterials,
+            );
+        const transportedSameSecretProofs = createSameSecretProofSet({
+            setupContext,
+            qSharePrimes,
+            participantCount,
+            sameSecretConsistency,
+            vssCoefficientCommitmentMaterial: vssCoefficientBundle.materialSet,
+            proofAccountingHash: fixtureHash(
+                'same-secret-proof-accounting-transported',
+            ),
+            proofMaterials: transportedSameSecretProofMaterial.proofMaterials,
+        });
+        const transportedBridgeStatementSet =
+            createCompactVssSameSecretBridgeStatementSet({
+                setupContext,
+                targetBasisHash: fixtureHash('compact-target-basis'),
+                publicMatrixSeedHash: compactPublicMatrixSeedHash,
+                compactCoefficientCommitmentSet,
+                sameSecretConsistency,
+                sameSecretProofs: transportedSameSecretProofs,
+            });
+        expect(
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: transportedBridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs: transportedSameSecretProofs,
+                transportedSameSecretProofMaterial:
+                    transportedSameSecretProofMaterial.transportedSameSecretProofMaterial,
+            }),
+        ).toBe(transportedBridgeStatementSet);
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: transportedBridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs: transportedSameSecretProofs,
+            }),
+        ).toThrow(/transportedSameSecretProofMaterial/u);
+
+        const tamperedTransportedSameSecretProofMaterial = structuredClone(
+            transportedSameSecretProofMaterial.transportedSameSecretProofMaterial,
+        );
+        const tamperedProofMaterial = tamperedTransportedSameSecretProofMaterial
+            .proofMaterials[0] as
+            | {
+                  chunks: { bytesHex: string }[];
+              }
+            | undefined;
+        if (tamperedProofMaterial === undefined) {
+            throw new Error(
+                'same-secret transported proof material fixture is missing proof material.',
+            );
+        }
+        const tamperedProofChunk = tamperedProofMaterial.chunks[0];
+        if (tamperedProofChunk === undefined) {
+            throw new Error(
+                'same-secret transported proof material fixture is missing a proof chunk.',
+            );
+        }
+        tamperedProofChunk.bytesHex = 'ff';
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: transportedBridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs: transportedSameSecretProofs,
+                transportedSameSecretProofMaterial:
+                    tamperedTransportedSameSecretProofMaterial,
+            }),
+        ).toThrow(/fullObjectHash/u);
 
         const forgedProofRootStatement = {
             ...firstBridgeStatement,
@@ -471,6 +667,98 @@ describe('same-secret consistency statement builders', () => {
                 sameSecretProofs,
             }),
         ).toThrow(/evidence roots/u);
+
+        const proofSetWithWrongProofBytesHash = {
+            ...sameSecretProofs,
+            proofRecords: sameSecretProofs.proofRecords.map(
+                (proofRecord, proofIndex) =>
+                    proofIndex === 0
+                        ? {
+                              ...proofRecord,
+                              proofBytesHash: '0'.repeat(128),
+                          }
+                        : proofRecord,
+            ),
+        };
+        const {
+            sameSecretProofSetRoot: _wrongHashRoot,
+            ...proofSetWithWrongProofBytesHashWithoutRoot
+        } = proofSetWithWrongProofBytesHash;
+        const proofSetWithWrongProofBytesHashRoot = deriveProtocolHash(
+            'SameSecretProofRoot',
+            proofSetWithWrongProofBytesHashWithoutRoot,
+        );
+        const statementSetWithWrongProofBytesHash = {
+            ...bridgeStatementSet,
+            sameSecretProofSetRoot: proofSetWithWrongProofBytesHashRoot,
+        };
+        const {
+            compactSameSecretBridgeStatementSetRoot:
+                _wrongProofBytesHashStatementSetRoot,
+            ...statementSetWithWrongProofBytesHashWithoutRoot
+        } = statementSetWithWrongProofBytesHash;
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: {
+                    ...statementSetWithWrongProofBytesHash,
+                    compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
+                        'SetupProofRecordBindingHash',
+                        statementSetWithWrongProofBytesHashWithoutRoot,
+                    ),
+                },
+                sameSecretConsistency,
+                sameSecretProofs: {
+                    ...proofSetWithWrongProofBytesHash,
+                    sameSecretProofSetRoot: proofSetWithWrongProofBytesHashRoot,
+                },
+            }),
+        ).toThrow(/proofBytesHash/u);
+
+        const proofSetWithWrongProofSize = {
+            ...sameSecretProofs,
+            proofRecords: sameSecretProofs.proofRecords.map(
+                (proofRecord, proofIndex) =>
+                    proofIndex === 0
+                        ? {
+                              ...proofRecord,
+                              proofSizeBytes: 2,
+                          }
+                        : proofRecord,
+            ),
+        };
+        const {
+            sameSecretProofSetRoot: _wrongSizeRoot,
+            ...proofSetWithWrongProofSizeWithoutRoot
+        } = proofSetWithWrongProofSize;
+        const proofSetWithWrongProofSizeRoot = deriveProtocolHash(
+            'SameSecretProofRoot',
+            proofSetWithWrongProofSizeWithoutRoot,
+        );
+        const statementSetWithWrongProofSize = {
+            ...bridgeStatementSet,
+            sameSecretProofSetRoot: proofSetWithWrongProofSizeRoot,
+        };
+        const {
+            compactSameSecretBridgeStatementSetRoot:
+                _wrongProofSizeStatementSetRoot,
+            ...statementSetWithWrongProofSizeWithoutRoot
+        } = statementSetWithWrongProofSize;
+        expect(() =>
+            verifyCompactVssSameSecretBridgeStatementSet({
+                statementSet: {
+                    ...statementSetWithWrongProofSize,
+                    compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
+                        'SetupProofRecordBindingHash',
+                        statementSetWithWrongProofSizeWithoutRoot,
+                    ),
+                },
+                sameSecretConsistency,
+                sameSecretProofs: {
+                    ...proofSetWithWrongProofSize,
+                    sameSecretProofSetRoot: proofSetWithWrongProofSizeRoot,
+                },
+            }),
+        ).toThrow(/proofBytesHex/u);
 
         const unsupportedBoundaryStatement = {
             ...firstBridgeStatement,

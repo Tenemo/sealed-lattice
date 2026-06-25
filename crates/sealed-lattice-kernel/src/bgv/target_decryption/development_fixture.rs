@@ -265,7 +265,7 @@ fn development_local_target_share_witness(
         target_share_profile.minimum_shares_for_interpolation,
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     )?;
-    let public_matrix_seed_hash = "3".repeat(128);
+    let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
     let share_linkage_statement_root = "4".repeat(128);
     let aggregate_threshold_commitment_root = "5".repeat(128);
     let compact_aggregate_opening_credentials = share_by_limb

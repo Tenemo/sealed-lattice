@@ -1,5 +1,7 @@
 mod accepted_certificates;
 mod common_randomness;
+mod compact_same_secret_bridge_verification;
+mod compact_vss_public_material_verification;
 mod evaluation_key_material_transport;
 mod evaluation_key_proof_checks;
 mod evaluation_key_share_rounds;
@@ -59,6 +61,8 @@ use self::common_randomness::{
     derive_bgv_public_a_polynomial, derive_collective_bgv_setup_public_derivations,
     verify_common_randomness,
 };
+use self::compact_same_secret_bridge_verification::verify_optional_compact_same_secret_bridge_statement_set;
+use self::compact_vss_public_material_verification::verify_optional_compact_vss_public_material;
 use self::evaluation_key_material_transport::{
     evaluation_key_material_refusal,
     transported_evaluation_key_share_component_material_from_request,
@@ -740,10 +744,18 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_threshold_share_commitments(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
+    if let Some(response) = verify_optional_compact_vss_public_material(setup_package, request)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_optional_same_secret_proofs(setup_package, request)? {
+        return Ok(VerificationFlow::Stop(response));
+    }
+    if let Some(response) =
+        verify_optional_compact_same_secret_bridge_statement_set(setup_package, request)?
+    {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_shares(setup_package)? {

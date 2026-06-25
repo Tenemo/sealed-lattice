@@ -117,6 +117,10 @@ impl LimbColumnLayout {
         self.family_shape == SuccinctSetupProofFamilyShape::CompactVssShareLinkage
     }
 
+    pub(crate) fn compact_same_secret_bridge_active(&self) -> bool {
+        self.family_shape == SuccinctSetupProofFamilyShape::CompactSameSecretBridge
+    }
+
     // Every private-VSS logical witness column committed in the trace: the
     // message (Shamir coefficient) columns, the carry column, and the
     // opening-randomness columns. This is the trace width and the length of the

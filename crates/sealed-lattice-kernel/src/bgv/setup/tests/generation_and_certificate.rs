@@ -10,6 +10,24 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
     );
     assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
     assert_eq!(
+        first["commonRandomness"]["objectType"],
+        "BgvPassiveSetupCommonRandomness"
+    );
+    assert_eq!(
+        first["commonRandomness"]["publicMatrixSeedHash"]
+            .as_str()
+            .expect("public matrix seed hash")
+            .len(),
+        128
+    );
+    assert_eq!(
+        first["commonRandomness"]["commonRandomnessRoot"]
+            .as_str()
+            .expect("common randomness root")
+            .len(),
+        128
+    );
+    assert_eq!(
         first["collectivePublicKey"]["coefficientMaterial"]["objectType"],
         "BgvCollectivePublicKeyCoefficientMaterial"
     );

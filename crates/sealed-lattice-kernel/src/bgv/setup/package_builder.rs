@@ -41,6 +41,18 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         }),
     )?;
     let public_common_random_polynomial_root = public_common_random_polynomial_root(input)?;
+    let public_matrix_seed_hash = derive_protocol_hash(
+        "SetupPublicMatrixSeedHash",
+        &json!({
+            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+            "ceremonyId": input.ceremony_id,
+            "manifestHash": input.manifest_hash,
+            "rosterHash": input.roster_hash,
+            "thresholdProfileHash": input.threshold_profile_hash,
+            "setupSeedHash": input.setup_seed_hash,
+            "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
+        }),
+    )?;
     #[cfg(not(target_arch = "wasm32"))]
     let participant_material = input
         .participants
@@ -137,6 +149,21 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &development_encryption_fixture,
     )?;
     let evaluator_context_bindings = passive_setup_evaluator_context_bindings(&setup_inputs)?;
+    let mut common_randomness = json!({
+        "objectType": "BgvPassiveSetupCommonRandomness",
+        "objectVersion": 1,
+        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
+        "ceremonyId": input.ceremony_id,
+        "manifestHash": input.manifest_hash,
+        "rosterHash": input.roster_hash,
+        "thresholdProfileHash": input.threshold_profile_hash,
+        "setupSeedHash": input.setup_seed_hash,
+        "publicCommonRandomPolynomialRoot": public_common_random_polynomial_root,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+    });
+    let common_randomness_root =
+        derive_protocol_hash("SetupCommonRandomnessRoot", &common_randomness)?;
+    common_randomness["commonRandomnessRoot"] = Value::String(common_randomness_root);
 
     let mut package = json!({
         "objectType": "BgvPassiveSetupPackage",
@@ -170,6 +197,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "passiveSetupEvaluatorContextBindingHash": evaluator_context_bindings["passiveSetupEvaluatorContextBindingHash"],
         },
         "participants": participant_records,
+        "commonRandomness": common_randomness,
         "collectivePublicKey": collective_public_key,
         "thresholdVerificationMaterial": threshold_verification_material,
         "evaluationKeys": evaluation_keys,

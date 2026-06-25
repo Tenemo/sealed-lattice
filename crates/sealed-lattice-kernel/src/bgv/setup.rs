@@ -24,7 +24,11 @@ mod sharing;
 mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
 pub(crate) use trustee_evaluation_key_proof::{
+    generate_compact_same_secret_bridge_proof_from_request,
+    generate_compact_vss_share_linkage_proof_from_request,
     generate_trustee_evaluation_key_proof_from_request,
+    verify_compact_same_secret_bridge_proof_from_request,
+    verify_compact_vss_share_linkage_proof_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 mod validation;
@@ -38,7 +42,10 @@ pub(crate) use accepted_setup::{
     describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
-pub(crate) use compact_same_secret_bridge::verify_compact_vss_same_secret_bridge_statement_set_request;
+pub(crate) use compact_same_secret_bridge::{
+    verify_compact_vss_same_secret_bridge_proof_material_set_request,
+    verify_compact_vss_same_secret_bridge_statement_set_request,
+};
 pub(crate) use compact_vss_commitment::{
     CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
     compute_compact_vss_commitment_from_opening_request,
@@ -48,6 +55,7 @@ pub(crate) use compact_vss_commitment::{
     verify_compact_vss_coefficient_commitment_set_request,
     verify_compact_vss_commitment_opening_request,
     verify_compact_vss_recipient_share_commitment_set_request,
+    verify_compact_vss_share_linkage_proof_material_set_request,
     verify_compact_vss_share_linkage_statement_request,
 };
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
@@ -231,6 +239,7 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "CollectiveSecretDistributionCertificate",
             "ErrorDistributionCertificate",
             "EvaluationKeySizeCertificate",
+            "BgvPassiveSetupCommonRandomness",
             "BgvDevelopmentEncryptionFixture"
         ],
         "reservedRootsAndHashes": [
@@ -261,7 +270,9 @@ pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
             "RotSetHash",
             "ComparisonInputDerivationCircuitHash",
             "EncryptedComparisonInputHash",
-            "EncryptedSparseTargetProjectionHash"
+            "EncryptedSparseTargetProjectionHash",
+            "SetupPublicMatrixSeedHash",
+            "SetupCommonRandomnessRoot"
         ],
     }))
 }

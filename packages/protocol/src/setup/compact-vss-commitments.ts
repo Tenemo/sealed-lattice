@@ -23,6 +23,11 @@ const compactVssShareLinkageStatementRelation =
     'recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments';
 const compactVssShareLinkageStatementProofBoundary =
     'statement binding only; zero-knowledge linkage proof backend is not implemented yet';
+export const compactVssRestrictedShareLinkageProofBoundary =
+    'restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend';
+export const compactVssShareLinkageProofFamily = 'compact-vss-share-linkage';
+const compactVssShareLinkageProofBytesHashDomain =
+    'sealed-lattice-compact-vss-share-linkage-proof-bytes-v1';
 const compactVssPublicSetupDownloadBudgetBytes = 64 * 1024 * 1024;
 const compactVssSourceTrusteeUploadBudgetBytes = 256 * 1024 * 1024;
 const compactVssLargestSingleObjectBudgetBytes = 16 * 1024 * 1024;
@@ -232,6 +237,7 @@ export type CompactVssParameterCertificateInputBinding = Readonly<
         readonly proofCoverageInputs: Readonly<Record<string, unknown>>;
         readonly structuredRingDisclosure: string;
         readonly sameSecretBridgeInput: Readonly<Record<string, unknown>>;
+        readonly missingCertificateInputs: readonly string[];
     }
 >;
 
@@ -543,6 +549,82 @@ export type CompactVssShareLinkageSourceStatementRecord = Readonly<
     }
 >;
 
+export type CompactVssShareLinkageProofRecordInput = Readonly<{
+    readonly proofStatementHash: ProtocolHash;
+    readonly proofBytesHex: string;
+}>;
+
+export type CompactVssShareLinkageProofMaterialInput = Readonly<{
+    readonly sourceStatementRoot: ProtocolHash;
+    readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
+    readonly proofRecords: readonly CompactVssShareLinkageProofRecordInput[];
+}>;
+
+export type CompactVssShareLinkageProofRecord = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssShareLinkageProofRecord';
+        readonly objectVersion: 1;
+        readonly proofFamily: typeof compactVssShareLinkageProofFamily;
+        readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
+        readonly sourceStatementRoot: ProtocolHash;
+        readonly proofStatementHash: ProtocolHash;
+        readonly proofByteLength: number;
+        readonly proofBytesHash: ProtocolHash;
+        readonly proofBytesHex: string;
+        readonly proofRecordRoot: ProtocolHash;
+    }
+>;
+
+export type CompactVssShareLinkageProofMaterial = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssShareLinkageProofMaterial';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: typeof compactVssCommitmentProfileId;
+        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
+        readonly proofFamily: typeof compactVssShareLinkageProofFamily;
+        readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupProfileHash: ProtocolHash;
+        readonly qShareHash: ProtocolHash;
+        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly sourceTrusteeIdentity: string;
+        readonly sourceTrusteeRosterPosition: number;
+        readonly shareLinkageStatementRoot: ProtocolHash;
+        readonly sourceStatementRoot: ProtocolHash;
+        readonly proofRecords: readonly CompactVssShareLinkageProofRecord[];
+        readonly proofMaterialRoot: ProtocolHash;
+    }
+>;
+
+export type CompactVssShareLinkageProofMaterialSet = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactVssShareLinkageProofMaterialSet';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly profileId: typeof compactVssCommitmentProfileId;
+        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
+        readonly proofFamily: typeof compactVssShareLinkageProofFamily;
+        readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupProfileHash: ProtocolHash;
+        readonly qShareHash: ProtocolHash;
+        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
+        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly participantCount: number;
+        readonly shareLinkageStatementRoot: ProtocolHash;
+        readonly proofMaterials: readonly CompactVssShareLinkageProofMaterial[];
+        readonly proofMaterialSetRoot: ProtocolHash;
+    }
+>;
+
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
@@ -689,6 +771,23 @@ const hexToBytes = (hex: string): Uint8Array => {
     }
 
     return bytes;
+};
+
+const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
+    if (value.length === 0 || value.length % 2 !== 0) {
+        throw new TypeError(
+            `${fieldName} must be non-empty whole-byte lowercase hex.`,
+        );
+    }
+    if (!/^[0-9a-f]+$/u.test(value)) {
+        throw new TypeError(`${fieldName} must be lowercase hex.`);
+    }
+};
+
+const proofBytesFromHex = (hex: string, fieldName: string): Uint8Array => {
+    assertLowercaseHexBytes(hex, fieldName);
+
+    return hexToBytes(hex);
 };
 
 const reduceUnbiasedU64 = (
@@ -3714,6 +3813,458 @@ export const verifyCompactVssShareLinkageStatement = (input: {
     return input.statement;
 };
 
+const compactVssShareLinkageProofBytesHash = (
+    proofBytes: Uint8Array,
+): ProtocolHash =>
+    hash512Hex(compactVssShareLinkageProofBytesHashDomain, [proofBytes]);
+
+const compactVssShareLinkageProofInputsBySourceRoot = (
+    proofMaterialInputs: readonly CompactVssShareLinkageProofMaterialInput[],
+): Map<ProtocolHash, CompactVssShareLinkageProofMaterialInput> => {
+    const proofInputsBySourceRoot = new Map<
+        ProtocolHash,
+        CompactVssShareLinkageProofMaterialInput
+    >();
+    proofMaterialInputs.forEach((proofMaterialInput, proofMaterialIndex) => {
+        assertProtocolHash(
+            proofMaterialInput.sourceStatementRoot,
+            `proofMaterialInputs.${String(proofMaterialIndex)}.sourceStatementRoot`,
+        );
+        assertExactStringField(
+            proofMaterialInput.proofBoundary,
+            `proofMaterialInputs.${String(proofMaterialIndex)}.proofBoundary`,
+            compactVssRestrictedShareLinkageProofBoundary,
+        );
+        const proofRecords: readonly CompactVssShareLinkageProofRecordInput[] =
+            proofMaterialInput.proofRecords;
+        const proofRecordsShape: unknown = proofRecords;
+        if (!Array.isArray(proofRecordsShape) || proofRecords.length === 0) {
+            throw new TypeError(
+                `proofMaterialInputs.${String(proofMaterialIndex)}.proofRecords must be a non-empty array.`,
+            );
+        }
+        const proofStatementHashes = new Set<ProtocolHash>();
+        proofRecords.forEach((proofRecordInput, proofRecordIndex) => {
+            assertProtocolHash(
+                proofRecordInput.proofStatementHash,
+                `proofMaterialInputs.${String(proofMaterialIndex)}.proofRecords.${String(proofRecordIndex)}.proofStatementHash`,
+            );
+            if (proofStatementHashes.has(proofRecordInput.proofStatementHash)) {
+                throw new Error(
+                    'compact VSS share-linkage proof material input proofRecords must not repeat a proof statement hash.',
+                );
+            }
+            proofStatementHashes.add(proofRecordInput.proofStatementHash);
+            proofBytesFromHex(
+                proofRecordInput.proofBytesHex,
+                `proofMaterialInputs.${String(proofMaterialIndex)}.proofRecords.${String(proofRecordIndex)}.proofBytesHex`,
+            );
+        });
+        if (
+            proofInputsBySourceRoot.has(proofMaterialInput.sourceStatementRoot)
+        ) {
+            throw new Error(
+                'compact VSS share-linkage proof material inputs must not repeat a source statement root.',
+            );
+        }
+        proofInputsBySourceRoot.set(
+            proofMaterialInput.sourceStatementRoot,
+            proofMaterialInput,
+        );
+    });
+
+    return proofInputsBySourceRoot;
+};
+
+export const createCompactVssShareLinkageProofMaterialSet = (input: {
+    readonly statement: CompactVssShareLinkageStatement;
+    readonly proofMaterialInputs: readonly CompactVssShareLinkageProofMaterialInput[];
+}): CompactVssShareLinkageProofMaterialSet => {
+    const statement = verifyCompactVssShareLinkageStatement({
+        statement: input.statement,
+    });
+    const proofInputsBySourceRoot =
+        compactVssShareLinkageProofInputsBySourceRoot(
+            input.proofMaterialInputs,
+        );
+    if (proofInputsBySourceRoot.size !== statement.participantCount) {
+        throw new Error(
+            'compact VSS share-linkage proof material inputs must contain one proof per source statement.',
+        );
+    }
+
+    const proofMaterials = statement.sourceStatementRecords.map(
+        (sourceStatement) => {
+            const proofMaterialInput = proofInputsBySourceRoot.get(
+                sourceStatement.sourceStatementRoot,
+            );
+            if (proofMaterialInput === undefined) {
+                throw new Error(
+                    'compact VSS share-linkage proof material inputs must cover every source statement.',
+                );
+            }
+            const proofRecords = proofMaterialInput.proofRecords.map(
+                (proofRecordInput) => {
+                    const proofBytes = proofBytesFromHex(
+                        proofRecordInput.proofBytesHex,
+                        'compact VSS share-linkage proofBytesHex',
+                    );
+                    const proofRecordWithoutRoot = {
+                        objectType: 'CompactVssShareLinkageProofRecord',
+                        objectVersion: 1,
+                        proofFamily: compactVssShareLinkageProofFamily,
+                        proofBoundary:
+                            compactVssRestrictedShareLinkageProofBoundary,
+                        sourceStatementRoot:
+                            sourceStatement.sourceStatementRoot,
+                        proofStatementHash: proofRecordInput.proofStatementHash,
+                        proofByteLength: proofBytes.byteLength,
+                        proofBytesHash:
+                            compactVssShareLinkageProofBytesHash(proofBytes),
+                        proofBytesHex: proofRecordInput.proofBytesHex,
+                    } as const satisfies Omit<
+                        CompactVssShareLinkageProofRecord,
+                        'proofRecordRoot'
+                    >;
+
+                    return {
+                        ...proofRecordWithoutRoot,
+                        proofRecordRoot: deriveProtocolHash(
+                            'SetupProofRecordBindingHash',
+                            proofRecordWithoutRoot,
+                        ),
+                    };
+                },
+            );
+            const proofMaterialWithoutRoot = {
+                objectType: 'CompactVssShareLinkageProofMaterial',
+                objectVersion: 1,
+                setupProfileId: 'CollectiveBgvSetup-v1',
+                profileId: compactVssCommitmentProfileId,
+                developmentScope: compactVssCommitmentDevelopmentScope,
+                proofFamily: compactVssShareLinkageProofFamily,
+                proofBoundary: compactVssRestrictedShareLinkageProofBoundary,
+                ceremonyId: statement.ceremonyId,
+                manifestHash: statement.manifestHash,
+                rosterHash: statement.rosterHash,
+                setupProfileHash: statement.setupProfileHash,
+                qShareHash: statement.qShareHash,
+                carryAwareVssShareRelationProfileHash:
+                    statement.carryAwareVssShareRelationProfileHash,
+                commitmentProfileHash: statement.commitmentProfileHash,
+                setupEpoch: statement.setupEpoch,
+                sourceTrusteeIdentity: sourceStatement.sourceTrusteeIdentity,
+                sourceTrusteeRosterPosition:
+                    sourceStatement.sourceTrusteeRosterPosition,
+                shareLinkageStatementRoot: statement.statementRoot,
+                sourceStatementRoot: sourceStatement.sourceStatementRoot,
+                proofRecords,
+            } as const satisfies Omit<
+                CompactVssShareLinkageProofMaterial,
+                'proofMaterialRoot'
+            >;
+
+            return {
+                ...proofMaterialWithoutRoot,
+                proofMaterialRoot: deriveProtocolHash(
+                    'SetupProofRecordBindingHash',
+                    proofMaterialWithoutRoot,
+                ),
+            };
+        },
+    );
+    const proofMaterialSetWithoutRoot = {
+        objectType: 'CompactVssShareLinkageProofMaterialSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        profileId: compactVssCommitmentProfileId,
+        developmentScope: compactVssCommitmentDevelopmentScope,
+        proofFamily: compactVssShareLinkageProofFamily,
+        proofBoundary: compactVssRestrictedShareLinkageProofBoundary,
+        ceremonyId: statement.ceremonyId,
+        manifestHash: statement.manifestHash,
+        rosterHash: statement.rosterHash,
+        setupProfileHash: statement.setupProfileHash,
+        qShareHash: statement.qShareHash,
+        carryAwareVssShareRelationProfileHash:
+            statement.carryAwareVssShareRelationProfileHash,
+        commitmentProfileHash: statement.commitmentProfileHash,
+        setupEpoch: statement.setupEpoch,
+        participantCount: statement.participantCount,
+        shareLinkageStatementRoot: statement.statementRoot,
+        proofMaterials,
+    } as const satisfies Omit<
+        CompactVssShareLinkageProofMaterialSet,
+        'proofMaterialSetRoot'
+    >;
+
+    return {
+        ...proofMaterialSetWithoutRoot,
+        proofMaterialSetRoot: deriveProtocolHash(
+            'SetupProofRecordBindingHash',
+            proofMaterialSetWithoutRoot,
+        ),
+    };
+};
+
+export const verifyCompactVssShareLinkageProofMaterialSet = (input: {
+    readonly statement: CompactVssShareLinkageStatement;
+    readonly proofMaterialSet: CompactVssShareLinkageProofMaterialSet;
+}): CompactVssShareLinkageProofMaterialSet => {
+    const statement = verifyCompactVssShareLinkageStatement({
+        statement: input.statement,
+    });
+    const proofMaterialSet = input.proofMaterialSet;
+    assertExactStringField(
+        proofMaterialSet.objectType,
+        'compact VSS share-linkage proof material set objectType',
+        'CompactVssShareLinkageProofMaterialSet',
+    );
+    if (proofMaterialSet.objectVersion !== 1) {
+        throw new TypeError(
+            'compact VSS share-linkage proof material set objectVersion is not supported.',
+        );
+    }
+    for (const [fieldName, expectedValue] of [
+        ['setupProfileId', statement.setupProfileId],
+        ['profileId', statement.profileId],
+        ['developmentScope', statement.developmentScope],
+        ['ceremonyId', statement.ceremonyId],
+        ['manifestHash', statement.manifestHash],
+        ['rosterHash', statement.rosterHash],
+        ['setupProfileHash', statement.setupProfileHash],
+        ['qShareHash', statement.qShareHash],
+        [
+            'carryAwareVssShareRelationProfileHash',
+            statement.carryAwareVssShareRelationProfileHash,
+        ],
+        ['commitmentProfileHash', statement.commitmentProfileHash],
+        ['setupEpoch', statement.setupEpoch],
+    ] as const) {
+        if (proofMaterialSet[fieldName] !== expectedValue) {
+            throw new Error(
+                `compact VSS share-linkage proof material set ${fieldName} must match the statement.`,
+            );
+        }
+    }
+    assertExactStringField(
+        proofMaterialSet.proofFamily,
+        'compact VSS share-linkage proof material set proofFamily',
+        compactVssShareLinkageProofFamily,
+    );
+    assertExactStringField(
+        proofMaterialSet.proofBoundary,
+        'compact VSS share-linkage proof material set proofBoundary',
+        compactVssRestrictedShareLinkageProofBoundary,
+    );
+    if (
+        proofMaterialSet.participantCount !== statement.participantCount ||
+        proofMaterialSet.shareLinkageStatementRoot !== statement.statementRoot
+    ) {
+        throw new Error(
+            'compact VSS share-linkage proof material set must bind the statement root and participant count.',
+        );
+    }
+    if (proofMaterialSet.proofMaterials.length !== statement.participantCount) {
+        throw new Error(
+            'compact VSS share-linkage proof material set must contain one proof per source statement.',
+        );
+    }
+    proofMaterialSet.proofMaterials.forEach(
+        (proofMaterial, sourceStatementIndex) => {
+            const sourceStatement =
+                statement.sourceStatementRecords[sourceStatementIndex];
+            if (sourceStatement === undefined) {
+                throw new Error(
+                    'compact VSS share-linkage proof material set has no matching source statement.',
+                );
+            }
+            assertExactStringField(
+                proofMaterial.objectType,
+                'compact VSS share-linkage proof material objectType',
+                'CompactVssShareLinkageProofMaterial',
+            );
+            if (proofMaterial.objectVersion !== 1) {
+                throw new TypeError(
+                    'compact VSS share-linkage proof material objectVersion is not supported.',
+                );
+            }
+            for (const [fieldName, expectedValue] of [
+                ['setupProfileId', proofMaterialSet.setupProfileId],
+                ['profileId', proofMaterialSet.profileId],
+                ['developmentScope', proofMaterialSet.developmentScope],
+                ['proofFamily', proofMaterialSet.proofFamily],
+                ['proofBoundary', proofMaterialSet.proofBoundary],
+                ['ceremonyId', proofMaterialSet.ceremonyId],
+                ['manifestHash', proofMaterialSet.manifestHash],
+                ['rosterHash', proofMaterialSet.rosterHash],
+                ['setupProfileHash', proofMaterialSet.setupProfileHash],
+                ['qShareHash', proofMaterialSet.qShareHash],
+                [
+                    'carryAwareVssShareRelationProfileHash',
+                    proofMaterialSet.carryAwareVssShareRelationProfileHash,
+                ],
+                [
+                    'commitmentProfileHash',
+                    proofMaterialSet.commitmentProfileHash,
+                ],
+                ['setupEpoch', proofMaterialSet.setupEpoch],
+                [
+                    'shareLinkageStatementRoot',
+                    proofMaterialSet.shareLinkageStatementRoot,
+                ],
+            ] as const) {
+                if (proofMaterial[fieldName] !== expectedValue) {
+                    throw new Error(
+                        `compact VSS share-linkage proof material ${fieldName} must match the proof material set.`,
+                    );
+                }
+            }
+            if (
+                proofMaterial.sourceTrusteeIdentity !==
+                    sourceStatement.sourceTrusteeIdentity ||
+                proofMaterial.sourceTrusteeRosterPosition !==
+                    sourceStatement.sourceTrusteeRosterPosition ||
+                proofMaterial.sourceStatementRoot !==
+                    sourceStatement.sourceStatementRoot
+            ) {
+                throw new Error(
+                    'compact VSS share-linkage proof material must bind the source statement.',
+                );
+            }
+            const proofRecords: readonly CompactVssShareLinkageProofRecord[] =
+                proofMaterial.proofRecords;
+            const proofRecordsShape: unknown = proofRecords;
+            if (
+                !Array.isArray(proofRecordsShape) ||
+                proofRecords.length === 0
+            ) {
+                throw new TypeError(
+                    'compact VSS share-linkage proof material proofRecords must be a non-empty array.',
+                );
+            }
+            const proofStatementHashes = new Set<ProtocolHash>();
+            proofRecords.forEach((proofRecord, proofRecordIndex) => {
+                assertExactStringField(
+                    proofRecord.objectType,
+                    'compact VSS share-linkage proof record objectType',
+                    'CompactVssShareLinkageProofRecord',
+                );
+                if (proofRecord.objectVersion !== 1) {
+                    throw new TypeError(
+                        'compact VSS share-linkage proof record objectVersion is not supported.',
+                    );
+                }
+                for (const [fieldName, expectedValue] of [
+                    ['proofFamily', proofMaterial.proofFamily],
+                    ['proofBoundary', proofMaterial.proofBoundary],
+                    ['sourceStatementRoot', proofMaterial.sourceStatementRoot],
+                ] as const) {
+                    if (proofRecord[fieldName] !== expectedValue) {
+                        throw new Error(
+                            `compact VSS share-linkage proof record ${fieldName} must match the proof material.`,
+                        );
+                    }
+                }
+                assertProtocolHash(
+                    proofRecord.proofStatementHash,
+                    'compact VSS share-linkage proof record proofStatementHash',
+                );
+                if (proofStatementHashes.has(proofRecord.proofStatementHash)) {
+                    throw new Error(
+                        'compact VSS share-linkage proof material proofRecords must not repeat a proof statement hash.',
+                    );
+                }
+                proofStatementHashes.add(proofRecord.proofStatementHash);
+                assertPositiveSafeInteger(
+                    proofRecord.proofByteLength,
+                    'compact VSS share-linkage proof record proofByteLength',
+                );
+                assertProtocolHash(
+                    proofRecord.proofBytesHash,
+                    'compact VSS share-linkage proof record proofBytesHash',
+                );
+                assertProtocolHash(
+                    proofRecord.proofRecordRoot,
+                    'compact VSS share-linkage proof record proofRecordRoot',
+                );
+                const proofBytes = proofBytesFromHex(
+                    proofRecord.proofBytesHex,
+                    'compact VSS share-linkage proof record proofBytesHex',
+                );
+                if (proofRecord.proofByteLength !== proofBytes.byteLength) {
+                    throw new Error(
+                        'compact VSS share-linkage proof record proofByteLength must match proofBytesHex.',
+                    );
+                }
+                if (
+                    proofRecord.proofBytesHash !==
+                    compactVssShareLinkageProofBytesHash(proofBytes)
+                ) {
+                    throw new Error(
+                        'compact VSS share-linkage proof record proofBytesHash must match proofBytesHex.',
+                    );
+                }
+                const {
+                    proofRecordRoot: _proofRecordRoot,
+                    ...proofRecordWithoutRoot
+                } = proofRecord;
+                if (
+                    proofRecord.proofRecordRoot !==
+                    deriveProtocolHash(
+                        'SetupProofRecordBindingHash',
+                        proofRecordWithoutRoot,
+                    )
+                ) {
+                    throw new Error(
+                        `compact VSS share-linkage proof record ${String(proofRecordIndex)} root does not match its bound proof bytes.`,
+                    );
+                }
+            });
+            assertProtocolHash(
+                proofMaterial.proofMaterialRoot,
+                'compact VSS share-linkage proof material proofMaterialRoot',
+            );
+            const {
+                proofMaterialRoot: _proofMaterialRoot,
+                ...proofMaterialWithoutRoot
+            } = proofMaterial;
+            if (
+                proofMaterial.proofMaterialRoot !==
+                deriveProtocolHash(
+                    'SetupProofRecordBindingHash',
+                    proofMaterialWithoutRoot,
+                )
+            ) {
+                throw new Error(
+                    'compact VSS share-linkage proof material root does not match its bound proof bytes.',
+                );
+            }
+        },
+    );
+    assertProtocolHash(
+        proofMaterialSet.proofMaterialSetRoot,
+        'compact VSS share-linkage proof material set proofMaterialSetRoot',
+    );
+    const {
+        proofMaterialSetRoot: _proofMaterialSetRoot,
+        ...proofMaterialSetWithoutRoot
+    } = proofMaterialSet;
+    if (
+        proofMaterialSet.proofMaterialSetRoot !==
+        deriveProtocolHash(
+            'SetupProofRecordBindingHash',
+            proofMaterialSetWithoutRoot,
+        )
+    ) {
+        throw new Error(
+            'compact VSS share-linkage proof material set root does not match its bound proof materials.',
+        );
+    }
+
+    return proofMaterialSet;
+};
+
 export const compactVssCommitmentMeasurement = (input: {
     readonly participantCount: number;
     readonly sourceRnsLimbCount: number;
@@ -4185,6 +4736,15 @@ export const compactVssParameterCertificateInputBinding = (input: {
                 'target-basis compact commitments use exact canonical residues and the shared compact matrix key',
             targetBasisLimbOrder: 'profile-order-prefix',
         },
+        missingCertificateInputs: [
+            'reviewed Module-SIS binding estimator row with verifier-accepted opening norms, proof-extracted norms, and multi-target loss',
+            'reviewed Module-LWE hiding estimator row with public sample count, corrupted-recipient openings, and multi-opening loss',
+            'source-batched compact share-linkage proof backend with extractor-bound opening norms',
+            'same-secret bridge proof verification before target-basis compact profile activation',
+            'target-decryption restored-opening proof backend, released-share smudging proof coverage, and recombination proof coverage',
+            'structured-ring attack review for the selected ring, module shape, modulus limbs, sparse projection, and common-key reuse',
+            'supported-phone runtime and memory measurements for compact public proofs, private openings, and restored local-state proof generation',
+        ],
     } as const;
 
     return {

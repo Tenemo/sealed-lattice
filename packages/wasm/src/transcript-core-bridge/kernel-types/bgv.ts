@@ -141,6 +141,8 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
     readonly transportedEvaluationKeyShareComponentMaterial?: BgvTransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: BgvTransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: BgvVerifiedSetupProofMaterialSet;
+    readonly compactVssRestrictedProofStatements?: readonly BgvJsonRecord[];
+    readonly compactSameSecretBridgeProofStatements?: readonly BgvJsonRecord[];
 }>;
 
 export type BgvRnsProfileDescription = {
@@ -879,11 +881,8 @@ export type BgvTrusteeEvaluationKeyStatementKey = {
     readonly roundOneAggregateDiagonal?: readonly (readonly number[])[];
 };
 
-// The kernel derives the proof family from the key list: a populated key
-// list is the trustee evaluation-key family and binds the schedule roots; an
-// empty key list is the keyless same-secret linkage anchor family and binds
-// the accepted public VSS material root.
-// These branches share fields and carry no discriminant, so which root set is mandatory is enforced by the kernel from the key list, not by the type.
+// The kernel derives the proof family from the statement shape, then enforces
+// the matching ordered binding roots.
 export type BgvTrusteeEvaluationKeyStatementContext = {
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
@@ -905,6 +904,16 @@ export type BgvTrusteeEvaluationKeyStatementContext = {
       }
     | {
           readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
+      }
+    | {
+          readonly sourceCoefficientCommitmentRoot: ProtocolHash;
+          readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
+      }
+    | {
+          readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+          readonly sameSecretStatementRoot: ProtocolHash;
+          readonly sameSecretProofRoot: ProtocolHash;
+          readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
       }
 );
 
@@ -1098,6 +1107,114 @@ export type BgvCompactVssShareLinkageStatementVerification = {
     readonly proofBoundary: string;
 };
 
+export type BgvCompactVssShareLinkageProofMaterialSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssShareLinkageProofMaterialSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly proofFamily: 'compact-vss-share-linkage';
+    readonly proofBoundary: string;
+    readonly shareLinkageStatementRoot: ProtocolHash;
+    readonly proofMaterialSetRoot: ProtocolHash;
+    readonly participantCount: number;
+    readonly proofMaterialCount: number;
+    readonly proofRecordCount: number;
+    readonly totalProofByteLength: number;
+    readonly restrictedProofVerificationCount: number;
+    readonly restrictedProofVerificationScope: string;
+};
+
+export type BgvCompactVssShareLinkageProofStatement = {
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly recipientIdentity: string;
+    readonly recipientRosterPosition: number;
+    readonly sourceCoefficientCommitmentRoot: ProtocolHash;
+    readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
+    readonly sourceRnsLimbIndex: number;
+    readonly sourceMessageModulus: number;
+    readonly coefficientCommitmentRoots: readonly ProtocolHash[];
+    readonly coefficientCommitments: readonly Readonly<
+        Record<string, unknown>
+    >[];
+    readonly recipientShareCommitmentRoot: ProtocolHash;
+    readonly recipientShareCommitment: Readonly<Record<string, unknown>>;
+};
+
+export type BgvCompactVssShareLinkageProofGeneration = {
+    readonly ok: true;
+    readonly operation: 'generateCompactVssShareLinkageProof';
+    readonly proofFamily: 'compact-vss-share-linkage';
+    readonly proofBoundary: string;
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly coefficientCommitmentCount: number;
+    readonly proofByteLength: number;
+    readonly proofBytesHex: string;
+    readonly proofRandomness: {
+        readonly source: string;
+        readonly binding: 'statement-bound';
+        readonly nonceHash: ProtocolHash;
+        readonly retention: string;
+    };
+};
+
+export type BgvCompactVssShareLinkageProofVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssShareLinkageProof';
+    readonly proofFamily: 'compact-vss-share-linkage';
+    readonly proofBoundary: string;
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly coefficientCommitmentCount: number;
+    readonly proofByteLength: number;
+};
+
+export type BgvCompactSameSecretBridgeProofStatement = {
+    readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    readonly sameSecretStatementRoot: ProtocolHash;
+    readonly sameSecretProofRoot: ProtocolHash;
+    readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly targetBasisHash: ProtocolHash;
+    readonly targetRnsPrimes: readonly number[];
+    readonly targetConstantCommitmentRoots: readonly ProtocolHash[];
+    readonly targetConstantCommitments: readonly Readonly<
+        Record<string, unknown>
+    >[];
+};
+
+export type BgvCompactSameSecretBridgeProofGeneration = {
+    readonly ok: true;
+    readonly operation: 'generateCompactSameSecretBridgeProof';
+    readonly proofFamily: 'compact-same-secret-bridge';
+    readonly proofBoundary: string;
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly proofByteLength: number;
+    readonly proofBytesHex: string;
+    readonly proofRandomness: {
+        readonly source: string;
+        readonly binding: 'statement-bound';
+        readonly nonceHash: ProtocolHash;
+        readonly retention: string;
+    };
+};
+
+export type BgvCompactSameSecretBridgeProofVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactSameSecretBridgeProof';
+    readonly proofFamily: 'compact-same-secret-bridge';
+    readonly proofBoundary: string;
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly proofByteLength: number;
+};
+
 export type BgvCompactVssSameSecretBridgeStatementSetVerification = {
     readonly ok: true;
     readonly operation: 'verifyCompactVssSameSecretBridgeStatementSet';
@@ -1117,6 +1234,21 @@ export type BgvCompactVssSameSecretBridgeStatementSetVerification = {
     readonly compactCommitmentEncoding: string;
     readonly targetBasisLimbOrder: string;
     readonly proofBoundary: string;
+};
+
+export type BgvCompactVssSameSecretBridgeProofMaterialSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssSameSecretBridgeProofMaterialSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly proofFamily: 'compact-same-secret-bridge';
+    readonly proofBoundary: string;
+    readonly compactSameSecretBridgeStatementSetRoot: ProtocolHash;
+    readonly proofMaterialSetRoot: ProtocolHash;
+    readonly participantCount: number;
+    readonly proofRecordCount: number;
+    readonly totalProofByteLength: number;
+    readonly restrictedProofVerificationCount: number;
+    readonly restrictedProofVerificationScope: string;
 };
 
 export type BgvThresholdShareCommitmentTransportDerivation = Omit<

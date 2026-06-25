@@ -9,6 +9,8 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         hash_at_path(setup_package, &["setupInputs", "manifestHash"])?.to_string();
     let threshold_profile_hash =
         hash_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?.to_string();
+    let public_matrix_seed_hash =
+        hash_at_path(setup_package, &["commonRandomness", "publicMatrixSeedHash"])?.to_string();
     let target_decryption_profile_hash = hash_at_path(
         setup_package,
         &["targetDecryptionStatus", "targetDecryptionProfileHash"],
@@ -78,6 +80,7 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         threshold_profile_hash,
         target_decryption_profile_hash,
         target_decryption_profile_binding_hash,
+        public_matrix_seed_hash,
         participants,
         threshold_verification: ThresholdVerificationBinding {
             threshold_share_verification_key_root,

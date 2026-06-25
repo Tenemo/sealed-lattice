@@ -25,6 +25,16 @@ pub(crate) struct CompactVssShareLinkagePublicVectorInput<'a> {
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
 }
 
+pub(crate) struct CompactSameSecretBridgePublicVectorInput<'a> {
+    pub(crate) public_matrix_seed_hash: &'a str,
+    pub(crate) commitment_modulus_index: usize,
+    pub(crate) modulus: u64,
+    pub(crate) ring_degree: usize,
+    pub(crate) target_rns_primes: &'a [u64],
+    pub(crate) target_constant_commitments: &'a [CompactVssShareLinkageCommitment],
+    pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
+}
+
 // Compact source-to-recipient share linkage vectors for one commitment field.
 // The vector order is every Shamir coefficient message, the recipient share
 // message, the recipient share carry, every coefficient opening-randomness
@@ -219,6 +229,150 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
     vectors.push(recipient_share_carry_vector);
     vectors.extend(coefficient_randomness_vectors);
     vectors.extend(recipient_share_randomness_vectors);
+
+    Ok((relation_claim, vectors))
+}
+
+// Compact same-secret bridge vectors for one commitment field. The vector
+// order is the signed ternary secret, the binary negative indicator, and each
+// compact target-constant opening-randomness column in target limb order.
+pub(crate) fn build_compact_same_secret_bridge_public_vectors(
+    input: CompactSameSecretBridgePublicVectorInput<'_>,
+    tower: &ChallengeExtensionTower,
+) -> CanonicalResult<(
+    ChallengeExtensionElement,
+    Vec<Vec<ChallengeExtensionElement>>,
+)> {
+    if input.ring_degree == 0 {
+        return Err(invalid_succinct_setup_proof(
+            "compact same-secret bridge ring degree must be positive",
+        ));
+    }
+    if tower.modulus != input.modulus {
+        return Err(invalid_succinct_setup_proof(
+            "compact same-secret bridge tower modulus does not match the commitment field",
+        ));
+    }
+    if input.target_rns_primes.is_empty()
+        || input.target_rns_primes.len() != input.target_constant_commitments.len()
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact same-secret bridge target primes and commitments must be aligned",
+        ));
+    }
+    for commitment in input.target_constant_commitments {
+        let coordinates = commitment
+            .coordinates_by_commitment_modulus
+            .get(input.commitment_modulus_index)
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact same-secret bridge commitment does not cover the selected commitment field",
+                )
+            })?;
+        if coordinates.len() != COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+            return Err(invalid_succinct_setup_proof(
+                "compact same-secret bridge coordinate count does not match the profile",
+            ));
+        }
+        if coordinates
+            .iter()
+            .any(|coordinate| *coordinate >= input.modulus)
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact same-secret bridge coordinate is outside the commitment field",
+            ));
+        }
+    }
+
+    let relation_count =
+        input.target_constant_commitments.len() * COMPACT_VSS_OUTPUT_COORDINATE_COUNT;
+    if input.relation_alpha.len() != relation_count {
+        return Err(invalid_succinct_setup_proof(
+            "compact same-secret bridge challenge count does not match the relation count",
+        ));
+    }
+
+    let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); input.ring_degree];
+    let mut relation_claim = ChallengeExtensionTower::zero();
+    let mut secret_vector = extension_zero_vector();
+    let mut negative_indicator_vector = extension_zero_vector();
+    let mut randomness_vectors = vec![
+        extension_zero_vector();
+        input.target_constant_commitments.len()
+            * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+    ];
+
+    for (target_rns_limb_index, (target_rns_prime, commitment)) in input
+        .target_rns_primes
+        .iter()
+        .zip(input.target_constant_commitments.iter())
+        .enumerate()
+    {
+        let coordinates =
+            &commitment.coordinates_by_commitment_modulus[input.commitment_modulus_index];
+        for (output_coordinate_index, coordinate) in coordinates.iter().enumerate() {
+            let alpha_index = target_rns_limb_index * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                + output_coordinate_index;
+            let alpha_value = &input.relation_alpha[alpha_index];
+            relation_claim =
+                tower.add(&relation_claim, &tower.scale_base(alpha_value, *coordinate));
+            add_compact_projection_vector(
+                AddCompactProjectionVectorInput {
+                    target: &mut secret_vector,
+                    scale: alpha_value,
+                    public_matrix_seed_hash: input.public_matrix_seed_hash,
+                    rns_limb_index: target_rns_limb_index,
+                    commitment_modulus_index: input.commitment_modulus_index,
+                    output_coordinate_index,
+                    input_column: COMPACT_VSS_MESSAGE_COLUMN_LABEL,
+                    ring_degree: input.ring_degree,
+                    modulus: input.modulus,
+                },
+                tower,
+            )?;
+            let target_prime_residue = *target_rns_prime % input.modulus;
+            let negative_indicator_scale = tower.scale_base(alpha_value, target_prime_residue);
+            add_compact_projection_vector(
+                AddCompactProjectionVectorInput {
+                    target: &mut negative_indicator_vector,
+                    scale: &negative_indicator_scale,
+                    public_matrix_seed_hash: input.public_matrix_seed_hash,
+                    rns_limb_index: target_rns_limb_index,
+                    commitment_modulus_index: input.commitment_modulus_index,
+                    output_coordinate_index,
+                    input_column: COMPACT_VSS_MESSAGE_COLUMN_LABEL,
+                    ring_degree: input.ring_degree,
+                    modulus: input.modulus,
+                },
+                tower,
+            )?;
+            for randomness_column_index in 0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+                let input_column = format!("randomness:{randomness_column_index}");
+                let randomness_vector = &mut randomness_vectors[target_rns_limb_index
+                    * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+                    + randomness_column_index];
+                add_compact_projection_vector(
+                    AddCompactProjectionVectorInput {
+                        target: randomness_vector,
+                        scale: alpha_value,
+                        public_matrix_seed_hash: input.public_matrix_seed_hash,
+                        rns_limb_index: target_rns_limb_index,
+                        commitment_modulus_index: input.commitment_modulus_index,
+                        output_coordinate_index,
+                        input_column: &input_column,
+                        ring_degree: input.ring_degree,
+                        modulus: input.modulus,
+                    },
+                    tower,
+                )?;
+            }
+        }
+    }
+
+    let mut vectors = Vec::with_capacity(2 + randomness_vectors.len());
+    vectors.push(secret_vector);
+    vectors.push(negative_indicator_vector);
+    vectors.extend(randomness_vectors);
 
     Ok((relation_claim, vectors))
 }

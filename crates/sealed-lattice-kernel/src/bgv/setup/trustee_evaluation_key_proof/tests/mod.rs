@@ -25,9 +25,10 @@ use std::time::Instant;
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::merkle_commitment::LEAF_SALT_BYTES;
 use super::relation::{
-    CompactVssShareLinkageCommitment, CompactVssShareLinkagePublicVectorInput,
-    CompactVssShareLinkageStatement, EvaluationKeyShareDescriptor, LimbColumnLayout,
-    PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
+    CompactSameSecretBridgeStatement, CompactVssShareLinkageCommitment,
+    CompactVssShareLinkagePublicVectorInput, CompactVssShareLinkageStatement,
+    EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
+    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
     build_compact_vss_share_linkage_public_vectors,
 };
 use super::{
@@ -50,12 +51,13 @@ use crate::bgv::evaluator::top_k::{
 // the sibling tests can keep referencing them through `super::` unchanged after
 // the move under this `tests/` directory.
 use super::{
-    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
+    COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
     generate_trustee_evaluation_key_proof_from_request, prover,
     verify_trustee_evaluation_key_proof_from_request,
 };
 
 mod command_surface;
+mod compact_same_secret_bridge;
 mod compact_vss_share_linkage;
 mod cross_language_vectors;
 mod masked_claim_zero_knowledge;
@@ -184,6 +186,7 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
                 .collect(),
         }),
         compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
     }
 }
 

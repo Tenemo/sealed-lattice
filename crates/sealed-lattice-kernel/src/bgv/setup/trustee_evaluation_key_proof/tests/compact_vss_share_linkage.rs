@@ -200,6 +200,7 @@ fn compact_vss_share_linkage_instance() -> (
             recipient_share_commitment_root: repeated_hash("93"),
             recipient_share_commitment,
         }),
+        compact_same_secret_bridge: None,
     };
     statement
         .validate_shape()

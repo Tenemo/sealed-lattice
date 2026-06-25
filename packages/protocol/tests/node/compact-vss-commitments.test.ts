@@ -8,8 +8,10 @@ import {
     compactVssParameterCertificateInputBinding,
     compactVssPrivateWitnessPayloadMeasurement,
     compactVssCommitmentProfileId,
+    compactVssRestrictedShareLinkageProofBoundary,
     compactVssShareLinkageAggregateThresholdRule,
     compactVssShareLinkageCommonKeyRule,
+    compactVssShareLinkageProofFamily,
     compactVssShareLinkageProofBatchingRule,
     compactVssShareLinkageRecipientApprovalBoundary,
     compactVssShareLinkageShamirEvaluationRule,
@@ -19,12 +21,14 @@ import {
     createCompactVssCoefficientCommitmentSet,
     createCompactVssRecipientShareCommitmentBundle,
     createCompactVssShareLinkageStatement,
+    createCompactVssShareLinkageProofMaterialSet,
     computeCompactVssCommitmentFromOpening,
     decodeCompactVssCommitmentBody,
     encodeCompactVssCommitmentBody,
     verifyCompactVssAggregateThresholdCommitmentSet,
     verifyCompactVssRecipientShareCommitmentSet,
     verifyCompactVssShareLinkageStatement,
+    verifyCompactVssShareLinkageProofMaterialSet,
     verifyCompactVssCommitmentOpening,
     verifyCompactVssAggregateOpeningCredential,
     type CompactVssAggregateThresholdCommitmentSet,
@@ -33,8 +37,17 @@ import {
     type CompactVssCommitmentOpeningInput,
     type CompactVssAggregateThresholdOpeningCredential,
     type CompactVssRecipientShareOpeningCredential,
+    type CompactVssShareLinkageProofMaterialInput,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import type { VssSourceTrusteeCoefficientOpeningState } from '#packages/protocol/src/setup/vss-coefficient-commitments.js';
+
+type MutableCompactVssProofMaterialSetBytes = {
+    readonly proofMaterials: {
+        readonly proofRecords: {
+            proofBytesHex: string;
+        }[];
+    }[];
+};
 
 const publicMatrixSeedHash = deriveProtocolHash('SetupPublicMatrixSeedHash', {
     fixture: 'compact-vss-commitments',
@@ -689,6 +702,15 @@ describe('compact VSS development commitments', () => {
             recombination:
                 'target result acceptance requires denominator-cleared Lagrange recombination and decoding-margin verification',
         });
+        expect(binding.missingCertificateInputs).toStrictEqual([
+            'reviewed Module-SIS binding estimator row with verifier-accepted opening norms, proof-extracted norms, and multi-target loss',
+            'reviewed Module-LWE hiding estimator row with public sample count, corrupted-recipient openings, and multi-opening loss',
+            'source-batched compact share-linkage proof backend with extractor-bound opening norms',
+            'same-secret bridge proof verification before target-basis compact profile activation',
+            'target-decryption restored-opening proof backend, released-share smudging proof coverage, and recombination proof coverage',
+            'structured-ring attack review for the selected ring, module shape, modulus limbs, sparse projection, and common-key reuse',
+            'supported-phone runtime and memory measurements for compact public proofs, private openings, and restored local-state proof generation',
+        ]);
 
         const {
             compactVssParameterCertificateInputBindingHash,
@@ -1031,6 +1053,113 @@ describe('compact VSS development commitments', () => {
             recipientApprovalBoundary:
                 compactVssShareLinkageRecipientApprovalBoundary,
         });
+        const proofMaterialInputs: CompactVssShareLinkageProofMaterialInput[] =
+            linkageStatement.sourceStatementRecords.map((sourceStatement) => ({
+                sourceStatementRoot: sourceStatement.sourceStatementRoot,
+                proofBoundary: compactVssRestrictedShareLinkageProofBoundary,
+                proofRecords: [
+                    {
+                        proofStatementHash: deriveProtocolHash(
+                            'SetupProofRecordBindingHash',
+                            {
+                                fixture: 'compact-vss',
+                                label: 'restricted-share-linkage-proof-statement',
+                                sourceTrusteeIdentity:
+                                    sourceStatement.sourceTrusteeIdentity,
+                            },
+                        ),
+                        proofBytesHex: 'ab'.repeat(
+                            32 + sourceStatement.sourceTrusteeRosterPosition,
+                        ),
+                    },
+                ],
+            }));
+        const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
+            statement: linkageStatement,
+            proofMaterialInputs,
+        });
+        expect(
+            verifyCompactVssShareLinkageProofMaterialSet({
+                statement: linkageStatement,
+                proofMaterialSet,
+            }),
+        ).toBe(proofMaterialSet);
+        expect(proofMaterialSet).toMatchObject({
+            objectType: 'CompactVssShareLinkageProofMaterialSet',
+            proofFamily: compactVssShareLinkageProofFamily,
+            proofBoundary: compactVssRestrictedShareLinkageProofBoundary,
+            participantCount: 2,
+            shareLinkageStatementRoot: linkageStatement.statementRoot,
+        });
+        expect(proofMaterialSet.proofMaterials[0]).toMatchObject({
+            objectType: 'CompactVssShareLinkageProofMaterial',
+            sourceTrusteeIdentity: 'source-0',
+            sourceTrusteeRosterPosition: 0,
+            sourceStatementRoot:
+                linkageStatement.sourceStatementRecords[0]?.sourceStatementRoot,
+            proofRecords: [
+                {
+                    objectType: 'CompactVssShareLinkageProofRecord',
+                    proofByteLength: 32,
+                },
+            ],
+        });
+        const repeatedProofInputRoot =
+            proofMaterialInputs[0]?.sourceStatementRoot;
+        if (repeatedProofInputRoot === undefined) {
+            throw new Error(
+                'compact VSS fixture did not create proof material inputs.',
+            );
+        }
+        expect(() =>
+            createCompactVssShareLinkageProofMaterialSet({
+                statement: linkageStatement,
+                proofMaterialInputs: proofMaterialInputs.map(
+                    (proofMaterialInput, proofMaterialIndex) =>
+                        proofMaterialIndex === 1
+                            ? {
+                                  ...proofMaterialInput,
+                                  sourceStatementRoot: repeatedProofInputRoot,
+                              }
+                            : proofMaterialInput,
+                ),
+            }),
+        ).toThrow(/must not repeat/u);
+        expect(() =>
+            createCompactVssShareLinkageProofMaterialSet({
+                statement: linkageStatement,
+                proofMaterialInputs: proofMaterialInputs.map(
+                    (proofMaterialInput, proofMaterialIndex) =>
+                        proofMaterialIndex === 0
+                            ? ({
+                                  ...proofMaterialInput,
+                                  proofBoundary:
+                                      'unsupported compact share-linkage proof boundary',
+                              } as unknown as CompactVssShareLinkageProofMaterialInput)
+                            : proofMaterialInput,
+                ),
+            }),
+        ).toThrow(/proofBoundary/u);
+        const proofMaterialSetWithTamperedRecordBytes =
+            structuredClone(proofMaterialSet);
+        const tamperedProofMaterialSetBytes =
+            proofMaterialSetWithTamperedRecordBytes as unknown as MutableCompactVssProofMaterialSetBytes;
+        const tamperedProofRecord =
+            tamperedProofMaterialSetBytes.proofMaterials[0]?.proofRecords[0];
+        if (tamperedProofRecord === undefined) {
+            throw new Error(
+                'compact VSS proof material fixture did not create a proof record.',
+            );
+        }
+        tamperedProofRecord.proofBytesHex = `00${tamperedProofRecord.proofBytesHex.slice(
+            2,
+        )}`;
+        expect(() =>
+            verifyCompactVssShareLinkageProofMaterialSet({
+                statement: linkageStatement,
+                proofMaterialSet: proofMaterialSetWithTamperedRecordBytes,
+            }),
+        ).toThrow(/proofBytesHash/u);
         const rebindLinkageStatementRoot = (
             statement: typeof linkageStatement,
         ): typeof linkageStatement => {
