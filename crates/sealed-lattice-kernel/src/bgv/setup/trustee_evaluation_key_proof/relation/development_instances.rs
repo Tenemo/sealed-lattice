@@ -337,6 +337,7 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
             keys,
             same_secret_linkage,
             private_vss_share: None,
+            compact_vss_share_linkage: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,
@@ -346,6 +347,11 @@ pub(crate) fn generate_development_trustee_instance_with_linkage(
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
+            compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_messages: Vec::new(),
+            compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_opening_randomness: Vec::new(),
+            compact_vss_carry_witnesses: Vec::new(),
         },
     ))
 }
@@ -474,6 +480,7 @@ pub(crate) fn generate_development_public_key_share_instance(
             keys: vec![descriptor],
             same_secret_linkage,
             private_vss_share: None,
+            compact_vss_share_linkage: None,
         },
         TrusteeEvaluationKeyWitness {
             secret_coefficients,
@@ -483,6 +490,11 @@ pub(crate) fn generate_development_public_key_share_instance(
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
+            compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_messages: Vec::new(),
+            compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_opening_randomness: Vec::new(),
+            compact_vss_carry_witnesses: Vec::new(),
         },
     ))
 }

@@ -27,6 +27,8 @@ enum TranscriptCoreCommand {
     VerifyTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
     ComputeCompactVssCommitmentFromOpening,
+    EncodeCompactVssCommitmentBody,
+    DecodeCompactVssCommitmentBody,
     VerifyCompactVssCommitmentOpening,
     VerifyCompactVssCoefficientCommitmentSet,
     VerifyCompactVssRecipientShareCommitmentSet,
@@ -229,6 +231,8 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening
+        | TranscriptCoreCommand::EncodeCompactVssCommitmentBody
+        | TranscriptCoreCommand::DecodeCompactVssCommitmentBody
         | TranscriptCoreCommand::VerifyCompactVssCommitmentOpening
         | TranscriptCoreCommand::VerifyCompactVssCoefficientCommitmentSet
         | TranscriptCoreCommand::VerifyCompactVssRecipientShareCommitmentSet
@@ -311,6 +315,12 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening => {
             crate::bgv::commands::compute_compact_vss_commitment_from_opening(request)
+        }
+        TranscriptCoreCommand::EncodeCompactVssCommitmentBody => {
+            crate::bgv::commands::encode_compact_vss_commitment_body(request)
+        }
+        TranscriptCoreCommand::DecodeCompactVssCommitmentBody => {
+            crate::bgv::commands::decode_compact_vss_commitment_body(request)
         }
         TranscriptCoreCommand::VerifyCompactVssCommitmentOpening => {
             crate::bgv::commands::verify_compact_vss_commitment_opening(request)

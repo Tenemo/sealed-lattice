@@ -77,6 +77,28 @@ pub(super) fn build_limb_witness_commitment(
                 append_logical_vector(&logical_vector);
             }
         }
+    } else if layout.compact_vss_active() {
+        for coefficient_messages in &witness.compact_vss_coefficient_messages_by_shamir_index {
+            let logical_vector = signed_residue_vector(coefficient_messages, modulus);
+            append_logical_vector(&logical_vector);
+        }
+        let recipient_message =
+            signed_residue_vector(&witness.compact_vss_recipient_share_messages, modulus);
+        append_logical_vector(&recipient_message);
+        let carry_vector = signed_residue_vector(&witness.compact_vss_carry_witnesses, modulus);
+        append_logical_vector(&carry_vector);
+        for randomness_columns in
+            &witness.compact_vss_coefficient_opening_randomness_by_shamir_index
+        {
+            for column in randomness_columns {
+                let logical_vector = signed_residue_vector(column, modulus);
+                append_logical_vector(&logical_vector);
+            }
+        }
+        for column in &witness.compact_vss_recipient_share_opening_randomness {
+            let logical_vector = signed_residue_vector(column, modulus);
+            append_logical_vector(&logical_vector);
+        }
     } else {
         let secret_vector = signed_residue_vector(&witness.secret_coefficients, modulus);
         append_logical_vector(&secret_vector);
@@ -149,12 +171,46 @@ pub(super) fn validate_witness_support(
             || !witness.error_coefficients_by_key.is_empty()
             || !witness.negative_indicator_coefficients.is_empty()
             || !witness.opening_randomness_by_limb.is_empty()
+            || !witness
+                .compact_vss_coefficient_messages_by_shamir_index
+                .is_empty()
+            || !witness.compact_vss_recipient_share_messages.is_empty()
+            || !witness
+                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .is_empty()
+            || !witness
+                .compact_vss_recipient_share_opening_randomness
+                .is_empty()
+            || !witness.compact_vss_carry_witnesses.is_empty()
         {
             return Err(invalid_succinct_setup_proof(
                 "private VSS witness must not include key or same-secret linkage material",
             ));
         }
         return validate_private_vss_witness(private_vss_share, witness, statement.ring_degree);
+    }
+    if let Some(compact_vss_share_linkage) = &statement.compact_vss_share_linkage {
+        if !witness.secret_coefficients.is_empty()
+            || !witness.error_coefficients_by_key.is_empty()
+            || !witness.negative_indicator_coefficients.is_empty()
+            || !witness.opening_randomness_by_limb.is_empty()
+            || !witness
+                .private_vss_coefficient_messages_by_shamir_index
+                .is_empty()
+            || !witness
+                .private_vss_opening_randomness_by_shamir_index
+                .is_empty()
+            || !witness.private_vss_carry_witnesses.is_empty()
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS share-linkage witness must not include key, same-secret, or private VSS material",
+            ));
+        }
+        return validate_compact_vss_witness(
+            compact_vss_share_linkage,
+            witness,
+            statement.ring_degree,
+        );
     }
     if witness.secret_coefficients.len() != statement.ring_degree
         || witness.error_coefficients_by_key.len() != statement.keys.len()
@@ -228,11 +284,173 @@ pub(super) fn validate_witness_support(
         None => {
             if !witness.negative_indicator_coefficients.is_empty()
                 || !witness.opening_randomness_by_limb.is_empty()
+                || !witness
+                    .private_vss_coefficient_messages_by_shamir_index
+                    .is_empty()
+                || !witness
+                    .private_vss_opening_randomness_by_shamir_index
+                    .is_empty()
+                || !witness.private_vss_carry_witnesses.is_empty()
+                || !witness
+                    .compact_vss_coefficient_messages_by_shamir_index
+                    .is_empty()
+                || !witness.compact_vss_recipient_share_messages.is_empty()
+                || !witness
+                    .compact_vss_coefficient_opening_randomness_by_shamir_index
+                    .is_empty()
+                || !witness
+                    .compact_vss_recipient_share_opening_randomness
+                    .is_empty()
+                || !witness.compact_vss_carry_witnesses.is_empty()
             {
                 return Err(invalid_succinct_setup_proof(
                     "witness linkage material requires a same-secret linkage statement",
                 ));
             }
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_compact_vss_witness(
+    statement: &super::super::relation::CompactVssShareLinkageStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    let coefficient_count = statement.coefficient_commitments.len();
+    if witness
+        .compact_vss_coefficient_messages_by_shamir_index
+        .len()
+        != coefficient_count
+        || witness
+            .compact_vss_coefficient_opening_randomness_by_shamir_index
+            .len()
+            != coefficient_count
+        || witness.compact_vss_recipient_share_messages.len() != ring_degree
+        || witness.compact_vss_carry_witnesses.len() != ring_degree
+        || witness.compact_vss_recipient_share_opening_randomness.len()
+            != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact VSS witness shape does not match the statement",
+        ));
+    }
+    let source_modulus_i64 = i64::try_from(statement.source_message_modulus)
+        .map_err(|_| invalid_succinct_setup_proof("compact VSS source modulus does not fit i64"))?;
+    for (coefficient_index, (messages, randomness_columns)) in witness
+        .compact_vss_coefficient_messages_by_shamir_index
+        .iter()
+        .zip(
+            witness
+                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .iter(),
+        )
+        .enumerate()
+    {
+        if messages.len() != ring_degree
+            || messages
+                .iter()
+                .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
+            || randomness_columns.len()
+                != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+            || randomness_columns.iter().any(|column| {
+                column.len() != ring_degree
+                    || column
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+            })
+        {
+            return Err(invalid_succinct_setup_proof(format!(
+                "compact VSS witness for Shamir coefficient {coefficient_index} has the wrong shape"
+            )));
+        }
+    }
+    if witness
+        .compact_vss_recipient_share_messages
+        .iter()
+        .any(|coefficient| *coefficient < 0 || *coefficient >= source_modulus_i64)
+        || witness
+            .compact_vss_recipient_share_opening_randomness
+            .iter()
+            .any(|column| {
+                column.len() != ring_degree
+                    || column
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+            })
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact VSS recipient share witness has the wrong shape",
+        ));
+    }
+    let carry_bound = private_vss_share_lifted_carry_bound(
+        statement.recipient_roster_position,
+        coefficient_count,
+    )?;
+    for carry in &witness.compact_vss_carry_witnesses {
+        let carry_i128 = i128::from(*carry);
+        if carry_i128 < 0 || carry_i128 > carry_bound {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS carry witness is outside the accepted bound",
+            ));
+        }
+    }
+    let trustee_point = i128::from(crate::bgv::setup::sharing::canonical_trustee_point(
+        usize::try_from(statement.recipient_roster_position).map_err(|_| {
+            invalid_succinct_setup_proof("compact VSS recipient roster position does not fit usize")
+        })?,
+        statement.source_message_modulus,
+    )?);
+    let mut powers = Vec::with_capacity(coefficient_count);
+    let mut power = 1_i128;
+    for _ in 0..coefficient_count {
+        powers.push(power);
+        power = power
+            .checked_mul(trustee_point)
+            .ok_or_else(|| invalid_succinct_setup_proof("compact VSS point power overflowed"))?;
+    }
+    for coefficient_position in 0..ring_degree {
+        let mut left = 0_i128;
+        for (messages, trustee_point_power) in witness
+            .compact_vss_coefficient_messages_by_shamir_index
+            .iter()
+            .zip(powers.iter())
+        {
+            left = left
+                .checked_add(
+                    trustee_point_power
+                        .checked_mul(i128::from(messages[coefficient_position]))
+                        .ok_or_else(|| {
+                            invalid_succinct_setup_proof(
+                                "compact VSS lifted message product overflowed",
+                            )
+                        })?,
+                )
+                .ok_or_else(|| invalid_succinct_setup_proof("compact VSS lifted sum overflowed"))?;
+        }
+        left = left
+            .checked_sub(i128::from(
+                witness.compact_vss_recipient_share_messages[coefficient_position],
+            ))
+            .ok_or_else(|| invalid_succinct_setup_proof("compact VSS lifted share overflowed"))?;
+        left = left
+            .checked_sub(
+                i128::from(statement.source_message_modulus)
+                    .checked_mul(i128::from(
+                        witness.compact_vss_carry_witnesses[coefficient_position],
+                    ))
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof("compact VSS lifted carry overflowed")
+                    })?,
+            )
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof("compact VSS lifted relation overflowed")
+            })?;
+        if left != 0 {
+            return Err(invalid_succinct_setup_proof(format!(
+                "compact VSS lifted relation failed at coefficient {coefficient_position}"
+            )));
         }
     }
 

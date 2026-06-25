@@ -34,8 +34,10 @@ pub(in super::super) fn global_claim_id(
 ) -> u64 {
     let repetition = local_claim_index % CONSISTENCY_REPETITIONS;
     let vector_index = local_claim_index / CONSISTENCY_REPETITIONS;
-    if layout.private_vss_active() {
-        debug_assert!(statement.private_vss_share.is_some());
+    if layout.private_vss_active() || layout.compact_vss_active() {
+        debug_assert!(
+            statement.private_vss_share.is_some() || statement.compact_vss_share_linkage.is_some()
+        );
         return (vector_index * CONSISTENCY_REPETITIONS + repetition) as u64;
     }
     if vector_index == 0 {
@@ -139,6 +141,18 @@ pub(super) fn global_claim_integers(
             for column in randomness_columns {
                 signed_vectors.push(column);
             }
+        }
+    } else if statement.compact_vss_share_linkage.is_some() {
+        signed_vectors.push(&witness.compact_vss_carry_witnesses);
+        for randomness_columns in
+            &witness.compact_vss_coefficient_opening_randomness_by_shamir_index
+        {
+            for column in randomness_columns {
+                signed_vectors.push(column);
+            }
+        }
+        for column in &witness.compact_vss_recipient_share_opening_randomness {
+            signed_vectors.push(column);
         }
     } else {
         signed_vectors.push(&witness.secret_coefficients);

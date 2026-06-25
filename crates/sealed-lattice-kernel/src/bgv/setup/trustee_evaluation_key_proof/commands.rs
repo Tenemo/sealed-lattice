@@ -40,6 +40,9 @@ fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResu
         SuccinctSetupProofFamilyShape::PrivateVssShare => {
             succinct_private_vss_share_accounting_hash()
         }
+        SuccinctSetupProofFamilyShape::CompactVssShareLinkage => Err(invalid_succinct_setup_proof(
+            "compact VSS share-linkage accounting is not exposed through the trustee proof command",
+        )),
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_hash()
         }
@@ -57,6 +60,9 @@ fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalRes
         SuccinctSetupProofFamilyShape::PrivateVssShare => {
             succinct_private_vss_share_accounting_value()
         }
+        SuccinctSetupProofFamilyShape::CompactVssShareLinkage => Err(invalid_succinct_setup_proof(
+            "compact VSS share-linkage accounting is not exposed through the trustee proof command",
+        )),
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_value()
         }
@@ -94,6 +100,11 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
+        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_messages: Vec::new(),
+        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_opening_randomness: Vec::new(),
+        compact_vss_carry_witnesses: Vec::new(),
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
@@ -275,6 +286,7 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
         keys,
         same_secret_linkage,
         private_vss_share: None,
+        compact_vss_share_linkage: None,
     };
     statement.validate_shape()?;
 

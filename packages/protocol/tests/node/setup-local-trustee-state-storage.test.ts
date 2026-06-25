@@ -546,6 +546,8 @@ describe('local trustee setup state storage', () => {
                         {
                             ...firstCredential,
                             aggregateShareValues: [8, 11, 13, 17],
+                            aggregateCommitmentMessageValues: [8, 11, 13, 17],
+                            aggregateShareCarryValues: [0, 0, 0, 0],
                         },
                     ],
                 },

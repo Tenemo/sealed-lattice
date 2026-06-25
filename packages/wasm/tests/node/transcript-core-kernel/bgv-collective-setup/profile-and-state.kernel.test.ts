@@ -367,6 +367,13 @@ describe('collective BGV setup kernel commands', () => {
             byteReduction: {
                 removedBytes: 1_603_784_897,
             },
+            budgetComparison: {
+                publicSetupDownloadBudgetBytes: 67_108_864,
+                sourceTrusteeUploadBudgetBytes: 268_435_456,
+                oneSourcePublicCommitmentUploadBytes: 52_992,
+                largestSingleObjectBudgetBytes: 16_777_216,
+                largestWasmBoundaryCopyBudgetBytes: 1_572_864,
+            },
             cpuWorkModel: {
                 residueMultiplyAddsPerCommitment: 4_608,
                 totalCommitments: 1_450,
@@ -394,13 +401,14 @@ describe('collective BGV setup kernel commands', () => {
             participantCount: 10,
             targetRnsLimbCount: 7,
             oneSourceRecipientCredentialPayloadBytes: 786_432,
+            oneAggregateCredentialPayloadBytes: 1_310_720,
             oneRecipientPrivateMailboxCredentialPayloadBytes: 55_050_240,
-            oneRecipientPersistentAggregateCredentialPayloadBytes: 5_505_024,
+            oneRecipientPersistentAggregateCredentialPayloadBytes: 9_175_040,
             allRecipientsPrivateMailboxCredentialPayloadBytes: 550_502_400,
-            allRecipientsPersistentAggregateCredentialPayloadBytes: 55_050_240,
-            largestSingleCredentialPayloadBytes: 786_432,
+            allRecipientsPersistentAggregateCredentialPayloadBytes: 91_750_400,
+            largestSingleCredentialPayloadBytes: 1_310_720,
             byteAccountingScope:
-                'compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one aggregate opening payload per persisted recipient limb',
+                'compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one reduced share vector, one carried commitment-message vector, one carry vector, and opening-randomness vectors per persisted aggregate limb',
         });
         expect(
             profile.compactVssPrivateWitnessPayloadMeasurement
@@ -418,7 +426,7 @@ describe('collective BGV setup kernel commands', () => {
             privateMailboxBudgetBytes: 67_108_864,
             oneRecipientPrivateMailboxPayloadFractionOfBudget: 0.8203125,
             persistentProofWitnessBudgetBytes: 16_777_216,
-            oneRecipientPersistentAggregatePayloadFractionOfBudget: 0.328125,
+            oneRecipientPersistentAggregatePayloadFractionOfBudget: 0.546875,
         });
         expect(profile.evaluatorKeyScheduleProfile).toMatchObject({
             objectType: 'EvaluatorKeyScheduleProfile',

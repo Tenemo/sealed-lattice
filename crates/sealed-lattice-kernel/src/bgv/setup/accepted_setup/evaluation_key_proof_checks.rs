@@ -695,6 +695,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
             commitments: constant_commitments,
         }),
         private_vss_share: None,
+        compact_vss_share_linkage: None,
     };
     statement.validate_shape()?;
 

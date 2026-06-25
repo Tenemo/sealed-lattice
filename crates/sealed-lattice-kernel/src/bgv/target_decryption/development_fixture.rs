@@ -273,6 +273,15 @@ fn development_local_target_share_witness(
         .enumerate()
         .map(|(rns_limb_index, share_values)| {
             let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
+            let rns_prime = DATA_PRIMES[rns_limb_index];
+            let mut aggregate_commitment_message_values = share_values.clone();
+            let mut aggregate_share_carry_values = vec![0_u64; POLYNOMIAL_DEGREE];
+            aggregate_commitment_message_values[0] += rns_prime;
+            aggregate_share_carry_values[0] = 1;
+            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+                rns_prime,
+                setup_binding.participants.len(),
+            )?;
             let (aggregate_commitment_root, aggregate_opening_root) =
                 compute_compact_aggregate_opening_roots(CompactAggregateOpeningRootsInput {
                     setup_binding,
@@ -280,8 +289,9 @@ fn development_local_target_share_witness(
                     setup_epoch: DEVELOPMENT_TARGET_DECRYPTION_SETUP_EPOCH,
                     public_matrix_seed_hash: &public_matrix_seed_hash,
                     rns_limb_index,
-                    rns_prime: DATA_PRIMES[rns_limb_index],
-                    aggregate_share_values: share_values,
+                    rns_prime,
+                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
+                    message_coefficient_bound,
                     aggregate_randomness_by_column: &aggregate_randomness_by_column,
                 })?;
 
@@ -292,10 +302,12 @@ fn development_local_target_share_witness(
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
                 "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": DATA_PRIMES[rns_limb_index],
+                "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": aggregate_commitment_root,
                 "aggregateOpeningRoot": aggregate_opening_root,
                 "aggregateShareValues": share_values,
+                "aggregateCommitmentMessageValues": aggregate_commitment_message_values,
+                "aggregateShareCarryValues": aggregate_share_carry_values,
                 "aggregateRandomnessByColumn": aggregate_randomness_by_column,
                 "sourceShareOpeningRoots": [],
             }))

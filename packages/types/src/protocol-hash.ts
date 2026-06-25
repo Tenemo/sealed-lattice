@@ -174,6 +174,7 @@ export const protocolHashNamespaceValues = [
     'BgvTargetDecryptionShareRoot',
     'BgvTargetDecryptionShareHash',
     'BgvTargetDecryptionShareProofStatementRoot',
+    'TargetDecryptionCompactAggregateOpeningCredentialBindingRoot',
     'TargetDecryptionSmudgingInputReportHash',
     'TargetDecryptionRecombinationInputReportHash',
     'TargetDecryptionResultHash',

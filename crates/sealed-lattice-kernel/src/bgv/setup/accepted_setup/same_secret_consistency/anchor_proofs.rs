@@ -381,6 +381,7 @@ fn verify_same_secret_anchor_proof_record(
             commitments: constant_commitments,
         }),
         private_vss_share: None,
+        compact_vss_share_linkage: None,
     };
     let statement_hash_hex = statement
         .statement_hash()

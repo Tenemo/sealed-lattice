@@ -637,6 +637,7 @@ fn verify_public_key_share_succinct_proof_record(
             commitments: vec![limb_zero_commitment],
         }),
         private_vss_share: None,
+        compact_vss_share_linkage: None,
     };
     let statement_hash_hex = statement
         .statement_hash()

@@ -356,6 +356,16 @@ fn local_target_share_witness(
         .enumerate()
         .map(|(rns_limb_index, share_values)| {
             let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
+            let rns_prime = DATA_PRIMES[rns_limb_index];
+            let mut aggregate_commitment_message_values = share_values.clone();
+            let mut aggregate_share_carry_values = vec![0_u64; POLYNOMIAL_DEGREE];
+            aggregate_commitment_message_values[0] += rns_prime;
+            aggregate_share_carry_values[0] = 1;
+            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+                rns_prime,
+                setup_binding.participants.len(),
+            )
+            .expect("compact aggregate message coefficient bound");
             let (aggregate_commitment_root, aggregate_opening_root) =
                 compute_compact_aggregate_opening_roots(CompactAggregateOpeningRootsInput {
                     setup_binding: &setup_binding,
@@ -363,8 +373,9 @@ fn local_target_share_witness(
                     setup_epoch,
                     public_matrix_seed_hash: &public_matrix_seed_hash,
                     rns_limb_index,
-                    rns_prime: DATA_PRIMES[rns_limb_index],
-                    aggregate_share_values: share_values,
+                    rns_prime,
+                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
+                    message_coefficient_bound,
                     aggregate_randomness_by_column: &aggregate_randomness_by_column,
                 })
                 .expect("compact aggregate opening roots");
@@ -375,10 +386,12 @@ fn local_target_share_witness(
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
                 "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": DATA_PRIMES[rns_limb_index],
+                "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": aggregate_commitment_root,
                 "aggregateOpeningRoot": aggregate_opening_root,
                 "aggregateShareValues": share_values,
+                "aggregateCommitmentMessageValues": aggregate_commitment_message_values,
+                "aggregateShareCarryValues": aggregate_share_carry_values,
                 "aggregateRandomnessByColumn": aggregate_randomness_by_column,
                 "sourceShareOpeningRoots": [],
             })
@@ -577,6 +590,19 @@ fn target_share_proof_statement_binds_compact_local_witness_and_share() {
         statement["compactAggregateOpeningBinding"]["aggregateThresholdCommitmentRoot"],
         json!("5".repeat(128))
     );
+    let expected_active_credential_binding_root = derive_protocol_hash(
+        "TargetDecryptionCompactAggregateOpeningCredentialBindingRoot",
+        &json!({
+            "objectType": "TargetDecryptionCompactAggregateOpeningCredentialBindingSet",
+            "objectVersion": 1,
+            "activeCredentialBindings": statement["compactAggregateOpeningBinding"]["activeCredentialBindings"],
+        }),
+    )
+    .expect("active credential binding root");
+    assert_eq!(
+        statement["compactAggregateOpeningBinding"]["activeCredentialBindingRoot"],
+        json!(expected_active_credential_binding_root)
+    );
     assert_eq!(
         statement["compactAggregateOpeningBinding"]["activeCredentialBindings"]
             .as_array()
@@ -673,6 +699,58 @@ fn target_share_proof_statement_verifier_accepts_bound_statement() {
         verification["proofBoundary"],
         json!(TARGET_DECRYPTION_SHARE_PROOF_BOUNDARY)
     );
+}
+
+#[test]
+fn target_share_proof_statement_verifier_rejects_rebound_wrong_active_binding_root() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let local_target_share_witness_value = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+    let local_share = generate_local_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        &local_target_share_witness_value,
+        "trustee-1",
+    );
+    let mut statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile,
+        local_target_share_witness_value: &local_target_share_witness_value,
+        target_decryption_share: &local_share,
+        trustee_identity: "trustee-1",
+    })
+    .expect("target share proof statement");
+    statement["compactAggregateOpeningBinding"]["activeCredentialBindingRoot"] =
+        json!("0".repeat(128));
+    rebind_share_proof_statement_root(&mut statement);
+
+    let error = verify_share_proof_statement(TargetShareProofStatementVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile,
+        target_decryption_share: &local_share,
+        proof_statement: &statement,
+    })
+    .expect_err("wrong active credential binding root must be refused");
+
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(error.message.contains("active credential binding root"));
 }
 
 #[test]
@@ -1149,6 +1227,37 @@ fn local_target_share_witness_rejects_noncanonical_limb_value() {
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
     assert!(error.message.contains("non-canonical residue"));
+}
+
+#[test]
+fn local_target_share_witness_rejects_wrong_compact_aggregate_carry() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile = target_share_profile(&setup_package);
+    let mut witness = local_target_share_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile,
+        "trustee-1",
+    );
+    witness["compactAggregateOpening"]["compactAggregateOpeningCredentials"][0]["aggregateShareCarryValues"]
+        [0] = json!(0);
+
+    let error = generate_bgv_target_decryption_share_from_local_share_request(&json!({
+        "setupPackage": setup_package,
+        "localTargetShareWitness": witness,
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+        "targetShareProfile": target_share_profile,
+        "trusteeIdentity": "trustee-1",
+    }))
+    .expect_err("wrong compact aggregate carry must be refused");
+
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(error.message.contains("carry relation"));
 }
 
 #[test]

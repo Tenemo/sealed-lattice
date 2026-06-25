@@ -6,8 +6,8 @@ pub(super) const COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE: &str =
     "development-only-not-certified-for-production-use";
 pub(super) const COMPACT_VSS_COMMITMENT_BINARY_FORMAT: &str =
     "sealed-lattice-compact-vss-commitment-binary-v1";
-const COMPACT_VSS_OUTPUT_COORDINATE_COUNT: usize = 16;
-const COMPACT_VSS_RANDOMNESS_COLUMN_COUNT: usize = 2;
+pub(in crate::bgv::setup) const COMPACT_VSS_OUTPUT_COORDINATE_COUNT: usize = 16;
+pub(in crate::bgv::setup) const COMPACT_VSS_RANDOMNESS_COLUMN_COUNT: usize = 2;
 const COMPACT_VSS_PROJECTION_WEIGHT: usize = 32;
 const COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 const COMPACT_VSS_MESSAGE_VECTOR_HASH_DOMAIN: &str =
@@ -35,6 +35,7 @@ pub(crate) struct CompactVssCommitmentOpeningInput<'a> {
     pub(crate) rns_prime: u64,
     pub(crate) ring_degree: usize,
     pub(crate) message_coefficients: &'a [u64],
+    pub(crate) message_coefficient_bound: u64,
     pub(crate) randomness_by_column: &'a [Vec<i64>],
 }
 
@@ -56,6 +57,11 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
     if input.ring_degree == 0 {
         return Err(invalid_compact_vss_input("ringDegree must be positive"));
     }
+    if input.message_coefficient_bound == 0 {
+        return Err(invalid_compact_vss_input(
+            "messageCoefficientBound must be positive",
+        ));
+    }
     if input.message_coefficients.len() != input.ring_degree {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
@@ -63,11 +69,11 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
         ));
     }
     for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
-        if *coefficient >= input.rns_prime {
+        if *coefficient >= input.message_coefficient_bound {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 format!(
-                    "compact VSS message coefficient {coefficient_index} must be below rnsPrime"
+                    "compact VSS message coefficient {coefficient_index} must be below messageCoefficientBound"
                 ),
             ));
         }
@@ -189,6 +195,45 @@ pub(crate) fn verify_compact_vss_commitment_opening_request(
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "commitmentRoot": computation.commitment_root,
         "openingRoot": computation.opening_root,
+    }))
+}
+
+pub(crate) fn encode_compact_vss_commitment_body_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let commitment = value_at_path(request, &["commitment"])?;
+    validate_standalone_compact_vss_commitment_body(commitment, "compact VSS commitment")?;
+    let commitment_body_bytes = encode_compact_vss_commitment_body_value(commitment)?;
+
+    Ok(json!({
+        "ok": true,
+        "operation": "encodeCompactVssCommitmentBody",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        "binaryFormat": COMPACT_VSS_COMMITMENT_BINARY_FORMAT,
+        "encodedCommitmentByteLength": compact_vss_encoded_commitment_byte_length(),
+        "commitmentBodyBytesHex": crate::transcript_core::encode_hex(&commitment_body_bytes),
+    }))
+}
+
+pub(crate) fn decode_compact_vss_commitment_body_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let metadata = value_at_path(request, &["metadata"])?;
+    let commitment_body_bytes_hex = string_at_path(request, &["commitmentBodyBytesHex"])?;
+    let commitment_body_bytes = crate::transcript_core::decode_hex(commitment_body_bytes_hex)?;
+    let commitment = decode_compact_vss_commitment_body_value(metadata, &commitment_body_bytes)?;
+    let commitment_root = derive_protocol_hash("SetupCommitmentRoot", &commitment)?;
+
+    Ok(json!({
+        "ok": true,
+        "operation": "decodeCompactVssCommitmentBody",
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        "binaryFormat": COMPACT_VSS_COMMITMENT_BINARY_FORMAT,
+        "encodedCommitmentByteLength": compact_vss_encoded_commitment_byte_length(),
+        "commitment": commitment,
+        "commitmentRoot": commitment_root,
     }))
 }
 
@@ -380,6 +425,7 @@ pub(crate) fn verify_compact_vss_recipient_share_commitment_set_request(
                 expected_source_roster_position: expected_roster_position,
                 expected_recipient_share_count,
                 rns_limb_count,
+                public_matrix_seed_hash,
             },
         )?);
     }
@@ -489,6 +535,7 @@ pub(crate) fn verify_compact_vss_aggregate_threshold_commitment_set_request(
                 expected_recipient_roster_position: recipient_record_index / rns_limb_count,
                 expected_rns_limb_index: recipient_record_index % rns_limb_count,
                 participant_count,
+                public_matrix_seed_hash,
             },
         )?);
     }
@@ -864,6 +911,12 @@ fn verify_compact_vss_share_linkage_evidence_sets(
         input.statement.threshold_degree as u64,
         "compact VSS share linkage evidence coefficient thresholdDegree",
     )?;
+    verify_compact_vss_aggregate_threshold_public_sums(
+        recipient_share_commitment_set,
+        aggregate_threshold_commitment_set,
+        input.statement.participant_count,
+        input.statement.target_rns_limb_count,
+    )?;
 
     let coefficient_source_records =
         array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
@@ -919,6 +972,150 @@ fn verify_compact_vss_share_linkage_evidence_sets(
             hash_at_path(source_statement, &["sourceRecipientShareCommitmentRoot"])?,
             "compact VSS share linkage evidence sourceRecipientShareCommitmentRoot",
         )?;
+    }
+
+    Ok(())
+}
+
+fn verify_compact_vss_aggregate_threshold_public_sums(
+    recipient_share_commitment_set: &Value,
+    aggregate_threshold_commitment_set: &Value,
+    participant_count: usize,
+    rns_limb_count: usize,
+) -> CanonicalResult<()> {
+    let recipient_source_records =
+        array_at_path(recipient_share_commitment_set, &["sourceTrusteeRecords"])?;
+    let aggregate_recipient_records =
+        array_at_path(aggregate_threshold_commitment_set, &["recipientRecords"])?;
+    for aggregate_record in aggregate_recipient_records {
+        let recipient_roster_position = usize::try_from(unsigned_at_path(
+            aggregate_record,
+            &["recipientRosterPosition"],
+        )?)
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS aggregate recipient roster position does not fit usize",
+            )
+        })?;
+        let rns_limb_index =
+            usize::try_from(unsigned_at_path(aggregate_record, &["rnsLimbIndex"])?).map_err(
+                |_| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact VSS aggregate RNS limb index does not fit usize",
+                    )
+                },
+            )?;
+        let recipient_share_record_index = recipient_roster_position
+            .checked_mul(rns_limb_count)
+            .and_then(|offset| offset.checked_add(rns_limb_index))
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact VSS aggregate recipient-share record index overflowed",
+                )
+            })?;
+        let source_share_commitment_roots =
+            array_at_path(aggregate_record, &["sourceShareCommitmentRoots"])?;
+        if source_share_commitment_roots.len() != participant_count {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS aggregate threshold commitment source roots must cover every participant",
+            ));
+        }
+        let mut source_recipient_share_records = Vec::with_capacity(participant_count);
+        for (source_roster_position, source_share_commitment_root) in
+            source_share_commitment_roots.iter().enumerate()
+        {
+            let source_record = recipient_source_records
+                .get(source_roster_position)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact VSS recipient-share set is missing a source record",
+                    )
+                })?;
+            let recipient_share_records =
+                array_at_path(source_record, &["recipientShareCommitments"])?;
+            let recipient_share_record = recipient_share_records
+                .get(recipient_share_record_index)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact VSS aggregate threshold commitment references a missing recipient-share commitment",
+                    )
+                })?;
+            let share_commitment_root =
+                hash_at_path(recipient_share_record, &["shareCommitmentRoot"])?;
+            let expected_root = source_share_commitment_root.as_str().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS aggregate source share commitment root must be a string",
+                )
+            })?;
+            compare_required_string(
+                share_commitment_root,
+                expected_root,
+                "compact VSS aggregate source share commitment root",
+            )?;
+            source_recipient_share_records.push(recipient_share_record);
+        }
+        let aggregate_commitment = value_at_path(aggregate_record, &["commitment"])?;
+        let aggregate_limbs = array_at_path(aggregate_commitment, &["commitmentLimbs"])?;
+        for (limb_position, aggregate_limb) in aggregate_limbs.iter().enumerate() {
+            let aggregate_coordinates = array_at_path(aggregate_limb, &["coordinates"])?;
+            let modulus = unsigned_at_path(aggregate_limb, &["modulus"])?;
+            for (coordinate_index, aggregate_coordinate) in aggregate_coordinates.iter().enumerate()
+            {
+                let aggregate_coordinate_value =
+                    aggregate_coordinate.as_u64().ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "compact VSS aggregate coordinate must be an unsigned integer",
+                        )
+                    })?;
+                let mut summed_coordinate = 0_u128;
+                for recipient_share_record in &source_recipient_share_records {
+                    let commitment = value_at_path(recipient_share_record, &["commitment"])?;
+                    let limb = array_at_path(commitment, &["commitmentLimbs"])?
+                        .get(limb_position)
+                        .ok_or_else(|| {
+                            CanonicalError::new(
+                                CanonicalErrorCode::MalformedLength,
+                                "compact VSS recipient-share commitment is missing a limb",
+                            )
+                        })?;
+                    compare_required_u64(
+                        unsigned_at_path(limb, &["commitmentModulusIndex"])?,
+                        unsigned_at_path(aggregate_limb, &["commitmentModulusIndex"])?,
+                        "compact VSS aggregate source commitment modulus index",
+                    )?;
+                    compare_required_u64(
+                        unsigned_at_path(limb, &["modulus"])?,
+                        modulus,
+                        "compact VSS aggregate source commitment modulus",
+                    )?;
+                    let coordinate = array_at_path(limb, &["coordinates"])?
+                        .get(coordinate_index)
+                        .and_then(Value::as_u64)
+                        .ok_or_else(|| {
+                            CanonicalError::new(
+                                CanonicalErrorCode::MalformedLength,
+                                "compact VSS recipient-share commitment is missing a coordinate",
+                            )
+                        })?;
+                    summed_coordinate =
+                        (summed_coordinate + u128::from(coordinate)) % u128::from(modulus);
+                }
+                if summed_coordinate as u64 != aggregate_coordinate_value {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ProfileComponentMismatch,
+                        "compact VSS aggregate threshold commitment body is not the public sum of recipient-share commitments",
+                    ));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -1255,6 +1452,254 @@ struct CompactVssCoefficientRecordInput<'a> {
     public_matrix_seed_hash: &'a str,
 }
 
+struct CompactVssCommitmentBodyInput<'a> {
+    commitment: &'a Value,
+    expected_commitment_role: &'a str,
+    expected_commitment_root: &'a str,
+    expected_public_matrix_seed_hash: &'a str,
+    expected_rns_limb_index: usize,
+    expected_rns_prime: u64,
+    expected_message_vector_hash: Option<&'a str>,
+    field_name: &'a str,
+}
+
+fn validate_standalone_compact_vss_commitment_body(
+    commitment: &Value,
+    field_name: &str,
+) -> CanonicalResult<Value> {
+    compare_required_string(
+        string_at_path(commitment, &["objectType"])?,
+        "CompactVssCommitment",
+        &format!("{field_name} objectType"),
+    )?;
+    compare_required_u64(
+        unsigned_at_path(commitment, &["objectVersion"])?,
+        1,
+        &format!("{field_name} objectVersion"),
+    )?;
+    compare_required_string(
+        string_at_path(commitment, &["profileId"])?,
+        COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        &format!("{field_name} profileId"),
+    )?;
+    compare_required_string(
+        string_at_path(commitment, &["developmentScope"])?,
+        COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+        &format!("{field_name} developmentScope"),
+    )?;
+    validate_compact_vss_commitment_role(string_at_path(commitment, &["commitmentRole"])?)?;
+    let _commitment_context_hash = hash_at_path(commitment, &["commitmentContextHash"])?;
+    let _public_matrix_seed_hash = hash_at_path(commitment, &["publicMatrixSeedHash"])?;
+    let _rns_limb_index = usize_at_path(commitment, &["rnsLimbIndex"])?;
+    let _rns_prime =
+        read_positive_u64_at_path(commitment, &["rnsPrime"], &format!("{field_name} rnsPrime"))?;
+    let _ring_degree = read_positive_usize_at_path(
+        commitment,
+        &["ringDegree"],
+        &format!("{field_name} ringDegree"),
+    )?;
+    compare_required_u64(
+        unsigned_at_path(commitment, &["outputCoordinateCount"])?,
+        COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64,
+        &format!("{field_name} outputCoordinateCount"),
+    )?;
+    compare_required_u64(
+        unsigned_at_path(commitment, &["randomnessColumnCount"])?,
+        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64,
+        &format!("{field_name} randomnessColumnCount"),
+    )?;
+    let _message_vector_hash = hash_at_path(commitment, &["messageVectorHash512"])?;
+    let _opening_randomness_hash = hash_at_path(commitment, &["openingRandomnessHash512"])?;
+    let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
+    if commitment_limbs.len() != COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{field_name} commitmentLimbs must cover the compact commitment modulus limbs"),
+        ));
+    }
+    for (limb_position, commitment_limb) in commitment_limbs.iter().enumerate() {
+        let expected_commitment_modulus_index =
+            COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES[limb_position];
+        compare_required_u64(
+            unsigned_at_path(commitment_limb, &["commitmentModulusIndex"])?,
+            expected_commitment_modulus_index as u64,
+            &format!("{field_name} commitmentLimbs.{limb_position}.commitmentModulusIndex"),
+        )?;
+        let expected_modulus = DATA_PRIMES[expected_commitment_modulus_index];
+        compare_required_u64(
+            unsigned_at_path(commitment_limb, &["modulus"])?,
+            expected_modulus,
+            &format!("{field_name} commitmentLimbs.{limb_position}.modulus"),
+        )?;
+        let coordinates = array_at_path(commitment_limb, &["coordinates"])?;
+        if coordinates.len() != COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                format!(
+                    "{field_name} commitmentLimbs.{limb_position}.coordinates length must match the compact output count"
+                ),
+            ));
+        }
+        for (coordinate_index, coordinate) in coordinates.iter().enumerate() {
+            let coordinate_value = coordinate.as_u64().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "{field_name} commitmentLimbs.{limb_position}.coordinates.{coordinate_index} must be an unsigned integer"
+                    ),
+                )
+            })?;
+            if coordinate_value >= expected_modulus {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!(
+                        "{field_name} commitmentLimbs.{limb_position}.coordinates.{coordinate_index} must be below the commitment modulus"
+                    ),
+                ));
+            }
+        }
+    }
+
+    Ok(commitment.clone())
+}
+
+fn verify_compact_vss_commitment_body(
+    input: CompactVssCommitmentBodyInput<'_>,
+) -> CanonicalResult<Value> {
+    let commitment =
+        validate_standalone_compact_vss_commitment_body(input.commitment, input.field_name)?;
+    compare_required_string(
+        string_at_path(&commitment, &["commitmentRole"])?,
+        input.expected_commitment_role,
+        &format!("{} commitmentRole", input.field_name),
+    )?;
+    compare_required_string(
+        hash_at_path(&commitment, &["publicMatrixSeedHash"])?,
+        input.expected_public_matrix_seed_hash,
+        &format!("{} publicMatrixSeedHash", input.field_name),
+    )?;
+    compare_required_u64(
+        unsigned_at_path(&commitment, &["rnsLimbIndex"])?,
+        input.expected_rns_limb_index as u64,
+        &format!("{} rnsLimbIndex", input.field_name),
+    )?;
+    compare_required_u64(
+        unsigned_at_path(&commitment, &["rnsPrime"])?,
+        input.expected_rns_prime,
+        &format!("{} rnsPrime", input.field_name),
+    )?;
+    let message_vector_hash = hash_at_path(&commitment, &["messageVectorHash512"])?;
+    if let Some(expected_message_vector_hash) = input.expected_message_vector_hash {
+        compare_required_string(
+            message_vector_hash,
+            expected_message_vector_hash,
+            &format!("{} messageVectorHash512", input.field_name),
+        )?;
+    }
+    let commitment_root = derive_protocol_hash("SetupCommitmentRoot", &commitment)?;
+    if commitment_root != input.expected_commitment_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            format!(
+                "{} canonical root must match the containing record",
+                input.field_name
+            ),
+        ));
+    }
+
+    Ok(commitment)
+}
+
+fn encode_compact_vss_commitment_body_value(commitment: &Value) -> CanonicalResult<Vec<u8>> {
+    validate_standalone_compact_vss_commitment_body(commitment, "compact VSS commitment")?;
+    let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
+    let mut commitment_body_bytes =
+        Vec::with_capacity(compact_vss_encoded_commitment_byte_length());
+    for commitment_limb in commitment_limbs {
+        let coordinates = array_at_path(commitment_limb, &["coordinates"])?;
+        for coordinate in coordinates {
+            let coordinate_value = coordinate.as_u64().ok_or_else(|| {
+                invalid_compact_vss_input(
+                    "compact VSS commitment coordinate must be an unsigned integer",
+                )
+            })?;
+            commitment_body_bytes.extend_from_slice(&coordinate_value.to_le_bytes());
+        }
+    }
+
+    Ok(commitment_body_bytes)
+}
+
+fn decode_compact_vss_commitment_body_value(
+    metadata: &Value,
+    commitment_body_bytes: &[u8],
+) -> CanonicalResult<Value> {
+    let commitment_role = string_at_path(metadata, &["commitmentRole"])?;
+    validate_compact_vss_commitment_role(commitment_role)?;
+    let commitment_context_hash = hash_at_path(metadata, &["commitmentContextHash"])?;
+    let public_matrix_seed_hash = hash_at_path(metadata, &["publicMatrixSeedHash"])?;
+    let rns_limb_index = usize_at_path(metadata, &["rnsLimbIndex"])?;
+    let rns_prime = read_positive_u64_at_path(metadata, &["rnsPrime"], "metadata rnsPrime")?;
+    let ring_degree =
+        read_positive_usize_at_path(metadata, &["ringDegree"], "metadata ringDegree")?;
+    let message_vector_hash = hash_at_path(metadata, &["messageVectorHash512"])?;
+    let opening_randomness_hash = hash_at_path(metadata, &["openingRandomnessHash512"])?;
+    if commitment_body_bytes.len() != compact_vss_encoded_commitment_byte_length() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact VSS encoded commitment body length must match the compact commitment profile",
+        ));
+    }
+
+    let mut offset = 0_usize;
+    let commitment_limbs = COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .map(|commitment_modulus_index| {
+            let modulus = DATA_PRIMES[*commitment_modulus_index];
+            let mut coordinates = Vec::with_capacity(COMPACT_VSS_OUTPUT_COORDINATE_COUNT);
+            for coordinate_index in 0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+                let mut coordinate_bytes = [0_u8; 8];
+                coordinate_bytes.copy_from_slice(&commitment_body_bytes[offset..offset + 8]);
+                offset += 8;
+                let coordinate_value = u64::from_le_bytes(coordinate_bytes);
+                if coordinate_value >= modulus {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        format!(
+                            "compact VSS encoded commitment body coordinate {coordinate_index} must be below the commitment modulus"
+                        ),
+                    ));
+                }
+                coordinates.push(coordinate_value);
+            }
+
+            Ok(json!({
+                "commitmentModulusIndex": commitment_modulus_index,
+                "modulus": modulus,
+                "coordinates": coordinates,
+            }))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(json!({
+        "objectType": "CompactVssCommitment",
+        "objectVersion": 1,
+        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+        "commitmentRole": commitment_role,
+        "commitmentContextHash": commitment_context_hash,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "ringDegree": ring_degree,
+        "outputCoordinateCount": COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+        "randomnessColumnCount": COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        "messageVectorHash512": message_vector_hash,
+        "openingRandomnessHash512": opening_randomness_hash,
+        "commitmentLimbs": commitment_limbs,
+    }))
+}
+
 fn verify_compact_vss_coefficient_record(
     input: CompactVssCoefficientRecordInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -1312,6 +1757,16 @@ fn verify_compact_vss_coefficient_record(
         hash_at_path(input.coefficient_record, &["coefficientCommitmentRoot"])?;
     let coefficient_vector_hash =
         hash_at_path(input.coefficient_record, &["coefficientVectorHash512"])?;
+    let commitment = verify_compact_vss_commitment_body(CompactVssCommitmentBodyInput {
+        commitment: value_at_path(input.coefficient_record, &["commitment"])?,
+        expected_commitment_role: "coefficient",
+        expected_commitment_root: coefficient_commitment_root,
+        expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
+        expected_rns_limb_index: input.expected_rns_limb_index,
+        expected_rns_prime: rns_prime,
+        expected_message_vector_hash: Some(coefficient_vector_hash),
+        field_name: "compact VSS coefficient commitment commitment",
+    })?;
 
     Ok(json!({
         "objectType": "CompactVssCoefficientCommitment",
@@ -1326,6 +1781,7 @@ fn verify_compact_vss_coefficient_record(
         "shamirCoefficientIndex": input.expected_shamir_coefficient_index,
         "coefficientCommitmentRoot": coefficient_commitment_root,
         "coefficientVectorHash512": coefficient_vector_hash,
+        "commitment": commitment,
     }))
 }
 
@@ -1334,6 +1790,7 @@ struct CompactVssSourceRecipientShareRecordInput<'a> {
     expected_source_roster_position: usize,
     expected_recipient_share_count: usize,
     rns_limb_count: usize,
+    public_matrix_seed_hash: &'a str,
 }
 
 fn verify_compact_vss_source_recipient_share_record(
@@ -1388,6 +1845,7 @@ fn verify_compact_vss_source_recipient_share_record(
                 expected_recipient_roster_position: recipient_share_record_index
                     / input.rns_limb_count,
                 expected_rns_limb_index: recipient_share_record_index % input.rns_limb_count,
+                public_matrix_seed_hash: input.public_matrix_seed_hash,
             },
         )?);
     }
@@ -1431,6 +1889,7 @@ struct CompactVssRecipientShareRecordInput<'a> {
     source_trustee_roster_position: usize,
     expected_recipient_roster_position: usize,
     expected_rns_limb_index: usize,
+    public_matrix_seed_hash: &'a str,
 }
 
 fn verify_compact_vss_recipient_share_record(
@@ -1495,6 +1954,16 @@ fn verify_compact_vss_recipient_share_record(
         hash_at_path(input.recipient_share_record, &["shareCommitmentRoot"])?;
     let share_opening_root = hash_at_path(input.recipient_share_record, &["shareOpeningRoot"])?;
     let share_vector_hash = hash_at_path(input.recipient_share_record, &["shareVectorHash512"])?;
+    let commitment = verify_compact_vss_commitment_body(CompactVssCommitmentBodyInput {
+        commitment: value_at_path(input.recipient_share_record, &["commitment"])?,
+        expected_commitment_role: "recipient-share",
+        expected_commitment_root: share_commitment_root,
+        expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
+        expected_rns_limb_index: input.expected_rns_limb_index,
+        expected_rns_prime: rns_prime,
+        expected_message_vector_hash: Some(share_vector_hash),
+        field_name: "compact VSS recipient-share commitment commitment",
+    })?;
 
     Ok(json!({
         "objectType": "CompactVssRecipientShareCommitment",
@@ -1511,6 +1980,7 @@ fn verify_compact_vss_recipient_share_record(
         "shareCommitmentRoot": share_commitment_root,
         "shareOpeningRoot": share_opening_root,
         "shareVectorHash512": share_vector_hash,
+        "commitment": commitment,
     }))
 }
 
@@ -1519,6 +1989,7 @@ struct CompactVssAggregateThresholdRecordInput<'a> {
     expected_recipient_roster_position: usize,
     expected_rns_limb_index: usize,
     participant_count: usize,
+    public_matrix_seed_hash: &'a str,
 }
 
 fn verify_compact_vss_aggregate_threshold_record(
@@ -1568,6 +2039,16 @@ fn verify_compact_vss_aggregate_threshold_record(
     let aggregate_commitment_root =
         hash_at_path(input.recipient_record, &["aggregateCommitmentRoot"])?;
     let aggregate_opening_root = hash_at_path(input.recipient_record, &["aggregateOpeningRoot"])?;
+    let commitment = verify_compact_vss_commitment_body(CompactVssCommitmentBodyInput {
+        commitment: value_at_path(input.recipient_record, &["commitment"])?,
+        expected_commitment_role: "aggregate-threshold-share",
+        expected_commitment_root: aggregate_commitment_root,
+        expected_public_matrix_seed_hash: input.public_matrix_seed_hash,
+        expected_rns_limb_index: input.expected_rns_limb_index,
+        expected_rns_prime: rns_prime,
+        expected_message_vector_hash: None,
+        field_name: "compact VSS aggregate threshold commitment commitment",
+    })?;
     let source_share_commitment_roots =
         array_at_path(input.recipient_record, &["sourceShareCommitmentRoots"])?;
     if source_share_commitment_roots.len() != input.participant_count {
@@ -1611,6 +2092,7 @@ fn verify_compact_vss_aggregate_threshold_record(
         "rnsPrime": rns_prime,
         "aggregateCommitmentRoot": aggregate_commitment_root,
         "aggregateOpeningRoot": aggregate_opening_root,
+        "commitment": commitment,
         "sourceShareCommitmentRoots": verified_source_share_commitment_roots,
     }))
 }
@@ -1696,11 +2178,13 @@ fn compute_compact_vss_commitment_from_opening_value(
     let rns_limb_index = usize_at_path(opening, &["rnsLimbIndex"])?;
     let rns_prime = unsigned_at_path(opening, &["rnsPrime"])?;
     let ring_degree = usize_at_path(opening, &["ringDegree"])?;
+    let message_coefficient_bound =
+        read_optional_u64(opening, "messageCoefficientBound")?.unwrap_or(rns_prime);
     let message_coefficients = read_compact_vss_message_coefficients(
         opening,
         "messageCoefficients",
         ring_degree,
-        rns_prime,
+        message_coefficient_bound,
     )?;
     let randomness_by_column =
         read_compact_vss_randomness_by_column(opening, "randomnessByColumn", ring_degree, None)?;
@@ -1713,6 +2197,7 @@ fn compute_compact_vss_commitment_from_opening_value(
         rns_prime,
         ring_degree,
         message_coefficients: &message_coefficients,
+        message_coefficient_bound,
         randomness_by_column: &randomness_by_column,
     })
 }
@@ -1736,8 +2221,13 @@ fn read_compact_vss_message_coefficients(
     value: &Value,
     field_name: &str,
     ring_degree: usize,
-    rns_prime: u64,
+    message_coefficient_bound: u64,
 ) -> CanonicalResult<Vec<u64>> {
+    if message_coefficient_bound == 0 {
+        return Err(invalid_compact_vss_input(
+            "messageCoefficientBound must be positive",
+        ));
+    }
     let coefficients = value
         .get(field_name)
         .and_then(Value::as_array)
@@ -1763,10 +2253,12 @@ fn read_compact_vss_message_coefficients(
                     format!("{field_name}.{coefficient_index} must be a non-negative integer"),
                 )
             })?;
-            if value >= rns_prime {
+            if value >= message_coefficient_bound {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    format!("{field_name}.{coefficient_index} must be below rnsPrime"),
+                    format!(
+                        "{field_name}.{coefficient_index} must be below messageCoefficientBound"
+                    ),
                 ));
             }
 
@@ -1896,7 +2388,7 @@ fn compact_commitment_coordinate(
     for (randomness_column_index, randomness_column) in
         input.randomness_by_column.iter().enumerate()
     {
-        let input_column = format!("randomness-{randomness_column_index}");
+        let input_column = format!("randomness:{randomness_column_index}");
         for (ring_coefficient_index, matrix_residue) in
             compact_projection_terms(CompactProjectionTermsInput {
                 public_matrix_seed_hash: input.public_matrix_seed_hash,
@@ -1920,17 +2412,17 @@ fn compact_commitment_coordinate(
     Ok(accumulator as u64)
 }
 
-struct CompactProjectionTermsInput<'a> {
-    public_matrix_seed_hash: &'a str,
-    rns_limb_index: usize,
-    commitment_modulus_index: usize,
-    output_coordinate_index: usize,
-    input_column: &'a str,
-    ring_degree: usize,
-    modulus: u64,
+pub(in crate::bgv::setup) struct CompactProjectionTermsInput<'a> {
+    pub(in crate::bgv::setup) public_matrix_seed_hash: &'a str,
+    pub(in crate::bgv::setup) rns_limb_index: usize,
+    pub(in crate::bgv::setup) commitment_modulus_index: usize,
+    pub(in crate::bgv::setup) output_coordinate_index: usize,
+    pub(in crate::bgv::setup) input_column: &'a str,
+    pub(in crate::bgv::setup) ring_degree: usize,
+    pub(in crate::bgv::setup) modulus: u64,
 }
 
-fn compact_projection_terms(
+pub(in crate::bgv::setup) fn compact_projection_terms(
     input: CompactProjectionTermsInput<'_>,
 ) -> CanonicalResult<Vec<(usize, u64)>> {
     (0..COMPACT_VSS_PROJECTION_WEIGHT)
@@ -2090,7 +2582,12 @@ mod tests {
     use serde_json::json;
 
     use super::{
+        COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+        COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
+        compute_compact_vss_commitment_from_opening,
         compute_compact_vss_commitment_from_opening_request,
+        decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
         verify_compact_vss_aggregate_threshold_commitment_set_request,
         verify_compact_vss_coefficient_commitment_set_request,
         verify_compact_vss_commitment_opening_request,
@@ -2157,6 +2654,86 @@ mod tests {
         assert!(
             compute_compact_vss_commitment_from_opening_request(&wrong_shape).is_err(),
             "wrong compact randomness shape must reject"
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn compact_commitment_body_binary_codec_round_trips_and_rejects_malformed_bodies()
+    -> CanonicalResult<()> {
+        let request = compact_opening_request();
+        let response = compute_compact_vss_commitment_from_opening_request(&request)?;
+        let encoded = encode_compact_vss_commitment_body_request(&json!({
+            "commitment": response["commitment"].clone(),
+        }))?;
+        let commitment_body_bytes_hex = encoded["commitmentBodyBytesHex"]
+            .as_str()
+            .expect("encoded commitment body hex")
+            .to_string();
+
+        assert_eq!(encoded["operation"], "encodeCompactVssCommitmentBody");
+        assert_eq!(
+            encoded["binaryFormat"],
+            COMPACT_VSS_COMMITMENT_BINARY_FORMAT
+        );
+        assert_eq!(encoded["encodedCommitmentByteLength"], json!(384_u64));
+        assert_eq!(commitment_body_bytes_hex.len(), 768);
+
+        let metadata = compact_commitment_body_metadata(&response["commitment"])?;
+        let decoded = decode_compact_vss_commitment_body_request(&json!({
+            "metadata": metadata,
+            "commitmentBodyBytesHex": commitment_body_bytes_hex,
+        }))?;
+
+        assert_eq!(decoded["operation"], "decodeCompactVssCommitmentBody");
+        assert_eq!(decoded["commitment"], response["commitment"]);
+        assert_eq!(decoded["commitmentRoot"], response["commitmentRoot"]);
+
+        let metadata = compact_commitment_body_metadata(&response["commitment"])?;
+        let short_body_hex = decoded["commitment"]
+            .as_object()
+            .and_then(|_| encoded["commitmentBodyBytesHex"].as_str())
+            .expect("encoded commitment body hex");
+        assert!(
+            decode_compact_vss_commitment_body_request(&json!({
+                "metadata": metadata,
+                "commitmentBodyBytesHex": &short_body_hex[..short_body_hex.len() - 16],
+            }))
+            .is_err(),
+            "short compact commitment body must reject"
+        );
+
+        let metadata = compact_commitment_body_metadata(&response["commitment"])?;
+        let mut out_of_range_body = crate::transcript_core::decode_hex(
+            encoded["commitmentBodyBytesHex"]
+                .as_str()
+                .expect("encoded commitment body hex"),
+        )?;
+        let first_modulus = response["commitment"]["commitmentLimbs"][0]["modulus"]
+            .as_u64()
+            .expect("first commitment modulus");
+        out_of_range_body[..8].copy_from_slice(&first_modulus.to_le_bytes());
+        assert!(
+            decode_compact_vss_commitment_body_request(&json!({
+                "metadata": metadata,
+                "commitmentBodyBytesHex": crate::transcript_core::encode_hex(&out_of_range_body),
+            }))
+            .is_err(),
+            "out-of-range compact commitment coordinate must reject"
+        );
+
+        let mut reordered_commitment = response["commitment"].clone();
+        reordered_commitment["commitmentLimbs"]
+            .as_array_mut()
+            .expect("commitment limbs")
+            .reverse();
+        assert!(
+            encode_compact_vss_commitment_body_request(&json!({
+                "commitment": reordered_commitment,
+            }))
+            .is_err(),
+            "non-canonical commitment limb order must reject"
         );
 
         Ok(())
@@ -2319,12 +2896,40 @@ mod tests {
             verify_compact_vss_share_linkage_statement_request(&json!({
                 "command": "VerifyCompactVssShareLinkageStatement",
                 "statement": forged_source_statement,
-                "coefficientCommitmentSet": coefficient_set,
-                "recipientShareCommitmentSet": recipient_set,
-                "aggregateThresholdCommitmentSet": aggregate_set,
+                "coefficientCommitmentSet": coefficient_set.clone(),
+                "recipientShareCommitmentSet": recipient_set.clone(),
+                "aggregateThresholdCommitmentSet": aggregate_set.clone(),
             }))
             .is_err(),
             "evidence-backed linkage verification must reject a source root absent from the recipient-share set"
+        );
+
+        let mut mismatched_aggregate_set = aggregate_set.clone();
+        tamper_compact_aggregate_commitment_body(&mut mismatched_aggregate_set)?;
+        assert!(
+            verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
+                "command": "VerifyCompactVssAggregateThresholdCommitmentSet",
+                "aggregateThresholdCommitmentSet": mismatched_aggregate_set.clone(),
+            }))
+            .is_ok(),
+            "aggregate set verification only checks aggregate body canonical roots"
+        );
+        let mismatched_statement = compact_share_linkage_statement_from_evidence(
+            &coefficient_set,
+            &recipient_set,
+            &mismatched_aggregate_set,
+        );
+        let mismatch_error = verify_compact_vss_share_linkage_statement_request(&json!({
+            "command": "VerifyCompactVssShareLinkageStatement",
+            "statement": mismatched_statement,
+            "coefficientCommitmentSet": coefficient_set,
+            "recipientShareCommitmentSet": recipient_set,
+            "aggregateThresholdCommitmentSet": mismatched_aggregate_set,
+        }))
+        .expect_err("evidence-backed linkage verification must reject a non-sum aggregate body");
+        assert!(
+            mismatch_error.to_string().contains("public sum"),
+            "aggregate body mismatch should be reported as a public-sum failure: {mismatch_error}"
         );
 
         let mut tampered_statement = statement;
@@ -2373,6 +2978,21 @@ mod tests {
         })
     }
 
+    fn compact_commitment_body_metadata(
+        commitment: &serde_json::Value,
+    ) -> CanonicalResult<serde_json::Value> {
+        Ok(json!({
+            "commitmentRole": commitment["commitmentRole"].clone(),
+            "commitmentContextHash": commitment["commitmentContextHash"].clone(),
+            "publicMatrixSeedHash": commitment["publicMatrixSeedHash"].clone(),
+            "rnsLimbIndex": commitment["rnsLimbIndex"].clone(),
+            "rnsPrime": commitment["rnsPrime"].clone(),
+            "ringDegree": commitment["ringDegree"].clone(),
+            "messageVectorHash512": commitment["messageVectorHash512"].clone(),
+            "openingRandomnessHash512": commitment["openingRandomnessHash512"].clone(),
+        }))
+    }
+
     fn compact_coefficient_commitment_set() -> CanonicalResult<serde_json::Value> {
         let mut source_trustee_records = Vec::new();
         for source_trustee_roster_position in 0..2_usize {
@@ -2406,39 +3026,46 @@ mod tests {
         source_trustee_roster_position: usize,
     ) -> CanonicalResult<serde_json::Value> {
         let mut coefficient_commitments = Vec::new();
-        for rns_limb_index in 0..2_usize {
-            for shamir_coefficient_index in 0..2_usize {
-                coefficient_commitments.push(json!({
-                    "objectType": "CompactVssCoefficientCommitment",
-                    "objectVersion": 1,
-                    "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-                    "developmentScope": "development-only-not-certified-for-production-use",
-                    "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "publicMatrixSeedHash": "7".repeat(128),
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": if rns_limb_index == 0 { 97 } else { 193 },
-                    "shamirCoefficientIndex": shamir_coefficient_index,
-                    "coefficientCommitmentRoot": compact_test_hash(
+        for rns_limb_index in 0..compact_test_rns_limb_count() {
+            let rns_prime = compact_test_rns_prime(rns_limb_index);
+            for shamir_coefficient_index in 0..compact_test_threshold_degree() {
+                let commitment = compact_test_commitment(
+                    "coefficient",
+                    rns_limb_index,
+                    rns_prime,
+                    &[
                         source_trustee_roster_position,
                         rns_limb_index,
                         shamir_coefficient_index,
                         0,
-                    ),
-                    "coefficientVectorHash512": compact_test_hash(
-                        source_trustee_roster_position,
-                        rns_limb_index,
-                        shamir_coefficient_index,
-                        1,
-                    ),
+                    ],
+                )?;
+                let coefficient_vector_hash = commitment["messageVectorHash512"].clone();
+                coefficient_commitments.push(json!({
+                    "objectType": "CompactVssCoefficientCommitment",
+                    "objectVersion": 1,
+                    "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+                    "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+                    "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                    "publicMatrixSeedHash": "7".repeat(128),
+                    "rnsLimbIndex": rns_limb_index,
+                    "rnsPrime": rns_prime,
+                    "shamirCoefficientIndex": shamir_coefficient_index,
+                    "coefficientCommitmentRoot": crate::hashing::derive_protocol_hash(
+                        "SetupCommitmentRoot",
+                        &commitment,
+                    )?,
+                    "coefficientVectorHash512": coefficient_vector_hash,
+                    "commitment": commitment,
                 }));
             }
         }
         let source_without_root = json!({
             "objectType": "CompactVssSourceCoefficientCommitments",
             "objectVersion": 1,
-            "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
             "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "publicMatrixSeedHash": "7".repeat(128),
@@ -2453,23 +3080,105 @@ mod tests {
         Ok(source_record)
     }
 
-    fn compact_test_hash(
-        source_trustee_roster_position: usize,
-        rns_limb_index: usize,
-        shamir_coefficient_index: usize,
-        domain_offset: usize,
-    ) -> String {
-        let digit = (source_trustee_roster_position * 4
-            + rns_limb_index * 2
-            + shamir_coefficient_index
-            + domain_offset)
-            % 16;
+    fn compact_test_participant_count() -> usize {
+        2
+    }
+
+    fn compact_test_rns_limb_count() -> usize {
+        2
+    }
+
+    fn compact_test_threshold_degree() -> usize {
+        2
+    }
+
+    fn compact_test_ring_degree() -> usize {
+        8
+    }
+
+    fn compact_test_public_matrix_seed_hash() -> String {
+        "7".repeat(128)
+    }
+
+    fn compact_test_rns_prime(rns_limb_index: usize) -> u64 {
+        if rns_limb_index == 0 { 97 } else { 193 }
+    }
+
+    fn compact_test_seed(seed_parts: &[usize]) -> usize {
+        seed_parts
+            .iter()
+            .fold(0_usize, |seed, seed_part| seed * 31 + seed_part + 1)
+    }
+
+    fn compact_test_hash_from_seed(seed: usize, domain_offset: usize) -> String {
+        let digit = (seed + domain_offset) % 16;
         format!("{digit:x}").repeat(128)
+    }
+
+    fn compact_test_message_coefficients(seed: usize, modulus: u64) -> Vec<u64> {
+        (0..compact_test_ring_degree())
+            .map(|coefficient_index| {
+                ((seed as u64)
+                    .wrapping_mul(17)
+                    .wrapping_add((coefficient_index as u64 + 1) * 19))
+                    % modulus
+            })
+            .collect()
+    }
+
+    fn compact_test_randomness_by_column(seed: usize) -> Vec<Vec<i64>> {
+        (0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+            .map(|column_index| {
+                (0..compact_test_ring_degree())
+                    .map(|coefficient_index| {
+                        let magnitude =
+                            ((seed + column_index * 11 + coefficient_index * 7) % 29) as i64;
+                        if (seed + column_index + coefficient_index).is_multiple_of(2) {
+                            magnitude
+                        } else {
+                            -magnitude
+                        }
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    fn compact_test_commitment(
+        commitment_role: &str,
+        rns_limb_index: usize,
+        rns_prime: u64,
+        seed_parts: &[usize],
+    ) -> CanonicalResult<serde_json::Value> {
+        let seed = compact_test_seed(seed_parts);
+        let commitment_context = json!({
+            "objectType": "CompactVssTestCommitmentContext",
+            "objectVersion": 1,
+            "commitmentRole": commitment_role,
+            "seedHash": compact_test_hash_from_seed(seed, 9),
+        });
+        let public_matrix_seed_hash = compact_test_public_matrix_seed_hash();
+        let message_coefficients = compact_test_message_coefficients(seed, rns_prime);
+        let randomness_by_column = compact_test_randomness_by_column(seed);
+        let computation =
+            compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
+                commitment_role,
+                commitment_context: &commitment_context,
+                public_matrix_seed_hash: &public_matrix_seed_hash,
+                rns_limb_index,
+                rns_prime,
+                ring_degree: compact_test_ring_degree(),
+                message_coefficients: &message_coefficients,
+                message_coefficient_bound: rns_prime,
+                randomness_by_column: &randomness_by_column,
+            })?;
+
+        Ok(computation.commitment)
     }
 
     fn compact_recipient_share_commitment_set() -> CanonicalResult<serde_json::Value> {
         let mut source_trustee_records = Vec::new();
-        for source_trustee_roster_position in 0..2_usize {
+        for source_trustee_roster_position in 0..compact_test_participant_count() {
             source_trustee_records.push(compact_source_recipient_share_record(
                 source_trustee_roster_position,
             )?);
@@ -2478,12 +3187,12 @@ mod tests {
             "objectType": "CompactVssRecipientShareCommitmentSet",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
-            "publicMatrixSeedHash": "7".repeat(128),
-            "participantCount": 2,
-            "rnsLimbCount": 2,
-            "ringDegree": 8,
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+            "publicMatrixSeedHash": compact_test_public_matrix_seed_hash(),
+            "participantCount": compact_test_participant_count(),
+            "rnsLimbCount": compact_test_rns_limb_count(),
+            "ringDegree": compact_test_ring_degree(),
             "sourceTrusteeRecords": source_trustee_records,
         });
         let mut recipient_set = set_without_root;
@@ -2499,46 +3208,20 @@ mod tests {
         source_trustee_roster_position: usize,
     ) -> CanonicalResult<serde_json::Value> {
         let mut recipient_share_commitments = Vec::new();
-        for recipient_roster_position in 0..2_usize {
-            for rns_limb_index in 0..2_usize {
-                recipient_share_commitments.push(json!({
-                    "objectType": "CompactVssRecipientShareCommitment",
-                    "objectVersion": 1,
-                    "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-                    "developmentScope": "development-only-not-certified-for-production-use",
-                    "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
-                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                    "recipientIdentity": format!("recipient-{recipient_roster_position}"),
-                    "recipientRosterPosition": recipient_roster_position,
-                    "recipientTrusteePoint": recipient_roster_position + 1,
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": if rns_limb_index == 0 { 97 } else { 193 },
-                    "shareCommitmentRoot": compact_test_hash(
-                        source_trustee_roster_position,
-                        rns_limb_index,
-                        recipient_roster_position,
-                        0,
-                    ),
-                    "shareOpeningRoot": compact_test_hash(
-                        source_trustee_roster_position,
-                        rns_limb_index,
-                        recipient_roster_position,
-                        1,
-                    ),
-                    "shareVectorHash512": compact_test_hash(
-                        source_trustee_roster_position,
-                        rns_limb_index,
-                        recipient_roster_position,
-                        2,
-                    ),
-                }));
+        for recipient_roster_position in 0..compact_test_participant_count() {
+            for rns_limb_index in 0..compact_test_rns_limb_count() {
+                recipient_share_commitments.push(compact_recipient_share_commitment_record(
+                    source_trustee_roster_position,
+                    recipient_roster_position,
+                    rns_limb_index,
+                )?);
             }
         }
         let source_without_root = json!({
             "objectType": "CompactVssSourceRecipientShareCommitments",
             "objectVersion": 1,
-            "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
             "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
             "recipientShareCommitments": recipient_share_commitments,
@@ -2552,49 +3235,83 @@ mod tests {
         Ok(source_record)
     }
 
+    fn compact_recipient_share_commitment_record(
+        source_trustee_roster_position: usize,
+        recipient_roster_position: usize,
+        rns_limb_index: usize,
+    ) -> CanonicalResult<serde_json::Value> {
+        let rns_prime = compact_test_rns_prime(rns_limb_index);
+        let commitment = compact_test_commitment(
+            "recipient-share",
+            rns_limb_index,
+            rns_prime,
+            &[
+                source_trustee_roster_position,
+                recipient_roster_position,
+                rns_limb_index,
+                1,
+            ],
+        )?;
+        let share_commitment_root =
+            crate::hashing::derive_protocol_hash("SetupCommitmentRoot", &commitment)?;
+        let share_vector_hash = commitment["messageVectorHash512"].clone();
+        let share_opening_root = compact_test_hash_from_seed(
+            compact_test_seed(&[
+                source_trustee_roster_position,
+                recipient_roster_position,
+                rns_limb_index,
+                2,
+            ]),
+            0,
+        );
+
+        Ok(json!({
+            "objectType": "CompactVssRecipientShareCommitment",
+            "objectVersion": 1,
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+            "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
+            "sourceTrusteeRosterPosition": source_trustee_roster_position,
+            "recipientIdentity": format!("recipient-{recipient_roster_position}"),
+            "recipientRosterPosition": recipient_roster_position,
+            "recipientTrusteePoint": recipient_roster_position + 1,
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "shareCommitmentRoot": share_commitment_root,
+            "shareOpeningRoot": share_opening_root,
+            "shareVectorHash512": share_vector_hash,
+            "commitment": commitment,
+        }))
+    }
+
     fn compact_aggregate_threshold_commitment_set() -> CanonicalResult<serde_json::Value> {
+        let recipient_set = compact_recipient_share_commitment_set()?;
+        compact_aggregate_threshold_commitment_set_from_recipient_set(&recipient_set)
+    }
+
+    fn compact_aggregate_threshold_commitment_set_from_recipient_set(
+        recipient_set: &serde_json::Value,
+    ) -> CanonicalResult<serde_json::Value> {
         let mut recipient_records = Vec::new();
-        for recipient_roster_position in 0..2_usize {
-            for rns_limb_index in 0..2_usize {
-                recipient_records.push(json!({
-                    "objectType": "CompactVssAggregateThresholdCommitment",
-                    "objectVersion": 1,
-                    "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-                    "developmentScope": "development-only-not-certified-for-production-use",
-                    "recipientIdentity": format!("recipient-{recipient_roster_position}"),
-                    "recipientRosterPosition": recipient_roster_position,
-                    "recipientTrusteePoint": recipient_roster_position + 1,
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": if rns_limb_index == 0 { 97 } else { 193 },
-                    "aggregateCommitmentRoot": compact_test_hash(
-                        recipient_roster_position,
-                        rns_limb_index,
-                        0,
-                        3,
-                    ),
-                    "aggregateOpeningRoot": compact_test_hash(
-                        recipient_roster_position,
-                        rns_limb_index,
-                        0,
-                        4,
-                    ),
-                    "sourceShareCommitmentRoots": [
-                        compact_test_hash(0, rns_limb_index, recipient_roster_position, 0),
-                        compact_test_hash(1, rns_limb_index, recipient_roster_position, 0),
-                    ],
-                }));
+        for recipient_roster_position in 0..compact_test_participant_count() {
+            for rns_limb_index in 0..compact_test_rns_limb_count() {
+                recipient_records.push(compact_aggregate_threshold_commitment_record(
+                    recipient_set,
+                    recipient_roster_position,
+                    rns_limb_index,
+                )?);
             }
         }
         let set_without_root = json!({
             "objectType": "CompactVssAggregateThresholdCommitmentSet",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
-            "publicMatrixSeedHash": "7".repeat(128),
-            "participantCount": 2,
-            "rnsLimbCount": 2,
-            "ringDegree": 8,
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+            "publicMatrixSeedHash": compact_test_public_matrix_seed_hash(),
+            "participantCount": compact_test_participant_count(),
+            "rnsLimbCount": compact_test_rns_limb_count(),
+            "ringDegree": compact_test_ring_degree(),
             "recipientRecords": recipient_records,
         });
         let mut aggregate_set = set_without_root;
@@ -2604,6 +3321,188 @@ mod tests {
         );
 
         Ok(aggregate_set)
+    }
+
+    fn compact_aggregate_threshold_commitment_record(
+        recipient_set: &serde_json::Value,
+        recipient_roster_position: usize,
+        rns_limb_index: usize,
+    ) -> CanonicalResult<serde_json::Value> {
+        let source_share_records = compact_source_share_records_for_recipient(
+            recipient_set,
+            recipient_roster_position,
+            rns_limb_index,
+        )?;
+        let rns_prime = compact_test_rns_prime(rns_limb_index);
+        let commitment = compact_aggregate_commitment_body(
+            recipient_roster_position,
+            rns_limb_index,
+            rns_prime,
+            &source_share_records,
+        )?;
+        let source_share_commitment_roots = source_share_records
+            .iter()
+            .map(|source_share_record| source_share_record["shareCommitmentRoot"].clone())
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "objectType": "CompactVssAggregateThresholdCommitment",
+            "objectVersion": 1,
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+            "recipientIdentity": format!("recipient-{recipient_roster_position}"),
+            "recipientRosterPosition": recipient_roster_position,
+            "recipientTrusteePoint": recipient_roster_position + 1,
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "aggregateCommitmentRoot": crate::hashing::derive_protocol_hash(
+                "SetupCommitmentRoot",
+                &commitment,
+            )?,
+            "aggregateOpeningRoot": compact_test_hash_from_seed(
+                compact_test_seed(&[recipient_roster_position, rns_limb_index, 3]),
+                0,
+            ),
+            "commitment": commitment,
+            "sourceShareCommitmentRoots": source_share_commitment_roots,
+        }))
+    }
+
+    fn compact_source_share_records_for_recipient(
+        recipient_set: &serde_json::Value,
+        recipient_roster_position: usize,
+        rns_limb_index: usize,
+    ) -> CanonicalResult<Vec<serde_json::Value>> {
+        let recipient_share_record_index = recipient_roster_position
+            .checked_mul(compact_test_rns_limb_count())
+            .and_then(|offset| offset.checked_add(rns_limb_index))
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact VSS fixture recipient-share index overflowed",
+                )
+            })?;
+        let source_records = recipient_set["sourceTrusteeRecords"]
+            .as_array()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS fixture recipient source records must be an array",
+                )
+            })?;
+        source_records
+            .iter()
+            .map(|source_record| {
+                let recipient_share_records = source_record["recipientShareCommitments"]
+                    .as_array()
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            "compact VSS fixture recipient-share records must be an array",
+                        )
+                    })?;
+                recipient_share_records
+                    .get(recipient_share_record_index)
+                    .cloned()
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "compact VSS fixture recipient-share record is missing",
+                        )
+                    })
+            })
+            .collect()
+    }
+
+    fn compact_aggregate_commitment_body(
+        recipient_roster_position: usize,
+        rns_limb_index: usize,
+        rns_prime: u64,
+        source_share_records: &[serde_json::Value],
+    ) -> CanonicalResult<serde_json::Value> {
+        let first_source_share_record = source_share_records.first().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS fixture aggregate body must have source share records",
+            )
+        })?;
+        let first_commitment_limbs = first_source_share_record["commitment"]["commitmentLimbs"]
+            .as_array()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS fixture commitment limbs must be an array",
+                )
+            })?;
+        let mut commitment_limbs = Vec::new();
+        for (commitment_limb_position, first_limb) in first_commitment_limbs.iter().enumerate() {
+            let commitment_modulus_index = first_limb["commitmentModulusIndex"]
+                .as_u64()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "compact VSS fixture commitment modulus index must be an unsigned integer",
+                    )
+                })?;
+            let modulus = first_limb["modulus"].as_u64().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS fixture commitment modulus must be an unsigned integer",
+                )
+            })?;
+            let mut summed_coordinates = Vec::new();
+            for coordinate_index in 0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+                let mut summed_coordinate = 0_u128;
+                for source_share_record in source_share_records {
+                    let source_limb = source_share_record["commitment"]["commitmentLimbs"]
+                        .as_array()
+                        .and_then(|limbs| limbs.get(commitment_limb_position))
+                        .ok_or_else(|| {
+                            CanonicalError::new(
+                                CanonicalErrorCode::MalformedLength,
+                                "compact VSS fixture source commitment limb is missing",
+                            )
+                        })?;
+                    let coordinate = source_limb["coordinates"]
+                        .as_array()
+                        .and_then(|coordinates| coordinates.get(coordinate_index))
+                        .and_then(serde_json::Value::as_u64)
+                        .ok_or_else(|| {
+                            CanonicalError::new(
+                                CanonicalErrorCode::InvalidFixture,
+                                "compact VSS fixture source commitment coordinate must be an unsigned integer",
+                            )
+                        })?;
+                    summed_coordinate =
+                        (summed_coordinate + u128::from(coordinate)) % u128::from(modulus);
+                }
+                summed_coordinates.push(summed_coordinate as u64);
+            }
+            commitment_limbs.push(json!({
+                "commitmentModulusIndex": commitment_modulus_index,
+                "modulus": modulus,
+                "coordinates": summed_coordinates,
+            }));
+        }
+
+        let seed = compact_test_seed(&[recipient_roster_position, rns_limb_index, 4]);
+        Ok(json!({
+            "objectType": "CompactVssCommitment",
+            "objectVersion": 1,
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+            "developmentScope": COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE,
+            "commitmentRole": "aggregate-threshold-share",
+            "commitmentContextHash": compact_test_hash_from_seed(seed, 0),
+            "publicMatrixSeedHash": compact_test_public_matrix_seed_hash(),
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "ringDegree": compact_test_ring_degree(),
+            "outputCoordinateCount": COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+            "randomnessColumnCount": COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+            "messageVectorHash512": compact_test_hash_from_seed(seed, 1),
+            "openingRandomnessHash512": compact_test_hash_from_seed(seed, 2),
+            "commitmentLimbs": commitment_limbs,
+        }))
     }
 
     fn compact_share_linkage_statement_from_evidence(
@@ -2739,6 +3638,57 @@ mod tests {
             "SetupProofRecordBindingHash",
             &serde_json::Value::Object(statement_without_root),
         )?);
+
+        Ok(())
+    }
+
+    fn tamper_compact_aggregate_commitment_body(
+        aggregate_set: &mut serde_json::Value,
+    ) -> CanonicalResult<()> {
+        let aggregate_record = &mut aggregate_set["recipientRecords"][0];
+        let modulus = aggregate_record["commitment"]["commitmentLimbs"][0]["modulus"]
+            .as_u64()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS fixture aggregate modulus must be an unsigned integer",
+                )
+            })?;
+        let coordinate = aggregate_record["commitment"]["commitmentLimbs"][0]["coordinates"][0]
+            .as_u64()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS fixture aggregate coordinate must be an unsigned integer",
+                )
+            })?;
+        aggregate_record["commitment"]["commitmentLimbs"][0]["coordinates"][0] =
+            json!((coordinate + 1) % modulus);
+        aggregate_record["aggregateCommitmentRoot"] = json!(crate::hashing::derive_protocol_hash(
+            "SetupCommitmentRoot",
+            &aggregate_record["commitment"],
+        )?);
+        rebind_compact_aggregate_threshold_commitment_set_root(aggregate_set)
+    }
+
+    fn rebind_compact_aggregate_threshold_commitment_set_root(
+        aggregate_set: &mut serde_json::Value,
+    ) -> CanonicalResult<()> {
+        let mut aggregate_set_without_root = aggregate_set
+            .as_object()
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS aggregate threshold commitment set must be an object",
+                )
+            })?
+            .clone();
+        aggregate_set_without_root.remove("aggregateThresholdCommitmentRoot");
+        aggregate_set["aggregateThresholdCommitmentRoot"] =
+            json!(crate::hashing::derive_protocol_hash(
+                "ThresholdShareCommitmentRoot",
+                &serde_json::Value::Object(aggregate_set_without_root),
+            )?);
 
         Ok(())
     }

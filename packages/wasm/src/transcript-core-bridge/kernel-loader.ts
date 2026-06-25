@@ -14,6 +14,8 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvCompactVssAggregateThresholdCommitmentSetVerification,
+    BgvCompactVssCommitmentBodyDecoding,
+    BgvCompactVssCommitmentBodyEncoding,
     BgvCompactVssCommitmentOpeningComputation,
     BgvCompactVssCoefficientCommitmentSetVerification,
     BgvCompactVssCommitmentOpeningVerification,
@@ -64,6 +66,31 @@ import {
     runKernelCommand,
     verifyKernelIntegrity,
 } from './kernel-runtime.js';
+import { bytesToHex } from './kernel-wasm-hash.js';
+
+const hexToBytes = (hex: string): Uint8Array => {
+    if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) {
+        throw new Error(
+            'The transcript-core kernel returned non-canonical hex bytes.',
+        );
+    }
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+
+    return bytes;
+};
+
+type BgvCompactVssCommitmentBodyEncodingResponse = Omit<
+    BgvCompactVssCommitmentBodyEncoding,
+    'commitmentBodyBytes'
+> & {
+    readonly commitmentBodyBytesHex: string;
+};
 
 export const createTranscriptCoreKernelLoader = (
     transcriptCoreKernelUrl: URL,
@@ -536,7 +563,42 @@ export const createTranscriptCoreKernelLoader = (
                         rnsPrime: input.rnsPrime,
                         ringDegree: input.ringDegree,
                         messageCoefficients: input.messageCoefficients,
+                        messageCoefficientBound: input.messageCoefficientBound,
                         randomnessByColumn: input.randomnessByColumn,
+                    }),
+                encodeCompactVssCommitmentBody: (
+                    input,
+                ): BgvCompactVssCommitmentBodyEncoding => {
+                    const response =
+                        executeCommand<BgvCompactVssCommitmentBodyEncodingResponse>(
+                            {
+                                command: 'EncodeCompactVssCommitmentBody',
+                                commitment: input.commitment,
+                            },
+                        );
+
+                    return {
+                        ok: response.ok,
+                        operation: response.operation,
+                        setupProfileId: response.setupProfileId,
+                        profileId: response.profileId,
+                        binaryFormat: response.binaryFormat,
+                        encodedCommitmentByteLength:
+                            response.encodedCommitmentByteLength,
+                        commitmentBodyBytes: hexToBytes(
+                            response.commitmentBodyBytesHex,
+                        ),
+                    };
+                },
+                decodeCompactVssCommitmentBody: (
+                    input,
+                ): BgvCompactVssCommitmentBodyDecoding =>
+                    executeCommand<BgvCompactVssCommitmentBodyDecoding>({
+                        command: 'DecodeCompactVssCommitmentBody',
+                        metadata: input.metadata,
+                        commitmentBodyBytesHex: bytesToHex(
+                            input.commitmentBodyBytes,
+                        ),
                     }),
                 verifyCompactVssCommitmentOpening: (
                     input,

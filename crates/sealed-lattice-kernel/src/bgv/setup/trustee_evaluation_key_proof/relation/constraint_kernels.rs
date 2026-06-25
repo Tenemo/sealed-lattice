@@ -145,6 +145,28 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
+    if layout.compact_vss_active() {
+        for randomness_position in 0..layout.compact_vss_randomness_columns {
+            for half in 0..TRACE_SPLIT {
+                let randomness = column_values
+                    [layout.physical_compact_vss_randomness(randomness_position, half)];
+                let cube =
+                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
+                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+            }
+        }
+        for mask_column in 0..layout.mask_column_count {
+            for half in 0..TRACE_SPLIT {
+                let mask = column_values[layout.physical_mask(mask_column, half)];
+                absorb(
+                    &domain.value_sub(&domain.value_mul(&mask, &mask), &mask),
+                    &mut accumulated,
+                );
+            }
+        }
+
+        return accumulated;
+    }
     for half in 0..TRACE_SPLIT {
         let secret = column_values[layout.physical_secret(half)];
         let cube = domain.value_mul(&domain.value_mul(&secret, &secret), &secret);
@@ -300,6 +322,53 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
+    if layout.compact_vss_active() {
+        let mut claim_alpha_index = 0_usize;
+        for consistency_vector in 0..layout.consistency_vector_count() {
+            for repetition in 0..CONSISTENCY_REPETITIONS {
+                let alpha_value = &consistency_alpha[claim_alpha_index];
+                claim_alpha_index += 1;
+                for half in 0..TRACE_SPLIT {
+                    let witness_value = if consistency_vector == 0 {
+                        column_values[layout.physical_compact_vss_carry(half)]
+                    } else {
+                        column_values
+                            [layout.physical_compact_vss_randomness(consistency_vector - 1, half)]
+                    };
+                    let consistency_product =
+                        domain.value_mul(&publics.consistency[repetition][half], &witness_value);
+                    accumulated = tower.add(
+                        &accumulated,
+                        &domain.challenge_times(alpha_value, &consistency_product),
+                    );
+                }
+            }
+        }
+        for (mask_column, mask_selector) in publics.mask_selector.iter().enumerate() {
+            for half in 0..TRACE_SPLIT {
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(
+                        &mask_selector[half],
+                        &column_values[layout.physical_mask(mask_column, half)],
+                    ),
+                );
+            }
+        }
+        debug_assert_eq!(publics.linkage.len(), layout.compact_vss_logical_columns());
+        for (column_index, relation_values) in publics.linkage.iter().enumerate() {
+            for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
+                let column_value =
+                    compact_vss_column_value::<Domain>(column_values, layout, column_index, half);
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(relation_value, &column_value),
+                );
+            }
+        }
+
+        return accumulated;
+    }
     for (repetition, (secret_factor, u_power)) in publics
         .secret_factor
         .iter()
@@ -404,6 +473,26 @@ fn private_vss_column_value<Domain: CompositionColumnDomain>(
     } else {
         column_values[layout.physical_private_vss_randomness(
             vector_index - layout.private_vss_coefficient_columns - 1,
+            half,
+        )]
+    }
+}
+
+fn compact_vss_column_value<Domain: CompositionColumnDomain>(
+    column_values: &[Domain::Value],
+    layout: &LimbColumnLayout,
+    vector_index: usize,
+    half: usize,
+) -> Domain::Value {
+    if vector_index < layout.compact_vss_coefficient_columns {
+        column_values[layout.physical_compact_vss_message(vector_index, half)]
+    } else if vector_index == layout.compact_vss_coefficient_columns {
+        column_values[layout.physical_compact_vss_recipient_message(half)]
+    } else if vector_index == layout.compact_vss_coefficient_columns + 1 {
+        column_values[layout.physical_compact_vss_carry(half)]
+    } else {
+        column_values[layout.physical_compact_vss_randomness(
+            vector_index - layout.compact_vss_coefficient_columns - 2,
             half,
         )]
     }

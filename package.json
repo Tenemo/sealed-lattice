@@ -21,6 +21,7 @@
         "api-surface:generate": "pnpm run build && tsx ./tools/ci/generate-api-surface-summary.ts",
         "vectors": "tsx ./tools/ci/verify-test-vectors.ts",
         "vectors:generate": "tsx ./tools/ci/verify-test-vectors.ts --generate",
+        "measure:compact-vss": "tsx ./tools/ci/measure-compact-vss.ts",
         "test:lattigo-oracle": "tsx ./tools/lattigo-oracle/verify-lattigo-oracle.ts",
         "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
         "test:rust:kernel:heavy:iterate": "tsx ./tools/ci/run-rust-kernel-heavy-iteration.ts",

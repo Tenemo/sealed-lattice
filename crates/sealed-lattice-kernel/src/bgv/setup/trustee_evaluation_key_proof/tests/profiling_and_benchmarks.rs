@@ -211,6 +211,7 @@ fn shape_only_trustee_statement(
         keys,
         same_secret_linkage,
         private_vss_share: None,
+        compact_vss_share_linkage: None,
     }
 }
 

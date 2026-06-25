@@ -10,8 +10,10 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    compactVssAggregateMessageCoefficientBound,
     computeCompactVssCommitmentFromOpening,
     verifyCompactVssAggregateThresholdCommitmentSet,
+    verifyCompactVssAggregateOpeningCredential,
     verifyCompactVssShareLinkageStatement,
     type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssAggregateThresholdOpeningCredential,
@@ -191,6 +193,14 @@ const assertNonNegativeSafeInteger = (
             `${fieldName} must be a non-negative safe integer.`,
         );
     }
+};
+
+const safeNumberFromBigInt = (value: bigint, fieldName: string): number => {
+    if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
+        throw new Error(`${fieldName} exceeds the safe integer range.`);
+    }
+
+    return Number(value);
 };
 
 const assertNonEmptyString = (value: string, fieldName: string): void => {
@@ -969,7 +979,7 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
         const sourceShareCommitmentRoots = new Set(
             record.sourceShareCommitmentRoots,
         );
-        const aggregateShareValues = Array.from(
+        const aggregateCommitmentMessageValues = Array.from(
             { length: aggregateThresholdCommitmentSet.ringDegree },
             () => 0n,
         );
@@ -1037,12 +1047,10 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                     'compact VSS recipient share opening credential does not open its public recipient-share commitment.',
                 );
             }
-            const rnsPrimeWide = BigInt(record.rnsPrime);
             credential.shareValues.forEach((shareValue, shareValueIndex) => {
-                aggregateShareValues[shareValueIndex] =
-                    ((aggregateShareValues[shareValueIndex] ?? 0n) +
-                        BigInt(shareValue)) %
-                    rnsPrimeWide;
+                aggregateCommitmentMessageValues[shareValueIndex] =
+                    (aggregateCommitmentMessageValues[shareValueIndex] ?? 0n) +
+                    BigInt(shareValue);
             });
             credential.randomnessByColumn.forEach(
                 (randomnessColumn, columnIndex) => {
@@ -1067,7 +1075,8 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
             );
         });
 
-        return {
+        const rnsPrimeWide = BigInt(record.rnsPrime);
+        const credential = {
             objectType: 'CompactVssAggregateThresholdOpeningCredential',
             objectVersion: 1,
             profileId: aggregateThresholdCommitmentSet.profileId,
@@ -1076,16 +1085,40 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
             recipientTrusteePoint: record.recipientTrusteePoint,
             rnsLimbIndex: record.rnsLimbIndex,
             rnsPrime: record.rnsPrime,
-            aggregateShareValues: aggregateShareValues.map((shareValue) =>
-                Number(shareValue),
+            aggregateShareValues: aggregateCommitmentMessageValues.map(
+                (shareValue, coefficientIndex) =>
+                    safeNumberFromBigInt(
+                        shareValue % rnsPrimeWide,
+                        `aggregateShareValues.${String(coefficientIndex)}`,
+                    ),
+            ),
+            aggregateCommitmentMessageValues:
+                aggregateCommitmentMessageValues.map(
+                    (shareValue, coefficientIndex) =>
+                        safeNumberFromBigInt(
+                            shareValue,
+                            `aggregateCommitmentMessageValues.${String(coefficientIndex)}`,
+                        ),
+                ),
+            aggregateShareCarryValues: aggregateCommitmentMessageValues.map(
+                (shareValue, coefficientIndex) =>
+                    safeNumberFromBigInt(
+                        shareValue / rnsPrimeWide,
+                        `aggregateShareCarryValues.${String(coefficientIndex)}`,
+                    ),
             ),
             aggregateRandomnessByColumn,
             aggregateCommitmentRoot: record.aggregateCommitmentRoot,
             aggregateOpeningRoot: record.aggregateOpeningRoot,
             sourceShareOpeningRoots: credentials.map(
-                (credential) => credential.shareOpeningRoot,
+                (sourceCredential) => sourceCredential.shareOpeningRoot,
             ),
         } satisfies CompactVssAggregateThresholdOpeningCredential;
+        return verifyCompactVssAggregateOpeningCredential({
+            credential,
+            participantCount: aggregateThresholdCommitmentSet.participantCount,
+            ringDegree: aggregateThresholdCommitmentSet.ringDegree,
+        });
     });
 };
 
@@ -1256,6 +1289,12 @@ const buildTargetDecryptionProofWitnessMaterial = (
                     'compact VSS aggregate opening credential is missing for a local recipient limb.',
                 );
             }
+            verifyCompactVssAggregateOpeningCredential({
+                credential,
+                participantCount:
+                    aggregateThresholdCommitmentSet.participantCount,
+                ringDegree: aggregateThresholdCommitmentSet.ringDegree,
+            });
             if (
                 credential.recipientTrusteePoint !==
                     record.recipientTrusteePoint ||
@@ -1305,7 +1344,14 @@ const buildTargetDecryptionProofWitnessMaterial = (
                     rnsLimbIndex: credential.rnsLimbIndex,
                     rnsPrime: credential.rnsPrime,
                     ringDegree: aggregateThresholdCommitmentSet.ringDegree,
-                    messageCoefficients: credential.aggregateShareValues,
+                    messageCoefficients:
+                        credential.aggregateCommitmentMessageValues,
+                    messageCoefficientBound:
+                        compactVssAggregateMessageCoefficientBound({
+                            rnsPrime: credential.rnsPrime,
+                            participantCount:
+                                aggregateThresholdCommitmentSet.participantCount,
+                        }),
                     randomnessByColumn: credential.aggregateRandomnessByColumn,
                 },
             );
@@ -1331,6 +1377,9 @@ const buildTargetDecryptionProofWitnessMaterial = (
                 aggregateCommitmentRoot: credential.aggregateCommitmentRoot,
                 aggregateOpeningRoot: credential.aggregateOpeningRoot,
                 aggregateShareValues: credential.aggregateShareValues,
+                aggregateCommitmentMessageValues:
+                    credential.aggregateCommitmentMessageValues,
+                aggregateShareCarryValues: credential.aggregateShareCarryValues,
                 aggregateRandomnessByColumn:
                     credential.aggregateRandomnessByColumn,
                 sourceShareOpeningRoots: credential.sourceShareOpeningRoots,

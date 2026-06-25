@@ -461,6 +461,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                 commitments: vec![limb_zero_commitment],
             }),
             private_vss_share: None,
+            compact_vss_share_linkage: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients,
@@ -470,6 +471,11 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
+            compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_messages: Vec::new(),
+            compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_opening_randomness: Vec::new(),
+            compact_vss_carry_witnesses: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_protocol_hash(
             "PublicKeyShareProofRoot",

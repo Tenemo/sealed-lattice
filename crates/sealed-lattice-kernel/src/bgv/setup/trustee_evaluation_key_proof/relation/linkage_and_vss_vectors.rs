@@ -270,7 +270,16 @@ pub(crate) fn masked_claim_bounds(
             )?;
             carry_bound.max(1)
         }
-        None => 2,
+        None => match &statement.compact_vss_share_linkage {
+            Some(compact_vss_share_linkage) => {
+                let carry_bound = private_vss_share_lifted_carry_bound(
+                    compact_vss_share_linkage.recipient_roster_position,
+                    compact_vss_share_linkage.coefficient_commitments.len(),
+                )?;
+                carry_bound.max(1)
+            }
+            None => 2,
+        },
     };
     let clear_bound = witness_bound
         .checked_mul(coefficient_bound)

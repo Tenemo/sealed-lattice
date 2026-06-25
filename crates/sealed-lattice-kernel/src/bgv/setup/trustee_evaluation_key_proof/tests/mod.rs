@@ -25,8 +25,10 @@ use std::time::Instant;
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::merkle_commitment::LEAF_SALT_BYTES;
 use super::relation::{
-    EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
-    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
+    CompactVssShareLinkageCommitment, CompactVssShareLinkagePublicVectorInput,
+    CompactVssShareLinkageStatement, EvaluationKeyShareDescriptor, LimbColumnLayout,
+    PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
+    build_compact_vss_share_linkage_public_vectors,
 };
 use super::{
     COMMITMENT_BOUND_FACTOR, CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP,
@@ -54,6 +56,7 @@ use super::{
 };
 
 mod command_surface;
+mod compact_vss_share_linkage;
 mod cross_language_vectors;
 mod masked_claim_zero_knowledge;
 mod profiling_and_benchmarks;
@@ -180,6 +183,7 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
                 })
                 .collect(),
         }),
+        compact_vss_share_linkage: None,
     }
 }
 

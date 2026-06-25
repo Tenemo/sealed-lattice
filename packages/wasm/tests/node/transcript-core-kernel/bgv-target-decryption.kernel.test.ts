@@ -12,6 +12,7 @@ type CompactAggregateOpeningBinding = {
     readonly publicMatrixSeedHash: string;
     readonly shareLinkageStatementRoot: string;
     readonly aggregateThresholdCommitmentRoot: string;
+    readonly activeCredentialBindingRoot: string;
     readonly activeCredentialBindings: readonly unknown[];
 };
 
@@ -114,6 +115,17 @@ describe('BGV target-decryption kernel commands', () => {
             publicMatrixSeedHash: '3'.repeat(128),
             shareLinkageStatementRoot: '4'.repeat(128),
             aggregateThresholdCommitmentRoot: '5'.repeat(128),
+            activeCredentialBindingRoot: kernel.deriveProtocolHash({
+                namespace:
+                    'TargetDecryptionCompactAggregateOpeningCredentialBindingRoot',
+                value: {
+                    objectType:
+                        'TargetDecryptionCompactAggregateOpeningCredentialBindingSet',
+                    objectVersion: 1,
+                    activeCredentialBindings:
+                        compactBinding.activeCredentialBindings,
+                },
+            }),
         });
         expect(compactBinding.activeCredentialBindings).toHaveLength(7);
 

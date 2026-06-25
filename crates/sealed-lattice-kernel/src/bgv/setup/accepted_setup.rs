@@ -1573,6 +1573,26 @@ fn compact_vss_development_measurement_value() -> CanonicalResult<Value> {
                 "compact VSS public byte accounting overflowed",
             )
         })?;
+    let one_source_public_commitment_upload_bytes = checked_accounting_product(
+        &[
+            source_rns_limb_count
+                .checked_mul(roster.decryption_threshold)
+                .and_then(|value| {
+                    roster
+                        .participant_count
+                        .checked_mul(target_rns_limb_count)
+                        .and_then(|recipient_share_count| value.checked_add(recipient_share_count))
+                })
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "compact VSS one-source public commitment count overflowed",
+                    )
+                })?,
+            single_compact_commitment_bytes,
+        ],
+        "compact VSS one-source public commitment upload bytes",
+    )?;
     let current_full_coefficient_transport_bytes =
         setup_transport_vss_material_byte_length_for_roster(&roster, POLYNOMIAL_DEGREE as u64)?;
     let removed_bytes = current_full_coefficient_transport_bytes
@@ -1605,6 +1625,23 @@ fn compact_vss_development_measurement_value() -> CanonicalResult<Value> {
         &[residue_multiply_adds_per_commitment, total_commitments],
         "compact VSS total residue multiply-add count",
     )?;
+    let aggregate_public_sum_residue_additions = checked_accounting_product(
+        &[
+            aggregate_threshold_commitments,
+            roster.participant_count,
+            commitment_modulus_limb_count,
+            output_coordinate_count,
+        ],
+        "compact VSS aggregate public-sum residue addition count",
+    )?;
+    let total_residue_arithmetic_operations = total_residue_multiply_adds
+        .checked_add(aggregate_public_sum_residue_additions)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "compact VSS residue arithmetic accounting overflowed",
+            )
+        })?;
 
     Ok(json!({
         "objectType": "CompactVssCommitmentMeasurement",
@@ -1649,6 +1686,18 @@ fn compact_vss_development_measurement_value() -> CanonicalResult<Value> {
         },
         "largestSingleObjectBytes": single_compact_commitment_bytes,
         "largestWasmBoundaryCopyBytes": single_compact_commitment_bytes,
+        "budgetComparison": {
+            "budgetScope": "compact public commitment bodies are compared with public setup download, source upload, largest-object, and WASM-copy budgets; excluded proof and transport categories are not counted here",
+            "publicSetupDownloadBudgetBytes": COMPACT_VSS_PUBLIC_SETUP_DOWNLOAD_BUDGET_BYTES,
+            "totalCompactPublicCommitmentFractionOfDownloadBudget": (total_compact_public_commitment_bytes as f64) / (COMPACT_VSS_PUBLIC_SETUP_DOWNLOAD_BUDGET_BYTES as f64),
+            "sourceTrusteeUploadBudgetBytes": COMPACT_VSS_SOURCE_TRUSTEE_UPLOAD_BUDGET_BYTES,
+            "oneSourcePublicCommitmentUploadBytes": one_source_public_commitment_upload_bytes,
+            "oneSourcePublicCommitmentUploadFractionOfBudget": (one_source_public_commitment_upload_bytes as f64) / (COMPACT_VSS_SOURCE_TRUSTEE_UPLOAD_BUDGET_BYTES as f64),
+            "largestSingleObjectBudgetBytes": COMPACT_VSS_LARGEST_SINGLE_OBJECT_BUDGET_BYTES,
+            "largestSingleObjectFractionOfBudget": (single_compact_commitment_bytes as f64) / (COMPACT_VSS_LARGEST_SINGLE_OBJECT_BUDGET_BYTES as f64),
+            "largestWasmBoundaryCopyBudgetBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
+            "largestWasmBoundaryCopyFractionOfBudget": (single_compact_commitment_bytes as f64) / (SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES as f64)
+        },
         "cpuWorkModel": {
             "residueMultiplyAddsPerCommitment": residue_multiply_adds_per_commitment,
             "sourceCoefficientCommitments": source_coefficient_commitments,
@@ -1656,6 +1705,9 @@ fn compact_vss_development_measurement_value() -> CanonicalResult<Value> {
             "aggregateThresholdCommitments": aggregate_threshold_commitments,
             "totalCommitments": total_commitments,
             "totalResidueMultiplyAdds": total_residue_multiply_adds,
+            "aggregatePublicSumResidueAdditions": aggregate_public_sum_residue_additions,
+            "totalResidueArithmeticOperations": total_residue_arithmetic_operations,
+            "aggregatePublicSumFractionOfCommitmentWork": (aggregate_public_sum_residue_additions as f64) / (total_residue_multiply_adds as f64),
         },
         "proofBoundary": "sparse projection is development-only; public linkage and compact same-secret bridge statement roots are implemented; zero-knowledge linkage and same-secret bridge proof backends are not implemented yet",
     }))
@@ -1668,6 +1720,7 @@ fn compact_vss_private_witness_payload_measurement_value() -> CanonicalResult<Va
     let bytes_per_residue = 8_u64;
     let randomness_column_count = 2_u64;
     let payload_vectors_per_credential = 1 + randomness_column_count;
+    let aggregate_payload_vectors_per_credential = 3 + randomness_column_count;
     let one_source_recipient_credential_payload_bytes = checked_accounting_product(
         &[
             payload_vectors_per_credential,
@@ -1675,6 +1728,14 @@ fn compact_vss_private_witness_payload_measurement_value() -> CanonicalResult<Va
             bytes_per_residue,
         ],
         "compact VSS source-recipient credential payload bytes",
+    )?;
+    let one_aggregate_credential_payload_bytes = checked_accounting_product(
+        &[
+            aggregate_payload_vectors_per_credential,
+            POLYNOMIAL_DEGREE as u64,
+            bytes_per_residue,
+        ],
+        "compact VSS aggregate credential payload bytes",
     )?;
     let one_recipient_private_mailbox_credential_payload_bytes = checked_accounting_product(
         &[
@@ -1687,7 +1748,7 @@ fn compact_vss_private_witness_payload_measurement_value() -> CanonicalResult<Va
     let one_recipient_persistent_aggregate_credential_payload_bytes = checked_accounting_product(
         &[
             target_rns_limb_count,
-            one_source_recipient_credential_payload_bytes,
+            one_aggregate_credential_payload_bytes,
         ],
         "compact VSS one-recipient persistent aggregate credential payload bytes",
     )?;
@@ -1719,12 +1780,16 @@ fn compact_vss_private_witness_payload_measurement_value() -> CanonicalResult<Va
         "bytesPerResidue": bytes_per_residue,
         "randomnessColumnCount": randomness_column_count,
         "oneSourceRecipientCredentialPayloadBytes": one_source_recipient_credential_payload_bytes,
+        "oneAggregateCredentialPayloadBytes": one_aggregate_credential_payload_bytes,
         "oneRecipientPrivateMailboxCredentialPayloadBytes": one_recipient_private_mailbox_credential_payload_bytes,
         "oneRecipientPersistentAggregateCredentialPayloadBytes": one_recipient_persistent_aggregate_credential_payload_bytes,
         "allRecipientsPrivateMailboxCredentialPayloadBytes": all_recipients_private_mailbox_credential_payload_bytes,
         "allRecipientsPersistentAggregateCredentialPayloadBytes": all_recipients_persistent_aggregate_credential_payload_bytes,
-        "largestSingleCredentialPayloadBytes": one_source_recipient_credential_payload_bytes,
-        "byteAccountingScope": "compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one aggregate opening payload per persisted recipient limb",
+        "largestSingleCredentialPayloadBytes": std::cmp::max(
+            one_source_recipient_credential_payload_bytes,
+            one_aggregate_credential_payload_bytes,
+        ),
+        "byteAccountingScope": "compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one reduced share vector, one carried commitment-message vector, one carry vector, and opening-randomness vectors per persisted aggregate limb",
         "excludedByteCategories": [
             "private-envelope JSON and canonical-encoding overhead",
             "mailbox KEM, AEAD, nonce, tag, and associated-data overhead",

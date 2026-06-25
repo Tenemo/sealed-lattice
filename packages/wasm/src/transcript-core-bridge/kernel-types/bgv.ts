@@ -507,6 +507,7 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly byteReduction: Readonly<Record<string, number>>;
         readonly largestSingleObjectBytes: number;
         readonly largestWasmBoundaryCopyBytes: number;
+        readonly budgetComparison: Readonly<Record<string, number | string>>;
         readonly cpuWorkModel: Readonly<Record<string, number>>;
         readonly proofBoundary: string;
     };
@@ -523,6 +524,7 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly bytesPerResidue: 8;
         readonly randomnessColumnCount: number;
         readonly oneSourceRecipientCredentialPayloadBytes: number;
+        readonly oneAggregateCredentialPayloadBytes: number;
         readonly oneRecipientPrivateMailboxCredentialPayloadBytes: number;
         readonly oneRecipientPersistentAggregateCredentialPayloadBytes: number;
         readonly allRecipientsPrivateMailboxCredentialPayloadBytes: number;
@@ -986,6 +988,7 @@ export type BgvCompactVssCommitmentOpeningInput = {
     readonly rnsPrime: number;
     readonly ringDegree: number;
     readonly messageCoefficients: readonly number[];
+    readonly messageCoefficientBound?: number;
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
 
@@ -998,6 +1001,38 @@ export type BgvCompactVssCommitmentOpeningComputation = {
     readonly commitmentContextHash: ProtocolHash;
     readonly openingRoot: ProtocolHash;
     readonly encodedCommitmentByteLength: number;
+};
+
+export type BgvCompactVssCommitmentBodyMetadata = {
+    readonly commitmentRole: BgvCompactVssCommitmentRole;
+    readonly commitmentContextHash: ProtocolHash;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly rnsLimbIndex: number;
+    readonly rnsPrime: number;
+    readonly ringDegree: number;
+    readonly messageVectorHash512: string;
+    readonly openingRandomnessHash512: string;
+};
+
+export type BgvCompactVssCommitmentBodyEncoding = {
+    readonly ok: true;
+    readonly operation: 'encodeCompactVssCommitmentBody';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly profileId: string;
+    readonly binaryFormat: string;
+    readonly encodedCommitmentByteLength: number;
+    readonly commitmentBodyBytes: Uint8Array;
+};
+
+export type BgvCompactVssCommitmentBodyDecoding = {
+    readonly ok: true;
+    readonly operation: 'decodeCompactVssCommitmentBody';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly profileId: string;
+    readonly binaryFormat: string;
+    readonly encodedCommitmentByteLength: number;
+    readonly commitment: BgvJsonRecord;
+    readonly commitmentRoot: ProtocolHash;
 };
 
 export type BgvCompactVssCommitmentOpeningVerification = {

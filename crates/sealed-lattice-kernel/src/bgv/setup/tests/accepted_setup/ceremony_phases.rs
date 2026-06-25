@@ -11,7 +11,7 @@ fn first_profile_setup_profile_hash_is_byte_stable() {
         profile["setupProfileHash"]
             .as_str()
             .expect("setup profile hash"),
-        "65468c7fa358d8d9acbb86e1986daf009ab11f0f01ad0078eb22c9c4aeac4fba0cd3fcd5d0539d323c26258d0dae8fa50e4cc87f660b6348b4fd4c96aaf8d3a9",
+        "a6a372fd3e9e0d61430ce74d460420aa991c08814e49cada0fa5f1e866f1e4da5649a2f0ba369fcfd6e811b1c054e164d2b53d8d1a8d0c4398e168ea81a9d266",
     );
 }
 
@@ -319,12 +319,40 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         serde_json::json!(1_603_784_897_u64)
     );
     assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["budgetComparison"]["publicSetupDownloadBudgetBytes"],
+        serde_json::json!(67_108_864_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["budgetComparison"]["sourceTrusteeUploadBudgetBytes"],
+        serde_json::json!(268_435_456_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["budgetComparison"]["oneSourcePublicCommitmentUploadBytes"],
+        serde_json::json!(52_992_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["budgetComparison"]["largestSingleObjectBudgetBytes"],
+        serde_json::json!(16_777_216_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["budgetComparison"]["largestWasmBoundaryCopyBudgetBytes"],
+        serde_json::json!(1_572_864_u64)
+    );
+    assert_eq!(
         profile["compactVssDevelopmentMeasurement"]["projectionWeight"],
         serde_json::json!(32_u64)
     );
     assert_eq!(
         profile["compactVssDevelopmentMeasurement"]["cpuWorkModel"]["totalResidueMultiplyAdds"],
         serde_json::json!(6_681_600_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["cpuWorkModel"]["aggregatePublicSumResidueAdditions"],
+        serde_json::json!(33_600_u64)
+    );
+    assert_eq!(
+        profile["compactVssDevelopmentMeasurement"]["cpuWorkModel"]["totalResidueArithmeticOperations"],
+        serde_json::json!(6_715_200_u64)
     );
     assert_eq!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["objectType"],
@@ -339,12 +367,16 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         serde_json::json!(786_432_u64)
     );
     assert_eq!(
+        profile["compactVssPrivateWitnessPayloadMeasurement"]["oneAggregateCredentialPayloadBytes"],
+        serde_json::json!(1_310_720_u64)
+    );
+    assert_eq!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["oneRecipientPrivateMailboxCredentialPayloadBytes"],
         serde_json::json!(55_050_240_u64)
     );
     assert_eq!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["oneRecipientPersistentAggregateCredentialPayloadBytes"],
-        serde_json::json!(5_505_024_u64)
+        serde_json::json!(9_175_040_u64)
     );
     assert_eq!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["allRecipientsPrivateMailboxCredentialPayloadBytes"],
@@ -352,11 +384,11 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["allRecipientsPersistentAggregateCredentialPayloadBytes"],
-        serde_json::json!(55_050_240_u64)
+        serde_json::json!(91_750_400_u64)
     );
     assert_eq!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["byteAccountingScope"],
-        "compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one aggregate opening payload per persisted recipient limb"
+        "compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one reduced share vector, one carried commitment-message vector, one carry vector, and opening-randomness vectors per persisted aggregate limb"
     );
     assert!(
         profile["compactVssPrivateWitnessPayloadMeasurement"]["excludedByteCategories"]

@@ -1,7 +1,8 @@
 use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::relation::{
-    LimbColumnLayout, SumcheckErrorWeights, TrusteeEvaluationKeyStatement,
+    CompactVssShareLinkagePublicVectorInput, LimbColumnLayout, SumcheckErrorWeights,
+    TrusteeEvaluationKeyStatement, build_compact_vss_share_linkage_public_vectors,
     build_linkage_public_vectors, build_private_vss_public_vectors,
 };
 use super::super::*;
@@ -59,6 +60,12 @@ pub(in super::super) fn draw_limb_challenges(
             "private-vss-relation-alpha",
             modulus,
             layout.private_vss_relation_count() * LINCHECK_REPETITIONS,
+        )
+    } else if layout.compact_vss_active() {
+        transcript.challenge_extension_elements(
+            "compact-vss-share-linkage-alpha",
+            modulus,
+            layout.compact_vss_relation_count(),
         )
     } else if layout.linkage_active() {
         let commitment_count =
@@ -133,6 +140,60 @@ pub(in super::super) fn build_limb_public_vectors(
             &challenges.linkage_alpha,
         )?;
         combined_claim = tower.add(&combined_claim, &private_vss_claim);
+
+        return Ok(LimbPublicVectors {
+            secret_factor: Vec::new(),
+            u_powers,
+            mask_selectors,
+            linkage_vectors: relation_vectors,
+            error_weights: SumcheckErrorWeights {
+                weights: vec![Vec::new(); LINCHECK_REPETITIONS],
+            },
+            lincheck_claim: combined_claim,
+        });
+    }
+    if layout.compact_vss_active() {
+        let compact_vss_share_linkage =
+            statement
+                .compact_vss_share_linkage
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "compact VSS layout requires a compact share-linkage statement",
+                    )
+                })?;
+        let mut combined_claim = ChallengeExtensionTower::zero();
+        let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
+        for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
+            combined_claim = tower.add(
+                &combined_claim,
+                &tower.scale_base(alpha_value, masked_claims[local_claim]),
+            );
+            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+                let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
+                let position = half * layout.trace_size + half_position;
+                let digit_weight =
+                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                mask_selectors[column][position] =
+                    tower.add(&mask_selectors[column][position], &digit_weight);
+            }
+        }
+        let (compact_vss_claim, relation_vectors) = build_compact_vss_share_linkage_public_vectors(
+            CompactVssShareLinkagePublicVectorInput {
+                public_matrix_seed_hash: &compact_vss_share_linkage.public_matrix_seed_hash,
+                rns_limb_index: compact_vss_share_linkage.source_rns_limb_index,
+                commitment_modulus_index: limb_index,
+                modulus,
+                source_message_modulus: compact_vss_share_linkage.source_message_modulus,
+                recipient_roster_position: compact_vss_share_linkage.recipient_roster_position,
+                ring_degree,
+                coefficient_commitments: &compact_vss_share_linkage.coefficient_commitments,
+                recipient_share_commitment: &compact_vss_share_linkage.recipient_share_commitment,
+                relation_alpha: &challenges.linkage_alpha,
+            },
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &compact_vss_claim);
 
         return Ok(LimbPublicVectors {
             secret_factor: Vec::new(),

@@ -139,6 +139,8 @@ fn target_decryption_share_proof_statement_value(
             })
         })
         .collect::<Vec<_>>();
+    let active_credential_binding_root =
+        compact_aggregate_opening_credential_binding_root(&credential_bindings)?;
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShareProofStatement",
@@ -195,10 +197,24 @@ fn target_decryption_share_proof_statement_value(
             "publicMatrixSeedHash": local_witness.compact_opening.public_matrix_seed_hash,
             "shareLinkageStatementRoot": local_witness.compact_opening.share_linkage_statement_root,
             "aggregateThresholdCommitmentRoot": local_witness.compact_opening.aggregate_threshold_commitment_root,
+            "activeCredentialBindingRoot": active_credential_binding_root,
             "activeCredentialBindings": credential_bindings,
         },
         "relation": "the target-decryption share payload is computed from the restored recipient aggregate threshold share that opens the compact aggregate commitment roots for the active target basis",
     }))
+}
+
+fn compact_aggregate_opening_credential_binding_root(
+    credential_bindings: &[Value],
+) -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "TargetDecryptionCompactAggregateOpeningCredentialBindingRoot",
+        &json!({
+            "objectType": "TargetDecryptionCompactAggregateOpeningCredentialBindingSet",
+            "objectVersion": 1,
+            "activeCredentialBindings": credential_bindings,
+        }),
+    )
 }
 
 fn validate_target_decryption_share_proof_statement_shape(
@@ -509,6 +525,14 @@ fn validate_compact_aggregate_opening_statement_binding(
         hash_at_path(credential_binding, &["aggregateCommitmentRoot"])?;
         hash_at_path(credential_binding, &["aggregateOpeningRoot"])?;
     }
+    let expected_active_credential_binding_root =
+        compact_aggregate_opening_credential_binding_root(credential_bindings)?;
+    compare_hash_field(
+        binding,
+        "activeCredentialBindingRoot",
+        &expected_active_credential_binding_root,
+        "target decryption compact aggregate active credential binding root",
+    )?;
 
     Ok(())
 }

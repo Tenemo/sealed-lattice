@@ -176,6 +176,7 @@ reserved_root_namespaces! {
     BGV_TARGET_DECRYPTION_SHARE_ROOT_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-share-root-v1",
     BGV_TARGET_DECRYPTION_SHARE_HASH_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-share-hash-v1",
     BGV_TARGET_DECRYPTION_SHARE_PROOF_STATEMENT_ROOT_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-share-proof-statement-root-v1",
+    TARGET_DECRYPTION_COMPACT_AGGREGATE_OPENING_CREDENTIAL_BINDING_ROOT_NAMESPACE => "sealed-lattice-root/target-decryption-compact-aggregate-opening-credential-binding-root-v1",
     TARGET_DECRYPTION_SMUDGING_INPUT_REPORT_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-smudging-input-report-hash-v1",
     TARGET_DECRYPTION_RECOMBINATION_INPUT_REPORT_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-recombination-input-report-hash-v1",
     TARGET_DECRYPTION_RESULT_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-result-hash-v1",

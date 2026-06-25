@@ -13,11 +13,13 @@ pub(crate) struct LimbColumnLayout {
     pub(crate) active_keys: Vec<(usize, usize)>,
     pub(crate) total_error_columns: usize,
     pub(crate) private_vss_coefficient_columns: usize,
+    pub(crate) compact_vss_coefficient_columns: usize,
     // Linkage logical columns active in this limb: the binary negative
     // indicator plus the per-commitment opening-randomness columns, or zero
     // outside the commitment fields.
     pub(crate) linkage_randomness_columns: usize,
     pub(crate) private_vss_randomness_columns: usize,
+    pub(crate) compact_vss_randomness_columns: usize,
     pub(crate) mask_column_count: usize,
 }
 
@@ -38,9 +40,11 @@ impl LimbColumnLayout {
             .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
             .map(|statement| statement.coefficient_commitments.len())
             .unwrap_or(0);
+        let compact_vss_coefficient_columns = statement.compact_vss_coefficient_count(limb_index);
         if active_keys.is_empty()
             && statement.linkage_randomness_count(limb_index) == 0
             && private_vss_coefficient_columns == 0
+            && compact_vss_coefficient_columns == 0
         {
             return Err(invalid_succinct_setup_proof(
                 "limb layout requires an active key or active linkage relations",
@@ -49,6 +53,7 @@ impl LimbColumnLayout {
         let total_error_columns = active_keys.iter().map(|(_, digits)| *digits).sum::<usize>();
         let linkage_randomness_columns = statement.linkage_randomness_count(limb_index);
         let private_vss_randomness_columns = statement.private_vss_randomness_count(limb_index);
+        let compact_vss_randomness_columns = statement.compact_vss_randomness_count(limb_index);
         let ring_degree = statement.ring_degree;
         // The mask columns are sized from the number of published consistency
         // claims, so this must mirror consistency_vector_count() exactly. For
@@ -60,6 +65,9 @@ impl LimbColumnLayout {
         // would commit unused mask columns for claims that are never published.
         let consistency_vector_count = match family_shape {
             SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
+            SuccinctSetupProofFamilyShape::CompactVssShareLinkage => {
+                1 + compact_vss_randomness_columns
+            }
             _ => {
                 1 + total_error_columns
                     + if linkage_randomness_columns > 0 {
@@ -80,8 +88,10 @@ impl LimbColumnLayout {
             active_keys,
             total_error_columns,
             private_vss_coefficient_columns,
+            compact_vss_coefficient_columns,
             linkage_randomness_columns,
             private_vss_randomness_columns,
+            compact_vss_randomness_columns,
             mask_column_count,
         })
     }
@@ -103,6 +113,10 @@ impl LimbColumnLayout {
         self.family_shape == SuccinctSetupProofFamilyShape::PrivateVssShare
     }
 
+    pub(crate) fn compact_vss_active(&self) -> bool {
+        self.family_shape == SuccinctSetupProofFamilyShape::CompactVssShareLinkage
+    }
+
     // Every private-VSS logical witness column committed in the trace: the
     // message (Shamir coefficient) columns, the carry column, and the
     // opening-randomness columns. This is the trace width and the length of the
@@ -119,9 +133,27 @@ impl LimbColumnLayout {
         }
     }
 
+    pub(crate) fn compact_vss_logical_columns(&self) -> usize {
+        if self.compact_vss_active() {
+            self.compact_vss_coefficient_columns + 2 + self.compact_vss_randomness_columns
+        } else {
+            0
+        }
+    }
+
     pub(crate) fn private_vss_relation_count(&self) -> usize {
         if self.private_vss_active() {
             self.private_vss_coefficient_columns * SETUP_COMMITMENT_ROW_COUNT + 1
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn compact_vss_relation_count(&self) -> usize {
+        if self.compact_vss_active() {
+            (self.compact_vss_coefficient_columns + 1)
+                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                + 1
         } else {
             0
         }
@@ -153,6 +185,8 @@ impl LimbColumnLayout {
             // private_vss_logical_columns() still counts the message columns
             // because they remain witnesses for the opening and share linchecks.
             1 + self.private_vss_randomness_columns
+        } else if self.compact_vss_active() {
+            1 + self.compact_vss_randomness_columns
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
         }
@@ -203,6 +237,34 @@ impl LimbColumnLayout {
         TRACE_SPLIT * coefficient_index + half
     }
 
+    pub(crate) fn physical_compact_vss_message(
+        &self,
+        coefficient_index: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.compact_vss_active());
+        TRACE_SPLIT * coefficient_index + half
+    }
+
+    pub(crate) fn physical_compact_vss_recipient_message(&self, half: usize) -> usize {
+        debug_assert!(self.compact_vss_active());
+        TRACE_SPLIT * self.compact_vss_coefficient_columns + half
+    }
+
+    pub(crate) fn physical_compact_vss_carry(&self, half: usize) -> usize {
+        debug_assert!(self.compact_vss_active());
+        TRACE_SPLIT * (self.compact_vss_coefficient_columns + 1) + half
+    }
+
+    pub(crate) fn physical_compact_vss_randomness(
+        &self,
+        randomness_position: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.compact_vss_active());
+        TRACE_SPLIT * (self.compact_vss_coefficient_columns + 2 + randomness_position) + half
+    }
+
     pub(crate) fn physical_private_vss_carry(&self, half: usize) -> usize {
         debug_assert!(self.private_vss_active());
         TRACE_SPLIT * self.private_vss_coefficient_columns + half
@@ -220,6 +282,8 @@ impl LimbColumnLayout {
     pub(crate) fn physical_mask(&self, mask_column: usize, half: usize) -> usize {
         let logical_prefix = if self.private_vss_active() {
             self.private_vss_logical_columns()
+        } else if self.compact_vss_active() {
+            self.compact_vss_logical_columns()
         } else {
             1 + 2 * self.total_error_columns + self.linkage_logical_columns()
         };
@@ -229,6 +293,8 @@ impl LimbColumnLayout {
     pub(crate) fn phase_one_physical_count(&self) -> usize {
         let logical_prefix = if self.private_vss_active() {
             self.private_vss_logical_columns()
+        } else if self.compact_vss_active() {
+            self.compact_vss_logical_columns()
         } else {
             1 + 2 * self.total_error_columns + self.linkage_logical_columns()
         };
@@ -244,6 +310,8 @@ impl LimbColumnLayout {
     pub(crate) fn row_check_constraint_count(&self) -> usize {
         if self.private_vss_active() {
             TRACE_SPLIT * (self.private_vss_randomness_columns + self.mask_column_count)
+        } else if self.compact_vss_active() {
+            TRACE_SPLIT * (self.compact_vss_randomness_columns + self.mask_column_count)
         } else {
             self.phase_one_physical_count()
         }

@@ -98,6 +98,22 @@ pub(crate) struct PrivateVssShareStatement {
     pub(crate) coefficient_commitments: Vec<SetupCommitmentValue>,
 }
 
+pub(crate) struct CompactVssShareLinkageStatement {
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) recipient_identity: String,
+    pub(crate) recipient_roster_position: u64,
+    pub(crate) source_coefficient_commitment_root: String,
+    pub(crate) source_recipient_share_commitment_root: String,
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) coefficient_commitment_roots: Vec<String>,
+    pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) recipient_share_commitment_root: String,
+    pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
+}
+
 // Ceremony context the proof is bound to: the shared base fields, the proof
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
@@ -127,6 +143,7 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) keys: Vec<EvaluationKeyShareDescriptor>,
     pub(crate) same_secret_linkage: Option<SameSecretLinkageStatement>,
     pub(crate) private_vss_share: Option<PrivateVssShareStatement>,
+    pub(crate) compact_vss_share_linkage: Option<CompactVssShareLinkageStatement>,
 }
 
 pub(crate) struct TrusteeEvaluationKeyWitness {
@@ -144,6 +161,11 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     pub(crate) private_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
     pub(crate) private_vss_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
     pub(crate) private_vss_carry_witnesses: Vec<i64>,
+    pub(crate) compact_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
+    pub(crate) compact_vss_recipient_share_messages: Vec<i64>,
+    pub(crate) compact_vss_coefficient_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
+    pub(crate) compact_vss_recipient_share_opening_randomness: Vec<Vec<i64>>,
+    pub(crate) compact_vss_carry_witnesses: Vec<i64>,
 }
 
 impl EvaluationKeyShareDescriptor {
@@ -342,7 +364,7 @@ impl TrusteeEvaluationKeyStatement {
     // keyless same-secret linkage anchor statement is active exactly on the
     // commitment fields, where its opening relations live.
     pub(crate) fn limb_count(&self) -> usize {
-        if self.private_vss_share.is_some() {
+        if self.private_vss_share.is_some() || self.compact_vss_share_linkage.is_some() {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
         }
         self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
@@ -384,6 +406,25 @@ impl TrusteeEvaluationKeyStatement {
         match &self.private_vss_share {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
                 statement.coefficient_commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_coefficient_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.coefficient_commitments.len()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_randomness_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                (statement.coefficient_commitments.len() + 1)
+                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
             }
             _ => 0,
         }

@@ -41,7 +41,9 @@ pub(crate) use commitment::compute_setup_commitment_from_opening_request;
 pub(crate) use compact_same_secret_bridge::verify_compact_vss_same_secret_bridge_statement_set_request;
 pub(crate) use compact_vss_commitment::{
     CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
-    compute_compact_vss_commitment_from_opening_request, read_compact_vss_randomness_by_column,
+    compute_compact_vss_commitment_from_opening_request,
+    decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
+    read_compact_vss_randomness_by_column,
     verify_compact_vss_aggregate_threshold_commitment_set_request,
     verify_compact_vss_coefficient_commitment_set_request,
     verify_compact_vss_commitment_opening_request,

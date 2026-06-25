@@ -17,6 +17,9 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvCompactVssAggregateThresholdCommitmentSetVerification,
+    BgvCompactVssCommitmentBodyDecoding,
+    BgvCompactVssCommitmentBodyEncoding,
+    BgvCompactVssCommitmentBodyMetadata,
     BgvCompactVssCommitmentOpeningComputation,
     BgvCompactVssCoefficientCommitmentSetVerification,
     BgvCompactVssCommitmentOpeningInput,
@@ -71,6 +74,9 @@ export type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvCompactVssAggregateThresholdCommitmentSetVerification,
+    BgvCompactVssCommitmentBodyDecoding,
+    BgvCompactVssCommitmentBodyEncoding,
+    BgvCompactVssCommitmentBodyMetadata,
     BgvCompactVssCommitmentOpeningComputation,
     BgvCompactVssCoefficientCommitmentSetVerification,
     BgvCompactVssCommitmentOpeningInput,
@@ -310,6 +316,13 @@ export type TranscriptCoreKernel = {
     computeCompactVssCommitmentFromOpening(
         input: BgvCompactVssCommitmentOpeningInput,
     ): BgvCompactVssCommitmentOpeningComputation;
+    encodeCompactVssCommitmentBody(input: {
+        readonly commitment: Readonly<Record<string, unknown>>;
+    }): BgvCompactVssCommitmentBodyEncoding;
+    decodeCompactVssCommitmentBody(input: {
+        readonly metadata: BgvCompactVssCommitmentBodyMetadata;
+        readonly commitmentBodyBytes: Uint8Array;
+    }): BgvCompactVssCommitmentBodyDecoding;
     verifyCompactVssCommitmentOpening(input: {
         readonly opening: BgvCompactVssCommitmentOpeningInput;
         readonly expectedCommitmentRoot: ProtocolHash;
@@ -646,6 +659,15 @@ type TranscriptCoreKernelCommand =
     | (BgvCompactVssCommitmentOpeningInput & {
           readonly command: 'ComputeCompactVssCommitmentFromOpening';
       })
+    | {
+          readonly command: 'EncodeCompactVssCommitmentBody';
+          readonly commitment: Readonly<Record<string, unknown>>;
+      }
+    | {
+          readonly command: 'DecodeCompactVssCommitmentBody';
+          readonly metadata: BgvCompactVssCommitmentBodyMetadata;
+          readonly commitmentBodyBytesHex: string;
+      }
     | {
           readonly command: 'VerifyCompactVssCommitmentOpening';
           readonly opening: BgvCompactVssCommitmentOpeningInput;

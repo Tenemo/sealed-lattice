@@ -23,8 +23,9 @@ use crate::hashing::hash512;
 // sub-modules keep referencing them as `super::<LABEL>` after the move under
 // this `relation/` directory.
 use super::{
-    PRIVATE_VSS_SHARE_PROOF_FAMILY, PUBLIC_KEY_SHARE_PROOF_FAMILY,
-    SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+    COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY, PRIVATE_VSS_SHARE_PROOF_FAMILY,
+    PUBLIC_KEY_SHARE_PROOF_FAMILY, SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
 };
 
 // The trustee evaluation-key relation is split by responsibility. Each
@@ -36,6 +37,7 @@ use super::{
 // modules are re-exported at crate visibility because those consumers sit a
 // directory level above these sub-modules.
 mod column_layout;
+mod compact_vss_vectors;
 mod constraint_kernels;
 mod diagonal_source_algebra;
 mod family_shape_and_validation;
@@ -43,6 +45,7 @@ mod linkage_and_vss_vectors;
 mod statement_types;
 
 pub(crate) use column_layout::*;
+pub(crate) use compact_vss_vectors::*;
 pub(crate) use constraint_kernels::*;
 pub(crate) use diagonal_source_algebra::*;
 pub(crate) use family_shape_and_validation::*;
