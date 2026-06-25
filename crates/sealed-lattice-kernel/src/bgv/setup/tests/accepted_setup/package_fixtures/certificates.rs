@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn setup_commitment_security_certificate_fixture(
     parameters: &serde_json::Value,
     participant_count: u64,
@@ -129,8 +131,7 @@ pub(super) fn setup_commitment_security_certificate_fixture(
     });
 
     let certificate_hash =
-        derive_protocol_hash("SetupCommitmentSecurityCertificateHash", &certificate)
-            .expect("commitment security certificate hash");
+        derive_canonical_object_hash(&certificate).expect("commitment security certificate hash");
     let mut certificate_with_hash = certificate;
     certificate_with_hash["setupCommitmentSecurityCertificateHash"] =
         serde_json::json!(certificate_hash);
@@ -166,18 +167,15 @@ pub(in super::super) fn setup_transport_chunk_manifest_root_fixture(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> String {
-    derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "objectType": "SetupTransportChunkManifest",
-            "objectVersion": 1,
-            "chunkSizeBytes": 1_048_576_u64,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportChunkManifest",
+        "objectVersion": 1,
+        "chunkSizeBytes": 1_048_576_u64,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
     .expect("setup transport chunk manifest root")
 }
 
@@ -207,38 +205,31 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         material_decryption_threshold,
     );
     let chunk_count = total_byte_length.div_ceil(chunk_size_bytes);
-    let vss_full_object_hash = derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "fixture": "setup-transport-full-object-hash",
-            "totalByteLength": total_byte_length,
-        }),
-    )
+    let vss_full_object_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportChunkManifestRoot",
+        "fixture": "setup-transport-full-object-hash",
+        "totalByteLength": total_byte_length,
+    }))
     .expect("transport full object hash");
     let chunk_hashes = (0..chunk_count)
         .map(|chunk_index| {
-            derive_protocol_hash(
-                "SetupTransportChunkManifestRoot",
-                &serde_json::json!({
-                    "fixture": "setup-transport-chunk-hash",
-                    "chunkIndex": chunk_index,
-                }),
-            )
+            derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "SetupTransportChunkManifestRoot",
+                "fixture": "setup-transport-chunk-hash",
+                "chunkIndex": chunk_index,
+            }))
             .expect("transport chunk hash")
         })
         .collect::<Vec<_>>();
-    let vss_chunk_root = derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "objectType": "SetupTransportChunkManifest",
-            "objectVersion": 1,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": vss_full_object_hash,
-        }),
-    )
+    let vss_chunk_root = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportChunkManifest",
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": vss_full_object_hash,
+    }))
     .expect("setup transport chunk root");
     let transported_objects = serde_json::json!([
         {
@@ -257,9 +248,7 @@ pub(in super::super) fn setup_transport_certificate_fixture(
             "loadingPolicy": "stream-verified-before-object-use",
         }
     ]);
-    let aggregate_full_object_hash = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
+    let aggregate_full_object_hash = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "SetupTransportFullObjectSet",
             "objectVersion": 1,
             "transportedObjects": [{
@@ -278,18 +267,15 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         }),
     )
     .expect("setup transport full object set hash");
-    let chunk_root = derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "objectType": "SetupTransportChunkManifest",
-            "objectVersion": 1,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": aggregate_full_object_hash,
-        }),
-    )
+    let chunk_root = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportChunkManifest",
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": aggregate_full_object_hash,
+    }))
     .expect("setup transport aggregate chunk root");
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
@@ -318,8 +304,8 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         "chunkRoot": chunk_root,
         "fullObjectHash": aggregate_full_object_hash,
     });
-    let certificate_hash = derive_protocol_hash("SetupTransportCertificateHash", &certificate)
-        .expect("setup transport certificate hash");
+    let certificate_hash =
+        derive_canonical_object_hash(&certificate).expect("setup transport certificate hash");
     certificate["setupTransportCertificateHash"] = serde_json::json!(certificate_hash);
 
     certificate

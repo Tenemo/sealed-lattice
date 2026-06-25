@@ -8,7 +8,7 @@ use crate::{
         setup_helpers::decimal_i128_value,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 use super::{
@@ -175,10 +175,7 @@ fn verify_private_vss_share_envelope_inner(
         ring_degree_status,
         &limb_verifications,
     )?;
-    let local_verification_root = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &local_verification_record,
-    )?;
+    let local_verification_root = derive_canonical_object_hash(&local_verification_record)?;
 
     if let Some(expected_private_envelope_hash) = request
         .get("expectedPrivateEnvelopeHash")

@@ -161,10 +161,8 @@ fn target_share_parameters_rejects_threshold_downgrade() {
         .as_object_mut()
         .expect("target share parameters object")
         .remove("targetShareParametersHash");
-    downgraded_parameters["targetShareParametersHash"] = json!(
-        derive_protocol_hash("TargetDecryptionShareParametersHash", &hash_input)
-            .expect("downgraded parameters hash")
-    );
+    downgraded_parameters["targetShareParametersHash"] =
+        json!(derive_canonical_object_hash(&hash_input).expect("downgraded parameters hash"));
 
     let result = generate_bgv_target_decryption_share_from_request(&json!({
         "setupPackage": setup_package,

@@ -185,6 +185,7 @@ use crate::bgv::evaluator::top_k::{
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
 };
 use crate::bgv::parameters::SPECIAL_PRIME;
+use crate::hashing::derive_canonical_object_hash;
 use crate::protocol_signatures::{
     ProtocolSignatureExpectation, verify_protocol_signature_envelope,
 };
@@ -335,15 +336,9 @@ const SETUP_TRANSPORTED_OBJECT_TYPE: &str = "SetupTransportedObject";
 const SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE: &str =
     "SetupCommitmentSecurityCertificate";
 const SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE: &str = "SetupProofAccountingCertificate";
-const SETUP_PROOF_RECORD_BINDING_HASH_NAMESPACE: &str = "SetupProofRecordBindingHash";
-const SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE: &str =
-    "SetupProofAccountingCertificateHash";
 const SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE: &str = "SetupKeyCorrectnessCertificate";
-const SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE: &str = "SetupKeyCorrectnessCertificateHash";
 const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
     "ActiveStaticSetupTheoremCertificate";
-const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE: &str =
-    "ActiveStaticSetupTheoremCertificateHash";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -782,7 +777,7 @@ fn verify_setup_package_hash(
     validate_hash_string(setup_package_hash, "setupPackage.setupPackageHash")?;
 
     let hash_input = setup_package_hash_input(setup_package);
-    let expected_hash = derive_protocol_hash("SetupPackageHash", &hash_input)?;
+    let expected_hash = derive_canonical_object_hash(&hash_input)?;
     if setup_package_hash != expected_hash {
         return Ok(Some(verification_response(
             VerifierStatus::Refused,
@@ -857,7 +852,7 @@ pub(super) fn setup_parameters_hash() -> CanonicalResult<String> {
 pub(super) fn setup_parameters_hash_for_roster(
     roster: &AcceptedRosterParameters,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash("SetupParametersHash", &setup_parameters_value(roster)?)
+    derive_canonical_object_hash(&setup_parameters_value(roster)?)
 }
 
 // The single canonical identity for the roster-parameterized collective BGV
@@ -871,6 +866,8 @@ pub(super) fn setup_parameters_hash_for_roster(
 // summarize succinct proof family accounting bound elsewhere.
 pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> CanonicalResult<Value> {
     Ok(json!({
+        "objectType": "SetupParameters",
+        "objectVersion": 1,
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
         "sharingModel": "recipient-verified-vss",
@@ -1031,10 +1028,9 @@ fn expected_required_galois_key_schedule() -> CanonicalResult<Value> {
 fn expected_required_galois_set_hash(
     required_galois_key_schedule: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "RequiredGaloisSetHash",
-        &required_galois_set_value(required_galois_key_schedule.clone()),
-    )
+    derive_canonical_object_hash(&required_galois_set_value(
+        required_galois_key_schedule.clone(),
+    ))
 }
 
 fn required_galois_set_value(required_galois_key_schedule: Value) -> Value {
@@ -1493,7 +1489,7 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "heSecurityCertificateHash": value_string(setup_package, "heSecurityCertificateHash")?,
         },
     });
-    let handoff_root = derive_protocol_hash("AcceptedSetupHandoffRoot", &handoff)?;
+    let handoff_root = derive_canonical_object_hash(&handoff)?;
     handoff
         .as_object_mut()
         .expect("accepted setup handoff is a JSON object")
@@ -1548,7 +1544,10 @@ fn verification_response(
 }
 
 fn phase_order_hash() -> CanonicalResult<String> {
-    derive_protocol_hash("CollectiveBgvSetupPhaseOrderHash", &phase_order_value())
+    derive_canonical_object_hash(&json!({
+        "objectType": "CollectiveBgvSetupPhaseOrder",
+        "phaseOrder": phase_order_value(),
+    }))
 }
 
 fn phase_order_value() -> Value {

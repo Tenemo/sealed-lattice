@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 // Share-record containers for the trustee evaluation-key proof path. The
 // records carry the public key-switch component material (the runtime key
 // shares), the ceremony context, and the same-secret anchors; the per-trustee
@@ -212,16 +214,13 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundOneRecords",
             )?));
         };
-        let expected_root = derive_protocol_hash(
-            "RelinearizationRoundOneAggregateRoot",
-            &json!({
-                "objectType": "RelinearizationRoundOneAggregate",
-                "objectVersion": 1,
-                "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-                "level": level,
-                "roundOneRecordRoots": record_roots,
-            }),
-        )?;
+        let expected_root = derive_canonical_object_hash(&json!({
+            "objectType": "RelinearizationRoundOneAggregate",
+            "objectVersion": 1,
+            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+            "level": level,
+            "roundOneRecordRoots": record_roots,
+        }))?;
         if supplied_round_one_aggregate_roots
             .get(level)
             .map(String::as_str)
@@ -300,20 +299,17 @@ pub(super) fn verify_relinearization_key_share_rounds(
                 "setupPackage.relinearizationKeyShareRounds.roundTwoRecords",
             )?));
         };
-        let expected_root = derive_protocol_hash(
-            "RelinearizationRoundTwoAggregateRoot",
-            &json!({
-                "objectType": "RelinearizationRoundTwoAggregate",
-                "objectVersion": 1,
-                "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-                "level": level,
-                // Chaining round two onto the accepted round-one aggregate root binds the rounds together, so round-two material proven against a substituted or rolled-back round-one transcript cannot verify.
-                "roundOneAggregateRoot": supplied_round_one_aggregate_roots
-                    .get(level)
-                    .expect("round-one aggregate root exists after verification"),
-                "roundTwoRecordRoots": record_roots,
-            }),
-        )?;
+        let expected_root = derive_canonical_object_hash(&json!({
+            "objectType": "RelinearizationRoundTwoAggregate",
+            "objectVersion": 1,
+            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+            "level": level,
+            // Chaining round two onto the accepted round-one aggregate root binds the rounds together, so round-two material proven against a substituted or rolled-back round-one transcript cannot verify.
+            "roundOneAggregateRoot": supplied_round_one_aggregate_roots
+                .get(level)
+                .expect("round-one aggregate root exists after verification"),
+            "roundTwoRecordRoots": record_roots,
+        }))?;
         if supplied_round_two_aggregate_roots
             .get(level)
             .map(String::as_str)
@@ -334,7 +330,7 @@ pub(super) fn verify_relinearization_key_share_rounds(
         .as_object_mut()
         .expect("relinearization rounds object was checked")
         .remove("relinearizationKeyShareRoundsRoot");
-    let expected_root = derive_protocol_hash("RelinearizationKeyShareRoundsRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if supplied_root != expected_root {
         return Ok(Some(evaluation_key_material_refusal(
             "relinearizationKeyShareRoundsRootMismatch",
@@ -548,19 +544,16 @@ pub(super) fn expected_relinearization_key_switch_seed(
     round: &str,
     level: u64,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "RelinearizationKeyShareSeed",
-        &json!({
-            "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-            "objectVersion": 1,
-            "proofFamily": "relinearization-key-share",
-            "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
-            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-            "relinearizationCrpRoot": binding.relinearization_crp_root.as_str(),
-            "round": round,
-            "level": level,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+        "objectVersion": 1,
+        "proofFamily": "relinearization-key-share",
+        "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
+        "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+        "relinearizationCrpRoot": binding.relinearization_crp_root.as_str(),
+        "round": round,
+        "level": level,
+    }))
 }
 
 pub(super) fn expected_galois_key_switch_seed(
@@ -568,20 +561,17 @@ pub(super) fn expected_galois_key_switch_seed(
     rotation: u64,
     level: u64,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "GaloisKeyShareSeed",
-        &json!({
-            "objectType": "GaloisKeySwitchPublicSampleSeed",
-            "objectVersion": 1,
-            "proofFamily": "galois-key-share",
-            "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
-            "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-            "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
-            "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
-            "rotation": rotation,
-            "level": level,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "GaloisKeySwitchPublicSampleSeed",
+        "objectVersion": 1,
+        "proofFamily": "galois-key-share",
+        "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
+        "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+        "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
+        "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
+        "rotation": rotation,
+        "level": level,
+    }))
 }
 
 pub(super) fn verify_relinearization_key_switch_sample_binding(
@@ -751,7 +741,7 @@ fn verify_relinearization_round_one_record(
         .as_object_mut()
         .expect("relinearization round-one record object was checked")
         .remove("roundOneRecordRoot");
-    let expected_root = derive_protocol_hash("RelinearizationRoundOneRecordRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -830,7 +820,7 @@ fn verify_relinearization_round_two_record(
         .as_object_mut()
         .expect("relinearization round-two record object was checked")
         .remove("roundTwoRecordRoot");
-    let expected_root = derive_protocol_hash("RelinearizationRoundTwoRecordRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -930,7 +920,7 @@ fn verify_galois_key_share_batch(
         .as_object_mut()
         .expect("Galois key share batch object was checked")
         .remove("galoisKeyShareBatchRoot");
-    let expected_root = derive_protocol_hash("GaloisKeyShareBatchRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 
-use crate::{encoding::CanonicalResult, hashing::derive_protocol_hash};
+use crate::{encoding::CanonicalResult, hashing::derive_canonical_object_hash};
 
 // Ring degree N. Powers of two are NTT-friendly; 2N divides each modulus-1.
 pub(crate) const POLYNOMIAL_DEGREE: usize = 32_768;
@@ -27,6 +27,8 @@ pub(crate) use root_parameters::{
 // collection of per-component hashes.
 pub(crate) fn bgv_parameters_value() -> Value {
     json!({
+        "objectType": "BgvParameters",
+        "objectVersion": 1,
         "polynomialDegree": POLYNOMIAL_DEGREE,
         "plaintextModulus": PLAINTEXT_MODULUS,
         "dataPrimes": DATA_PRIMES,
@@ -60,7 +62,7 @@ pub(crate) fn bgv_parameters_value() -> Value {
 }
 
 pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
-    derive_protocol_hash("BGVParametersHash", &bgv_parameters_value())
+    derive_canonical_object_hash(&bgv_parameters_value())
 }
 
 // Layout data only, with no embedded sub-hashes. Used by the encode command's

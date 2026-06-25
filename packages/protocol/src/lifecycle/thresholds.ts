@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     FrozenRosterParameters,
     PollSpec,
@@ -308,10 +308,10 @@ export const deriveThresholdParametersHash = (input: {
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
 }): ProtocolHash =>
-    // The preimage keys are the external ThresholdParametersHash field names and
-    // are kept verbatim so the hash value stays stable; only the source
-    // property names changed.
-    deriveProtocolHash('ThresholdParametersHash', {
+    // Threshold-parameter set hashed under the shared canonical-object domain,
+    // separated by its objectType discriminator.
+    deriveCanonicalObjectHash({
+        objectType: 'ThresholdParameters',
         activeFaultBound: input.thresholdParameters.activeFaultBound,
         ballotReleaseFloor: input.thresholdParameters.ballotReleaseFloor,
         backendCorruptionBound:

@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { LocalTrusteeSetupStateCommitment } from './local-trustee-setup-state.js';
@@ -402,9 +402,6 @@ export const createSetupContributionAssembly = (
 
     return {
         ...assemblyWithoutRoot,
-        setupContributionRoot: deriveProtocolHash(
-            'ParticipantBgvSetupRecordHash',
-            assemblyWithoutRoot,
-        ),
+        setupContributionRoot: deriveCanonicalObjectHash(assemblyWithoutRoot),
     } satisfies SetupContributionAssembly;
 };

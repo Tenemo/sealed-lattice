@@ -499,11 +499,11 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "70f5c5cf1753b9fda97d459520efe074a9c638a94bc31fce1557df3ecbfa7561bf728674ade4aa06a3ce67bcbfb5ee71c3e81830e3bebd7d7d78a4869affb928"
+            "e1ee6ae0c273b721b8a264351e321ce1aa48c918e68be4a70124ff955341a4057a0a828d30f28821270d043d60988cd16fbaf03b51e3b53d617a9f4fccff733d"
         );
         assert_eq!(
             encoded["canonicalBytesHash512"],
-            "547e25bfddf68448958d07e0cef4f552efc53c8bdf5447fa50adc5d02a4a52aff1a1abd904f55db737a7b4b7d4d740793fb2fddcf2a8d8b72493d80e48d3fd73"
+            "1ae2996a3a78bf246c97407c5b54fd2fac1743438e1b14c4058c9324d03718fff8938b362ec26b9edb3e04e3404c40edbf18e689a2d89693821893e6c57d573d"
         );
         assert_eq!(encoded["canonicalByteLength"], 90_311);
 
@@ -516,11 +516,11 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "1f34c9cdb9575b2eba429b75d0111bb2fe177a17f4de14d16eef12a9ba22fad2c7f83d42d35fbdbd020c0d33ac6cad71f8813e8fbdbdb11b97974a716b02ca35"
+            "13b81ddfad714f9d2acfbea317fc2903a6fb923cdd896249bccb6d16fa34f23074fd1227ce54462b9090812b31ecc7ab3c9340ad7a9d754924ac4c8c5c25debd"
         );
         assert_eq!(
             ciphertext["canonicalBytesHash512"],
-            "37f449008d590174675ef6a3789db935a3c95df18938bf302a0927126dea1827c0264032310269cd6b89eb935ff4664cc7d27c34ce49c5c4d40c2a5201b5c996"
+            "a6f70bb9a39ed57a1033692d91c46a771869a93914d1a2192e205dd0f6cd59698cca4eb719cc9e870c0eba48048e30c266b3c4e3fb63e86e97f30dec97ec5956"
         );
         assert_eq!(ciphertext["canonicalByteLength"], 180_521);
 
@@ -531,11 +531,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "1211491e58fc3900c7972f5d959f8ef4a7c5bd748fc840ddc9c26c91665bb37444140e51011baa5e15e8ac6047fab6b2bdc5c83b3ed088045dd3d68d6766f5ab"
+            "931f921d820dda486c015b4ce487cb8782382cf61b9dde136cf0c7799ecb486086bd1dc383514dee5bd1caf4113cd5e83e41d03a4645e2559d47473dc33d7078"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "d094e28df50d4e7518eca20c6b9ac286123b0a476e26b4db78777b2888a67e1af8e46bcf1dd68bab47f20ba1552e96ab9750638c43589f86c7d8562d19cfcd33"
+            "f665c828ebaaccd684dc53aeedbeed9ae31e1aa44e3008df6526ffc6517a7bb4120258c68b00ede7543cd3c1573b31b391b26e512a401bbad6761979e15d5fe0"
         );
     }
 

@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -172,9 +172,8 @@ describe('same-secret consistency statement builders', () => {
         );
         const { sameSecretStatementRoot, ...statementWithoutRoot } =
             firstStatementRecord;
-        const expectedSameSecretProofFamilyBindingRoot = deriveProtocolHash(
-            'SameSecretProofFamilyBindingRoot',
-            {
+        const expectedSameSecretProofFamilyBindingRoot =
+            deriveCanonicalObjectHash({
                 objectType: 'SameSecretProofFamilyBinding',
                 objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
@@ -185,23 +184,18 @@ describe('same-secret consistency statement builders', () => {
                     sameSecretGenericKeySwitchBindingPolicy,
                 targetDecryptionBindingPolicy:
                     sameSecretTargetDecryptionBindingPolicy,
-            },
-        );
-        const expectedTrusteeSecretCommitmentRoot = deriveProtocolHash(
-            'TrusteeSecretCommitmentRoot',
-            {
-                objectType: 'TrusteeSecretCommitment',
-                objectVersion: 1,
-                ...setupContext,
-                trusteeIdentity: firstStatementRecord.trusteeIdentity,
-                trusteeRosterPosition:
-                    firstStatementRecord.trusteeRosterPosition,
-                vssSourceTrusteeCommitmentRoot:
-                    firstStatementRecord.vssSourceTrusteeCommitmentRoot,
-                constantCoefficientCommitmentRoots:
-                    firstStatementRecord.constantCoefficientCommitmentRoots,
-            },
-        );
+            });
+        const expectedTrusteeSecretCommitmentRoot = deriveCanonicalObjectHash({
+            objectType: 'TrusteeSecretCommitment',
+            objectVersion: 1,
+            ...setupContext,
+            trusteeIdentity: firstStatementRecord.trusteeIdentity,
+            trusteeRosterPosition: firstStatementRecord.trusteeRosterPosition,
+            vssSourceTrusteeCommitmentRoot:
+                firstStatementRecord.vssSourceTrusteeCommitmentRoot,
+            constantCoefficientCommitmentRoots:
+                firstStatementRecord.constantCoefficientCommitmentRoots,
+        });
 
         expect(
             sameSecretConsistency.statementRecords.map(
@@ -239,16 +233,10 @@ describe('same-secret consistency statement builders', () => {
                 ?.trusteeSecretCommitmentRoot,
         );
         expect(sameSecretStatementRoot).toBe(
-            deriveProtocolHash(
-                'SameSecretConsistencyRoot',
-                statementWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(statementWithoutRoot),
         );
         expect(sameSecretConsistencyRoot).toBe(
-            deriveProtocolHash(
-                'SameSecretConsistencyRoot',
-                statementSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(statementSetWithoutRoot),
         );
     });
 

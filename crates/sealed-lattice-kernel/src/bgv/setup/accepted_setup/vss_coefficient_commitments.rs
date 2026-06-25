@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn verify_vss_coefficient_commitments(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
@@ -126,7 +128,7 @@ pub(super) fn verify_vss_coefficient_commitments(
         .as_object_mut()
         .expect("VSS commitment set object was checked")
         .remove("vssCoefficientCommitmentRoot");
-    let expected_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if commitment_root != expected_root {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentRootMismatch",
@@ -365,7 +367,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
         .as_object_mut()
         .expect("VSS coefficient commitment material set object was checked")
         .remove("vssCoefficientCommitmentMaterialRoot");
-    let expected_root = derive_protocol_hash("VssCoefficientCommitmentMaterialRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if material_root != expected_root {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialRootMismatch",
@@ -609,7 +611,7 @@ fn verify_vss_source_trustee_commitment_record(
         .as_object_mut()
         .expect("VSS source trustee commitment object was checked")
         .remove("sourceTrusteeCommitmentRoot");
-    let expected_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if source_trustee_commitment_root != expected_root {
         return Ok(Some(vss_commitment_refusal(
             "vssSourceTrusteeCommitmentRootMismatch",

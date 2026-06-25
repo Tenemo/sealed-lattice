@@ -3,10 +3,6 @@ import type {
     ScoreDomain,
     SmallRosterPolicy,
 } from '@sealed-lattice/types';
-export {
-    targetDecryptionId,
-    targetBoundShareSelectionId,
-} from '@sealed-lattice/types';
 
 export const structuralOneThirdModel = {
     kind: 'StructuralOneThird',

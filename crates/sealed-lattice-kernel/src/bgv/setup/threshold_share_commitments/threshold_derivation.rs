@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) struct ThresholdLimbCommitment {
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
@@ -50,8 +52,7 @@ pub(super) fn threshold_share_commitment_set(
         "recipientRecords": recipient_records,
     });
     copy_context_fields(&mut commitment_set, setup_context)?;
-    let commitment_set_root =
-        derive_protocol_hash("ThresholdShareCommitmentRoot", &commitment_set)?;
+    let commitment_set_root = derive_canonical_object_hash(&commitment_set)?;
     commitment_set["thresholdShareCommitmentRoot"] = json!(commitment_set_root);
 
     Ok(commitment_set)
@@ -126,8 +127,7 @@ fn threshold_share_recipient_record(
         "limbCommitments": limb_commitments,
     });
     copy_context_fields(&mut recipient_record, setup_context)?;
-    let recipient_commitment_root =
-        derive_protocol_hash("ThresholdShareCommitmentRoot", &recipient_record)?;
+    let recipient_commitment_root = derive_canonical_object_hash(&recipient_record)?;
     recipient_record["recipientCommitmentRoot"] = json!(recipient_commitment_root);
 
     Ok(recipient_record)
@@ -187,9 +187,8 @@ fn derive_threshold_limb_commitment(
         coefficient_commitment_roots,
         commitment,
     };
-    let threshold_share_commitment_root = derive_protocol_hash(
-        "ThresholdShareCommitmentRoot",
-        &threshold_limb_commitment_root_payload(
+    let threshold_share_commitment_root =
+        derive_canonical_object_hash(&threshold_limb_commitment_root_payload(
             setup_context,
             public_matrix_seed_hash,
             recipient_identity,
@@ -197,8 +196,7 @@ fn derive_threshold_limb_commitment(
             recipient_roster_position_usize,
             decryption_threshold,
             &threshold_limb,
-        )?,
-    )?;
+        )?)?;
 
     Ok(ThresholdLimbCommitment {
         threshold_share_commitment_root,
@@ -350,8 +348,7 @@ pub(super) fn transported_vss_material_set_value(
         },
     });
     copy_context_fields(&mut material_set, setup_context)?;
-    let material_root =
-        derive_protocol_hash("VssCoefficientCommitmentMaterialRoot", &material_set)?;
+    let material_root = derive_canonical_object_hash(&material_set)?;
     material_set["vssCoefficientCommitmentMaterialRoot"] = json!(material_root);
 
     Ok(material_set)

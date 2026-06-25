@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 pub(super) fn read_non_empty_string<'a>(
@@ -228,12 +228,11 @@ pub(super) fn compare_hash_at_path(
 }
 
 pub(super) fn compare_derived_hash(
-    namespace: &str,
     value: &Value,
     actual_hash: &str,
     description: &str,
 ) -> CanonicalResult<()> {
-    let expected_hash = derive_protocol_hash(namespace, value)?;
+    let expected_hash = derive_canonical_object_hash(value)?;
     if actual_hash != expected_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,

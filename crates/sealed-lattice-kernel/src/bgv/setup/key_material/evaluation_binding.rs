@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in crate::bgv::setup) fn expected_evaluation_key_material_binding(
     setup_package: &Value,
 ) -> CanonicalResult<Value> {
@@ -129,8 +131,7 @@ pub(super) fn evaluation_key_material_binding(
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?),
         "keyMaterialStreamHash": relinearization_stream_hash,
     });
-    let relinearization_key_root =
-        derive_protocol_hash("RelinearizationKeyRoot", &relinearization_key_record)?;
+    let relinearization_key_root = derive_canonical_object_hash(&relinearization_key_record)?;
     let mut rotation_key_roots = Vec::with_capacity(rotation_schedule.len());
     let mut rotation_key_records = Vec::with_capacity(rotation_schedule.len());
     for entry in &rotation_schedule {
@@ -168,7 +169,7 @@ pub(super) fn evaluation_key_material_binding(
             "publicRlweSampleCount": entry.level + 1,
             "keyMaterialStreamHash": entry_stream_hash,
         });
-        let root = derive_protocol_hash("RotationKeyRoot", &record)?;
+        let root = derive_canonical_object_hash(&record)?;
         rotation_key_roots.push(json!({
             "rotation": entry.rotation,
             "level": entry.level,
@@ -199,7 +200,7 @@ pub(super) fn evaluation_key_material_binding(
         "keyMaterialStreamHash": key_switch_stream_hash,
         "genericKeySwitchApiExported": false,
     });
-    let key_switch_key_root = derive_protocol_hash("KeySwitchKeyRoot", &key_switch_key_record)?;
+    let key_switch_key_root = derive_canonical_object_hash(&key_switch_key_record)?;
     let record = json!({
         "objectType": "BgvEvaluationKeyMaterialCommitment",
         "objectVersion": 1,
@@ -222,7 +223,7 @@ pub(super) fn evaluation_key_material_binding(
         "sampledRelationChecks": sampled_relation_checks,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
-    let material_hash = derive_protocol_hash("EvaluationKeySetHash", &record)?;
+    let material_hash = derive_canonical_object_hash(&record)?;
 
     Ok(EvaluationKeyMaterialBinding {
         record,

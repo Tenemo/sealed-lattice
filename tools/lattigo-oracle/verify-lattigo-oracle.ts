@@ -7,7 +7,7 @@ import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -256,32 +256,31 @@ export const buildReferenceOracleHashBindings = (
     };
 
     return {
-        referenceOracleCommitHash: deriveProtocolHash('ChallengeDomainHash', {
+        referenceOracleCommitHash: deriveCanonicalObjectHash({
+            objectType: 'LattigoReferenceOracleRecord',
             payload: commitRecord,
             purpose: 'lattigo-reference-oracle-commit-v1',
         }),
-        referenceOracleContainerHash: deriveProtocolHash(
-            'ChallengeDomainHash',
-            {
-                payload: containerRecord,
-                purpose: 'lattigo-reference-oracle-container-v1',
-            },
-        ),
-        referenceOracleCommandHash: deriveProtocolHash('ChallengeDomainHash', {
+        referenceOracleContainerHash: deriveCanonicalObjectHash({
+            objectType: 'LattigoReferenceOracleRecord',
+            payload: containerRecord,
+            purpose: 'lattigo-reference-oracle-container-v1',
+        }),
+        referenceOracleCommandHash: deriveCanonicalObjectHash({
+            objectType: 'LattigoReferenceOracleRecord',
             payload: commandRecord,
             purpose: 'lattigo-reference-oracle-command-v1',
         }),
-        referenceOracleVectorRoot: deriveProtocolHash('ChallengeDomainHash', {
+        referenceOracleVectorRoot: deriveCanonicalObjectHash({
+            objectType: 'LattigoReferenceOracleRecord',
             payload: vectorRecord,
             purpose: 'lattigo-reference-oracle-vector-root-v1',
         }),
-        referenceOracleParametersHash: deriveProtocolHash(
-            'ChallengeDomainHash',
-            {
-                payload: parametersRecord,
-                purpose: 'lattigo-reference-oracle-parameters-v1',
-            },
-        ),
+        referenceOracleParametersHash: deriveCanonicalObjectHash({
+            objectType: 'LattigoReferenceOracleRecord',
+            payload: parametersRecord,
+            purpose: 'lattigo-reference-oracle-parameters-v1',
+        }),
         records: {
             commitRecord,
             containerRecord,

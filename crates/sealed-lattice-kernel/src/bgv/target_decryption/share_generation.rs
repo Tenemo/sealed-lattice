@@ -24,7 +24,7 @@ pub(super) fn generate_target_decryption_share(
     let target_order_partials =
         partial_decryption_by_limb(&target_ciphertexts.target_order, &secret_share)?;
     let payload = share_payload(level, &target_id_partials, &target_order_partials)?;
-    let share_root = derive_protocol_hash("BgvTargetDecryptionShareRoot", &payload)?;
+    let share_root = derive_canonical_object_hash(&payload)?;
     let record_hash_input = share_record_hash_input(
         setup_binding,
         target_accepted,
@@ -33,8 +33,7 @@ pub(super) fn generate_target_decryption_share(
         participant,
         &share_root,
     );
-    let target_decryption_share_hash =
-        derive_protocol_hash("BgvTargetDecryptionShareHash", &record_hash_input)?;
+    let target_decryption_share_hash = derive_canonical_object_hash(&record_hash_input)?;
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionShare",

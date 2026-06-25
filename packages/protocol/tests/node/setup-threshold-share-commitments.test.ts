@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -245,10 +245,7 @@ describe('threshold-share commitment derivation', () => {
         const { recipientCommitmentRoot, ...firstRecipientWithoutRoot } =
             firstRecipient;
         expect(recipientCommitmentRoot).toBe(
-            deriveProtocolHash(
-                'ThresholdShareCommitmentRoot',
-                firstRecipientWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(firstRecipientWithoutRoot),
         );
     });
 

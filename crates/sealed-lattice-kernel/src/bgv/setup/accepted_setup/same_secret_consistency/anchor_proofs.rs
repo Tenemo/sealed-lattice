@@ -1,7 +1,9 @@
 use super::accessors::*;
+
 use super::family_binding::*;
 use super::proof_transport::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -221,7 +223,7 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
         .as_object_mut()
         .expect("same-secret proof set object was checked")
         .remove("sameSecretProofSetRoot");
-    let expected_root = derive_protocol_hash("SameSecretProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if proof_set_root != expected_root {
         return Ok(Some(same_secret_proof_refusal(
             "sameSecretProofSetRootMismatch",
@@ -395,7 +397,7 @@ fn verify_same_secret_anchor_proof_record(
         .as_object_mut()
         .expect("same-secret proof record object was checked")
         .remove("sameSecretProofRoot");
-    let expected_root = derive_protocol_hash("SameSecretProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if proof_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

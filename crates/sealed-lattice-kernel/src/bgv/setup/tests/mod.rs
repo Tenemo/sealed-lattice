@@ -47,7 +47,7 @@ use crate::bgv::evaluator::{
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
 use crate::bgv::ntt::forward_negacyclic_ntt;
 use crate::bgv::parameters::PLAINTEXT_MODULUS;
-use crate::hashing::{derive_protocol_hash, hash512};
+use crate::hashing::{derive_canonical_object_hash, hash512};
 use std::sync::OnceLock;
 
 mod accepted_setup;
@@ -63,7 +63,7 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "f2cfb616ac70044921b2b5a2fd3e61f112bc83886e08a80ac5df5adabe814c5d5b42025b370e7a40a1635aacc8a0b59e691df460661e0fe4b786253165766d75";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "08424172486182b3c80ba5b7446670602a878951ee2cd946f8b454e6e6cceb2acab0866d4fe2a9f748fe55e0867d67826d9a24bab8731434006c4d63c6fa10fa";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -75,17 +75,14 @@ static PASSIVE_SETUP_ROTATION_PUBLIC_CONTEXT: OnceLock<EvaluatorContext> = OnceL
 fn request() -> serde_json::Value {
     serde_json::json!({
         "ceremonyId": "ceremony-main",
-        "manifestHash": derive_protocol_hash(
-            "ElectionManifestHash",
-            &serde_json::json!({ "manifest": "passive-bgv-setup-test" }),
+        "manifestHash": derive_canonical_object_hash(
+            &serde_json::json!({ "objectType": "ElectionManifestHash", "manifest": "passive-bgv-setup-test" }),
         ).expect("manifest hash"),
-        "rosterHash": derive_protocol_hash(
-            "RosterHash",
-            &serde_json::json!({ "roster": "passive-bgv-setup-test" }),
+        "rosterHash": derive_canonical_object_hash(
+            &serde_json::json!({ "objectType": "RosterHash", "roster": "passive-bgv-setup-test" }),
         ).expect("roster hash"),
-        "thresholdParametersHash": derive_protocol_hash(
-            "ThresholdParametersHash",
-            &serde_json::json!({ "threshold": "passive-bgv-setup-test" }),
+        "thresholdParametersHash": derive_canonical_object_hash(
+            &serde_json::json!({ "objectType": "ThresholdParametersHash", "threshold": "passive-bgv-setup-test" }),
         ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
@@ -111,10 +108,8 @@ fn rebind_setup_package_hash(package: &mut serde_json::Value) {
         .as_object_mut()
         .expect("setup package must be an object")
         .remove("setupPackageHash");
-    package["setupPackageHash"] = serde_json::json!(
-        derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)
-            .expect("setup package hash")
-    );
+    package["setupPackageHash"] =
+        serde_json::json!(derive_canonical_object_hash(&hash_input).expect("setup package hash"));
 }
 
 fn valid_hash(fill: char) -> String {
@@ -259,8 +254,7 @@ fn rebind_public_evaluation_key_material_hash(material: &mut serde_json::Value) 
         .expect("public evaluation-key material must be an object")
         .remove("publicEvaluationKeyMaterialHash");
     material["publicEvaluationKeyMaterialHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", material)
-            .expect("public evaluation-key material hash")
+        derive_canonical_object_hash(material).expect("public evaluation-key material hash")
     );
 }
 

@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     PollSpec,
     PollSpecValidation,
@@ -47,7 +47,8 @@ const normalizeRosterBound = (value: unknown, defaultValue: number): number =>
     typeof value === 'number' ? value : defaultValue;
 
 export const derivePollSpecHash = (pollSpec: PollSpec): ProtocolHash =>
-    deriveProtocolHash('PollSpecHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'PollSpec',
         maxRosterSize: pollSpec.maxRosterSize,
         minRosterSize: pollSpec.minRosterSize,
         options: pollSpec.options,

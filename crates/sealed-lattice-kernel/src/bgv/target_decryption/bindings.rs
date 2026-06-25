@@ -109,29 +109,26 @@ pub(super) fn read_target_accepted_binding(
         &setup_binding.target_decryption_parameters_hash,
         "target decryption parameters hash",
     )?;
-    let expected_record_hash = derive_protocol_hash(
-        "TargetAcceptedRecordHash",
-        &json!({
-            "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
-            "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
-            "ceremonyId": string_at_path(record, &["ceremonyId"])?,
-            "electionManifestHash": hash_at_path(record, &["electionManifestHash"])?,
-            "evaluatorReplayParametersHash": hash_at_path(record, &["evaluatorReplayParametersHash"])?,
-            "evaluatorReplayRecordHash": hash_at_path(record, &["evaluatorReplayRecordHash"])?,
-            "objectType": string_at_path(record, &["objectType"])?,
-            "objectVersion": unsigned_at_path(record, &["objectVersion"])?,
-            "organizerIdentity": string_at_path(record, &["organizerIdentity"])?,
-            "targetBasisHash": hash_at_path(record, &["targetBasisHash"])?,
-            "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
-            "targetContextHash": hash_at_path(record, &["targetContextHash"])?,
-            "targetDecryptionParametersHash": hash_at_path(record, &["targetDecryptionParametersHash"])?,
-            "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
-            "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
-            "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
-            "targetPreimageHash": hash_at_path(record, &["targetPreimageHash"])?,
-            "targetProposalHash": hash_at_path(record, &["targetProposalHash"])?,
-        }),
-    )?;
+    let expected_record_hash = derive_canonical_object_hash(&json!({
+        "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
+        "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
+        "ceremonyId": string_at_path(record, &["ceremonyId"])?,
+        "electionManifestHash": hash_at_path(record, &["electionManifestHash"])?,
+        "evaluatorReplayParametersHash": hash_at_path(record, &["evaluatorReplayParametersHash"])?,
+        "evaluatorReplayRecordHash": hash_at_path(record, &["evaluatorReplayRecordHash"])?,
+        "objectType": string_at_path(record, &["objectType"])?,
+        "objectVersion": unsigned_at_path(record, &["objectVersion"])?,
+        "organizerIdentity": string_at_path(record, &["organizerIdentity"])?,
+        "targetBasisHash": hash_at_path(record, &["targetBasisHash"])?,
+        "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
+        "targetContextHash": hash_at_path(record, &["targetContextHash"])?,
+        "targetDecryptionParametersHash": hash_at_path(record, &["targetDecryptionParametersHash"])?,
+        "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
+        "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
+        "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
+        "targetPreimageHash": hash_at_path(record, &["targetPreimageHash"])?,
+        "targetProposalHash": hash_at_path(record, &["targetProposalHash"])?,
+    }))?;
     compare_hash_field(
         record,
         "targetAcceptedRecordHash",
@@ -224,7 +221,7 @@ pub(super) fn read_target_share_parameters(
         "minimumSharesForInterpolation": minimum_shares_for_interpolation,
         "decryptionShareQuorum": decryption_share_quorum,
     });
-    let hash = derive_protocol_hash("TargetDecryptionShareParametersHash", &hash_input)?;
+    let hash = derive_canonical_object_hash(&hash_input)?;
     compare_hash_field(
         value,
         "targetShareParametersHash",

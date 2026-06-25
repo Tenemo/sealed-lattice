@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 import type {
     BgvPassiveSetupPackage,
@@ -170,13 +170,16 @@ export const createDirectBallotSetupPackage = (
 ): BgvPassiveSetupPackage =>
     kernel.generateBgvPassiveSetup({
         ceremonyId: 'direct-encrypted-ballot-node-wasm-ceremony',
-        manifestHash: deriveProtocolHash('ElectionManifestHash', {
+        manifestHash: deriveCanonicalObjectHash({
+            objectType: 'ElectionManifestHash',
             manifest: 'direct encrypted ballot node wasm smoke',
         }),
-        rosterHash: deriveProtocolHash('RosterHash', {
+        rosterHash: deriveCanonicalObjectHash({
+            objectType: 'RosterHash',
             roster: 'direct encrypted ballot node wasm smoke',
         }),
-        thresholdParametersHash: deriveProtocolHash('ThresholdParametersHash', {
+        thresholdParametersHash: deriveCanonicalObjectHash({
+            objectType: 'ThresholdParametersHash',
             threshold: 'direct encrypted ballot node wasm smoke',
         }),
         participants: [
@@ -200,7 +203,8 @@ export const createDirectBallotSetupPackage = (
     });
 
 export const directBallotActionContextHash = (): string =>
-    deriveProtocolHash('ActionContextHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ActionContextHash',
         action: 'direct encrypted ballot node wasm smoke',
     });
 
@@ -231,7 +235,8 @@ export const createDirectBallotInputs = (
         { length: ballotCount },
         (_unusedBallot, ballotIndex) => ({
             voterIdentity: `voter-node-wasm-${String(ballotIndex + 1).padStart(2, '0')}`,
-            actionContextHash: deriveProtocolHash('ActionContextHash', {
+            actionContextHash: deriveCanonicalObjectHash({
+                objectType: 'ActionContextHash',
                 action: 'direct encrypted ballot node wasm smoke',
                 ballotIndex,
             }),

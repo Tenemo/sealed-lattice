@@ -13,9 +13,8 @@ fn direct_encrypted_ballot_command_reports_current_proof_status() {
         "ballots": [
             {
                 "voterIdentity": "voter-1",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot test" }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({ "objectType": "ActionContextHash", "action": "direct encrypted ballot test" }),
                 ).expect("action hash"),
                 "scores": [
                     10, 9, 8, 7, 6,

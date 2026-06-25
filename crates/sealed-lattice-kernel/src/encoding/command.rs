@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
@@ -8,7 +10,7 @@ enum TranscriptCoreCommand {
     AnalyzeCanonicalObject,
     ComputeChunkRoot,
     HashRaw,
-    DeriveProtocolHash,
+    DeriveCanonicalObjectHash,
     InterpolateShamirConstantTerm,
     EvaluatePlaintextComparison,
     VerifyFixture,
@@ -156,8 +158,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
             }))
         }
-        TranscriptCoreCommand::DeriveProtocolHash => {
-            let namespace = read_string_field(&request, "namespace")?;
+        TranscriptCoreCommand::DeriveCanonicalObjectHash => {
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
@@ -166,7 +167,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
             })?;
 
             Ok(json!({
-                "protocolHash": derive_protocol_hash(namespace, value)?,
+                "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
         }
         TranscriptCoreCommand::InterpolateShamirConstantTerm => {
@@ -358,18 +359,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
-}
-
-fn read_string_field<'a>(request: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    request
-        .get(field_name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{field_name} must be a string"),
-            )
-        })
 }
 
 fn read_u64_field(request: &Value, field_name: &str) -> CanonicalResult<u64> {

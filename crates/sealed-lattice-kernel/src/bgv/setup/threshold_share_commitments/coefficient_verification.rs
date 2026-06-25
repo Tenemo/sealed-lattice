@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Clone)]
 pub(super) struct SourceTrusteeCommitmentBinding {
     pub(super) source_trustee_identity: String,
@@ -145,8 +147,7 @@ fn verify_source_trustee_commitment_record(
         .as_object_mut()
         .expect("source trustee commitment record object was checked")
         .remove("sourceTrusteeCommitmentRoot");
-    let expected_source_trustee_commitment_root =
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_source_trustee_commitment_root = derive_canonical_object_hash(&root_input)?;
     if source_trustee_commitment_root != expected_source_trustee_commitment_root {
         return Err(invalid_threshold_commitment_input(
             "sourceTrusteeCommitmentRoot does not match the canonical source trustee coefficient commitment record",

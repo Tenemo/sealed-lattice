@@ -78,7 +78,7 @@ async function buildAcceptedShapedSetupPackage(
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
         rosterHash: collectiveSetupRosterHash((input) =>
-            kernel.deriveProtocolHash(input),
+            kernel.deriveCanonicalObjectHash(input),
         ),
         setupParametersHash: setupParameters.setupParametersHash,
         setupEpoch: 'setup-epoch-1',

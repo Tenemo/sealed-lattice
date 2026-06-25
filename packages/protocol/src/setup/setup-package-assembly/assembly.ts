@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { resolveThresholdShareCommitments, validateInput } from './bindings.js';
 import {
@@ -131,8 +131,7 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
 
     return {
         ...packageWithoutHash,
-        setupPackageHash: deriveProtocolHash(
-            'SetupPackageHash',
+        setupPackageHash: deriveCanonicalObjectHash(
             setupPackageHashInput(packageWithoutHash),
         ),
     } satisfies SetupPackage;

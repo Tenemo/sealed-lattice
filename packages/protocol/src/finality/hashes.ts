@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ConflictingHeadEvidence,
     ProtocolHash,
@@ -15,7 +15,7 @@ import { compareCanonicalStrings } from '../common/verification-helpers.js';
 export const deriveWitnessCheckpointHash = (
     checkpoint: Omit<WitnessCheckpoint, 'checkpointHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('WitnessCheckpointHash', {
+    deriveCanonicalObjectHash({
         ceremonyId: checkpoint.ceremonyId,
         objectType: checkpoint.objectType,
         objectVersion: checkpoint.objectVersion,
@@ -30,7 +30,8 @@ export const deriveWitnessCheckpointHash = (
 export const deriveTargetProposalHash = (
     proposal: Omit<TargetProposal, 'targetProposalHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('TargetProposalHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'TargetProposal',
         ceremonyId: proposal.ceremonyId,
         electionManifestHash: proposal.electionManifestHash,
         encryptedBallotAggregateHash: proposal.encryptedBallotAggregateHash,
@@ -48,7 +49,7 @@ export const deriveTargetProposalHash = (
 export const deriveTargetFinalityCheckpointHash = (
     checkpoint: Omit<TargetFinalityCheckpoint, 'targetFinalityCheckpointHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('TargetFinalityCheckpointHash', {
+    deriveCanonicalObjectHash({
         boardPolicyHash: checkpoint.boardPolicyHash,
         ceremonyId: checkpoint.ceremonyId,
         electionManifestHash: checkpoint.electionManifestHash,
@@ -72,7 +73,8 @@ export const deriveTargetFinalityCheckpointHash = (
 export const deriveWitnessPolicyHash = (
     policy: Omit<WitnessPolicy, 'witnessPolicyHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('WitnessPolicyHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'WitnessPolicy',
         totalWitnesses: policy.totalWitnesses,
         witnessIdentities: [...policy.witnessIdentities].sort(
             compareCanonicalStrings,
@@ -83,7 +85,8 @@ export const deriveWitnessPolicyHash = (
 export const deriveTargetFinalityPolicyHash = (
     policy: Omit<TargetFinalityPolicy, 'targetFinalityPolicyHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('TargetFinalityPolicyHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'TargetFinalityPolicy',
         targetFinalityScope: policy.targetFinalityScope,
         totalWitnesses: policy.totalWitnesses,
         witnessQuorum: policy.witnessQuorum,
@@ -92,7 +95,7 @@ export const deriveTargetFinalityPolicyHash = (
 export const deriveTargetFinalityRecordHash = (
     record: Omit<TargetFinalityRecord, 'targetFinalityRecordHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('TargetFinalityRecordHash', {
+    deriveCanonicalObjectHash({
         ceremonyId: record.ceremonyId,
         inclusionProof: record.inclusionProof,
         objectType: record.objectType,
@@ -111,13 +114,13 @@ export const deriveTargetFinalityRecordHash = (
 export const deriveWitnessEquivocationEvidenceHash = (
     evidence: Omit<ConflictingHeadEvidence, 'evidenceHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('WitnessEquivocationEvidenceHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'WitnessEquivocationEvidence',
         boardPolicyHash: evidence.boardPolicyHash,
         ceremonyId: evidence.ceremonyId,
         equivocatingWitnessIdentities:
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadHash: evidence.leftBoardHeadHash,
-        purpose: 'witness-equivocation-evidence-v1',
         rightBoardHeadHash: evidence.rightBoardHeadHash,
         targetFinalityScope: evidence.targetFinalityScope ?? null,
     });

@@ -377,8 +377,7 @@ describe('accepted setup public package API in Node', () => {
         };
         const trusteeEvaluationKeyProofs = {
             ...trusteeEvaluationKeyProofsWithoutRoot,
-            trusteeEvaluationKeyProofSetRoot: kernel.deriveProtocolHash({
-                namespace: 'TrusteeEvaluationKeyProofSetRoot',
+            trusteeEvaluationKeyProofSetRoot: kernel.deriveCanonicalObjectHash({
                 value: trusteeEvaluationKeyProofsWithoutRoot,
             }),
         };
@@ -618,8 +617,7 @@ describe('accepted setup public package API in Node', () => {
             phaseTranscript: phaseTranscriptFixture(kernel, setupContext),
             commonRandomness: {
                 ...commonRandomnessWithoutRoot,
-                commonRandomnessRoot: kernel.deriveProtocolHash({
-                    namespace: 'SetupCommonRandomnessRoot',
+                commonRandomnessRoot: kernel.deriveCanonicalObjectHash({
                     value: commonRandomnessWithoutRoot,
                 }),
             },
@@ -787,8 +785,7 @@ describe('accepted setup public package API in Node', () => {
                 .thresholdShareCommitmentRoot,
         ).toMatch(/^[0-9a-f]{128}$/u);
         expect(setupPackageHash).toBe(
-            kernel.deriveProtocolHash({
-                namespace: 'SetupPackageHash',
+            kernel.deriveCanonicalObjectHash({
                 value: setupPackageHashInput,
             }),
         );

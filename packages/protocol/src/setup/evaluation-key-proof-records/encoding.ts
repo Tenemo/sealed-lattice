@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
@@ -252,7 +252,7 @@ export const evaluationKeyShareComponentVectorRoot = (
     ringDegree: number,
     componentVectors: readonly JsonRecord[],
 ): ProtocolHash =>
-    deriveProtocolHash('EvaluationKeyShareComponentVectorRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentVectorSet',
         objectVersion: 1,
         proofFamily,
@@ -317,21 +317,17 @@ export const evaluationKeyShareComponentMaterialTransportHashes = (
             chunk,
         ),
     );
-    const chunkRoot = deriveProtocolHash(
-        'EvaluationKeyShareComponentMaterialChunkRoot',
-        {
-            objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
-            objectVersion: 1,
-            proofFamily,
-            keySwitchMaterialEncoding:
-                evaluationKeyShareComponentMaterialEncoding,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        },
-    );
+    const chunkRoot = deriveCanonicalObjectHash({
+        objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
+        objectVersion: 1,
+        proofFamily,
+        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        chunkCount: chunkHashes.length,
+        totalByteLength,
+        chunkHashes,
+        fullObjectHash,
+    });
 
     return {
         fullObjectHash,
@@ -349,7 +345,7 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
     level: number,
     transportHashes: ComponentMaterialTransportHashes,
 ): ProtocolHash =>
-    deriveProtocolHash('EvaluationKeyShareComponentMaterialRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialReference',
         objectVersion: 1,
         proofFamily,

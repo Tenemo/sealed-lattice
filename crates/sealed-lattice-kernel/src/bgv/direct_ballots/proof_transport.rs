@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn chunk_count_for_bytes(
     byte_count: usize,
     chunk_size_bytes: usize,
@@ -159,26 +161,23 @@ pub(super) fn direct_ballot_public_proof_transport_hash(
     )?;
     let proof_parameters_hash = direct_ballot_relation_proof_parameters_hash()?;
 
-    derive_protocol_hash(
-        "ProofBytesHash",
-        &json!({
-            "objectType": "DirectEncryptedBallotProofTransport",
-            "objectVersion": 1,
-            "proofByteLength": input.proof_byte_length,
-            "chunkSizeBytes": input.chunk_size_bytes,
-            "chunkCount": input.chunk_count,
-            "chunkHashes": input.chunk_hashes,
-            "chunkMerkleRoot": input.chunk_merkle_root,
-            "fullProofHash": input.proof_bytes_hash,
-            "statementHash": input.statement_hash,
-            "ciphertextRoot": input.ballot.ciphertext_root,
-            "voterIdentity": input.ballot.input.voter_identity,
-            "actionContextHash": input.ballot.input.action_context_hash,
-            "bgvParametersHash": bgv_parameters_hash()?,
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "proofParametersHash": proof_parameters_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "DirectEncryptedBallotProofTransport",
+        "objectVersion": 1,
+        "proofByteLength": input.proof_byte_length,
+        "chunkSizeBytes": input.chunk_size_bytes,
+        "chunkCount": input.chunk_count,
+        "chunkHashes": input.chunk_hashes,
+        "chunkMerkleRoot": input.chunk_merkle_root,
+        "fullProofHash": input.proof_bytes_hash,
+        "statementHash": input.statement_hash,
+        "ciphertextRoot": input.ballot.ciphertext_root,
+        "voterIdentity": input.ballot.input.voter_identity,
+        "actionContextHash": input.ballot.input.action_context_hash,
+        "bgvParametersHash": bgv_parameters_hash()?,
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "proofParametersHash": proof_parameters_hash,
+    }))
 }
 
 pub(super) fn verify_direct_ballot_public_proof_transport(

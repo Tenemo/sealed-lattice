@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -316,10 +316,7 @@ const assertRecordHashMatches = (
         void removedCommitHash;
         void removedSignatureEnvelopeHash;
         void removedSignatureEnvelope;
-        const expectedCommitHash = deriveProtocolHash(
-            'CommonRandomnessCommitHash',
-            hashInput,
-        );
+        const expectedCommitHash = deriveCanonicalObjectHash(hashInput);
         if (record.commitHash !== expectedCommitHash) {
             throw new Error(
                 `${objectPath}.commitHash does not match the canonical payload.`,
@@ -338,10 +335,7 @@ const assertRecordHashMatches = (
     void removedRevealHash;
     void removedSignatureEnvelopeHash;
     void removedSignatureEnvelope;
-    const expectedRevealHash = deriveProtocolHash(
-        'CommonRandomnessRevealHash',
-        hashInput,
-    );
+    const expectedRevealHash = deriveCanonicalObjectHash(hashInput);
     if (record.revealHash !== expectedRevealHash) {
         throw new Error(
             `${objectPath}.revealHash does not match the canonical payload.`,
@@ -457,8 +451,7 @@ const assertPublicDerivationsMatchKernelShape = (
         publicDerivations.publicDerivationRoot,
         'publicDerivations.publicDerivationRoot',
     );
-    const expectedPublicDerivationRoot = deriveProtocolHash(
-        'SetupPublicDerivationRoot',
+    const expectedPublicDerivationRoot = deriveCanonicalObjectHash(
         withoutHashField(publicDerivations, 'publicDerivationRoot'),
     );
     if (
@@ -478,7 +471,8 @@ const commonRandomnessSignatureContextHash = (
     payload: JsonRecord,
     objectRoot: ProtocolHash,
 ): ProtocolHash =>
-    deriveProtocolHash(`${objectType}Hash`, {
+    deriveCanonicalObjectHash({
+        objectType: `${objectType}SignatureContext`,
         purpose,
         ceremonyId: payload.ceremonyId,
         manifestHash: payload.manifestHash,
@@ -539,10 +533,7 @@ export const createCommonRandomnessReveal = async (
         ...commonRandomnessParticipantFields(input),
         revealHex: input.revealHex,
     } as const satisfies JsonRecord;
-    const revealHash = deriveProtocolHash(
-        'CommonRandomnessRevealHash',
-        revealWithoutHash,
-    );
+    const revealHash = deriveCanonicalObjectHash(revealWithoutHash);
     const revealContextHash = commonRandomnessSignatureContextHash(
         'CommonRandomnessReveal',
         'common-randomness-reveal-signature-context',
@@ -592,10 +583,7 @@ export const createCommonRandomnessCommit = async (
         ...commonRandomnessParticipantFields(input),
         revealHash: input.revealHash,
     } as const satisfies JsonRecord;
-    const commitHash = deriveProtocolHash(
-        'CommonRandomnessCommitHash',
-        commitWithoutHash,
-    );
+    const commitHash = deriveCanonicalObjectHash(commitWithoutHash);
     const commitContextHash = commonRandomnessSignatureContextHash(
         'CommonRandomnessCommit',
         'common-randomness-commit-signature-context',
@@ -689,17 +677,15 @@ export const createSetupCommonRandomness = (
         (revealRecord) => revealRecord.revealHash,
     );
     // Commit-then-reveal coin flip: the public matrix seed is the joint digest of all reveal hashes in roster order, so no single trustee can bias the derived CRS after seeing others' reveals.
-    const publicMatrixSeedHash = deriveProtocolHash(
-        'SetupPublicMatrixSeedHash',
-        {
-            ceremonyId: input.setupContext.ceremonyId,
-            manifestHash: input.setupContext.manifestHash,
-            rosterHash: input.setupContext.rosterHash,
-            setupParametersHash: input.setupContext.setupParametersHash,
-            setupEpoch: input.setupContext.setupEpoch,
-            orderedRevealHashes,
-        },
-    );
+    const publicMatrixSeedHash = deriveCanonicalObjectHash({
+        objectType: 'SetupPublicMatrixSeed',
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        rosterHash: input.setupContext.rosterHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
+        setupEpoch: input.setupContext.setupEpoch,
+        orderedRevealHashes,
+    });
     const publicDerivations =
         input.derivePublicDerivations(publicMatrixSeedHash);
     assertPublicDerivationsMatchKernelShape(
@@ -719,8 +705,7 @@ export const createSetupCommonRandomness = (
 
     return {
         ...commonRandomnessWithoutRoot,
-        commonRandomnessRoot: deriveProtocolHash(
-            'SetupCommonRandomnessRoot',
+        commonRandomnessRoot: deriveCanonicalObjectHash(
             commonRandomnessWithoutRoot,
         ),
     } satisfies SetupCommonRandomness;

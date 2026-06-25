@@ -2,6 +2,8 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn collective_public_key_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -88,8 +90,7 @@ pub(in super::super) fn collective_public_key_object(
         "aggregateCoefficientVectorsByLimb": aggregate_limbs,
     });
     collective_public_key["collectivePublicKeyRoot"] = serde_json::json!(
-        derive_protocol_hash("CollectivePublicKeyRoot", &collective_public_key)
-            .expect("collective public-key root")
+        derive_canonical_object_hash(&collective_public_key).expect("collective public-key root")
     );
 
     collective_public_key
@@ -206,8 +207,7 @@ pub(in super::super) fn public_key_share_material_object(
             "shareCoefficientVectorsByLimb": limbs,
         });
         material_record["publicKeyShareMaterialRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareRoot", &material_record)
-                .expect("public-key share material root")
+            derive_canonical_object_hash(&material_record).expect("public-key share material root")
         );
         material_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -237,8 +237,7 @@ pub(in super::super) fn public_key_share_material_object(
         "shareMaterialRecords": material_records,
     });
     material_set["publicKeyShareMaterialSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareRoot", &material_set)
-            .expect("public-key share material set root")
+        derive_canonical_object_hash(&material_set).expect("public-key share material set root")
     );
 
     material_set
@@ -456,13 +455,11 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
         };
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "PublicKeyShareProofRoot",
-            &serde_json::json!({
-                "fixture": "public-key-share-succinct-proof-randomness",
-                "trusteeRosterPosition": trustee_roster_position,
-            }),
-        )
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PublicKeyShareProofRoot",
+            "fixture": "public-key-share-succinct-proof-randomness",
+            "trusteeRosterPosition": trustee_roster_position,
+        }))
         .expect("public-key share succinct proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
         let proof_bytes = checkpointed_anchor_proof_bytes(
@@ -502,7 +499,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             "proofBytesHex": to_hex(&proof_bytes),
         });
         proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
+            derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
         let proof_root_entry = serde_json::json!({
@@ -549,8 +546,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "proofRecords": proof_records,
     });
     proof_set["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareProofRoot", &proof_set)
-            .expect("public-key share succinct proof set root")
+        derive_canonical_object_hash(&proof_set).expect("public-key share succinct proof set root")
     );
 
     proof_set

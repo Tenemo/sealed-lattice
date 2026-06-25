@@ -7,6 +7,7 @@ use self::evaluation_keys::{
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
 use crate::bgv::parameters::SPECIAL_PRIME;
+use crate::hashing::derive_canonical_object_hash;
 use num_bigint::BigUint;
 
 #[allow(clippy::too_many_arguments)]
@@ -34,10 +35,8 @@ pub(super) fn setup_certificates(
     let rotation_key_count = rotation_key_roots.len();
     let public_samples = public_rlwe_samples_by_basis(input.participants.len(), rotation_key_count);
     let evaluation_key_size_certificate = evaluation_key_size_certificate(evaluation_keys)?;
-    let evaluation_key_size_parameters_hash = derive_protocol_hash(
-        "EvaluationKeySizeParametersHash",
-        &evaluation_key_size_certificate,
-    )?;
+    let evaluation_key_size_parameters_hash =
+        derive_canonical_object_hash(&evaluation_key_size_certificate)?;
     let evaluation_key_streaming_commitment = evaluation_key_streaming_commitment(evaluation_keys)?;
     let target_threshold_decryptability_certificate =
         target_threshold_decryptability_certificate_for_setup_parts(
@@ -47,10 +46,8 @@ pub(super) fn setup_certificates(
             target_decryption_parameters_hash,
             target_decryption_parameters_binding_hash,
         )?;
-    let target_threshold_decryptability_certificate_hash = derive_protocol_hash(
-        "TargetThresholdDecryptabilityCertificateHash",
-        &target_threshold_decryptability_certificate,
-    )?;
+    let target_threshold_decryptability_certificate_hash =
+        derive_canonical_object_hash(&target_threshold_decryptability_certificate)?;
     let setup_parameter_certificate = json!({
         "objectType": "BgvSetupParameterCertificate",
         "objectVersion": 1,
@@ -75,10 +72,8 @@ pub(super) fn setup_certificates(
         "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         "targetThresholdDecryptabilityCertificateHash": target_threshold_decryptability_certificate_hash,
     });
-    let setup_parameter_certificate_hash = derive_protocol_hash(
-        "BGVSetupParameterCertificateHash",
-        &setup_parameter_certificate,
-    )?;
+    let setup_parameter_certificate_hash =
+        derive_canonical_object_hash(&setup_parameter_certificate)?;
 
     Ok(json!({
         "collectiveSecretDistributionCertificate": collective_secret_distribution_certificate,
@@ -206,6 +201,8 @@ pub(super) fn key_switch_decomposition_parameters() -> CanonicalResult<Value> {
 // safety boundaries and the target-decryption implementation notes.
 pub(super) fn target_decryption_parameters(bgv_parameters_hash: &str) -> CanonicalResult<Value> {
     Ok(json!({
+        "objectType": "TargetDecryptionParameters",
+        "objectVersion": 1,
         "bgvParametersHash": bgv_parameters_hash,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
         "asyncLagrangeTargetDirection": true,
@@ -313,10 +310,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "participantCount": unsigned_at_path(setup_inputs, &["participantCount"])?,
         "setupSeedHash": string_at_path(setup_inputs, &["setupSeedHash"])?,
     });
-    let evaluator_binding_context_hash = derive_protocol_hash(
-        "PassiveSetupEvaluatorBindingContextHash",
-        &evaluator_binding_context,
-    )?;
+    let evaluator_binding_context_hash = derive_canonical_object_hash(&evaluator_binding_context)?;
     let bgv_parameters_hash = bgv_parameters_hash()?;
     let comparison_input_derivation_record = json!({
         "objectType": "ComparisonInputDerivationCircuitBinding",
@@ -330,8 +324,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "objectVersion": 1,
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "selectedEvaluatorPath": "direct-encrypted-score-comparison-v1",
-        "comparisonInputDerivationCircuitHash": derive_protocol_hash(
-            "ComparisonInputDerivationCircuitHash",
+        "comparisonInputDerivationCircuitHash": derive_canonical_object_hash(
             &comparison_input_derivation_record,
         )?,
         "bgvParametersHash": &bgv_parameters_hash,
@@ -344,19 +337,14 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "bgvParametersHash": &bgv_parameters_hash,
     });
 
-    let comparison_input_derivation_circuit_hash = derive_protocol_hash(
-        "ComparisonInputDerivationCircuitHash",
-        &comparison_input_derivation_record,
-    )?;
-    let encrypted_comparison_input_hash = derive_protocol_hash(
-        "EncryptedComparisonInputHash",
-        &encrypted_comparison_input_record,
-    )?;
-    let encrypted_sparse_target_projection_hash = derive_protocol_hash(
-        "EncryptedSparseTargetProjectionHash",
-        &sparse_target_projection_record,
-    )?;
+    let comparison_input_derivation_circuit_hash =
+        derive_canonical_object_hash(&comparison_input_derivation_record)?;
+    let encrypted_comparison_input_hash =
+        derive_canonical_object_hash(&encrypted_comparison_input_record)?;
+    let encrypted_sparse_target_projection_hash =
+        derive_canonical_object_hash(&sparse_target_projection_record)?;
     let binding_record = json!({
+        "objectType": "PassiveSetupEvaluatorContextBinding",
         "evaluatorBindingContextHash": &evaluator_binding_context_hash,
         "bgvParametersHash": &bgv_parameters_hash,
         "comparisonInputDerivationCircuitHash": comparison_input_derivation_circuit_hash,
@@ -373,8 +361,7 @@ pub(super) fn passive_setup_evaluator_context_bindings(
         "encryptedComparisonInputHash": binding_record["encryptedComparisonInputHash"],
         "encryptedSparseTargetProjectionHash": binding_record["encryptedSparseTargetProjectionHash"],
         "targetLayoutHash": binding_record["targetLayoutHash"],
-        "passiveSetupEvaluatorContextBindingHash": derive_protocol_hash(
-            "EvaluatorReplayContextHash",
+        "passiveSetupEvaluatorContextBindingHash": derive_canonical_object_hash(
             &binding_record,
         )?,
     }))
@@ -383,21 +370,18 @@ pub(super) fn passive_setup_evaluator_context_bindings(
 pub(super) fn public_common_random_polynomial_root(
     input: &PassiveSetupInput,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "BGVPublicCommonRandomPolynomialRoot",
-        &json!({
-            "objectType": "BgvPublicCommonRandomPolynomial",
-            "objectVersion": 1,
-            "ceremonyId": input.ceremony_id,
-            "rosterHash": input.roster_hash,
-            "setupSeedHash": input.setup_seed_hash,
-            "level": DATA_PRIMES.len() - 1,
-            "coefficientCount": POLYNOMIAL_DEGREE,
-            "sampledResidues": sample_public_residues(
-                &input.setup_seed_hash,
-                "public-common-random-polynomial",
-                DATA_PRIMES[0],
-            ),
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "BgvPublicCommonRandomPolynomial",
+        "objectVersion": 1,
+        "ceremonyId": input.ceremony_id,
+        "rosterHash": input.roster_hash,
+        "setupSeedHash": input.setup_seed_hash,
+        "level": DATA_PRIMES.len() - 1,
+        "coefficientCount": POLYNOMIAL_DEGREE,
+        "sampledResidues": sample_public_residues(
+            &input.setup_seed_hash,
+            "public-common-random-polynomial",
+            DATA_PRIMES[0],
+        ),
+    }))
 }

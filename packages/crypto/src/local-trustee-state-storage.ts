@@ -4,7 +4,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson, hash512Hex } from './canonical-json.js';
-import { deriveProtocolHash } from './hashes.js';
+import { deriveCanonicalObjectHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -921,10 +921,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
               );
     const materialPlaintextJson = canonicalJson(input.materialPlaintext);
     const materialPlaintextBytes = textEncoder.encode(materialPlaintextJson);
-    const materialRoot = deriveProtocolHash(
-        'LocalTrusteeSetupStateRoot',
-        input.materialPlaintext,
-    );
+    const materialRoot = deriveCanonicalObjectHash(input.materialPlaintext);
     const associatedData = sealedMaterialAad(
         input.setupContext,
         input.materialClass,

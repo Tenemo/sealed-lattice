@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 // Build one key share's public component material so the trustee
 // evaluation-key relation holds: for digit j and limb l,
 // b = p * e_j - a_{j,l} (*) s + [l == j] * source_j, with the per-digit
@@ -255,19 +257,16 @@ pub(in super::super) fn relinearization_key_switch_seed_for_test(
     round: &str,
     level: u64,
 ) -> String {
-    derive_protocol_hash(
-        "RelinearizationKeyShareSeed",
-        &serde_json::json!({
-            "objectType": "RelinearizationKeySwitchPublicSampleSeed",
-            "objectVersion": 1,
-            "proofFamily": "relinearization-key-share",
-            "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
-            "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-            "relinearizationCrpRoot": schedule["relinearizationCrpRoot"],
-            "round": round,
-            "level": level,
-        }),
-    )
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "RelinearizationKeySwitchPublicSampleSeed",
+        "objectVersion": 1,
+        "proofFamily": "relinearization-key-share",
+        "keySwitchSampleScope": "shared-by-scheduled-level-and-round",
+        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+        "relinearizationCrpRoot": schedule["relinearizationCrpRoot"],
+        "round": round,
+        "level": level,
+    }))
     .expect("relinearization key-switch seed")
 }
 
@@ -276,20 +275,17 @@ pub(in super::super) fn galois_key_switch_seed_for_test(
     rotation: u64,
     level: u64,
 ) -> String {
-    derive_protocol_hash(
-        "GaloisKeyShareSeed",
-        &serde_json::json!({
-            "objectType": "GaloisKeySwitchPublicSampleSeed",
-            "objectVersion": 1,
-            "proofFamily": "galois-key-share",
-            "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
-            "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-            "galoisKeyCrpRoot": schedule["galoisKeyCrpRoot"],
-            "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
-            "rotation": rotation,
-            "level": level,
-        }),
-    )
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "GaloisKeySwitchPublicSampleSeed",
+        "objectVersion": 1,
+        "proofFamily": "galois-key-share",
+        "keySwitchSampleScope": "shared-by-scheduled-rotation-and-level",
+        "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+        "galoisKeyCrpRoot": schedule["galoisKeyCrpRoot"],
+        "requiredGaloisSetHash": schedule["requiredGaloisSetHash"],
+        "rotation": rotation,
+        "level": level,
+    }))
     .expect("Galois key-switch seed")
 }
 

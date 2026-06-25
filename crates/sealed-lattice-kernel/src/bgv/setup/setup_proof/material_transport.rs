@@ -995,19 +995,16 @@ fn setup_proof_material_chunk_manifest_root(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupProofChunkManifestRoot",
-        &json!({
-            "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
-            "objectVersion": 1,
-            "proofFamily": proof_family,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
+        "objectVersion": 1,
+        "proofFamily": proof_family,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
 }
 
 fn append_bytes_to_hasher(hasher: &mut Shake256, value: &[u8]) -> CanonicalResult<()> {

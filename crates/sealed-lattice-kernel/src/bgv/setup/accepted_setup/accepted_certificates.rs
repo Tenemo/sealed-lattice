@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 fn expected_relinearization_key_switch_component_polynomial_count() -> CanonicalResult<u64> {
     scheduled_relinearization_levels()?
         .into_iter()
@@ -133,10 +135,9 @@ fn setup_commitment_security_certificate_hash() -> CanonicalResult<String> {
 fn setup_commitment_security_certificate_hash_for_roster(
     roster: &super::AcceptedRosterParameters,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupCommitmentSecurityCertificateHash",
-        &setup_commitment_security_certificate_value_for_roster(roster)?,
-    )
+    derive_canonical_object_hash(&setup_commitment_security_certificate_value_for_roster(
+        roster,
+    )?)
 }
 
 pub(super) fn setup_commitment_security_certificate_with_hash_value() -> CanonicalResult<Value> {
@@ -408,10 +409,7 @@ pub(super) fn verify_setup_proof_accounting_certificate(
 }
 
 pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        SETUP_PROOF_ACCOUNTING_CERTIFICATE_HASH_NAMESPACE,
-        &setup_proof_accounting_certificate_value()?,
-    )
+    derive_canonical_object_hash(&setup_proof_accounting_certificate_value()?)
 }
 
 pub(super) fn setup_proof_accounting_certificate_with_hash_value() -> CanonicalResult<Value> {
@@ -542,10 +540,7 @@ pub(in crate::bgv::setup) fn setup_proof_accounting_certificate_value() -> Canon
 }
 
 fn setup_proof_record_binding_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        SETUP_PROOF_RECORD_BINDING_HASH_NAMESPACE,
-        &setup_proof_record_binding_value()?,
-    )
+    derive_canonical_object_hash(&setup_proof_record_binding_value()?)
 }
 
 fn setup_proof_accounting_certificate_refusal(
@@ -638,10 +633,7 @@ pub(super) fn setup_package_requires_setup_key_correctness_certificate(
 pub(in crate::bgv::setup) fn setup_key_correctness_certificate_hash(
     setup_package: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        SETUP_KEY_CORRECTNESS_CERTIFICATE_HASH_NAMESPACE,
-        &setup_key_correctness_certificate_value(setup_package)?,
-    )
+    derive_canonical_object_hash(&setup_key_correctness_certificate_value(setup_package)?)
 }
 
 pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
@@ -768,10 +760,9 @@ pub(super) fn verify_active_static_setup_theorem_certificate(
 pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_hash(
     setup_package: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_HASH_NAMESPACE,
-        &active_static_setup_theorem_certificate_value(setup_package)?,
-    )
+    derive_canonical_object_hash(&active_static_setup_theorem_certificate_value(
+        setup_package,
+    )?)
 }
 
 pub(in crate::bgv::setup) fn active_static_setup_theorem_certificate_value(
@@ -1047,10 +1038,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_hash() -> Canonica
 pub(in crate::bgv::setup) fn accepted_he_security_certificate_hash_for_roster(
     roster: &super::AcceptedRosterParameters,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "BGVHeSecurityCertificateHash",
-        &accepted_he_security_certificate_value_for_roster(roster)?,
-    )
+    derive_canonical_object_hash(&accepted_he_security_certificate_value_for_roster(roster)?)
 }
 
 pub(super) fn accepted_he_security_certificate_with_hash_value() -> CanonicalResult<Value> {

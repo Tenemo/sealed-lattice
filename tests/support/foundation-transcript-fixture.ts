@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
 } from '#packages/crypto/src/index';
 import {
@@ -323,12 +323,11 @@ const createFirstValidCandidate = (
     contextHash,
     deviceEpoch: 0,
     isByteIdenticalRetransmission,
-    objectHash: deriveProtocolHash('CiphertextRoot', {
+    objectHash: deriveFixtureHash('foundation-encrypted-ballot-shell', {
         actionSequence,
         boardPosition,
         boardSequence,
         participantIdentity,
-        purpose: 'foundation-encrypted-ballot-shell',
     }),
     objectType: 'EncryptedBallot',
     recoveryEpoch: 0,
@@ -365,14 +364,17 @@ export const createFoundationTranscriptFixture =
             rosterManifestTranscript.electionManifest.electionManifestHash,
             manifestHead.headHash,
         );
-        const firstValidContextHash = deriveProtocolHash('ActionContextHash', {
-            electionManifestHash:
-                rosterManifestTranscript.electionManifest.electionManifestHash,
-            purpose: 'foundation-first-valid-context',
-            rosterExternalAcceptanceHash:
-                rosterExternalAcceptance.acceptance
-                    .rosterExternalAcceptanceHash,
-        });
+        const firstValidContextHash = deriveFixtureHash(
+            'foundation-first-valid-context',
+            {
+                electionManifestHash:
+                    rosterManifestTranscript.electionManifest
+                        .electionManifestHash,
+                rosterExternalAcceptanceHash:
+                    rosterExternalAcceptance.acceptance
+                        .rosterExternalAcceptanceHash,
+            },
+        );
         const firstValidObjects = [
             createFirstValidCandidate(
                 'participant-2',
@@ -433,32 +435,32 @@ export const createFoundationTranscriptFixture =
                 electionManifestHash:
                     rosterManifestTranscript.electionManifest
                         .electionManifestHash,
-                encryptedBallotAggregateHash: deriveProtocolHash(
-                    'CiphertextRoot',
+                encryptedBallotAggregateHash: deriveFixtureHash(
+                    'foundation-encrypted-ballot-aggregate',
                     {
                         electionManifestHash:
                             rosterManifestTranscript.electionManifest
                                 .electionManifestHash,
-                        purpose: 'foundation-encrypted-ballot-aggregate',
                     },
                 ),
-                evaluatorReplayContextHash: deriveProtocolHash(
-                    'EvaluatorReplayContextHash',
+                evaluatorReplayContextHash: deriveFixtureHash(
+                    'foundation-evaluator-replay-context',
                     {
                         electionManifestHash:
                             rosterManifestTranscript.electionManifest
                                 .electionManifestHash,
-                        purpose: 'foundation-evaluator-replay-context',
                     },
                 ),
                 evaluatorReplayParametersHash:
                     manifestOpaqueBindings.evaluatorReplayParametersHash,
-                targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
-                    electionManifestHash:
-                        rosterManifestTranscript.electionManifest
-                            .electionManifestHash,
-                    purpose: 'foundation-target-ciphertext',
-                }),
+                targetCiphertextHash: deriveFixtureHash(
+                    'foundation-target-ciphertext',
+                    {
+                        electionManifestHash:
+                            rosterManifestTranscript.electionManifest
+                                .electionManifestHash,
+                    },
+                ),
                 targetFinalityPolicyHash:
                     manifestPolicyHashes.targetFinalityPolicyHash,
                 targetLayoutHash: manifestOpaqueBindings.targetLayoutHash,
@@ -502,12 +504,12 @@ export const createFoundationTranscriptFixture =
                 electionManifestHash:
                     rosterManifestTranscript.electionManifest
                         .electionManifestHash,
-                firstValidOrderHash: deriveProtocolHash('FirstValidOrderHash', {
+                firstValidOrderHash: deriveCanonicalObjectHash({
+                    objectType: 'FirstValidOrder',
                     orderedObjectHashes: [
                         firstValidObjects[1].objectHash,
                         firstValidObjects[0].objectHash,
                     ],
-                    purpose: 'first-valid-order-v1',
                     requiredContextHash: firstValidContextHash,
                     selectionPolicyHash:
                         manifestPolicyHashes.firstValidPolicyHash,

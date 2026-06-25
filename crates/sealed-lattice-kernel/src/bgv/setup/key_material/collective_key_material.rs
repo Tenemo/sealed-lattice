@@ -1,7 +1,8 @@
-﻿use super::*;
+use super::*;
 use crate::bgv::coefficient_codec::{
     coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
 };
+use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_COEFFICIENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/public-key-coefficient-vector-v1";
@@ -54,16 +55,13 @@ pub(in crate::bgv::setup) fn collective_public_key(
         "publicKeyCoefficientMaterialBinding": "public-coefficients-bound-in-setup-package-with-private-share-derivation-unexported",
         "participantCount": public_key_share_roots.len(),
     });
-    let collective_public_key_root =
-        derive_protocol_hash("CollectivePublicKeyRoot", &record_without_roots)?;
-    let bgv_public_key_root = derive_protocol_hash(
-        "BGVPublicKeyRoot",
-        &json!({
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
-            "bgvParametersHash": bgv_parameters_hash,
-        }),
-    )?;
+    let collective_public_key_root = derive_canonical_object_hash(&record_without_roots)?;
+    let bgv_public_key_root = derive_canonical_object_hash(&json!({
+        "objectType": "BgvPublicKeyRoot",
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "collectivePublicKeyCoefficientRoot": collective_public_key_coefficient_root,
+        "bgvParametersHash": bgv_parameters_hash,
+    }))?;
 
     Ok(json!({
         "record": record_without_roots,
@@ -157,7 +155,7 @@ pub(in crate::bgv::setup) fn collective_public_key_coefficients_from_table(
 pub(in crate::bgv::setup) fn collective_public_key_coefficient_root(
     coefficient_material: &Value,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash("BGVPublicKeyRoot", coefficient_material)
+    derive_canonical_object_hash(coefficient_material)
 }
 
 pub(in crate::bgv::setup) fn collective_public_key_coefficient_material(

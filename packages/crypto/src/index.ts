@@ -6,12 +6,7 @@ export {
     setupVssMaterialFullObjectHashHex,
 } from './canonical-json.js';
 export type { SetupVssMaterialFullObjectHasher } from './canonical-json.js';
-export {
-    deriveProtocolHash,
-    protocolHashNamespaceValues,
-    resolveProtocolHashDomain,
-} from './hashes.js';
-export type { ProtocolHashNamespace } from './hashes.js';
+export { deriveCanonicalObjectHash } from './hashes.js';
 export {
     deriveMlDsaPublicKeyHash,
     deriveProtocolSignatureHash,

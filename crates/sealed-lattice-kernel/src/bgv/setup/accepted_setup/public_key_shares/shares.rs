@@ -1,6 +1,8 @@
 use super::common::*;
+
 use super::proofs::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_public_key_shares(
     setup_package: &Value,
@@ -162,7 +164,7 @@ pub(in super::super) fn verify_public_key_shares(
         .as_object_mut()
         .expect("public-key share set object was checked")
         .remove("publicKeyShareSetRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_set_root != expected_root {
         return Ok(Some(public_key_share_refusal(
             "publicKeyShareSetRootMismatch",
@@ -317,7 +319,7 @@ fn verify_public_key_share_record(
         .as_object_mut()
         .expect("public-key share object was checked")
         .remove("publicKeyShareRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_root != expected_root {
         return Ok(Some(public_key_share_refusal(
             "publicKeyShareRootMismatch",

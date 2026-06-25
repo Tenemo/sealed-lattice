@@ -33,8 +33,7 @@ export function rebindCollectiveSetupPackageHash(
     setupPackage: JsonRecord,
 ): void {
     delete setupPackage.setupPackageHash;
-    setupPackage.setupPackageHash = kernel.deriveProtocolHash({
-        namespace: 'SetupPackageHash',
+    setupPackage.setupPackageHash = kernel.deriveCanonicalObjectHash({
         value: setupPackageHashInput(setupPackage),
     });
 }
@@ -92,9 +91,9 @@ export function acceptedSetupTransportCertificate(
     parameters: BgvCollectiveSetupParametersDescription,
     vssCoefficientCommitmentMaterial: JsonRecord,
 ): JsonRecord {
-    const vssObjectFullObjectHash = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportChunkManifestRoot',
+    const vssObjectFullObjectHash = kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'SetupTransportChunkManifestRoot',
             fixture: 'setup-transport-full-object-hash',
             totalByteLength: setupTransportTotalByteLength,
         },
@@ -102,17 +101,17 @@ export function acceptedSetupTransportCertificate(
     const chunkHashes = Array.from(
         { length: setupTransportChunkCount },
         (_unused, chunkIndex) =>
-            kernel.deriveProtocolHash({
-                namespace: 'SetupTransportChunkManifestRoot',
+            kernel.deriveCanonicalObjectHash({
                 value: {
+                    objectType: 'SetupTransportChunkManifestRoot',
                     fixture: 'setup-transport-chunk-hash',
                     chunkIndex,
                 },
             }),
     );
-    const vssObjectChunkRoot = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportChunkManifestRoot',
+    const vssObjectChunkRoot = kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'SetupTransportChunkManifestRoot',
             fixture: 'setup-transport-vss-object-chunk-root',
             totalByteLength: setupTransportTotalByteLength,
         },
@@ -136,8 +135,7 @@ export function acceptedSetupTransportCertificate(
     };
     // The certificate-level hashes are the verifier-recomputed aggregates over
     // the transported-object set.
-    const fullObjectHash = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportFullObjectSetHash',
+    const fullObjectHash = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'SetupTransportFullObjectSet',
             objectVersion: 1,
@@ -158,8 +156,7 @@ export function acceptedSetupTransportCertificate(
             chunkHashes,
         },
     });
-    const chunkRoot = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportChunkManifestRoot',
+    const chunkRoot = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'SetupTransportChunkManifest',
             objectVersion: 1,
@@ -194,8 +191,7 @@ export function acceptedSetupTransportCertificate(
 
     return {
         ...certificate,
-        setupTransportCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'SetupTransportCertificateHash',
+        setupTransportCertificateHash: kernel.deriveCanonicalObjectHash({
             value: certificate,
         }),
     };
@@ -314,9 +310,9 @@ export function acceptedActiveStaticSetupTheoremCertificate(
 
     return {
         ...certificate,
-        activeStaticSetupTheoremCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'ActiveStaticSetupTheoremCertificateHash',
-            value: certificate,
-        }),
+        activeStaticSetupTheoremCertificateHash:
+            kernel.deriveCanonicalObjectHash({
+                value: certificate,
+            }),
     };
 }

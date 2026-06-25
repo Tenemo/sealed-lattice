@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_commitment_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -395,16 +397,14 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
             tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
             signature_envelope["signatureBytesHex"] =
                 serde_json::json!(tampered_signature_bytes_hex);
-            let signature_envelope_hash = derive_protocol_hash(
-                "ProtocolSignatureEnvelopeHash",
-                &serde_json::json!({
-                    "profile": signature_envelope["profile"],
-                    "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-                    "publicKeyHash": signature_envelope["publicKeyHash"],
-                    "signatureBytesHex": signature_envelope["signatureBytesHex"],
-                    "signedRoot": signature_envelope["signedRoot"],
-                }),
-            )
+            let signature_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "ProtocolSignatureEnvelope",
+                "profile": signature_envelope["profile"],
+                "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+                "publicKeyHash": signature_envelope["publicKeyHash"],
+                "signatureBytesHex": signature_envelope["signatureBytesHex"],
+                "signedRoot": signature_envelope["signedRoot"],
+            }))
             .expect("signature envelope hash");
             signature_envelope["signatureHash"] =
                 serde_json::json!(signature_envelope_hash.clone());
@@ -490,16 +490,14 @@ fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
             tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
             signature_envelope["signatureBytesHex"] =
                 serde_json::json!(tampered_signature_bytes_hex);
-            let signature_envelope_hash = derive_protocol_hash(
-                "ProtocolSignatureEnvelopeHash",
-                &serde_json::json!({
-                    "profile": signature_envelope["profile"],
-                    "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-                    "publicKeyHash": signature_envelope["publicKeyHash"],
-                    "signatureBytesHex": signature_envelope["signatureBytesHex"],
-                    "signedRoot": signature_envelope["signedRoot"],
-                }),
-            )
+            let signature_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "ProtocolSignatureEnvelope",
+                "profile": signature_envelope["profile"],
+                "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+                "publicKeyHash": signature_envelope["publicKeyHash"],
+                "signatureBytesHex": signature_envelope["signatureBytesHex"],
+                "signedRoot": signature_envelope["signedRoot"],
+            }))
             .expect("signature envelope hash");
             signature_envelope["signatureHash"] =
                 serde_json::json!(signature_envelope_hash.clone());

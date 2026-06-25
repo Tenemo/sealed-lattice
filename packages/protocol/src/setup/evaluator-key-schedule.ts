@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type {
@@ -262,10 +262,7 @@ export const createEvaluatorKeySchedule = (
         rnsLimbCount,
         input.requiredGaloisKeySchedule,
     );
-    const requiredGaloisSetHash = deriveProtocolHash(
-        'RequiredGaloisSetHash',
-        requiredGaloisSet,
-    );
+    const requiredGaloisSetHash = deriveCanonicalObjectHash(requiredGaloisSet);
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
         objectVersion: 1,
@@ -289,9 +286,7 @@ export const createEvaluatorKeySchedule = (
 
     return {
         ...scheduleWithoutRoot,
-        evaluatorKeyScheduleRoot: deriveProtocolHash(
-            'EvaluatorKeyScheduleRoot',
-            scheduleWithoutRoot,
-        ),
+        evaluatorKeyScheduleRoot:
+            deriveCanonicalObjectHash(scheduleWithoutRoot),
     } satisfies EvaluatorKeySchedule;
 };

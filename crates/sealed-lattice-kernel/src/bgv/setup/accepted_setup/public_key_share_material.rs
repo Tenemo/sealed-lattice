@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 use crate::bgv::coefficient_codec::coefficient_vector_hash512;
 
 // Canonical per-limb hash of a public-key share coefficient vector, bound into
@@ -284,7 +286,7 @@ pub(super) fn verify_collective_public_key_material(
         .as_object_mut()
         .expect("collective public-key object was checked")
         .remove("collectivePublicKeyRoot");
-    let expected_root = derive_protocol_hash("CollectivePublicKeyRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if collective_public_key_root != expected_root {
         return Ok(Some(public_key_share_proof_refusal(
             "collectivePublicKeyRootMismatch",
@@ -1197,8 +1199,7 @@ fn decode_public_key_share_material_bindings(
             "publicKeyShareRoot": public_key_share_root,
             "shareCoefficientVectorsByLimb": limb_records,
         });
-        let public_key_share_material_root =
-            derive_protocol_hash("PublicKeyShareRoot", &material_record)?;
+        let public_key_share_material_root = derive_canonical_object_hash(&material_record)?;
         let binding = PublicKeyShareMaterialBinding {
             trustee_identity: value_string(&material_record, "trusteeIdentity")?.to_string(),
             trustee_roster_position: expected_roster_position,
@@ -1356,7 +1357,7 @@ pub(super) fn verify_public_key_share_material_set(
         .as_object_mut()
         .expect("public-key share material set object was checked")
         .remove("publicKeyShareMaterialSetRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if material_set_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1536,7 +1537,7 @@ fn verify_public_key_share_material_record(
         .as_object_mut()
         .expect("public-key share material record object was checked")
         .remove("publicKeyShareMaterialRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_material_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

@@ -2,6 +2,8 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn trustee_evaluation_key_proofs_object_with_terminal_transport(
     package: &serde_json::Value,
     transported_component_material: &serde_json::Value,
@@ -176,8 +178,7 @@ fn trustee_evaluation_key_proofs_object_inner(
             .expect("trustee evaluation-key proof record object")
             .remove("trusteeEvaluationKeyProofRoot");
         record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-            derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
-                .expect("trustee evaluation-key proof root")
+            derive_canonical_object_hash(&record).expect("trustee evaluation-key proof root")
         );
         proof_records.push(record);
     }
@@ -231,8 +232,7 @@ fn trustee_evaluation_key_proofs_object_inner(
         "proofRecords": proof_records,
     });
     proof_set["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &proof_set)
-            .expect("trustee evaluation-key proof set root")
+        derive_canonical_object_hash(&proof_set).expect("trustee evaluation-key proof set root")
     );
 
     proof_set
@@ -261,13 +261,11 @@ fn build_trustee_evaluation_key_proof_record(
         ring_degree,
         &work_item.statement,
     );
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &serde_json::json!({
-            "fixture": "trustee-evaluation-key-proof-randomness",
-            "trusteeRosterPosition": work_item.trustee_roster_position,
-        }),
-    )
+    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomness",
+        "fixture": "trustee-evaluation-key-proof-randomness",
+        "trusteeRosterPosition": work_item.trustee_roster_position,
+    }))
     .expect("trustee proof randomness seed");
     let statement_hash_hex = to_hex(&work_item.statement.statement_hash());
     let proof_bytes = checkpointed_anchor_proof_bytes(
@@ -349,7 +347,7 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
             .expect("trustee evaluation-key proof material root");
     record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
     record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+        derive_canonical_object_hash(&record)
             .expect("transported trustee evaluation-key proof root")
     );
     let proof_material =
@@ -420,7 +418,7 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
             }
             record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
             record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-                derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+                derive_canonical_object_hash(&record)
                     .expect("transported trustee evaluation-key proof root")
             );
             let proof_material =

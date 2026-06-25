@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, derive_protocol_hash, hash512_hex},
+    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, hash512_hex},
     ring::{
         MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
         interpolate_shamir_constant_term,
@@ -363,23 +363,38 @@ mod tests {
     }
 
     #[test]
-    fn command_derives_protocol_hash_with_kernel_canonical_json() {
+    fn command_derives_canonical_object_hash_with_kernel_canonical_json() {
         let response = super::run_transcript_core_command_inner(
             serde_json::json!({
-                "command": "DeriveProtocolHash",
-                "namespace": "PollSpecHash",
+                "command": "DeriveCanonicalObjectHash",
                 "value": {
+                    "objectType": "PollSpec",
                     "poll": "main"
                 }
             })
             .to_string()
             .as_bytes(),
         )
-        .expect("protocol hash command should succeed");
+        .expect("canonical object hash command should succeed");
 
         assert_eq!(
-            response["protocolHash"],
-            "43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4"
+            response["canonicalObjectHash"]
+                .as_str()
+                .expect("canonical object hash")
+                .len(),
+            128
+        );
+        // A typeless value is rejected by the canonical-object domain.
+        assert!(
+            super::run_transcript_core_command_inner(
+                serde_json::json!({
+                    "command": "DeriveCanonicalObjectHash",
+                    "value": { "poll": "main" }
+                })
+                .to_string()
+                .as_bytes(),
+            )
+            .is_err()
         );
     }
 

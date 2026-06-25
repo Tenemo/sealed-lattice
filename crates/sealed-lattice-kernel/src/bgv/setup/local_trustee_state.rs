@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::{
     bgv::parameters::DATA_PRIMES,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 use super::{
@@ -230,7 +230,7 @@ fn local_state_deletion_receipt_root(deletion_receipt: &Value) -> CanonicalResul
         .as_object_mut()
         .ok_or_else(|| invalid_local_state_input("deletionReceipt must be an object"))?
         .remove("deletionReceiptRoot");
-    derive_protocol_hash("LocalTrusteeDeletionReceiptRoot", &root_input)
+    derive_canonical_object_hash(&root_input)
 }
 
 fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
@@ -239,7 +239,7 @@ fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
         .as_object_mut()
         .ok_or_else(|| invalid_local_state_input("localStateCommitment must be an object"))?;
     object.remove("localStateRoot");
-    derive_protocol_hash("LocalTrusteeSetupStateRoot", &root_input)
+    derive_canonical_object_hash(&root_input)
 }
 
 fn compare_context_fields(

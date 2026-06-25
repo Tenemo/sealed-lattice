@@ -1,5 +1,6 @@
 use super::*;
 use crate::bgv::setup::key_material::collective_public_key_coefficient_root;
+use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -66,19 +67,16 @@ pub(super) fn validate_collective_public_key(
     let collective_public_key_root =
         hash_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
     compare_derived_hash(
-        "CollectivePublicKeyRoot",
         collective_public_key_record,
         collective_public_key_root,
         "collective public key root",
     )?;
-    let expected_bgv_public_key_root = derive_protocol_hash(
-        "BGVPublicKeyRoot",
-        &json!({
-            "collectivePublicKeyRoot": collective_public_key_root,
-            "collectivePublicKeyCoefficientRoot": expected_coefficient_root,
-            "bgvParametersHash": bgv_parameters_hash,
-        }),
-    )?;
+    let expected_bgv_public_key_root = derive_canonical_object_hash(&json!({
+        "objectType": "BgvPublicKeyRoot",
+        "collectivePublicKeyRoot": collective_public_key_root,
+        "collectivePublicKeyCoefficientRoot": expected_coefficient_root,
+        "bgvParametersHash": bgv_parameters_hash,
+    }))?;
     compare_hash_at_path(
         collective_public_key,
         &["bgvPublicKeyRoot"],
@@ -316,19 +314,16 @@ pub(super) fn validate_threshold_verification_material(
     let threshold_share_verification_key_root =
         hash_at_path(threshold_material, &["thresholdShareVerificationKeyRoot"])?;
     compare_derived_hash(
-        "ThresholdShareVerificationKeyRoot",
         verification_key_set,
         threshold_share_verification_key_root,
         "threshold share verification key root",
     )?;
-    let expected_threshold_share_verification_key_hash = derive_protocol_hash(
-        "ThresholdShareVerificationKeyHash",
-        &json!({
-            "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "targetDecryptionParametersHash": target_decryption_parameters_hash,
-            "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
-        }),
-    )?;
+    let expected_threshold_share_verification_key_hash = derive_canonical_object_hash(&json!({
+        "objectType": "ThresholdShareVerificationKeyBinding",
+        "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
+    }))?;
     compare_hash_at_path(
         threshold_material,
         &["thresholdShareVerificationKeyHash"],

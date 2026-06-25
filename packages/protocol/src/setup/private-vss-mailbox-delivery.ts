@@ -62,8 +62,7 @@ export type PrivateVssShareProofFactory = (
 ) => JsonRecord;
 
 export type PrivateVssMailboxDeliveryKernel = {
-    readonly deriveProtocolHash: (input: {
-        readonly namespace: string;
+    readonly deriveCanonicalObjectHash: (input: {
         readonly value: unknown;
     }) => ProtocolHash;
     readonly computeSetupCommitmentFromOpening?: (input: {
@@ -486,8 +485,7 @@ const setupProofChunkManifestRoot = (
     fullObjectHash: ProtocolHash,
     totalByteLength: number,
 ): ProtocolHash =>
-    kernel.deriveProtocolHash({
-        namespace: 'SetupProofChunkManifestRoot',
+    kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'SetupProofMaterialChunkManifest',
             objectVersion: 1,
@@ -780,8 +778,7 @@ const transportPrivateVssShareProofMaterial = (
         proofRecord.statementHash,
         'privateVssShareProof.statementHash',
     );
-    const proofMaterialRoot = kernel.deriveProtocolHash({
-        namespace: 'PrivateVssShareProofMaterialRoot',
+    const proofMaterialRoot = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
             objectVersion: 1,
@@ -1028,8 +1025,7 @@ const createEnvelopeCommitment = async (
         recipient,
         envelopeSequenceNumber,
     );
-    const associatedDataHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEnvelopeAadHash',
+    const associatedDataHash = input.kernel.deriveCanonicalObjectHash({
         value: associatedData,
     });
     const privateShareEnvelopeBuild = privateEnvelope(
@@ -1127,8 +1123,7 @@ const createEnvelopeCommitment = async (
 
     return {
         ...commitmentWithoutRoot,
-        privateEnvelopeCommitmentRoot: input.kernel.deriveProtocolHash({
-            namespace: 'PrivateVssEnvelopeCommitmentRoot',
+        privateEnvelopeCommitmentRoot: input.kernel.deriveCanonicalObjectHash({
             value: privateVssEnvelopeCommitmentRootInput(commitmentWithoutRoot),
         }),
     } satisfies PrivateVssEnvelopeCommitment;
@@ -1207,12 +1202,12 @@ export const createPrivateVssMailboxDeliverySetFromReferences = (
 
     return {
         ...commitmentSetWithoutRoot,
-        privateVssEnvelopeCommitmentRoot: input.kernel.deriveProtocolHash({
-            namespace: 'PrivateVssEnvelopeCommitmentRoot',
-            value: privateVssEnvelopeCommitmentSetRootInput(
-                commitmentSetWithoutRoot,
-            ),
-        }),
+        privateVssEnvelopeCommitmentRoot:
+            input.kernel.deriveCanonicalObjectHash({
+                value: privateVssEnvelopeCommitmentSetRootInput(
+                    commitmentSetWithoutRoot,
+                ),
+            }),
     } satisfies PrivateVssMailboxDeliverySet;
 };
 

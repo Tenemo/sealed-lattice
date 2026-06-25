@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
@@ -129,11 +129,11 @@ const deriveFirstValidOrderHash = (
     >,
     orderedCandidates: readonly ValidatedFirstValidObject[],
 ): string =>
-    deriveProtocolHash('FirstValidOrderHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'FirstValidOrder',
         orderedObjectHashes: orderedCandidates.map(
             (candidate) => candidate.objectHash,
         ),
-        purpose: 'first-valid-order-v1',
         requiredContextHash: input.requiredContextHash,
         selectionPolicyHash: input.selectionPolicyHash,
     });

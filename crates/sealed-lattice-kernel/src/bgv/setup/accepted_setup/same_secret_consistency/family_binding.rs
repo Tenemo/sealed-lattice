@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn verify_same_secret_context(
     value: &Value,
     setup_context: &Value,
@@ -45,8 +47,5 @@ fn same_secret_proof_family_binding_value() -> Value {
 }
 
 pub(in super::super) fn same_secret_proof_family_binding_root() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SameSecretProofFamilyBindingRoot",
-        &same_secret_proof_family_binding_value(),
-    )
+    derive_canonical_object_hash(&same_secret_proof_family_binding_value())
 }

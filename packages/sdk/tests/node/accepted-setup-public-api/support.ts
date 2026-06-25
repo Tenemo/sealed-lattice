@@ -128,9 +128,9 @@ export const hashFromKernel = (
     kernel: TranscriptCoreKernel,
     label: string,
 ): string =>
-    kernel.deriveProtocolHash({
-        namespace: 'ActionContextHash',
+    kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'ActionContextHash',
             fixture: 'accepted-setup-public-api',
             label,
         },
@@ -160,13 +160,11 @@ export const contextFields = (
     setupEpoch: setupContext.setupEpoch,
 });
 
-const protocolHashFromKernel = (
+const canonicalObjectHashFromKernel = (
     kernel: TranscriptCoreKernel,
-    namespace: string,
     value: Record<string, unknown>,
 ): string =>
-    kernel.deriveProtocolHash({
-        namespace,
+    kernel.deriveCanonicalObjectHash({
         value,
     });
 
@@ -399,7 +397,7 @@ const relinearizationKeySwitchSeed = (
     round: 'round-one' | 'round-two',
     level: number,
 ): string =>
-    protocolHashFromKernel(kernel, 'RelinearizationKeyShareSeed', {
+    canonicalObjectHashFromKernel(kernel, {
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
         proofFamily: 'relinearization-key-share',
@@ -416,7 +414,7 @@ const galoisKeySwitchSeed = (
     rotation: number,
     level: number,
 ): string =>
-    protocolHashFromKernel(kernel, 'GaloisKeyShareSeed', {
+    canonicalObjectHashFromKernel(kernel, {
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
         proofFamily: 'galois-key-share',
@@ -614,8 +612,7 @@ export const localStateInput = (
             },
         ],
     };
-    const privateEnvelopeHash = kernel.deriveProtocolHash({
-        namespace: 'PrivateVssShareEnvelopeHash',
+    const privateEnvelopeHash = kernel.deriveCanonicalObjectHash({
         value: privateEnvelope,
     });
     const privateVssEnvelopeCommitmentRoot = hashFromKernel(

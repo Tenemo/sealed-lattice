@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { transportedPublicKeyShareMaterialReader } from './binary-material-transport.js';
 import {
@@ -160,8 +160,7 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
 
     return {
         ...collectivePublicKeyWithoutRoot,
-        collectivePublicKeyRoot: deriveProtocolHash(
-            'CollectivePublicKeyRoot',
+        collectivePublicKeyRoot: deriveCanonicalObjectHash(
             collectivePublicKeyWithoutRoot,
         ),
     } satisfies CollectivePublicKey;
@@ -377,8 +376,7 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
             PublicKeyShareMaterialRecord,
             'publicKeyShareMaterialRoot'
         >;
-        const publicKeyShareMaterialRoot = deriveProtocolHash(
-            'PublicKeyShareRoot',
+        const publicKeyShareMaterialRoot = deriveCanonicalObjectHash(
             materialRecordWithoutRoot,
         );
         materialRootReferences.push({

@@ -20,7 +20,7 @@ use super::verifier::verify_evaluation_key_share;
 use super::*;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
-use crate::hashing::{derive_protocol_hash, to_hex};
+use crate::hashing::{derive_canonical_object_hash, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
@@ -152,20 +152,17 @@ fn statement_bound_proof_randomness_seed_hex(
     )?;
     let statement_hash = to_hex(&statement.statement_hash());
 
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
-            "objectVersion": 1,
-            "proofFamily": &statement.context.proof_family,
-            "statementHash": statement_hash,
-            "trusteeIdentity": &statement.context.trustee_identity,
-            "trusteeRosterPosition": statement.context.trustee_roster_position,
-            "setupEpoch": &statement.context.setup_epoch,
-            "proofRandomnessNonceHex": proof_randomness_nonce_hex,
-            "proofRandomnessSeedHex": to_hex(&seed_bytes),
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
+        "objectVersion": 1,
+        "proofFamily": &statement.context.proof_family,
+        "statementHash": statement_hash,
+        "trusteeIdentity": &statement.context.trustee_identity,
+        "trusteeRosterPosition": statement.context.trustee_roster_position,
+        "setupEpoch": &statement.context.setup_epoch,
+        "proofRandomnessNonceHex": proof_randomness_nonce_hex,
+        "proofRandomnessSeedHex": to_hex(&seed_bytes),
+    }))
 }
 
 fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
@@ -175,14 +172,11 @@ fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalRes
         "proofRandomnessNonceHex",
     )?;
 
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofRandomnessNonceHash",
-            "objectVersion": 1,
-            "nonceBytesHex": to_hex(&nonce_bytes),
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomnessNonceHash",
+        "objectVersion": 1,
+        "nonceBytesHex": to_hex(&nonce_bytes),
+    }))
 }
 
 pub(crate) fn verify_trustee_evaluation_key_proof_from_request(

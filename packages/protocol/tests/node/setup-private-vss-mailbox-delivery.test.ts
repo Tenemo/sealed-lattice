@@ -1,6 +1,6 @@
 import {
     createPrivateVssMailboxKeyPair,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
@@ -20,8 +20,8 @@ describe('private VSS mailbox delivery', () => {
         await expect(
             createPrivateVssMailboxDeliverySet({
                 kernel: {
-                    deriveProtocolHash: ({ namespace, value }) =>
-                        deriveProtocolHash(namespace, value),
+                    deriveCanonicalObjectHash: ({ value }) =>
+                        deriveCanonicalObjectHash(value),
                     verifyPrivateVssShareEnvelope: () => {
                         throw new Error(
                             'local verifier must not be reached without proof generation.',
@@ -88,8 +88,8 @@ describe('private VSS mailbox delivery', () => {
 
         const deliverySet = await createPrivateVssMailboxDeliverySet({
             kernel: {
-                deriveProtocolHash: ({ namespace, value }) =>
-                    deriveProtocolHash(namespace, value),
+                deriveCanonicalObjectHash: ({ value }) =>
+                    deriveCanonicalObjectHash(value),
                 verifyPrivateVssShareEnvelope: (input) => {
                     observedPrivateEnvelope = input.privateEnvelope as Record<
                         string,
@@ -102,8 +102,7 @@ describe('private VSS mailbox delivery', () => {
 
                     return {
                         ok: true,
-                        privateEnvelopeHash: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
+                        privateEnvelopeHash: deriveCanonicalObjectHash(
                             input.privateEnvelope,
                         ),
                         localVerificationRoot:
@@ -213,12 +212,11 @@ describe('private VSS mailbox delivery', () => {
         await expect(
             createPrivateVssMailboxDeliverySet({
                 kernel: {
-                    deriveProtocolHash: ({ namespace, value }) =>
-                        deriveProtocolHash(namespace, value),
+                    deriveCanonicalObjectHash: ({ value }) =>
+                        deriveCanonicalObjectHash(value),
                     verifyPrivateVssShareEnvelope: (input) => ({
                         ok: true,
-                        privateEnvelopeHash: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
+                        privateEnvelopeHash: deriveCanonicalObjectHash(
                             input.privateEnvelope,
                         ),
                         localVerificationRoot: fixtureHash(

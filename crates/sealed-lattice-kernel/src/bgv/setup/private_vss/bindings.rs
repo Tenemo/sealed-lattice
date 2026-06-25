@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 
@@ -287,8 +289,7 @@ pub(super) fn verify_source_trustee_commitment_record(
         .as_object_mut()
         .expect("source trustee commitment record object was checked")
         .remove("sourceTrusteeCommitmentRoot");
-    let expected_source_trustee_commitment_root =
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_source_trustee_commitment_root = derive_canonical_object_hash(&root_input)?;
     if source_trustee_commitment_root != expected_source_trustee_commitment_root {
         return Ok(Err(PrivateVssRefusal::new(
             "sourceTrusteeCommitmentRootMismatch",

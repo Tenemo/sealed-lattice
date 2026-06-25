@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -30,7 +30,7 @@ function setupTransportChunkManifestRoot(
         readonly fullObjectHash: ProtocolHash;
     }>,
 ): ProtocolHash {
-    return deriveProtocolHash('SetupTransportChunkManifestRoot', {
+    return deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
         chunkSizeBytes: setupTransportChunkSizeBytes,
@@ -147,26 +147,23 @@ const setupTransportCertificateBody = (
         (transportedObject) => transportedObject.chunkHashes,
     );
     const chunkCount = chunkHashes.length;
-    const fullObjectHash = deriveProtocolHash(
-        'SetupTransportFullObjectSetHash',
-        {
-            objectType: 'SetupTransportFullObjectSet',
-            objectVersion: 1,
-            transportedObjects: transportedObjects.map((transportedObject) => ({
-                objectName: transportedObject.objectName,
-                objectRole: transportedObject.objectRole,
-                objectRoot: transportedObject.objectRoot,
-                byteLength: transportedObject.byteLength,
-                chunkStartIndex: transportedObject.chunkStartIndex,
-                chunkCount: transportedObject.chunkCount,
-                chunkRoot: transportedObject.chunkRoot,
-                fullObjectHash: transportedObject.fullObjectHash,
-            })),
-            totalByteLength,
-            chunkCount,
-            chunkHashes,
-        },
-    );
+    const fullObjectHash = deriveCanonicalObjectHash({
+        objectType: 'SetupTransportFullObjectSet',
+        objectVersion: 1,
+        transportedObjects: transportedObjects.map((transportedObject) => ({
+            objectName: transportedObject.objectName,
+            objectRole: transportedObject.objectRole,
+            objectRoot: transportedObject.objectRoot,
+            byteLength: transportedObject.byteLength,
+            chunkStartIndex: transportedObject.chunkStartIndex,
+            chunkCount: transportedObject.chunkCount,
+            chunkRoot: transportedObject.chunkRoot,
+            fullObjectHash: transportedObject.fullObjectHash,
+        })),
+        totalByteLength,
+        chunkCount,
+        chunkHashes,
+    });
     const chunkRoot = setupTransportChunkManifestRoot({
         chunkCount,
         totalByteLength,
@@ -209,9 +206,7 @@ export const createSetupTransportCertificate = (
 
     return {
         ...certificateBody,
-        setupTransportCertificateHash: deriveProtocolHash(
-            'SetupTransportCertificateHash',
-            certificateBody,
-        ),
+        setupTransportCertificateHash:
+            deriveCanonicalObjectHash(certificateBody),
     };
 };

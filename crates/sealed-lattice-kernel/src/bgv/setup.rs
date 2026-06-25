@@ -102,7 +102,7 @@ use crate::{
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
+    hashing::{canonical_json, chunk_root, derive_canonical_object_hash, hash512, hash512_hex},
 };
 
 pub(crate) const KEY_SWITCH_DECOMPOSITION_SCHEME_ID: &str =
@@ -243,7 +243,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
         )
     })?;
     hash_object.remove("setupPackageHash");
-    let expected_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)?;
+    let expected_hash = derive_canonical_object_hash(&hash_input)?;
     if setup_package_hash != expected_hash {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,

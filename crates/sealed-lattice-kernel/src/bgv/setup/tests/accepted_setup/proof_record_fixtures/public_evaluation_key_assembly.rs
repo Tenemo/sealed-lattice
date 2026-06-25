@@ -1,5 +1,7 @@
 use super::super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn public_evaluation_key_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -36,9 +38,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
             // constant, the three binding roots, the rounds root, the level, the
             // digit/limb counts, and the two aggregate roots. No extra narration
             // fields are bound.
-            let relinearization_key_root = derive_protocol_hash(
-                "RelinearizationKeyRoot",
-                &serde_json::json!({
+            let relinearization_key_root = derive_canonical_object_hash(&serde_json::json!({
                     "objectType": "RelinearizationKeyAggregate",
                     "objectVersion": 1,
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
@@ -115,9 +115,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
             // The hash preimage must match the verifier's recompute in
             // expected_galois_key_roots_for_evaluation_keys exactly; no extra
             // narration fields are bound.
-            let galois_key_root = derive_protocol_hash(
-                "RotationKeyRoot",
-                &serde_json::json!({
+            let galois_key_root = derive_canonical_object_hash(&serde_json::json!({
                     "objectType": "GaloisKeyAggregate",
                     "objectVersion": 1,
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
@@ -173,8 +171,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "verifierGeneratedKeyMaterial": false,
     });
     evaluation_keys["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &evaluation_keys)
-            .expect("evaluation key set hash")
+        derive_canonical_object_hash(&evaluation_keys).expect("evaluation key set hash")
     );
 
     evaluation_keys
@@ -216,8 +213,7 @@ pub(in super::super) fn add_public_evaluation_key_material_transport(
         .expect("evaluation key set")
         .remove("evaluationKeySetHash");
     package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
-            .expect("evaluation key set hash")
+        derive_canonical_object_hash(&package["evaluationKeys"]).expect("evaluation key set hash")
     );
     append_setup_transport_certificate_object(
         package,

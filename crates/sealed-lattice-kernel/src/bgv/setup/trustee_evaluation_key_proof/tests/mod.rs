@@ -17,7 +17,7 @@ use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
     SetupCommitmentValue, setup_commitment_full_value, setup_commitment_root,
 };
-use crate::hashing::derive_protocol_hash;
+use crate::hashing::derive_canonical_object_hash;
 
 use std::collections::BTreeSet;
 use std::time::Instant;
@@ -450,8 +450,8 @@ fn private_vss_statement_hash_vector_request() -> serde_json::Value {
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "coefficientCommitments": coefficient_commitments,
     });
-    let source_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &source_record)
-        .expect("source trustee commitment root");
+    let source_root =
+        derive_canonical_object_hash(&source_record).expect("source trustee commitment root");
     source_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(source_root);
     let mut request = serde_json::json!({
         "setupContext": setup_context,

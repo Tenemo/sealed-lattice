@@ -1,6 +1,8 @@
 use super::expected_roots::*;
+
 use super::material_transport::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_required_public_evaluation_key_set(
     setup_package: &Value,
@@ -231,8 +233,7 @@ pub(in super::super) fn verify_public_evaluation_key_set(
         .as_object_mut()
         .expect("evaluationKeys object was checked")
         .remove("evaluationKeySetHash");
-    let expected_evaluation_key_set_hash =
-        derive_protocol_hash("EvaluationKeySetHash", &root_input)?;
+    let expected_evaluation_key_set_hash = derive_canonical_object_hash(&root_input)?;
     if supplied_evaluation_key_set_hash != expected_evaluation_key_set_hash {
         return Ok(Some(evaluation_key_material_refusal(
             "evaluationKeySetHashMismatch",

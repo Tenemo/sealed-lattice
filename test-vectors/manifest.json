@@ -3,7 +3,7 @@
   "entries": [
     {
       "path": "plaintext-oracle/comparator-polynomials.json",
-      "sha256": "da5e86c839149e31489c84c7ea23335b7ab9f3eeda18c2efae40904822925acd"
+      "sha256": "36c9baca09f7ab3658772bb6508f04db5e8ee65fa7d85d0960763f2fb3cf4b93"
     },
     {
       "path": "plaintext-oracle/field.json",
@@ -11,19 +11,19 @@
     },
     {
       "path": "plaintext-oracle/shamir.json",
-      "sha256": "414c874787ed521bc3621efb6b6fd9f7d763db5fcc7b2380548c2ac7c0dd8e69"
+      "sha256": "aedbf23e48543f7e38e398574b52f60894afc36f6694de0a10b06868e84d368e"
     },
     {
       "path": "plaintext-oracle/sparse-target.json",
-      "sha256": "a4bc54399a41ff0b62e534d2db5ae3231114fd74f2d36455045ef6e327afe545"
+      "sha256": "abe3774d81df2c5649e4b4d07ed9fa06a7ad61d8aa0daed3c31491bf3fabb519"
     },
     {
       "path": "plaintext-oracle/top-k.json",
-      "sha256": "a64b1ddeef0f6c23b96709c19d1678869aafe424eea08527accb38924975ce8a"
+      "sha256": "41b8a20594d2788d4129fb445868c1b66e72caaaf1d556a1ec275139e315e6ff"
     },
     {
       "path": "succinct-setup-statement-hashes.json",
-      "sha256": "77de480931f293ffbbd6237695f2a964cb0e5f0694f37c7a07d9b9451021568f"
+      "sha256": "06556980d8e004f45ce682e2d35d0b754f07caa053d2040f3f4ed6b2d30eb525"
     }
   ]
 }

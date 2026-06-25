@@ -1,6 +1,8 @@
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn relinearization_key_share_rounds_fixture_with_terminal_transport(
     package: &serde_json::Value,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
@@ -135,8 +137,7 @@ fn relinearization_key_share_rounds_object_inner(
                 );
             }
             record["roundOneRecordRoot"] = serde_json::json!(
-                derive_protocol_hash("RelinearizationRoundOneRecordRoot", &record)
-                    .expect("round-one record root")
+                derive_canonical_object_hash(&record).expect("round-one record root")
             );
             let record_root = record["roundOneRecordRoot"]
                 .as_str()
@@ -159,18 +160,15 @@ fn relinearization_key_share_rounds_object_inner(
     let mut round_one_aggregate_root_by_level = BTreeMap::new();
     for level in &scheduled_levels {
         let level = *level;
-        let aggregate_root = derive_protocol_hash(
-            "RelinearizationRoundOneAggregateRoot",
-            &serde_json::json!({
-                "objectType": "RelinearizationRoundOneAggregate",
-                "objectVersion": 1,
-                "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                "level": level,
-                "roundOneRecordRoots": round_one_roots_by_level
-                    .get(&level)
-                    .expect("round-one roots by level"),
-            }),
-        )
+        let aggregate_root = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "RelinearizationRoundOneAggregate",
+            "objectVersion": 1,
+            "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+            "level": level,
+            "roundOneRecordRoots": round_one_roots_by_level
+                .get(&level)
+                .expect("round-one roots by level"),
+        }))
         .expect("round-one aggregate root");
         round_one_aggregate_roots.push(serde_json::json!({
             "level": level,
@@ -275,8 +273,7 @@ fn relinearization_key_share_rounds_object_inner(
                 );
             }
             record["roundTwoRecordRoot"] = serde_json::json!(
-                derive_protocol_hash("RelinearizationRoundTwoRecordRoot", &record)
-                    .expect("round-two record root")
+                derive_canonical_object_hash(&record).expect("round-two record root")
             );
             let record_root = record["roundTwoRecordRoot"]
                 .as_str()
@@ -296,21 +293,18 @@ fn relinearization_key_share_rounds_object_inner(
     let round_two_aggregate_roots = scheduled_levels
         .iter()
         .map(|level| {
-            let aggregate_root = derive_protocol_hash(
-                "RelinearizationRoundTwoAggregateRoot",
-                &serde_json::json!({
-                    "objectType": "RelinearizationRoundTwoAggregate",
-                    "objectVersion": 1,
-                    "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
-                    "level": level,
-                    "roundOneAggregateRoot": round_one_aggregate_root_by_level
-                        .get(level)
-                        .expect("round-one aggregate root"),
-                    "roundTwoRecordRoots": round_two_roots_by_level
-                        .get(level)
-                        .expect("round-two roots by level"),
-                }),
-            )
+            let aggregate_root = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "RelinearizationRoundTwoAggregate",
+                "objectVersion": 1,
+                "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
+                "level": level,
+                "roundOneAggregateRoot": round_one_aggregate_root_by_level
+                    .get(level)
+                    .expect("round-one aggregate root"),
+                "roundTwoRecordRoots": round_two_roots_by_level
+                    .get(level)
+                    .expect("round-two roots by level"),
+            }))
             .expect("round-two aggregate root");
             serde_json::json!({
                 "level": level,
@@ -344,8 +338,7 @@ fn relinearization_key_share_rounds_object_inner(
         "roundTwoRecords": round_two_records,
     });
     rounds["relinearizationKeyShareRoundsRoot"] = serde_json::json!(
-        derive_protocol_hash("RelinearizationKeyShareRoundsRoot", &rounds)
-            .expect("relinearization rounds root")
+        derive_canonical_object_hash(&rounds).expect("relinearization rounds root")
     );
 
     RelinearizationKeyShareRoundsFixture {

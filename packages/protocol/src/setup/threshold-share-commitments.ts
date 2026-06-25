@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -556,8 +556,7 @@ const parseMaterialRecordsByCoordinate = (
                     `${objectPath}.commitment coordinate must match the material record coordinate.`,
                 );
             }
-            const recomputedCommitmentRoot = deriveProtocolHash(
-                'SetupCommitmentRoot',
+            const recomputedCommitmentRoot = deriveCanonicalObjectHash(
                 setupCommitmentRootPayload(commitment),
             );
             if (materialRecord.commitmentRoot !== recomputedCommitmentRoot) {
@@ -814,10 +813,8 @@ const aggregateThresholdCommitmentLimb = (
 
     return {
         ...limbWithoutRoot,
-        thresholdShareCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
-            limbWithoutRoot,
-        ),
+        thresholdShareCommitmentRoot:
+            deriveCanonicalObjectHash(limbWithoutRoot),
     };
 };
 
@@ -868,10 +865,8 @@ const deriveRecipientCommitment = (
 
     return {
         ...recipientWithoutRoot,
-        recipientCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
-            recipientWithoutRoot,
-        ),
+        recipientCommitmentRoot:
+            deriveCanonicalObjectHash(recipientWithoutRoot),
     };
 };
 
@@ -1021,8 +1016,7 @@ export const deriveThresholdShareCommitments = (
 
     return {
         ...thresholdShareCommitmentsWithoutRoot,
-        thresholdShareCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
+        thresholdShareCommitmentRoot: deriveCanonicalObjectHash(
             thresholdShareCommitmentsWithoutRoot,
         ),
     };

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 static VSS_TRANSPORT_THRESHOLD_DERIVATION_SESSIONS: OnceLock<
     Mutex<BTreeMap<String, VssTransportThresholdDerivationSession>>,
 > = OnceLock::new();
@@ -1113,9 +1115,8 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                 coefficient_commitment_roots: accumulator.coefficient_commitment_roots.clone(),
                 commitment: accumulator.commitment.clone(),
             };
-            let threshold_share_commitment_root = derive_protocol_hash(
-                "ThresholdShareCommitmentRoot",
-                &threshold_limb_commitment_root_payload(
+            let threshold_share_commitment_root =
+                derive_canonical_object_hash(&threshold_limb_commitment_root_payload(
                     setup_context,
                     public_matrix_seed_hash,
                     &recipient_identity,
@@ -1123,8 +1124,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                     recipient_roster_position_usize,
                     roster.decryption_threshold as usize,
                     &threshold_limb_without_root,
-                )?,
-            )?;
+                )?)?;
             let threshold_limb = ThresholdLimbCommitment {
                 threshold_share_commitment_root,
                 ..threshold_limb_without_root
@@ -1155,8 +1155,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
             "limbCommitments": limb_commitments,
         });
         copy_context_fields(&mut recipient_record, setup_context)?;
-        let recipient_commitment_root =
-            derive_protocol_hash("ThresholdShareCommitmentRoot", &recipient_record)?;
+        let recipient_commitment_root = derive_canonical_object_hash(&recipient_record)?;
         recipient_record["recipientCommitmentRoot"] = json!(recipient_commitment_root);
         recipient_records.push(recipient_record);
     }
@@ -1174,8 +1173,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
         "recipientRecords": recipient_records,
     });
     copy_context_fields(&mut commitment_set, setup_context)?;
-    let commitment_set_root =
-        derive_protocol_hash("ThresholdShareCommitmentRoot", &commitment_set)?;
+    let commitment_set_root = derive_canonical_object_hash(&commitment_set)?;
     commitment_set["thresholdShareCommitmentRoot"] = json!(commitment_set_root);
 
     Ok(commitment_set)

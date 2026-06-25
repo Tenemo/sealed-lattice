@@ -1,6 +1,6 @@
 import {
     decryptLocalTrusteeState,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
     type EncryptedLocalTrusteeSetupState,
@@ -321,8 +321,7 @@ export const createLocalTrusteeSetupStateCommitment = (
     } as const satisfies JsonRecord;
     const deletionReceipt = {
         ...deletionReceiptWithoutRoot,
-        deletionReceiptRoot: deriveProtocolHash(
-            'LocalTrusteeDeletionReceiptRoot',
+        deletionReceiptRoot: deriveCanonicalObjectHash(
             deletionReceiptWithoutRoot,
         ),
     } satisfies LocalTrusteeSetupStateDeletionReceipt;
@@ -346,10 +345,7 @@ export const createLocalTrusteeSetupStateCommitment = (
 
     return {
         ...localStateWithoutRoot,
-        localStateRoot: deriveProtocolHash(
-            'LocalTrusteeSetupStateRoot',
-            localStateWithoutRoot,
-        ),
+        localStateRoot: deriveCanonicalObjectHash(localStateWithoutRoot),
     } satisfies LocalTrusteeSetupStateCommitment;
 };
 
@@ -510,7 +506,7 @@ const issuedVssAcceptanceRoot = (
         );
     }
 
-    return deriveProtocolHash('VssShareAcceptanceRoot', {
+    return deriveCanonicalObjectHash({
         objectType: 'LocalTrusteeIssuedVssAcceptanceSet',
         objectVersion: 1,
         ...setupContextFields(input.setupContext),
@@ -647,10 +643,7 @@ const aggregateVerifiedPrivateVssMaterial = (
             privateEnvelopeValue,
             'verifiedPrivateVssShareEnvelopes',
         );
-        const privateEnvelopeHash = deriveProtocolHash(
-            'PrivateVssShareEnvelopeHash',
-            privateEnvelope,
-        );
+        const privateEnvelopeHash = deriveCanonicalObjectHash(privateEnvelope);
         if (privateEnvelopeByHash.has(privateEnvelopeHash)) {
             throw new Error(
                 'verifiedPrivateVssShareEnvelopes must not contain duplicate private envelope hashes.',

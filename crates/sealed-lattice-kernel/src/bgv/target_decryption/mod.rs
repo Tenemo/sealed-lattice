@@ -48,7 +48,7 @@ use crate::{
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
     transcript_core::decode_hex,
 };
 

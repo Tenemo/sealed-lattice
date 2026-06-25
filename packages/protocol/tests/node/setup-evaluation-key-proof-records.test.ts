@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -63,8 +63,7 @@ const requiredGaloisKeySchedule = [
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
 const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
-    const requiredGaloisSetHash = deriveProtocolHash(
-        'RequiredGaloisSetHash',
+    const requiredGaloisSetHash = deriveCanonicalObjectHash(
         createRequiredGaloisSet(qSharePrimes.length, requiredGaloisKeySchedule),
     );
     const scheduleWithoutRoot = {
@@ -93,10 +92,8 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
 
     return {
         ...scheduleWithoutRoot,
-        evaluatorKeyScheduleRoot: deriveProtocolHash(
-            'EvaluatorKeyScheduleRoot',
-            scheduleWithoutRoot,
-        ),
+        evaluatorKeyScheduleRoot:
+            deriveCanonicalObjectHash(scheduleWithoutRoot),
     } satisfies EvaluatorKeySchedule;
 };
 
@@ -123,7 +120,7 @@ const relinearizationKeySwitchSeed = (
     round: 'round-one' | 'round-two',
     level: number,
 ): string =>
-    deriveProtocolHash('RelinearizationKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
         proofFamily: 'relinearization-key-share',
@@ -139,7 +136,7 @@ const galoisKeySwitchSeed = (
     rotation: number,
     level: number,
 ): string =>
-    deriveProtocolHash('GaloisKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
         proofFamily: 'galois-key-share',
@@ -511,10 +508,7 @@ describe('createRelinearizationKeyShareRounds', () => {
             const recordWithoutRoot = { ...record } as JsonRecord;
             delete recordWithoutRoot.roundOneRecordRoot;
             expect(record.roundOneRecordRoot).toBe(
-                deriveProtocolHash(
-                    'RelinearizationRoundOneRecordRoot',
-                    recordWithoutRoot,
-                ),
+                deriveCanonicalObjectHash(recordWithoutRoot),
             );
         }
         for (const record of rounds.roundTwoRecords) {
@@ -534,43 +528,35 @@ describe('createRelinearizationKeyShareRounds', () => {
                 matchingRoundOne?.roundOneShareRoot,
             );
         }
-        const expectedRoundOneAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundOneAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundOneAggregate',
-                objectVersion: 1,
-                evaluatorKeyScheduleRoot:
-                    fixture.schedule.evaluatorKeyScheduleRoot,
-                level: scheduledLevel,
-                roundOneRecordRoots: rounds.roundOneRecords.map((record) => ({
-                    trusteeIdentity: record.trusteeIdentity,
-                    trusteeRosterPosition: record.trusteeRosterPosition,
-                    roundOneRecordRoot: record.roundOneRecordRoot,
-                })),
-            },
-        );
+        const expectedRoundOneAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundOneAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
+            level: scheduledLevel,
+            roundOneRecordRoots: rounds.roundOneRecords.map((record) => ({
+                trusteeIdentity: record.trusteeIdentity,
+                trusteeRosterPosition: record.trusteeRosterPosition,
+                roundOneRecordRoot: record.roundOneRecordRoot,
+            })),
+        });
         expect(rounds.roundOneAggregateRoots).toEqual([
             {
                 level: scheduledLevel,
                 roundOneAggregateRoot: expectedRoundOneAggregateRoot,
             },
         ]);
-        const expectedRoundTwoAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundTwoAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundTwoAggregate',
-                objectVersion: 1,
-                evaluatorKeyScheduleRoot:
-                    fixture.schedule.evaluatorKeyScheduleRoot,
-                level: scheduledLevel,
-                roundOneAggregateRoot: expectedRoundOneAggregateRoot,
-                roundTwoRecordRoots: rounds.roundTwoRecords.map((record) => ({
-                    trusteeIdentity: record.trusteeIdentity,
-                    trusteeRosterPosition: record.trusteeRosterPosition,
-                    roundTwoRecordRoot: record.roundTwoRecordRoot,
-                })),
-            },
-        );
+        const expectedRoundTwoAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundTwoAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
+            level: scheduledLevel,
+            roundOneAggregateRoot: expectedRoundOneAggregateRoot,
+            roundTwoRecordRoots: rounds.roundTwoRecords.map((record) => ({
+                trusteeIdentity: record.trusteeIdentity,
+                trusteeRosterPosition: record.trusteeRosterPosition,
+                roundTwoRecordRoot: record.roundTwoRecordRoot,
+            })),
+        });
         expect(rounds.roundTwoAggregateRoots).toEqual([
             {
                 level: scheduledLevel,
@@ -580,10 +566,7 @@ describe('createRelinearizationKeyShareRounds', () => {
         const roundsWithoutRoot = { ...rounds } as JsonRecord;
         delete roundsWithoutRoot.relinearizationKeyShareRoundsRoot;
         expect(rounds.relinearizationKeyShareRoundsRoot).toBe(
-            deriveProtocolHash(
-                'RelinearizationKeyShareRoundsRoot',
-                roundsWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(roundsWithoutRoot),
         );
     });
 
@@ -713,7 +696,7 @@ describe('createGaloisKeyShareBatches', () => {
             const batchWithoutRoot = { ...batch } as JsonRecord;
             delete batchWithoutRoot.galoisKeyShareBatchRoot;
             expect(batch.galoisKeyShareBatchRoot).toBe(
-                deriveProtocolHash('GaloisKeyShareBatchRoot', batchWithoutRoot),
+                deriveCanonicalObjectHash(batchWithoutRoot),
             );
         });
     });
@@ -896,10 +879,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                 const recordWithoutRoot = { ...proofRecord } as JsonRecord;
                 delete recordWithoutRoot.trusteeEvaluationKeyProofRoot;
                 expect(proofRecord.trusteeEvaluationKeyProofRoot).toBe(
-                    deriveProtocolHash(
-                        'TrusteeEvaluationKeyProofRoot',
-                        recordWithoutRoot,
-                    ),
+                    deriveCanonicalObjectHash(recordWithoutRoot),
                 );
             },
         );
@@ -909,12 +889,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         delete proofSetWithoutRoot.trusteeEvaluationKeyProofSetRoot;
         expect(
             trusteeEvaluationKeyProofs.trusteeEvaluationKeyProofSetRoot,
-        ).toBe(
-            deriveProtocolHash(
-                'TrusteeEvaluationKeyProofSetRoot',
-                proofSetWithoutRoot,
-            ),
-        );
+        ).toBe(deriveCanonicalObjectHash(proofSetWithoutRoot));
     });
 
     it('rejects generators that drift the proof accounting hash across trustees', () => {
@@ -1115,10 +1090,7 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
                 const recordWithoutRoot = { ...proofRecord } as JsonRecord;
                 delete recordWithoutRoot.trusteeEvaluationKeyProofRoot;
                 expect(proofRecord.trusteeEvaluationKeyProofRoot).toBe(
-                    deriveProtocolHash(
-                        'TrusteeEvaluationKeyProofRoot',
-                        recordWithoutRoot,
-                    ),
+                    deriveCanonicalObjectHash(recordWithoutRoot),
                 );
             },
         );
@@ -1129,12 +1101,7 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
         expect(
             transport.trusteeEvaluationKeyProofs
                 .trusteeEvaluationKeyProofSetRoot,
-        ).toBe(
-            deriveProtocolHash(
-                'TrusteeEvaluationKeyProofSetRoot',
-                proofSetWithoutRoot,
-            ),
-        );
+        ).toBe(deriveCanonicalObjectHash(proofSetWithoutRoot));
         expect(
             transport.trusteeEvaluationKeyProofs
                 .trusteeEvaluationKeyProofSetRoot,
@@ -1354,10 +1321,7 @@ describe('createPublicEvaluationKeySet', () => {
         const evaluationKeysWithoutHash = { ...evaluationKeys } as JsonRecord;
         delete evaluationKeysWithoutHash.evaluationKeySetHash;
         expect(evaluationKeys.evaluationKeySetHash).toBe(
-            deriveProtocolHash(
-                'EvaluationKeySetHash',
-                evaluationKeysWithoutHash,
-            ),
+            deriveCanonicalObjectHash(evaluationKeysWithoutHash),
         );
     });
 

@@ -1,9 +1,10 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
     let certificates = value_at_path(setup_package, &["certificates"])?;
     compare_derived_hash(
-        "CollectiveSecretDistributionCertificateHash",
         value_at_path(certificates, &["collectiveSecretDistributionCertificate"])?,
         hash_at_path(
             certificates,
@@ -12,19 +13,16 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         "collective secret distribution certificate hash",
     )?;
     compare_derived_hash(
-        "ErrorDistributionCertificateHash",
         value_at_path(certificates, &["errorDistributionCertificate"])?,
         hash_at_path(certificates, &["errorDistributionCertificateHash"])?,
         "error distribution certificate hash",
     )?;
     compare_derived_hash(
-        "KeySwitchDecompositionHash",
         value_at_path(certificates, &["keySwitchDecomposition"])?,
         hash_at_path(certificates, &["keySwitchDecompositionHash"])?,
         "key-switch decomposition hash",
     )?;
     compare_derived_hash(
-        "EvaluationKeySizeParametersHash",
         value_at_path(certificates, &["evaluationKeySizeCertificate"])?,
         hash_at_path(certificates, &["evaluationKeySizeParametersHash"])?,
         "evaluation key size parameters hash",
@@ -50,7 +48,6 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         ));
     }
     compare_derived_hash(
-        "TargetThresholdDecryptabilityCertificateHash",
         target_threshold_decryptability_certificate,
         hash_at_path(
             certificates,
@@ -68,13 +65,11 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         "setup parameter target-threshold decryptability certificate hash",
     )?;
     compare_derived_hash(
-        "BGVSetupParameterCertificateHash",
         value_at_path(certificates, &["setupParameterCertificate"])?,
         hash_at_path(certificates, &["setupParameterCertificateHash"])?,
         "setup parameter certificate hash",
     )?;
     compare_derived_hash(
-        "BGVDevelopmentEncryptionFixtureHash",
         value_at_path(setup_package, &["developmentEncryptionFixture", "fixture"])?,
         hash_at_path(
             setup_package,
@@ -123,7 +118,7 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
         &chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?,
         "evaluation key streaming commitment chunk root",
     )?;
-    let commitment_hash = derive_protocol_hash("EvaluationKeySetHash", commitment_record)?;
+    let commitment_hash = derive_canonical_object_hash(commitment_record)?;
     compare_hash_at_path(
         wrapped_commitment,
         &["commitmentHash"],

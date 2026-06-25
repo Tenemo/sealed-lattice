@@ -17,7 +17,7 @@ use sha3::{
 use crate::{
     bgv::setup_helpers::validate_hash_string,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
-    hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512_hex, to_hex},
+    hashing::{HASH512_PREIMAGE_PREFIX, derive_canonical_object_hash, hash512_hex, to_hex},
 };
 
 pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =

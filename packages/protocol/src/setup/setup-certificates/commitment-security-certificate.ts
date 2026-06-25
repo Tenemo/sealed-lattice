@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import {
     acceptedCertificateTemplate,
@@ -159,7 +159,6 @@ export const createSetupCommitmentSecurityCertificate = (
         'setupCommitmentSecurityCertificate',
         'SetupCommitmentSecurityCertificate',
         'setupCommitmentSecurityCertificateHash',
-        'SetupCommitmentSecurityCertificateHash',
     );
     if (template !== null) {
         return template as SetupCommitmentSecurityCertificate;
@@ -170,9 +169,7 @@ export const createSetupCommitmentSecurityCertificate = (
 
     return {
         ...certificateBody,
-        setupCommitmentSecurityCertificateHash: deriveProtocolHash(
-            'SetupCommitmentSecurityCertificateHash',
-            certificateBody,
-        ),
+        setupCommitmentSecurityCertificateHash:
+            deriveCanonicalObjectHash(certificateBody),
     };
 };

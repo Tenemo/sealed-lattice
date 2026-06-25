@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 // One synthetic single-chunk transport object's hash triple, derived from a
 // fixture label so each unrequested or unreferenced transport sidecar reuses the
 // same derivation shape. The root field name varies per sidecar (object,
@@ -17,29 +19,23 @@ fn synthetic_transport_object_hashes(
     fixture_label: &str,
     root_field_name: &str,
 ) -> SyntheticTransportObjectHashes {
-    let object_root = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "fixture": fixture_label,
-            "field": root_field_name,
-        }),
-    )
+    let object_root = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportFullObjectSetHash",
+        "fixture": fixture_label,
+        "field": root_field_name,
+    }))
     .expect("synthetic setup transport object root");
-    let full_object_hash = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "fixture": fixture_label,
-            "field": "full-object-hash",
-        }),
-    )
+    let full_object_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportFullObjectSetHash",
+        "fixture": fixture_label,
+        "field": "full-object-hash",
+    }))
     .expect("synthetic setup transport full object hash");
-    let chunk_hash = derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &serde_json::json!({
-            "fixture": fixture_label,
-            "field": "chunk-hash",
-        }),
-    )
+    let chunk_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportChunkManifestRoot",
+        "fixture": fixture_label,
+        "field": "chunk-hash",
+    }))
     .expect("synthetic setup transport chunk hash");
     let chunk_root = setup_transport_chunk_manifest_root_fixture(
         1,
@@ -229,17 +225,14 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
         }));
     }
 
-    let aggregate_full_object_hash = derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &serde_json::json!({
-            "objectType": "SetupTransportFullObjectSet",
-            "objectVersion": 1,
-            "transportedObjects": transported_object_summaries,
-            "totalByteLength": total_byte_length,
-            "chunkCount": chunk_count,
-            "chunkHashes": chunk_hashes.clone(),
-        }),
-    )
+    let aggregate_full_object_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupTransportFullObjectSet",
+        "objectVersion": 1,
+        "transportedObjects": transported_object_summaries,
+        "totalByteLength": total_byte_length,
+        "chunkCount": chunk_count,
+        "chunkHashes": chunk_hashes.clone(),
+    }))
     .expect("setup transport aggregate full object hash");
     let aggregate_chunk_root = setup_transport_chunk_manifest_root_fixture(
         chunk_count,
@@ -258,9 +251,8 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
         .as_object_mut()
         .expect("setup transport certificate object")
         .remove("setupTransportCertificateHash");
-    let certificate_hash =
-        derive_protocol_hash("SetupTransportCertificateHash", &certificate_hash_input)
-            .expect("setup transport certificate hash");
+    let certificate_hash = derive_canonical_object_hash(&certificate_hash_input)
+        .expect("setup transport certificate hash");
     certificate["setupTransportCertificateHash"] = serde_json::json!(certificate_hash);
 
     certificate_hash
@@ -447,8 +439,7 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
                 .expect("same-secret anchor proof material root");
         proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root);
         proof_record["sameSecretProofRoot"] = serde_json::json!(
-            derive_protocol_hash("SameSecretProofRoot", proof_record)
-                .expect("same-secret proof root")
+            derive_canonical_object_hash(proof_record).expect("same-secret proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -534,8 +525,7 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
         proof_record["proofChunkRoot"] = serde_json::json!(transport_hashes.chunk_root);
         proof_record["proofChunkHashes"] = serde_json::json!(transport_hashes.chunk_hashes.clone());
         proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareProofRoot", proof_record)
-                .expect("public-key succinct proof root")
+            derive_canonical_object_hash(proof_record).expect("public-key succinct proof root")
         );
         proof_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -929,8 +919,7 @@ pub(super) fn rebind_public_evaluation_key_material_transport(
         .expect("evaluation key set")
         .remove("evaluationKeySetHash");
     package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
-            .expect("evaluation key set hash")
+        derive_canonical_object_hash(&package["evaluationKeys"]).expect("evaluation key set hash")
     );
     rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
@@ -1130,7 +1119,7 @@ fn move_trustee_evaluation_key_proof_record_bytes_with_chunk_policy(
             .expect("trustee evaluation-key proof material root");
     proof_record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
     proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", proof_record)
+        derive_canonical_object_hash(proof_record)
             .expect("transported trustee evaluation-key proof root")
     );
 
@@ -1205,7 +1194,7 @@ pub(super) fn move_public_key_share_material_to_transport(
         );
     }
     transported_material_set["publicKeyShareMaterialSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareRoot", &transported_material_set)
+        derive_canonical_object_hash(&transported_material_set)
             .expect("transported public-key material set root")
     );
     package["publicKeyShareMaterial"] = transported_material_set;

@@ -12,7 +12,7 @@ import {
     createKeyFixture,
     createSignature,
     deriveActionContextHash,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveRecoveryEpochUpdateHash,
     deriveValidatedFirstValidOrder,
     isActionCurrentForRecoveryEpoch,
@@ -87,17 +87,15 @@ describe('recovery epoch shells', () => {
             oldActionCutoffBoardSequence: 5,
             boardHeadHash: recoveryContextHead.headHash,
             newSigningPublicKeyHash: newSigningKeyFixture.publicKeyHash,
-            restoredEncryptedBallotStateCommitment: deriveProtocolHash(
-                'ChallengeDomainHash',
-                {
-                    payload: { encryptedBallotState: 'restored' },
-                    purpose: 'fixture-restored-encrypted-ballot-state-root-v1',
-                },
-            ),
-            newTrusteeSetupCommitment: deriveProtocolHash(
-                'CollectivePublicKeyRoot',
-                { trusteeSetup: 'new' },
-            ),
+            restoredEncryptedBallotStateCommitment: deriveCanonicalObjectHash({
+                objectType: 'ChallengeDomainHash',
+                payload: { encryptedBallotState: 'restored' },
+                purpose: 'fixture-restored-encrypted-ballot-state-root-v1',
+            }),
+            newTrusteeSetupCommitment: deriveCanonicalObjectHash({
+                objectType: 'CollectivePublicKeyRoot',
+                trusteeSetup: 'new',
+            }),
         } satisfies Omit<
             RecoveryEpochUpdate,
             'recoveryEpochUpdateHash' | 'signature'
@@ -252,7 +250,8 @@ describe('recovery epoch shells', () => {
         );
         const wrongRecoveryPolicyPayload = {
             ...payload,
-            recoveryPolicyHash: deriveProtocolHash('ChallengeDomainHash', {
+            recoveryPolicyHash: deriveCanonicalObjectHash({
+                objectType: 'ChallengeDomainHash',
                 payload: { policy: 'wrong-recovery-policy' },
                 purpose: 'fixture-recovery-policy-v1',
             }),
@@ -364,7 +363,8 @@ describe('recovery epoch shells', () => {
 
         const staleActionPayload = {
             ceremonyId,
-            electionManifestHash: deriveProtocolHash('ElectionManifestHash', {
+            electionManifestHash: deriveCanonicalObjectHash({
+                objectType: 'ElectionManifestHash',
                 manifest: 'main',
             }),
             signerIdentity: 'participant-1',
@@ -375,10 +375,11 @@ describe('recovery epoch shells', () => {
             actionSequence: 1,
             recoveryPolicyHash: manifestPolicyHashes.recoveryPolicyHash,
             acceptedRecoveryEpochUpdateHash: recoveryEpochUpdateHash,
-            rosterExternalAcceptanceHash: deriveProtocolHash(
-                'RosterExternalAcceptanceHash',
-                { participant: 'participant-1', roster: 'main' },
-            ),
+            rosterExternalAcceptanceHash: deriveCanonicalObjectHash({
+                objectType: 'RosterExternalAcceptanceHash',
+                participant: 'participant-1',
+                roster: 'main',
+            }),
             contextHash,
         };
         const staleActionContext: ActionContext = {
@@ -401,9 +402,12 @@ describe('recovery epoch shells', () => {
             isActionCurrentForRecoveryEpoch({
                 actionContext: staleActionContext,
                 recoveryEpochState: currentEntry,
-                expectedRosterExternalAcceptanceHash: deriveProtocolHash(
-                    'RosterExternalAcceptanceHash',
-                    { participant: 'participant-1', roster: 'different' },
+                expectedRosterExternalAcceptanceHash: deriveCanonicalObjectHash(
+                    {
+                        objectType: 'RosterExternalAcceptanceHash',
+                        participant: 'participant-1',
+                        roster: 'different',
+                    },
                 ),
             }).refusedObjects,
         ).toEqual(

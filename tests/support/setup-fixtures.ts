@@ -1,23 +1,24 @@
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import type {
     CollectiveBgvSetupContext,
     VssOpeningRandomByteSource,
 } from '#packages/protocol/src/index';
 
 // Collective BGV setup test suites derive every fixture value from a per-suite
-// namespace so the deterministic protocol hashes stay isolated between suites.
+// namespace so the deterministic fixture hashes stay isolated between suites.
 // These shared factories keep a single definition of that derivation instead of
 // repeating the same fixture-hash, deterministic-randomness, and setup-context
 // boilerplate in every suite. Each factory is parameterized by the suite's
-// fixture namespace, so the produced values are byte-identical to the previous
-// per-suite copies.
+// fixture namespace, so distinct suites still produce distinct, deterministic
+// values.
 
 export type SetupFixtureHash = (label: string) => string;
 
 export const makeSetupFixtureHash =
     (fixtureNamespace: string): SetupFixtureHash =>
     (label) =>
-        deriveProtocolHash('ActionContextHash', {
+        deriveCanonicalObjectHash({
+            objectType: 'SetupFixtureHash',
             fixture: fixtureNamespace,
             label,
         });
@@ -36,7 +37,8 @@ export const makeVssOpeningRandomBytes =
             while (outputOffset < byteLength) {
                 if (bufferedOffset >= bufferedBytes.byteLength) {
                     bufferedBytes = textEncoder.encode(
-                        deriveProtocolHash('ActionContextHash', {
+                        deriveCanonicalObjectHash({
+                            objectType: 'SetupFixtureHash',
                             fixture: fixtureNamespace,
                             seedLabel,
                             blockIndex,

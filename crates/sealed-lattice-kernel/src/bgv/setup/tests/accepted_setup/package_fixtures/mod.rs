@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
 static TERMINAL_FULL_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     TerminalFullRingSetupPackageFixture,
@@ -34,25 +36,21 @@ struct CollectiveSetupPackageFixture {
 }
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
-    derive_protocol_hash(
-        "PublicKeyHash",
-        &serde_json::json!({
-            "algorithm": "ML-KEM-768",
-            "keyPurpose": "private-vss-mailbox",
-            "recipientRosterPosition": roster_position,
-        }),
-    )
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "MlKemMailboxPublicKey",
+        "algorithm": "ML-KEM-768",
+        "keyPurpose": "private-vss-mailbox",
+        "recipientRosterPosition": roster_position,
+    }))
     .expect("recipient mailbox public key hash")
 }
 
 fn private_vss_mailbox_public_key_bytes_hash(roster_position: u64) -> String {
-    derive_protocol_hash(
-        "PublicKeyHash",
-        &serde_json::json!({
-            "fixture": "recipient-mailbox-public-key-bytes",
-            "recipientRosterPosition": roster_position,
-        }),
-    )
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "MlKemMailboxPublicKeyBytes",
+        "fixture": "recipient-mailbox-public-key-bytes",
+        "recipientRosterPosition": roster_position,
+    }))
     .expect("recipient mailbox public key bytes hash")
 }
 
@@ -78,10 +76,10 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
         })
         .collect::<Vec<_>>();
 
-    derive_protocol_hash(
-        "CollectiveBgvSetupRosterHash",
-        &serde_json::Value::Array(roster_entries),
-    )
+    derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "CollectiveBgvSetupRoster",
+        "rosterEntries": roster_entries,
+    }))
     .expect("collective setup roster hash")
 }
 
@@ -223,10 +221,10 @@ fn build_collective_setup_package_fixture_parts(
 ) -> CollectiveSetupPackageFixture {
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     let ceremony_id = "ceremony-main";
-    let manifest_hash = derive_protocol_hash(
-        "ElectionManifestHash",
-        &serde_json::json!({ "manifest": "collective-bgv-setup-test" }),
-    )
+    let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "ElectionManifestHash",
+        "manifest": "collective-bgv-setup-test",
+    }))
     .expect("manifest hash");
     let roster_hash = collective_setup_roster_hash_fixture(participant_count);
     // The setup parameters hash is a roster family: distinct per n,
@@ -293,17 +291,13 @@ fn build_collective_setup_package_fixture_parts(
                             private_vss_mailbox_public_key_bytes_hash(roster_position)
                         );
                     }
-                    let phase_object_root = derive_protocol_hash(
-                        "SetupPhaseObjectHash",
-                        &phase_payload,
-                    )
-                    .expect("phase object root");
+                    let phase_object_root = derive_canonical_object_hash(&phase_payload)
+                        .expect("phase object root");
                     let phase_object_byte_length =
                         u64::try_from(canonical_json(&phase_payload).expect("phase payload").len())
                             .expect("phase payload length");
-                    let phase_signature_context_hash = derive_protocol_hash(
-                        "SetupPhaseObjectHash",
-                        &serde_json::json!({
+                    let phase_signature_context_hash = derive_canonical_object_hash(&serde_json::json!({
+                            "objectType": "SetupPhaseSignatureContext",
                             "purpose": "setup-phase-signature-context",
                             "phaseId": phase_identifier,
                             "phaseNumber": phase_number,
@@ -374,6 +368,7 @@ fn build_collective_setup_package_fixture_parts(
                 })
                 .collect::<Vec<_>>();
             let mut phase_record = serde_json::json!({
+                "objectType": "SetupPhaseRecord",
                 "phaseId": phase_identifier,
                 "phaseNumber": phase_number,
                 "ceremonyId": ceremony_id,
@@ -384,8 +379,7 @@ fn build_collective_setup_package_fixture_parts(
                 "previousPhaseRoot": previous_phase_root.clone(),
                 "participantPhaseObjects": participant_phase_objects,
             });
-            let phase_root =
-                derive_protocol_hash("SetupPhaseRoot", &phase_record).expect("phase root");
+            let phase_root = derive_canonical_object_hash(&phase_record).expect("phase root");
             phase_record["phaseRoot"] = serde_json::json!(phase_root.clone());
             previous_phase_root = serde_json::json!(phase_root);
 

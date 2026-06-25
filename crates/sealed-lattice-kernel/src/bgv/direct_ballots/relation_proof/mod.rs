@@ -37,7 +37,7 @@ use crate::{
         parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, derive_protocol_hash, hash512, hash512_hex, to_hex},
+    hashing::{canonical_json, hash512, hash512_hex, to_hex},
 };
 
 const DIRECT_BALLOT_RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";

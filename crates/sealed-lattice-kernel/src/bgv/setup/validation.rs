@@ -5,6 +5,8 @@ use super::certificates::{
 use super::input::ensure_nfc_identity;
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 mod certificate_checks;
 mod evaluation_key_checks;
 mod key_material_checks;
@@ -60,16 +62,12 @@ pub(super) fn validate_setup_package_internal_bindings(
         )?;
     }
 
-    let target_decryption_parameters_hash = derive_protocol_hash(
-        "TargetDecryptionParametersHash",
-        &target_decryption_parameters(&bgv_parameters_hash)?,
-    )?;
-    let target_decryption_parameters_binding_hash = derive_protocol_hash(
-        "TargetDecryptionParametersBindingHash",
-        &json!({
-            "targetDecryptionParametersHash": target_decryption_parameters_hash,
-        }),
-    )?;
+    let target_decryption_parameters_hash =
+        derive_canonical_object_hash(&target_decryption_parameters(&bgv_parameters_hash)?)?;
+    let target_decryption_parameters_binding_hash = derive_canonical_object_hash(&json!({
+        "objectType": "TargetDecryptionParametersBinding",
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+    }))?;
     compare_hash_at_path(
         setup_package,
         &["targetDecryptionStatus", "targetDecryptionParametersHash"],

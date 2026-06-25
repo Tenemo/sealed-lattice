@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -156,8 +156,8 @@ const phaseSignatureContextHash = (
     input: Omit<SetupPhaseParticipantObjectInput, 'signRoot'>,
     phaseObjectRoot: ProtocolHash,
 ): ProtocolHash =>
-    deriveProtocolHash('SetupPhaseObjectHash', {
-        purpose: 'setup-phase-signature-context',
+    deriveCanonicalObjectHash({
+        objectType: 'SetupPhaseSignatureContext',
         phaseId: input.phaseId,
         phaseNumber: input.phaseNumber,
         ceremonyId: input.setupContext.ceremonyId,
@@ -247,7 +247,7 @@ export const createSetupPhaseParticipantObject = async (
     }
 
     const payload = phasePayload(input);
-    const phaseObjectRoot = deriveProtocolHash('SetupPhaseObjectHash', payload);
+    const phaseObjectRoot = deriveCanonicalObjectHash(payload);
     const phaseObjectByteLength = canonicalByteLength(payload);
     const phaseSignatureContext = phaseSignatureContextHash(
         input,
@@ -312,6 +312,9 @@ export const createSetupPhaseRecord = (input: {
 
     return {
         ...phaseRecordWithoutRoot,
-        phaseRoot: deriveProtocolHash('SetupPhaseRoot', phaseRecordWithoutRoot),
+        phaseRoot: deriveCanonicalObjectHash({
+            objectType: 'SetupPhaseRecord',
+            ...phaseRecordWithoutRoot,
+        }),
     } satisfies SetupPhaseRecord;
 };

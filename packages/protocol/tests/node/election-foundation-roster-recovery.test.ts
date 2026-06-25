@@ -8,7 +8,7 @@ import {
     createRegistrationEntry,
     createRosterManifestTranscriptInput,
     createSignature,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveRosterHash,
     manifestOpaqueBindings,
     verifyRosterManifestTranscript,
@@ -93,7 +93,8 @@ describe('roster and manifest shells', () => {
         ]);
         const changedFrozenRosterParameters = {
             ...input.frozenRosterParameters,
-            pollSpecHash: deriveProtocolHash('PollSpecHash', {
+            pollSpecHash: deriveCanonicalObjectHash({
+                objectType: 'PollSpecHash',
                 poll: 'changed',
             }),
         };
@@ -194,12 +195,10 @@ describe('roster and manifest shells', () => {
         ]);
         const changedManifest = createElectionManifest(registrations, {
             boardSequence: 4,
-            thresholdParametersHash: deriveProtocolHash(
-                'ThresholdParametersHash',
-                {
-                    parameters: 'different-threshold-parameters',
-                },
-            ),
+            thresholdParametersHash: deriveCanonicalObjectHash({
+                objectType: 'ThresholdParametersHash',
+                parameters: 'different-threshold-parameters',
+            }),
         });
         const wrongFixedParametersManifest = createElectionManifest(
             registrations,
@@ -207,7 +206,8 @@ describe('roster and manifest shells', () => {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    bgvParametersHash: deriveProtocolHash('BGVParametersHash', {
+                    bgvParametersHash: deriveCanonicalObjectHash({
+                        objectType: 'BGVParametersHash',
                         parameters: 'unsupported-fixed-parameters',
                     }),
                 },
@@ -219,15 +219,13 @@ describe('roster and manifest shells', () => {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    unexpectedDirectBindingHash: deriveProtocolHash(
-                        'ChallengeDomainHash',
-                        {
-                            payload: {
-                                parameters: 'unexpected-parameters-binding',
-                            },
-                            purpose: 'fixture-unexpected-direct-binding-v1',
+                    unexpectedDirectBindingHash: deriveCanonicalObjectHash({
+                        objectType: 'ChallengeDomainHash',
+                        payload: {
+                            parameters: 'unexpected-parameters-binding',
                         },
-                    ),
+                        purpose: 'fixture-unexpected-direct-binding-v1',
+                    }),
                 } as typeof manifestOpaqueBindings,
             },
         );
@@ -245,7 +243,8 @@ describe('roster and manifest shells', () => {
         );
         const changedPollSpecManifest = createElectionManifest(registrations, {
             boardSequence: 4,
-            pollSpecHash: deriveProtocolHash('PollSpecHash', {
+            pollSpecHash: deriveCanonicalObjectHash({
+                objectType: 'PollSpecHash',
                 poll: 'different',
             }),
         });

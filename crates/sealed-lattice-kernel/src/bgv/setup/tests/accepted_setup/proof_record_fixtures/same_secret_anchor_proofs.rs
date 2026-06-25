@@ -2,6 +2,8 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn same_secret_proofs_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -110,13 +112,11 @@ pub(in super::super) fn same_secret_proofs_object(
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
         };
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "SameSecretProofRoot",
-            &serde_json::json!({
-                "fixture": "same-secret-internal-proof-randomness",
-                "trusteeRosterPosition": trustee_roster_position,
-            }),
-        )
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "SameSecretProofRoot",
+            "fixture": "same-secret-internal-proof-randomness",
+            "trusteeRosterPosition": trustee_roster_position,
+        }))
         .expect("same-secret proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
         let proof_bytes = checkpointed_anchor_proof_bytes(
@@ -156,7 +156,7 @@ pub(in super::super) fn same_secret_proofs_object(
             "proofBytesHex": to_hex(&proof_bytes),
         });
         proof_record["sameSecretProofRoot"] = serde_json::json!(
-            derive_protocol_hash("SameSecretProofRoot", &proof_record)
+            derive_canonical_object_hash(&proof_record)
                 .expect("same-secret proof root")
         );
         let proof_root_entry = serde_json::json!({
@@ -197,8 +197,7 @@ pub(in super::super) fn same_secret_proofs_object(
         "proofRecords": proof_records,
     });
     proof_set["sameSecretProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("SameSecretProofRoot", &proof_set)
-            .expect("same-secret proof set root")
+        derive_canonical_object_hash(&proof_set).expect("same-secret proof set root")
     );
 
     proof_set

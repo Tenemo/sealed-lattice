@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Debug, Clone)]
 pub(crate) struct SetupVssMaterialTransportHashes {
     pub(crate) full_object_hash: String,
@@ -785,16 +787,13 @@ pub(super) fn setup_transport_chunk_manifest_root(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &json!({
-            "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
-            "objectVersion": 1,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
 }

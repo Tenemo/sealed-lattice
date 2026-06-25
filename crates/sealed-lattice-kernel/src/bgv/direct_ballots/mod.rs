@@ -57,7 +57,7 @@ use crate::{
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512_hex},
+    hashing::{canonical_json, chunk_root, hash512_hex},
 };
 
 const DIRECT_BALLOT_OPERATION: &str = "runDirectEncryptedBallot";

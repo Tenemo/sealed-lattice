@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use crate::{
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_protocol_hash, to_hex},
+    hashing::{derive_canonical_object_hash, to_hex},
     transcript_core::decode_hex,
 };
 
@@ -115,8 +115,7 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
 
     let statement = private_vss_share_succinct_statement(&input)?;
     let statement_value = private_vss_share_succinct_statement_value(&input, &statement)?;
-    let proof_statement_root =
-        derive_protocol_hash("PrivateVssShareProofStatementRoot", &statement_value)?;
+    let proof_statement_root = derive_canonical_object_hash(&statement_value)?;
     let statement_hash_hex = to_hex(&statement.statement_hash());
     if value_string(input.proof_record, "proofStatementRoot")? != proof_statement_root {
         return Err(invalid_private_vss_share_proof(
@@ -741,18 +740,15 @@ pub(super) fn private_vss_share_succinct_proof_material_root(
     proof_size_bytes: usize,
     proof_bytes_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "PrivateVssShareProofMaterialRoot",
-        &json!({
-            "objectType": "PrivateVssShareSuccinctProofMaterial",
-            "objectVersion": 1,
-            "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-            "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
-            "statementHash": statement_hash_hex,
-            "proofSizeBytes": proof_size_bytes,
-            "proofBytesHash": proof_bytes_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "PrivateVssShareSuccinctProofMaterial",
+        "objectVersion": 1,
+        "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
+        "statementHash": statement_hash_hex,
+        "proofSizeBytes": proof_size_bytes,
+        "proofBytesHash": proof_bytes_hash,
+    }))
 }
 
 fn private_vss_share_succinct_transported_proof_material_root(
@@ -761,28 +757,25 @@ fn private_vss_share_succinct_transported_proof_material_root(
     proof_bytes_hash: &str,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "PrivateVssShareProofMaterialRoot",
-        &json!({
-            "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-            "objectVersion": 1,
-            "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-            "statementHash": statement_hash_hex,
-            "proofSizeBytes": proof_size_bytes,
-            "proofBytesHash": proof_bytes_hash,
-            "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            "proofChunkCount": transport_hashes.chunk_hashes.len(),
-            "proofTotalByteLength": transport_hashes.total_byte_length,
-            "proofFullObjectHash": transport_hashes.full_object_hash.as_str(),
-            "proofChunkRoot": transport_hashes.chunk_root.as_str(),
-            "proofChunkHashes": transport_hashes
-                .chunk_hashes
-                .iter()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
+        "objectVersion": 1,
+        "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "statementHash": statement_hash_hex,
+        "proofSizeBytes": proof_size_bytes,
+        "proofBytesHash": proof_bytes_hash,
+        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "proofChunkCount": transport_hashes.chunk_hashes.len(),
+        "proofTotalByteLength": transport_hashes.total_byte_length,
+        "proofFullObjectHash": transport_hashes.full_object_hash.as_str(),
+        "proofChunkRoot": transport_hashes.chunk_root.as_str(),
+        "proofChunkHashes": transport_hashes
+            .chunk_hashes
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>(),
+    }))
 }
 
 fn private_vss_share_lifted_carry_bound(
@@ -901,8 +894,7 @@ pub(super) fn private_vss_share_succinct_proof_record(
     let statement = private_vss_share_succinct_statement(&verification_input)?;
     let statement_value =
         private_vss_share_succinct_statement_value(&verification_input, &statement)?;
-    let proof_statement_root =
-        derive_protocol_hash("PrivateVssShareProofStatementRoot", &statement_value)?;
+    let proof_statement_root = derive_canonical_object_hash(&statement_value)?;
     let statement_hash_hex = to_hex(&statement.statement_hash());
     let witness = TrusteeEvaluationKeyWitness {
         secret_coefficients: Vec::new(),

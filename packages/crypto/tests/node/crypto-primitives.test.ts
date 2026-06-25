@@ -6,14 +6,13 @@ import {
     createPrivateVssMailboxKeyPair,
     decryptLocalTrusteeState,
     decryptPrivateVssMailboxEnvelope,
+    deriveCanonicalObjectHash,
     deriveMlDsaPublicKeyHash,
-    deriveProtocolHash,
     deriveProtocolSignatureHash,
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
     encryptPrivateVssMailboxEnvelope,
     hash512Hex,
-    resolveProtocolHashDomain,
     verifySignedObjectSignature,
 } from '#packages/crypto/src/index';
 import {
@@ -22,12 +21,16 @@ import {
     createProtocolSignatureFixture,
 } from '#packages/crypto/tests/support/protocol-signature-fixtures';
 
-const contextHash = deriveProtocolHash('ActionContextHash', {
+const contextHash = deriveCanonicalObjectHash({
+    objectType: 'ActionContextHash',
     context: 'crypto-test',
 });
 
 const createSignedRoot = (
-    objectRoot = deriveProtocolHash('BoardHeadHash', { object: 'root' }),
+    objectRoot = deriveCanonicalObjectHash({
+        objectType: 'BoardHeadHash',
+        object: 'root',
+    }),
 ): CanonicalSignedRootObject => ({
     objectType: 'BoardHead',
     objectVersion: 1,
@@ -45,26 +48,6 @@ const createSignedRoot = (
 });
 
 describe('crypto primitive boundary', () => {
-    it('uses the Rust Hash512 framing for protocol hash namespaces', () => {
-        const canonicalBytes = new TextEncoder().encode(
-            canonicalJson({ poll: 'main' }),
-        );
-
-        expect(resolveProtocolHashDomain('PollSpecHash')).toBe(
-            'sealed-lattice-root/poll-spec-hash-v1',
-        );
-        expect(
-            hash512Hex('sealed-lattice-root/poll-spec-hash-v1', [
-                canonicalBytes,
-            ]),
-        ).toBe(
-            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
-        );
-        expect(deriveProtocolHash('PollSpecHash', { poll: 'main' })).toBe(
-            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
-        );
-    });
-
     it('hashes large byte parts without argument spreading', () => {
         const largeCanonicalPart = new Uint8Array(200_000);
 
@@ -75,41 +58,6 @@ describe('crypto primitive boundary', () => {
                 largeCanonicalPart,
             ]),
         ).toHaveLength(128);
-    });
-
-    it('rejects unreserved protocol hash namespaces', () => {
-        expect(() =>
-            resolveProtocolHashDomain('UnreservedInternalModulusHash'),
-        ).toThrow('reserved');
-        expect(() =>
-            resolveProtocolHashDomain(
-                'sealed-lattice-root/unreserved-internal-modulus-hash-v1',
-            ),
-        ).toThrow('reserved');
-        expect(() =>
-            deriveProtocolHash('UnreservedInternalRoot', {
-                fixture: 'rejected',
-            }),
-        ).toThrow('reserved');
-    });
-
-    it('uses only reserved hash namespaces without aliases', () => {
-        const targetProposal = { target: 'proposal' };
-        const targetProposalHash = deriveProtocolHash(
-            'TargetProposalHash',
-            targetProposal,
-        );
-
-        expect(resolveProtocolHashDomain('TargetProposalHash')).toBe(
-            'sealed-lattice-root/target-proposal-hash-v1',
-        );
-        expect(() => resolveProtocolHashDomain('ManifestHash')).toThrow(
-            'reserved',
-        );
-        expect(targetProposalHash).toMatch(/^[0-9a-f]{128}$/u);
-        expect(targetProposalHash).toBe(
-            deriveProtocolHash('TargetProposalHash', targetProposal),
-        );
     });
 
     it('canonicalizes JSON deterministically and rejects unsupported values', () => {
@@ -221,7 +169,8 @@ describe('crypto primitive boundary', () => {
                 signerRole: 'Board',
                 signerIdentity: 'board',
                 ceremonyId: 'ceremony',
-                publicKeyHash: deriveProtocolHash('PublicKeyHash', {
+                publicKeyHash: deriveCanonicalObjectHash({
+                    objectType: 'PublicKeyHash',
                     key: 'wrong',
                 }),
                 objectRoot: signedRoot.objectRoot,
@@ -253,10 +202,12 @@ describe('crypto primitive boundary', () => {
             objectType: 'PrivateVssEnvelopeAad',
             objectVersion: 1,
             ceremonyId: 'ceremony',
-            manifestHash: deriveProtocolHash('ElectionManifestHash', {
+            manifestHash: deriveCanonicalObjectHash({
+                objectType: 'ElectionManifestHash',
                 manifest: 'mailbox-test',
             }),
-            rosterHash: deriveProtocolHash('RosterHash', {
+            rosterHash: deriveCanonicalObjectHash({
+                objectType: 'RosterHash',
                 roster: 'mailbox-test',
             }),
             sourceTrusteeIdentity: 'trustee-2',
@@ -266,10 +217,8 @@ describe('crypto primitive boundary', () => {
         const privateEnvelope = {
             objectType: 'PrivateVssShareEnvelope',
             objectVersion: 1,
-            privateEnvelopeAadHash: deriveProtocolHash(
-                'PrivateVssEnvelopeAadHash',
-                privateEnvelopeAad,
-            ),
+            privateEnvelopeAadHash:
+                deriveCanonicalObjectHash(privateEnvelopeAad),
             sourceTrusteeIdentity: 'trustee-2',
             recipientIdentity: 'trustee-3',
             rnsShareOpenings: [
@@ -281,18 +230,18 @@ describe('crypto primitive boundary', () => {
                         objectVersion: 1,
                         proofId:
                             'sealed-lattice-private-vss-share-proof-lnp-v1',
-                        proofMaterialRoot: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
-                            { proof: 'material-root' },
-                        ),
-                        proofBytesHash: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
-                            { proof: 'bytes-hash' },
-                        ),
-                        proofStatementRoot: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
-                            { proof: 'statement-root' },
-                        ),
+                        proofMaterialRoot: deriveCanonicalObjectHash({
+                            objectType: 'PrivateVssShareEnvelopeHash',
+                            proof: 'material-root',
+                        }),
+                        proofBytesHash: deriveCanonicalObjectHash({
+                            objectType: 'PrivateVssShareEnvelopeHash',
+                            proof: 'bytes-hash',
+                        }),
+                        proofStatementRoot: deriveCanonicalObjectHash({
+                            objectType: 'PrivateVssShareEnvelopeHash',
+                            proof: 'statement-root',
+                        }),
                         proofVerificationStatus:
                             'verifier-required-not-implemented',
                     },
@@ -350,12 +299,10 @@ describe('crypto primitive boundary', () => {
 
         const wrongKemCiphertextHash = {
             ...encrypted.encryptedEnvelope,
-            kemCiphertextHash: deriveProtocolHash(
-                'PrivateVssEncryptedEnvelopeHash',
-                {
-                    fixture: 'wrong-kem-ciphertext-hash',
-                },
-            ),
+            kemCiphertextHash: deriveCanonicalObjectHash({
+                objectType: 'PrivateVssEncryptedEnvelopeHash',
+                fixture: 'wrong-kem-ciphertext-hash',
+            }),
         };
         const wrongKemCiphertextHashWithoutHash = Object.fromEntries(
             Object.entries(wrongKemCiphertextHash).filter(
@@ -366,8 +313,7 @@ describe('crypto primitive boundary', () => {
             decryptPrivateVssMailboxEnvelope({
                 encryptedEnvelope: {
                     ...wrongKemCiphertextHash,
-                    encryptedEnvelopeHash: deriveProtocolHash(
-                        'PrivateVssEncryptedEnvelopeHash',
+                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
                         wrongKemCiphertextHashWithoutHash,
                     ),
                 },
@@ -378,12 +324,10 @@ describe('crypto primitive boundary', () => {
 
         const wrongCiphertextBytesHash = {
             ...encrypted.encryptedEnvelope,
-            ciphertextBytesHash: deriveProtocolHash(
-                'PrivateVssEncryptedEnvelopeHash',
-                {
-                    fixture: 'wrong-ciphertext-bytes-hash',
-                },
-            ),
+            ciphertextBytesHash: deriveCanonicalObjectHash({
+                objectType: 'PrivateVssEncryptedEnvelopeHash',
+                fixture: 'wrong-ciphertext-bytes-hash',
+            }),
         };
         const wrongCiphertextBytesHashWithoutHash = Object.fromEntries(
             Object.entries(wrongCiphertextBytesHash).filter(
@@ -394,8 +338,7 @@ describe('crypto primitive boundary', () => {
             decryptPrivateVssMailboxEnvelope({
                 encryptedEnvelope: {
                     ...wrongCiphertextBytesHash,
-                    encryptedEnvelopeHash: deriveProtocolHash(
-                        'PrivateVssEncryptedEnvelopeHash',
+                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
                         wrongCiphertextBytesHashWithoutHash,
                     ),
                 },
@@ -406,12 +349,10 @@ describe('crypto primitive boundary', () => {
 
         const wrongPrivateEnvelopeAadHash = {
             ...encrypted.encryptedEnvelope,
-            privateEnvelopeAadHash: deriveProtocolHash(
-                'PrivateVssEnvelopeAadHash',
-                {
-                    fixture: 'wrong-private-envelope-aad-hash',
-                },
-            ),
+            privateEnvelopeAadHash: deriveCanonicalObjectHash({
+                objectType: 'PrivateVssEnvelopeAadHash',
+                fixture: 'wrong-private-envelope-aad-hash',
+            }),
         };
         const wrongPrivateEnvelopeAadHashWithoutHash = Object.fromEntries(
             Object.entries(wrongPrivateEnvelopeAadHash).filter(
@@ -422,8 +363,7 @@ describe('crypto primitive boundary', () => {
             decryptPrivateVssMailboxEnvelope({
                 encryptedEnvelope: {
                     ...wrongPrivateEnvelopeAadHash,
-                    encryptedEnvelopeHash: deriveProtocolHash(
-                        'PrivateVssEncryptedEnvelopeHash',
+                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
                         wrongPrivateEnvelopeAadHashWithoutHash,
                     ),
                 },
@@ -448,8 +388,7 @@ describe('crypto primitive boundary', () => {
             decryptPrivateVssMailboxEnvelope({
                 encryptedEnvelope: {
                     ...reboundAad,
-                    encryptedEnvelopeHash: deriveProtocolHash(
-                        'PrivateVssEncryptedEnvelopeHash',
+                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
                         reboundAadWithoutHash,
                     ),
                 },
@@ -462,31 +401,33 @@ describe('crypto primitive boundary', () => {
     it('encrypts local trustee setup state and rejects raw or rebound state', async () => {
         const setupContext = {
             ceremonyId: 'ceremony',
-            manifestHash: deriveProtocolHash('ElectionManifestHash', {
+            manifestHash: deriveCanonicalObjectHash({
+                objectType: 'ElectionManifestHash',
                 manifest: 'local-state-storage-test',
             }),
-            rosterHash: deriveProtocolHash('RosterHash', {
+            rosterHash: deriveCanonicalObjectHash({
+                objectType: 'RosterHash',
                 roster: 'local-state-storage-test',
             }),
-            setupParametersHash: deriveProtocolHash('SetupParametersHash', {
+            setupParametersHash: deriveCanonicalObjectHash({
+                objectType: 'SetupParametersHash',
                 parameters: 'local-state-storage-test',
             }),
             setupEpoch: 'setup-epoch-1',
         };
-        const thresholdShareCommitmentRecipientRoot = deriveProtocolHash(
-            'ActionContextHash',
+        const thresholdShareCommitmentRecipientRoot = deriveCanonicalObjectHash(
             {
+                objectType: 'ActionContextHash',
                 commitment: 'threshold-share-commitment-recipient',
             },
         );
-        const issuedVssAcceptanceRoot = deriveProtocolHash(
-            'VssShareAcceptanceRoot',
-            {
-                accepted: 'source-trustee-1',
-            },
-        );
+        const issuedVssAcceptanceRoot = deriveCanonicalObjectHash({
+            objectType: 'VssShareAcceptanceRoot',
+            accepted: 'source-trustee-1',
+        });
         const issuedVssComplaintRoots = [
-            deriveProtocolHash('VssComplaintRoot', {
+            deriveCanonicalObjectHash({
+                objectType: 'VssComplaintRoot',
                 complaint: 'source-trustee-2',
             }),
         ];
@@ -521,7 +462,8 @@ describe('crypto primitive boundary', () => {
             setupEpoch: setupContext.setupEpoch,
             storageRequirement: 'encrypted-local-device-state-required',
             exportPolicy: 'roots-only-no-raw-share-or-opening-export',
-            localStateRoot: deriveProtocolHash('LocalTrusteeSetupStateRoot', {
+            localStateRoot: deriveCanonicalObjectHash({
+                objectType: 'LocalTrusteeSetupStateRoot',
                 trustee: 'trustee-3',
             }),
             trusteeIdentity: 'trustee-3',
@@ -592,10 +534,10 @@ describe('crypto primitive boundary', () => {
         await expect(
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted.encryptedLocalState,
-                expectedLocalStateRoot: deriveProtocolHash(
-                    'LocalTrusteeSetupStateRoot',
-                    { trustee: 'wrong' },
-                ),
+                expectedLocalStateRoot: deriveCanonicalObjectHash({
+                    objectType: 'LocalTrusteeSetupStateRoot',
+                    trustee: 'wrong',
+                }),
                 setupContext,
                 storageKeyBytesHex,
             }),
@@ -656,7 +598,8 @@ describe('crypto primitive boundary', () => {
                 ...signature.profile,
                 providerName: 'forged-provider',
                 providerVersion: '999',
-                providerBuildHash: deriveProtocolHash('ProviderBuildHash', {
+                providerBuildHash: deriveCanonicalObjectHash({
+                    objectType: 'ProviderBuildHash',
                     forged: true,
                 }),
             },

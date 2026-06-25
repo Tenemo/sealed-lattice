@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
@@ -283,7 +285,7 @@ fn verify_trustee_evaluation_key_proof_set(
         .as_object_mut()
         .expect("trustee evaluation-key proof set object was checked")
         .remove("trusteeEvaluationKeyProofSetRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -461,7 +463,7 @@ fn verify_trustee_evaluation_key_proof_record(
         .as_object_mut()
         .expect("trustee evaluation-key proof record object was checked")
         .remove("trusteeEvaluationKeyProofRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -476,8 +478,7 @@ fn verify_trustee_evaluation_key_proof_record(
 // recomputed from the repo-owned decomposition parameters, never read from the
 // package.
 pub(in crate::bgv::setup) fn accepted_key_switch_decomposition_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "KeySwitchDecompositionHash",
+    derive_canonical_object_hash(
         &crate::bgv::setup::certificates::key_switch_decomposition_parameters()?,
     )
 }
@@ -921,25 +922,22 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofMaterialRoot",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-            "objectVersion": 1,
-            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "statementHash": value_string(proof_record, "statementHash")?,
-            "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
-            "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "TrusteeEvaluationKeyProofMaterialReference",
+        "objectVersion": 1,
+        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
+        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+        "statementHash": value_string(proof_record, "statementHash")?,
+        "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
+        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
+        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    }))
 }
 
 fn verify_trustee_evaluation_key_proof_transport_reference(

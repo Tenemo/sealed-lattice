@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in crate::bgv::setup) fn threshold_verification_material(
     input: &PassiveSetupInput,
     target_decryption_parameters_hash: &str,
@@ -40,15 +42,13 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
         ],
     });
     let threshold_share_verification_key_root =
-        derive_protocol_hash("ThresholdShareVerificationKeyRoot", &verification_key_set)?;
-    let threshold_share_verification_key_hash = derive_protocol_hash(
-        "ThresholdShareVerificationKeyHash",
-        &json!({
-            "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
-            "targetDecryptionParametersHash": target_decryption_parameters_hash,
-            "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
-        }),
-    )?;
+        derive_canonical_object_hash(&verification_key_set)?;
+    let threshold_share_verification_key_hash = derive_canonical_object_hash(&json!({
+        "objectType": "ThresholdShareVerificationKeyBinding",
+        "thresholdShareVerificationKeyRoot": threshold_share_verification_key_root,
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
+    }))?;
 
     Ok(json!({
         "verificationKeySet": verification_key_set,

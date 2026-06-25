@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
     proof_bytes: &[u8],
 ) -> String {
@@ -20,19 +22,17 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
 // safety boundaries for the full scope statement.
 pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_hash()
 -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "BallotValidityProofParametersHash",
-        &json!({
-            "statementVersion": 3,
-            "proofEncoding": "binary relation transcript",
-            "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
-            "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
-            "proofBytesDomain": DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
-            "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
-            "sourceRingDegree": POLYNOMIAL_DEGREE,
-            "dataPrimeCount": DATA_PRIMES.len(),
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "BallotValidityProofParameters",
+        "statementVersion": 3,
+        "proofEncoding": "binary relation transcript",
+        "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
+        "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",
+        "proofBytesDomain": DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN,
+        "relation": "BGV all-limb encryption equations, score encoding, one-hot constraints, randomizer support, and error support",
+        "sourceRingDegree": POLYNOMIAL_DEGREE,
+        "dataPrimeCount": DATA_PRIMES.len(),
+    }))
 }
 
 // Reports the operative and computed accounting for the internal relation proof. The honest

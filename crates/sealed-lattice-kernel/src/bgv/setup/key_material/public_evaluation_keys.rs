@@ -1,12 +1,14 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in crate::bgv::setup) fn evaluation_keys(
     input: &PassiveSetupInput,
     collective_public_key: &Value,
     key_switch_decomposition_hash: &str,
 ) -> CanonicalResult<Value> {
     let rot_set = selected_rotation_set()?;
-    let rot_set_hash = derive_protocol_hash("RotSetHash", &rot_set)?;
+    let rot_set_hash = derive_canonical_object_hash(&rot_set)?;
     let collective_public_key_root =
         string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?;
     let bgv_public_key_root = string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?;
@@ -53,7 +55,7 @@ pub(in crate::bgv::setup) fn evaluation_keys(
         "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
         "regenerateIfRotSetChanges": true,
     });
-    let evaluation_key_root = derive_protocol_hash("EvalKeyRoot", &evaluation_key_record)?;
+    let evaluation_key_root = derive_canonical_object_hash(&evaluation_key_record)?;
 
     Ok(json!({
         "record": evaluation_key_record,

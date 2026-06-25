@@ -153,7 +153,7 @@
     "maxCenteredAbsCoefficient": 28091,
     "rosterSize": 20,
     "threshold": 7,
-    "reportHash": "9f7b78ebe82ef81c546e3e1dc5687fca9411979bb55e47a608c5510449a326072bf5856a5f409fa774f07f12a9a397a3fead990597832990251541fe5212c3e2"
+    "reportHash": "0cbc6d3fdd5aca1326686c1899d2b1be401fd7782bd8cd6f2263733a73241173004c699ccb5b2f07c87097de787029a3082edff0b07337cff5c7153dc4d995ad"
   },
   "stressWorstCaseReport": {
     "exhaustiveSubsetCount": 77520,
@@ -253,6 +253,6 @@
     ],
     "rosterSize": 20,
     "threshold": 7,
-    "reportHash": "ecb49a2d079305837556d04e6f71bbb34046030d4665e85d665291b2aa3a77b060b2e360bc93c9e14e732b17408c9eec180aa2c5b1fdf52a6391b620f0467681"
+    "reportHash": "c4b51f8abaf8d50ed0652fdf19e92c863326eb0670ddf20bd78aa6b114dcbac77d8299a922c9b5f9d2d450db52752b6f98e7d49ab82480f30dcf6741d8dee9aa"
   }
 }

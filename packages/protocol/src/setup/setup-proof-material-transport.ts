@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 type JsonRecord = Record<string, unknown>;
@@ -60,7 +60,7 @@ export const setupProofChunkManifestRoot = (
     fullObjectHash: ProtocolHash,
     totalByteLength: number,
 ): ProtocolHash =>
-    deriveProtocolHash('SetupProofChunkManifestRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'SetupProofMaterialChunkManifest',
         objectVersion: 1,
         proofFamily,

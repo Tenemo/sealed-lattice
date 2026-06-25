@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
 fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -1079,13 +1081,11 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
         })
         .expect("statement over substituted round-two share");
     let witness = trustee_evaluation_key_witness_for_fixture(0, ring_degree, &statement);
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &serde_json::json!({
-            "fixture": "substituted-aggregate-reprove",
-            "trusteeRosterPosition": 0,
-        }),
-    )
+    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomness",
+        "fixture": "substituted-aggregate-reprove",
+        "trusteeRosterPosition": 0,
+    }))
     .expect("proof randomness seed");
 
     let error = match prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex) {

@@ -1,7 +1,9 @@
 use super::expected_roots::*;
+
 use super::manifest::*;
 use super::public_key_reconstruction::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn transported_evaluation_key_share_component_material_from_request(
     request: &Value,
@@ -544,19 +546,16 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
             public_evaluation_key_material_chunk_hash(&full_object_hash, chunk_index, chunk)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let chunk_root = derive_protocol_hash(
-        "PublicEvaluationKeyMaterialChunkRoot",
-        &json!({
-            "objectType": "PublicEvaluationKeyMaterialChunkManifest",
-            "objectVersion": 1,
-            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": chunk_hashes.len(),
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )?;
+    let chunk_root = derive_canonical_object_hash(&json!({
+        "objectType": "PublicEvaluationKeyMaterialChunkManifest",
+        "objectVersion": 1,
+        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": chunk_hashes.len(),
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))?;
 
     Ok(PublicEvaluationKeyMaterialTransportHashes {
         full_object_hash,
@@ -672,41 +671,38 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
     expected_manifest: &Value,
     transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "PublicEvaluationKeyMaterialRoot",
-        &json!({
-            "objectType": "PublicEvaluationKeyMaterialReference",
-            "objectVersion": 1,
-            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-            "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
-            "manifestHash": value_string(evaluation_keys, "manifestHash")?,
-            "rosterHash": value_string(evaluation_keys, "rosterHash")?,
-            "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
-            "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
-            "evaluatorKeyScheduleRoot": value_string(
-                evaluation_keys,
-                "evaluatorKeyScheduleRoot",
-            )?,
-            "sameSecretProofFamilyBindingRoot": value_string(
-                evaluation_keys,
-                "sameSecretProofFamilyBindingRoot",
-            )?,
-            "publicKeyShareSuccinctProofSetRoot": value_string(
-                evaluation_keys,
-                "publicKeyShareSuccinctProofSetRoot",
-            )?,
-            "relinearizationKeyShareRoundsRoot": value_string(
-                evaluation_keys,
-                "relinearizationKeyShareRoundsRoot",
-            )?,
-            "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
-            "expectedMaterialManifest": expected_manifest,
-            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "PublicEvaluationKeyMaterialReference",
+        "objectVersion": 1,
+        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+        "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
+        "manifestHash": value_string(evaluation_keys, "manifestHash")?,
+        "rosterHash": value_string(evaluation_keys, "rosterHash")?,
+        "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
+        "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
+        "evaluatorKeyScheduleRoot": value_string(
+            evaluation_keys,
+            "evaluatorKeyScheduleRoot",
+        )?,
+        "sameSecretProofFamilyBindingRoot": value_string(
+            evaluation_keys,
+            "sameSecretProofFamilyBindingRoot",
+        )?,
+        "publicKeyShareSuccinctProofSetRoot": value_string(
+            evaluation_keys,
+            "publicKeyShareSuccinctProofSetRoot",
+        )?,
+        "relinearizationKeyShareRoundsRoot": value_string(
+            evaluation_keys,
+            "relinearizationKeyShareRoundsRoot",
+        )?,
+        "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
+        "expectedMaterialManifest": expected_manifest,
+        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    }))
 }

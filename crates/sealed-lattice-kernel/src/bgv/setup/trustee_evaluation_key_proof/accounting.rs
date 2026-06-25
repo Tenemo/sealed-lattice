@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::*;
 use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
-use crate::hashing::derive_protocol_hash;
+use crate::hashing::derive_canonical_object_hash;
 
 // Repo-owned accounting for the trustee-batched succinct evaluation-key
 // argument. Every row states what is implemented and measured against the
@@ -345,10 +345,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
 }
 
 pub(crate) fn succinct_evaluation_key_proof_accounting_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SuccinctEvaluationKeyProofAccountingHash",
-        &succinct_evaluation_key_proof_accounting_value()?,
-    )
+    derive_canonical_object_hash(&succinct_evaluation_key_proof_accounting_value()?)
 }
 
 // One migrated family's accounting: the closed evaluation-key accounting with
@@ -449,10 +446,7 @@ pub(crate) fn succinct_same_secret_linkage_anchor_accounting_value() -> Canonica
 }
 
 pub(crate) fn succinct_same_secret_linkage_anchor_accounting_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SuccinctSameSecretLinkageAnchorAccountingHash",
-        &succinct_same_secret_linkage_anchor_accounting_value()?,
-    )
+    derive_canonical_object_hash(&succinct_same_secret_linkage_anchor_accounting_value()?)
 }
 
 // Accounting for the public-key share family: one share-correctness relation
@@ -473,10 +467,7 @@ pub(crate) fn succinct_public_key_share_accounting_value() -> CanonicalResult<Va
 }
 
 pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SuccinctPublicKeyShareAccountingHash",
-        &succinct_public_key_share_accounting_value()?,
-    )
+    derive_canonical_object_hash(&succinct_public_key_share_accounting_value()?)
 }
 
 // Accounting for the recipient-private VSS share family: hidden Shamir
@@ -616,8 +607,5 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
 }
 
 pub(crate) fn succinct_private_vss_share_accounting_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SuccinctPrivateVssShareAccountingHash",
-        &succinct_private_vss_share_accounting_value()?,
-    )
+    derive_canonical_object_hash(&succinct_private_vss_share_accounting_value()?)
 }

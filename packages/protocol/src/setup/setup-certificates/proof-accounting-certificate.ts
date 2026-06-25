@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -6,10 +6,6 @@ import {
     setupProofBytesDomain,
     setupProofFamilies,
     setupProofSerialization,
-    succinctEvaluationKeyProofAccountingHashNamespace,
-    succinctPrivateVssShareAccountingHashNamespace,
-    succinctPublicKeyShareAccountingHashNamespace,
-    succinctSameSecretLinkageAnchorAccountingHashNamespace,
 } from './constants.js';
 import {
     acceptedCertificateTemplate,
@@ -145,17 +141,14 @@ const setupProofAccountingCertificateBody = (
     const setupProofParameters = setupParameters.setupProof;
     const setupProofRecordBinding =
         setupProofRecordBindingForCertificate(setupParameters);
-    const sameSecretLinkageAnchorProofAccountingHash = deriveProtocolHash(
-        succinctSameSecretLinkageAnchorAccountingHashNamespace,
-        sameSecretLinkageAnchorProofAccounting,
-    );
+    const sameSecretLinkageAnchorProofAccountingHash =
+        deriveCanonicalObjectHash(sameSecretLinkageAnchorProofAccounting);
     const privateVssShareProofAccounting = objectField(
         setupProofParameters,
         'privateVssShareProofAccounting',
         'setupParameters.setupProof',
     );
-    const privateVssShareProofAccountingHash = deriveProtocolHash(
-        succinctPrivateVssShareAccountingHashNamespace,
+    const privateVssShareProofAccountingHash = deriveCanonicalObjectHash(
         privateVssShareProofAccounting,
     );
     const expectedPrivateVssShareProofAccountingHash = hashField(
@@ -171,12 +164,10 @@ const setupProofAccountingCertificateBody = (
             'setupParameters.setupProof.privateVssShareProofAccountingHash must match privateVssShareProofAccounting.',
         );
     }
-    const publicKeyShareProofAccountingHash = deriveProtocolHash(
-        succinctPublicKeyShareAccountingHashNamespace,
+    const publicKeyShareProofAccountingHash = deriveCanonicalObjectHash(
         publicKeyShareProofAccounting,
     );
-    const trusteeEvaluationKeyProofAccountingHash = deriveProtocolHash(
-        succinctEvaluationKeyProofAccountingHashNamespace,
+    const trusteeEvaluationKeyProofAccountingHash = deriveCanonicalObjectHash(
         trusteeEvaluationKeyProofAccounting,
     );
 
@@ -185,8 +176,7 @@ const setupProofAccountingCertificateBody = (
         objectVersion: 1,
         setupParametersHash: setupParameters.setupParametersHash,
         setupProofRecordBinding,
-        setupProofRecordBindingHash: deriveProtocolHash(
-            'SetupProofRecordBindingHash',
+        setupProofRecordBindingHash: deriveCanonicalObjectHash(
             setupProofRecordBinding,
         ),
         proofFamilies: setupProofFamilies,
@@ -236,7 +226,6 @@ export const createSetupProofAccountingCertificate = (
         'setupProofAccountingCertificate',
         'SetupProofAccountingCertificate',
         'setupProofAccountingCertificateHash',
-        'SetupProofAccountingCertificateHash',
     );
     if (template !== null) {
         return template as SetupProofAccountingCertificate;
@@ -266,9 +255,7 @@ export const createSetupProofAccountingCertificate = (
 
     return {
         ...certificateBody,
-        setupProofAccountingCertificateHash: deriveProtocolHash(
-            'SetupProofAccountingCertificateHash',
-            certificateBody,
-        ),
+        setupProofAccountingCertificateHash:
+            deriveCanonicalObjectHash(certificateBody),
     };
 };

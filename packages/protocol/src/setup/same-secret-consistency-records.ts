@@ -1,5 +1,5 @@
 import {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
@@ -537,10 +537,7 @@ const sameSecretProofFamilyBindingPayload = (): JsonRecord => ({
 });
 
 const sameSecretProofFamilyBindingRoot = (): ProtocolHash =>
-    deriveProtocolHash(
-        'SameSecretProofFamilyBindingRoot',
-        sameSecretProofFamilyBindingPayload(),
-    );
+    deriveCanonicalObjectHash(sameSecretProofFamilyBindingPayload());
 
 const createStatementRecord = (
     setupContext: CollectiveBgvSetupContext,
@@ -550,8 +547,7 @@ const createStatementRecord = (
     readonly statementRecord: SameSecretConsistencyStatementRecord;
     readonly trusteeSecretCommitmentRootReference: TrusteeSecretCommitmentRootReference;
 } => {
-    const trusteeSecretCommitmentRoot = deriveProtocolHash(
-        'TrusteeSecretCommitmentRoot',
+    const trusteeSecretCommitmentRoot = deriveCanonicalObjectHash(
         trusteeSecretCommitmentPayload(
             setupContext,
             sourceTrusteeRecord,
@@ -581,8 +577,7 @@ const createStatementRecord = (
     >;
     const statementRecord = {
         ...statementRecordWithoutRoot,
-        sameSecretStatementRoot: deriveProtocolHash(
-            'SameSecretConsistencyRoot',
+        sameSecretStatementRoot: deriveCanonicalObjectHash(
             statementRecordWithoutRoot,
         ),
     } satisfies SameSecretConsistencyStatementRecord;
@@ -638,8 +633,7 @@ export const createSameSecretConsistencyStatementSet = (
 
     return {
         ...statementSetWithoutRoot,
-        sameSecretConsistencyRoot: deriveProtocolHash(
-            'SameSecretConsistencyRoot',
+        sameSecretConsistencyRoot: deriveCanonicalObjectHash(
             statementSetWithoutRoot,
         ),
     } satisfies SameSecretConsistencyStatementSet;
@@ -794,8 +788,7 @@ export const createSameSecretProofSet = (
 
             return {
                 ...proofRecordWithoutRoot,
-                sameSecretProofRoot: deriveProtocolHash(
-                    'SameSecretProofRoot',
+                sameSecretProofRoot: deriveCanonicalObjectHash(
                     proofRecordWithoutRoot,
                 ),
             } satisfies SameSecretProofRecord;
@@ -826,10 +819,7 @@ export const createSameSecretProofSet = (
 
     return {
         ...proofSetWithoutRoot,
-        sameSecretProofSetRoot: deriveProtocolHash(
-            'SameSecretProofRoot',
-            proofSetWithoutRoot,
-        ),
+        sameSecretProofSetRoot: deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies SameSecretProofSet;
 };
 
@@ -912,25 +902,22 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                 fullObjectHash,
                 totalByteLength,
             );
-            const proofMaterialRoot = deriveProtocolHash(
-                'SameSecretLinkageAnchorProofMaterialRoot',
-                {
-                    objectType: 'SameSecretLinkageAnchorProofMaterialReference',
-                    objectVersion: 1,
-                    proofFamily: sameSecretProofFamily,
-                    trusteeIdentity: proofMaterial.trusteeIdentity,
-                    trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
-                    statementHash: proofMaterial.statementHash,
-                    proofSizeBytes: proofMaterial.proofSizeBytes,
-                    proofBytesHash: proofMaterial.proofBytesHash,
-                    chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                    chunkCount: chunkHashes.length,
-                    totalByteLength,
-                    fullObjectHash,
-                    chunkRoot,
-                    chunkHashes,
-                },
-            );
+            const proofMaterialRoot = deriveCanonicalObjectHash({
+                objectType: 'SameSecretLinkageAnchorProofMaterialReference',
+                objectVersion: 1,
+                proofFamily: sameSecretProofFamily,
+                trusteeIdentity: proofMaterial.trusteeIdentity,
+                trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
+                statementHash: proofMaterial.statementHash,
+                proofSizeBytes: proofMaterial.proofSizeBytes,
+                proofBytesHash: proofMaterial.proofBytesHash,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: chunkHashes.length,
+                totalByteLength,
+                fullObjectHash,
+                chunkRoot,
+                chunkHashes,
+            });
             transportedProofMaterials.push({
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,

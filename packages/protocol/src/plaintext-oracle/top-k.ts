@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ComparatorPolynomialSet,
     FieldElement,
@@ -150,7 +150,10 @@ const derivePlaintextTally = (input: {
 
     return {
         ...tallyPayload,
-        tallyHash: deriveProtocolHash('PlaintextTallyHash', tallyPayload),
+        tallyHash: deriveCanonicalObjectHash({
+            objectType: 'PlaintextTally',
+            ...tallyPayload,
+        }),
     };
 };
 
@@ -315,10 +318,10 @@ export const deriveComparatorPolynomialSet = (
 
     return {
         ...comparatorPayload,
-        comparatorHash: deriveProtocolHash(
-            'TopKCircuitHash',
-            comparatorPayload,
-        ),
+        comparatorHash: deriveCanonicalObjectHash({
+            objectType: 'TopKCircuit',
+            ...comparatorPayload,
+        }),
     };
 };
 
@@ -347,10 +350,10 @@ export const derivePlaintextTopKOracle = (input: {
 
     return {
         ...oraclePayload,
-        oracleHash: deriveProtocolHash(
-            'PlaintextTopKOracleHash',
-            oraclePayload,
-        ),
+        oracleHash: deriveCanonicalObjectHash({
+            objectType: 'PlaintextTopKOracle',
+            ...oraclePayload,
+        }),
         tally,
     };
 };

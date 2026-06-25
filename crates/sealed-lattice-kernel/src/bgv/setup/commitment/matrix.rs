@@ -319,14 +319,11 @@ fn setup_commitment_matrix_entry_hash(
     coordinate: &Value,
     coefficient_value: u64,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupPublicDerivationRoot",
-        &json!({
-            "objectType": "SetupCommitmentMatrixEntryDerivation",
-            "objectVersion": 1,
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "coordinate": coordinate,
-            "coefficientValue": coefficient_value,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "SetupCommitmentMatrixEntryDerivation",
+        "objectVersion": 1,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "coordinate": coordinate,
+        "coefficientValue": coefficient_value,
+    }))
 }

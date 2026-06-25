@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
@@ -194,7 +194,7 @@ describe('VSS share verification record builders', () => {
             ),
         ).toEqual([0, 1]);
         expect(acceptanceSet.vssShareAcceptanceRoot).toBe(
-            deriveProtocolHash('VssShareAcceptanceRoot', {
+            deriveCanonicalObjectHash({
                 objectType: 'VssShareAcceptanceSet',
                 objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
@@ -316,7 +316,7 @@ describe('VSS share verification record builders', () => {
             complaintRecords: [complaintRecord],
         });
         expect(complaintSet.vssComplaintRoot).toBe(
-            deriveProtocolHash('VssComplaintRoot', {
+            deriveCanonicalObjectHash({
                 objectType: 'VssComplaintSet',
                 objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
@@ -381,7 +381,7 @@ describe('VSS share verification record builders', () => {
             'private-vss-opening-verification-failed',
         );
         expect(complaintRecord.complaintEvidenceRoot).toBe(
-            deriveProtocolHash('VssComplaintRoot', {
+            deriveCanonicalObjectHash({
                 objectType: 'VssShareComplaintEvidence',
                 objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,

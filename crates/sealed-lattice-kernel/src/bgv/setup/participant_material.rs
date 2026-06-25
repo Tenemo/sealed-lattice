@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn participant_setup_material(
     input: &PassiveSetupInput,
     participant: &SetupParticipant,
@@ -56,8 +58,7 @@ pub(super) fn participant_setup_material(
             &participant.trustee_identity,
         )?,
     });
-    let public_key_share_root =
-        derive_protocol_hash("PublicKeyShareRoot", &public_key_share_record)?;
+    let public_key_share_root = derive_canonical_object_hash(&public_key_share_record)?;
     let trustee_threshold_verification_key = json!({
         "objectType": "TrusteeThresholdVerificationKey",
         "objectVersion": 1,
@@ -71,10 +72,8 @@ pub(super) fn participant_setup_material(
         "deviceEpoch": participant.device_epoch,
         "publicKeyShareRoot": public_key_share_root,
     });
-    let trustee_threshold_verification_key_hash = derive_protocol_hash(
-        "TrusteeThresholdVerificationKeyHash",
-        &trustee_threshold_verification_key,
-    )?;
+    let trustee_threshold_verification_key_hash =
+        derive_canonical_object_hash(&trustee_threshold_verification_key)?;
     let participant_record_without_hash = json!({
         "objectType": "ParticipantBgvSetupRecord",
         "objectVersion": 1,
@@ -93,10 +92,8 @@ pub(super) fn participant_setup_material(
         "localSecretShareCommitmentHash": local_secret_share_commitment_hash,
         "localErrorCommitmentHash": local_error_commitment_hash,
     });
-    let participant_setup_record_hash = derive_protocol_hash(
-        "ParticipantBgvSetupRecordHash",
-        &participant_record_without_hash,
-    )?;
+    let participant_setup_record_hash =
+        derive_canonical_object_hash(&participant_record_without_hash)?;
     let mut participant_record = participant_record_without_hash;
     participant_record["participantSetupRecordHash"] =
         Value::String(participant_setup_record_hash.clone());

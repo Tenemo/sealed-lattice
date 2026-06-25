@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { dataBasisId } from './constants.js';
 import {
@@ -413,7 +413,6 @@ export const createBgvHeSecurityCertificate = (
         'heSecurityCertificate',
         'BgvHeSecurityCertificate',
         'heSecurityCertificateHash',
-        'BGVHeSecurityCertificateHash',
     );
     if (template !== null) {
         return template as BgvHeSecurityCertificate;
@@ -426,9 +425,6 @@ export const createBgvHeSecurityCertificate = (
 
     return {
         ...certificateBody,
-        heSecurityCertificateHash: deriveProtocolHash(
-            'BGVHeSecurityCertificateHash',
-            certificateBody,
-        ),
+        heSecurityCertificateHash: deriveCanonicalObjectHash(certificateBody),
     };
 };

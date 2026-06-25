@@ -1,5 +1,7 @@
 use super::family_binding::*;
+
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY;
 
@@ -187,7 +189,7 @@ pub(in super::super) fn verify_same_secret_consistency(
         .as_object_mut()
         .expect("same-secret statement set object was checked")
         .remove("sameSecretConsistencyRoot");
-    let expected_root = derive_protocol_hash("SameSecretConsistencyRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if same_secret_consistency_root != expected_root {
         return Ok(Some(same_secret_refusal(
             "sameSecretConsistencyRootMismatch",
@@ -331,10 +333,8 @@ fn verify_same_secret_statement_record(
         "sameSecretConsistency.statementRecords.trusteeSecretCommitmentRoot",
     )?;
     // Recompute the trustee secret commitment from the setup context and the ordered VSS constant commitments so it cannot be detached from this ceremony's dealing.
-    let expected_trustee_secret_commitment_root = derive_protocol_hash(
-        "TrusteeSecretCommitmentRoot",
-        &trustee_secret_commitment_payload(setup_context, binding)?,
-    )?;
+    let expected_trustee_secret_commitment_root =
+        derive_canonical_object_hash(&trustee_secret_commitment_payload(setup_context, binding)?)?;
     if trustee_secret_commitment_root != expected_trustee_secret_commitment_root {
         return Ok(Some(same_secret_refusal(
             "trusteeSecretCommitmentRootMismatch",
@@ -364,8 +364,7 @@ fn verify_same_secret_statement_record(
         .as_object_mut()
         .expect("same-secret statement object was checked")
         .remove("sameSecretStatementRoot");
-    let expected_statement_root =
-        derive_protocol_hash("SameSecretConsistencyRoot", &statement_root_input)?;
+    let expected_statement_root = derive_canonical_object_hash(&statement_root_input)?;
     if same_secret_statement_root != expected_statement_root {
         return Ok(Some(same_secret_refusal(
             "sameSecretStatementRootMismatch",

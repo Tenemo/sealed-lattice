@@ -11,7 +11,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import { canonicalJson } from './canonical-json.js';
-import { deriveProtocolHash } from './hashes.js';
+import { deriveCanonicalObjectHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
 const mlDsaContextByteLimit = 255;
@@ -122,7 +122,8 @@ export const deriveMlDsaPublicKeyHash = (
         'publicKeyBytesHex',
     );
 
-    return deriveProtocolHash('PublicKeyHash', {
+    return deriveCanonicalObjectHash({
+        objectType: 'MlDsaPublicKeyHash',
         algorithm: 'ML-DSA-65',
         publicKeyBytesHex,
     });
@@ -131,7 +132,8 @@ export const deriveMlDsaPublicKeyHash = (
 export const deriveProtocolSignatureHash = (
     signature: Omit<ProtocolSignatureEnvelope, 'signatureHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('ProtocolSignatureEnvelopeHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ProtocolSignatureEnvelope',
         profile: signature.profile,
         publicKeyBytesHex: signature.publicKeyBytesHex,
         publicKeyHash: signature.publicKeyHash,

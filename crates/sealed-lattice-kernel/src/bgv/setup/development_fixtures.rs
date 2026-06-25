@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn development_encryption_fixture(
     input: &PassiveSetupInput,
     collective_public_key: &Value,
@@ -96,16 +98,14 @@ pub(super) fn development_encryption_fixture(
         BgvObjectKind::Plaintext,
         std::slice::from_ref(&message.polynomial),
     )?;
-    let public_key_material_root = derive_protocol_hash(
-        "BGVPublicKeyRoot",
-        &json!({
-            "collectivePublicKeyRoot": string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?,
-            "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
-            "sampleModulus": modulus,
-            "sampledPublicKeyCoefficients": sample_values(&public_key_coefficients),
-            "sampledPublicEncryptionCoefficients": sample_values(&public_sample_coefficients),
-        }),
-    )?;
+    let public_key_material_root = derive_canonical_object_hash(&json!({
+        "objectType": "BgvDevelopmentEncryptionPublicKeySample",
+        "collectivePublicKeyRoot": string_at_path(collective_public_key, &["collectivePublicKeyRoot"])?,
+        "bgvPublicKeyRoot": string_at_path(collective_public_key, &["bgvPublicKeyRoot"])?,
+        "sampleModulus": modulus,
+        "sampledPublicKeyCoefficients": sample_values(&public_key_coefficients),
+        "sampledPublicEncryptionCoefficients": sample_values(&public_sample_coefficients),
+    }))?;
     let randomness_root = hash512_hex(
         "sealed-lattice-bgv-rns/development-encryption-randomness-root-v1",
         &[canonical_json(&json!({
@@ -132,8 +132,7 @@ pub(super) fn development_encryption_fixture(
         "sampleModulus": modulus,
         "fixtureScope": "development-collective-public-key-encryption-fixture",
     });
-    let fixture_hash =
-        derive_protocol_hash("BGVDevelopmentEncryptionFixtureHash", &fixture_record)?;
+    let fixture_hash = derive_canonical_object_hash(&fixture_record)?;
 
     Ok(json!({
         "fixture": fixture_record,

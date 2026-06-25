@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn direct_ballot_target_proposal(
     setup_package: &Value,
     aggregate_ciphertext_root: &str,
@@ -15,6 +17,7 @@ pub(super) fn direct_ballot_target_proposal(
 
     validate_direct_ballot_hash_hex(target_finality_policy_hash, "targetFinalityPolicyHash")?;
     let proposal_without_hash = json!({
+        "objectType": "DirectEncryptedBallotTargetProposal",
         "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
         "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
         "thresholdParametersHash": required_string_path(setup_package, &["setupInputs", "thresholdParametersHash"])?,
@@ -26,7 +29,7 @@ pub(super) fn direct_ballot_target_proposal(
         "evaluatorReplayParametersHash": bgv_parameters_hash()?,
         "targetFinalityPolicyHash": target_finality_policy_hash,
     });
-    let target_proposal_hash = derive_protocol_hash("TargetProposalHash", &proposal_without_hash)?;
+    let target_proposal_hash = derive_canonical_object_hash(&proposal_without_hash)?;
 
     Ok(json!({
         "targetProposalHash": target_proposal_hash,

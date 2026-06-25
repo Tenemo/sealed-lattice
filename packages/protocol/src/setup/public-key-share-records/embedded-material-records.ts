@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { BinaryChunkWriter } from '../binary-chunk-writer.js';
 import { setupTransportChunkSizeBytes } from '../vss-coefficient-commitments.js';
@@ -171,8 +171,7 @@ export const publicKeyShareMaterialRecordsFromContributions = (
 
             return {
                 ...materialRecordWithoutRoot,
-                publicKeyShareMaterialRoot: deriveProtocolHash(
-                    'PublicKeyShareRoot',
+                publicKeyShareMaterialRoot: deriveCanonicalObjectHash(
                     materialRecordWithoutRoot,
                 ),
             } satisfies PublicKeyShareMaterialRecord;
@@ -245,8 +244,7 @@ export const createPublicKeyShareMaterialSet = (
 
     return {
         ...materialSetWithoutRoot,
-        publicKeyShareMaterialSetRoot: deriveProtocolHash(
-            'PublicKeyShareRoot',
+        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash(
             materialSetWithoutRoot,
         ),
     } satisfies PublicKeyShareMaterialSet;

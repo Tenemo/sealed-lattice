@@ -78,6 +78,7 @@ pub(super) fn selected_rotation_set() -> CanonicalResult<Value> {
         .into_iter()
         .collect::<Vec<_>>();
     Ok(json!({
+        "objectType": "BgvRotationSet",
         "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalizedBy": "encrypted-aggregate-evaluator-closure",
         "regeneratePassiveSetupKeysIfChanged": true,

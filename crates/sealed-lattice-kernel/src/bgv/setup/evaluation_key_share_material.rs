@@ -47,7 +47,7 @@ use crate::{
     },
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint},
-    hashing::{derive_protocol_hash, hash512_hex},
+    hashing::hash512_hex,
 };
 
 #[cfg(test)]

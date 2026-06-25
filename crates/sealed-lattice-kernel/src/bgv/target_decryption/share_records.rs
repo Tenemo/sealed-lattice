@@ -35,19 +35,16 @@ pub(super) fn read_partial_decryption_share(
         participant,
     )?;
     let payload = value_at_path(share, &["sharePayload"])?;
-    let share_root = derive_protocol_hash("BgvTargetDecryptionShareRoot", payload)?;
+    let share_root = derive_canonical_object_hash(payload)?;
     compare_hash_field(share, "shareRoot", &share_root, "target share root")?;
-    let expected_hash = derive_protocol_hash(
-        "BgvTargetDecryptionShareHash",
-        &share_record_hash_input(
-            setup_binding,
-            target_accepted,
-            target_ciphertexts,
-            target_share_parameters,
-            participant,
-            &share_root,
-        ),
-    )?;
+    let expected_hash = derive_canonical_object_hash(&share_record_hash_input(
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_parameters,
+        participant,
+        &share_root,
+    ))?;
     compare_hash_field(
         share,
         "targetDecryptionShareHash",

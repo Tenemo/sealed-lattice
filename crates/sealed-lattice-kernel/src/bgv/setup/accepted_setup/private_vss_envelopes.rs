@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Clone)]
 pub(super) struct PrivateVssEnvelopeBinding {
     pub(super) source_trustee_identity: String,
@@ -319,7 +321,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
             }
         }
     }
-    let expected_root = derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if set_root != expected_root {
         return Ok(Some(private_vss_envelope_refusal(
             "privateVssEnvelopeCommitmentRootMismatch",
@@ -757,8 +759,7 @@ fn private_vss_envelope_binding_from_reference(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeAad",
         )));
     }
-    let expected_aad_hash =
-        derive_protocol_hash("PrivateVssEnvelopeAadHash", private_envelope_aad)?;
+    let expected_aad_hash = derive_canonical_object_hash(private_envelope_aad)?;
     if envelope_reference
         .get("privateEnvelopeAadHash")
         .and_then(Value::as_str)
@@ -818,8 +819,7 @@ fn private_vss_envelope_binding_from_reference(
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
         .remove("encryptedEnvelope");
-    let expected_record_root =
-        derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &record_root_input)?;
+    let expected_record_root = derive_canonical_object_hash(&record_root_input)?;
     if private_envelope_commitment_root != expected_record_root {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeCommitmentRecordRootMismatch",
@@ -1088,10 +1088,8 @@ fn verify_encrypted_private_vss_envelope(
         .as_object_mut()
         .expect("encrypted envelope object was checked")
         .remove("encryptedEnvelopeHash");
-    let expected_encrypted_envelope_hash = derive_protocol_hash(
-        "PrivateVssEncryptedEnvelopeHash",
-        &encrypted_envelope_root_input,
-    )?;
+    let expected_encrypted_envelope_hash =
+        derive_canonical_object_hash(&encrypted_envelope_root_input)?;
     if encrypted_envelope_hash != expected_encrypted_envelope_hash {
         return Ok(Err(Refusal::new(
             "privateVssEncryptedEnvelopeHashMismatch",

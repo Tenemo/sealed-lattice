@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { type EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
@@ -229,7 +229,7 @@ const relinearizationKeySwitchSeed = (
     round: 'round-one' | 'round-two',
     level: number,
 ): ProtocolHash =>
-    deriveProtocolHash('RelinearizationKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
         proofFamily: 'relinearization-key-share',
@@ -245,7 +245,7 @@ const galoisKeySwitchSeed = (
     rotation: number,
     level: number,
 ): ProtocolHash =>
-    deriveProtocolHash('GaloisKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
         proofFamily: 'galois-key-share',
@@ -518,10 +518,8 @@ export const createRelinearizationKeyShareRounds = (
                     roundOneShareRoot: contribution.roundOneShareRoot,
                     ...shareMaterialRecordFields(contribution.shareMaterial),
                 } as JsonRecord;
-                const roundOneRecordRoot = deriveProtocolHash(
-                    'RelinearizationRoundOneRecordRoot',
-                    recordWithoutRoot,
-                );
+                const roundOneRecordRoot =
+                    deriveCanonicalObjectHash(recordWithoutRoot);
                 roundOneShareRoots.set(key, contribution.roundOneShareRoot);
                 roundOneRecordRoots.set(key, roundOneRecordRoot);
                 roundOneRecords.push({
@@ -536,17 +534,14 @@ export const createRelinearizationKeyShareRounds = (
                 };
             },
         );
-        const roundOneAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundOneAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundOneAggregate',
-                objectVersion: 1,
-                evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                level,
-                roundOneRecordRoots: roundOneRecordRootsForLevel,
-            },
-        );
+        const roundOneAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundOneAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot:
+                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+            level,
+            roundOneRecordRoots: roundOneRecordRootsForLevel,
+        });
         roundOneAggregateRootByLevel.set(level, roundOneAggregateRoot);
 
         return {
@@ -624,10 +619,8 @@ export const createRelinearizationKeyShareRounds = (
                     roundTwoShareRoot: contribution.roundTwoShareRoot,
                     ...shareMaterialRecordFields(contribution.shareMaterial),
                 } as JsonRecord;
-                const roundTwoRecordRoot = deriveProtocolHash(
-                    'RelinearizationRoundTwoRecordRoot',
-                    recordWithoutRoot,
-                );
+                const roundTwoRecordRoot =
+                    deriveCanonicalObjectHash(recordWithoutRoot);
                 roundTwoRecords.push({
                     ...recordWithoutRoot,
                     roundTwoRecordRoot,
@@ -646,18 +639,15 @@ export const createRelinearizationKeyShareRounds = (
                 'roundTwoContributions is missing a scheduled round-one aggregate root.',
             );
         }
-        const roundTwoAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundTwoAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundTwoAggregate',
-                objectVersion: 1,
-                evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                level,
-                roundOneAggregateRoot,
-                roundTwoRecordRoots: roundTwoRecordRootsForLevel,
-            },
-        );
+        const roundTwoAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundTwoAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot:
+                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+            level,
+            roundOneAggregateRoot,
+            roundTwoRecordRoots: roundTwoRecordRootsForLevel,
+        });
 
         return {
             level,
@@ -697,10 +687,8 @@ export const createRelinearizationKeyShareRounds = (
 
     return {
         ...roundsWithoutRoot,
-        relinearizationKeyShareRoundsRoot: deriveProtocolHash(
-            'RelinearizationKeyShareRoundsRoot',
-            roundsWithoutRoot,
-        ),
+        relinearizationKeyShareRoundsRoot:
+            deriveCanonicalObjectHash(roundsWithoutRoot),
     } satisfies RelinearizationKeyShareRounds;
 };
 
@@ -835,10 +823,8 @@ export const createGaloisKeyShareBatches = (
 
         return {
             ...batchWithoutRoot,
-            galoisKeyShareBatchRoot: deriveProtocolHash(
-                'GaloisKeyShareBatchRoot',
-                batchWithoutRoot,
-            ),
+            galoisKeyShareBatchRoot:
+                deriveCanonicalObjectHash(batchWithoutRoot),
         } satisfies GaloisKeyShareBatch;
     });
 };

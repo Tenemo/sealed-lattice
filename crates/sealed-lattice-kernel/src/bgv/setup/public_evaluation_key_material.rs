@@ -1,5 +1,7 @@
 use super::*;
+
 use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
+use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_SWITCH_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/public-key-switch-component-vector-v1";
@@ -125,7 +127,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
         Value::String(PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING.to_string());
     material["relinearizationKeys"] = Value::Array(relinearization_keys);
     material["rotationKeys"] = Value::Array(rotation_keys);
-    let public_material_hash = derive_protocol_hash("EvaluationKeySetHash", &material)?;
+    let public_material_hash = derive_canonical_object_hash(&material)?;
     material["publicEvaluationKeyMaterialHash"] = Value::String(public_material_hash);
 
     Ok(material)
@@ -293,7 +295,7 @@ pub(crate) fn public_evaluation_keys_from_material(
     compare_hash_at_path(
         material,
         &["publicEvaluationKeyMaterialHash"],
-        &derive_protocol_hash("EvaluationKeySetHash", &hash_input)?,
+        &derive_canonical_object_hash(&hash_input)?,
         "public evaluation-key material hash",
     )?;
 

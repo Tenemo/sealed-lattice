@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolHash,
@@ -12,7 +12,7 @@ import { compareCanonicalStrings } from '../common/verification-helpers.js';
 export const deriveRegistrationEntryHash = (
     entry: Omit<RegistrationEntry, 'registrationEntryHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('RegistrationEntryHash', {
+    deriveCanonicalObjectHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
@@ -27,7 +27,7 @@ export const deriveRegistrationEntryHash = (
 export const deriveTrusteeSetupEntryHash = (
     entry: Omit<TrusteeSetupEntry, 'trusteeSetupEntryHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('TrusteeSetupEntryHash', {
+    deriveCanonicalObjectHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
         bgvParametersHash: entry.bgvParametersHash,
@@ -55,9 +55,9 @@ export const deriveTrusteeSetupEntryHash = (
 export const deriveRosterHash = (
     entries: readonly RegistrationEntry[],
 ): ProtocolHash =>
-    deriveProtocolHash(
-        'RosterHash',
-        entries
+    deriveCanonicalObjectHash({
+        objectType: 'Roster',
+        entries: entries
             .map((entry) => ({
                 participantIdentity: entry.participantIdentity.normalize('NFC'),
                 registrationEntryHash: entry.registrationEntryHash,
@@ -69,7 +69,7 @@ export const deriveRosterHash = (
                     right.participantIdentity,
                 ),
             ),
-    );
+    });
 
 export const deriveRosterExternalAcceptanceHash = (
     acceptance: Omit<
@@ -77,7 +77,7 @@ export const deriveRosterExternalAcceptanceHash = (
         'rosterExternalAcceptanceHash' | 'signature'
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('RosterExternalAcceptanceHash', {
+    deriveCanonicalObjectHash({
         acceptedBoardHeadHash: acceptance.acceptedBoardHeadHash,
         ceremonyId: acceptance.ceremonyId,
         electionManifestHash: acceptance.electionManifestHash,
@@ -91,7 +91,7 @@ export const deriveRosterExternalAcceptanceHash = (
 export const deriveElectionManifestHash = (
     manifest: Omit<ElectionManifest, 'electionManifestHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('ElectionManifestHash', {
+    deriveCanonicalObjectHash({
         boardPosition: manifest.boardPosition,
         boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,

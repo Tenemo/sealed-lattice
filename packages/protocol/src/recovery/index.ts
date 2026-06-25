@@ -1,5 +1,5 @@
 import {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -30,7 +30,8 @@ export const deriveActionContextHash = (
         'actionContextHash'
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('ActionContextHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ActionContext',
         acceptedRecoveryEpochUpdateHash:
             actionContext.acceptedRecoveryEpochUpdateHash,
         actionSequence: actionContext.actionSequence,
@@ -50,7 +51,7 @@ export const deriveActionContextHash = (
 export const deriveRecoveryEpochUpdateHash = (
     update: Omit<RecoveryEpochUpdate, 'recoveryEpochUpdateHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('RecoveryEpochUpdateHash', {
+    deriveCanonicalObjectHash({
         boardHeadHash: update.boardHeadHash,
         ceremonyId: update.ceremonyId,
         newDeviceEpoch: update.newDeviceEpoch,

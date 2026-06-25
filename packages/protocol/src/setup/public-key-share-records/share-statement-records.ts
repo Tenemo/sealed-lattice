@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { type SameSecretConsistencyStatementRecord } from '../same-secret-consistency-records.js';
 
@@ -183,8 +183,7 @@ export const createPublicKeyShareSet = (
 
             return {
                 ...shareRecordWithoutRoot,
-                publicKeyShareRoot: deriveProtocolHash(
-                    'PublicKeyShareRoot',
+                publicKeyShareRoot: deriveCanonicalObjectHash(
                     shareRecordWithoutRoot,
                 ),
             } satisfies PublicKeyShareRecord;
@@ -212,10 +211,7 @@ export const createPublicKeyShareSet = (
 
     return {
         ...shareSetWithoutRoot,
-        publicKeyShareSetRoot: deriveProtocolHash(
-            'PublicKeyShareRoot',
-            shareSetWithoutRoot,
-        ),
+        publicKeyShareSetRoot: deriveCanonicalObjectHash(shareSetWithoutRoot),
     } satisfies PublicKeyShareSet;
 };
 
@@ -303,8 +299,7 @@ export const createPublicKeyShareProofSet = (
 
             return {
                 ...proofRecordWithoutRoot,
-                publicKeyShareProofRoot: deriveProtocolHash(
-                    'PublicKeyShareProofRoot',
+                publicKeyShareProofRoot: deriveCanonicalObjectHash(
                     proofRecordWithoutRoot,
                 ),
             } satisfies PublicKeyShareProofRecord;
@@ -336,10 +331,8 @@ export const createPublicKeyShareProofSet = (
 
     return {
         ...proofSetWithoutRoot,
-        publicKeyShareProofSetRoot: deriveProtocolHash(
-            'PublicKeyShareProofRoot',
-            proofSetWithoutRoot,
-        ),
+        publicKeyShareProofSetRoot:
+            deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies PublicKeyShareProofSet;
 };
 

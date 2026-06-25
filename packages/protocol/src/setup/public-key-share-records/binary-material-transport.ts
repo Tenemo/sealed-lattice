@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -52,7 +52,7 @@ const setupTransportChunkManifestRoot = (input: {
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
 }): ProtocolHash =>
-    deriveProtocolHash('SetupTransportChunkManifestRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
         chunkSizeBytes: input.chunkSizeBytes,
@@ -207,8 +207,7 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
 
     return {
         ...materialSetWithoutRoot,
-        publicKeyShareMaterialSetRoot: deriveProtocolHash(
-            'PublicKeyShareRoot',
+        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash(
             materialSetWithoutRoot,
         ),
     } satisfies BinaryChunkedPublicKeyShareMaterialSet;
@@ -585,7 +584,7 @@ const transportedPublicKeyShareMaterialReader = (
     const materialSetWithoutRoot = { ...input.materialSet };
     delete (materialSetWithoutRoot as JsonRecord).publicKeyShareMaterialSetRoot;
     if (
-        deriveProtocolHash('PublicKeyShareRoot', materialSetWithoutRoot) !==
+        deriveCanonicalObjectHash(materialSetWithoutRoot) !==
         input.materialSet.publicKeyShareMaterialSetRoot
     ) {
         throw new Error(
@@ -743,8 +742,7 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
         >;
         const materialRecord = {
             ...materialRecordWithoutRoot,
-            publicKeyShareMaterialRoot: deriveProtocolHash(
-                'PublicKeyShareRoot',
+            publicKeyShareMaterialRoot: deriveCanonicalObjectHash(
                 materialRecordWithoutRoot,
             ),
         } satisfies PublicKeyShareMaterialRecord;

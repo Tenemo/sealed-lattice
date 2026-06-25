@@ -113,10 +113,7 @@ export type TranscriptCoreKernel = {
         readonly inputHex: string;
         readonly chunkSize: number;
     }): string;
-    deriveProtocolHash(input: {
-        readonly namespace: string;
-        readonly value: unknown;
-    }): ProtocolHash;
+    deriveCanonicalObjectHash(input: { readonly value: unknown }): ProtocolHash;
     evaluatePlaintextComparison(input: {
         readonly leftTotalScore: number;
         readonly rightTotalScore: number;
@@ -351,8 +348,7 @@ type TranscriptCoreKernelCommand =
           readonly chunkSize: number;
       }
     | {
-          readonly command: 'DeriveProtocolHash';
-          readonly namespace: string;
+          readonly command: 'DeriveCanonicalObjectHash';
           readonly value: unknown;
       }
     | {

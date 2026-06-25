@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn vss_coefficient_commitments_object(
     ceremony_id: &str,
@@ -49,25 +51,21 @@ pub(super) fn vss_coefficient_commitments_object(
                 )
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
-                let commitment_chunk_root = derive_protocol_hash(
-                    "VssCoefficientCommitmentRoot",
-                    &serde_json::json!({
-                        "fixture": "vss-coefficient-commitment-chunk-root",
-                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                        "rnsLimbIndex": rns_limb_index,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                )
+                let commitment_chunk_root = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "VssCoefficientCommitmentRoot",
+                "fixture": "vss-coefficient-commitment-chunk-root",
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                    "rnsLimbIndex": rns_limb_index,
+                    "shamirCoefficientIndex": shamir_coefficient_index,
+                }))
                 .expect("commitment chunk root");
-                let coefficient_vector_hash512 = derive_protocol_hash(
-                    "VssCoefficientCommitmentRoot",
-                    &serde_json::json!({
-                        "fixture": "vss-coefficient-vector-hash",
-                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                        "rnsLimbIndex": rns_limb_index,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                )
+                let coefficient_vector_hash512 = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "VssCoefficientCommitmentRoot",
+                "fixture": "vss-coefficient-vector-hash",
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                    "rnsLimbIndex": rns_limb_index,
+                    "shamirCoefficientIndex": shamir_coefficient_index,
+                }))
                 .expect("coefficient vector hash");
                 coefficient_commitments.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitment",
@@ -121,7 +119,7 @@ pub(super) fn vss_coefficient_commitments_object(
             "coefficientCommitments": coefficient_commitments,
         });
         source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
-            derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+            derive_canonical_object_hash(&source_trustee_record)
                 .expect("source trustee commitment root")
         );
         source_trustee_records.push(source_trustee_record);
@@ -139,8 +137,7 @@ pub(super) fn vss_coefficient_commitments_object(
         "sourceTrusteeRecords": source_trustee_records,
     });
     commitment_set["vssCoefficientCommitmentRoot"] = serde_json::json!(
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &commitment_set)
-            .expect("VSS commitment set root")
+        derive_canonical_object_hash(&commitment_set).expect("VSS commitment set root")
     );
 
     let mut material_set = serde_json::json!({
@@ -163,7 +160,7 @@ pub(super) fn vss_coefficient_commitments_object(
         "coefficientCommitments": coefficient_commitment_material,
     });
     material_set["vssCoefficientCommitmentMaterialRoot"] = serde_json::json!(
-        derive_protocol_hash("VssCoefficientCommitmentMaterialRoot", &material_set)
+        derive_canonical_object_hash(&material_set)
             .expect("VSS coefficient commitment material root")
     );
 
@@ -259,25 +256,21 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
                 )
                 .expect("setup commitment");
                 let commitment_root = setup_commitment_root(&commitment).expect("commitment root");
-                let commitment_chunk_root = derive_protocol_hash(
-                    "VssCoefficientCommitmentRoot",
-                    &serde_json::json!({
-                        "fixture": "vss-coefficient-commitment-chunk-root",
-                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                        "rnsLimbIndex": rns_limb_index,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                )
+                let commitment_chunk_root = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "VssCoefficientCommitmentRoot",
+                "fixture": "vss-coefficient-commitment-chunk-root",
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                    "rnsLimbIndex": rns_limb_index,
+                    "shamirCoefficientIndex": shamir_coefficient_index,
+                }))
                 .expect("commitment chunk root");
-                let coefficient_vector_hash512 = derive_protocol_hash(
-                    "VssCoefficientCommitmentRoot",
-                    &serde_json::json!({
-                        "fixture": "vss-coefficient-vector-hash",
-                        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                        "rnsLimbIndex": rns_limb_index,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                )
+                let coefficient_vector_hash512 = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "VssCoefficientCommitmentRoot",
+                "fixture": "vss-coefficient-vector-hash",
+                    "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                    "rnsLimbIndex": rns_limb_index,
+                    "shamirCoefficientIndex": shamir_coefficient_index,
+                }))
                 .expect("coefficient vector hash");
                 coefficient_commitments.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitment",
@@ -325,7 +318,7 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
             "coefficientCommitments": coefficient_commitments,
         });
         source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
-            derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+            derive_canonical_object_hash(&source_trustee_record)
                 .expect("source trustee commitment root")
         );
         source_trustee_records.push(source_trustee_record);
@@ -343,8 +336,7 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
         "sourceTrusteeRecords": source_trustee_records,
     });
     commitment_set["vssCoefficientCommitmentRoot"] = serde_json::json!(
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &commitment_set)
-            .expect("VSS commitment set root")
+        derive_canonical_object_hash(&commitment_set).expect("VSS commitment set root")
     );
     let stream_derivation = writer
         .finish(

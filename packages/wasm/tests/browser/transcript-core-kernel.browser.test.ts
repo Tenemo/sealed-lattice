@@ -13,7 +13,7 @@ const foundationTranscriptFixture = createFoundationTranscriptFixture();
 const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
     foundationTranscriptFixture.expectedHashes,
 );
-const protocolHashPattern = /^[a-f0-9]{128}$/u;
+const hash512Pattern = /^[a-f0-9]{128}$/u;
 
 describe('transcript-core kernel in browsers', () => {
     it('loads the transcript-core module and exposes command exports', async () => {
@@ -40,19 +40,17 @@ describe('transcript-core kernel in browsers', () => {
         });
     });
 
-    it('derives protocol hash and field checks through WASM', async () => {
+    it('derives canonical object hash and field checks through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        const pollSpecHash = kernel.deriveProtocolHash({
-            namespace: 'PollSpecHash',
-            value: { poll: 'main' },
+        const pollSpecHash = kernel.deriveCanonicalObjectHash({
+            value: { objectType: 'PollSpec', poll: 'main' },
         });
 
-        expect(pollSpecHash).toMatch(protocolHashPattern);
+        expect(pollSpecHash).toMatch(hash512Pattern);
         expect(pollSpecHash).toBe(
-            kernel.deriveProtocolHash({
-                namespace: 'PollSpecHash',
-                value: { poll: 'main' },
+            kernel.deriveCanonicalObjectHash({
+                value: { objectType: 'PollSpec', poll: 'main' },
             }),
         );
         expect(
@@ -86,7 +84,7 @@ describe('transcript-core kernel in browsers', () => {
             includeCanonicalBytesHex: true,
         });
 
-        expect(parameters.bgvParametersHash).toMatch(protocolHashPattern);
+        expect(parameters.bgvParametersHash).toMatch(hash512Pattern);
         expect(encodedResult).not.toMatchObject({ ok: false });
         const encoded = encodedResult as {
             readonly canonicalBytesHex: string;
@@ -95,8 +93,8 @@ describe('transcript-core kernel in browsers', () => {
             readonly plaintextRoot: string;
         };
 
-        expect(encoded.plaintextRoot).toMatch(protocolHashPattern);
-        expect(encoded.canonicalBytesHash512).toMatch(protocolHashPattern);
+        expect(encoded.plaintextRoot).toMatch(hash512Pattern);
+        expect(encoded.canonicalBytesHash512).toMatch(hash512Pattern);
         expect(encoded.canonicalByteLength).toBeGreaterThan(0);
         expect(
             kernel.validateBgvPlaintextObject({

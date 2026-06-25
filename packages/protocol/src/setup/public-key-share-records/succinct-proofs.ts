@@ -1,5 +1,5 @@
 import {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
@@ -515,8 +515,7 @@ export const createPublicKeyShareSuccinctProofSet = (
 
             return {
                 ...proofRecordWithoutRoot,
-                publicKeyShareSuccinctProofRoot: deriveProtocolHash(
-                    'PublicKeyShareProofRoot',
+                publicKeyShareSuccinctProofRoot: deriveCanonicalObjectHash(
                     proofRecordWithoutRoot,
                 ),
             } satisfies PublicKeyShareSuccinctProofRecord;
@@ -557,10 +556,8 @@ export const createPublicKeyShareSuccinctProofSet = (
 
     return {
         ...proofSetWithoutRoot,
-        publicKeyShareSuccinctProofSetRoot: deriveProtocolHash(
-            'PublicKeyShareProofRoot',
-            proofSetWithoutRoot,
-        ),
+        publicKeyShareSuccinctProofSetRoot:
+            deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies PublicKeyShareSuccinctProofSet;
 };
 
@@ -643,25 +640,22 @@ export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
                 fullObjectHash,
                 totalByteLength,
             );
-            const proofMaterialRoot = deriveProtocolHash(
-                'PublicKeyShareProofMaterialRoot',
-                {
-                    objectType: 'PublicKeyShareSuccinctProofMaterialReference',
-                    objectVersion: 1,
-                    proofFamily: publicKeyShareProofFamily,
-                    trusteeIdentity: proofMaterial.trusteeIdentity,
-                    trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
-                    statementHash: proofMaterial.statementHash,
-                    proofSizeBytes: proofMaterial.proofSizeBytes,
-                    proofBytesHash: proofMaterial.proofBytesHash,
-                    chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                    chunkCount: chunkHashes.length,
-                    totalByteLength,
-                    fullObjectHash,
-                    chunkRoot,
-                    chunkHashes,
-                },
-            );
+            const proofMaterialRoot = deriveCanonicalObjectHash({
+                objectType: 'PublicKeyShareSuccinctProofMaterialReference',
+                objectVersion: 1,
+                proofFamily: publicKeyShareProofFamily,
+                trusteeIdentity: proofMaterial.trusteeIdentity,
+                trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
+                statementHash: proofMaterial.statementHash,
+                proofSizeBytes: proofMaterial.proofSizeBytes,
+                proofBytesHash: proofMaterial.proofBytesHash,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: chunkHashes.length,
+                totalByteLength,
+                fullObjectHash,
+                chunkRoot,
+                chunkHashes,
+            });
             transportedProofMaterials.push({
                 objectType: 'SetupTransportedPublicKeyShareProofMaterial',
                 objectVersion: 1,

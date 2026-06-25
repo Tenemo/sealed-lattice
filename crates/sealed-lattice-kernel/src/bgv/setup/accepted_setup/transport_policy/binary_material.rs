@@ -1,5 +1,7 @@
 use super::certificate::*;
+
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn verify_binary_vss_material_transport_reference(
     setup_package: &Value,
@@ -225,17 +227,14 @@ pub(super) fn setup_transport_full_object_set_hash(
         })
         .collect::<Vec<_>>();
 
-    derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &json!({
-            "objectType": "SetupTransportFullObjectSet",
-            "objectVersion": 1,
-            "transportedObjects": transported_object_values,
-            "totalByteLength": total_byte_length,
-            "chunkCount": chunk_count,
-            "chunkHashes": chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "SetupTransportFullObjectSet",
+        "objectVersion": 1,
+        "transportedObjects": transported_object_values,
+        "totalByteLength": total_byte_length,
+        "chunkCount": chunk_count,
+        "chunkHashes": chunk_hashes,
+    }))
 }
 
 pub(in super::super) fn setup_transport_chunk_manifest_root(
@@ -245,18 +244,15 @@ pub(in super::super) fn setup_transport_chunk_manifest_root(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &json!({
-            "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
-            "objectVersion": 1,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
 }
 
 pub(in super::super) fn setup_transport_vss_material_byte_length_for_roster(

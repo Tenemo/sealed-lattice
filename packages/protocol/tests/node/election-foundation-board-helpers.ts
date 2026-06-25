@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     BoardConsistencyInput,
     InclusionProof,
@@ -45,7 +45,8 @@ export const createBoardHead = (
     boardEntryHashes?: readonly string[],
 ): SignedBoardHead => {
     const resolvedBoardEntryHashes = boardEntryHashes ?? [
-        deriveProtocolHash('BoardEntryHash', {
+        deriveCanonicalObjectHash({
+            objectType: 'BoardEntryFiller',
             branchName,
             marker: 'empty-board-head',
             boardSequence,
@@ -100,7 +101,8 @@ export const createInclusionProof = (
         Array.from({ length: boardPosition + 1 }, (_, index) =>
             index === boardPosition
                 ? boardEntryHash
-                : deriveProtocolHash('BoardEntryHash', {
+                : deriveCanonicalObjectHash({
+                      objectType: 'BoardEntryFiller',
                       filler: index,
                       headHash: head.headHash,
                   }),
@@ -151,7 +153,8 @@ export const createBoardHeadWithObjects = (
             );
 
             return object === undefined
-                ? deriveProtocolHash('BoardEntryHash', {
+                ? deriveCanonicalObjectHash({
+                      objectType: 'BoardEntryFiller',
                       filler: boardPosition,
                       branchName,
                       boardSequence,
@@ -204,18 +207,17 @@ export const createTargetProposalHead = (
 export const createWitnessCheckpoint = (
     witnessIdentity: string,
     finalizedBoardHeadHash: string,
-    targetProposalHash = deriveProtocolHash('TargetProposalHash', {
+    targetProposalHash = deriveCanonicalObjectHash({
+        objectType: 'WitnessCheckpointProposalPlaceholder',
         finalizedBoardHeadHash,
         witnessIdentity,
     }),
-    targetFinalityCheckpointHash = deriveProtocolHash(
-        'TargetFinalityCheckpointHash',
-        {
-            finalizedBoardHeadHash,
-            targetProposalHash,
-            witnessIdentity,
-        },
-    ),
+    targetFinalityCheckpointHash = deriveCanonicalObjectHash({
+        objectType: 'WitnessCheckpointFinalityPlaceholder',
+        finalizedBoardHeadHash,
+        targetProposalHash,
+        witnessIdentity,
+    }),
     electionManifestHash: string | null = null,
     overrides: Partial<WitnessCheckpoint> = {},
 ): WitnessCheckpoint => {
@@ -260,28 +262,30 @@ export const createTargetFinalityRecord = (
 ): TargetFinalityRecord => {
     const proposalPayload = {
         ceremonyId,
-        electionManifestHash: deriveProtocolHash('ElectionManifestHash', {
+        electionManifestHash: deriveCanonicalObjectHash({
+            objectType: 'FixtureManifestPlaceholder',
             ceremonyId,
             marker: 'default-manifest',
         }),
         thresholdParametersHash: defaultThresholdParametersHash,
-        evaluatorReplayContextHash: deriveProtocolHash(
-            'EvaluatorReplayContextHash',
-            {
-                ceremonyId,
-                marker: 'direct-evaluator-replay',
-            },
-        ),
+        evaluatorReplayContextHash: deriveCanonicalObjectHash({
+            objectType: 'FixtureEvaluatorReplayContextPlaceholder',
+            ceremonyId,
+            marker: 'direct-evaluator-replay',
+        }),
         evaluatorReplayRecordHash,
-        encryptedBallotAggregateHash: deriveProtocolHash('CiphertextRoot', {
+        encryptedBallotAggregateHash: deriveCanonicalObjectHash({
+            objectType: 'FixtureCiphertextRootPlaceholder',
             ceremonyId,
             marker: 'direct-encrypted-ballot-aggregate',
         }),
-        targetCiphertextHash: deriveProtocolHash('CiphertextRoot', {
+        targetCiphertextHash: deriveCanonicalObjectHash({
+            objectType: 'FixtureCiphertextRootPlaceholder',
             ceremonyId,
             marker: 'direct-target-ciphertext',
         }),
-        targetLayoutHash: deriveProtocolHash('TargetLayoutHash', {
+        targetLayoutHash: deriveCanonicalObjectHash({
+            objectType: 'FixtureTargetLayoutPlaceholder',
             layout: 'direct-sparse-target-layout-v1',
         }),
         evaluatorReplayParametersHash:

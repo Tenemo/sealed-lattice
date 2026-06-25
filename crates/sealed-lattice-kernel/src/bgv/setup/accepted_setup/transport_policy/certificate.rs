@@ -1,7 +1,9 @@
 use super::binary_material::*;
+
 use super::field_access::*;
 use super::request_bindings::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_transport_certificate(
     setup_package: &Value,
@@ -228,8 +230,7 @@ fn verify_transport_certificate_body(
         .as_object_mut()
         .expect("transport certificate object was checked")
         .remove("setupTransportCertificateHash");
-    let expected_certificate_hash =
-        derive_protocol_hash("SetupTransportCertificateHash", &certificate_hash_input)?;
+    let expected_certificate_hash = derive_canonical_object_hash(&certificate_hash_input)?;
     if certificate_hash != expected_certificate_hash {
         return Ok(Err(Refusal::new(
             "transportCertificateHashMismatch",

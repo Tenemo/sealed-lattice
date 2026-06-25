@@ -5,7 +5,7 @@ import {
     type RecoveryEpochMapEntry,
     type ValidatedFirstValidObject,
     contextHash,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveValidatedFirstValidOrder,
     manifestPolicyHashes,
 } from './election-foundation-test-helpers';
@@ -81,14 +81,16 @@ describe('first-valid ordering shells', () => {
 
         const badInput: FirstValidOrderingInput = {
             ...input,
-            selectionPolicyHash: deriveProtocolHash('ChallengeDomainHash', {
+            selectionPolicyHash: deriveCanonicalObjectHash({
+                objectType: 'ChallengeDomainHash',
                 payload: { policy: 'wrong' },
                 purpose: 'fixture-first-valid-policy-v1',
             }),
             objects: [
                 {
                     ...objects[0],
-                    contextHash: deriveProtocolHash('ActionContextHash', {
+                    contextHash: deriveCanonicalObjectHash({
+                        objectType: 'ActionContext',
                         context: 'wrong',
                     }),
                 },

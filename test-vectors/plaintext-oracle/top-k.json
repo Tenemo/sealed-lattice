@@ -84,8 +84,8 @@
       0,
       0
     ],
-    "tallyHash": "c455418f25ec3f931111936c3725271271a7e2f6d18153994c2a71fab941b0cd431da6913b45f14a8e3c78f159a072cb36854114f29273b0a87c37ea1d71ded2",
-    "oracleHash": "40f199eacff2e09d3ddfc268bbc13aea55636c0e9c22e4fd1d67dd91d68af403cad285dc7e374484e13674e29c690f9877de46e841cc7b0c2b0021004d4bfeec"
+    "tallyHash": "3c3aa36b7d7040e2d98eaf0df6eb471a79156b0e811dd7888db9ba6a57ced05d239f3646f4254df227430fc026e6b8ec177b8d6d0ea6c9ca60f3023e8a060dd3",
+    "oracleHash": "63a2eb1e3d2653c7f10985010c398e119dc3f9ca3e03d83ac60fd4a5c3cd039be2dfd977ed2d9712be4f34319b6ae8fd3b9f38276f54f4d61c55aba542b6a5f2"
   },
   "fullTieCase": {
     "pollSpecInput": {
@@ -129,7 +129,7 @@
       2,
       3
     ],
-    "expectedOracleHash": "bc9cd70ddc21ef3656b88b878e2d8c91ac32e369c909aedd4b9d954a3165cf3920745b8a722bb42a8396b5ba0f17ee11a7183d06bf7f7cd929b7d26aff496db5"
+    "expectedOracleHash": "cfee04e008c8161157ece84c805e6dff1f1894f4c1b3c976a6938017e2fc012f07d5fd89237daabdac432b28968ce3c7312a0c88402257507a916fb08bbdeeba"
   },
   "topOneClearWinnerCase": {
     "pollSpecInput": {
@@ -196,8 +196,8 @@
       0,
       0
     ],
-    "expectedTallyHash": "3b49fa7c5fa10a2f70937c8cc25d856ba097803deda6f309909e444c69013b4d01df91e10b028f657c0c85cf34fc2664a5f1ab0e79fc453ab109fd6a18652b66",
-    "expectedOracleHash": "85123f17c3f874cdced0d5f766c1f143f90f189f98e91a0259769fd2a52bca26b259f837f7bbb506ab7512fa9229056bc4ddabde9e10396d2cc3a24ae49425a6"
+    "expectedTallyHash": "d06cf0dc5eda03e8c30fd66ae936ff545067bef5e409dfdae6a6e220771dc5a8e3413b08734b0e51c03b88fc12e6da08cc03e1c713fe1b09b883d9a4d511198f",
+    "expectedOracleHash": "ca2b3218f877c5cef0abfc30cbeeea3d22dc29aba03dfdd5bf3329a3415c33bebb0b864ac4e4a859e7d26aa8e13de952ca3eec7ccc0c2f6692e88f597cedf3d7"
   },
   "maximumNoWrapCase": {
     "pollSpecInput": {
@@ -296,7 +296,7 @@
       19,
       20
     ],
-    "expectedTallyHash": "60ee4aa8e95aabc4744b6b88b6cffb9ae6f22224a1613e47eddde8ce4b7ba6129e22bb6f512bdc2cf472beb2ac642d0a9b80e22455127a5a0b11f3ccaea9e6c9",
-    "expectedOracleHash": "5b43dee857aea2edbdf0e8bffbd8ad5bb7f57b8a0313aaa4327a0a86a21c95f14e3e529bb73b91b3071b406d75d45922d6e7d7900b0d16927471b28d05599b60"
+    "expectedTallyHash": "b8d08ed106e99859756d030a5ba64b9e8b4299ad8f3715b68bd3d3e04d3cf8c6d2077746aa479ccfe833852f876a0b77940f48a29facca2207879352b0521819",
+    "expectedOracleHash": "8b88d3e23192dd6c534683f18331b35a0ce9fa655884bea28a502144f100f7255c41ec2cd344a3fb176ccf52d1dda9752650750f9556749a52f894ca3de53139"
   }
 }

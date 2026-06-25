@@ -1,5 +1,5 @@
 import {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveProtocolSignatureHash,
 } from '@sealed-lattice/crypto';
 import {
@@ -32,7 +32,8 @@ export const deriveFixtureHash = (
     purpose: string,
     payload: Record<string, unknown>,
 ): string =>
-    deriveProtocolHash('ChallengeDomainHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'FixtureChallenge',
         payload,
         purpose,
     });
@@ -49,7 +50,8 @@ export const bgvParametersHash =
 export const boardPolicyHash = deriveFixtureHash('fixture-board-policy-v1', {
     policy: 'signed-head-chain-v1',
 });
-export const contextHash = deriveProtocolHash('ActionContextHash', {
+export const contextHash = deriveCanonicalObjectHash({
+    objectType: 'ActionContext',
     context: 'default',
 });
 export const profile = createMlDsaSignatureProfileFixture();
@@ -110,10 +112,10 @@ export const defaultEvaluatorReplayRecordHash = deriveFixtureHash(
     'fixture-evaluator-replay-record-v1',
     { proposal: 'direct-evaluator-replay' },
 );
-export const defaultThresholdParametersHash = deriveProtocolHash(
-    'ThresholdParametersHash',
-    { parameters: 'default-target-finality-threshold-parameters' },
-);
+export const defaultThresholdParametersHash = deriveCanonicalObjectHash({
+    objectType: 'ThresholdParametersHash',
+    parameters: 'default-target-finality-threshold-parameters',
+});
 export const dynamicRosterParametersCertificateHash = 'a'.repeat(128);
 export const targetBoundShareSelectionParameters = {
     certificateHash: 'target-bound-certificate-hash',
@@ -166,66 +168,55 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     heParamHash: deriveFixtureHash('fixture-he-parameter-set-v1', {
         parameters: 'BGV-RNS-v1',
     }),
-    bgvPassiveSetupPackageHash: deriveProtocolHash(
-        'BGVPassiveSetupPackageHash',
-        {
-            setup: 'passive-full-roster-bgv',
-        },
-    ),
-    bgvSetupParameterCertificateHash: deriveProtocolHash(
-        'BGVSetupParameterCertificateHash',
-        {
-            setup: 'parameter-certificate',
-        },
-    ),
+    bgvPassiveSetupPackageHash: deriveCanonicalObjectHash({
+        objectType: 'BGVPassiveSetupPackageHash',
+        setup: 'passive-full-roster-bgv',
+    }),
+    bgvSetupParameterCertificateHash: deriveCanonicalObjectHash({
+        objectType: 'BGVSetupParameterCertificateHash',
+        setup: 'parameter-certificate',
+    }),
     bgvParametersHash,
-    bgvPublicKeyRoot: deriveProtocolHash('BGVPublicKeyRoot', {
+    bgvPublicKeyRoot: deriveCanonicalObjectHash({
+        objectType: 'BGVPublicKeyRoot',
         key: 'bgv-collective',
     }),
-    collectivePublicKeyRoot: deriveProtocolHash('CollectivePublicKeyRoot', {
+    collectivePublicKeyRoot: deriveCanonicalObjectHash({
+        objectType: 'CollectivePublicKeyRoot',
         key: 'bgv-collective',
     }),
-    collectiveSecretDistributionCertificateHash: deriveProtocolHash(
-        'CollectiveSecretDistributionCertificateHash',
-        {
-            setup: 'secret-distribution',
-        },
-    ),
-    errorDistributionCertificateHash: deriveProtocolHash(
-        'ErrorDistributionCertificateHash',
-        {
-            setup: 'error-distribution',
-        },
-    ),
-    keySwitchDecompositionHash: deriveProtocolHash(
-        'KeySwitchDecompositionHash',
-        {
-            parameters: 'key-switch-decomposition',
-        },
-    ),
+    collectiveSecretDistributionCertificateHash: deriveCanonicalObjectHash({
+        objectType: 'CollectiveSecretDistributionCertificateHash',
+        setup: 'secret-distribution',
+    }),
+    errorDistributionCertificateHash: deriveCanonicalObjectHash({
+        objectType: 'ErrorDistributionCertificateHash',
+        setup: 'error-distribution',
+    }),
+    keySwitchDecompositionHash: deriveCanonicalObjectHash({
+        objectType: 'KeySwitchDecompositionHash',
+        parameters: 'key-switch-decomposition',
+    }),
     ballotValidityProofParametersHash: deriveFixtureHash(
         'fixture-ballot-validity-proof-v1',
         { parameters: ballotValidityProofId },
     ),
-    comparisonInputDerivationCircuitHash: deriveProtocolHash(
-        'ComparisonInputDerivationCircuitHash',
-        {
-            circuit: 'comparison-input-derivation-circuit-v1',
-            selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
-        },
-    ),
-    encryptedComparisonInputHash: deriveProtocolHash(
-        'EncryptedComparisonInputHash',
-        {
-            layout: 'encrypted-comparison-inputs-v1',
-            selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
-        },
-    ),
-    encryptedSparseTargetProjectionHash: deriveProtocolHash(
-        'EncryptedSparseTargetProjectionHash',
-        { circuit: 'encrypted-sparse-target-projection-v1' },
-    ),
-    targetLayoutHash: deriveProtocolHash('TargetLayoutHash', {
+    comparisonInputDerivationCircuitHash: deriveCanonicalObjectHash({
+        objectType: 'ComparisonInputDerivationCircuitHash',
+        circuit: 'comparison-input-derivation-circuit-v1',
+        selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
+    }),
+    encryptedComparisonInputHash: deriveCanonicalObjectHash({
+        objectType: 'EncryptedComparisonInputHash',
+        layout: 'encrypted-comparison-inputs-v1',
+        selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
+    }),
+    encryptedSparseTargetProjectionHash: deriveCanonicalObjectHash({
+        objectType: 'EncryptedSparseTargetProjectionHash',
+        circuit: 'encrypted-sparse-target-projection-v1',
+    }),
+    targetLayoutHash: deriveCanonicalObjectHash({
+        objectType: 'TargetLayoutHash',
         layout: 'direct-sparse-target-layout-v1',
     }),
     evaluatorReplayParametersHash: deriveFixtureHash(
@@ -239,47 +230,39 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     heEvaluationNoiseCertHash: deriveFixtureHash('fixture-he-noise-cert-v1', {
         certificate: 'direct-evaluator-noise-v1',
     }),
-    rotSetHash: deriveProtocolHash('RotSetHash', {
+    rotSetHash: deriveCanonicalObjectHash({
+        objectType: 'RotSetHash',
         rotations: 'direct-encrypted-ballot-evaluator-replay',
     }),
-    evaluationKeyRoot: deriveProtocolHash('EvalKeyRoot', {
+    evaluationKeyRoot: deriveCanonicalObjectHash({
+        objectType: 'EvalKeyRoot',
         keys: 'direct-encrypted-ballot-evaluator-replay',
     }),
-    evaluationKeySizeParametersHash: deriveProtocolHash(
-        'EvaluationKeySizeParametersHash',
-        {
-            parameters: 'passive-bgv-setup-evaluation-key-size',
-        },
-    ),
-    thresholdShareVerificationKeyRoot: deriveProtocolHash(
-        'ThresholdShareVerificationKeyRoot',
-        {
-            setup: 'threshold-share-verification-key-set',
-        },
-    ),
-    thresholdShareVerificationKeyHash: deriveProtocolHash(
-        'ThresholdShareVerificationKeyHash',
-        {
-            setup: 'threshold-share-verification-key-set',
-        },
-    ),
-    trusteeThresholdVerificationKeyHash: deriveProtocolHash(
-        'TrusteeThresholdVerificationKeyHash',
-        {
-            setup: 'trustee-threshold-verification-key-set',
-        },
-    ),
-    targetDecryptionParametersHash: deriveProtocolHash(
-        'TargetDecryptionParametersHash',
-        { parameters: targetDecryptionId },
-    ),
-    targetThresholdDecryptabilityCertificateHash: deriveProtocolHash(
-        'TargetThresholdDecryptabilityCertificateHash',
-        {
-            parameters: targetDecryptionId,
-            targetOnly: true,
-        },
-    ),
+    evaluationKeySizeParametersHash: deriveCanonicalObjectHash({
+        objectType: 'EvaluationKeySizeParametersHash',
+        parameters: 'passive-bgv-setup-evaluation-key-size',
+    }),
+    thresholdShareVerificationKeyRoot: deriveCanonicalObjectHash({
+        objectType: 'ThresholdShareVerificationKeyRoot',
+        setup: 'threshold-share-verification-key-set',
+    }),
+    thresholdShareVerificationKeyHash: deriveCanonicalObjectHash({
+        objectType: 'ThresholdShareVerificationKeyHash',
+        setup: 'threshold-share-verification-key-set',
+    }),
+    trusteeThresholdVerificationKeyHash: deriveCanonicalObjectHash({
+        objectType: 'TrusteeThresholdVerificationKeyHash',
+        setup: 'trustee-threshold-verification-key-set',
+    }),
+    targetDecryptionParametersHash: deriveCanonicalObjectHash({
+        objectType: 'TargetDecryptionParametersHash',
+        parameters: targetDecryptionId,
+    }),
+    targetThresholdDecryptabilityCertificateHash: deriveCanonicalObjectHash({
+        objectType: 'TargetThresholdDecryptabilityCertificateHash',
+        parameters: targetDecryptionId,
+        targetOnly: true,
+    }),
     targetBasisHash: deriveFixtureHash('fixture-target-basis-v1', {
         parameters: 'direct-target-basis-v1',
     }),

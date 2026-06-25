@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from './constants.js';
@@ -57,7 +57,6 @@ export const acceptedCertificateTemplate = (
     templateFieldName: string,
     objectType: string,
     hashFieldName: string,
-    hashNamespace: string,
 ): JsonRecord | null => {
     const templates = setupParameters.acceptedCertificateTemplates;
     if (templates === undefined) {
@@ -83,7 +82,7 @@ export const acceptedCertificateTemplate = (
     );
     const hashInput = cloneJsonRecord(certificate);
     delete hashInput[hashFieldName];
-    if (deriveProtocolHash(hashNamespace, hashInput) !== certificateHash) {
+    if (deriveCanonicalObjectHash(hashInput) !== certificateHash) {
         throw new Error(
             `setupParameters.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName} must match the certificate body.`,
         );

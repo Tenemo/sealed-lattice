@@ -13,7 +13,7 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
     let evaluation_key_record = value_at_path(evaluation_keys, &["record"])?;
     let rot_set = value_at_path(evaluation_keys, &["rotSet"])?;
     let rot_set_hash = hash_at_path(evaluation_keys, &["rotSetHash"])?;
-    compare_derived_hash("RotSetHash", rot_set, rot_set_hash, "rotation set hash")?;
+    compare_derived_hash(rot_set, rot_set_hash, "rotation set hash")?;
     let key_switch_decomposition_hash =
         hash_at_path(evaluation_keys, &["keySwitchDecompositionHash"])?;
     compare_hash_at_path(
@@ -74,7 +74,6 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
         value_at_path(&expected_material, &["relinearizationKeyRecord"])?;
     let relinearization_key_root = hash_at_path(evaluation_keys, &["relinearizationKeyRoot"])?;
     compare_derived_hash(
-        "RelinearizationKeyRoot",
         relinearization_key_record,
         relinearization_key_root,
         "relinearization key root",
@@ -112,7 +111,6 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
             )
         })?;
         compare_derived_hash(
-            "RotationKeyRoot",
             rotation_key_record,
             hash_at_path(rotation_key_root_record, &["rotationKeyRoot"])?,
             "rotation key root",
@@ -129,7 +127,6 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
     let key_switch_key_record = value_at_path(&expected_material, &["keySwitchKeyRecord"])?;
     let key_switch_key_root = hash_at_path(evaluation_keys, &["keySwitchKeyRoot"])?;
     compare_derived_hash(
-        "KeySwitchKeyRoot",
         key_switch_key_record,
         key_switch_key_root,
         "key-switch key root",
@@ -143,7 +140,6 @@ pub(super) fn validate_evaluation_keys(setup_package: &Value) -> CanonicalResult
 
     let evaluation_key_root = hash_at_path(evaluation_keys, &["evaluationKeyRoot"])?;
     compare_derived_hash(
-        "EvalKeyRoot",
         evaluation_key_record,
         evaluation_key_root,
         "evaluation key root",

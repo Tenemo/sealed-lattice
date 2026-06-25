@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
     setup_package: &Value,
     binding: &EvaluationKeyProofCommonBinding,
@@ -52,8 +54,7 @@ pub(super) fn expected_relinearization_key_roots_for_evaluation_keys(
                     "relinearization level overflowed while deriving evaluation-key assembly",
                 )
             })?;
-            let key_root = derive_protocol_hash(
-                "RelinearizationKeyRoot",
+            let key_root = derive_canonical_object_hash(
                 &json!({
                     "objectType": "RelinearizationKeyAggregate",
                     "objectVersion": 1,
@@ -173,28 +174,25 @@ pub(super) fn expected_galois_key_roots_for_evaluation_keys(
                     "galoisKeyShareRoot": value_string(material_record, "galoisKeyShareRoot")?,
                 }));
             }
-            let galois_key_root = derive_protocol_hash(
-                "RotationKeyRoot",
-                &json!({
-                    "objectType": "GaloisKeyAggregate",
-                    "objectVersion": 1,
-                    "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
-                    "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
-                    "sameSecretProofFamilyBindingRoot": binding
-                        .same_secret_proof_family_binding_root
-                        .as_str(),
-                    "publicKeyShareSuccinctProofSetRoot": binding
-                        .public_key_share_succinct_proof_set_root
-                        .as_str(),
-                    "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
-                    "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
-                    "rotation": rotation,
-                    "level": level,
-                    "decompositionDigitCount": decomposition_digit_count,
-                    "rnsLimbCount": decomposition_digit_count,
-                    "contributingShareRoots": contributing_share_roots,
-                }),
-            )?;
+            let galois_key_root = derive_canonical_object_hash(&json!({
+                "objectType": "GaloisKeyAggregate",
+                "objectVersion": 1,
+                "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
+                "evaluatorKeyScheduleRoot": binding.evaluator_key_schedule_root.as_str(),
+                "sameSecretProofFamilyBindingRoot": binding
+                    .same_secret_proof_family_binding_root
+                    .as_str(),
+                "publicKeyShareSuccinctProofSetRoot": binding
+                    .public_key_share_succinct_proof_set_root
+                    .as_str(),
+                "galoisKeyCrpRoot": binding.galois_key_crp_root.as_str(),
+                "requiredGaloisSetHash": binding.required_galois_set_hash.as_str(),
+                "rotation": rotation,
+                "level": level,
+                "decompositionDigitCount": decomposition_digit_count,
+                "rnsLimbCount": decomposition_digit_count,
+                "contributingShareRoots": contributing_share_roots,
+            }))?;
 
             Ok(json!({
                 "rotation": rotation,

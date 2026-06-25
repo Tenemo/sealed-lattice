@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 
@@ -238,16 +240,13 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
             "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
         ));
     }
-    let share_values_hash = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &json!({
-            "objectType": "PrivateVssShareValueVector",
-            "objectVersion": 1,
-            "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "shareValues": share_values,
-        }),
-    )?;
+    let share_values_hash = derive_canonical_object_hash(&json!({
+        "objectType": "PrivateVssShareValueVector",
+        "objectVersion": 1,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "shareValues": share_values,
+    }))?;
     let bound_proof_randomness_seed_hex = statement_bound_private_vss_proof_randomness_seed_hex(
         setup_context,
         public_matrix_seed_hash,
@@ -341,29 +340,26 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
         "proofRandomnessNonceHex",
     )?;
 
-    derive_protocol_hash(
-        "PrivateVssShareProofRandomness",
-        &json!({
-            "objectType": "PrivateVssShareProofRandomnessBinding",
-            "objectVersion": 1,
-            "proofFamily": "vss-opening-carry",
-            "setupContext": setup_context,
-            "publicMatrixSeedHash": public_matrix_seed_hash,
-            "privateEnvelopeAadHash": private_envelope_aad_hash,
-            "sourceTrusteeIdentity": source_trustee_identity,
-            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-            "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-            "recipientIdentity": recipient_identity,
-            "recipientRosterPosition": recipient_roster_position,
-            "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "ringDegree": ring_degree,
-            "shareValuesHash": share_values_hash,
-            "coefficientCommitmentRoots": coefficient_commitment_roots,
-            "proofRandomnessNonceHex": proof_randomness_nonce_hex,
-            "proofRandomnessSeedHex": proof_randomness_seed_hex,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "PrivateVssShareProofRandomnessBinding",
+        "objectVersion": 1,
+        "proofFamily": "vss-opening-carry",
+        "setupContext": setup_context,
+        "publicMatrixSeedHash": public_matrix_seed_hash,
+        "privateEnvelopeAadHash": private_envelope_aad_hash,
+        "sourceTrusteeIdentity": source_trustee_identity,
+        "sourceTrusteeRosterPosition": source_trustee_roster_position,
+        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
+        "recipientIdentity": recipient_identity,
+        "recipientRosterPosition": recipient_roster_position,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "ringDegree": ring_degree,
+        "shareValuesHash": share_values_hash,
+        "coefficientCommitmentRoots": coefficient_commitment_roots,
+        "proofRandomnessNonceHex": proof_randomness_nonce_hex,
+        "proofRandomnessSeedHex": proof_randomness_seed_hex,
+    }))
 }
 
 fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
@@ -373,14 +369,11 @@ fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalRes
         "proofRandomnessNonceHex",
     )?;
 
-    derive_protocol_hash(
-        "PrivateVssShareProofRandomness",
-        &json!({
-            "objectType": "PrivateVssShareProofRandomnessNonceHash",
-            "objectVersion": 1,
-            "nonceBytesHex": proof_randomness_nonce_hex,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "PrivateVssShareProofRandomnessNonceHash",
+        "objectVersion": 1,
+        "nonceBytesHex": proof_randomness_nonce_hex,
+    }))
 }
 
 fn u64_matrix_field(

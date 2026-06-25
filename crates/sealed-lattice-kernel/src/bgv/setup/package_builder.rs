@@ -9,6 +9,7 @@ use super::{
     key_material::{collective_public_key, evaluation_keys, threshold_verification_material},
     participant_material::participant_setup_material,
 };
+use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -17,29 +18,20 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
     let bgv_parameters_hash = bgv_parameters_hash()?;
     let collective_secret_distribution_certificate =
         collective_secret_distribution_certificate(input.participants.len())?;
-    let collective_secret_distribution_certificate_hash = derive_protocol_hash(
-        "CollectiveSecretDistributionCertificateHash",
-        &collective_secret_distribution_certificate,
-    )?;
+    let collective_secret_distribution_certificate_hash =
+        derive_canonical_object_hash(&collective_secret_distribution_certificate)?;
     let error_distribution_certificate = error_distribution_certificate()?;
-    let error_distribution_certificate_hash = derive_protocol_hash(
-        "ErrorDistributionCertificateHash",
-        &error_distribution_certificate,
-    )?;
+    let error_distribution_certificate_hash =
+        derive_canonical_object_hash(&error_distribution_certificate)?;
     let key_switch_decomposition = key_switch_decomposition_parameters()?;
-    let key_switch_decomposition_hash =
-        derive_protocol_hash("KeySwitchDecompositionHash", &key_switch_decomposition)?;
+    let key_switch_decomposition_hash = derive_canonical_object_hash(&key_switch_decomposition)?;
     let target_decryption_parameters = target_decryption_parameters(&bgv_parameters_hash)?;
-    let target_decryption_parameters_hash = derive_protocol_hash(
-        "TargetDecryptionParametersHash",
-        &target_decryption_parameters,
-    )?;
-    let target_decryption_parameters_binding_hash = derive_protocol_hash(
-        "TargetDecryptionParametersBindingHash",
-        &json!({
-            "targetDecryptionParametersHash": target_decryption_parameters_hash,
-        }),
-    )?;
+    let target_decryption_parameters_hash =
+        derive_canonical_object_hash(&target_decryption_parameters)?;
+    let target_decryption_parameters_binding_hash = derive_canonical_object_hash(&json!({
+        "objectType": "TargetDecryptionParametersBinding",
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+    }))?;
     let public_common_random_polynomial_root = public_common_random_polynomial_root(input)?;
     #[cfg(not(target_arch = "wasm32"))]
     let participant_material = input
@@ -160,7 +152,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
             "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         },
     });
-    let setup_package_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &package)?;
+    let setup_package_hash = derive_canonical_object_hash(&package)?;
     package["setupPackageHash"] = Value::String(setup_package_hash);
 
     Ok(package)

@@ -1,4 +1,5 @@
 use crate::bgv::target_decryption::direct_target_ciphertext_hash;
+use crate::hashing::derive_canonical_object_hash;
 
 use super::*;
 
@@ -270,28 +271,25 @@ pub(super) fn direct_ballot_evaluator_replay_context_hash(
         evaluation_key_material["publicEvaluationKeyMaterialHash"] = json!(material_hash);
     }
 
-    derive_protocol_hash(
-        "EvaluatorReplayContextHash",
-        &json!({
-            "objectType": "DirectEncryptedBallotEvaluatorReplayContext",
-            "objectVersion": 1,
-            "setupPackageHash": setup_package_hash(input.setup_package)?,
-            "ceremonyId": required_string_path(input.setup_package, &["setupInputs", "ceremonyId"])?,
-            "manifestHash": required_string_path(input.setup_package, &["setupInputs", "manifestHash"])?,
-            "thresholdParametersHash": required_string_path(input.setup_package, &["setupInputs", "thresholdParametersHash"])?,
-            "aggregateCiphertextRoot": input.aggregate_ciphertext_root,
-            "aggregateCiphertextCanonicalByteLength": input.aggregate_ciphertext_canonical_byte_length,
-            "ballotCount": input.ballot_count,
-            "topCount": input.top_count,
-            "scoreDomainMax": input.score_domain_max,
-            "tiePolicy": TIE_POLICY,
-            "workingLevel": input.working_level,
-            "bgvParametersHash": bgv_parameters_hash()?,
-            "evaluationKeyMaterial": evaluation_key_material,
-            "targetLayoutHash": input.target_layout_hash,
-            "intermediateOpeningsAllowed": false,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "DirectEncryptedBallotEvaluatorReplayContext",
+        "objectVersion": 1,
+        "setupPackageHash": setup_package_hash(input.setup_package)?,
+        "ceremonyId": required_string_path(input.setup_package, &["setupInputs", "ceremonyId"])?,
+        "manifestHash": required_string_path(input.setup_package, &["setupInputs", "manifestHash"])?,
+        "thresholdParametersHash": required_string_path(input.setup_package, &["setupInputs", "thresholdParametersHash"])?,
+        "aggregateCiphertextRoot": input.aggregate_ciphertext_root,
+        "aggregateCiphertextCanonicalByteLength": input.aggregate_ciphertext_canonical_byte_length,
+        "ballotCount": input.ballot_count,
+        "topCount": input.top_count,
+        "scoreDomainMax": input.score_domain_max,
+        "tiePolicy": TIE_POLICY,
+        "workingLevel": input.working_level,
+        "bgvParametersHash": bgv_parameters_hash()?,
+        "evaluationKeyMaterial": evaluation_key_material,
+        "targetLayoutHash": input.target_layout_hash,
+        "intermediateOpeningsAllowed": false,
+    }))
 }
 
 pub(super) fn direct_ballot_evaluator_replay_record_hash(
@@ -301,18 +299,15 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
     target_ciphertext_hash: &str,
     target_layout_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EvaluatorReplayRecordHash",
-        &json!({
-            "objectType": "EvaluatorReplayRecord",
-            "objectVersion": 1,
-            "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
-            "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
-            "encryptedBallotAggregateHash": aggregate_ciphertext_root,
-            "evaluatorReplayParametersHash": bgv_parameters_hash()?,
-            "evaluatorReplayContextHash": evaluator_replay_context_hash,
-            "targetCiphertextHash": target_ciphertext_hash,
-            "targetLayoutHash": target_layout_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "EvaluatorReplayRecord",
+        "objectVersion": 1,
+        "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
+        "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
+        "encryptedBallotAggregateHash": aggregate_ciphertext_root,
+        "evaluatorReplayParametersHash": bgv_parameters_hash()?,
+        "evaluatorReplayContextHash": evaluator_replay_context_hash,
+        "targetCiphertextHash": target_ciphertext_hash,
+        "targetLayoutHash": target_layout_hash,
+    }))
 }

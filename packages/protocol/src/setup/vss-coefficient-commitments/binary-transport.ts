@@ -5,7 +5,7 @@
 // records together.
 import {
     createSetupVssMaterialFullObjectHasher,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
     setupVssMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
@@ -81,7 +81,7 @@ function setupTransportChunkManifestRoot(input: {
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
 }): ProtocolHash {
-    return deriveProtocolHash('SetupTransportChunkManifestRoot', {
+    return deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
         chunkSizeBytes: input.chunkSizeBytes,
@@ -433,8 +433,7 @@ export const writeSetupCommitment = (
         materialRecord.commitment,
         'vssCoefficientCommitmentMaterial.coefficientCommitments.commitment',
     );
-    const commitmentRoot = deriveProtocolHash(
-        'SetupCommitmentRoot',
+    const commitmentRoot = deriveCanonicalObjectHash(
         setupCommitmentRootPayload(commitment),
     );
     if (commitmentRoot !== materialRecord.commitmentRoot) {
@@ -572,8 +571,7 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
 
     return {
         ...materialSetWithoutRoot,
-        vssCoefficientCommitmentMaterialRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentMaterialRoot',
+        vssCoefficientCommitmentMaterialRoot: deriveCanonicalObjectHash(
             materialSetWithoutRoot,
         ),
     } satisfies BinaryChunkedVssCoefficientCommitmentMaterialSet;
@@ -906,10 +904,8 @@ export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
     delete (materialRootWithoutRoot as JsonRecord)
         .vssCoefficientCommitmentMaterialRoot;
     if (
-        deriveProtocolHash(
-            'VssCoefficientCommitmentMaterialRoot',
-            materialRootWithoutRoot,
-        ) !== input.materialSet.vssCoefficientCommitmentMaterialRoot
+        deriveCanonicalObjectHash(materialRootWithoutRoot) !==
+        input.materialSet.vssCoefficientCommitmentMaterialRoot
     ) {
         throw new Error(
             'binary VSS material set root must match the canonical material set.',
@@ -1035,8 +1031,7 @@ export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
                     input.materialSet.ringDegree,
                     expectedCommitmentModuli,
                 );
-                const commitmentRoot = deriveProtocolHash(
-                    'SetupCommitmentRoot',
+                const commitmentRoot = deriveCanonicalObjectHash(
                     setupCommitmentRootPayload(commitment),
                 );
                 const expectedCommitmentRecord =

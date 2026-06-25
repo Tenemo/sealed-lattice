@@ -52,22 +52,19 @@ pub(super) fn recombine_target_decryption_shares(
         })?;
     let decoded_target_ids = packed_target_values(&target_id_slots);
     let decoded_target_orders = packed_target_values(&target_order_slots);
-    let target_result_root = derive_protocol_hash(
-        "TargetDecryptionResultHash",
-        &json!({
-            "objectType": "TargetDecryptionResult",
-            "objectVersion": 1,
-            "setupPackageHash": setup_binding.setup_package_hash,
-            "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-            "targetContextHash": target_accepted.target_context_hash,
-            "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-            "targetShareParametersHash": target_share_parameters.hash,
-            "selectedBoardPositions": selected_board_positions,
-            "selectedRosterPositions": selected_roster_positions,
-            "decodedTargetIds": decoded_target_ids,
-            "decodedTargetOrders": decoded_target_orders,
-        }),
-    )?;
+    let target_result_root = derive_canonical_object_hash(&json!({
+        "objectType": "TargetDecryptionResult",
+        "objectVersion": 1,
+        "setupPackageHash": setup_binding.setup_package_hash,
+        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
+        "targetContextHash": target_accepted.target_context_hash,
+        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
+        "targetShareParametersHash": target_share_parameters.hash,
+        "selectedBoardPositions": selected_board_positions,
+        "selectedRosterPositions": selected_roster_positions,
+        "decodedTargetIds": decoded_target_ids,
+        "decodedTargetOrders": decoded_target_orders,
+    }))?;
 
     Ok(json!({
         "ok": true,

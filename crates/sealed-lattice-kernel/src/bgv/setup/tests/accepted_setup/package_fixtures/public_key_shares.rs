@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn public_key_shares_object(
     ceremony_id: &str,
@@ -38,14 +40,12 @@ pub(super) fn public_key_shares_object(
                     "rnsLimbIndex": rns_limb_index,
                     "rnsPrime": rns_prime,
                     "component": "b_i",
-                    "coefficientVectorHash512": derive_protocol_hash(
-                        "PublicKeyShareRoot",
-                        &serde_json::json!({
-                            "fixture": "public-key-share-coefficient-vector",
-                            "trusteeRosterPosition": trustee_roster_position,
-                            "rnsLimbIndex": rns_limb_index,
-                        }),
-                    )
+                    "coefficientVectorHash512": derive_canonical_object_hash(&serde_json::json!({
+                        "objectType": "PublicKeyShareRoot",
+                        "fixture": "public-key-share-coefficient-vector",
+                        "trusteeRosterPosition": trustee_roster_position,
+                        "rnsLimbIndex": rns_limb_index,
+                    }))
                     .expect("public-key share coefficient hash"),
                 })
             })
@@ -71,8 +71,7 @@ pub(super) fn public_key_shares_object(
             "proofBindingStatus": "public-key-share-proof-required",
         });
         share_record["publicKeyShareRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareRoot", &share_record)
-                .expect("public-key share root")
+            derive_canonical_object_hash(&share_record).expect("public-key share root")
         );
         public_key_share_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -100,7 +99,7 @@ pub(super) fn public_key_shares_object(
         "shareRecords": share_records,
     });
     share_set["publicKeyShareSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareRoot", &share_set).expect("public-key share set root")
+        derive_canonical_object_hash(&share_set).expect("public-key share set root")
     );
 
     share_set
@@ -163,8 +162,7 @@ pub(super) fn public_key_share_proofs_object(
             "proofBytesStatus": "supplied-by-public-key-share-succinct-proof-set",
         });
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
-                .expect("public-key share proof root")
+            derive_canonical_object_hash(&proof_record).expect("public-key share proof root")
         );
         public_key_share_proof_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -193,8 +191,7 @@ pub(super) fn public_key_share_proofs_object(
         "proofRecords": proof_records,
     });
     proof_set["publicKeyShareProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareProofRoot", &proof_set)
-            .expect("public-key share proof set root")
+        derive_canonical_object_hash(&proof_set).expect("public-key share proof set root")
     );
 
     proof_set
@@ -239,8 +236,7 @@ pub(super) fn evaluator_key_schedule_object(
         "genericKeySwitchPolicy": "refused-unless-explicitly-required",
     });
     schedule["evaluatorKeyScheduleRoot"] = serde_json::json!(
-        derive_protocol_hash("EvaluatorKeyScheduleRoot", &schedule)
-            .expect("evaluator-key schedule root")
+        derive_canonical_object_hash(&schedule).expect("evaluator-key schedule root")
     );
 
     schedule

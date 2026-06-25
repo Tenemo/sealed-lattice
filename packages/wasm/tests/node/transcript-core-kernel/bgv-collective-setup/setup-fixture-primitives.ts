@@ -45,34 +45,35 @@ export const setupTrusteeSignatureSeedLabel = (
     trusteeIdentity: string,
 ): string => `${trusteeIdentity}-setup-signing`;
 
-type ProtocolHashDeriver = (input: {
-    readonly namespace: string;
+type CanonicalObjectHashDeriver = (input: {
     readonly value: unknown;
 }) => string;
 
 export const collectiveSetupRosterHash = (
-    deriveProtocolHashForValue: ProtocolHashDeriver,
+    deriveCanonicalObjectHashForValue: CanonicalObjectHashDeriver,
     participantCount = firstRosterParticipantCount,
 ): string =>
-    deriveProtocolHashForValue({
-        namespace: 'CollectiveBgvSetupRosterHash',
-        value: Array.from(
-            { length: participantCount },
-            (_unusedSlot, rosterPosition) => {
-                const trusteeIdentity = `trustee-${String(rosterPosition)}`;
-                const signingPublicKeyHash = createMlDsaKeyPairFixture(
-                    setupTrusteeSignatureSeedLabel(trusteeIdentity),
-                ).publicKeyHash;
+    deriveCanonicalObjectHashForValue({
+        value: {
+            objectType: 'CollectiveBgvSetupRoster',
+            rosterEntries: Array.from(
+                { length: participantCount },
+                (_unusedSlot, rosterPosition) => {
+                    const trusteeIdentity = `trustee-${String(rosterPosition)}`;
+                    const signingPublicKeyHash = createMlDsaKeyPairFixture(
+                        setupTrusteeSignatureSeedLabel(trusteeIdentity),
+                    ).publicKeyHash;
 
-                return {
-                    objectType: 'CollectiveBgvSetupRosterEntry',
-                    objectVersion: 1,
-                    rosterPosition,
-                    trusteeIdentity,
-                    signingPublicKeyHash,
-                };
-            },
-        ),
+                    return {
+                        objectType: 'CollectiveBgvSetupRosterEntry',
+                        objectVersion: 1,
+                        rosterPosition,
+                        trusteeIdentity,
+                        signingPublicKeyHash,
+                    };
+                },
+            ),
+        },
     });
 
 export const hexToBytes = (hexValue: string): Uint8Array =>

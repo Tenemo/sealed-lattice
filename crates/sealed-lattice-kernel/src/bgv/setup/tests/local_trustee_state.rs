@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
 fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
     let request = local_trustee_setup_state_request();
@@ -44,15 +46,15 @@ fn local_trustee_setup_state_verifier_rejects_deletion_receipt_drift() {
 
 fn local_trustee_setup_state_request() -> serde_json::Value {
     let ceremony_id = "ceremony-main";
-    let manifest_hash = derive_protocol_hash(
-        "ElectionManifestHash",
-        &serde_json::json!({ "manifest": "local-trustee-state-test" }),
-    )
+    let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "ElectionManifestHash",
+        "manifest": "local-trustee-state-test",
+    }))
     .expect("manifest hash");
-    let roster_hash = derive_protocol_hash(
-        "RosterHash",
-        &serde_json::json!({ "roster": "local-trustee-state-test" }),
-    )
+    let roster_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "RosterHash",
+        "roster": "local-trustee-state-test",
+    }))
     .expect("roster hash");
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
@@ -96,8 +98,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         ],
     });
     deletion_receipt["deletionReceiptRoot"] = serde_json::json!(
-        derive_protocol_hash("LocalTrusteeDeletionReceiptRoot", &deletion_receipt)
-            .expect("deletion receipt root")
+        derive_canonical_object_hash(&deletion_receipt).expect("deletion receipt root")
     );
     let mut local_state = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateCommitment",
@@ -119,9 +120,8 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "exportPolicy": "roots-only-no-raw-share-or-opening-export",
         "storageRequirement": "encrypted-local-device-state-required",
     });
-    local_state["localStateRoot"] = serde_json::json!(
-        derive_protocol_hash("LocalTrusteeSetupStateRoot", &local_state).expect("local state root")
-    );
+    local_state["localStateRoot"] =
+        serde_json::json!(derive_canonical_object_hash(&local_state).expect("local state root"));
 
     serde_json::json!({
         "setupContext": setup_context,
@@ -135,11 +135,8 @@ fn rebind_local_deletion_receipt_root(request: &mut serde_json::Value) {
         .expect("deletion receipt")
         .remove("deletionReceiptRoot");
     request["localStateCommitment"]["deletionReceipt"]["deletionReceiptRoot"] = serde_json::json!(
-        derive_protocol_hash(
-            "LocalTrusteeDeletionReceiptRoot",
-            &request["localStateCommitment"]["deletionReceipt"],
-        )
-        .expect("deletion receipt root")
+        derive_canonical_object_hash(&request["localStateCommitment"]["deletionReceipt"])
+            .expect("deletion receipt root")
     );
     request["localStateCommitment"]["deletionReceiptRoot"] =
         request["localStateCommitment"]["deletionReceipt"]["deletionReceiptRoot"].clone();
@@ -151,10 +148,6 @@ fn rebind_local_state_root(request: &mut serde_json::Value) {
         .expect("local state")
         .remove("localStateRoot");
     request["localStateCommitment"]["localStateRoot"] = serde_json::json!(
-        derive_protocol_hash(
-            "LocalTrusteeSetupStateRoot",
-            &request["localStateCommitment"],
-        )
-        .expect("local state root")
+        derive_canonical_object_hash(&request["localStateCommitment"]).expect("local state root")
     );
 }

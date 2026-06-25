@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 struct PhaseParticipantPayloadInput<'a> {
     phase_identifier: &'a str,
     phase_number: u64,
@@ -41,7 +43,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
         None;
 
     for phase_value in phase_transcript {
-        let phase_object_hash = derive_protocol_hash("SetupPhaseObjectHash", phase_value)?;
         let Some(phase_identifier) = phase_value.get("phaseId").and_then(Value::as_str) else {
             return Ok(Some(verification_response(
                 VerifierStatus::Refused,
@@ -68,6 +69,15 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
                 Vec::new(),
             )?));
         };
+        let mut phase_object_value = phase_value.clone();
+        phase_object_value
+            .as_object_mut()
+            .expect("phase transcript entry with phaseId is an object")
+            .insert(
+                "objectType".to_string(),
+                Value::String("SetupPhaseRecord".to_string()),
+            );
+        let phase_object_hash = derive_canonical_object_hash(&phase_object_value)?;
         // A byte-identical re-post of a phase is benign idempotency and skipped; any non-identical record for the same phaseId is trustee equivocation and rejected as a fork.
         if let Some(previous_hash) = seen_phase_hashes.get(phase_identifier) {
             if previous_hash == &phase_object_hash {
@@ -250,11 +260,15 @@ fn verify_phase_object_binding(
         &format!("phaseTranscript.{phase_identifier}.phaseRoot"),
     )?;
     let mut root_input = phase_value.clone();
-    root_input
+    let root_object = root_input
         .as_object_mut()
-        .expect("phase transcript entry is an object")
-        .remove("phaseRoot");
-    let expected_phase_root = derive_protocol_hash("SetupPhaseRoot", &root_input)?;
+        .expect("phase transcript entry is an object");
+    root_object.remove("phaseRoot");
+    root_object.insert(
+        "objectType".to_string(),
+        Value::String("SetupPhaseRecord".to_string()),
+    );
+    let expected_phase_root = derive_canonical_object_hash(&root_input)?;
     if phase_root != expected_phase_root {
         return Ok(Some(phase_refusal(
             phase_identifier,
@@ -560,8 +574,7 @@ fn verify_participant_phase_object(
         private_vss_mailbox_public_key_hash,
         private_vss_mailbox_public_key_bytes_hash,
     })?;
-    let expected_phase_object_root =
-        derive_protocol_hash("SetupPhaseObjectHash", &phase_object_payload)?;
+    let expected_phase_object_root = derive_canonical_object_hash(&phase_object_payload)?;
     let expected_phase_object_byte_length =
         u64::try_from(canonical_json(&phase_object_payload)?.len()).map_err(|_| {
             CanonicalError::new(
@@ -763,23 +776,22 @@ fn phase_signature_context_hash(
     roster_position: u64,
     phase_object_root: &str,
 ) -> CanonicalResult<String> {
-    // Same hash domain is safe here only because the purpose field and disjoint key sets make the object-root and signature-context preimages non-overlapping.
-    derive_protocol_hash(
-        "SetupPhaseObjectHash",
-        &json!({
-            "purpose": "setup-phase-signature-context",
-            "phaseId": phase_identifier,
-            "phaseNumber": phase_number,
-            "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
-            "manifestHash": setup_context_string(setup_context, "manifestHash")?,
-            "rosterHash": setup_context_string(setup_context, "rosterHash")?,
-            "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
-            "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
-            "trusteeIdentity": trustee_identity,
-            "rosterPosition": roster_position,
-            "phaseObjectRoot": phase_object_root,
-        }),
-    )
+    // The signature-context hash carries its own objectType discriminator, which
+    // domain-separates it from the phase object root under the shared canonical-object hash.
+    derive_canonical_object_hash(&json!({
+        "objectType": "SetupPhaseSignatureContext",
+        "purpose": "setup-phase-signature-context",
+        "phaseId": phase_identifier,
+        "phaseNumber": phase_number,
+        "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
+        "manifestHash": setup_context_string(setup_context, "manifestHash")?,
+        "rosterHash": setup_context_string(setup_context, "rosterHash")?,
+        "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
+        "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
+        "trusteeIdentity": trustee_identity,
+        "rosterPosition": roster_position,
+        "phaseObjectRoot": phase_object_root,
+    }))
 }
 
 pub(super) fn setup_context_string<'a>(
@@ -867,10 +879,10 @@ pub(super) fn setup_intent_roster_hash_from_registrations(
         })
         .collect::<Vec<_>>();
 
-    derive_protocol_hash(
-        "CollectiveBgvSetupRosterHash",
-        &Value::Array(roster_entries),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "CollectiveBgvSetupRoster",
+        "rosterEntries": roster_entries,
+    }))
 }
 
 fn setup_intent_trustee_registrations_from_phase_value(

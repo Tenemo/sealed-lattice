@@ -175,12 +175,13 @@ export const createTranscriptCoreKernelLoader = (
                         inputHex: input.inputHex,
                         chunkSize: input.chunkSize,
                     }).chunkRoot,
-                deriveProtocolHash: (input): ProtocolHash =>
-                    executeCommand<{ readonly protocolHash: ProtocolHash }>({
-                        command: 'DeriveProtocolHash',
-                        namespace: input.namespace,
+                deriveCanonicalObjectHash: (input): ProtocolHash =>
+                    executeCommand<{
+                        readonly canonicalObjectHash: ProtocolHash;
+                    }>({
+                        command: 'DeriveCanonicalObjectHash',
                         value: input.value,
-                    }).protocolHash,
+                    }).canonicalObjectHash,
                 evaluatePlaintextComparison: (
                     input,
                 ): TranscriptCorePlaintextComparison =>

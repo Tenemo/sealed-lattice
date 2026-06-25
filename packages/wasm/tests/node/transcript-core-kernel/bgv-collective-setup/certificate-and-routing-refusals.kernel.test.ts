@@ -176,7 +176,7 @@ describe('collective BGV setup kernel commands', () => {
             ceremonyId: setupRequest.ceremonyId,
             manifestHash: setupRequest.manifestHash,
             rosterHash: collectiveSetupRosterHash((input) =>
-                kernel.deriveProtocolHash(input),
+                kernel.deriveCanonicalObjectHash(input),
             ),
             setupParametersHash: parameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',

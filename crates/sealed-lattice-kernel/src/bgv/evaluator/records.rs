@@ -3,7 +3,7 @@ use serde_json::json;
 use crate::{
     bgv::parameters::POLYNOMIAL_DEGREE,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 pub(crate) const MAXIMUM_OPTION_COUNT: usize = 20;
@@ -17,15 +17,13 @@ pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String>
         ));
     }
 
-    derive_protocol_hash(
-        "TargetLayoutHash",
-        &json!({
-            "layoutId": DIRECT_TARGET_PROJECTION_ID,
-            "optionCount": option_count,
-            "targetIdSlotRule": "(option + 1) * [rank < topCount]",
-            "targetOrderSlotRule": "(rank + 1) * [rank < topCount]",
-            "intermediateOpeningsAllowed": false,
-            "slotCount": POLYNOMIAL_DEGREE,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+    "objectType": "DirectEncryptedBallotTargetLayout",
+    "layoutId": DIRECT_TARGET_PROJECTION_ID,
+        "optionCount": option_count,
+        "targetIdSlotRule": "(option + 1) * [rank < topCount]",
+        "targetOrderSlotRule": "(rank + 1) * [rank < topCount]",
+        "intermediateOpeningsAllowed": false,
+        "slotCount": POLYNOMIAL_DEGREE,
+    }))
 }

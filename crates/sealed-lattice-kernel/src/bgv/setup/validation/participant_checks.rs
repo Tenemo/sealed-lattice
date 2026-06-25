@@ -118,7 +118,6 @@ pub(super) fn validate_participant_setup_records(
             })?
             .remove("participantSetupRecordHash");
         compare_derived_hash(
-            "ParticipantBgvSetupRecordHash",
             &participant_record_without_hash,
             participant_setup_record_hash,
             "participant setup record hash",
@@ -138,7 +137,6 @@ pub(super) fn validate_participant_setup_records(
             "publicKeyShareRoot": public_key_share_root,
         });
         compare_derived_hash(
-            "TrusteeThresholdVerificationKeyHash",
             &trustee_threshold_verification_key,
             trustee_threshold_verification_key_hash,
             "trustee threshold verification key hash",

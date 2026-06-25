@@ -1,5 +1,5 @@
 import {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
@@ -774,10 +774,8 @@ export const createTrusteeEvaluationKeyProofs = (
 
         return {
             ...recordWithoutRoot,
-            trusteeEvaluationKeyProofRoot: deriveProtocolHash(
-                'TrusteeEvaluationKeyProofRoot',
-                recordWithoutRoot,
-            ),
+            trusteeEvaluationKeyProofRoot:
+                deriveCanonicalObjectHash(recordWithoutRoot),
         } as TrusteeEvaluationKeyProofRecord;
     });
     if (proofAccountingHash === undefined) {
@@ -827,10 +825,8 @@ export const createTrusteeEvaluationKeyProofs = (
 
     return {
         ...proofSetWithoutRoot,
-        trusteeEvaluationKeyProofSetRoot: deriveProtocolHash(
-            'TrusteeEvaluationKeyProofSetRoot',
-            proofSetWithoutRoot,
-        ),
+        trusteeEvaluationKeyProofSetRoot:
+            deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies TrusteeEvaluationKeyProofSet;
 };
 
@@ -908,25 +904,22 @@ export const transportTrusteeEvaluationKeyProofSet = (
             fullObjectHash,
             totalByteLength,
         );
-        const proofMaterialRoot = deriveProtocolHash(
-            'TrusteeEvaluationKeyProofMaterialRoot',
-            {
-                objectType: 'TrusteeEvaluationKeyProofMaterialReference',
-                objectVersion: 1,
-                proofFamily: trusteeEvaluationKeyProofFamily,
-                trusteeIdentity: proofRecord.trusteeIdentity,
-                trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-                statementHash: proofRecord.statementHash,
-                proofSizeBytes: proofRecord.proofSizeBytes,
-                proofBytesHash: proofRecord.proofBytesHash,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: chunkHashes.length,
-                totalByteLength,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes,
-            },
-        );
+        const proofMaterialRoot = deriveCanonicalObjectHash({
+            objectType: 'TrusteeEvaluationKeyProofMaterialReference',
+            objectVersion: 1,
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            trusteeIdentity: proofRecord.trusteeIdentity,
+            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+            statementHash: proofRecord.statementHash,
+            proofSizeBytes: proofRecord.proofSizeBytes,
+            proofBytesHash: proofRecord.proofBytesHash,
+            chunkSizeBytes: setupProofTransportChunkSizeBytes,
+            chunkCount: chunkHashes.length,
+            totalByteLength,
+            fullObjectHash,
+            chunkRoot,
+            chunkHashes,
+        });
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
             objectVersion: 1,
@@ -960,8 +953,7 @@ export const transportTrusteeEvaluationKeyProofSet = (
 
         return {
             ...transportedRecordWithoutRoot,
-            trusteeEvaluationKeyProofRoot: deriveProtocolHash(
-                'TrusteeEvaluationKeyProofRoot',
+            trusteeEvaluationKeyProofRoot: deriveCanonicalObjectHash(
                 transportedRecordWithoutRoot,
             ),
         } as TrusteeEvaluationKeyProofRecord;
@@ -975,10 +967,8 @@ export const transportTrusteeEvaluationKeyProofSet = (
     return {
         trusteeEvaluationKeyProofs: {
             ...proofSetWithoutRoot,
-            trusteeEvaluationKeyProofSetRoot: deriveProtocolHash(
-                'TrusteeEvaluationKeyProofSetRoot',
-                proofSetWithoutRoot,
-            ),
+            trusteeEvaluationKeyProofSetRoot:
+                deriveCanonicalObjectHash(proofSetWithoutRoot),
         } as TrusteeEvaluationKeyProofSet,
         transportedEvaluationKeyShareProofMaterial: {
             objectType: evaluationKeyShareProofTransportSetObjectType,

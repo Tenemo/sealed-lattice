@@ -153,7 +153,7 @@ fn passive_setup_uses_rejection_sampled_setup_distributions() {
 }
 
 #[test]
-fn public_common_random_polynomial_uses_its_own_root_namespace() {
+fn public_common_random_polynomial_root_matches_canonical_object_hash() {
     let package = setup_package();
     let setup_seed_hash = package["setupInputs"]["setupSeedHash"]
         .as_str()
@@ -175,15 +175,8 @@ fn public_common_random_polynomial_uses_its_own_root_namespace() {
     let actual_root = package["collectivePublicKey"]["record"]["publicCommonRandomPolynomialRoot"]
         .as_str()
         .expect("public common random polynomial root");
-    let expected_root = derive_protocol_hash(
-        "BGVPublicCommonRandomPolynomialRoot",
-        &common_random_polynomial_record,
-    )
-    .expect("common random polynomial root");
-    let old_public_key_share_namespace_root =
-        derive_protocol_hash("PublicKeyShareRoot", &common_random_polynomial_record)
-            .expect("old public key share namespace root");
+    let expected_root = derive_canonical_object_hash(&common_random_polynomial_record)
+        .expect("common random polynomial root");
 
     assert_eq!(actual_root, expected_root);
-    assert_ne!(actual_root, old_public_key_share_namespace_root);
 }

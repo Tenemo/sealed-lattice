@@ -15,7 +15,7 @@ use crate::{
         parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
-    hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512_hex, to_hex},
+    hashing::{HASH512_PREIMAGE_PREFIX, hash512_hex, to_hex},
     transcript_core::decode_hex,
 };
 

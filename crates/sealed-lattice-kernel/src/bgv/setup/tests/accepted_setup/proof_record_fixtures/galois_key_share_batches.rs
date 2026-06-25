@@ -1,6 +1,8 @@
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn galois_key_share_batches_object_with_terminal_transport(
     package: &serde_json::Value,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
@@ -134,7 +136,7 @@ fn galois_key_share_batches_object_inner(
                 "galoisKeyShareMaterialRecords": galois_key_share_material_records,
             });
             batch["galoisKeyShareBatchRoot"] = serde_json::json!(
-                derive_protocol_hash("GaloisKeyShareBatchRoot", &batch)
+                derive_canonical_object_hash(&batch)
                     .expect("Galois key share batch root")
             );
             batch

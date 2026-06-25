@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn verify_evaluator_key_schedule(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
@@ -203,7 +205,7 @@ pub(super) fn verify_evaluator_key_schedule(
         .as_object_mut()
         .expect("evaluator key schedule object was checked")
         .remove("evaluatorKeyScheduleRoot");
-    let expected_root = derive_protocol_hash("EvaluatorKeyScheduleRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if evaluator_key_schedule_root != expected_root {
         return Ok(Some(evaluator_key_schedule_refusal(
             "evaluatorKeyScheduleRootMismatch",

@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
@@ -112,28 +112,25 @@ export function createPublicEvaluationKeySet(
                     );
                 }
                 const decompositionDigitCount = level + 1;
-                const relinearizationKeyRoot = deriveProtocolHash(
-                    'RelinearizationKeyRoot',
-                    {
-                        objectType: 'RelinearizationKeyAggregate',
-                        objectVersion: 1,
-                        materialEncoding: publicEvaluationKeyMaterialEncoding,
-                        evaluatorKeyScheduleRoot:
-                            input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                        sameSecretProofFamilyBindingRoot:
-                            input.sameSecretProofFamilyBindingRoot,
-                        publicKeyShareSuccinctProofSetRoot:
-                            input.publicKeyShareSuccinctProofSetRoot,
-                        relinearizationKeyShareRoundsRoot:
-                            input.relinearizationKeyShareRounds
-                                .relinearizationKeyShareRoundsRoot,
-                        level,
-                        decompositionDigitCount,
-                        rnsLimbCount: decompositionDigitCount,
-                        roundOneAggregateRoot,
-                        roundTwoAggregateRoot,
-                    },
-                );
+                const relinearizationKeyRoot = deriveCanonicalObjectHash({
+                    objectType: 'RelinearizationKeyAggregate',
+                    objectVersion: 1,
+                    materialEncoding: publicEvaluationKeyMaterialEncoding,
+                    evaluatorKeyScheduleRoot:
+                        input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+                    sameSecretProofFamilyBindingRoot:
+                        input.sameSecretProofFamilyBindingRoot,
+                    publicKeyShareSuccinctProofSetRoot:
+                        input.publicKeyShareSuccinctProofSetRoot,
+                    relinearizationKeyShareRoundsRoot:
+                        input.relinearizationKeyShareRounds
+                            .relinearizationKeyShareRoundsRoot,
+                    level,
+                    decompositionDigitCount,
+                    rnsLimbCount: decompositionDigitCount,
+                    roundOneAggregateRoot,
+                    roundTwoAggregateRoot,
+                });
 
                 return {
                     level,
@@ -203,7 +200,7 @@ export function createPublicEvaluationKeySet(
                         } satisfies GaloisKeyContributingShareRoot;
                     },
                 );
-                const galoisKeyRoot = deriveProtocolHash('RotationKeyRoot', {
+                const galoisKeyRoot = deriveCanonicalObjectHash({
                     objectType: 'GaloisKeyAggregate',
                     objectVersion: 1,
                     materialEncoding: publicEvaluationKeyMaterialEncoding,
@@ -320,8 +317,7 @@ export function createPublicEvaluationKeySet(
 
     return {
         ...evaluationKeysWithoutHash,
-        evaluationKeySetHash: deriveProtocolHash(
-            'EvaluationKeySetHash',
+        evaluationKeySetHash: deriveCanonicalObjectHash(
             evaluationKeysWithoutHash,
         ),
     } satisfies PublicEvaluationKeySet;
@@ -567,19 +563,16 @@ const publicEvaluationKeyMaterialTransportHashes = (
     const chunkHashes = chunks.map((chunk, chunkIndex) =>
         publicEvaluationKeyMaterialChunkHash(fullObjectHash, chunkIndex, chunk),
     );
-    const chunkRoot = deriveProtocolHash(
-        'PublicEvaluationKeyMaterialChunkRoot',
-        {
-            objectType: 'PublicEvaluationKeyMaterialChunkManifest',
-            objectVersion: 1,
-            materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        },
-    );
+    const chunkRoot = deriveCanonicalObjectHash({
+        objectType: 'PublicEvaluationKeyMaterialChunkManifest',
+        objectVersion: 1,
+        materialEncoding: publicEvaluationKeyTransportMaterialEncoding,
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        chunkCount: chunkHashes.length,
+        totalByteLength,
+        chunkHashes,
+        fullObjectHash,
+    });
 
     return {
         fullObjectHash,
@@ -596,7 +589,7 @@ const publicEvaluationKeyMaterialReferenceRoot = (
         typeof publicEvaluationKeyMaterialTransportHashes
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('PublicEvaluationKeyMaterialRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'PublicEvaluationKeyMaterialReference',
         objectVersion: 1,
         materialEncoding: publicEvaluationKeyTransportMaterialEncoding,

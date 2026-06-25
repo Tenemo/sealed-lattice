@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -364,16 +364,10 @@ describe('VSS coefficient commitment builders', () => {
             participantCount * qSharePrimes.length * thresholdDegree,
         );
         expect(vssCoefficientCommitmentRoot).toBe(
-            deriveProtocolHash(
-                'VssCoefficientCommitmentRoot',
-                commitmentSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(commitmentSetWithoutRoot),
         );
         expect(vssCoefficientCommitmentMaterialRoot).toBe(
-            deriveProtocolHash(
-                'VssCoefficientCommitmentMaterialRoot',
-                materialSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(materialSetWithoutRoot),
         );
         expect(firstMaterialRecord?.commitmentRoot).toBe(
             setupCommitmentComputer({
@@ -458,10 +452,7 @@ describe('VSS coefficient commitment builders', () => {
             'coefficientCommitments',
         );
         expect(vssCoefficientCommitmentMaterialRoot).toBe(
-            deriveProtocolHash(
-                'VssCoefficientCommitmentMaterialRoot',
-                materialSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(materialSetWithoutRoot),
         );
         expect(
             transport.transportedVssCoefficientCommitmentMaterial,

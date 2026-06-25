@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { firstClosureRosterSize } from '../../lifecycle/roster-policy.js';
 import type { GaloisKeyShareBatch } from '../evaluation-key-proof-records.js';
@@ -341,10 +341,8 @@ export const createSetupKeyCorrectnessCertificate = (
 
     return {
         ...certificateBody,
-        setupKeyCorrectnessCertificateHash: deriveProtocolHash(
-            'SetupKeyCorrectnessCertificateHash',
-            certificateBody,
-        ),
+        setupKeyCorrectnessCertificateHash:
+            deriveCanonicalObjectHash(certificateBody),
     };
 };
 
@@ -466,9 +464,7 @@ export const createActiveStaticSetupTheoremCertificate = (
 
     return {
         ...certificateBody,
-        activeStaticSetupTheoremCertificateHash: deriveProtocolHash(
-            'ActiveStaticSetupTheoremCertificateHash',
-            certificateBody,
-        ),
+        activeStaticSetupTheoremCertificateHash:
+            deriveCanonicalObjectHash(certificateBody),
     };
 };

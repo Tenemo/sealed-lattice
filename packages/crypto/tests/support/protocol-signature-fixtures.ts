@@ -8,8 +8,8 @@ import type {
 
 import {
     canonicalJson,
+    deriveCanonicalObjectHash,
     deriveMlDsaPublicKeyHash,
-    deriveProtocolHash,
     deriveProtocolSignatureHash,
 } from '#packages/crypto/src/index';
 
@@ -76,7 +76,8 @@ export const createMlDsaSignatureProfileFixture = (
         providerVersion: overrides.providerVersion ?? '1',
         providerBuildHash:
             overrides.providerBuildHash ??
-            deriveProtocolHash('ProviderBuildHash', {
+            deriveCanonicalObjectHash({
+                objectType: 'MlDsaProviderBuild',
                 providerName: 'deterministic-fixture',
                 providerVersion: '1',
             }),
@@ -90,7 +91,8 @@ export const createMlDsaSignatureProfileFixture = (
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
 ): MlDsaKeyPairFixture => {
-    const seed = deriveProtocolHash('ChallengeDomainHash', {
+    const seed = deriveCanonicalObjectHash({
+        objectType: 'MlDsaKeyFixtureSeed',
         purpose: 'ml-dsa-fixture-seed',
         seedLabel,
     }).slice(0, 64);

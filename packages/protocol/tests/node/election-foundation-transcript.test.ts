@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     FoundationTranscriptInput,
     ProtocolRefusalCode,
@@ -23,7 +23,8 @@ import {
 } from '#tests/support/foundation-transcript-fixture';
 
 const protocolHashFixture = (label: string): string =>
-    deriveProtocolHash('ChallengeDomainHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ChallengeDomainHash',
         label,
         purpose: 'foundation-mutation',
     });

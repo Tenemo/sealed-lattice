@@ -28,7 +28,7 @@ import {
     deriveFixtureHash,
     deriveConflictingHeadEvidenceHash,
     deriveInclusionProofHash,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     getParticipantSigningPublicKeyHash,
     profile,
     replaceSignatureBytes,
@@ -135,7 +135,8 @@ describe('board consistency', () => {
                 pathStepIndex === 0
                     ? {
                           ...pathStep,
-                          siblingHash: deriveProtocolHash('BoardEntryHash', {
+                          siblingHash: deriveCanonicalObjectHash({
+                              objectType: 'BoardEntryHash',
                               pathStepIndex,
                               tampered: true,
                           }),
@@ -208,7 +209,8 @@ describe('board consistency', () => {
         const skippedSequence = createBoardHead(3, head1.headHash);
         const orphan = createBoardHead(
             2,
-            deriveProtocolHash('BoardHeadHash', {
+            deriveCanonicalObjectHash({
+                objectType: 'BoardHeadHash',
                 hidden: true,
             }),
         );
@@ -281,7 +283,8 @@ describe('board consistency', () => {
         };
         const wrongHashForkEvidence = {
             ...compatibleEvidencePayload,
-            evidenceHash: deriveProtocolHash('ChallengeDomainHash', {
+            evidenceHash: deriveCanonicalObjectHash({
+                objectType: 'ChallengeDomainHash',
                 payload: { wrong: true },
                 purpose: 'fixture-wrong-conflicting-head-evidence-v1',
             }),
@@ -487,7 +490,8 @@ describe('board consistency', () => {
             }),
             createHeadWithSignedRoot({
                 ...head1.signature.signedRoot,
-                chunkMerkleRoot: deriveProtocolHash('BoardRootHash', {
+                chunkMerkleRoot: deriveCanonicalObjectHash({
+                    objectType: 'BoardRootHash',
                     chunkRoot: 'ambiguous',
                 }),
             }),
@@ -519,7 +523,8 @@ describe('board consistency', () => {
             ...targetRecord,
             witnessCheckpoints: undefined,
         } as unknown as TargetFinalityRecord;
-        const castReceiptHash = deriveProtocolHash('CastReceiptHash', {
+        const castReceiptHash = deriveCanonicalObjectHash({
+            objectType: 'CastReceiptHash',
             malformed: 'receipt',
         });
         const castReceipt = {
@@ -527,11 +532,13 @@ describe('board consistency', () => {
             objectVersion: 1,
             castReceiptHash,
             ceremonyId,
-            electionManifestHash: deriveProtocolHash('ElectionManifestHash', {
+            electionManifestHash: deriveCanonicalObjectHash({
+                objectType: 'ElectionManifestHash',
                 manifest: 'cast',
             }),
             voterIdentity: 'participant-1',
-            encryptedBallotHash: deriveProtocolHash('CiphertextRoot', {
+            encryptedBallotHash: deriveCanonicalObjectHash({
+                objectType: 'CiphertextRoot',
                 ballot: 'participant-1',
             }),
             contextHash,

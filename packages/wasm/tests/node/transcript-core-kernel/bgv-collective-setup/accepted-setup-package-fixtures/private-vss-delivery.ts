@@ -79,17 +79,19 @@ function collectiveSetupPhaseOrderHash(
     kernel: TranscriptCoreKernel,
     setupParameters: BgvCollectiveSetupParametersDescription,
 ): string {
-    return kernel.deriveProtocolHash({
-        namespace: 'CollectiveBgvSetupPhaseOrderHash',
-        value: setupParameters.phaseOrder.map(
-            (phase: {
-                readonly phaseId: string;
-                readonly phaseNumber: number;
-            }) => ({
-                phaseId: phase.phaseId,
-                phaseNumber: phase.phaseNumber,
-            }),
-        ),
+    return kernel.deriveCanonicalObjectHash({
+        value: {
+            objectType: 'CollectiveBgvSetupPhaseOrder',
+            phaseOrder: setupParameters.phaseOrder.map(
+                (phase: {
+                    readonly phaseId: string;
+                    readonly phaseNumber: number;
+                }) => ({
+                    phaseId: phase.phaseId,
+                    phaseNumber: phase.phaseNumber,
+                }),
+            ),
+        },
     });
 }
 
@@ -194,21 +196,20 @@ function packageShapePrivateVssEnvelopeReference(input: {
         sourceTrusteeCommitmentRoot,
         envelopeSequenceNumber,
     });
-    const privateEnvelopeAadHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEnvelopeAadHash',
+    const privateEnvelopeAadHash = input.kernel.deriveCanonicalObjectHash({
         value: privateEnvelopeAad,
     });
-    const privateEnvelopeHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssShareEnvelopeHash',
+    const privateEnvelopeHash = input.kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'PrivateVssShareEnvelopeHash',
             fixture: 'package-shape-private-vss-envelope-reference',
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
         },
     });
-    const encryptedEnvelopeHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEncryptedEnvelopeHash',
+    const encryptedEnvelopeHash = input.kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'PrivateVssEncryptedEnvelopeHash',
             fixture: 'package-shape-private-vss-envelope-reference',
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
@@ -216,9 +217,9 @@ function packageShapePrivateVssEnvelopeReference(input: {
             privateEnvelopeAadHash,
         },
     });
-    const localVerificationRoot = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssLocalVerificationRoot',
+    const localVerificationRoot = input.kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'PrivateVssLocalVerificationRoot',
             fixture: 'package-shape-private-vss-envelope-reference',
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
@@ -257,8 +258,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
 
     return {
         ...referenceWithoutRoot,
-        privateEnvelopeCommitmentRoot: input.kernel.deriveProtocolHash({
-            namespace: 'PrivateVssEnvelopeCommitmentRoot',
+        privateEnvelopeCommitmentRoot: input.kernel.deriveCanonicalObjectHash({
             value: referenceWithoutRoot,
         }),
     } as const satisfies PrivateVssEnvelopeCommitment;
@@ -302,7 +302,8 @@ export function packageShapePrivateVssEnvelopeCommitments(
     const privateVssEnvelopeCommitmentSet =
         createPrivateVssMailboxDeliverySetFromReferences({
             kernel: {
-                deriveProtocolHash: (input) => kernel.deriveProtocolHash(input),
+                deriveCanonicalObjectHash: (input) =>
+                    kernel.deriveCanonicalObjectHash(input),
                 verifyPrivateVssShareEnvelope: (input) =>
                     kernel.verifyPrivateVssShareEnvelope(input),
             },
@@ -350,7 +351,8 @@ export async function focusedPrivateVssSourceDeliveryReferences(
 
     return createPrivateVssMailboxSourceTrusteeDeliveryReferences({
         kernel: {
-            deriveProtocolHash: (input) => kernel.deriveProtocolHash(input),
+            deriveCanonicalObjectHash: (input) =>
+                kernel.deriveCanonicalObjectHash(input),
             generatePrivateVssShareProof: (input) =>
                 kernel.generatePrivateVssShareProof(input),
             verifyPrivateVssShareEnvelope: (input) =>

@@ -152,24 +152,19 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         .map(|commitment| setup_commitment_root(commitment).expect("commitment root"))
         .collect::<Vec<_>>();
     let share_values = vec![0_u64; ring_degree];
-    let share_values_hash = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &serde_json::json!({
-            "objectType": "PrivateVssShareValueVector",
-            "objectVersion": 1,
-            "rnsLimbIndex": 0,
-            "rnsPrime": rns_prime,
-            "shareValues": share_values,
-        }),
-    )
+    let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "PrivateVssShareValueVector",
+        "objectVersion": 1,
+        "rnsLimbIndex": 0,
+        "rnsPrime": rns_prime,
+        "shareValues": share_values,
+    }))
     .expect("share values hash");
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &serde_json::json!({
-            "fixture": "private-vss-succinct-proof-record",
-            "rnsLimbIndex": 0,
-        }),
-    )
+    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "PrivateVssLocalVerificationRoot",
+        "fixture": "private-vss-succinct-proof-record",
+        "rnsLimbIndex": 0,
+    }))
     .expect("private VSS proof randomness seed");
     let proof_record =
         private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
@@ -334,24 +329,19 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
             .iter()
             .map(|carry| carry.parse::<i128>().expect("carry witness parses"))
             .collect::<Vec<_>>();
-        let share_values_hash = derive_protocol_hash(
-            "PrivateVssLocalVerificationRoot",
-            &serde_json::json!({
-                "objectType": "PrivateVssShareValueVector",
-                "objectVersion": 1,
-                "rnsLimbIndex": 0,
-                "rnsPrime": rns_prime,
-                "shareValues": share_values,
-            }),
-        )
+        let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PrivateVssShareValueVector",
+            "objectVersion": 1,
+            "rnsLimbIndex": 0,
+            "rnsPrime": rns_prime,
+            "shareValues": share_values,
+        }))
         .expect("share values hash");
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "PrivateVssLocalVerificationRoot",
-            &serde_json::json!({
-                "fixture": "private-vss-multi-recipient-consistency",
-                "recipientRosterPosition": recipient_roster_position,
-            }),
-        )
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PrivateVssLocalVerificationRoot",
+            "fixture": "private-vss-multi-recipient-consistency",
+            "recipientRosterPosition": recipient_roster_position,
+        }))
         .expect("private VSS proof randomness seed");
         let recipient_identity = format!("trustee-{recipient_roster_position}");
         let proof_record =
@@ -486,24 +476,19 @@ fn private_vss_succinct_proof_refuses_message_inconsistent_with_commitment_openi
     coefficient_messages_by_shamir_index[0][0] = tampered_message;
     let mut share_values = vec![0_u64; ring_degree];
     share_values[0] = tampered_message;
-    let share_values_hash = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &serde_json::json!({
-            "objectType": "PrivateVssShareValueVector",
-            "objectVersion": 1,
-            "rnsLimbIndex": 0,
-            "rnsPrime": rns_prime,
-            "shareValues": share_values,
-        }),
-    )
+    let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "PrivateVssShareValueVector",
+        "objectVersion": 1,
+        "rnsLimbIndex": 0,
+        "rnsPrime": rns_prime,
+        "shareValues": share_values,
+    }))
     .expect("share values hash");
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &serde_json::json!({
-            "fixture": "private-vss-succinct-proof-tampered-message",
-            "rnsLimbIndex": 0,
-        }),
-    )
+    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "PrivateVssLocalVerificationRoot",
+        "fixture": "private-vss-succinct-proof-tampered-message",
+        "rnsLimbIndex": 0,
+    }))
     .expect("private VSS proof randomness seed");
 
     let generation =
@@ -828,13 +813,11 @@ fn replace_first_private_vss_proof_hash(
     field_name: &str,
     fixture_label: &str,
 ) {
-    let replacement_hash = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &serde_json::json!({
-            "fixture": "private-vss-proof-drift-refusal",
-            "label": fixture_label,
-        }),
-    )
+    let replacement_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "PrivateVssLocalVerificationRoot",
+        "fixture": "private-vss-proof-drift-refusal",
+        "label": fixture_label,
+    }))
     .expect("private VSS drift hash");
     let proof_record =
         &mut request["privateEnvelope"]["rnsShareOpenings"][0]["privateVssShareProof"];
@@ -869,14 +852,12 @@ fn assert_private_vss_share_proof_refusal_contains(
 
 fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
     let ceremony_id = "ceremony-main";
-    let manifest_hash = derive_protocol_hash(
-        "ElectionManifestHash",
-        &serde_json::json!({ "manifest": "private-vss-envelope-test" }),
+    let manifest_hash = derive_canonical_object_hash(
+        &serde_json::json!({ "objectType": "ElectionManifestHash", "manifest": "private-vss-envelope-test" }),
     )
     .expect("manifest hash");
-    let roster_hash = derive_protocol_hash(
-        "RosterHash",
-        &serde_json::json!({ "roster": "private-vss-envelope-test" }),
+    let roster_hash = derive_canonical_object_hash(
+        &serde_json::json!({ "objectType": "RosterHash", "roster": "private-vss-envelope-test" }),
     )
     .expect("roster hash");
     let setup_parameters_hash =
@@ -893,25 +874,21 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
     });
-    let public_matrix_seed_hash = derive_protocol_hash(
-        "SetupPublicMatrixSeedHash",
-        &serde_json::json!({
-            "fixture": "private-vss-envelope-test-public-matrix",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupParametersHash": setup_parameters_hash,
-            "setupEpoch": setup_epoch,
-        }),
-    )
+    let public_matrix_seed_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "SetupPublicMatrixSeedHash",
+        "fixture": "private-vss-envelope-test-public-matrix",
+        "ceremonyId": ceremony_id,
+        "manifestHash": manifest_hash,
+        "rosterHash": roster_hash,
+        "setupParametersHash": setup_parameters_hash,
+        "setupEpoch": setup_epoch,
+    }))
     .expect("public matrix seed hash");
-    let private_envelope_aad_hash = derive_protocol_hash(
-        "PrivateVssEnvelopeAadHash",
-        &serde_json::json!({
-            "fixture": "private-vss-envelope-aad",
-            "recipientRosterPosition": 2,
-        }),
-    )
+    let private_envelope_aad_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "PrivateVssEnvelopeAadHash",
+        "fixture": "private-vss-envelope-aad",
+        "recipientRosterPosition": 2,
+    }))
     .expect("private VSS envelope AAD hash");
 
     let mut source_trustee_coefficient_commitments = Vec::new();
@@ -961,17 +938,17 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "rnsPrime": rns_prime,
                 "shamirCoefficientIndex": shamir_coefficient_index,
                 "commitmentRoot": commitment_root.clone(),
-                "commitmentChunkRoot": derive_protocol_hash(
-                    "VssCoefficientCommitmentRoot",
+                "commitmentChunkRoot": derive_canonical_object_hash(
                     &serde_json::json!({
+                        "objectType": "VssCoefficientCommitmentRoot",
                         "fixture": "private-vss-commitment-chunk",
                         "rnsLimbIndex": rns_limb_index,
                         "shamirCoefficientIndex": shamir_coefficient_index,
                     }),
                 ).expect("commitment chunk root"),
-                "coefficientVectorHash512": derive_protocol_hash(
-                    "VssCoefficientCommitmentRoot",
+                "coefficientVectorHash512": derive_canonical_object_hash(
                     &serde_json::json!({
+                        "objectType": "VssCoefficientCommitmentRoot",
                         "fixture": "private-vss-coefficient-vector",
                         "rnsLimbIndex": rns_limb_index,
                         "shamirCoefficientIndex": shamir_coefficient_index,
@@ -1042,7 +1019,7 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
         "coefficientCommitments": source_trustee_coefficient_commitments,
     });
     source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+        derive_canonical_object_hash(&source_trustee_record)
             .expect("source trustee commitment root")
     );
 
@@ -1162,24 +1139,19 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
             .iter()
             .map(|carry| carry.parse::<i128>().expect("carry witness"))
             .collect::<Vec<_>>();
-        let share_values_hash = derive_protocol_hash(
-            "PrivateVssLocalVerificationRoot",
-            &serde_json::json!({
-                "objectType": "PrivateVssShareValueVector",
-                "objectVersion": 1,
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
-                "shareValues": share_values,
-            }),
-        )
+        let share_values_hash = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PrivateVssShareValueVector",
+            "objectVersion": 1,
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "shareValues": share_values,
+        }))
         .expect("share values hash");
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "PrivateVssLocalVerificationRoot",
-            &serde_json::json!({
-                "fixture": "private-vss-share-succinct-proof-randomness",
-                "rnsLimbIndex": rns_limb_index,
-            }),
-        )
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PrivateVssLocalVerificationRoot",
+            "fixture": "private-vss-share-succinct-proof-randomness",
+            "rnsLimbIndex": rns_limb_index,
+        }))
         .expect("private VSS proof randomness seed");
         let private_vss_share_proof =
             private_vss_share_succinct_proof_record(PrivateVssShareSuccinctProofGenerationInput {
@@ -1240,24 +1212,21 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
             )
             .expect("private VSS proof transport hashes");
-            let proof_material_root = derive_protocol_hash(
-                "PrivateVssShareProofMaterialRoot",
-                &serde_json::json!({
-                    "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
-                    "objectVersion": 1,
-                    "proofFamily": "vss-opening-carry",
-                    "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
-                    "statementHash": proof_record["statementHash"],
-                    "proofSizeBytes": proof_record["proofSizeBytes"],
-                    "proofBytesHash": proof_record["proofBytesHash"],
-                    "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-                    "proofChunkCount": transport_hashes.chunk_hashes.len(),
-                    "proofTotalByteLength": transport_hashes.total_byte_length,
-                    "proofFullObjectHash": transport_hashes.full_object_hash.clone(),
-                    "proofChunkRoot": transport_hashes.chunk_root.clone(),
-                    "proofChunkHashes": transport_hashes.chunk_hashes.clone(),
-                }),
-            )
+            let proof_material_root = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "PrivateVssShareTransportedSuccinctProofMaterial",
+                "objectVersion": 1,
+                "proofFamily": "vss-opening-carry",
+                "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+                "statementHash": proof_record["statementHash"],
+                "proofSizeBytes": proof_record["proofSizeBytes"],
+                "proofBytesHash": proof_record["proofBytesHash"],
+                "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+                "proofChunkCount": transport_hashes.chunk_hashes.len(),
+                "proofTotalByteLength": transport_hashes.total_byte_length,
+                "proofFullObjectHash": transport_hashes.full_object_hash.clone(),
+                "proofChunkRoot": transport_hashes.chunk_root.clone(),
+                "proofChunkHashes": transport_hashes.chunk_hashes.clone(),
+            }))
             .expect("private VSS transported proof material root");
             proof_record
                 .as_object_mut()

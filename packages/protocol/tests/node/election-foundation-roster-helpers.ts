@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     FrozenRosterParameters,
@@ -70,7 +70,8 @@ const createFrozenRosterParameters = (
     return deriveFrozenRosterParameters({
         dynamicRosterParametersCertificateHash:
             rosterSize >= 10 && rosterSize !== 10
-                ? deriveProtocolHash('ThresholdParametersHash', {
+                ? deriveCanonicalObjectHash({
+                      objectType: 'ThresholdParametersHash',
                       certificate: 'dynamic-roster-parameters',
                       rosterSize,
                   })
@@ -126,26 +127,24 @@ export const createTrusteeSetupEntry = (
         objectVersion: 1,
         ceremonyId,
         trusteeIdentity,
-        trusteeSetupRoot: deriveProtocolHash('ParticipantBgvSetupRecordHash', {
+        trusteeSetupRoot: deriveCanonicalObjectHash({
+            objectType: 'ParticipantBgvSetupRecordHash',
             trusteeIdentity,
         }),
         bgvParametersHash: manifestOpaqueBindings.bgvParametersHash,
-        participantSetupRecordHash: deriveProtocolHash(
-            'ParticipantBgvSetupRecordHash',
-            {
-                trusteeIdentity,
-            },
-        ),
-        publicKeyShareRoot: deriveProtocolHash('PublicKeyShareRoot', {
+        participantSetupRecordHash: deriveCanonicalObjectHash({
+            objectType: 'ParticipantBgvSetupRecordHash',
+            trusteeIdentity,
+        }),
+        publicKeyShareRoot: deriveCanonicalObjectHash({
+            objectType: 'PublicKeyShareRoot',
             trusteeIdentity,
         }),
         collectivePublicKeyRoot: manifestOpaqueBindings.collectivePublicKeyRoot,
-        trusteeThresholdVerificationKeyHash: deriveProtocolHash(
-            'TrusteeThresholdVerificationKeyHash',
-            {
-                trusteeIdentity,
-            },
-        ),
+        trusteeThresholdVerificationKeyHash: deriveCanonicalObjectHash({
+            objectType: 'TrusteeThresholdVerificationKeyHash',
+            trusteeIdentity,
+        }),
         thresholdShareVerificationKeyRoot:
             manifestOpaqueBindings.thresholdShareVerificationKeyRoot,
         evaluationKeyRoot: manifestOpaqueBindings.evaluationKeyRoot,
@@ -180,7 +179,8 @@ export const createElectionManifest = (
         registrations.length >= 3
             ? createFrozenRosterParameters(pollSpec, registrations)
                   .thresholdParametersHash
-            : deriveProtocolHash('ThresholdParametersHash', {
+            : deriveCanonicalObjectHash({
+                  objectType: 'ThresholdParametersHash',
                   fixture: 'below-minimum-roster',
                   rosterSize: registrations.length,
               });

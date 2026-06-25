@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     DecodedSparseTopKSelection,
     FieldElement,
@@ -21,7 +21,8 @@ const deriveSparseTopKTargetLayoutHash = (input: {
     readonly optionCount: number;
     readonly topOptionCount: number;
 }): string =>
-    deriveProtocolHash('TargetLayoutHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'SparseTopKTargetLayout',
         forbiddenSemanticSlotCount,
         optionCount: input.optionCount,
         optionOrdinalEncoding: 'one-based',
@@ -35,7 +36,8 @@ const deriveSparseTopKTargetLayoutHash = (input: {
 export const deriveSparseTopKTargetHash = (
     target: Omit<SparseTopKTarget, 'targetHash'>,
 ): string =>
-    deriveProtocolHash('SparseTopKTargetHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'SparseTopKTarget',
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutHash: target.layoutHash,
         optionCount: target.optionCount,

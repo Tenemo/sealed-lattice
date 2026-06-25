@@ -391,85 +391,31 @@ pub fn canonical_json_matches_bytes(value: &Value, expected_bytes: &[u8]) -> Can
     Ok(sink.complete())
 }
 
-fn is_pascal_case_namespace(namespace: &str) -> bool {
-    let mut chars = namespace.chars();
-    let Some(first_char) = chars.next() else {
-        return false;
-    };
-
-    first_char.is_ascii_uppercase() && chars.all(|character| character.is_ascii_alphanumeric())
-}
-
-fn pascal_case_to_kebab_case(namespace: &str) -> String {
-    let chars: Vec<char> = namespace.chars().collect();
-    let mut output = String::new();
-
-    for (index, character) in chars.iter().copied().enumerate() {
-        if character.is_ascii_uppercase() {
-            let has_previous = index > 0;
-            let previous_is_lower_or_digit = chars
-                .get(index.saturating_sub(1))
-                .is_some_and(|previous| previous.is_ascii_lowercase() || previous.is_ascii_digit());
-            let previous_is_upper = chars
-                .get(index.saturating_sub(1))
-                .is_some_and(|previous| previous.is_ascii_uppercase());
-            let next_is_lower = chars
-                .get(index + 1)
-                .is_some_and(|next| next.is_ascii_lowercase());
-
-            if has_previous && (previous_is_lower_or_digit || (previous_is_upper && next_is_lower))
-            {
-                output.push('-');
-            }
-            output.push(character.to_ascii_lowercase());
-        } else {
-            output.push(character.to_ascii_lowercase());
-        }
-    }
-
-    output
-}
-
-pub fn resolve_protocol_hash_domain(namespace: &str) -> CanonicalResult<String> {
-    if namespace.starts_with("sealed-lattice-root/") {
-        if RESERVED_ROOT_NAMESPACES.contains(&namespace) {
-            return Ok(namespace.to_string());
-        }
-
+/// Single structural domain for canonical typed protocol objects, records, and
+/// roots. Domain separation comes from the mandatory `objectType` discriminator
+/// already inside the canonical JSON, not from a per-type namespace string. The
+/// non-empty-objectType check is load-bearing: it makes "never merge a typeless
+/// preimage into the shared domain" a hard rejection, not a convention.
+pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
+    let has_object_type = value
+        .get("objectType")
+        .and_then(Value::as_str)
+        .is_some_and(|object_type| !object_type.is_empty());
+    if !has_object_type {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "protocol hash namespace domain is not reserved",
+            "canonical object hash requires a non-empty objectType discriminator",
         ));
     }
 
-    if !is_pascal_case_namespace(namespace) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "protocol hash namespace must be a reserved PascalCase name",
-        ));
-    }
-
-    let domain = format!(
-        "sealed-lattice-root/{}-v1",
-        pascal_case_to_kebab_case(namespace)
-    );
-    if !RESERVED_ROOT_NAMESPACES.contains(&domain.as_str()) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "protocol hash namespace is not reserved",
-        ));
-    }
-
-    Ok(domain)
-}
-
-pub fn derive_protocol_hash(namespace: &str, value: &Value) -> CanonicalResult<String> {
-    let domain = resolve_protocol_hash_domain(namespace)?;
+    // Single structural hash domain. Length-framed preimage: fixed prefix, the
+    // canonical-object domain, a varuint part count, then the length-framed
+    // canonical JSON. This MUST byte-match the TypeScript reference.
     let canonical_json_length = canonical_json_len(value)?;
     let mut hasher = Shake256::default();
     hasher.update(HASH512_PREIMAGE_PREFIX);
-    update_bytes_prefix(&mut hasher, domain.len())?;
-    hasher.update(domain.as_bytes());
+    update_bytes_prefix(&mut hasher, CANONICAL_OBJECT_HASH_NAMESPACE.len())?;
+    hasher.update(CANONICAL_OBJECT_HASH_NAMESPACE.as_bytes());
     update_varuint(&mut hasher, 1);
     update_bytes_prefix(&mut hasher, canonical_json_length)?;
     write_canonical_json(
@@ -483,137 +429,10 @@ pub fn derive_protocol_hash(namespace: &str, value: &Value) -> CanonicalResult<S
 }
 
 #[cfg(test)]
-fn write_ascii_json_string(value: &str, sink: &mut impl CanonicalJsonSink) -> CanonicalResult<()> {
-    if !value.is_ascii()
-        || value
-            .bytes()
-            .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\')
-    {
-        sink.write_str(&serialize_json_string(value)?)?;
-        return Ok(());
-    }
-
-    sink.write_char('"')?;
-    sink.write_str(value)?;
-    sink.write_char('"')
-}
-
-#[cfg(test)]
-fn ascii_json_string_len(value: &str) -> CanonicalResult<usize> {
-    if !value.is_ascii()
-        || value
-            .bytes()
-            .any(|byte| byte < 0x20 || byte == b'"' || byte == b'\\')
-    {
-        return serialized_json_string_len(value);
-    }
-
-    checked_len_add(value.len(), 2)
-}
-
-#[cfg(test)]
-pub fn derive_protocol_hash_for_ascii_string_payload(
-    namespace: &str,
-    purpose: &str,
-    field_name: &str,
-    field_value: &str,
-) -> CanonicalResult<String> {
-    let domain = resolve_protocol_hash_domain(namespace)?;
-    let mut entries = [(field_name, field_value), ("purpose", purpose)];
-    entries.sort_by(|left, right| compare_utf16(left.0, right.0));
-
-    let mut canonical_json_length = 2_usize;
-    for (entry_index, (key, value)) in entries.iter().enumerate() {
-        if entry_index > 0 {
-            canonical_json_length = checked_len_add(canonical_json_length, 1)?;
-        }
-        canonical_json_length =
-            checked_len_add(canonical_json_length, ascii_json_string_len(key)?)?;
-        canonical_json_length = checked_len_add(canonical_json_length, 1)?;
-        canonical_json_length =
-            checked_len_add(canonical_json_length, ascii_json_string_len(value)?)?;
-    }
-
-    let mut hasher = Shake256::default();
-    hasher.update(HASH512_PREIMAGE_PREFIX);
-    update_bytes_prefix(&mut hasher, domain.len())?;
-    hasher.update(domain.as_bytes());
-    update_varuint(&mut hasher, 1);
-    update_bytes_prefix(&mut hasher, canonical_json_length)?;
-    let mut sink = HashingCanonicalJsonSink {
-        hasher: &mut hasher,
-    };
-    sink.write_char('{')?;
-    for (entry_index, (key, value)) in entries.iter().enumerate() {
-        if entry_index > 0 {
-            sink.write_char(',')?;
-        }
-        write_ascii_json_string(key, &mut sink)?;
-        sink.write_char(':')?;
-        write_ascii_json_string(value, &mut sink)?;
-    }
-    sink.write_char('}')?;
-
-    Ok(finalize_hash512_hex(hasher))
-}
-
-#[cfg(test)]
-pub fn derive_protocol_hash_for_proof_bytes_payload(
-    proof_bytes_hex: &str,
-    proof_size_bytes: u64,
-) -> CanonicalResult<String> {
-    const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
-    if proof_size_bytes > MAX_SAFE_INTEGER {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "canonical JSON integers must be JavaScript-safe",
-        ));
-    }
-
-    let domain = resolve_protocol_hash_domain("ProofBytesHash")?;
-    let proof_size_bytes_string = proof_size_bytes.to_string();
-    let fixed_prefix = "{\"objectType\":\"ProofBytes\",\"objectVersion\":1,\"proofBytesHex\":";
-    let fixed_middle = ",\"proofSizeBytes\":";
-    let fixed_suffix = "}";
-    let canonical_json_length = checked_len_add(
-        checked_len_add(
-            checked_len_add(
-                checked_len_add(fixed_prefix.len(), ascii_json_string_len(proof_bytes_hex)?)?,
-                fixed_middle.len(),
-            )?,
-            proof_size_bytes_string.len(),
-        )?,
-        fixed_suffix.len(),
-    )?;
-
-    let mut hasher = Shake256::default();
-    hasher.update(HASH512_PREIMAGE_PREFIX);
-    update_bytes_prefix(&mut hasher, domain.len())?;
-    hasher.update(domain.as_bytes());
-    update_varuint(&mut hasher, 1);
-    update_bytes_prefix(&mut hasher, canonical_json_length)?;
-    let mut sink = HashingCanonicalJsonSink {
-        hasher: &mut hasher,
-    };
-    sink.write_str(fixed_prefix)?;
-    write_ascii_json_string(proof_bytes_hex, &mut sink)?;
-    sink.write_str(fixed_middle)?;
-    sink.write_str(&proof_size_bytes_string)?;
-    sink.write_str(fixed_suffix)?;
-
-    Ok(finalize_hash512_hex(hasher))
-}
-
-#[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use super::{
-        POLL_SPEC_HASH_NAMESPACE, RESERVED_ROOT_NAMESPACES, canonical_json,
-        canonical_json_matches_bytes, canonical_root, chunk_root, derive_protocol_hash,
-        derive_protocol_hash_for_ascii_string_payload,
-        derive_protocol_hash_for_proof_bytes_payload, hash512, hash512_hex, namespace_root,
-        resolve_protocol_hash_domain,
+        canonical_json, canonical_json_matches_bytes, canonical_root, chunk_root, hash512,
+        hash512_hex,
     };
 
     #[test]
@@ -662,68 +481,6 @@ mod tests {
     }
 
     #[test]
-    fn ascii_string_payload_hash_matches_canonical_json_hash() {
-        let specialized = derive_protocol_hash_for_ascii_string_payload(
-            "ProofBytesHash",
-            "sealed-lattice-test-proof-bytes-v1",
-            "proofBytesHex",
-            "abcdef012345",
-        )
-        .expect("specialized hash should derive");
-        let generic = derive_protocol_hash(
-            "ProofBytesHash",
-            &serde_json::json!({
-                "purpose": "sealed-lattice-test-proof-bytes-v1",
-                "proofBytesHex": "abcdef012345",
-            }),
-        )
-        .expect("generic hash should derive");
-
-        assert_eq!(specialized, generic);
-    }
-
-    #[test]
-    fn proof_bytes_payload_hash_matches_canonical_json_hash() {
-        let proof_bytes_hex = "abcdef012345";
-        let specialized = derive_protocol_hash_for_proof_bytes_payload(
-            proof_bytes_hex,
-            proof_bytes_hex.len() as u64 / 2,
-        )
-        .expect("specialized hash should derive");
-        let generic = derive_protocol_hash(
-            "ProofBytesHash",
-            &serde_json::json!({
-                "objectType": "ProofBytes",
-                "objectVersion": 1,
-                "proofBytesHex": proof_bytes_hex,
-                "proofSizeBytes": proof_bytes_hex.len() / 2,
-            }),
-        )
-        .expect("generic hash should derive");
-
-        assert_eq!(specialized, generic);
-    }
-
-    #[test]
-    fn derives_protocol_hash_from_reserved_pascal_case_namespaces() {
-        assert_eq!(
-            resolve_protocol_hash_domain("PollSpecHash").expect("namespace should resolve"),
-            POLL_SPEC_HASH_NAMESPACE
-        );
-        assert_eq!(
-            derive_protocol_hash(
-                "PollSpecHash",
-                &serde_json::json!({
-                    "poll": "main"
-                }),
-            )
-            .expect("protocol hash should derive"),
-            "43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4"
-        );
-        assert!(resolve_protocol_hash_domain("AuxiliaryHash").is_err());
-    }
-
-    #[test]
     fn canonical_root_binds_object_type_and_version() {
         let canonical_bytes = b"canonical";
 
@@ -735,20 +492,6 @@ mod tests {
             canonical_root(1, 1, canonical_bytes),
             canonical_root(1, 2, canonical_bytes),
         );
-    }
-
-    #[test]
-    fn reserved_root_namespaces_are_unique_and_domain_separated() {
-        let namespace_set: BTreeSet<&str> = RESERVED_ROOT_NAMESPACES.iter().copied().collect();
-        assert_eq!(namespace_set.len(), RESERVED_ROOT_NAMESPACES.len());
-
-        let input = b"same canonical bytes";
-        let root_set: BTreeSet<String> = RESERVED_ROOT_NAMESPACES
-            .iter()
-            .map(|namespace| namespace_root(namespace, input))
-            .collect();
-
-        assert_eq!(root_set.len(), RESERVED_ROOT_NAMESPACES.len());
     }
 
     #[test]
@@ -770,6 +513,22 @@ mod tests {
         assert_ne!(
             chunk_root(&[], 64).expect("empty chunk root should compute"),
             chunk_root(&[0; 64], 64).expect("full zero chunk root should compute"),
+        );
+    }
+
+    #[test]
+    fn canonical_object_hash_separates_by_object_type_and_requires_it() {
+        let alpha = serde_json::json!({ "objectType": "Alpha", "objectVersion": 1, "value": 7 });
+        let beta = serde_json::json!({ "objectType": "Beta", "objectVersion": 1, "value": 7 });
+        let alpha_hash = super::derive_canonical_object_hash(&alpha).expect("alpha should hash");
+        let beta_hash = super::derive_canonical_object_hash(&beta).expect("beta should hash");
+
+        // Same body, different objectType -> different hash (separation holds).
+        assert_ne!(alpha_hash, beta_hash);
+        // A typeless preimage is rejected, never silently merged into the domain.
+        assert!(super::derive_canonical_object_hash(&serde_json::json!({ "value": 7 })).is_err());
+        assert!(
+            super::derive_canonical_object_hash(&serde_json::json!({ "objectType": "" })).is_err()
         );
     }
 }

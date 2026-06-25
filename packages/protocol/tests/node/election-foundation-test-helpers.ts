@@ -1,5 +1,5 @@
 export {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn same_secret_consistency_object(
     ceremony_id: &str,
@@ -13,9 +15,7 @@ pub(super) fn same_secret_consistency_object(
     let decryption_threshold = participant_count / 3 + 1;
     let mut statement_records = Vec::new();
     let mut trustee_secret_commitment_roots = Vec::new();
-    let same_secret_proof_family_binding_root = derive_protocol_hash(
-        "SameSecretProofFamilyBindingRoot",
-        &serde_json::json!({
+    let same_secret_proof_family_binding_root = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "SameSecretProofFamilyBinding",
             "objectVersion": 1,
             "proofFamily": "same-secret-linkage-anchor",
@@ -75,11 +75,9 @@ pub(super) fn same_secret_consistency_object(
             "vssSourceTrusteeCommitmentRoot": vss_source_trustee_commitment_root,
             "constantCoefficientCommitmentRoots": constant_coefficient_commitment_roots,
         });
-        let trustee_secret_commitment_root = derive_protocol_hash(
-            "TrusteeSecretCommitmentRoot",
-            &trustee_secret_commitment_payload,
-        )
-        .expect("trustee secret commitment root");
+        let trustee_secret_commitment_root =
+            derive_canonical_object_hash(&trustee_secret_commitment_payload)
+                .expect("trustee secret commitment root");
         let mut statement_record = serde_json::json!({
             "objectType": "SameSecretConsistencyStatement",
             "objectVersion": 1,
@@ -106,8 +104,7 @@ pub(super) fn same_secret_consistency_object(
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         });
         statement_record["sameSecretStatementRoot"] = serde_json::json!(
-            derive_protocol_hash("SameSecretConsistencyRoot", &statement_record)
-                .expect("same-secret statement root")
+            derive_canonical_object_hash(&statement_record).expect("same-secret statement root")
         );
         trustee_secret_commitment_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -134,7 +131,7 @@ pub(super) fn same_secret_consistency_object(
         "statementRecords": statement_records,
     });
     same_secret_consistency["sameSecretConsistencyRoot"] = serde_json::json!(
-        derive_protocol_hash("SameSecretConsistencyRoot", &same_secret_consistency)
+        derive_canonical_object_hash(&same_secret_consistency)
             .expect("same-secret consistency root")
     );
 

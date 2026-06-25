@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn public_rlwe_samples_by_basis(
     participant_count: usize,
     rotation_key_count: usize,
@@ -116,7 +118,7 @@ pub(super) fn evaluation_key_streaming_commitment(
         "streamCommitmentEvidence": true,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
-    let commitment_hash = derive_protocol_hash("EvaluationKeySetHash", &commitment_record)?;
+    let commitment_hash = derive_canonical_object_hash(&commitment_record)?;
 
     Ok(json!({
         "commitment": commitment_record,

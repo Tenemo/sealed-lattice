@@ -168,12 +168,10 @@ const privateVssRequest = (
         publicMatrixSeedHash,
         coefficientCommitments,
     };
-    sourceTrusteeRecord.sourceTrusteeCommitmentRoot = kernel.deriveProtocolHash(
-        {
-            namespace: 'VssCoefficientCommitmentRoot',
+    sourceTrusteeRecord.sourceTrusteeCommitmentRoot =
+        kernel.deriveCanonicalObjectHash({
             value: sourceTrusteeRecord,
-        },
-    );
+        });
 
     return {
         setupContext: currentSetupContext,

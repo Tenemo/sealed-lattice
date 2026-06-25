@@ -10,7 +10,7 @@ import {
 
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     setupProofMaterialFullObjectHashHex,
 } from '#packages/crypto/src/index';
 import {
@@ -206,17 +206,9 @@ describe('transcript-core kernel in Node', () => {
         expect(foundationAnalysis.sequence).toBe(10);
     });
 
-    it('derives protocol Hashes and field results through WASM', async () => {
+    it('computes Shamir interpolation and plaintext comparison through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(
-            kernel.deriveProtocolHash({
-                namespace: 'PollSpecHash',
-                value: { poll: 'main' },
-            }),
-        ).toBe(
-            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
-        );
         expect(
             kernel.interpolateShamirConstantTerm({
                 sharePoints: [
@@ -236,18 +228,13 @@ describe('transcript-core kernel in Node', () => {
             equal: 0,
             scoreDifference: 1,
         });
-        expect(() =>
-            kernel.deriveProtocolHash({
-                namespace: 'UnreservedHash',
-                value: {},
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
-    it('keeps TypeScript and Rust canonical JSON behavior aligned for protocol Hashes', async () => {
+    it('keeps TypeScript and Rust canonical JSON behavior aligned for canonical object Hashes', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const acceptedValues: readonly unknown[] = [
+        const acceptedValues: readonly Record<string, unknown>[] = [
             {
+                objectType: 'CanonicalJsonParityProbe',
                 flags: [true, false, null],
                 nested: {
                     a: 'Cafe\u0301',
@@ -262,32 +249,40 @@ describe('transcript-core kernel in Node', () => {
                     rosterPosition: 20,
                 },
                 shareVectorWidth: 220,
+                objectType: 'CanonicalJsonParityProbe',
             },
         ];
 
         for (const value of acceptedValues) {
-            expect(
-                kernel.deriveProtocolHash({
-                    namespace: 'PollSpecHash',
-                    value,
-                }),
-            ).toBe(deriveProtocolHash('PollSpecHash', value));
+            expect(kernel.deriveCanonicalObjectHash({ value })).toBe(
+                deriveCanonicalObjectHash(value),
+            );
         }
 
         const rejectedValues: readonly {
-            readonly value: unknown;
+            readonly value: Record<string, unknown>;
             readonly expectedKernelCode: string;
         }[] = [
             {
-                value: { ['e\u0301']: 1, ['\u00E9']: 2 },
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    ['e\u0301']: 1,
+                    ['\u00E9']: 2,
+                },
                 expectedKernelCode: 'DuplicateField',
             },
             {
-                value: { unsafeInteger: Number.MAX_SAFE_INTEGER + 1 },
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    unsafeInteger: Number.MAX_SAFE_INTEGER + 1,
+                },
                 expectedKernelCode: 'InvalidFixture',
             },
             {
-                value: { fractional: 1.5 },
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    fractional: 1.5,
+                },
                 expectedKernelCode: 'InvalidFixture',
             },
         ];
@@ -295,20 +290,18 @@ describe('transcript-core kernel in Node', () => {
         for (const { value, expectedKernelCode } of rejectedValues) {
             expect(() => canonicalJson(value)).toThrow(TypeError);
 
-            let protocolHashError: unknown;
+            let canonicalObjectHashError: unknown;
             try {
-                kernel.deriveProtocolHash({
-                    namespace: 'PollSpecHash',
-                    value,
-                });
+                kernel.deriveCanonicalObjectHash({ value });
             } catch (error) {
-                protocolHashError = error;
+                canonicalObjectHashError = error;
             }
-            expect(protocolHashError).toBeInstanceOf(
+            expect(canonicalObjectHashError).toBeInstanceOf(
                 TranscriptCoreKernelCommandError,
             );
             expect(
-                (protocolHashError as TranscriptCoreKernelCommandError).code,
+                (canonicalObjectHashError as TranscriptCoreKernelCommandError)
+                    .code,
             ).toBe(expectedKernelCode);
         }
     });
@@ -544,10 +537,7 @@ describe('transcript-core kernel in Node', () => {
         expect(kernel.hashRaw('00')).toMatch(/^[a-f0-9]{128}$/u);
         expect(kernel.listCanonicalErrorCodes()).toContain('InvalidEnum');
         expect(kernel.listReservedRootNamespaces()).toContain(
-            'sealed-lattice-root/poll-spec-hash-v1',
-        );
-        expect(kernel.listReservedRootNamespaces()).toContain(
-            'sealed-lattice-root/proof-bytes-hash-v1',
+            'sealed-lattice-root/canonical-object-v1',
         );
     });
 });

@@ -5,14 +5,6 @@ export const setupProofSerialization = 'binary';
 export const setupProofByteDecoder =
     'sealed-lattice-succinct-setup-proof-byte-decoder-v1';
 export const setupProofFamilies = ['vss-opening-carry'] as const;
-export const succinctSameSecretLinkageAnchorAccountingHashNamespace =
-    'SuccinctSameSecretLinkageAnchorAccountingHash';
-export const succinctPrivateVssShareAccountingHashNamespace =
-    'SuccinctPrivateVssShareAccountingHash';
-export const succinctPublicKeyShareAccountingHashNamespace =
-    'SuccinctPublicKeyShareAccountingHash';
-export const succinctEvaluationKeyProofAccountingHashNamespace =
-    'SuccinctEvaluationKeyProofAccountingHash';
 export const setupTransportChunkSizeBytes = 1_048_576;
 export const setupTransportStorageQuotaBytes = 2_147_483_648;
 export const setupTransportLargestSingleBufferBytes = 1_572_864;
