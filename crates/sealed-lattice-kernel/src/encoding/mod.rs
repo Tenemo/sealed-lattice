@@ -39,7 +39,6 @@ pub enum CanonicalErrorCode {
     ComponentMismatch,
     TrailingBytes,
     UnknownField,
-    UnknownSecurityClosure,
     UnsupportedCanonicalEnvelopeVersion,
     UnsupportedObjectType,
     UnsupportedObjectVersion,
@@ -68,7 +67,6 @@ pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
     CanonicalErrorCode::ComponentMismatch,
     CanonicalErrorCode::TrailingBytes,
     CanonicalErrorCode::UnknownField,
-    CanonicalErrorCode::UnknownSecurityClosure,
     CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion,
     CanonicalErrorCode::UnsupportedObjectType,
     CanonicalErrorCode::UnsupportedObjectVersion,
@@ -94,7 +92,6 @@ impl CanonicalErrorCode {
             Self::ComponentMismatch => "ComponentMismatch",
             Self::TrailingBytes => "TrailingBytes",
             Self::UnknownField => "UnknownField",
-            Self::UnknownSecurityClosure => "UnknownSecurityClosure",
             Self::UnsupportedCanonicalEnvelopeVersion => "UnsupportedCanonicalEnvelopeVersion",
             Self::UnsupportedObjectType => "UnsupportedObjectType",
             Self::UnsupportedObjectVersion => "UnsupportedObjectVersion",
@@ -447,7 +444,6 @@ mod tests {
                 | CanonicalErrorCode::ComponentMismatch
                 | CanonicalErrorCode::TrailingBytes
                 | CanonicalErrorCode::UnknownField
-                | CanonicalErrorCode::UnknownSecurityClosure
                 | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion
                 | CanonicalErrorCode::UnsupportedObjectType
                 | CanonicalErrorCode::UnsupportedObjectVersion => {}
@@ -458,6 +454,6 @@ mod tests {
             ensure_exhaustive(code.clone());
         }
 
-        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 21);
+        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 20);
     }
 }

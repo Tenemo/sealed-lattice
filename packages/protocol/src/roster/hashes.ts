@@ -41,7 +41,6 @@ export const deriveTrusteeSetupEntryHash = (
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
         rotSetHash: entry.rotSetHash,
-        targetDecryptionId: entry.targetDecryptionId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
         trusteeThresholdVerificationKeyHash:

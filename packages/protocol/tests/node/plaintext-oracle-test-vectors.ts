@@ -111,7 +111,6 @@ type TopKVectors = {
 type SparseTargetVectors = {
     readonly expectedSelectedOptionOrdinals: readonly number[];
     readonly layoutHash: string;
-    readonly layoutId: 'WinnerRankTopK-v1';
     readonly schemaVersion: 1;
     readonly target: SparseTopKTarget;
     readonly targetHash: string;
@@ -247,7 +246,6 @@ export const mutateSparseTarget = (
         forbiddenSemanticSlots:
             overrides.forbiddenSemanticSlots ?? target.forbiddenSemanticSlots,
         layoutHash: overrides.layoutHash ?? target.layoutHash,
-        layoutId: overrides.layoutId ?? target.layoutId,
         optionCount: overrides.optionCount ?? target.optionCount,
         targetIdSlots: overrides.targetIdSlots ?? target.targetIdSlots,
         targetOrderSlots: overrides.targetOrderSlots ?? target.targetOrderSlots,

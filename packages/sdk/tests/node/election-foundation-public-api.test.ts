@@ -19,20 +19,12 @@ type VerifyFoundationTranscript = (
 type VerifyTranscriptCoreFixture = (
     fixture: TranscriptCoreFixture,
 ) => Promise<TranscriptCoreVerificationResult>;
-type VerifyTranscript = () => {
-    readonly ok: boolean;
-    readonly refusedObjects: readonly {
-        readonly code: string;
-    }[];
-};
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const verifyFoundationTranscript =
     publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
 const verifyTranscriptCoreFixture =
     publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
-const verifyTranscript =
-    publicApiRuntimeRecord.verifyTranscript as VerifyTranscript;
 
 const requiredPublicFunctions = [
     [
@@ -86,7 +78,6 @@ const requiredPublicFunctions = [
     ],
     ['verifyFoundationTranscript', verifyFoundationTranscript],
     ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
-    ['verifyTranscript', verifyTranscript],
     [
         'verifyTranscriptCoreFixture',
         publicApiRuntimeRecord.verifyTranscriptCoreFixture,
@@ -118,15 +109,6 @@ describe('election foundation public package API in Node', () => {
                 publicFunctionName,
             ).toBe('function');
         }
-    });
-
-    it('keeps reserved transcript verification fail closed', () => {
-        expect(verifyTranscript()).toMatchObject({
-            ok: false,
-            refusedObjects: [
-                expect.objectContaining({ code: 'OperationUnavailable' }),
-            ],
-        });
     });
 
     it('verifies the deterministic foundation transcript through the public package', () => {

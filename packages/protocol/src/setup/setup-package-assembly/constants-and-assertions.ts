@@ -13,13 +13,6 @@ export const contextFieldNames = [
     'setupParametersHash',
     'setupEpoch',
 ] as const;
-const commonRandomnessContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 export const requiredSetupPhases = [
     ['rosterFreeze', 1],
     ['setupIntent', 2],
@@ -102,20 +95,6 @@ export const assertContextMatches = (
     objectPath: string,
 ): void => {
     for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
-
-export const assertCommonRandomnessContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    objectPath: string,
-): void => {
-    for (const fieldName of commonRandomnessContextFieldNames) {
         if (value[fieldName] !== setupContext[fieldName]) {
             throw new Error(
                 `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,

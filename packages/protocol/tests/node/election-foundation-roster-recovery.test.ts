@@ -14,9 +14,6 @@ import {
     verifyRosterManifestTranscript,
 } from './election-foundation-test-helpers';
 
-const retiredThresholdDecryptionId = 'unsupported-target-decryption-v0';
-const retiredBallotValidityProofId = 'PQEvalProof-STARK-BGVReplay-v1';
-
 describe('roster and manifest shells', () => {
     it('accepts an honest registration to manifest transcript', () => {
         const registrations = [
@@ -86,48 +83,6 @@ describe('roster and manifest shells', () => {
                 expect.objectContaining({ code: 'WrongSignerRole' }),
             ]),
         );
-    });
-
-    it('rejects retired direct-path identifiers in certified manifests', () => {
-        const registrations = [
-            createRegistrationEntry('participant-1', 1, 0),
-            createRegistrationEntry('participant-2', 1, 1),
-            createRegistrationEntry('participant-3', 1, 2),
-        ];
-        const oldThresholdParametersInput = createRosterManifestTranscriptInput(
-            registrations,
-            {
-                manifestOpaqueBindings: {
-                    ...manifestOpaqueBindings,
-                    targetDecryptionId: retiredThresholdDecryptionId,
-                },
-            },
-        );
-        const oldBallotProofIdInput = createRosterManifestTranscriptInput(
-            registrations,
-            {
-                manifestOpaqueBindings: {
-                    ...manifestOpaqueBindings,
-                    ballotValidityProofId: retiredBallotValidityProofId,
-                },
-            },
-        );
-
-        for (const input of [
-            oldThresholdParametersInput,
-            oldBallotProofIdInput,
-        ]) {
-            const result = verifyRosterManifestTranscript(input);
-
-            expect(result.ok).toBe(false);
-            expect(result.refusedObjects).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({
-                        code: 'ManifestHashMismatch',
-                    }),
-                ]),
-            );
-        }
     });
 
     it('attributes frozen roster parameters mismatches to the frozen roster parameters', () => {
@@ -252,7 +207,9 @@ describe('roster and manifest shells', () => {
                 boardSequence: 4,
                 manifestOpaqueBindings: {
                     ...manifestOpaqueBindings,
-                    evaluatorReplayId: 'unsupported-evaluator-replay',
+                    bgvParametersHash: deriveProtocolHash('BGVParametersHash', {
+                        parameters: 'unsupported-fixed-parameters',
+                    }),
                 },
             },
         );

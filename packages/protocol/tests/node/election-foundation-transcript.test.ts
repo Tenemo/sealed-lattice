@@ -542,26 +542,11 @@ describe('integrated election foundation transcript', () => {
                 ],
             },
         };
-        const manifestBindingInput = createManifestOpaqueBindingInput({
-            evaluatorReplayId: 'unsupported-evaluator-replay',
-        });
-        const ballotProofIdInput = createManifestOpaqueBindingInput({
-            ballotValidityProofId: 'unsupported-ballot-validity-proof',
-        });
         const bgvParametersInput = createManifestOpaqueBindingInput({
             bgvParametersHash: protocolHashFixture('wrong-bgv-parameters'),
         });
         const targetLayoutInput = createManifestOpaqueBindingInput({
             targetLayoutHash: protocolHashFixture('wrong-target-layout'),
-        });
-        const directComparisonIdInput = createManifestOpaqueBindingInput({
-            directComparisonId: 'unsupported-direct-comparison',
-        });
-        const targetDecryptionIdInput = createManifestOpaqueBindingInput({
-            targetDecryptionId: 'unsupported-target-decryption',
-        });
-        const mobileRuntimeIdInput = createManifestOpaqueBindingInput({
-            mobileRuntimeId: 'unsupported-mobile-runtime',
         });
 
         const mutationCases = [
@@ -586,13 +571,8 @@ describe('integrated election foundation transcript', () => {
             [wrongBoardPolicyInput, 'TargetFinalityPolicyMismatch'],
             [proposalNotIncludedInput, 'EvaluatorReplayRecordNotIncluded'],
             [wrongObjectTypeInput, 'WrongObjectType'],
-            [manifestBindingInput, 'ManifestHashMismatch'],
-            [ballotProofIdInput, 'ManifestHashMismatch'],
             [bgvParametersInput, 'ManifestHashMismatch'],
             [targetLayoutInput, 'ManifestHashMismatch'],
-            [directComparisonIdInput, 'ManifestHashMismatch'],
-            [targetDecryptionIdInput, 'ManifestHashMismatch'],
-            [mobileRuntimeIdInput, 'ManifestHashMismatch'],
         ] as const satisfies readonly (readonly [
             FoundationTranscriptInput,
             ProtocolRefusalCode,

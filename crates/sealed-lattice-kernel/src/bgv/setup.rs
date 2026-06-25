@@ -105,7 +105,6 @@ use crate::{
     hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
 };
 
-pub(crate) const TARGET_DECRYPTION_ID: &str = "BGV-RNS-AsyncTargetDecryption-v1";
 pub(crate) const KEY_SWITCH_DECOMPOSITION_SCHEME_ID: &str =
     "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
 pub(crate) const SELECTED_ROT_SET_ID: &str = "compact-generator-basis-packed-rank-rot-set-v1";
@@ -156,7 +155,6 @@ struct VerifiedParticipantSetupBinding {
 pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
     Ok(json!({
         "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
-        "targetDecryptionId": TARGET_DECRYPTION_ID,
         "keySwitchDecompositionSchemeId": KEY_SWITCH_DECOMPOSITION_SCHEME_ID,
         "selectedRotSetId": SELECTED_ROT_SET_ID,
         "canonicalObjects": [

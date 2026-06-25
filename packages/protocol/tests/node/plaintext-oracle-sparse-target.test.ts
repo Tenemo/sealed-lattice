@@ -36,8 +36,7 @@ describe('sparse target decoder oracle', () => {
         },
     ] as const satisfies readonly PlaintextTopKRankingEntry[];
 
-    it('decodes the WinnerRankTopK-v1 target vector', () => {
-        expect(sparseTargetVectors.layoutId).toBe('WinnerRankTopK-v1');
+    it('decodes the canonical sparse top-k target vector', () => {
         const decoding = decodeSparseTopKTarget({
             expectedLayoutHash: sparseTargetVectors.layoutHash,
             target: sparseTargetVectors.target,

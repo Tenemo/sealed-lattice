@@ -1,8 +1,7 @@
 {
   "schemaVersion": 1,
-  "layoutId": "WinnerRankTopK-v1",
-  "layoutHash": "b1d9c6781b7cae8f154c5f622bdc3474cf084ba389163e7815695a45a80ae768d830c2bb0c24b62e3062bd699dd6019491fbd9be0a37e9229b1fbfff04fe13ee",
-  "targetHash": "4a3845030e270b8a3920557029f8a85a35c0b812cda5415cd1c69b7c29fbd8b56a668d5aa2809aeaa3d86f46e7c7673800c8c6e0f4ea4975c56b7d2d03d6e2cc",
+  "layoutHash": "f73dc9c5bc1a85d3231e14b77027d49ba7cfa19181177c3fcc609a1450496fe21ec25c17f461918319aa5766c7167667d66def2606450f18af1c418e62e5e2b0",
+  "targetHash": "0dd04a02a905a85c3ad35a21f12bf0357294404d4a1098ecae4cd740f84bdd48ecc3378d77ac16c9c1ffff1b47bb8f28222370e48119e569649f403c4eab9f54",
   "target": {
     "forbiddenSemanticSlots": [
       0,
@@ -10,8 +9,7 @@
       0,
       0
     ],
-    "layoutHash": "b1d9c6781b7cae8f154c5f622bdc3474cf084ba389163e7815695a45a80ae768d830c2bb0c24b62e3062bd699dd6019491fbd9be0a37e9229b1fbfff04fe13ee",
-    "layoutId": "WinnerRankTopK-v1",
+    "layoutHash": "f73dc9c5bc1a85d3231e14b77027d49ba7cfa19181177c3fcc609a1450496fe21ec25c17f461918319aa5766c7167667d66def2606450f18af1c418e62e5e2b0",
     "optionCount": 4,
     "targetIdSlots": [
       1,
@@ -26,7 +24,7 @@
       0
     ],
     "topOptionCount": 2,
-    "targetHash": "4a3845030e270b8a3920557029f8a85a35c0b812cda5415cd1c69b7c29fbd8b56a668d5aa2809aeaa3d86f46e7c7673800c8c6e0f4ea4975c56b7d2d03d6e2cc"
+    "targetHash": "0dd04a02a905a85c3ad35a21f12bf0357294404d4a1098ecae4cd740f84bdd48ecc3378d77ac16c9c1ffff1b47bb8f28222370e48119e569649f403c4eab9f54"
   },
   "expectedSelectedOptionOrdinals": [
     2,

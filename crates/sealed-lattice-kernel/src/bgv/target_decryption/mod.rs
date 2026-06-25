@@ -39,7 +39,7 @@ use crate::{
         parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
-            TARGET_DECRYPTION_ID, development_evaluator_key_from_passive_setup_package,
+            development_evaluator_key_from_passive_setup_package,
             validate_passive_setup_package_for_encrypted_evaluation,
         },
         setup_helpers::{

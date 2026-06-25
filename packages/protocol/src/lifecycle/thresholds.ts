@@ -24,8 +24,6 @@ import {
     minimumDynamicRosterSize,
     minimumSupportedRosterSize,
     structuralOneThirdModel,
-    targetBoundShareSelectionId,
-    targetDecryptionId,
 } from './roster-policy.js';
 
 const normalizeDynamicRosterParametersCertificateHash = (
@@ -80,19 +78,9 @@ const normalizeTargetBoundShareSelectionParameters = (
         return null;
     }
 
-    if (parameters.selectionId !== targetBoundShareSelectionId) {
-        throw new Error(
-            'Target-bound share-selection parameters uses an unsupported ID.',
-        );
-    }
     if (parameters.certificateHash.trim().length === 0) {
         throw new Error(
             'Target-bound share-selection parameters requires a certificate hash.',
-        );
-    }
-    if (parameters.targetDecryptionId !== targetDecryptionId) {
-        throw new Error(
-            'Target-bound share-selection parameters uses an unsupported target decryption parameters ID.',
         );
     }
     if (parameters.targetBasisHash.trim().length === 0) {
@@ -162,9 +150,7 @@ const normalizeTargetBoundShareSelectionParameters = (
     }
 
     return {
-        selectionId: parameters.selectionId,
         certificateHash: parameters.certificateHash,
-        targetDecryptionId: parameters.targetDecryptionId,
         targetBasisHash: parameters.targetBasisHash,
         decryptionShareQuorum: parameters.decryptionShareQuorum,
         minimumSharesForInterpolation: parameters.minimumSharesForInterpolation,

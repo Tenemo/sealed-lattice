@@ -91,12 +91,6 @@ pub(super) fn read_target_accepted_binding(
             "targetAcceptedRecord must be a canonical TargetAcceptedRecord",
         ));
     }
-    if string_at_path(record, &["targetDecryptionId"])? != TARGET_DECRYPTION_ID {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "target accepted record uses an unsupported target decryption parameters",
-        ));
-    }
     compare_string_field(
         record,
         "ceremonyId",
@@ -131,7 +125,6 @@ pub(super) fn read_target_accepted_binding(
             "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
             "targetContextHash": hash_at_path(record, &["targetContextHash"])?,
             "targetDecryptionParametersHash": hash_at_path(record, &["targetDecryptionParametersHash"])?,
-            "targetDecryptionId": string_at_path(record, &["targetDecryptionId"])?,
             "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
             "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
             "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
@@ -186,12 +179,6 @@ pub(super) fn read_target_share_parameters(
         &setup_binding.threshold_parameters_hash,
         "target share threshold parameters hash",
     )?;
-    compare_string_field(
-        value,
-        "targetDecryptionId",
-        TARGET_DECRYPTION_ID,
-        "target decryption id",
-    )?;
     compare_hash_field(
         value,
         "targetDecryptionParametersHash",
@@ -231,7 +218,6 @@ pub(super) fn read_target_share_parameters(
         "objectType": "TargetDecryptionShareParameters",
         "objectVersion": 1,
         "thresholdParametersHash": setup_binding.threshold_parameters_hash,
-        "targetDecryptionId": TARGET_DECRYPTION_ID,
         "targetDecryptionParametersHash": setup_binding.target_decryption_parameters_hash,
         "targetDecryptionParametersBindingHash": setup_binding.target_decryption_parameters_binding_hash,
         "decryptionThreshold": decryption_threshold,

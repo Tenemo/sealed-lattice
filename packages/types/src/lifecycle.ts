@@ -18,9 +18,7 @@ export type DecryptionShareFilteringMode =
 
 /** Certified target-bound decryption share-selection parameters. */
 export type TargetBoundShareSelectionParameters = {
-    readonly selectionId: string;
     readonly certificateHash: string;
-    readonly targetDecryptionId: string;
     readonly targetBasisHash: ProtocolHash;
     readonly decryptionShareQuorum: number;
     readonly minimumSharesForInterpolation: number;

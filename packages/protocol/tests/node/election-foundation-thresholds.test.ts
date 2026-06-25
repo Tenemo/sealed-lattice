@@ -29,9 +29,6 @@ const pollSpec = {
     topOptionCount: 1,
 } as const satisfies PollSpec;
 
-const retiredThresholdDecryptionId =
-    'unsupported-target-decryption-thresholdParameters-v0';
-
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor(rosterSize / 3) + 1;
     const thresholdParameters = deriveThresholdParameters({
@@ -341,44 +338,6 @@ describe('election foundation threshold parameters', () => {
     });
 
     it('rejects unsupported target-bound share-selection thresholdParameters and target-basis bindings', () => {
-        expect(() =>
-            deriveThresholdParameters({
-                dynamicRosterParametersCertificateHash,
-                rosterSize: 20,
-                targetBoundShareSelectionParameters: {
-                    ...targetBoundShareSelectionParameters,
-                    selectionId: 'arbitrary-selection',
-                },
-            }),
-        ).toThrow(
-            'Target-bound share-selection parameters uses an unsupported ID.',
-        );
-
-        expect(() =>
-            deriveThresholdParameters({
-                dynamicRosterParametersCertificateHash,
-                rosterSize: 20,
-                targetBoundShareSelectionParameters: {
-                    ...targetBoundShareSelectionParameters,
-                    targetDecryptionId: 'arbitrary-target-thresholdParameters',
-                },
-            }),
-        ).toThrow(
-            'Target-bound share-selection parameters uses an unsupported target decryption parameters ID.',
-        );
-        expect(() =>
-            deriveThresholdParameters({
-                dynamicRosterParametersCertificateHash,
-                rosterSize: 20,
-                targetBoundShareSelectionParameters: {
-                    ...targetBoundShareSelectionParameters,
-                    targetDecryptionId: retiredThresholdDecryptionId,
-                },
-            }),
-        ).toThrow(
-            'Target-bound share-selection parameters uses an unsupported target decryption parameters ID.',
-        );
-
         expect(() =>
             deriveThresholdParameters({
                 dynamicRosterParametersCertificateHash,

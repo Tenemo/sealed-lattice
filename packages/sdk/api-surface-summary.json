@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "daa7a67656f41310dd4e87e4832f58ed19094efbe58ccf602c555d2d6f50fd9e",
+    "reachableDeclarationHash": "b002c8ad27168c088777ec963e24420987842d836f7f468a5fefc2c82804ad9b",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveFrozenRosterParameters",
@@ -36,7 +36,6 @@
         "verifyRosterManifestTranscript",
         "verifySetupPackage",
         "verifyTargetFinality",
-        "verifyTranscript",
         "verifyTranscriptCoreFixture"
     ],
     "typeExports": [
@@ -72,7 +71,6 @@
         "FoundationTranscriptInput",
         "FoundationTranscriptVerification",
         "FrozenRosterParameters",
-        "FutureProtocolOperationResult",
         "GoldenTranscriptCoreFixture",
         "GoldenTranscriptCoreFixtureVerification",
         "HeBackendCorruptionModel",

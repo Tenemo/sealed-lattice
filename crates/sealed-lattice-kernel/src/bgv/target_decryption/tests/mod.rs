@@ -39,7 +39,6 @@ fn target_share_parameters(setup_package: &Value) -> Value {
         "objectType": "TargetDecryptionShareParameters",
         "objectVersion": 1,
         "thresholdParametersHash": setup_package["setupInputs"]["thresholdParametersHash"],
-        "targetDecryptionId": TARGET_DECRYPTION_ID,
         "targetDecryptionParametersHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersHash"],
         "targetDecryptionParametersBindingHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersBindingHash"],
         "decryptionThreshold": 2,
@@ -118,7 +117,6 @@ fn accepted_record(
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,
         "targetDecryptionParametersHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersHash"],
-        "targetDecryptionId": TARGET_DECRYPTION_ID,
         "targetBasisHash": derive_protocol_hash(
             "TargetBasisHash",
             &json!({ "basis": "test" }),

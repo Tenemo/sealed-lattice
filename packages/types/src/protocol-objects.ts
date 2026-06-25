@@ -187,12 +187,6 @@ export type StructuredProtocolVerificationResult = {
     readonly unresolvedReason?: string | null;
 };
 
-/** Fail-closed result returned by safe API entries reserved for later implementation. */
-export type FutureProtocolOperationResult =
-    StructuredProtocolVerificationResult & {
-        readonly operation: string;
-    };
-
 /** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;
 

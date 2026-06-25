@@ -1,13 +1,4 @@
 import { verifySignedObjectSignature } from '@sealed-lattice/crypto';
-import {
-    ballotValidityProofId,
-    directComparisonId,
-    encryptedBallotAggregateId,
-    encryptedBallotLayoutId,
-    evaluatorReplayId,
-    mobileRuntimeId,
-    targetDecryptionId,
-} from '@sealed-lattice/types';
 import type {
     ElectionManifest,
     InclusionProof,
@@ -38,13 +29,6 @@ import {
 // Exact-schema lock: the manifest's opaque bindings must carry precisely this
 // set of field names or it fails closed.
 const manifestOpaqueBindingFieldNames = new Set([
-    'encryptedBallotLayoutId',
-    'ballotValidityProofId',
-    'encryptedBallotAggregateId',
-    'evaluatorReplayId',
-    'directComparisonId',
-    'targetDecryptionId',
-    'mobileRuntimeId',
     'heParamHash',
     'bgvPassiveSetupPackageHash',
     'bgvSetupParameterCertificateHash',
@@ -81,25 +65,6 @@ const collectManifestOpaqueBindingRefusals = (
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const bindings = manifest.manifestOpaqueBindings;
-
-    if (
-        bindings.encryptedBallotLayoutId !== encryptedBallotLayoutId ||
-        bindings.ballotValidityProofId !== ballotValidityProofId ||
-        bindings.encryptedBallotAggregateId !== encryptedBallotAggregateId ||
-        bindings.evaluatorReplayId !== evaluatorReplayId ||
-        bindings.directComparisonId !== directComparisonId ||
-        bindings.targetDecryptionId !== targetDecryptionId ||
-        bindings.mobileRuntimeId !== mobileRuntimeId
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'ManifestHashMismatch',
-                'Election manifest must bind the fixed direct encrypted ballot, evaluator replay, target decryption, and mobile runtime identifiers.',
-                manifest.electionManifestHash,
-                'ElectionManifest',
-            ),
-        );
-    }
     // Enforce the exact-schema lock: the binding object must have exactly the
     // expected number of keys AND no key outside the allowed set (rejects both
     // missing and extra fields).
@@ -271,7 +236,6 @@ export const verifyTrusteeSetupEntry = (
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
         rotSetHash: entry.rotSetHash,
-        targetDecryptionId: entry.targetDecryptionId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
         trusteeThresholdVerificationKeyHash:
@@ -293,7 +257,6 @@ export const verifyTrusteeSetupEntry = (
     if (
         entry.objectType !== 'TrusteeSetupEntry' ||
         entry.objectVersion !== 1 ||
-        entry.targetDecryptionId !== targetDecryptionId ||
         !isNonNegativeInteger(entry.boardSequence) ||
         !isNonNegativeInteger(entry.boardPosition) ||
         !isNonNegativeInteger(entry.recoveryEpoch) ||

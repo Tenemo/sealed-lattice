@@ -45,7 +45,6 @@ import type {
     CloseRecordVerificationInput,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
-    FutureProtocolOperationResult,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
     LifecycleTransition,
@@ -102,7 +101,6 @@ export type {
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
     FrozenRosterParameters,
-    FutureProtocolOperationResult,
     GoldenTranscriptCoreFixture,
     GoldenTranscriptCoreFixtureVerification,
     HeBackendCorruptionModel,
@@ -348,28 +346,6 @@ export const evaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
-
-// Fail-closed result builder for the reserved future complete-protocol entry points
-// below: each returns a structured OperationUnavailable refusal (ok:false) rather than
-// throwing, so callers get a typed, non-crashing refusal until the path is implemented.
-const unavailableFutureProtocolOperation = (
-    operation: string,
-): FutureProtocolOperationResult => ({
-    ok: false,
-    acceptedHashes: [],
-    refusedObjects: [
-        {
-            code: 'OperationUnavailable',
-            message: `${operation} is reserved for later protocol implementation and is not implemented in this package build.`,
-        },
-    ],
-    unresolvedReason: 'OperationUnavailable',
-    operation,
-});
-
-/** Reserved transcript verifier entry point for the future complete protocol path. */
-export const verifyTranscript = (): FutureProtocolOperationResult =>
-    unavailableFutureProtocolOperation('verifyTranscript');
 
 /** Verifies the integrated foundation transcript without claiming full election verification. */
 export const verifyFoundationTranscript = (

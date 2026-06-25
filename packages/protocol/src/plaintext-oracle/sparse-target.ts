@@ -15,7 +15,6 @@ import {
 
 import { assertCanonicalFieldElement } from './field.js';
 
-const sparseTopKTargetLayoutId = 'WinnerRankTopK-v1' as const;
 const forbiddenSemanticSlotCount = 4;
 
 const deriveSparseTopKTargetLayoutHash = (input: {
@@ -24,7 +23,6 @@ const deriveSparseTopKTargetLayoutHash = (input: {
 }): string =>
     deriveProtocolHash('TargetLayoutHash', {
         forbiddenSemanticSlotCount,
-        layoutId: sparseTopKTargetLayoutId,
         optionCount: input.optionCount,
         optionOrdinalEncoding: 'one-based',
         targetIdSlotRule: 'optionOrdinalWhenRankLessThanTopOptionCountElseZero',
@@ -40,7 +38,6 @@ export const deriveSparseTopKTargetHash = (
     deriveProtocolHash('SparseTopKTargetHash', {
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutHash: target.layoutHash,
-        layoutId: target.layoutId,
         optionCount: target.optionCount,
         targetIdSlots: target.targetIdSlots,
         targetOrderSlots: target.targetOrderSlots,
@@ -175,7 +172,6 @@ export const deriveSparseTopKTarget = (input: {
             () => 0,
         ),
         layoutHash,
-        layoutId: sparseTopKTargetLayoutId,
         optionCount: input.optionCount,
         targetIdSlots,
         targetOrderSlots,
@@ -242,7 +238,6 @@ const decodeSparseTopKTargetUnchecked = (input: {
     const recomputedHash = deriveSparseTopKTargetHash({
         forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutHash: target.layoutHash,
-        layoutId: target.layoutId,
         optionCount: target.optionCount,
         targetIdSlots: target.targetIdSlots,
         targetOrderSlots: target.targetOrderSlots,
@@ -253,13 +248,6 @@ const decodeSparseTopKTargetUnchecked = (input: {
         addSparseTargetRefusal(
             refusedObjects,
             'Sparse target hash does not match its canonical payload.',
-            target.targetHash,
-        );
-    }
-    if (target.layoutId !== sparseTopKTargetLayoutId) {
-        addSparseTargetRefusal(
-            refusedObjects,
-            'Sparse target layout ID is not supported.',
             target.targetHash,
         );
     }

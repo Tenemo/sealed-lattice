@@ -29,7 +29,6 @@ export type TrusteeSetupEntry = {
     readonly trusteeSetupEntryHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly trusteeIdentity: string;
-    readonly targetDecryptionId: string;
     readonly trusteeSetupRoot: ProtocolHash;
     readonly bgvParametersHash: ProtocolHash;
     readonly participantSetupRecordHash: ProtocolHash;
@@ -58,13 +57,6 @@ export type ManifestPolicyHashes = {
 
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
-    readonly encryptedBallotLayoutId: string;
-    readonly ballotValidityProofId: string;
-    readonly encryptedBallotAggregateId: string;
-    readonly evaluatorReplayId: string;
-    readonly directComparisonId: string;
-    readonly targetDecryptionId: string;
-    readonly mobileRuntimeId: string;
     readonly heParamHash: ProtocolHash;
     readonly bgvPassiveSetupPackageHash: ProtocolHash;
     readonly bgvSetupParameterCertificateHash: ProtocolHash;

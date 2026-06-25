@@ -4,12 +4,8 @@ import {
 } from '@sealed-lattice/crypto';
 import {
     ballotValidityProofId,
-    directComparisonId,
-    encryptedBallotAggregateId,
-    encryptedBallotLayoutId,
     evaluatorReplayId,
     mobileRuntimeId,
-    targetBoundShareSelectionId,
     targetDecryptionId,
 } from '@sealed-lattice/types';
 import type {
@@ -120,9 +116,7 @@ export const defaultThresholdParametersHash = deriveProtocolHash(
 );
 export const dynamicRosterParametersCertificateHash = 'a'.repeat(128);
 export const targetBoundShareSelectionParameters = {
-    selectionId: targetBoundShareSelectionId,
     certificateHash: 'target-bound-certificate-hash',
-    targetDecryptionId,
     targetBasisHash: 'target-basis-hash',
     decryptionShareQuorum: 9,
     minimumSharesForInterpolation: 7,
@@ -169,13 +163,6 @@ export const manifestPolicyHashes: ManifestPolicyHashes = {
     witnessPolicyHash,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    encryptedBallotLayoutId,
-    ballotValidityProofId,
-    encryptedBallotAggregateId,
-    evaluatorReplayId,
-    directComparisonId,
-    targetDecryptionId,
-    mobileRuntimeId,
     heParamHash: deriveFixtureHash('fixture-he-parameter-set-v1', {
         parameters: 'BGV-RNS-v1',
     }),

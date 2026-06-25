@@ -125,7 +125,6 @@ export const createTrusteeSetupEntry = (
         objectType: 'TrusteeSetupEntry',
         objectVersion: 1,
         ceremonyId,
-        targetDecryptionId: manifestOpaqueBindings.targetDecryptionId,
         trusteeIdentity,
         trusteeSetupRoot: deriveProtocolHash('ParticipantBgvSetupRecordHash', {
             trusteeIdentity,

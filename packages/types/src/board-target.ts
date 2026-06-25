@@ -279,7 +279,6 @@ export type TargetAcceptedRecord = {
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
     readonly targetDecryptionParametersHash: ProtocolHash;
-    readonly targetDecryptionId: string;
     readonly targetBasisHash: ProtocolHash;
     readonly acceptanceMode: 'evaluator-replay';
     readonly boardSequence: number;

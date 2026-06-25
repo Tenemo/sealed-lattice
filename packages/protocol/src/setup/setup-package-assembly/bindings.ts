@@ -10,7 +10,6 @@ import {
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
-    assertCommonRandomnessContextMatches,
     assertContext,
     assertContextMatches,
     assertObjectRecord,
@@ -64,7 +63,7 @@ const assertCommonBindings = (input: SetupPackageInput): void => {
         'commonRandomness',
         'SetupCommonRandomness',
     );
-    assertCommonRandomnessContextMatches(
+    assertContextMatches(
         input.setupContext,
         input.commonRandomness,
         'commonRandomness',

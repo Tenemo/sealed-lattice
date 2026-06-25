@@ -16,7 +16,6 @@ export const canonicalErrorCodeValues = [
     'NonCanonicalVarUint',
     'TrailingBytes',
     'UnknownField',
-    'UnknownSecurityClosure',
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
     'UnsupportedObjectVersion',
