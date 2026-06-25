@@ -23,11 +23,7 @@ const javaScriptFiles = ['**/*.{js,jsx,mjs,cjs}'];
 const testFiles = ['packages/*/tests/**/*.{ts,tsx}', 'tests/**/*.{ts,tsx}'];
 const toolFiles = ['tools/**/*.{ts,mts,mjs,cjs}', '*.config.{ts,mjs,cjs,js}'];
 
-const projectPaths = [
-    './tsconfig.tools.json',
-    './packages/*/tsconfig.json',
-    './docs/tsconfig.json',
-];
+const projectPaths = ['./tsconfig.tools.json', './packages/*/tsconfig.json'];
 
 const unusedImportsPlugin = unusedImportsPluginModule.default;
 const vitestPlugin = vitestPluginModule.default;
@@ -128,10 +124,6 @@ export default defineConfig(
         '**/dist/**',
         'target',
         'target/**',
-        'docs/.astro',
-        'docs/.astro/**',
-        'docs/dist',
-        'docs/dist/**',
     ]),
     {
         linterOptions: {
@@ -257,12 +249,6 @@ export default defineConfig(
             parserOptions: {
                 project: './tsconfig.tools.json',
             },
-        },
-    },
-    {
-        files: ['docs/src/content.config.ts'],
-        rules: {
-            'import-x/no-unresolved': OFF,
         },
     },
     {

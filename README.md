@@ -2,7 +2,7 @@
 
 > This project is under active implementation. It has not been audited or externally reviewed.
 
-[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Every roster participant is intended to act as both voter and trustee. Untrusted services may store and distribute transcript objects, but the verification path is participant mobile browsers, not servers or dedicated heavy verifier machines.
 
@@ -99,7 +99,6 @@ Read [SECURITY.md](SECURITY.md) before treating any verification result as secur
 sealed-lattice/
   crates/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
-  docs/                         Public documentation site and API documentation tools
   packages/
     crypto/                     Internal canonical JSON, hashes, signatures
     protocol/                   Internal protocol logic and reference paths
@@ -107,15 +106,8 @@ sealed-lattice/
     types/                      Shared TypeScript type declarations
     wasm/                       Internal WASM loader package
   test-vectors/                 Canonical public regression vectors
-  tools/                        CI, vector, packaging, and documentation tools
+  tools/                        CI, vector, and packaging tools
 ```
-
-## Documentation
-
-- [Documentation site](https://tenemo.github.io/sealed-lattice/)
-- [Guides](https://tenemo.github.io/sealed-lattice/guides/)
-- [Protocol spec](https://tenemo.github.io/sealed-lattice/spec/)
-- [API reference](https://tenemo.github.io/sealed-lattice/api/)
 
 ## Development
 
@@ -131,7 +123,7 @@ Run the main local validation gate:
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the non-heavy kernel Node tests through the repository check runner.
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the non-heavy kernel Node tests through the repository check runner.
 
 For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
@@ -147,7 +139,6 @@ pnpm run test:node:kernel:heavy
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
-pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 

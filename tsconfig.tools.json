@@ -8,11 +8,9 @@
         "packages/*/tests/**/*.ts",
         "tools/**/*.ts",
         "tools/**/*.mjs",
-        "docs/typedoc/**/*.ts",
         "tests/**/*.ts",
         "vitest.config.ts",
-        "eslint.config.js",
-        "typedoc.config.mjs"
+        "eslint.config.js"
     ],
     "references": [
         {

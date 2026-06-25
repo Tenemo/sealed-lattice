@@ -217,14 +217,11 @@ const buildRustKernelLane = (): ValidationLane => ({
     name: rustKernelLaneName,
 });
 
-// Independent checks run concurrently against the built output. The docs lane
-// runs the post-build docs commands directly instead of `pnpm run docs:build`,
-// because the standalone docs script rebuilds the workspace and would write
-// `dist/` during the parallel phase. The commit gate runs the fast Node test
-// project, the non-heavy kernel Node project, and the fast Rust kernel tests.
-// The heavier protocol, kernel-heavy Node project, ignored Rust kernel heavy
-// tests, and the Playwright browser projects stay in their standalone lanes for
-// pre-push verification.
+// Independent checks run concurrently against the built output. The commit gate
+// runs the fast Node test project, the non-heavy kernel Node project, and the
+// fast Rust kernel tests. The heavier protocol, kernel-heavy Node project,
+// ignored Rust kernel heavy tests, and the Playwright browser projects stay in
+// their standalone lanes for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -243,73 +240,6 @@ const buildParallelLanes = (
     return [
         lane('Lint', 'lint', ['run', 'lint']),
         buildRustKernelLane(),
-        {
-            commands: [
-                createPackageManagerCommand(
-                    'Clear docs API reference',
-                    ['exec', 'del-cli', 'docs/src/content/docs/api/reference'],
-                    {
-                        logFileSlug: 'docs-clear-api-reference',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Generate docs API reference',
-                    [
-                        'exec',
-                        'tsx',
-                        './node_modules/typedoc/bin/typedoc',
-                        '--options',
-                        'typedoc.config.mjs',
-                    ],
-                    {
-                        logFileSlug: 'docs-api-reference',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Postprocess docs API reference',
-                    ['exec', 'tsx', './docs/typedoc/postprocess-site-docs.ts'],
-                    {
-                        logFileSlug: 'docs-api-postprocess',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Clear docs site output',
-                    ['exec', 'del-cli', 'docs/dist'],
-                    {
-                        logFileSlug: 'docs-clear-site-output',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Build docs site',
-                    ['exec', 'astro', 'build', '--root', 'docs', '--silent'],
-                    {
-                        logFileSlug: 'docs-site-build',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Verify docs links',
-                    ['exec', 'tsx', './docs/typedoc/verify-docs.ts'],
-                    {
-                        logFileSlug: 'docs-link-verification',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Verify rendered docs',
-                    ['exec', 'tsx', './tools/ci/verify-docs-render.ts'],
-                    {
-                        logFileSlug: 'docs-render-verification',
-                        packageManagerRunner,
-                    },
-                ),
-            ],
-            name: 'Verify docs',
-        },
         lane('Verify public package policy', 'package-policy', [
             'exec',
             'tsx',
