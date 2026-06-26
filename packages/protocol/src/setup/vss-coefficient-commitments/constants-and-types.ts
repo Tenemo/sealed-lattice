@@ -36,8 +36,6 @@ export const acceptedBgvSetupQShare = {
     objectVersion: 1,
     sharingDomain: 'per-rns-prime',
     primeOrder: 'profile-order',
-    targetDecryptionReadiness:
-        'refused until smudging proof coverage, recombination proof coverage, target proof backend, and verifier activation are complete',
     primes: acceptedBgvSetupQSharePrimes,
 } as const;
 
@@ -191,7 +189,6 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
         readonly materialRecordCount: number;
         readonly coefficientCommitments: readonly VssCoefficientCommitmentMaterialRecord[];
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
@@ -265,7 +262,6 @@ export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
         readonly materialRecordCount: number;
         readonly transport: Readonly<
             JsonRecord & {

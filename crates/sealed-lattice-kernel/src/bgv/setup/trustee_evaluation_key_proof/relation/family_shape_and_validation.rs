@@ -24,6 +24,11 @@ pub(crate) const COMPACT_SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 4] = [
     "sameSecretProofRoot",
     "sameSecretProofFamilyBindingRoot",
 ];
+pub(crate) const TARGET_DECRYPTION_SHARE_BINDING_LABELS: [&str; 3] = [
+    "targetShareProofStatementRoot",
+    "aggregateCommitmentRoot",
+    "smudgingCommitmentSetRoot",
+];
 pub(crate) const TRUSTEE_EVALUATION_KEY_BINDING_LABELS: [&str; 5] = [
     "requiredGaloisSetHash",
     "evaluatorKeyScheduleRoot",
@@ -44,6 +49,7 @@ pub(crate) enum SuccinctSetupProofFamilyShape {
     PrivateVssShare,
     CompactVssShareLinkage,
     CompactSameSecretBridge,
+    TargetDecryptionShare,
     TrusteeEvaluationKey,
 }
 
@@ -75,6 +81,7 @@ impl SuccinctSetupProofFamilyShape {
             Self::PrivateVssShare => super::PRIVATE_VSS_SHARE_PROOF_FAMILY,
             Self::CompactVssShareLinkage => super::COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
             Self::CompactSameSecretBridge => super::COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
+            Self::TargetDecryptionShare => super::TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
             Self::TrusteeEvaluationKey => super::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         }
     }
@@ -86,6 +93,7 @@ impl SuccinctSetupProofFamilyShape {
             Self::PrivateVssShare => &PRIVATE_VSS_SHARE_BINDING_LABELS,
             Self::CompactVssShareLinkage => &COMPACT_VSS_SHARE_LINKAGE_BINDING_LABELS,
             Self::CompactSameSecretBridge => &COMPACT_SAME_SECRET_BRIDGE_BINDING_LABELS,
+            Self::TargetDecryptionShare => &TARGET_DECRYPTION_SHARE_BINDING_LABELS,
             Self::TrusteeEvaluationKey => &TRUSTEE_EVALUATION_KEY_BINDING_LABELS,
         }
     }
@@ -393,6 +401,111 @@ impl TrusteeEvaluationKeyStatement {
                 }
             }
         }
+        if let Some(target_decryption_share) = &self.target_decryption_share {
+            preimage.push(1);
+            for field in [
+                target_decryption_share.public_matrix_seed_hash.as_str(),
+                target_decryption_share.target_basis_hash.as_str(),
+                target_decryption_share.trustee_identity.as_str(),
+                target_decryption_share.target_role.as_str(),
+                target_decryption_share.aggregate_commitment_root.as_str(),
+                target_decryption_share
+                    .smudging_commitment_set_root
+                    .as_str(),
+            ] {
+                append_len_prefixed_str(&mut preimage, field);
+            }
+            preimage.extend_from_slice(
+                &target_decryption_share
+                    .trustee_roster_position
+                    .to_le_bytes(),
+            );
+            append_usize(&mut preimage, target_decryption_share.target_rns_limb_index);
+            preimage.extend_from_slice(&target_decryption_share.target_rns_prime.to_le_bytes());
+            preimage.extend_from_slice(&target_decryption_share.interpolation_point.to_le_bytes());
+            append_usize(
+                &mut preimage,
+                target_decryption_share
+                    .target_ciphertext_component_one
+                    .len(),
+            );
+            preimage.extend_from_slice(&coefficient_vector_hash(
+                &target_decryption_share.target_ciphertext_component_one,
+            ));
+            append_usize(
+                &mut preimage,
+                target_decryption_share.released_partial_decryption.len(),
+            );
+            preimage.extend_from_slice(&coefficient_vector_hash(
+                &target_decryption_share.released_partial_decryption,
+            ));
+            append_usize(
+                &mut preimage,
+                target_decryption_share
+                    .aggregate_commitment
+                    .coordinates_by_commitment_modulus
+                    .len(),
+            );
+            for coordinates in &target_decryption_share
+                .aggregate_commitment
+                .coordinates_by_commitment_modulus
+            {
+                append_usize(&mut preimage, coordinates.len());
+                for coordinate in coordinates {
+                    preimage.extend_from_slice(&coordinate.to_le_bytes());
+                }
+            }
+            preimage.extend_from_slice(
+                &target_decryption_share
+                    .aggregate_message_coefficient_bound
+                    .to_le_bytes(),
+            );
+            append_usize(
+                &mut preimage,
+                target_decryption_share.smudging_commitment_roots.len(),
+            );
+            for root in &target_decryption_share.smudging_commitment_roots {
+                append_len_prefixed_str(&mut preimage, root);
+            }
+            append_usize(
+                &mut preimage,
+                target_decryption_share.smudging_commitments.len(),
+            );
+            for commitment in &target_decryption_share.smudging_commitments {
+                append_usize(
+                    &mut preimage,
+                    commitment.coordinates_by_commitment_modulus.len(),
+                );
+                for coordinates in &commitment.coordinates_by_commitment_modulus {
+                    append_usize(&mut preimage, coordinates.len());
+                    for coordinate in coordinates {
+                        preimage.extend_from_slice(&coordinate.to_le_bytes());
+                    }
+                }
+            }
+            append_usize(
+                &mut preimage,
+                target_decryption_share.smudging_polynomial_degree,
+            );
+            preimage.extend_from_slice(
+                &target_decryption_share
+                    .smudging_coefficient_bound
+                    .to_le_bytes(),
+            );
+            preimage.extend_from_slice(
+                &target_decryption_share
+                    .smudging_signed_coefficient_offset
+                    .to_le_bytes(),
+            );
+            preimage.extend_from_slice(
+                &target_decryption_share
+                    .smudging_message_coefficient_bound
+                    .to_le_bytes(),
+            );
+            preimage.extend_from_slice(&target_decryption_share.plaintext_multiple.to_le_bytes());
+        } else {
+            preimage.push(0);
+        }
 
         hash512(STATEMENT_HASH_DOMAIN, &[&preimage])
     }
@@ -428,12 +541,26 @@ impl TrusteeEvaluationKeyStatement {
                 || self.same_secret_linkage.is_some()
                 || self.private_vss_share.is_some()
                 || self.compact_vss_share_linkage.is_some()
+                || self.target_decryption_share.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
                     "compact same-secret bridge statement must not mix proof families",
                 ));
             }
             return Ok(SuccinctSetupProofFamilyShape::CompactSameSecretBridge);
+        }
+        if self.target_decryption_share.is_some() {
+            if !self.keys.is_empty()
+                || self.same_secret_linkage.is_some()
+                || self.private_vss_share.is_some()
+                || self.compact_vss_share_linkage.is_some()
+                || self.compact_same_secret_bridge.is_some()
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption share statement must not mix proof families",
+                ));
+            }
+            return Ok(SuccinctSetupProofFamilyShape::TargetDecryptionShare);
         }
         let kinds = self.keys.iter().map(|key| key.kind).collect::<Vec<_>>();
 
@@ -446,6 +573,7 @@ impl TrusteeEvaluationKeyStatement {
             && self.private_vss_share.is_none()
             && self.compact_vss_share_linkage.is_none()
             && self.compact_same_secret_bridge.is_none()
+            && self.target_decryption_share.is_none()
         {
             return Err(invalid_succinct_setup_proof(
                 "trustee statement requires key shares or the same-secret linkage anchor",
@@ -483,6 +611,7 @@ impl TrusteeEvaluationKeyStatement {
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_some()
                     && self.compact_vss_share_linkage.is_none()
+                    && self.target_decryption_share.is_none()
                 {
                     // The detailed statement check below validates the
                     // recipient-private VSS material.
@@ -497,7 +626,8 @@ impl TrusteeEvaluationKeyStatement {
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_none()
                     && self.compact_vss_share_linkage.is_some()
-                    && self.compact_same_secret_bridge.is_none())
+                    && self.compact_same_secret_bridge.is_none()
+                    && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
                         "compact VSS share-linkage statement must not mix proof families",
@@ -509,10 +639,24 @@ impl TrusteeEvaluationKeyStatement {
                     && self.same_secret_linkage.is_none()
                     && self.private_vss_share.is_none()
                     && self.compact_vss_share_linkage.is_none()
-                    && self.compact_same_secret_bridge.is_some())
+                    && self.compact_same_secret_bridge.is_some()
+                    && self.target_decryption_share.is_none())
                 {
                     return Err(invalid_succinct_setup_proof(
                         "compact same-secret bridge statement must not mix proof families",
+                    ));
+                }
+            }
+            SuccinctSetupProofFamilyShape::TargetDecryptionShare => {
+                if !(self.keys.is_empty()
+                    && self.same_secret_linkage.is_none()
+                    && self.private_vss_share.is_none()
+                    && self.compact_vss_share_linkage.is_none()
+                    && self.compact_same_secret_bridge.is_none()
+                    && self.target_decryption_share.is_some())
+                {
+                    return Err(invalid_succinct_setup_proof(
+                        "target-decryption share statement must not mix proof families",
                     ));
                 }
             }
@@ -599,6 +743,25 @@ impl TrusteeEvaluationKeyStatement {
                 compact_same_secret_bridge,
                 self.ring_degree,
             )?;
+        }
+        if let Some(target_decryption_share) = &self.target_decryption_share {
+            if target_decryption_share.trustee_identity != self.context.trustee_identity
+                || target_decryption_share.trustee_roster_position
+                    != self.context.trustee_roster_position
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption share trustee must match the proof context",
+                ));
+            }
+            if self.context.binding_roots[1].1 != target_decryption_share.aggregate_commitment_root
+                || self.context.binding_roots[2].1
+                    != target_decryption_share.smudging_commitment_set_root
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption share context roots must match the statement roots",
+                ));
+            }
+            validate_target_decryption_share_statement(target_decryption_share, self.ring_degree)?;
         }
 
         Ok(())
@@ -788,9 +951,9 @@ fn validate_compact_same_secret_bridge_statement(
     }
     for (target_rns_limb_index, target_rns_prime) in statement.target_rns_primes.iter().enumerate()
     {
-        if *target_rns_prime == 0 {
+        if *target_rns_prime != DATA_PRIMES[target_rns_limb_index] {
             return Err(invalid_succinct_setup_proof(
-                "compact same-secret bridge target primes must be positive",
+                "compact same-secret bridge target primes must match the canonical target basis",
             ));
         }
         validate_protocol_hash_hex(
@@ -815,6 +978,121 @@ fn validate_compact_same_secret_bridge_statement(
         return Err(invalid_succinct_setup_proof(
             "compact same-secret bridge ring degree must be positive",
         ));
+    }
+
+    Ok(())
+}
+
+fn validate_target_decryption_share_statement(
+    statement: &TargetDecryptionShareStatement,
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    validate_protocol_hash_hex(
+        "targetDecryptionShare.publicMatrixSeedHash",
+        &statement.public_matrix_seed_hash,
+    )?;
+    validate_protocol_hash_hex(
+        "targetDecryptionShare.targetBasisHash",
+        &statement.target_basis_hash,
+    )?;
+    validate_context_token(
+        "targetDecryptionShare.trusteeIdentity",
+        &statement.trustee_identity,
+    )?;
+    validate_context_token("targetDecryptionShare.targetRole", &statement.target_role)?;
+    validate_protocol_hash_hex(
+        "targetDecryptionShare.aggregateCommitmentRoot",
+        &statement.aggregate_commitment_root,
+    )?;
+    validate_protocol_hash_hex(
+        "targetDecryptionShare.smudgingCommitmentSetRoot",
+        &statement.smudging_commitment_set_root,
+    )?;
+    if statement.target_rns_limb_index >= DATA_PRIMES.len()
+        || DATA_PRIMES[statement.target_rns_limb_index] != statement.target_rns_prime
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share target limb does not match the selected data basis",
+        ));
+    }
+    if statement.interpolation_point == 0
+        || statement.interpolation_point >= statement.target_rns_prime
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share interpolation point is outside the target field",
+        ));
+    }
+    if statement.target_ciphertext_component_one.len() != ring_degree
+        || statement.released_partial_decryption.len() != ring_degree
+        || statement
+            .target_ciphertext_component_one
+            .iter()
+            .chain(statement.released_partial_decryption.iter())
+            .any(|value| *value >= statement.target_rns_prime)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share ciphertext and released partial must be canonical target-limb vectors",
+        ));
+    }
+    if statement.smudging_polynomial_degree == 0
+        || statement.smudging_commitments.len() != statement.smudging_polynomial_degree
+        || statement.smudging_commitment_roots.len() != statement.smudging_polynomial_degree
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption smudging commitments must cover every nonconstant polynomial degree",
+        ));
+    }
+    if statement.aggregate_message_coefficient_bound < statement.target_rns_prime {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption aggregate message coefficient bound must cover the target field",
+        ));
+    }
+    if statement.smudging_coefficient_bound < 0
+        || statement.smudging_signed_coefficient_offset != statement.smudging_coefficient_bound
+        || statement.smudging_message_coefficient_bound
+            != (statement.smudging_coefficient_bound as u64) * 2 + 1
+        || statement.plaintext_multiple == 0
+        || statement.plaintext_multiple >= statement.target_rns_prime
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption smudging numeric bounds do not match the statement shape",
+        ));
+    }
+    for commitment_root in &statement.smudging_commitment_roots {
+        validate_protocol_hash_hex(
+            "targetDecryptionShare.smudgingCommitmentRoot",
+            commitment_root,
+        )?;
+    }
+    for commitment in std::iter::once(&statement.aggregate_commitment)
+        .chain(statement.smudging_commitments.iter())
+    {
+        if commitment.coordinates_by_commitment_modulus.len()
+            != SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+            || commitment.coordinates_by_commitment_modulus.iter().any(|coordinates| {
+                coordinates.len()
+                    != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+            })
+        {
+            return Err(invalid_succinct_setup_proof(
+                "target-decryption compact commitment coordinate count does not match the profile",
+            ));
+        }
+        for (commitment_modulus_index, coordinates) in commitment
+            .coordinates_by_commitment_modulus
+            .iter()
+            .enumerate()
+        {
+            let commitment_modulus = DATA_PRIMES[commitment_modulus_index];
+            if coordinates
+                .iter()
+                .any(|coordinate| *coordinate >= commitment_modulus)
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption compact commitment coordinate is outside its commitment field",
+                ));
+            }
+        }
     }
 
     Ok(())

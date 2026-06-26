@@ -84,8 +84,6 @@ type PublicSetupTypes = [
     publicTypes.TransportedPublicEvaluationKeyMaterialSet,
     publicTypes.TransportedPublicKeyShareProofMaterialSet,
     publicTypes.TransportedSameSecretProofMaterialSet,
-    publicTypes.VerifiedSetupProofMaterial,
-    publicTypes.VerifiedSetupProofMaterialSet,
     publicTypes.VerifiedVssCoefficientCommitmentMaterial,
     publicTypes.VerifyPrivateVssShareInput,
     publicTypes.VerifySetupPackageInput,
@@ -116,12 +114,6 @@ type VerifySetupPackageTransportFieldProbe = [
         publicTypes.VerifySetupPackageInput,
         'verifiedVssCoefficientCommitmentMaterial'
     > extends publicTypes.VerifiedVssCoefficientCommitmentMaterial
-        ? true
-        : false,
-    OptionalInputField<
-        publicTypes.VerifySetupPackageInput,
-        'verifiedSetupProofMaterials'
-    > extends publicTypes.VerifiedSetupProofMaterialSet
         ? true
         : false,
     OptionalInputField<
@@ -163,7 +155,6 @@ type VerifySetupPackageTransportFieldProbe = [
 ];
 
 const verifySetupPackageTransportFieldProbe = [
-    true,
     true,
     true,
     true,
@@ -215,8 +206,6 @@ const publicSetupTypeNames = [
     'TransportedPublicEvaluationKeyMaterialSet',
     'TransportedPublicKeyShareProofMaterialSet',
     'TransportedSameSecretProofMaterialSet',
-    'VerifiedSetupProofMaterial',
-    'VerifiedSetupProofMaterialSet',
     'VerifiedVssCoefficientCommitmentMaterial',
     'VerifyPrivateVssShareInput',
     'VerifySetupPackageInput',
@@ -228,10 +217,10 @@ describe('election foundation public type surface', () => {
     });
 
     it('keeps the verifier-only accepted setup type surface available', () => {
-        expect(publicSetupTypeNames).toHaveLength(18);
+        expect(publicSetupTypeNames).toHaveLength(16);
     });
 
     it('keeps setup verifier transport companions on concrete public types', () => {
-        expect(verifySetupPackageTransportFieldProbe).toHaveLength(9);
+        expect(verifySetupPackageTransportFieldProbe).toHaveLength(8);
     });
 });

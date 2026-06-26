@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::bgv::setup::{
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
-    read_compact_vss_randomness_by_column,
+    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
+    compute_compact_vss_commitment_from_opening,
 };
 
 const COMPACT_VSS_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
@@ -15,7 +15,6 @@ pub(super) struct CompactAggregateOpeningCheckInput<'a> {
     pub(super) credential: &'a Value,
     pub(super) rns_limb_index: usize,
     pub(super) rns_prime: u64,
-    pub(super) aggregate_share_values: &'a [u64],
 }
 
 pub(super) struct CompactAggregateOpeningRootsInput<'a> {
@@ -30,23 +29,35 @@ pub(super) struct CompactAggregateOpeningRootsInput<'a> {
     pub(super) aggregate_randomness_by_column: &'a [Vec<i64>],
 }
 
+pub(super) struct CompactAggregateOpeningComputation {
+    pub(super) commitment: Value,
+    pub(super) commitment_root: String,
+    pub(super) opening_root: String,
+}
+
+pub(super) struct VerifiedCompactAggregateOpeningCredential {
+    pub(super) commitment_root: String,
+    pub(super) aggregate_share_values: Vec<u64>,
+    pub(super) aggregate_commitment_message_values: Vec<u64>,
+    pub(super) message_coefficient_bound: u64,
+    pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
+}
+
 pub(super) fn verify_compact_aggregate_opening_credential(
     input: CompactAggregateOpeningCheckInput<'_>,
-) -> CanonicalResult<(String, String)> {
-    let aggregate_randomness_by_column = read_compact_vss_randomness_by_column(
+) -> CanonicalResult<VerifiedCompactAggregateOpeningCredential> {
+    let aggregate_randomness_by_column =
+        read_compact_aggregate_randomness_by_column_signed_byte_hex(
+            input.credential,
+            input.setup_binding.participants.len(),
+        )?;
+    let aggregate_commitment_message_values = read_compact_aggregate_u64_vector_le_hex(
         input.credential,
-        "aggregateRandomnessByColumn",
-        POLYNOMIAL_DEGREE,
-        Some(input.rns_prime),
+        "aggregateCommitmentMessageValuesLeHex",
+        "compact aggregate opening credential message byte length must match ringDegree",
     )?;
-    let aggregate_commitment_message_values =
-        read_compact_aggregate_u64_vector(input.credential, "aggregateCommitmentMessageValues")?;
-    let aggregate_share_carry_values =
-        read_compact_aggregate_u64_vector(input.credential, "aggregateShareCarryValues")?;
-    verify_compact_aggregate_carry_relation(
-        input.aggregate_share_values,
+    let aggregate_share_values = derive_compact_aggregate_share_values(
         &aggregate_commitment_message_values,
-        &aggregate_share_carry_values,
         input.rns_prime,
     )?;
     let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
@@ -78,12 +89,26 @@ pub(super) fn verify_compact_aggregate_opening_credential(
         "compact aggregate opening credential opening root",
     )?;
 
-    Ok((commitment_root, opening_root))
+    Ok(VerifiedCompactAggregateOpeningCredential {
+        commitment_root,
+        aggregate_share_values,
+        aggregate_commitment_message_values,
+        message_coefficient_bound,
+        aggregate_randomness_by_column,
+    })
 }
 
 pub(super) fn compute_compact_aggregate_opening_roots(
     input: CompactAggregateOpeningRootsInput<'_>,
 ) -> CanonicalResult<(String, String)> {
+    let computation = compute_compact_aggregate_opening(input)?;
+
+    Ok((computation.commitment_root, computation.opening_root))
+}
+
+pub(super) fn compute_compact_aggregate_opening(
+    input: CompactAggregateOpeningRootsInput<'_>,
+) -> CanonicalResult<CompactAggregateOpeningComputation> {
     let commitment_context = compact_aggregate_commitment_context(
         input.setup_binding,
         input.participant,
@@ -104,7 +129,11 @@ pub(super) fn compute_compact_aggregate_opening_roots(
             randomness_by_column: input.aggregate_randomness_by_column,
         })?;
 
-    Ok((computation.commitment_root, computation.opening_root))
+    Ok(CompactAggregateOpeningComputation {
+        commitment: computation.commitment,
+        commitment_root: computation.commitment_root,
+        opening_root: computation.opening_root,
+    })
 }
 
 pub(super) fn compact_aggregate_message_coefficient_bound(
@@ -132,52 +161,75 @@ pub(super) fn compact_aggregate_message_coefficient_bound(
         })
 }
 
-fn read_compact_aggregate_u64_vector(
+pub(super) fn read_compact_aggregate_u64_vector_le_hex(
     credential: &Value,
     field_name: &str,
+    length_error_message: &'static str,
 ) -> CanonicalResult<Vec<u64>> {
-    let values = array_at_path(credential, &[field_name])?;
-    if values.len() != POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!(
-                "compact aggregate opening credential {field_name} length must match ringDegree"
-            ),
-        ));
-    }
-
-    values
-        .iter()
-        .enumerate()
-        .map(|(coefficient_index, value)| {
-            value.as_u64().ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "compact aggregate opening credential {field_name}.{coefficient_index} must be a non-negative integer"
-                    ),
-                )
-            })
-        })
-        .collect()
+    coefficient_vector_from_le_hex(
+        string_at_path(credential, &[field_name])?,
+        POLYNOMIAL_DEGREE,
+        length_error_message,
+    )
 }
 
-fn verify_compact_aggregate_carry_relation(
-    aggregate_share_values: &[u64],
-    aggregate_commitment_message_values: &[u64],
-    aggregate_share_carry_values: &[u64],
-    rns_prime: u64,
-) -> CanonicalResult<()> {
-    for coefficient_index in 0..POLYNOMIAL_DEGREE {
-        let aggregate_share_value =
-            *aggregate_share_values
-                .get(coefficient_index)
-                .ok_or_else(|| {
+fn read_compact_aggregate_randomness_by_column_signed_byte_hex(
+    credential: &Value,
+    participant_count: usize,
+) -> CanonicalResult<Vec<Vec<i64>>> {
+    let columns = array_at_path(credential, &["aggregateRandomnessByColumnSignedByteHex"])?;
+    if columns.len() != COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "aggregateRandomnessByColumnSignedByteHex must carry the compact randomness column count",
+        ));
+    }
+    let maximum_abs = i64::try_from(participant_count).map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact aggregate opening participant count does not fit signed randomness bound",
+        )
+    })?;
+
+    let randomness_by_column = columns
+        .iter()
+        .enumerate()
+        .map(|(column_index, column)| {
+            let coefficients = signed_byte_vector_from_hex(
+                column.as_str().ok_or_else(|| {
                     CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "compact aggregate opening reduced share length must match ringDegree",
+                        CanonicalErrorCode::InvalidFixture,
+                        format!(
+                            "aggregateRandomnessByColumnSignedByteHex.{column_index} must be lowercase hex bytes"
+                        ),
                     )
-                })?;
+                })?,
+                POLYNOMIAL_DEGREE,
+                "compact aggregate opening credential signed-byte randomness length must match ringDegree",
+            )?;
+            if coefficients
+                .iter()
+                .any(|coefficient| coefficient.unsigned_abs() > maximum_abs.unsigned_abs())
+            {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compact VSS opening randomness coefficient exceeds the participant-count bound",
+                ));
+            }
+
+            Ok(coefficients)
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+
+    Ok(randomness_by_column)
+}
+
+fn derive_compact_aggregate_share_values(
+    aggregate_commitment_message_values: &[u64],
+    rns_prime: u64,
+) -> CanonicalResult<Vec<u64>> {
+    let mut aggregate_share_values = Vec::with_capacity(POLYNOMIAL_DEGREE);
+    for coefficient_index in 0..POLYNOMIAL_DEGREE {
         let aggregate_commitment_message_value = aggregate_commitment_message_values
             .get(coefficient_index)
             .copied()
@@ -187,41 +239,10 @@ fn verify_compact_aggregate_carry_relation(
                     "compact aggregate opening message length must match ringDegree",
                 )
             })?;
-        let aggregate_share_carry_value = aggregate_share_carry_values
-            .get(coefficient_index)
-            .copied()
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact aggregate opening carry length must match ringDegree",
-                )
-            })?;
-        let expected_message_value = aggregate_share_value
-            .checked_add(
-                aggregate_share_carry_value
-                    .checked_mul(rns_prime)
-                    .ok_or_else(|| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "compact aggregate opening carry multiplication overflowed",
-                        )
-                    })?,
-            )
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact aggregate opening carry addition overflowed",
-                )
-            })?;
-        if aggregate_commitment_message_value != expected_message_value {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "compact aggregate opening carry relation does not match the reduced aggregate share",
-            ));
-        }
+        aggregate_share_values.push(aggregate_commitment_message_value % rns_prime);
     }
 
-    Ok(())
+    Ok(aggregate_share_values)
 }
 
 fn compact_aggregate_commitment_context(

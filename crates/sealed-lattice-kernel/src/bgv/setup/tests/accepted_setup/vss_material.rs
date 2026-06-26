@@ -54,10 +54,10 @@ fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
         "collective_setup_verifier_refuses_tampered_threshold_share_commitments",
     );
     assert_minimal_collective_setup_package_refused(
-        "tampered threshold share commitment ring-degree status",
+        "tampered threshold share commitment ring degree",
         |package| {
-            package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"][0]["ringDegreeStatus"] =
-                serde_json::json!("profile-ring");
+            package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"][0]["ringDegree"] =
+                serde_json::json!(POLYNOMIAL_DEGREE);
             rebind_collective_threshold_share_commitment_root(package);
         },
         "thresholdShareCommitmentSetMismatch",

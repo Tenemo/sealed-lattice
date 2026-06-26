@@ -10,10 +10,7 @@ use sha3::{
 };
 
 use crate::{
-    bgv::{
-        coefficient_codec::coefficient_vector_hash512,
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-    },
+    bgv::{coefficient_codec::coefficient_vector_hash512, profile::DATA_PRIMES},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
     hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512_hex, to_hex},
     transcript_core::decode_hex,
@@ -105,14 +102,6 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
                 "threshold share commitment set ring degree was not derived",
             )
         })?;
-    let ring_degree_status = threshold_share_commitments
-        .get("ringDegreeStatus")
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            invalid_threshold_commitment_input(
-                "threshold share commitment set ring degree status was not derived",
-            )
-        })?;
     let threshold_share_commitment_root = threshold_share_commitments
         .get("thresholdShareCommitmentRoot")
         .and_then(Value::as_str)
@@ -127,7 +116,6 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
         "operation": "deriveThresholdShareCommitments",
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": roster.decryption_threshold,
@@ -177,7 +165,6 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         setup_context,
         public_matrix_seed_hash,
         derivation.ring_degree,
-        derivation.ring_degree_status,
         &roster,
         material_record_count,
         vss_coefficient_commitment_root,
@@ -199,7 +186,6 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
-        "ringDegreeStatus": derivation.ring_degree_status,
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": roster.decryption_threshold,
@@ -416,7 +402,6 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
         setup_context,
         public_matrix_seed_hash,
         constant_material.ring_degree,
-        constant_material.ring_degree_status,
         &roster,
         material_record_count,
         vss_coefficient_commitment_root,
@@ -459,17 +444,10 @@ pub(crate) fn derive_threshold_share_commitment_set_from_parts(
         .next()
         .map(|binding| binding.commitment.ring_degree)
         .ok_or_else(|| invalid_threshold_commitment_input("no coefficient commitments supplied"))?;
-    let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-        "profile-ring"
-    } else {
-        "development-reduced-ring"
-    };
-
     let threshold_share_commitments = threshold_share_commitment_set(
         setup_context,
         public_matrix_seed_hash,
         ring_degree,
-        ring_degree_status,
         &roster,
         &source_trustee_bindings,
         &coefficient_commitments,

@@ -15,7 +15,7 @@ use super::relation::{
     CompactSameSecretBridgeStatement, CompactVssShareLinkageCommitment,
     CompactVssShareLinkageStatement, EvaluationKeyShareDescriptor, EvaluationKeyShareKind,
     SameSecretLinkageStatement, SuccinctSetupProofContext, SuccinctSetupProofFamilyShape,
-    TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    TargetDecryptionShareStatement, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
 };
 use super::verifier::verify_evaluation_key_share;
 use super::*;
@@ -24,16 +24,16 @@ use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, parse_setup_commitment_full_value,
 };
 use crate::bgv::setup::compact_vss_commitment::{
-    COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE, COMPACT_VSS_COMMITMENT_PROFILE_ID,
-    COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+    COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
 };
 use crate::bgv::setup::setup_proof::SETUP_PROOF_PROFILE_ID;
 use crate::hashing::{derive_protocol_hash, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
-const COMPACT_VSS_SHARE_LINKAGE_PROOF_BOUNDARY: &str = "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend";
-const COMPACT_SAME_SECRET_BRIDGE_PROOF_BOUNDARY: &str = "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence";
+const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
+    "target-decryption-smudging-polynomial-coefficient";
 
 struct CompactVssCommandCommitmentExpectation<'a> {
     field_name: String,
@@ -67,6 +67,9 @@ fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResu
                 "compact same-secret bridge accounting is not exposed through the trustee proof command",
             ))
         }
+        SuccinctSetupProofFamilyShape::TargetDecryptionShare => Err(invalid_succinct_setup_proof(
+            "target-decryption share accounting is not exposed through the trustee proof command",
+        )),
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_hash()
         }
@@ -92,6 +95,9 @@ fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalRes
                 "compact same-secret bridge accounting is not exposed through the trustee proof command",
             ))
         }
+        SuccinctSetupProofFamilyShape::TargetDecryptionShare => Err(invalid_succinct_setup_proof(
+            "target-decryption share accounting is not exposed through the trustee proof command",
+        )),
         SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
             succinct_evaluation_key_proof_accounting_value()
         }
@@ -134,6 +140,8 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         compact_vss_recipient_share_opening_randomness: Vec::new(),
         compact_vss_carry_witnesses: Vec::new(),
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
@@ -167,12 +175,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
-        "proofRandomness": {
-            "source": proof_randomness_source,
-            "binding": "seed and nonce are bound to statement hash, proof family, trustee identity, roster position, and setup epoch before proof masking",
-            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
-            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
-        },
     }))
 }
 
@@ -207,23 +209,6 @@ fn statement_bound_proof_randomness_seed_hex(
             "setupEpoch": &statement.context.setup_epoch,
             "proofRandomnessNonceHex": proof_randomness_nonce_hex,
             "proofRandomnessSeedHex": to_hex(&seed_bytes),
-        }),
-    )
-}
-
-fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
-    let nonce_bytes = decode_exact_hex_bytes(
-        proof_randomness_nonce_hex,
-        PROOF_RANDOMNESS_NONCE_BYTES,
-        "proofRandomnessNonceHex",
-    )?;
-
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofRandomnessNonceHash",
-            "objectVersion": 1,
-            "nonceBytesHex": to_hex(&nonce_bytes),
         }),
     )
 }
@@ -283,18 +268,11 @@ pub(crate) fn generate_compact_vss_share_linkage_proof_from_request(
         "ok": true,
         "operation": "generateCompactVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
-        "proofBoundary": COMPACT_VSS_SHARE_LINKAGE_PROOF_BOUNDARY,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "coefficientCommitmentCount": compact_statement.coefficient_commitments.len(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
-        "proofRandomness": {
-            "source": proof_randomness_source,
-            "binding": "statement-bound",
-            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
-            "retention": "do not persist proof randomness after proof generation"
-        },
     }))
 }
 
@@ -314,7 +292,6 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_from_request(
         "ok": true,
         "operation": "verifyCompactVssShareLinkageProof",
         "proofFamily": statement.context.proof_family,
-        "proofBoundary": COMPACT_VSS_SHARE_LINKAGE_PROOF_BOUNDARY,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "coefficientCommitmentCount": compact_statement.coefficient_commitments.len(),
@@ -356,18 +333,11 @@ pub(crate) fn generate_compact_same_secret_bridge_proof_from_request(
         "ok": true,
         "operation": "generateCompactSameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
-        "proofBoundary": COMPACT_SAME_SECRET_BRIDGE_PROOF_BOUNDARY,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "targetRnsLimbCount": compact_statement.target_rns_primes.len(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
-        "proofRandomness": {
-            "source": proof_randomness_source,
-            "binding": "statement-bound",
-            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
-            "retention": "do not persist proof randomness after proof generation"
-        },
     }))
 }
 
@@ -389,10 +359,74 @@ pub(crate) fn verify_compact_same_secret_bridge_proof_from_request(
         "ok": true,
         "operation": "verifyCompactSameSecretBridgeProof",
         "proofFamily": statement.context.proof_family,
-        "proofBoundary": COMPACT_SAME_SECRET_BRIDGE_PROOF_BOUNDARY,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "targetRnsLimbCount": compact_statement.target_rns_primes.len(),
+        "proofByteLength": proof_bytes.len(),
+    }))
+}
+
+pub(crate) fn generate_target_decryption_share_proof_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let statement = target_decryption_share_statement_from_request(request)?;
+    let witness = target_decryption_share_witness_from_request(request)?;
+    let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
+    let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
+    let proof_randomness_source = read_string(request, "proofRandomnessSource")?;
+    if !matches!(
+        proof_randomness_source,
+        "fresh-csprng" | "development-deterministic-fixture"
+    ) {
+        return Err(invalid_succinct_setup_proof(
+            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
+        ));
+    }
+    let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
+        &statement,
+        proof_randomness_seed_hex,
+        proof_randomness_nonce_hex,
+    )?;
+    let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
+    let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+    let target_statement = statement
+        .target_decryption_share
+        .as_ref()
+        .ok_or_else(|| invalid_succinct_setup_proof("target-decryption share statement missing"))?;
+
+    Ok(json!({
+        "ok": true,
+        "operation": "generateTargetDecryptionShareProof",
+        "proofFamily": statement.context.proof_family,
+        "statementHash": to_hex(&statement.statement_hash()),
+        "limbCount": statement.limb_count(),
+        "targetRole": target_statement.target_role,
+        "targetRnsLimbIndex": target_statement.target_rns_limb_index,
+        "proofByteLength": proof_bytes.len(),
+        "proofBytesHex": to_hex(&proof_bytes),
+    }))
+}
+
+pub(crate) fn verify_target_decryption_share_proof_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let statement = target_decryption_share_statement_from_request(request)?;
+    let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
+    let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
+    verify_evaluation_key_share(&statement, &proof)?;
+    let target_statement = statement
+        .target_decryption_share
+        .as_ref()
+        .ok_or_else(|| invalid_succinct_setup_proof("target-decryption share statement missing"))?;
+
+    Ok(json!({
+        "ok": true,
+        "operation": "verifyTargetDecryptionShareProof",
+        "proofFamily": statement.context.proof_family,
+        "statementHash": to_hex(&statement.statement_hash()),
+        "limbCount": statement.limb_count(),
+        "targetRole": target_statement.target_role,
+        "targetRnsLimbIndex": target_statement.target_rns_limb_index,
         "proofByteLength": proof_bytes.len(),
     }))
 }
@@ -445,6 +479,7 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
         private_vss_share: None,
         compact_vss_share_linkage: None,
         compact_same_secret_bridge: None,
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -594,6 +629,7 @@ fn compact_vss_share_linkage_statement_from_request(
             recipient_share_commitment,
         }),
         compact_same_secret_bridge: None,
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -625,6 +661,8 @@ fn compact_vss_share_linkage_witness_from_request(
             "recipientShareOpeningRandomness",
         )?,
         compact_vss_carry_witnesses: read_i64_array(request, "carryWitnesses")?,
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     })
 }
 
@@ -727,6 +765,7 @@ fn compact_same_secret_bridge_statement_from_request(
             target_constant_commitment_roots,
             target_constant_commitments,
         }),
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -749,6 +788,295 @@ fn compact_same_secret_bridge_witness_from_request(
         compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         compact_vss_recipient_share_opening_randomness: Vec::new(),
         compact_vss_carry_witnesses: Vec::new(),
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
+    })
+}
+
+fn target_decryption_share_statement_from_request(
+    request: &Value,
+) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
+    let context_value = request
+        .get("context")
+        .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
+    let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
+        .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
+    let target_value = request
+        .get("targetDecryptionShare")
+        .ok_or_else(|| invalid_succinct_setup_proof("targetDecryptionShare must be present"))?;
+    let context = proof_context_from_value(
+        context_value,
+        SuccinctSetupProofFamilyShape::TargetDecryptionShare,
+    )?;
+    let target_share_proof_statement_root =
+        read_string(target_value, "targetShareProofStatementRoot")?;
+    if context.binding_roots[0].1 != target_share_proof_statement_root {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share context root must match the target share proof statement root",
+        ));
+    }
+
+    let public_matrix_seed_hash = read_string(target_value, "publicMatrixSeedHash")?.to_string();
+    let target_basis_hash = read_string(target_value, "targetBasisHash")?.to_string();
+    let trustee_identity = read_string(target_value, "trusteeIdentity")?.to_string();
+    let trustee_roster_position = read_u64(target_value, "trusteeRosterPosition")?;
+    let target_role = read_string(target_value, "targetRole")?.to_string();
+    let target_rns_limb_index = usize::try_from(read_u64(target_value, "targetRnsLimbIndex")?)
+        .map_err(|_| invalid_succinct_setup_proof("targetRnsLimbIndex does not fit usize"))?;
+    let target_rns_prime = read_u64(target_value, "targetRnsPrime")?;
+    let aggregate_commitment_root =
+        read_string(target_value, "aggregateCommitmentRoot")?.to_string();
+    let aggregate_commitment_value = target_value
+        .get("aggregateCommitment")
+        .ok_or_else(|| invalid_succinct_setup_proof("aggregateCommitment must be present"))?;
+    let aggregate_commitment = compact_vss_share_linkage_commitment_from_value(
+        aggregate_commitment_value,
+        CompactVssCommandCommitmentExpectation {
+            field_name: "targetDecryptionShare.aggregateCommitment".to_string(),
+            root: &aggregate_commitment_root,
+            role: "aggregate-threshold-share",
+            public_matrix_seed_hash: &public_matrix_seed_hash,
+            rns_limb_index: target_rns_limb_index,
+            rns_prime: target_rns_prime,
+            ring_degree,
+        },
+    )?;
+
+    let smudging_commitment_set = target_value
+        .get("smudgingCommitmentSet")
+        .ok_or_else(|| invalid_succinct_setup_proof("smudgingCommitmentSet must be present"))?;
+    let smudging_commitment_set_root =
+        validated_target_decryption_smudging_commitment_set_root(smudging_commitment_set)?;
+    if context.binding_roots[2].1 != smudging_commitment_set_root {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share context root must match the smudging commitment set root",
+        ));
+    }
+    if read_string(smudging_commitment_set, "publicMatrixSeedHash")? != public_matrix_seed_hash
+        || read_string(smudging_commitment_set, "targetBasisHash")? != target_basis_hash
+        || read_u64(smudging_commitment_set, "ringDegree")? != ring_degree as u64
+        || read_string(smudging_commitment_set, "commitmentRole")?
+            != TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE
+    {
+        return Err(invalid_succinct_setup_proof(
+            "smudging commitment set metadata must match the target-decryption share statement",
+        ));
+    }
+    if read_u64(smudging_commitment_set, "activeRnsLimbCount")? <= target_rns_limb_index as u64 {
+        return Err(invalid_succinct_setup_proof(
+            "smudging commitment set must cover the requested target limb",
+        ));
+    }
+    let smudging_polynomial_degree = usize::try_from(read_u64(
+        smudging_commitment_set,
+        "smudgingPolynomialDegree",
+    )?)
+    .map_err(|_| invalid_succinct_setup_proof("smudgingPolynomialDegree does not fit usize"))?;
+    let smudging_coefficient_bound = read_i64(smudging_commitment_set, "smudgingCoefficientBound")?;
+    let smudging_signed_coefficient_offset =
+        read_i64(smudging_commitment_set, "signedCoefficientOffset")?;
+    let smudging_message_coefficient_bound =
+        read_u64(smudging_commitment_set, "messageCoefficientBound")?;
+    let (smudging_commitment_roots, smudging_commitments) =
+        target_decryption_smudging_commitments_from_set(
+            smudging_commitment_set,
+            &target_role,
+            target_rns_limb_index,
+            target_rns_prime,
+            &public_matrix_seed_hash,
+            ring_degree,
+            smudging_polynomial_degree,
+        )?;
+
+    let statement = TrusteeEvaluationKeyStatement {
+        context,
+        ring_degree,
+        keys: Vec::new(),
+        same_secret_linkage: None,
+        private_vss_share: None,
+        compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
+        target_decryption_share: Some(TargetDecryptionShareStatement {
+            public_matrix_seed_hash,
+            target_basis_hash,
+            trustee_identity,
+            trustee_roster_position,
+            target_role,
+            target_rns_limb_index,
+            target_rns_prime,
+            interpolation_point: read_u64(target_value, "interpolationPoint")?,
+            target_ciphertext_component_one: read_u64_array(
+                target_value,
+                "targetCiphertextComponentOne",
+            )?,
+            released_partial_decryption: read_u64_array(target_value, "releasedPartialDecryption")?,
+            aggregate_commitment_root,
+            aggregate_commitment,
+            aggregate_message_coefficient_bound: read_u64(
+                target_value,
+                "aggregateMessageCoefficientBound",
+            )?,
+            smudging_commitment_set_root,
+            smudging_commitment_roots,
+            smudging_commitments,
+            smudging_polynomial_degree,
+            smudging_coefficient_bound,
+            smudging_signed_coefficient_offset,
+            smudging_message_coefficient_bound,
+            plaintext_multiple: read_u64(target_value, "plaintextMultiple")?,
+        }),
+    };
+    statement.validate_shape()?;
+
+    Ok(statement)
+}
+
+fn validated_target_decryption_smudging_commitment_set_root(
+    smudging_commitment_set: &Value,
+) -> CanonicalResult<String> {
+    if read_string(smudging_commitment_set, "objectType")?
+        != "TargetDecryptionSmudgingCommitmentSet"
+        || read_u64(smudging_commitment_set, "objectVersion")? != 1
+    {
+        return Err(invalid_succinct_setup_proof(
+            "smudgingCommitmentSet must be TargetDecryptionSmudgingCommitmentSet version 1",
+        ));
+    }
+    let root = read_string(smudging_commitment_set, "smudgingCommitmentSetRoot")?;
+    let mut without_root = smudging_commitment_set.clone();
+    without_root
+        .as_object_mut()
+        .ok_or_else(|| invalid_succinct_setup_proof("smudgingCommitmentSet must be an object"))?
+        .remove("smudgingCommitmentSetRoot")
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("smudgingCommitmentSet must include its root")
+        })?;
+    let expected_root =
+        derive_protocol_hash("TargetDecryptionSmudgingCommitmentSetRoot", &without_root)?;
+    if root != expected_root {
+        return Err(invalid_succinct_setup_proof(
+            "smudgingCommitmentSetRoot does not match its canonical payload",
+        ));
+    }
+
+    Ok(root.to_string())
+}
+
+fn target_decryption_smudging_commitments_from_set(
+    smudging_commitment_set: &Value,
+    target_role: &str,
+    target_rns_limb_index: usize,
+    target_rns_prime: u64,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    smudging_polynomial_degree: usize,
+) -> CanonicalResult<(Vec<String>, Vec<CompactVssShareLinkageCommitment>)> {
+    let records = smudging_commitment_set
+        .get("commitmentRecords")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("smudgingCommitmentSet.commitmentRecords must be an array")
+        })?;
+    let mut roots_by_degree = vec![None; smudging_polynomial_degree];
+    let mut commitments_by_degree = vec![None; smudging_polynomial_degree];
+
+    for (record_index, record) in records.iter().enumerate() {
+        if read_string(record, "objectType")? != "TargetDecryptionSmudgingCommitment"
+            || read_u64(record, "objectVersion")? != 1
+        {
+            return Err(invalid_succinct_setup_proof(
+                "smudging commitment records must be TargetDecryptionSmudgingCommitment version 1",
+            ));
+        }
+        let record_role = read_string(record, "role")?;
+        let record_limb_index = usize::try_from(read_u64(record, "rnsLimbIndex")?)
+            .map_err(|_| invalid_succinct_setup_proof("rnsLimbIndex does not fit usize"))?;
+        let record_rns_prime = read_u64(record, "rnsPrime")?;
+        let polynomial_degree = usize::try_from(read_u64(record, "polynomialDegree")?)
+            .map_err(|_| invalid_succinct_setup_proof("polynomialDegree does not fit usize"))?;
+        if record_role != target_role
+            || record_limb_index != target_rns_limb_index
+            || record_rns_prime != target_rns_prime
+        {
+            continue;
+        }
+        if polynomial_degree == 0 || polynomial_degree > smudging_polynomial_degree {
+            return Err(invalid_succinct_setup_proof(
+                "smudging commitment record polynomial degree is outside the statement range",
+            ));
+        }
+        let degree_index = polynomial_degree - 1;
+        if roots_by_degree[degree_index].is_some() {
+            return Err(invalid_succinct_setup_proof(
+                "smudging commitment set has duplicate records for the target slice",
+            ));
+        }
+        let commitment_root = read_string(record, "commitmentRoot")?.to_string();
+        let commitment_value = record.get("commitment").ok_or_else(|| {
+            invalid_succinct_setup_proof("smudging commitment record must include a commitment")
+        })?;
+        let commitment = compact_vss_share_linkage_commitment_from_value(
+            commitment_value,
+            CompactVssCommandCommitmentExpectation {
+                field_name: format!(
+                    "smudgingCommitmentSet.commitmentRecords.{record_index}.commitment"
+                ),
+                root: &commitment_root,
+                role: TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
+                public_matrix_seed_hash,
+                rns_limb_index: target_rns_limb_index,
+                rns_prime: target_rns_prime,
+                ring_degree,
+            },
+        )?;
+        roots_by_degree[degree_index] = Some(commitment_root);
+        commitments_by_degree[degree_index] = Some(commitment);
+    }
+
+    let roots = roots_by_degree
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "smudging commitment set is missing a target-slice polynomial degree",
+            )
+        })?;
+    let commitments = commitments_by_degree
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "smudging commitment set is missing a target-slice commitment",
+            )
+        })?;
+
+    Ok((roots, commitments))
+}
+
+fn target_decryption_share_witness_from_request(
+    request: &Value,
+) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
+    Ok(TrusteeEvaluationKeyWitness {
+        secret_coefficients: Vec::new(),
+        error_coefficients_by_key: Vec::new(),
+        negative_indicator_coefficients: Vec::new(),
+        opening_randomness_by_limb: Vec::new(),
+        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        private_vss_opening_randomness_by_shamir_index: Vec::new(),
+        private_vss_carry_witnesses: Vec::new(),
+        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_messages: Vec::new(),
+        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_opening_randomness: Vec::new(),
+        compact_vss_carry_witnesses: Vec::new(),
+        target_decryption_message_vectors: read_i64_matrix2(
+            request,
+            "targetDecryptionMessageVectors",
+        )?,
+        target_decryption_opening_randomness_by_commitment: read_i64_matrix(
+            request,
+            "targetDecryptionOpeningRandomnessByCommitment",
+        )?,
     })
 }
 
@@ -763,7 +1091,6 @@ fn compact_vss_share_linkage_commitment_from_value(
         )));
     }
     if read_string(value, "profileId")? != COMPACT_VSS_COMMITMENT_PROFILE_ID
-        || read_string(value, "developmentScope")? != COMPACT_VSS_COMMITMENT_DEVELOPMENT_SCOPE
         || read_u64(value, "outputCoordinateCount")? != COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64
         || read_u64(value, "randomnessColumnCount")? != COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64
     {
@@ -989,6 +1316,15 @@ fn read_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
         })
 }
 
+fn read_i64(value: &Value, field_name: &str) -> CanonicalResult<i64> {
+    value
+        .get(field_name)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(format!("{field_name} must be a signed integer"))
+        })
+}
+
 fn read_hex_bytes(value: &Value, field_name: &str) -> CanonicalResult<Vec<u8>> {
     let text = read_string(value, field_name)?;
     decode_hex_bytes(text, field_name)
@@ -1013,6 +1349,14 @@ fn decode_hex_bytes(text: &str, field_name: &str) -> CanonicalResult<Vec<u8>> {
     if !text.len().is_multiple_of(2) {
         return Err(invalid_succinct_setup_proof(format!(
             "{field_name} must contain whole bytes"
+        )));
+    }
+    if !text
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{field_name} must be lowercase hex"
         )));
     }
     (0..text.len())

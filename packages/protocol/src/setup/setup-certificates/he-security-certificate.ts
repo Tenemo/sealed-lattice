@@ -407,7 +407,7 @@ const bgvHeSecurityCertificateBody = (
             largestExposedModulusBits,
             extendedUtilityCeilLog2Product,
         ),
-        targetDecryptionStatus: {
+        targetDecryptionProfileBinding: {
             targetDecryptionProfileId,
         },
     };

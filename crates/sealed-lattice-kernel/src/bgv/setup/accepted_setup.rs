@@ -384,21 +384,6 @@ const HE_SECURITY_CERTIFICATE_OBJECT_TYPE: &str = "BgvHeSecurityCertificate";
 const PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID: &str =
     "sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1";
 const PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER: u64 = 6;
-const COMPACT_VSS_PUBLIC_SETUP_DOWNLOAD_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
-const COMPACT_VSS_PUBLIC_SETUP_PROOF_BUDGET_BYTES: u64 = 32 * 1024 * 1024;
-const COMPACT_VSS_PRIVATE_MAILBOX_BUDGET_BYTES: u64 = 64 * 1024 * 1024;
-const COMPACT_VSS_SOURCE_TRUSTEE_UPLOAD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
-const COMPACT_VSS_PERSISTENT_LOCAL_STATE_BUDGET_BYTES: u64 = 32 * 1024 * 1024;
-const COMPACT_VSS_PERSISTENT_PROOF_WITNESS_BUDGET_BYTES: u64 = 16 * 1024 * 1024;
-const COMPACT_VSS_PUBLIC_VERIFICATION_TIME_BUDGET_MILLISECONDS: u64 = 30_000;
-const COMPACT_VSS_RECIPIENT_VERIFICATION_TIME_BUDGET_MILLISECONDS: u64 = 30_000;
-const COMPACT_VSS_SOURCE_TRUSTEE_PROVING_TIME_BUDGET_MILLISECONDS: u64 = 600_000;
-const COMPACT_VSS_PUBLIC_VERIFIER_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
-const COMPACT_VSS_RECIPIENT_MEMORY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
-const COMPACT_VSS_SOURCE_TRUSTEE_MEMORY_BUDGET_BYTES: u64 = 1024 * 1024 * 1024;
-const COMPACT_VSS_LARGEST_SINGLE_OBJECT_BUDGET_BYTES: u64 = 16 * 1024 * 1024;
-const COMPACT_VSS_COLD_MATRIX_EXPANSION_BUDGET_MILLISECONDS: u64 = 5_000;
-const COMPACT_VSS_WARM_MATRIX_EXPANSION_BUDGET_MILLISECONDS: u64 = 1_000;
 const PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER: u64 = 7;
 const EVALUATOR_REPLAY_PROFILE_LABEL: &str = "direct-encrypted-ballot-evaluator-replay";
 const EVALUATOR_PACKING_PROFILE_LABEL: &str = "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing";
@@ -552,15 +537,10 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "canonicalTargetBasis": canonical_target_basis_value()?,
         "canonicalTargetBasisHash": canonical_target_basis_hash()?,
-        "compactVssProfileBudget": compact_vss_profile_budget_value(),
         "compactVssMatrixExpansionProfile": compact_vss_matrix_expansion_profile_value(),
         "compactVssMatrixExpansionProfileHash": compact_vss_matrix_expansion_profile_hash()?,
         "compactVssParameterCertificateInputBinding": compact_vss_parameter_certificate_input_binding_value()?,
         "compactVssParameterCertificateInputBindingHash": compact_vss_parameter_certificate_input_binding_hash()?,
-        "compactVssParameterEvidence": compact_vss_parameter_evidence_value()?,
-        "compactVssParameterEvidenceHash": compact_vss_parameter_evidence_hash()?,
-        "compactVssDevelopmentMeasurement": compact_vss_development_measurement_value()?,
-        "compactVssPrivateWitnessPayloadMeasurement": compact_vss_private_witness_payload_measurement_value()?,
         "currentVssMaterialBaselineReport": current_vss_material_baseline_report_value()?,
         "publicVssCommitmentMaterialSizeProfile": public_vss_commitment_material_size_profile_value()?,
         "publicVssCommitmentMaterialSizeProfileHash": public_vss_commitment_material_size_profile_hash()?,
@@ -575,18 +555,9 @@ pub(crate) fn describe_collective_bgv_setup_profile() -> CanonicalResult<Value> 
             "setupProofAccountingCertificate": setup_proof_accounting_certificate_with_hash_value()?,
             "heSecurityCertificate": accepted_he_security_certificate_with_hash_value()?,
         },
-        "verifierStatuses": [
-            "accepted",
-            "pending",
-            "refused",
-            "aborted",
-            "forkDetected",
-            "outsideProfile"
-        ],
         "phaseOrder": phase_order_value(),
         "phaseOrderHash": phase_order_hash()?,
         "requiredFinalObjects": REQUIRED_FINAL_OBJECTS,
-        "genericKeySwitchPolicy": "refused-unless-explicitly-required-by-frozen-evaluator-schedule",
         "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
     }))
 }
@@ -1014,9 +985,7 @@ fn public_vss_commitment_material_size_profile_value() -> CanonicalResult<Value>
         "objectType": "PublicVssCommitmentMaterialSizeProfile",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "measurementKind": "static-full-profile-coefficient-byte-accounting",
         "ringDegree": POLYNOMIAL_DEGREE,
-        "ringDegreeStatus": "profile-ring",
         "participantCount": FIRST_PROFILE_PARTICIPANT_COUNT,
         "rnsLimbCount": DATA_PRIMES.len(),
         "shamirCoefficientCount": FIRST_PROFILE_DECRYPTION_THRESHOLD,
@@ -1027,48 +996,7 @@ fn public_vss_commitment_material_size_profile_value() -> CanonicalResult<Value>
         "publishedCommitmentCount": commitment_count,
         "fullMaterialCoefficientBytes": full_material_coefficient_bytes,
         "fullMaterialCoefficientMebibytes": full_material_coefficient_bytes / bytes_per_mebibyte,
-        "jsonOverheadStatus": "excluded-from-lower-bound",
-        "streamingRequirement": "binary-chunked-stream-verification-with-one-commitment-resident",
     }))
-}
-
-fn compact_vss_profile_budget_value() -> Value {
-    json!({
-        "objectType": "CompactVssProfileBudget",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "budgetScope": "development budget for the future compact VSS target-ready profile; not verification evidence",
-        "publicVerifier": {
-            "publicSetupDownloadBudgetBytes": COMPACT_VSS_PUBLIC_SETUP_DOWNLOAD_BUDGET_BYTES,
-            "publicSetupProofBudgetBytes": COMPACT_VSS_PUBLIC_SETUP_PROOF_BUDGET_BYTES,
-            "peakMemoryBudgetBytes": COMPACT_VSS_PUBLIC_VERIFIER_MEMORY_BUDGET_BYTES,
-            "verificationTimeBudgetMilliseconds": COMPACT_VSS_PUBLIC_VERIFICATION_TIME_BUDGET_MILLISECONDS,
-            "largestSingleObjectBudgetBytes": COMPACT_VSS_LARGEST_SINGLE_OBJECT_BUDGET_BYTES,
-            "largestWasmBoundaryCopyBudgetBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
-        },
-        "recipientTrustee": {
-            "privateMailboxBudgetBytes": COMPACT_VSS_PRIVATE_MAILBOX_BUDGET_BYTES,
-            "peakMemoryBudgetBytes": COMPACT_VSS_RECIPIENT_MEMORY_BUDGET_BYTES,
-            "verificationTimeBudgetMilliseconds": COMPACT_VSS_RECIPIENT_VERIFICATION_TIME_BUDGET_MILLISECONDS,
-        },
-        "sourceTrustee": {
-            "totalUploadBudgetBytes": COMPACT_VSS_SOURCE_TRUSTEE_UPLOAD_BUDGET_BYTES,
-            "peakMemoryBudgetBytes": COMPACT_VSS_SOURCE_TRUSTEE_MEMORY_BUDGET_BYTES,
-            "provingTimeBudgetMilliseconds": COMPACT_VSS_SOURCE_TRUSTEE_PROVING_TIME_BUDGET_MILLISECONDS,
-        },
-        "persistentLocalState": {
-            "persistentStateBudgetBytes": COMPACT_VSS_PERSISTENT_LOCAL_STATE_BUDGET_BYTES,
-            "proofWitnessBudgetBytes": COMPACT_VSS_PERSISTENT_PROOF_WITNESS_BUDGET_BYTES,
-        },
-        "matrixExpansion": {
-            "coldCacheBudgetMilliseconds": COMPACT_VSS_COLD_MATRIX_EXPANSION_BUDGET_MILLISECONDS,
-            "warmCacheBudgetMilliseconds": COMPACT_VSS_WARM_MATRIX_EXPANSION_BUDGET_MILLISECONDS,
-        },
-        "accountingRules": {
-            "privateMailboxBytes": "private recipient envelopes are reported separately from public verifier setup bytes",
-            "persistentProofWitnessBytes": "the restorable target-proof witness is reported separately from setup download bytes",
-        },
-    })
 }
 
 fn compact_vss_matrix_expansion_profile_hash() -> CanonicalResult<String> {
@@ -1097,9 +1025,7 @@ fn compact_vss_matrix_expansion_profile_value() -> Value {
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-        "developmentScope": "development-only-not-certified-for-production-use",
         "matrixKind": "compact-vss-commitment-key",
-        "keyScope": "one common public matrix seed hash is used for compact coefficient, recipient-share, and aggregate threshold commitments",
         "ringDegree": POLYNOMIAL_DEGREE,
         "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
         "outputCoordinateCount": output_coordinate_count,
@@ -1135,22 +1061,13 @@ fn compact_vss_matrix_expansion_profile_value() -> Value {
             "ringDegree",
             "blockIndex"
         ],
-        "biasBoundary": "matrix residues and projection indices use rejection sampling; direct modulo reduction without rejection is not part of this profile",
         "coordinateCountPerCommitment": coordinate_count_per_commitment,
         "sampledMatrixResiduesPerCoordinate": sampled_matrix_residues_per_coordinate,
         "sampledProjectionIndicesPerCoordinate": sampled_projection_indices_per_coordinate,
         "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
         "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
         "residueMultiplyAddsPerCommitment": sampled_matrix_residues_per_commitment,
-        "certificateBoundary": "deterministic matrix-expansion profile only; binding and hiding still require reviewed Module-SIS and MLWE estimator evidence",
     })
-}
-
-fn compact_vss_parameter_evidence_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "CompactVssParameterEvidenceHash",
-        &compact_vss_parameter_evidence_value()?,
-    )
 }
 
 fn compact_vss_parameter_certificate_input_binding_hash() -> CanonicalResult<String> {
@@ -1179,6 +1096,39 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
     let source_rns_limb_count = DATA_PRIMES.len() as u64;
     let target_rns_limb_count =
         (crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1) as u64;
+    let commitment_modulus_limb_count = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64;
+    let output_coordinate_count =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64;
+    let randomness_column_count =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64;
+    let projection_weight =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_PROJECTION_WEIGHT as u64;
+    let input_column_count = 1_u64
+        .checked_add(randomness_column_count)
+        .ok_or_else(|| static_accounting_error("compact VSS input column count overflowed"))?;
+    let coordinate_count_per_commitment = commitment_modulus_limb_count
+        .checked_mul(output_coordinate_count)
+        .ok_or_else(|| {
+            static_accounting_error("compact VSS coordinate count per commitment overflowed")
+        })?;
+    let sampled_matrix_residues_per_coordinate = input_column_count
+        .checked_mul(projection_weight)
+        .ok_or_else(|| {
+            static_accounting_error("compact VSS sampled matrix residues per coordinate overflowed")
+        })?;
+    let sampled_projection_indices_per_coordinate = sampled_matrix_residues_per_coordinate;
+    let sampled_matrix_residues_per_commitment = coordinate_count_per_commitment
+        .checked_mul(sampled_matrix_residues_per_coordinate)
+        .ok_or_else(|| {
+            static_accounting_error("compact VSS sampled matrix residues per commitment overflowed")
+        })?;
+    let sampled_projection_indices_per_commitment = coordinate_count_per_commitment
+        .checked_mul(sampled_projection_indices_per_coordinate)
+        .ok_or_else(|| {
+            static_accounting_error(
+                "compact VSS sampled projection indices per commitment overflowed",
+            )
+        })?;
     let maximum_recipient_trustee_point = roster.participant_count;
     let maximum_one_source_shamir_scalar_l1 = shamir_scalar_l1_amplification(
         maximum_recipient_trustee_point,
@@ -1209,7 +1159,6 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-        "developmentScope": "development-only-not-certified-for-production-use",
         "participantCount": roster.participant_count,
         "sourceRnsLimbCount": source_rns_limb_count,
         "targetRnsLimbCount": target_rns_limb_count,
@@ -1220,9 +1169,11 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
             "commitmentModulusLimbs": commitment_modulus_limbs,
-            "outputCoordinateCount": 16_u64,
+            "outputCoordinateCount": output_coordinate_count,
             "messageWidth": 1_u64,
-            "randomnessWidth": 2_u64,
+            "randomnessWidth": randomness_column_count,
+            "projectionWeight": projection_weight,
+            "coordinateCountPerCommitment": coordinate_count_per_commitment,
             "inputColumnLabels": [
                 "message",
                 "randomness:0",
@@ -1232,7 +1183,6 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
             "homomorphicScalarRule": "public Shamir and aggregation scalars multiply both message and randomness columns over the same commitment key",
         },
         "commonCommitmentKey": {
-            "keyScope": "one common public matrix seed hash is used for coefficient, recipient-share, and aggregate threshold commitments",
             "matrixResidueHashDomain": "sealed-lattice-compact-vss-commitment/matrix-residue-v1",
             "projectionIndexHashDomain": "sealed-lattice-compact-vss-commitment/projection-index-v1",
             "rejectionSamplingRule": "sample little-endian 64-bit chunks and reject values at or above 2^64 - (2^64 mod modulus or ringDegree)",
@@ -1258,7 +1208,15 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
                 "ringDegree",
                 "blockIndex"
             ],
-            "statementBindingRule": "source trustee, recipient trustee, coefficient index, limb, and setup context are bound in statement roots, not by deriving incompatible matrices",
+            "sparseProjectionShape": {
+                "inputColumnCount": input_column_count,
+                "projectionWeight": projection_weight,
+                "coordinateCountPerCommitment": coordinate_count_per_commitment,
+                "sampledMatrixResiduesPerCoordinate": sampled_matrix_residues_per_coordinate,
+                "sampledProjectionIndicesPerCoordinate": sampled_projection_indices_per_coordinate,
+                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+            },
         },
         "messageEncoding": {
             "sourceCoefficientRepresentation": "canonical residue modulo the selected source RNS prime",
@@ -1269,7 +1227,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
             "paddingAndBlockOrder": "one coefficient-domain residue vector per commitment, ordered by coefficient index",
             "freshEncodingRule": "exact canonical residue encoding",
             "linearDecoder": "identity over the selected RNS limb",
-            "derivedEncodingRule": "Shamir and aggregate encodings are linear combinations of exact residue vectors and are checked for no-wrap by the parameter certificate inputs",
+            "derivedEncodingRule": "Shamir recipient-share encodings are exact residues; aggregate threshold openings bind the carried public-sum message together with the reduced share and non-negative carry witness",
         },
         "normInputClasses": [
             {
@@ -1281,30 +1239,17 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
             },
             {
                 "className": "messageEncodingNorm",
-                "coefficientRange": "0 <= messageCoefficient < selectedRnsPrime",
-                "compressionRule": "no low-bit compression or CRT packing is part of this development profile",
+                "sourceCoefficientUpperBoundMultiplier": 1_u64,
+                "recipientShareCoefficientUpperBoundMultiplier": 1_u64,
+                "aggregateCoefficientUpperBoundMultiplier": roster.participant_count,
             },
             {
                 "className": "openingRandomnessNorm",
-                "randomnessColumnCount": 2_u64,
-                "requiredCertificateInput": "certificate must bind distribution and accepted norm for every opening column",
+                "randomnessColumnCount": randomness_column_count,
             },
             {
                 "className": "aggregateDealerCount",
                 "sourceTrusteeCount": roster.participant_count,
-                "aggregationRule": "one recipient aggregate threshold commitment combines every source trustee contribution for that recipient and active target limb",
-            },
-            {
-                "className": "proofExtractedOpeningNorm",
-                "requiredCertificateInput": "public linkage proof backend must emit extractor-bound opening norms",
-            },
-            {
-                "className": "targetDecryptionOpeningNorm",
-                "requiredCertificateInput": "target-decryption proof backend must bind restored compact aggregate openings for the accepted target basis",
-            },
-            {
-                "className": "targetDecryptionRecombinationCoefficientAmplification",
-                "requiredCertificateInput": "target recombination proof must bind denominator-cleared Lagrange coefficients and decoding margin",
             },
         ],
         "estimatorInputRows": [
@@ -1314,8 +1259,13 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
                 "targetSecurityBits": 128_u64,
                 "ringDegree": POLYNOMIAL_DEGREE,
                 "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-                "outputCoordinateCount": 16_u64,
-                "shortVectorBoundSource": "openingRandomnessNorm plus proofExtractedOpeningNorm plus aggregate Shamir scalar L1 amplification",
+                "commitmentModulusLimbs": commitment_modulus_limbs,
+                "outputCoordinateCount": output_coordinate_count,
+                "messageWidth": 1_u64,
+                "randomnessWidth": randomness_column_count,
+                "projectionWeight": projection_weight,
+                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
             },
             {
                 "rowId": "compact-vss-module-lwe-hiding-input",
@@ -1323,499 +1273,20 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
                 "targetSecurityBits": 128_u64,
                 "ringDegree": POLYNOMIAL_DEGREE,
                 "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-                "openingDistributionSource": "openingRandomnessNorm with recipient-hidden opening leakage boundary",
+                "commitmentModulusLimbs": commitment_modulus_limbs,
+                "outputCoordinateCount": output_coordinate_count,
+                "messageWidth": 1_u64,
+                "randomnessWidth": randomness_column_count,
+                "projectionWeight": projection_weight,
+                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
             },
         ],
-        "proofCoverageInputs": {
-            "shareLinkageProof": "one public proof per source trustee should batch every recipient and target limb for coefficient-to-recipient-share linkage",
-            "sameSecretBridgeProof": "target-basis compact constant coefficient commitments must bind to the same signed ternary trustee secret as data-basis setup proof roots",
-            "targetDecryptionProof": "recipient-owned restored compact aggregate opening material must generate the target-bound decryption share proof without dealer state",
-            "smudging": "released smudged target-decryption shares require zero-knowledge proof coverage before production activation",
-            "recombination": "target result acceptance requires denominator-cleared Lagrange recombination and decoding-margin verification",
-        },
-        "structuredRingDisclosure": "structured-ring attack cost must be reviewed for the selected ring, module shape, modulus limbs, sparse projection, and common-key reuse",
         "sameSecretBridgeInput": {
             "targetBasisHash": canonical_target_basis_hash()?,
             "targetRnsPrimes": target_rns_primes,
             "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root()?,
-            "compactCommitmentEncoding": "target-basis compact commitments use exact canonical residues and the shared compact matrix key",
             "targetBasisLimbOrder": "profile-order-prefix",
-        },
-    }))
-}
-
-fn compact_vss_parameter_evidence_value() -> CanonicalResult<Value> {
-    let roster = first_closure_roster_parameters();
-    let source_rns_limb_count = DATA_PRIMES.len() as u64;
-    let target_rns_limb_count =
-        (crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1) as u64;
-    let threshold_degree = roster.decryption_threshold;
-    let output_coordinate_count = 16_u64;
-    let randomness_column_count = 2_u64;
-    let projection_weight = 32_u64;
-    let source_coefficient_commitments = checked_accounting_product(
-        &[
-            roster.participant_count,
-            source_rns_limb_count,
-            threshold_degree,
-        ],
-        "compact VSS source coefficient commitment count",
-    )?;
-    let recipient_share_commitments = checked_accounting_product(
-        &[
-            roster.participant_count,
-            roster.participant_count,
-            target_rns_limb_count,
-        ],
-        "compact VSS recipient share commitment count",
-    )?;
-    let aggregate_threshold_commitments = checked_accounting_product(
-        &[roster.participant_count, target_rns_limb_count],
-        "compact VSS aggregate threshold commitment count",
-    )?;
-    let total_commitments = source_coefficient_commitments
-        .checked_add(recipient_share_commitments)
-        .and_then(|value| value.checked_add(aggregate_threshold_commitments))
-        .ok_or_else(|| static_accounting_error("compact VSS commitment count overflowed"))?;
-    let maximum_recipient_trustee_point = roster.participant_count;
-    let maximum_one_source_shamir_scalar_l1 =
-        shamir_scalar_l1_amplification(maximum_recipient_trustee_point, threshold_degree)?;
-    let one_recipient_aggregate_shamir_scalar_l1 = maximum_one_source_shamir_scalar_l1
-        .checked_mul(roster.participant_count)
-        .ok_or_else(|| {
-            static_accounting_error("aggregate Shamir scalar L1 amplification overflowed")
-        })?;
-    let commitment_modulus_limbs = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .map(|commitment_modulus_index| {
-            json!({
-                "commitmentModulusIndex": commitment_modulus_index,
-                "modulus": DATA_PRIMES[*commitment_modulus_index],
-            })
-        })
-        .collect::<Vec<_>>();
-
-    Ok(json!({
-        "objectType": "CompactVssParameterEvidence",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-        "developmentScope": "development-only-not-certified-for-production-use",
-        "evidenceKind": "static-development-parameter-search-inputs",
-        "certificateBoundary": "this is not a parameter certificate; binding, hiding, zero-knowledge extraction, and structured-ring estimates still require a reviewed estimator and proof backend",
-        "certificateInputBindingHash": compact_vss_parameter_certificate_input_binding_hash()?,
-        "commitmentShape": {
-            "ringDegree": POLYNOMIAL_DEGREE,
-            "outputCoordinateCount": output_coordinate_count,
-            "projectionWeight": projection_weight,
-            "randomnessColumnCount": randomness_column_count,
-            "commitmentModulusLimbs": commitment_modulus_limbs,
-            "matrixKeyRule": "one common public matrix seed hash is used for coefficient, recipient-share, and aggregate threshold commitments",
-            "encodingRule": "messages are exact canonical residues; low-bit compression and CRT packing are absent",
-        },
-        "sampleCounts": {
-            "sourceCoefficientCommitments": source_coefficient_commitments,
-            "recipientShareCommitments": recipient_share_commitments,
-            "aggregateThresholdCommitments": aggregate_threshold_commitments,
-            "totalCommitments": total_commitments,
-            "publicSampleCount": total_commitments,
-        },
-        "normInputs": {
-            "maximumOneSourceShamirScalarL1": maximum_one_source_shamir_scalar_l1,
-            "oneRecipientAggregateShamirScalarL1": one_recipient_aggregate_shamir_scalar_l1,
-            "aggregateDealerCount": roster.participant_count,
-            "messageEncoding": "committed message coefficients are canonical residues below the selected RNS prime",
-            "openingRandomness": "compact opening randomness is shape-checked now; certificate-grade distribution and norm bounds remain open",
-            "proofExtractedOpeningNorm": "not certified until the public linkage proof backend emits extractor-bound opening norms",
-            "targetDecryptionOpeningNorm": "statement derivation consumes restored compact local openings after recomputing aggregate openings against their declared compact roots; certificate-grade proof opening bounds remain open",
-            "recombinationAmplification": "smudging and denominator-cleared recombination reports are hash-bound now; certificate-grade proof binding and norm bounds remain open",
-            "certificateInputClasses": {
-                "shamirScalarL1Amplification": {
-                    "maximumOneSourceShamirScalarL1": maximum_one_source_shamir_scalar_l1,
-                    "oneRecipientAggregateShamirScalarL1": one_recipient_aggregate_shamir_scalar_l1,
-                    "maximumRecipientTrusteePoint": maximum_recipient_trustee_point,
-                    "shamirCoefficientCount": threshold_degree
-                },
-                "messageEncodingNorm": {
-                    "messageSource": "canonical per-prime share residues",
-                    "coefficientRange": "0 <= messageCoefficient < sourceRnsPrime",
-                    "compressionRule": "no low-bit compression or CRT packing is part of this development profile"
-                },
-                "openingRandomnessNorm": {
-                    "randomnessColumnCount": randomness_column_count,
-                    "currentEvidence": "recipient-share and aggregate opening credentials are shape-checked; certificate-grade distribution and norm bounds remain open"
-                },
-                "aggregateDealerCount": {
-                    "sourceTrusteeCount": roster.participant_count,
-                    "aggregationRule": "one recipient aggregate threshold commitment combines every source trustee contribution for that recipient and active target limb"
-                },
-                "proofExtractedOpeningNorm": {
-                    "currentEvidence": "not certified until the public linkage proof backend emits extractor-bound opening norms"
-                },
-                "targetDecryptionOpeningNorm": {
-                    "currentEvidence": "target-decryption share statements are derived from restored compact aggregate opening credentials after the credential openings are recomputed against declared compact roots; proof opening bounds remain open"
-                },
-                "targetDecryptionRecombinationCoefficientAmplification": {
-                    "currentEvidence": "smudging and denominator-cleared recombination reports are hash-bound now; certificate-grade proof binding and norm bounds remain open"
-                }
-            }
-        },
-        "securityAssumptionInputs": {
-            "hiding": "Module-LWE input for the selected commitment modulus limbs and opening distribution still needs estimator evidence",
-            "binding": "Module-SIS input for the selected commitment modulus limbs, projection dimensions, and accepted verifier norm bounds still needs estimator evidence",
-            "privacyGame": "public share commitments reveal only recipient-authorized shares when the future ZK linkage proof is simulator sound for at most three corrupted recipients",
-            "structuredRingDisclosure": "structured-ring attack cost is not certified by this development evidence object",
-        },
-        "sameSecretBridgeInput": {
-            "targetBasisHash": canonical_target_basis_hash()?,
-            "relation": "the signed ternary constant coefficient must bind the target-basis VSS commitments to the data-basis setup proof roots",
-            "existingSameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
-            "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root()?,
-            "boundSecretDependentProofFamilies": SAME_SECRET_BOUND_PROOF_FAMILIES,
-            "currentStatementBinding": "compact same-secret bridge statement sets bind target-basis compact constant coefficient roots to data-basis same-secret statement and proof roots; the bridge proof backend remains open",
-            "requiredStatementInputs": {
-                "ternarySupport": "the same signed ternary coefficient is represented in every bound basis",
-                "signedRepresentativeConvention": "coefficients use the setup proof signed representative convention before reduction into each RNS prime",
-                "compactCommitmentEncoding": "target-basis compact commitments use exact canonical residues and the shared compact matrix key",
-                "targetBasisLimbOrder": {
-                    "targetBasisHash": canonical_target_basis_hash()?,
-                    "primeOrder": "profile-order-prefix",
-                    "targetRnsLimbCount": target_rns_limb_count
-                },
-                "dataBasisProofRoots": [
-                    "sameSecretStatementRoot",
-                    "sameSecretProofFamilyBindingRoot",
-                    "trusteeSecretCommitmentRoot",
-                    "setup proof roots for public-key and evaluation-key uses"
-                ],
-                "targetBasisCommitmentRoots": [
-                    "compact source coefficient commitment roots for constant coefficients",
-                    "compact recipient-share commitment roots",
-                    "compact aggregate threshold commitment roots"
-                ],
-                "trusteeBinding": [
-                    "sourceTrusteeIdentity",
-                    "sourceTrusteeRosterPosition"
-                ],
-                "setupBinding": [
-                    "ceremonyId",
-                    "manifestHash",
-                    "rosterHash",
-                    "setupEpoch"
-                ],
-                "matrixKeyBinding": "publicMatrixSeedHash",
-                "sameSecretProfile": "same-secret-linkage-anchor"
-            },
-            "boundary": "the bridge proof is not implemented, so Q_share equals Q_target remains inactive",
-        },
-        "missingCertificateInputs": [
-            "reviewed MLWE estimator output for hiding",
-            "reviewed Module-SIS estimator output for binding",
-            "proof-extracted opening norm bounds",
-            "public share-linkage zero-knowledge proof backend",
-            "same-secret bridge proof over signed ternary coefficients",
-            "target-decryption proof backend and verifier activation for compact statements",
-            "smudging and recombination constraints for the target basis"
-        ],
-    }))
-}
-
-fn compact_vss_development_measurement_value() -> CanonicalResult<Value> {
-    let roster = first_closure_roster_parameters();
-    let source_rns_limb_count = DATA_PRIMES.len() as u64;
-    let target_rns_limb_count =
-        (crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1) as u64;
-    let commitment_modulus_limb_count = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64;
-    let output_coordinate_count = 16_u64;
-    let randomness_column_count = 2_u64;
-    let projection_weight = 32_u64;
-    let bytes_per_residue = 8_u64;
-    let single_compact_commitment_bytes = checked_accounting_product(
-        &[
-            commitment_modulus_limb_count,
-            output_coordinate_count,
-            bytes_per_residue,
-        ],
-        "single compact VSS commitment bytes",
-    )?;
-    let source_coefficient_commitments = checked_accounting_product(
-        &[
-            roster.participant_count,
-            source_rns_limb_count,
-            roster.decryption_threshold,
-        ],
-        "compact VSS source coefficient commitment count",
-    )?;
-    let recipient_share_commitments = checked_accounting_product(
-        &[
-            roster.participant_count,
-            roster.participant_count,
-            target_rns_limb_count,
-        ],
-        "compact VSS recipient share commitment count",
-    )?;
-    let aggregate_threshold_commitments = checked_accounting_product(
-        &[roster.participant_count, target_rns_limb_count],
-        "compact VSS aggregate threshold commitment count",
-    )?;
-    let full_coefficient_commitment_bytes = checked_accounting_product(
-        &[
-            source_coefficient_commitments,
-            single_compact_commitment_bytes,
-        ],
-        "compact VSS coefficient commitment bytes",
-    )?;
-    let recipient_share_commitment_bytes = checked_accounting_product(
-        &[recipient_share_commitments, single_compact_commitment_bytes],
-        "compact VSS recipient share commitment bytes",
-    )?;
-    let aggregate_threshold_commitment_bytes = checked_accounting_product(
-        &[
-            aggregate_threshold_commitments,
-            single_compact_commitment_bytes,
-        ],
-        "compact VSS aggregate threshold commitment bytes",
-    )?;
-    let total_compact_public_commitment_bytes = full_coefficient_commitment_bytes
-        .checked_add(recipient_share_commitment_bytes)
-        .and_then(|value| value.checked_add(aggregate_threshold_commitment_bytes))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "compact VSS public byte accounting overflowed",
-            )
-        })?;
-    let one_source_public_commitment_upload_bytes = checked_accounting_product(
-        &[
-            source_rns_limb_count
-                .checked_mul(roster.decryption_threshold)
-                .and_then(|value| {
-                    roster
-                        .participant_count
-                        .checked_mul(target_rns_limb_count)
-                        .and_then(|recipient_share_count| value.checked_add(recipient_share_count))
-                })
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        "compact VSS one-source public commitment count overflowed",
-                    )
-                })?,
-            single_compact_commitment_bytes,
-        ],
-        "compact VSS one-source public commitment upload bytes",
-    )?;
-    let current_full_coefficient_transport_bytes =
-        setup_transport_vss_material_byte_length_for_roster(&roster, POLYNOMIAL_DEGREE as u64)?;
-    let removed_bytes = current_full_coefficient_transport_bytes
-        .checked_sub(total_compact_public_commitment_bytes)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "compact VSS public commitment bytes exceed the current full transport baseline",
-            )
-        })?;
-    let residue_multiply_adds_per_commitment = checked_accounting_product(
-        &[
-            commitment_modulus_limb_count,
-            output_coordinate_count,
-            projection_weight,
-            1 + randomness_column_count,
-        ],
-        "compact VSS per-commitment residue multiply-add count",
-    )?;
-    let total_commitments = source_coefficient_commitments
-        .checked_add(recipient_share_commitments)
-        .and_then(|value| value.checked_add(aggregate_threshold_commitments))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "compact VSS commitment count overflowed",
-            )
-        })?;
-    let total_residue_multiply_adds = checked_accounting_product(
-        &[residue_multiply_adds_per_commitment, total_commitments],
-        "compact VSS total residue multiply-add count",
-    )?;
-    let aggregate_public_sum_residue_additions = checked_accounting_product(
-        &[
-            aggregate_threshold_commitments,
-            roster.participant_count,
-            commitment_modulus_limb_count,
-            output_coordinate_count,
-        ],
-        "compact VSS aggregate public-sum residue addition count",
-    )?;
-    let total_residue_arithmetic_operations = total_residue_multiply_adds
-        .checked_add(aggregate_public_sum_residue_additions)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "compact VSS residue arithmetic accounting overflowed",
-            )
-        })?;
-
-    Ok(json!({
-        "objectType": "CompactVssCommitmentMeasurement",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-        "developmentScope": "development-only-not-certified-for-production-use",
-        "measurementKind": "static-development-compact-vss-commitment-accounting",
-        "participantCount": roster.participant_count,
-        "sourceRnsLimbCount": source_rns_limb_count,
-        "targetRnsLimbCount": target_rns_limb_count,
-        "thresholdDegree": roster.decryption_threshold,
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "projectionWeight": projection_weight,
-        "commitmentModulusLimbCount": commitment_modulus_limb_count,
-        "outputCoordinateCount": output_coordinate_count,
-        "randomnessColumnCount": randomness_column_count,
-        "singleCompactCommitmentBytes": single_compact_commitment_bytes,
-        "fullCoefficientCommitmentBytes": full_coefficient_commitment_bytes,
-        "recipientShareCommitmentBytes": recipient_share_commitment_bytes,
-        "aggregateThresholdCommitmentBytes": aggregate_threshold_commitment_bytes,
-        "totalCompactPublicCommitmentBytes": total_compact_public_commitment_bytes,
-        "currentFullCoefficientTransportBytes": current_full_coefficient_transport_bytes,
-        "byteAccountingScope": "compact public commitment bodies only: source coefficient commitments, source-to-recipient share commitments, and recipient aggregate-threshold commitments",
-        "measuredPublicCommitmentRoles": [
-            "source coefficient commitments",
-            "source-to-recipient share commitments",
-            "recipient aggregate-threshold commitments"
-        ],
-        "excludedByteCategories": [
-            "compact commitment transport framing and container metadata",
-            "public share-linkage zero-knowledge proof bytes",
-            "compact same-secret bridge proof bytes",
-            "private mailbox share and opening-credential bytes",
-            "encrypted persistent local-state witness bytes",
-            "target-decryption proof bytes, production smudging proof bytes, and recombination proof material"
-        ],
-        "byteReduction": {
-            "removedBytes": removed_bytes,
-            "compactFractionOfCurrent": (total_compact_public_commitment_bytes as f64) / (current_full_coefficient_transport_bytes as f64),
-            "reductionFactor": (current_full_coefficient_transport_bytes as f64) / (total_compact_public_commitment_bytes as f64),
-        },
-        "largestSingleObjectBytes": single_compact_commitment_bytes,
-        "largestWasmBoundaryCopyBytes": single_compact_commitment_bytes,
-        "budgetComparison": {
-            "budgetScope": "compact public commitment bodies are compared with public setup download, source upload, largest-object, and WASM-copy budgets; excluded proof and transport categories are not counted here",
-            "publicSetupDownloadBudgetBytes": COMPACT_VSS_PUBLIC_SETUP_DOWNLOAD_BUDGET_BYTES,
-            "totalCompactPublicCommitmentFractionOfDownloadBudget": (total_compact_public_commitment_bytes as f64) / (COMPACT_VSS_PUBLIC_SETUP_DOWNLOAD_BUDGET_BYTES as f64),
-            "sourceTrusteeUploadBudgetBytes": COMPACT_VSS_SOURCE_TRUSTEE_UPLOAD_BUDGET_BYTES,
-            "oneSourcePublicCommitmentUploadBytes": one_source_public_commitment_upload_bytes,
-            "oneSourcePublicCommitmentUploadFractionOfBudget": (one_source_public_commitment_upload_bytes as f64) / (COMPACT_VSS_SOURCE_TRUSTEE_UPLOAD_BUDGET_BYTES as f64),
-            "largestSingleObjectBudgetBytes": COMPACT_VSS_LARGEST_SINGLE_OBJECT_BUDGET_BYTES,
-            "largestSingleObjectFractionOfBudget": (single_compact_commitment_bytes as f64) / (COMPACT_VSS_LARGEST_SINGLE_OBJECT_BUDGET_BYTES as f64),
-            "largestWasmBoundaryCopyBudgetBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
-            "largestWasmBoundaryCopyFractionOfBudget": (single_compact_commitment_bytes as f64) / (SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES as f64)
-        },
-        "cpuWorkModel": {
-            "residueMultiplyAddsPerCommitment": residue_multiply_adds_per_commitment,
-            "sourceCoefficientCommitments": source_coefficient_commitments,
-            "recipientShareCommitments": recipient_share_commitments,
-            "aggregateThresholdCommitments": aggregate_threshold_commitments,
-            "totalCommitments": total_commitments,
-            "totalResidueMultiplyAdds": total_residue_multiply_adds,
-            "aggregatePublicSumResidueAdditions": aggregate_public_sum_residue_additions,
-            "totalResidueArithmeticOperations": total_residue_arithmetic_operations,
-            "aggregatePublicSumFractionOfCommitmentWork": (aggregate_public_sum_residue_additions as f64) / (total_residue_multiply_adds as f64),
-        },
-        "proofBoundary": "sparse projection is development-only; public linkage and compact same-secret bridge statement roots are implemented; zero-knowledge linkage and same-secret bridge proof backends are not implemented yet",
-    }))
-}
-
-fn compact_vss_private_witness_payload_measurement_value() -> CanonicalResult<Value> {
-    let roster = first_closure_roster_parameters();
-    let target_rns_limb_count =
-        (crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1) as u64;
-    let bytes_per_residue = 8_u64;
-    let randomness_column_count = 2_u64;
-    let payload_vectors_per_credential = 1 + randomness_column_count;
-    let aggregate_payload_vectors_per_credential = 3 + randomness_column_count;
-    let one_source_recipient_credential_payload_bytes = checked_accounting_product(
-        &[
-            payload_vectors_per_credential,
-            POLYNOMIAL_DEGREE as u64,
-            bytes_per_residue,
-        ],
-        "compact VSS source-recipient credential payload bytes",
-    )?;
-    let one_aggregate_credential_payload_bytes = checked_accounting_product(
-        &[
-            aggregate_payload_vectors_per_credential,
-            POLYNOMIAL_DEGREE as u64,
-            bytes_per_residue,
-        ],
-        "compact VSS aggregate credential payload bytes",
-    )?;
-    let one_recipient_private_mailbox_credential_payload_bytes = checked_accounting_product(
-        &[
-            roster.participant_count,
-            target_rns_limb_count,
-            one_source_recipient_credential_payload_bytes,
-        ],
-        "compact VSS one-recipient private mailbox credential payload bytes",
-    )?;
-    let one_recipient_persistent_aggregate_credential_payload_bytes = checked_accounting_product(
-        &[
-            target_rns_limb_count,
-            one_aggregate_credential_payload_bytes,
-        ],
-        "compact VSS one-recipient persistent aggregate credential payload bytes",
-    )?;
-    let all_recipients_private_mailbox_credential_payload_bytes = checked_accounting_product(
-        &[
-            roster.participant_count,
-            one_recipient_private_mailbox_credential_payload_bytes,
-        ],
-        "compact VSS all-recipient private mailbox credential payload bytes",
-    )?;
-    let all_recipients_persistent_aggregate_credential_payload_bytes = checked_accounting_product(
-        &[
-            roster.participant_count,
-            one_recipient_persistent_aggregate_credential_payload_bytes,
-        ],
-        "compact VSS all-recipient persistent aggregate credential payload bytes",
-    )?;
-
-    Ok(json!({
-        "objectType": "CompactVssPrivateWitnessPayloadMeasurement",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-        "developmentScope": "development-only-not-certified-for-production-use",
-        "measurementKind": "static-development-compact-vss-private-opening-payload-accounting",
-        "participantCount": roster.participant_count,
-        "targetRnsLimbCount": target_rns_limb_count,
-        "ringDegree": POLYNOMIAL_DEGREE,
-        "bytesPerResidue": bytes_per_residue,
-        "randomnessColumnCount": randomness_column_count,
-        "oneSourceRecipientCredentialPayloadBytes": one_source_recipient_credential_payload_bytes,
-        "oneAggregateCredentialPayloadBytes": one_aggregate_credential_payload_bytes,
-        "oneRecipientPrivateMailboxCredentialPayloadBytes": one_recipient_private_mailbox_credential_payload_bytes,
-        "oneRecipientPersistentAggregateCredentialPayloadBytes": one_recipient_persistent_aggregate_credential_payload_bytes,
-        "allRecipientsPrivateMailboxCredentialPayloadBytes": all_recipients_private_mailbox_credential_payload_bytes,
-        "allRecipientsPersistentAggregateCredentialPayloadBytes": all_recipients_persistent_aggregate_credential_payload_bytes,
-        "largestSingleCredentialPayloadBytes": std::cmp::max(
-            one_source_recipient_credential_payload_bytes,
-            one_aggregate_credential_payload_bytes,
-        ),
-        "byteAccountingScope": "compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one reduced share vector, one carried commitment-message vector, one carry vector, and opening-randomness vectors per persisted aggregate limb",
-        "excludedByteCategories": [
-            "private-envelope JSON and canonical-encoding overhead",
-            "mailbox KEM, AEAD, nonce, tag, and associated-data overhead",
-            "source and recipient metadata fields",
-            "source share and opening roots",
-            "encrypted local-state wrapper overhead",
-            "future target-decryption proof bytes"
-        ],
-        "budgetComparison": {
-            "budgetScope": "per-recipient payloads are compared with recipient mailbox and persistent proof-witness budgets before envelope, encoding, and encryption overhead",
-            "privateMailboxBudgetBytes": COMPACT_VSS_PRIVATE_MAILBOX_BUDGET_BYTES,
-            "oneRecipientPrivateMailboxPayloadFractionOfBudget": (one_recipient_private_mailbox_credential_payload_bytes as f64) / (COMPACT_VSS_PRIVATE_MAILBOX_BUDGET_BYTES as f64),
-            "persistentProofWitnessBudgetBytes": COMPACT_VSS_PERSISTENT_PROOF_WITNESS_BUDGET_BYTES,
-            "oneRecipientPersistentAggregatePayloadFractionOfBudget": (one_recipient_persistent_aggregate_credential_payload_bytes as f64) / (COMPACT_VSS_PERSISTENT_PROOF_WITNESS_BUDGET_BYTES as f64)
         },
     }))
 }
@@ -1871,7 +1342,6 @@ fn current_vss_material_baseline_report_value() -> CanonicalResult<Value> {
         "objectType": "CurrentVssMaterialBaselineReport",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "measurementKind": "static-current-full-profile-vss-material-baseline",
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "shamirCoefficientCount": roster.decryption_threshold,
@@ -1891,21 +1361,6 @@ fn current_vss_material_baseline_report_value() -> CanonicalResult<Value> {
             "transportChunkBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
             "lowerBoundBytes": public_verifier_memory_lower_bound_bytes,
             "largestWasmBoundaryCopyBytes": SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
-        },
-        "localStateMaterialClasses": {
-            "retainedAfterAggregation": [
-                "aggregate-threshold-share-sealed",
-                "target-decryption-proof-witness-sealed",
-                "issued-vss-acceptance-roots",
-                "issued-vss-complaint-roots",
-                "setup-context",
-            ],
-            "deletedAfterAggregation": [
-                "raw-per-source-trustee-vss-shares",
-                "raw-per-source-trustee-vss-openings",
-                "private-vss-envelope-payloads-after-aggregation",
-            ],
-            "currentWitnessBoundary": "target proof witness material is root-bound and sealed; compact aggregate opening credentials are locally recomputed against declared compact roots, sealed, and restorable, while the zero-knowledge target proof backend is not implemented yet",
         },
         "trusteePointScalarBounds": {
             "trusteePointRule": "roster-position-plus-one",
@@ -2022,7 +1477,6 @@ fn evaluator_key_schedule_profile_value_for_roster(
         "relinearizationLevelSchedule": expected_relinearization_level_schedule(),
         "requiredGaloisKeySchedule": required_galois_key_schedule,
         "requiredGaloisSetHash": required_galois_set_hash,
-        "genericKeySwitchPolicy": "refused-unless-explicitly-required",
     }))
 }
 
@@ -2099,8 +1553,6 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
         "objectVersion": 1,
         "profileId": SETUP_PROOF_PROFILE_ID,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "proofBackendBoundary": "sealed-lattice-rust-wasm-fixed-relations-only",
-        "arbitraryRelationApi": "not-exposed",
         "relationModel": {
             "applicationRing": "Z_q[X]/(X^N+1)",
             "applicationRingDegree": POLYNOMIAL_DEGREE,
@@ -2145,24 +1597,11 @@ fn setup_proof_profile_value() -> CanonicalResult<Value> {
             "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
             "succinctProofByteLayout": {
                 "encoding": "sealed-lattice-succinct-setup-proof-bytes",
-                "canonicalFieldElementStatus": "decoder-rejects-non-canonical-base-and-extension-field-coordinates",
-                "transportRootStatus": "embedded-and-binary-chunked-proof-material-roots-bind-proof-size-bytes-proof-bytes-hash-and-statement-hash"
             },
             "chunking": "required-for-large-proof-material",
             "chunkRootRequired": true,
             "statementRootRequired": true,
             "canonicalJsonRole": "root-bound metadata only"
-        },
-        "verificationPolicy": {
-            "rejectionRules": [
-                "wrong setup-proof profile",
-                "wrong setup-proof record binding",
-                "wrong statement root",
-                "wrong proof chunk root",
-                "missing witness bounds",
-                "modulo-only relation check",
-                "generic or undeclared proof family"
-            ]
         }
     }))
 }
@@ -2463,13 +1902,13 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "setupContext was required before accepted setup handoff construction",
         )
     })?;
-    let target_decryption_status = setup_package
+    let target_decryption_profile_binding = setup_package
         .get("heSecurityCertificate")
-        .and_then(|certificate| certificate.get("targetDecryptionStatus"))
+        .and_then(|certificate| certificate.get("targetDecryptionProfileBinding"))
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "heSecurityCertificate.targetDecryptionStatus was required before accepted setup handoff construction",
+                "heSecurityCertificate.targetDecryptionProfileBinding was required before accepted setup handoff construction",
             )
         })?;
     let mut handoff = json!({
@@ -2537,7 +1976,7 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
         },
         "futureTargetDecryptionHandoff": {
             "targetDecryptionProfileId": value_string(
-                target_decryption_status,
+                target_decryption_profile_binding,
                 "targetDecryptionProfileId",
             )?,
         },

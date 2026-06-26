@@ -14,11 +14,6 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
     assert_eq!(result["trusteeRosterPosition"], 3);
     assert_eq!(result["trusteePoint"], 4);
     assert_eq!(
-        result["exportPolicy"],
-        "roots-only-no-raw-share-or-opening-export"
-    );
-    assert_eq!(result["deletionBoundary"], "after-private-vss-aggregation");
-    assert_eq!(
         result["targetDecryptionProofWitnessRoot"],
         request["localStateCommitment"]["targetDecryptionProofWitnessRoot"]
     );
@@ -30,21 +25,21 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
 }
 
 #[test]
-fn local_trustee_setup_state_verifier_rejects_deletion_receipt_drift() {
+fn local_trustee_setup_state_verifier_rejects_deletion_receipt_trustee_drift() {
     let mut request = local_trustee_setup_state_request();
-    request["localStateCommitment"]["deletionReceipt"]["deletedMaterialClasses"][0] =
-        serde_json::json!("raw-share-deletion-not-recorded");
+    request["localStateCommitment"]["deletionReceipt"]["trusteeIdentity"] =
+        serde_json::json!("trustee-drift");
     rebind_local_deletion_receipt_root(&mut request);
     rebind_local_state_root(&mut request);
 
     let error = verify_local_trustee_setup_state_from_request(&request)
-        .expect_err("deletion receipt drift must be refused");
+        .expect_err("deletion receipt trustee drift must be refused");
 
     assert_eq!(
         error.code,
         crate::encoding::CanonicalErrorCode::InvalidFixture
     );
-    assert!(error.message.contains("deletedMaterialClasses"));
+    assert!(error.message.contains("trustee binding"));
 }
 
 #[test]
@@ -103,7 +98,7 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
     let trustee_identity = "trustee-3";
     let trustee_roster_position = 3_u64;
     let trustee_point = trustee_roster_position + 1;
-    let mut deletion_receipt = serde_json::json!({
+    let deletion_receipt = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateDeletionReceipt",
         "objectVersion": 1,
         "ceremonyId": ceremony_id,
@@ -117,24 +112,10 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": trustee_roster_position,
         "trusteePoint": trustee_point,
-        "deletionBoundary": "after-private-vss-aggregation",
-        "deletedMaterialClasses": [
-            "raw-per-source-trustee-vss-shares",
-            "raw-per-source-trustee-vss-openings",
-            "private-vss-envelope-payloads-after-aggregation"
-        ],
-        "retainedMaterialClasses": [
-            "aggregate-threshold-share-sealed",
-            "target-decryption-proof-witness-sealed",
-            "issued-vss-acceptance-roots",
-            "issued-vss-complaint-roots",
-            "setup-context"
-        ],
     });
-    deletion_receipt["deletionReceiptRoot"] = serde_json::json!(
+    let deletion_receipt_root =
         derive_protocol_hash("LocalTrusteeDeletionReceiptRoot", &deletion_receipt)
-            .expect("deletion receipt root")
-    );
+            .expect("deletion receipt root");
     let mut local_state = serde_json::json!({
         "objectType": "LocalTrusteeSetupStateCommitment",
         "objectVersion": 1,
@@ -155,10 +136,8 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "targetDecryptionProofWitnessRoot": valid_hash('3'),
         "issuedVssAcceptanceRoot": valid_hash('4'),
         "issuedVssComplaintRoots": [valid_hash('5')],
-        "deletionReceiptRoot": deletion_receipt["deletionReceiptRoot"],
+        "deletionReceiptRoot": deletion_receipt_root,
         "deletionReceipt": deletion_receipt,
-        "exportPolicy": "roots-only-no-raw-share-or-opening-export",
-        "storageProfile": "encrypted-local-device-state-required",
     });
     local_state["localStateRoot"] = serde_json::json!(
         derive_protocol_hash("LocalTrusteeSetupStateRoot", &local_state).expect("local state root")
@@ -171,19 +150,13 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
 }
 
 fn rebind_local_deletion_receipt_root(request: &mut serde_json::Value) {
-    request["localStateCommitment"]["deletionReceipt"]
-        .as_object_mut()
-        .expect("deletion receipt")
-        .remove("deletionReceiptRoot");
-    request["localStateCommitment"]["deletionReceipt"]["deletionReceiptRoot"] = serde_json::json!(
+    request["localStateCommitment"]["deletionReceiptRoot"] = serde_json::json!(
         derive_protocol_hash(
             "LocalTrusteeDeletionReceiptRoot",
             &request["localStateCommitment"]["deletionReceipt"],
         )
         .expect("deletion receipt root")
     );
-    request["localStateCommitment"]["deletionReceiptRoot"] =
-        request["localStateCommitment"]["deletionReceipt"]["deletionReceiptRoot"].clone();
 }
 
 fn rebind_local_state_root(request: &mut serde_json::Value) {

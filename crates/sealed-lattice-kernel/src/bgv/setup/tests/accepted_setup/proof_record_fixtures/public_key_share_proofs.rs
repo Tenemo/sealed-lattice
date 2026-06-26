@@ -66,7 +66,6 @@ pub(in super::super) fn collective_public_key_object(
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "aggregationStatus": "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -463,6 +462,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             private_vss_share: None,
             compact_vss_share_linkage: None,
             compact_same_secret_bridge: None,
+            target_decryption_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients,
@@ -477,6 +477,8 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
             compact_vss_recipient_share_opening_randomness: Vec::new(),
             compact_vss_carry_witnesses: Vec::new(),
+            target_decryption_message_vectors: Vec::new(),
+            target_decryption_opening_randomness_by_commitment: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_protocol_hash(
             "PublicKeyShareProofRoot",

@@ -278,7 +278,16 @@ pub(crate) fn masked_claim_bounds(
                 )?;
                 carry_bound.max(1)
             }
-            None => 2,
+            None => match &statement.target_decryption_share {
+                Some(target_decryption_share) => {
+                    i128::from(target_decryption_share.target_rns_prime.saturating_sub(1))
+                        .max(i128::from(
+                            target_decryption_share.smudging_message_coefficient_bound,
+                        ))
+                        .max(1)
+                }
+                None => 2,
+            },
         },
     };
     let clear_bound = witness_bound

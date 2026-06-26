@@ -172,17 +172,19 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
             }),
         ),
         (
+            "setup parameter target basis hash",
+            Box::new(|mutated_package| {
+                mutated_package["certificates"]["setupParameterCertificate"]["targetBasisHash"] =
+                    serde_json::json!(valid_hash('c'));
+                rebind_setup_parameter_certificate_hash(mutated_package);
+                rebind_setup_package_hash(mutated_package);
+            }),
+        ),
+        (
             "collective secret distribution certificate hash",
             Box::new(|mutated_package| {
                 mutated_package["certificates"]["collectiveSecretDistributionCertificateHash"] =
                     serde_json::json!(valid_hash('9'));
-            }),
-        ),
-        (
-            "final security status",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["setupParameterCertificate"]["finalSecurityStatus"] =
-                    serde_json::json!("accepted");
             }),
         ),
         (
@@ -273,14 +275,12 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
     for invalid_participant_count in [2_usize, 51_usize] {
         let minimally_shaped_package = serde_json::json!({
             "certificates": {
-                "setupParameterCertificate": {
-                    "finalSecurityStatus": "acceptedForDirectEvaluatorReplayTargetPending",
-                },
+                "setupParameterCertificate": {},
             },
-            "targetDecryptionStatus": {
-                "targetC1C4StatusAccepted": false,
-                "targetPartDecImplemented": true,
-                "setupMaterialMatchesTargetDecryption": true,
+            "targetDecryptionProfileBinding": {
+                "targetDecryptionProfileId": "BGV-RNS-AsyncTargetDecryption-v1",
+                "targetDecryptionProfileHash": valid_hash('a'),
+                "targetDecryptionProfileBindingHash": valid_hash('b'),
             },
             "objectType": "BgvPassiveSetupPackage",
             "objectVersion": 1,
@@ -386,5 +386,15 @@ fn passive_setup_verification_rejects_rotation_set_gaps() {
     assert_setup_package_payload_is_rejected(
         wrong_required_rotation_group,
         "wrong direct score packing rotation group",
+    );
+}
+
+fn rebind_setup_parameter_certificate_hash(package: &mut serde_json::Value) {
+    package["certificates"]["setupParameterCertificateHash"] = serde_json::json!(
+        derive_protocol_hash(
+            "BGVSetupParameterCertificateHash",
+            &package["certificates"]["setupParameterCertificate"],
+        )
+        .expect("setup parameter certificate hash")
     );
 }

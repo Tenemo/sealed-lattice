@@ -90,12 +90,21 @@ pub(crate) fn canonical_target_basis_value() -> CanonicalResult<Value> {
         },
         "scalingNormalization": "normalize ciphertext decrypt scaling to one before target roots are computed",
         "targetCiphertextRule": "target id and target order ciphertexts must both use the canonical target level",
-        "targetDecryptionReadiness": "refused until smudging proof coverage, recombination proof coverage, target proof backend, and verifier activation are complete",
     }))
 }
 
 pub(crate) fn canonical_target_basis_hash() -> CanonicalResult<String> {
     derive_protocol_hash("TargetBasisHash", &canonical_target_basis_value()?)
+}
+
+pub(crate) fn canonical_target_basis_modulus_bits() -> usize {
+    canonical_target_basis_primes()
+        .iter()
+        .map(|modulus| {
+            usize::try_from(u64::BITS - modulus.leading_zeros())
+                .expect("modulus bit length fits usize")
+        })
+        .sum()
 }
 
 pub(crate) fn canonicalize_target_ciphertext(
@@ -133,7 +142,7 @@ pub(crate) fn validate_canonical_target_ciphertext(
     Ok(())
 }
 
-fn canonical_target_basis_primes() -> &'static [u64] {
+pub(crate) fn canonical_target_basis_primes() -> &'static [u64] {
     &DATA_PRIMES[..=CANONICAL_TARGET_CIPHERTEXT_LEVEL]
 }
 

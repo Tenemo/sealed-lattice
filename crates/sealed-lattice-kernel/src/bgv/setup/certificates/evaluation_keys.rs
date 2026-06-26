@@ -103,8 +103,6 @@ pub(super) fn evaluation_key_streaming_commitment(
         "rotationKeyRoots": evaluation_keys["rotationKeyRoots"],
         "evaluationKeyMaterialCommitmentHash": evaluation_keys["evaluationKeyMaterialCommitmentHash"],
         "evaluationKeyMaterialCommitment": evaluation_keys["evaluationKeyMaterialCommitment"],
-        "serializationPolicy": "sealed-lattice-canonical-json-evaluation-key-material-commitment-stream",
-        "streamCommitmentEvidence": true,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
     let stream_bytes = canonical_json(&stream_record)?.into_bytes();
@@ -119,7 +117,6 @@ pub(super) fn evaluation_key_streaming_commitment(
         "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,
         "chunkRoot": chunk_root_value,
         "chunkCount": stream_bytes.len().div_ceil(EVALUATION_KEY_CHUNK_SIZE_BYTES),
-        "streamCommitmentEvidence": true,
         "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
     let commitment_hash = derive_protocol_hash("EvaluationKeySetHash", &commitment_record)?;

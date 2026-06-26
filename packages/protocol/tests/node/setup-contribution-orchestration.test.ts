@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
 import {
     createSetupContributionAssembly,
@@ -8,15 +8,15 @@ import {
     type VssSourceTrusteeCoefficientCommitmentRecord,
     type VssShareAcceptanceRecord,
     type VssShareComplaintRecord,
-} from '#packages/protocol/src/index';
+} from "#packages/protocol/src/index";
 import {
     makeSetupContext,
     makeSetupFixtureHash,
-} from '#tests/support/setup-fixtures';
+} from "#tests/support/setup-fixtures";
 
-const fixtureHash = makeSetupFixtureHash('setup-contribution-orchestration');
+const fixtureHash = makeSetupFixtureHash("setup-contribution-orchestration");
 
-const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
+const setupContext = makeSetupContext(fixtureHash, "carry-aware");
 
 const contextFields = {
     ceremonyId: setupContext.ceremonyId,
@@ -32,11 +32,11 @@ const contextFields = {
 
 const phaseObject = (phaseNumber: number): SetupPhaseParticipantObject =>
     ({
-        objectType: 'SetupPhaseParticipantObject',
+        objectType: "SetupPhaseParticipantObject",
         objectVersion: 1,
         phaseId: `phase-${String(phaseNumber)}`,
         phaseNumber,
-        trusteeIdentity: 'trustee-3',
+        trusteeIdentity: "trustee-3",
         rosterPosition: 3,
         recoveryEpoch: 0,
         deviceEpoch: 0,
@@ -56,88 +56,86 @@ const phaseObject = (phaseNumber: number): SetupPhaseParticipantObject =>
     }) as unknown as SetupPhaseParticipantObject;
 
 const sourceTrusteeRecord = {
-    objectType: 'VssSourceTrusteeCoefficientCommitments',
+    objectType: "VssSourceTrusteeCoefficientCommitments",
     objectVersion: 1,
     ...contextFields,
-    sourceTrusteeIdentity: 'trustee-3',
+    sourceTrusteeIdentity: "trustee-3",
     sourceTrusteeRosterPosition: 3,
-    publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+    publicMatrixSeedHash: fixtureHash("public-matrix-seed"),
     coefficientCommitments: [],
-    sourceTrusteeCommitmentRoot: fixtureHash('source-trustee-root'),
+    sourceTrusteeCommitmentRoot: fixtureHash("source-trustee-root"),
 } as unknown as VssSourceTrusteeCoefficientCommitmentRecord;
 
 const envelopeReference = {
-    objectType: 'PrivateVssEnvelopeCommitment',
+    objectType: "PrivateVssEnvelopeCommitment",
     objectVersion: 1,
     ...contextFields,
-    sourceTrusteeIdentity: 'trustee-3',
+    sourceTrusteeIdentity: "trustee-3",
     sourceTrusteeRosterPosition: 3,
-    recipientIdentity: 'trustee-4',
+    recipientIdentity: "trustee-4",
     recipientRosterPosition: 4,
-    privateEnvelopeCommitmentRoot: fixtureHash('private-envelope-commitment'),
-    encryptedEnvelopeHash: fixtureHash('encrypted-envelope'),
-    privateEnvelopeHash: fixtureHash('private-envelope'),
-    localVerificationRoot: fixtureHash('local-verification'),
+    privateEnvelopeCommitmentRoot: fixtureHash("private-envelope-commitment"),
+    encryptedEnvelopeHash: fixtureHash("encrypted-envelope"),
+    privateEnvelopeHash: fixtureHash("private-envelope"),
+    localVerificationRoot: fixtureHash("local-verification"),
 } as unknown as PrivateVssEnvelopeVerificationReference;
 
 const acceptanceRecord = {
-    objectType: 'VssShareAcceptance',
+    objectType: "VssShareAcceptance",
     objectVersion: 1,
     ...contextFields,
-    sourceTrusteeIdentity: 'trustee-1',
+    sourceTrusteeIdentity: "trustee-1",
     sourceTrusteeRosterPosition: 1,
-    recipientIdentity: 'trustee-3',
+    recipientIdentity: "trustee-3",
     recipientRosterPosition: 3,
-    privateVssEnvelopeCommitmentRoot: fixtureHash('private-vss-envelope-set'),
-    privateEnvelopeHash: fixtureHash('accepted-envelope'),
-    localVerificationRoot: fixtureHash('accepted-local-verification'),
-    acceptanceRoot: fixtureHash('acceptance-root'),
+    privateVssEnvelopeCommitmentRoot: fixtureHash("private-vss-envelope-set"),
+    privateEnvelopeHash: fixtureHash("accepted-envelope"),
+    localVerificationRoot: fixtureHash("accepted-local-verification"),
+    acceptanceRoot: fixtureHash("acceptance-root"),
 } as unknown as VssShareAcceptanceRecord;
 
 const complaintRecord = {
-    objectType: 'VssShareComplaint',
+    objectType: "VssShareComplaint",
     objectVersion: 1,
     ...contextFields,
-    sourceTrusteeIdentity: 'trustee-2',
+    sourceTrusteeIdentity: "trustee-2",
     sourceTrusteeRosterPosition: 2,
-    recipientIdentity: 'trustee-3',
+    recipientIdentity: "trustee-3",
     recipientRosterPosition: 3,
-    privateVssEnvelopeCommitmentRoot: fixtureHash('private-vss-envelope-set'),
-    privateEnvelopeHash: fixtureHash('complaint-envelope'),
-    complaintEvidenceRoot: fixtureHash('complaint-evidence'),
-    complaintReasonCode: 'private-vss-opening-verification-failed',
-    complaintRoot: fixtureHash('complaint-root'),
+    privateVssEnvelopeCommitmentRoot: fixtureHash("private-vss-envelope-set"),
+    privateEnvelopeHash: fixtureHash("complaint-envelope"),
+    complaintEvidenceRoot: fixtureHash("complaint-evidence"),
+    complaintReasonCode: "private-vss-opening-verification-failed",
+    complaintRoot: fixtureHash("complaint-root"),
 } as unknown as VssShareComplaintRecord;
 
 const localStateCommitment = {
-    objectType: 'LocalTrusteeSetupStateCommitment',
+    objectType: "LocalTrusteeSetupStateCommitment",
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
+    setupProfileId: "CollectiveBgvSetup-v1",
     ...contextFields,
-    trusteeIdentity: 'trustee-3',
+    trusteeIdentity: "trustee-3",
     trusteeRosterPosition: 3,
     trusteePoint: 4,
-    thresholdShareCommitmentRecipientRoot: fixtureHash('threshold-recipient'),
-    aggregateThresholdShareRoot: fixtureHash('aggregate-share'),
-    targetDecryptionProofWitnessRoot: fixtureHash('target-proof-witness'),
-    issuedVssAcceptanceRoot: fixtureHash('issued-acceptance'),
+    thresholdShareCommitmentRecipientRoot: fixtureHash("threshold-recipient"),
+    aggregateThresholdShareRoot: fixtureHash("aggregate-share"),
+    targetDecryptionProofWitnessRoot: fixtureHash("target-proof-witness"),
+    issuedVssAcceptanceRoot: fixtureHash("issued-acceptance"),
     issuedVssComplaintRoots: [],
-    deletionReceiptRoot: fixtureHash('deletion-receipt'),
+    deletionReceiptRoot: fixtureHash("deletion-receipt"),
     deletionReceipt: {},
-    exportPolicy: 'roots-only-no-raw-share-or-opening-export',
-    storageProfile: 'encrypted-local-device-state-required',
-    localStateRoot: fixtureHash('local-state'),
+    localStateRoot: fixtureHash("local-state"),
 } as unknown as LocalTrusteeSetupStateCommitment;
 
-describe('setup contribution orchestration', () => {
-    it('assembles a roots-only participant setup contribution', () => {
+describe("setup contribution orchestration", () => {
+    it("assembles a roots-only participant setup contribution", () => {
         const assembly = createSetupContributionAssembly({
             setupContext,
-            trusteeIdentity: 'trustee-3',
+            trusteeIdentity: "trustee-3",
             trusteeRosterPosition: 3,
             setupPhaseParticipantObjects: [phaseObject(2), phaseObject(1)],
-            commonRandomnessCommitRoot: fixtureHash('common-commit'),
-            commonRandomnessRevealRoot: fixtureHash('common-reveal'),
+            commonRandomnessCommitRoot: fixtureHash("common-commit"),
+            commonRandomnessRevealRoot: fixtureHash("common-reveal"),
             vssSourceTrusteeRecord: sourceTrusteeRecord,
             privateVssEnvelopeReferences: [envelopeReference],
             vssShareAcceptanceRecords: [acceptanceRecord],
@@ -146,9 +144,9 @@ describe('setup contribution orchestration', () => {
         });
 
         expect(assembly).toMatchObject({
-            objectType: 'SetupContributionAssembly',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            trusteeIdentity: 'trustee-3',
+            objectType: "SetupContributionAssembly",
+            setupProfileId: "CollectiveBgvSetup-v1",
+            trusteeIdentity: "trustee-3",
             trusteeRosterPosition: 3,
             vssSourceTrusteeCommitmentRoot:
                 sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
@@ -161,20 +159,20 @@ describe('setup contribution orchestration', () => {
             localStateRoot: localStateCommitment.localStateRoot,
         });
         expect(assembly.phaseObjectRoots).toEqual([
-            fixtureHash('phase-root-1'),
-            fixtureHash('phase-root-2'),
+            fixtureHash("phase-root-1"),
+            fixtureHash("phase-root-2"),
         ]);
         expect(assembly.issuedVssComplaintRoots).toEqual([
-            fixtureHash('complaint-root'),
+            fixtureHash("complaint-root"),
         ]);
         expect(assembly.setupContributionRoot).toHaveLength(128);
     });
 
-    it('rejects contribution records bound to a different trustee', () => {
+    it("rejects contribution records bound to a different trustee", () => {
         expect(() =>
             createSetupContributionAssembly({
                 setupContext,
-                trusteeIdentity: 'trustee-3',
+                trusteeIdentity: "trustee-3",
                 trusteeRosterPosition: 3,
                 setupPhaseParticipantObjects: [phaseObject(1)],
                 vssShareAcceptanceRecords: [

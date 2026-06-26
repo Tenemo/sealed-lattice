@@ -32,8 +32,6 @@ pub(super) use threshold_verification::*;
 
 const DECRYPTABLE_PUBLIC_KEY_COMPONENT_MODEL: &str =
     "componentZero=sum_i(-a*s_i+p*e_i),componentOne=a-over-selected-BGV-RNS-data-basis";
-const EVALUATION_KEY_STREAM_POLICY: &str =
-    "sealed-lattice-deterministic-bgv-key-switch-material-stream-v1";
 
 pub(super) struct CollectivePublicKeyCoefficients {
     pub(super) component_zero_coefficients: Vec<u64>,

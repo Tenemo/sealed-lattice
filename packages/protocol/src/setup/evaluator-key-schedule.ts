@@ -13,9 +13,6 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 type JsonRecord = Record<string, unknown>;
 
-export const evaluatorKeyGenericSwitchPolicy =
-    'refused-unless-explicitly-required';
-
 export type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;
     readonly proofFamily: 'relinearization-key-share';
@@ -58,7 +55,6 @@ export type EvaluatorKeySchedule = Readonly<
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly requiredGaloisSetHash: ProtocolHash;
-        readonly genericKeySwitchPolicy: typeof evaluatorKeyGenericSwitchPolicy;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
     }
 >;
@@ -300,7 +296,6 @@ export const createEvaluatorKeySchedule = (
             createRelinearizationLevelSchedule(rnsLimbCount),
         requiredGaloisKeySchedule: requiredGaloisSet.entries,
         requiredGaloisSetHash,
-        genericKeySwitchPolicy: evaluatorKeyGenericSwitchPolicy,
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {

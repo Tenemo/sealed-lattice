@@ -7,6 +7,7 @@ use super::super::*;
 use super::claim_masking::{mask_digit_columns, masked_half_coefficients};
 use super::salted_tree::{SaltedTree, commit_salted_extension_rows};
 use super::*;
+use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
 
@@ -99,6 +100,17 @@ pub(super) fn build_limb_witness_commitment(
             let logical_vector = signed_residue_vector(column, modulus);
             append_logical_vector(&logical_vector);
         }
+    } else if layout.target_decryption_active() {
+        for message_vector in &witness.target_decryption_message_vectors {
+            let logical_vector = signed_residue_vector(message_vector, modulus);
+            append_logical_vector(&logical_vector);
+        }
+        for randomness_columns in &witness.target_decryption_opening_randomness_by_commitment {
+            for column in randomness_columns {
+                let logical_vector = signed_residue_vector(column, modulus);
+                append_logical_vector(&logical_vector);
+            }
+        }
     } else {
         let secret_vector = signed_residue_vector(&witness.secret_coefficients, modulus);
         append_logical_vector(&secret_vector);
@@ -183,6 +195,11 @@ pub(super) fn validate_witness_support(
                 .is_empty()
             || !witness.compact_vss_carry_witnesses.is_empty()
             || statement.compact_same_secret_bridge.is_some()
+            || !witness.target_decryption_message_vectors.is_empty()
+            || !witness
+                .target_decryption_opening_randomness_by_commitment
+                .is_empty()
+            || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
                 "private VSS witness must not include key or same-secret linkage material",
@@ -202,6 +219,11 @@ pub(super) fn validate_witness_support(
                 .private_vss_opening_randomness_by_shamir_index
                 .is_empty()
             || !witness.private_vss_carry_witnesses.is_empty()
+            || !witness.target_decryption_message_vectors.is_empty()
+            || !witness
+                .target_decryption_opening_randomness_by_commitment
+                .is_empty()
+            || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
                 "compact VSS share-linkage witness must not include key, same-secret, or private VSS material",
@@ -233,6 +255,11 @@ pub(super) fn validate_witness_support(
                 .compact_vss_recipient_share_opening_randomness
                 .is_empty()
             || !witness.compact_vss_carry_witnesses.is_empty()
+            || !witness.target_decryption_message_vectors.is_empty()
+            || !witness
+                .target_decryption_opening_randomness_by_commitment
+                .is_empty()
+            || statement.target_decryption_share.is_some()
         {
             return Err(invalid_succinct_setup_proof(
                 "compact same-secret bridge witness must not include key, private VSS, or share-linkage material",
@@ -241,6 +268,40 @@ pub(super) fn validate_witness_support(
         return validate_linkage_witness(
             compact_same_secret_bridge.target_constant_commitments.len(),
             crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+            witness,
+            statement.ring_degree,
+        );
+    }
+    if let Some(target_decryption_share) = &statement.target_decryption_share {
+        if !witness.secret_coefficients.is_empty()
+            || !witness.error_coefficients_by_key.is_empty()
+            || !witness.negative_indicator_coefficients.is_empty()
+            || !witness.opening_randomness_by_limb.is_empty()
+            || !witness
+                .private_vss_coefficient_messages_by_shamir_index
+                .is_empty()
+            || !witness
+                .private_vss_opening_randomness_by_shamir_index
+                .is_empty()
+            || !witness.private_vss_carry_witnesses.is_empty()
+            || !witness
+                .compact_vss_coefficient_messages_by_shamir_index
+                .is_empty()
+            || !witness.compact_vss_recipient_share_messages.is_empty()
+            || !witness
+                .compact_vss_coefficient_opening_randomness_by_shamir_index
+                .is_empty()
+            || !witness
+                .compact_vss_recipient_share_opening_randomness
+                .is_empty()
+            || !witness.compact_vss_carry_witnesses.is_empty()
+        {
+            return Err(invalid_succinct_setup_proof(
+                "target-decryption share witness must not include setup proof material",
+            ));
+        }
+        return validate_target_decryption_share_witness(
+            target_decryption_share,
             witness,
             statement.ring_degree,
         );
@@ -316,6 +377,11 @@ pub(super) fn validate_witness_support(
                     .is_empty()
                 || !witness.compact_vss_carry_witnesses.is_empty()
                 || statement.compact_same_secret_bridge.is_some()
+                || !witness.target_decryption_message_vectors.is_empty()
+                || !witness
+                    .target_decryption_opening_randomness_by_commitment
+                    .is_empty()
+                || statement.target_decryption_share.is_some()
             {
                 return Err(invalid_succinct_setup_proof(
                     "witness linkage material requires a same-secret linkage statement",
@@ -356,6 +422,134 @@ fn validate_linkage_witness(
     {
         return Err(invalid_succinct_setup_proof(
             "witness opening randomness must be ternary per commitment and column",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_target_decryption_share_witness(
+    statement: &super::super::relation::TargetDecryptionShareStatement,
+    witness: &TrusteeEvaluationKeyWitness,
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    let message_count = 1 + statement.smudging_commitments.len();
+    if witness.target_decryption_message_vectors.len() != message_count
+        || witness
+            .target_decryption_opening_randomness_by_commitment
+            .len()
+            != message_count
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption witness shape does not match the statement",
+        ));
+    }
+    let target_prime_i64 = i64::try_from(statement.target_rns_prime).map_err(|_| {
+        invalid_succinct_setup_proof("target-decryption target prime does not fit i64")
+    })?;
+    let aggregate_message_bound_i64 = i64::try_from(statement.aggregate_message_coefficient_bound)
+        .map_err(|_| {
+            invalid_succinct_setup_proof(
+                "target-decryption aggregate message bound does not fit i64",
+            )
+        })?;
+    let message_bound_i64 =
+        i64::try_from(statement.smudging_message_coefficient_bound).map_err(|_| {
+            invalid_succinct_setup_proof("target-decryption smudging bound does not fit i64")
+        })?;
+    let aggregate_messages = &witness.target_decryption_message_vectors[0];
+    if aggregate_messages.len() != ring_degree
+        || aggregate_messages
+            .iter()
+            .any(|coefficient| *coefficient < 0 || *coefficient >= aggregate_message_bound_i64)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption aggregate-share witness is outside the aggregate message bound",
+        ));
+    }
+    for (message_index, message_vector) in witness
+        .target_decryption_message_vectors
+        .iter()
+        .enumerate()
+        .skip(1)
+    {
+        if message_vector.len() != ring_degree
+            || message_vector
+                .iter()
+                .any(|coefficient| *coefficient < 0 || *coefficient >= message_bound_i64)
+        {
+            return Err(invalid_succinct_setup_proof(format!(
+                "target-decryption smudging message vector {message_index} is outside the encoded coefficient range"
+            )));
+        }
+    }
+    for (commitment_index, randomness_columns) in witness
+        .target_decryption_opening_randomness_by_commitment
+        .iter()
+        .enumerate()
+    {
+        if randomness_columns.len()
+            != crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+            || randomness_columns.iter().any(|column| {
+                column.len() != ring_degree
+                    || column
+                        .iter()
+                        .any(|coefficient| !(-1..=1).contains(coefficient))
+            })
+        {
+            return Err(invalid_succinct_setup_proof(format!(
+                "target-decryption opening randomness for commitment {commitment_index} has the wrong shape"
+            )));
+        }
+    }
+
+    let aggregate_share = aggregate_messages
+        .iter()
+        .map(|coefficient| {
+            let residue = coefficient.rem_euclid(target_prime_i64);
+            u64::try_from(residue).map_err(|_| {
+                invalid_succinct_setup_proof(
+                    "target-decryption aggregate-share coefficient does not fit u64",
+                )
+            })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut expected_partial = negacyclic_mul(
+        &statement.target_ciphertext_component_one,
+        &aggregate_share,
+        statement.target_rns_prime,
+    )?;
+    let mut interpolation_power = statement.interpolation_point % statement.target_rns_prime;
+    let plaintext_multiple = statement.plaintext_multiple % statement.target_rns_prime;
+    for smudging_message in witness.target_decryption_message_vectors.iter().skip(1) {
+        let smudging_scale = mul_mod_fast(
+            plaintext_multiple,
+            interpolation_power,
+            statement.target_rns_prime,
+        );
+        for (partial, encoded_coefficient) in expected_partial.iter_mut().zip(smudging_message) {
+            let signed_coefficient = encoded_coefficient
+                .checked_sub(statement.smudging_signed_coefficient_offset)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption smudging coefficient decoding overflowed",
+                    )
+                })?;
+            let smudging_residue =
+                signed_value_residue(signed_coefficient, statement.target_rns_prime);
+            let smudging_term =
+                mul_mod_fast(smudging_scale, smudging_residue, statement.target_rns_prime);
+            *partial = add_mod_fast(*partial, smudging_term, statement.target_rns_prime);
+        }
+        interpolation_power = mul_mod_fast(
+            interpolation_power,
+            statement.interpolation_point % statement.target_rns_prime,
+            statement.target_rns_prime,
+        );
+    }
+    if expected_partial != statement.released_partial_decryption {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption witness does not reconstruct the released partial",
         ));
     }
 

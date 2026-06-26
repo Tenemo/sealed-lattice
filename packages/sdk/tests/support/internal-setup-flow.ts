@@ -381,8 +381,6 @@ export type LocalTrusteeSetupStateDeletionReceipt = Readonly<
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly trusteePoint: number;
-        readonly deletionBoundary: 'after-private-vss-aggregation';
-        readonly deletionReceiptRoot: ProtocolHash;
     }
 >;
 
@@ -409,8 +407,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly deletionReceiptRoot: ProtocolHash;
         readonly deletionReceipt: LocalTrusteeSetupStateDeletionReceipt;
-        readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-        readonly storageProfile: 'encrypted-local-device-state-required';
         readonly localStateRoot: ProtocolHash;
     }
 >;
@@ -458,6 +454,8 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<JsonRecord>;
         readonly storageAadHash: ProtocolHash;
+        readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+        readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
@@ -513,7 +511,6 @@ export type SetupContribution = Readonly<
         readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
         readonly publicKeyShareProofRoot: ProtocolHash | null;
-        readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
         readonly setupContributionRoot: ProtocolHash;
     }
 >;
@@ -706,9 +703,6 @@ export type LocalTrusteeSetupStateVerification = Readonly<{
     readonly localStateRoot: ProtocolHash;
     readonly targetDecryptionProofWitnessRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
-    readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-    readonly storageProfile: 'encrypted-local-device-state-required';
-    readonly deletionBoundary: 'after-private-vss-aggregation';
 }>;
 
 export type RestoredLocalTrusteeSetupState = Readonly<{

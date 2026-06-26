@@ -18,23 +18,6 @@ use super::{
 
 const LOCAL_STATE_OBJECT_TYPE: &str = "LocalTrusteeSetupStateCommitment";
 const LOCAL_STATE_DELETION_RECEIPT_OBJECT_TYPE: &str = "LocalTrusteeSetupStateDeletionReceipt";
-const LOCAL_STATE_EXPORT_POLICY: &str = "roots-only-no-raw-share-or-opening-export";
-const LOCAL_STATE_STORAGE_PROFILE: &str = "encrypted-local-device-state-required";
-const DELETION_BOUNDARY: &str = "after-private-vss-aggregation";
-
-const DELETED_MATERIAL_CLASSES: &[&str] = &[
-    "raw-per-source-trustee-vss-shares",
-    "raw-per-source-trustee-vss-openings",
-    "private-vss-envelope-payloads-after-aggregation",
-];
-
-const RETAINED_MATERIAL_CLASSES: &[&str] = &[
-    "aggregate-threshold-share-sealed",
-    "target-decryption-proof-witness-sealed",
-    "issued-vss-acceptance-roots",
-    "issued-vss-complaint-roots",
-    "setup-context",
-];
 
 pub(crate) fn verify_local_trustee_setup_state_from_request(
     request: &Value,
@@ -103,9 +86,6 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
         "localStateRoot": local_state_root,
         "deletionReceiptRoot": deletion_receipt_root,
         "targetDecryptionProofWitnessRoot": hash_string_field(local_state, "targetDecryptionProofWitnessRoot")?,
-        "exportPolicy": LOCAL_STATE_EXPORT_POLICY,
-        "storageProfile": LOCAL_STATE_STORAGE_PROFILE,
-        "deletionBoundary": DELETION_BOUNDARY,
     }))
 }
 
@@ -193,18 +173,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
             "localStateCommitment.setupProfileId must be CollectiveBgvSetup-v1",
         ));
     }
-    if local_state.get("exportPolicy").and_then(Value::as_str) != Some(LOCAL_STATE_EXPORT_POLICY) {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.exportPolicy must forbid raw share and opening export",
-        ));
-    }
-    if local_state.get("storageProfile").and_then(Value::as_str)
-        != Some(LOCAL_STATE_STORAGE_PROFILE)
-    {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.storageProfile must require encrypted local device state",
-        ));
-    }
     string_field(local_state, "trusteeIdentity")?;
 
     Ok(())
@@ -245,37 +213,16 @@ fn verify_deletion_receipt(
             "deletionReceipt.trusteePoint must match localStateCommitment.trusteePoint",
         ));
     }
-    if deletion_receipt
-        .get("deletionBoundary")
-        .and_then(Value::as_str)
-        != Some(DELETION_BOUNDARY)
-    {
-        return Err(invalid_local_state_input(
-            "deletionReceipt.deletionBoundary must match the accepted private VSS aggregation boundary",
-        ));
-    }
-    if string_array_field(deletion_receipt, "deletedMaterialClasses")? != DELETED_MATERIAL_CLASSES {
-        return Err(invalid_local_state_input(
-            "deletionReceipt.deletedMaterialClasses must record raw source trustee share and opening deletion",
-        ));
-    }
-    if string_array_field(deletion_receipt, "retainedMaterialClasses")? != RETAINED_MATERIAL_CLASSES
-    {
-        return Err(invalid_local_state_input(
-            "deletionReceipt.retainedMaterialClasses must retain sealed aggregate state, sealed target-decryption proof witness material, and roots",
-        ));
-    }
-
     Ok(())
 }
 
 fn local_state_deletion_receipt_root(deletion_receipt: &Value) -> CanonicalResult<String> {
-    let mut root_input = deletion_receipt.clone();
-    root_input
-        .as_object_mut()
-        .ok_or_else(|| invalid_local_state_input("deletionReceipt must be an object"))?
-        .remove("deletionReceiptRoot");
-    derive_protocol_hash("LocalTrusteeDeletionReceiptRoot", &root_input)
+    if !deletion_receipt.is_object() {
+        return Err(invalid_local_state_input(
+            "deletionReceipt must be an object",
+        ));
+    }
+    derive_protocol_hash("LocalTrusteeDeletionReceiptRoot", deletion_receipt)
 }
 
 fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
@@ -359,17 +306,6 @@ fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
 fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
     usize::try_from(u64_field(value, field_name)?)
         .map_err(|_| invalid_local_state_input(format!("{field_name} does not fit usize")))
-}
-
-fn string_array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<Vec<&'a str>> {
-    array_field(value, field_name)?
-        .iter()
-        .map(|item| {
-            item.as_str().ok_or_else(|| {
-                invalid_local_state_input(format!("{field_name} must contain only strings"))
-            })
-        })
-        .collect()
 }
 
 fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {

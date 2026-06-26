@@ -5,7 +5,6 @@ fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "profile-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -37,7 +36,6 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "profile-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -445,7 +443,6 @@ fn terminal_profile_ring_gate_refuses_reduced_vss_material() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": 8,
-            "ringDegreeStatus": "development-reduced-ring",
         },
     });
 

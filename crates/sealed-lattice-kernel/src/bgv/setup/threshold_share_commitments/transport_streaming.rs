@@ -26,7 +26,6 @@ pub(crate) struct VerifiedTransportedVssMaterial {
 
 pub(super) struct TransportThresholdDerivation {
     pub(super) ring_degree: usize,
-    pub(super) ring_degree_status: &'static str,
     pub(super) observed_commitment_roots: BTreeMap<(u64, usize, u64), String>,
     pub(super) threshold_share_commitments: Value,
     pub(super) constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
@@ -45,7 +44,6 @@ pub(super) struct VssTransportThresholdDerivationSession {
 
 pub(super) struct TransportConstantVssMaterial {
     pub(super) ring_degree: usize,
-    pub(super) ring_degree_status: &'static str,
     pub(super) constant_commitments_by_source_trustee: BTreeMap<u64, Vec<SetupCommitmentValue>>,
 }
 
@@ -349,7 +347,6 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
         &session.setup_context,
         &session.public_matrix_seed_hash,
         derivation.ring_degree,
-        derivation.ring_degree_status,
         &roster,
         material_record_count,
         vss_coefficient_commitment_root,
@@ -413,7 +410,6 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
         "derivationId": derivation_id,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
-        "ringDegreeStatus": derivation.ring_degree_status,
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": roster.decryption_threshold,
@@ -564,17 +560,11 @@ impl StreamingVssThresholdMaterialParser {
             }
         }
 
-        let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-            "profile-ring"
-        } else {
-            "development-reduced-ring"
-        };
         let threshold_share_commitments =
             threshold_share_commitment_set_from_transport_accumulators(
                 setup_context,
                 public_matrix_seed_hash,
                 ring_degree,
-                ring_degree_status,
                 &self.roster,
                 source_trustee_bindings,
                 &self.accumulators,
@@ -582,7 +572,6 @@ impl StreamingVssThresholdMaterialParser {
 
         Ok(TransportThresholdDerivation {
             ring_degree,
-            ring_degree_status,
             observed_commitment_roots: self.observed_commitment_roots,
             threshold_share_commitments,
             constant_commitments_by_source_trustee: self.constant_commitments_by_source_trustee,
@@ -882,11 +871,6 @@ pub(super) fn read_constant_vss_commitments_from_transport_bytes(
 
     Ok(TransportConstantVssMaterial {
         ring_degree,
-        ring_degree_status: if ring_degree == POLYNOMIAL_DEGREE {
-            "profile-ring"
-        } else {
-            "development-reduced-ring"
-        },
         constant_commitments_by_source_trustee,
     })
 }
@@ -1007,16 +991,10 @@ pub(super) fn derive_threshold_share_commitment_set_from_transport_bytes(
             "transported VSS material has trailing bytes after the final commitment record",
         ));
     }
-    let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-        "profile-ring"
-    } else {
-        "development-reduced-ring"
-    };
     let threshold_share_commitments = threshold_share_commitment_set_from_transport_accumulators(
         setup_context,
         public_matrix_seed_hash,
         ring_degree,
-        ring_degree_status,
         roster,
         source_trustee_bindings,
         &accumulators,
@@ -1024,7 +1002,6 @@ pub(super) fn derive_threshold_share_commitment_set_from_transport_bytes(
 
     Ok(TransportThresholdDerivation {
         ring_degree,
-        ring_degree_status,
         observed_commitment_roots,
         threshold_share_commitments,
         constant_commitments_by_source_trustee,
@@ -1088,7 +1065,6 @@ fn threshold_share_commitment_set_from_transport_accumulators(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     ring_degree: usize,
-    ring_degree_status: &str,
     roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     accumulators: &BTreeMap<(u64, usize), TransportThresholdAccumulator>,
@@ -1149,7 +1125,6 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                 recipient_roster_position,
                 recipient_roster_position_usize,
                 roster.decryption_threshold as usize,
-                ring_degree_status,
                 &threshold_limb,
             )?);
         }
@@ -1166,7 +1141,6 @@ fn threshold_share_commitment_set_from_transport_accumulators(
             "recipientRosterPosition": recipient_roster_position,
             "trusteePoint": trustee_point,
             "ringDegree": ring_degree,
-            "ringDegreeStatus": ring_degree_status,
             "limbCommitments": limb_commitments,
         });
         copy_context_fields(&mut recipient_record, setup_context)?;
@@ -1187,7 +1161,6 @@ fn threshold_share_commitment_set_from_transport_accumulators(
         "thresholdDegree": roster.decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "recipientRecords": recipient_records,
     });
     copy_context_fields(&mut commitment_set, setup_context)?;

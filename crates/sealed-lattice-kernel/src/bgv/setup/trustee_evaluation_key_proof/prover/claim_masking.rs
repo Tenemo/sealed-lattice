@@ -34,9 +34,14 @@ pub(in super::super) fn global_claim_id(
 ) -> u64 {
     let repetition = local_claim_index % CONSISTENCY_REPETITIONS;
     let vector_index = local_claim_index / CONSISTENCY_REPETITIONS;
-    if layout.private_vss_active() || layout.compact_vss_active() {
+    if layout.private_vss_active()
+        || layout.compact_vss_active()
+        || layout.target_decryption_active()
+    {
         debug_assert!(
-            statement.private_vss_share.is_some() || statement.compact_vss_share_linkage.is_some()
+            statement.private_vss_share.is_some()
+                || statement.compact_vss_share_linkage.is_some()
+                || statement.target_decryption_share.is_some()
         );
         return (vector_index * CONSISTENCY_REPETITIONS + repetition) as u64;
     }
@@ -153,6 +158,15 @@ pub(super) fn global_claim_integers(
         }
         for column in &witness.compact_vss_recipient_share_opening_randomness {
             signed_vectors.push(column);
+        }
+    } else if statement.target_decryption_share.is_some() {
+        for message_vector in &witness.target_decryption_message_vectors {
+            signed_vectors.push(message_vector);
+        }
+        for randomness_columns in &witness.target_decryption_opening_randomness_by_commitment {
+            for column in randomness_columns {
+                signed_vectors.push(column);
+            }
         }
     } else {
         signed_vectors.push(&witness.secret_coefficients);

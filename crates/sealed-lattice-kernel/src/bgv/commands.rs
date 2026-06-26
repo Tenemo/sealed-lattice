@@ -39,6 +39,7 @@ use crate::{
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
+            generate_target_decryption_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             release_verified_transported_vss_material_request,
             verify_collective_bgv_setup_package_from_request,
@@ -55,6 +56,7 @@ use crate::{
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
+            verify_target_decryption_share_proof_from_request,
             verify_trustee_evaluation_key_proof_from_request,
         },
         validation::{bgv_profile_rejection, validate_ciphertext_hex, validate_plaintext_hex},
@@ -194,6 +196,14 @@ pub(crate) fn generate_compact_same_secret_bridge_proof(request: &Value) -> Cano
 
 pub(crate) fn verify_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
     verify_compact_same_secret_bridge_proof_from_request(request)
+}
+
+pub(crate) fn generate_target_decryption_share_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_target_decryption_share_proof_from_request(request)
+}
+
+pub(crate) fn verify_target_decryption_share_proof(request: &Value) -> CanonicalResult<Value> {
+    verify_target_decryption_share_proof_from_request(request)
 }
 
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {

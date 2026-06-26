@@ -581,6 +581,8 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         compact_vss_recipient_share_opening_randomness: Vec::new(),
         compact_vss_carry_witnesses: Vec::new(),
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     }
 }
 

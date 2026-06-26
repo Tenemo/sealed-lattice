@@ -1,7 +1,10 @@
 import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { acceptedBgvProfileRingDegree } from './vss-coefficient-commitments.js';
+import {
+    acceptedBgvProfileRingDegree,
+    acceptedBgvSetupQSharePrimes,
+} from './vss-coefficient-commitments.js';
 import type { VssSourceTrusteeCoefficientOpeningState } from './vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
@@ -11,8 +14,6 @@ const twoToTheSixtyFourth = 1n << 64n;
 
 export const compactVssCommitmentProfileId =
     'SealedLattice-CompactLinearCommitment-Development-v1';
-export const compactVssCommitmentDevelopmentScope =
-    'development-only-not-certified-for-production-use';
 export const compactVssCommitmentOutputCoordinateCount = 16;
 export const compactVssCommitmentRandomnessColumnCount = 2;
 export const compactVssProjectionWeight = 32;
@@ -21,10 +22,6 @@ export const compactVssCommitmentBinaryFormat =
     'sealed-lattice-compact-vss-commitment-binary-v1';
 const compactVssShareLinkageStatementRelation =
     'recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments';
-const compactVssShareLinkageStatementProofBoundary =
-    'statement binding only; zero-knowledge linkage proof backend is not implemented yet';
-export const compactVssRestrictedShareLinkageProofBoundary =
-    'restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend';
 export const compactVssShareLinkageProofFamily = 'compact-vss-share-linkage';
 const compactVssShareLinkageProofBytesHashDomain =
     'sealed-lattice-compact-vss-share-linkage-proof-bytes-v1';
@@ -40,13 +37,12 @@ export const compactVssShareLinkageAggregateThresholdRule =
     'aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb';
 export const compactVssShareLinkageCommonKeyRule =
     'coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile';
-export const compactVssShareLinkageRecipientApprovalBoundary =
-    'recipient signatures or acknowledgements are not accepted as evidence for an invalid public recipient-share commitment';
 
 export type CompactVssCommitmentRole =
     | 'coefficient'
     | 'recipient-share'
-    | 'aggregate-threshold-share';
+    | 'aggregate-threshold-share'
+    | 'target-decryption-smudging-polynomial-coefficient';
 
 export type CompactVssCommitmentOpeningInput = Readonly<{
     readonly commitmentRole: CompactVssCommitmentRole;
@@ -71,7 +67,6 @@ export type CompactVssCommitmentValue = Readonly<
         readonly objectType: 'CompactVssCommitment';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly commitmentRole: CompactVssCommitmentRole;
         readonly commitmentContextHash: ProtocolHash;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -80,8 +75,6 @@ export type CompactVssCommitmentValue = Readonly<
         readonly ringDegree: number;
         readonly outputCoordinateCount: typeof compactVssCommitmentOutputCoordinateCount;
         readonly randomnessColumnCount: typeof compactVssCommitmentRandomnessColumnCount;
-        readonly messageVectorHash512: string;
-        readonly openingRandomnessHash512: string;
         readonly commitmentLimbs: readonly CompactVssCommitmentLimb[];
     }
 >;
@@ -93,7 +86,6 @@ type CompactVssCommitmentComputation = Readonly<{
     readonly commitment: CompactVssCommitmentValue;
     readonly commitmentRoot: ProtocolHash;
     readonly commitmentContextHash: ProtocolHash;
-    readonly openingRoot: ProtocolHash;
     readonly encodedCommitmentByteLength: number;
 }>;
 
@@ -104,8 +96,6 @@ export type CompactVssCommitmentBodyMetadata = Readonly<{
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly ringDegree: number;
-    readonly messageVectorHash512: string;
-    readonly openingRandomnessHash512: string;
 }>;
 
 type CompactVssCommitmentOpeningVerification = Readonly<{
@@ -113,14 +103,11 @@ type CompactVssCommitmentOpeningVerification = Readonly<{
     readonly operation: 'verifyCompactVssCommitmentOpening';
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly commitmentRoot: ProtocolHash;
-    readonly openingRoot: ProtocolHash;
 }>;
 
 type CompactVssCommitmentHomomorphicCombinationInput = Readonly<{
     readonly commitmentRole: CompactVssCommitmentRole;
     readonly commitmentContext: JsonRecord;
-    readonly combinedMessageVectorHash512?: string;
-    readonly combinedOpeningRandomnessHash512?: string;
     readonly terms: readonly {
         readonly commitment: CompactVssCommitmentValue;
         readonly scalar: number;
@@ -132,7 +119,6 @@ type CompactVssCommitmentMeasurement = Readonly<
         readonly objectType: 'CompactVssCommitmentMeasurement';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly participantCount: number;
         readonly sourceRnsLimbCount: number;
         readonly targetRnsLimbCount: number;
@@ -147,9 +133,6 @@ type CompactVssCommitmentMeasurement = Readonly<
         readonly aggregateThresholdCommitmentBytes: number;
         readonly totalCompactPublicCommitmentBytes: number;
         readonly currentFullCoefficientTransportBytes: number;
-        readonly byteAccountingScope: string;
-        readonly measuredPublicCommitmentRoles: readonly string[];
-        readonly excludedByteCategories: readonly string[];
         readonly byteReduction: Readonly<{
             readonly removedBytes: number;
             readonly compactFractionOfCurrent: number;
@@ -158,7 +141,6 @@ type CompactVssCommitmentMeasurement = Readonly<
         readonly largestSingleObjectBytes: number;
         readonly largestWasmBoundaryCopyBytes: number;
         readonly budgetComparison: Readonly<{
-            readonly budgetScope: string;
             readonly publicSetupDownloadBudgetBytes: number;
             readonly totalCompactPublicCommitmentFractionOfDownloadBudget: number;
             readonly sourceTrusteeUploadBudgetBytes: number;
@@ -189,9 +171,7 @@ type CompactVssMatrixExpansionProfile = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly matrixKind: 'compact-vss-commitment-key';
-        readonly keyScope: string;
         readonly ringDegree: number;
         readonly commitmentModulusLimbIndices: readonly number[];
         readonly outputCoordinateCount: typeof compactVssCommitmentOutputCoordinateCount;
@@ -203,14 +183,12 @@ type CompactVssMatrixExpansionProfile = Readonly<
         readonly rejectionSamplingRule: string;
         readonly matrixResiduePreimageFields: readonly string[];
         readonly projectionIndexPreimageFields: readonly string[];
-        readonly biasBoundary: string;
         readonly coordinateCountPerCommitment: number;
         readonly sampledMatrixResiduesPerCoordinate: number;
         readonly sampledProjectionIndicesPerCoordinate: number;
         readonly sampledMatrixResiduesPerCommitment: number;
         readonly sampledProjectionIndicesPerCommitment: number;
         readonly residueMultiplyAddsPerCommitment: number;
-        readonly certificateBoundary: string;
     }
 >;
 
@@ -220,7 +198,6 @@ export type CompactVssParameterCertificateInputBinding = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly compactVssParameterCertificateInputBindingHash: ProtocolHash;
         readonly participantCount: number;
         readonly sourceRnsLimbCount: number;
@@ -234,33 +211,7 @@ export type CompactVssParameterCertificateInputBinding = Readonly<
         readonly estimatorInputRows: readonly Readonly<
             Record<string, unknown>
         >[];
-        readonly proofCoverageInputs: Readonly<Record<string, unknown>>;
-        readonly structuredRingDisclosure: string;
         readonly sameSecretBridgeInput: Readonly<Record<string, unknown>>;
-        readonly missingCertificateInputs: readonly string[];
-    }
->;
-
-type CompactVssPrivateWitnessPayloadMeasurement = Readonly<
-    JsonRecord & {
-        readonly objectType: 'CompactVssPrivateWitnessPayloadMeasurement';
-        readonly objectVersion: 1;
-        readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
-        readonly participantCount: number;
-        readonly targetRnsLimbCount: number;
-        readonly ringDegree: number;
-        readonly bytesPerResidue: 8;
-        readonly randomnessColumnCount: typeof compactVssCommitmentRandomnessColumnCount;
-        readonly oneSourceRecipientCredentialPayloadBytes: number;
-        readonly oneAggregateCredentialPayloadBytes: number;
-        readonly oneRecipientPrivateMailboxCredentialPayloadBytes: number;
-        readonly oneRecipientPersistentAggregateCredentialPayloadBytes: number;
-        readonly allRecipientsPrivateMailboxCredentialPayloadBytes: number;
-        readonly allRecipientsPersistentAggregateCredentialPayloadBytes: number;
-        readonly largestSingleCredentialPayloadBytes: number;
-        readonly byteAccountingScope: string;
-        readonly excludedByteCategories: readonly string[];
     }
 >;
 
@@ -301,7 +252,6 @@ type CompactVssCoefficientCommitmentRecord = Readonly<
         readonly objectType: 'CompactVssCoefficientCommitment';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -309,7 +259,6 @@ type CompactVssCoefficientCommitmentRecord = Readonly<
         readonly rnsPrime: number;
         readonly shamirCoefficientIndex: number;
         readonly coefficientCommitmentRoot: ProtocolHash;
-        readonly coefficientVectorHash512: string;
         readonly commitment: CompactVssCommitmentValue;
     }
 >;
@@ -319,7 +268,6 @@ type CompactVssSourceCoefficientCommitments = Readonly<
         readonly objectType: 'CompactVssSourceCoefficientCommitments';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -334,7 +282,6 @@ export type CompactVssCoefficientCommitmentSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -350,7 +297,6 @@ type CompactVssRecipientShareCommitmentRecord = Readonly<
         readonly objectType: 'CompactVssRecipientShareCommitment';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientIdentity: string;
@@ -359,8 +305,6 @@ type CompactVssRecipientShareCommitmentRecord = Readonly<
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
         readonly shareCommitmentRoot: ProtocolHash;
-        readonly shareOpeningRoot: ProtocolHash;
-        readonly shareVectorHash512: string;
         readonly commitment: CompactVssCommitmentValue;
     }
 >;
@@ -370,7 +314,6 @@ type CompactVssSourceRecipientShareCommitments = Readonly<
         readonly objectType: 'CompactVssSourceRecipientShareCommitments';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly sourceTrusteeIdentity: string;
         readonly sourceTrusteeRosterPosition: number;
         readonly recipientShareCommitments: readonly CompactVssRecipientShareCommitmentRecord[];
@@ -384,7 +327,6 @@ export type CompactVssRecipientShareCommitmentSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -423,14 +365,12 @@ export type CompactVssAggregateThresholdCommitmentRecord = Readonly<
         readonly objectType: 'CompactVssAggregateThresholdCommitment';
         readonly objectVersion: 1;
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
         readonly recipientTrusteePoint: number;
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
         readonly aggregateCommitmentRoot: ProtocolHash;
-        readonly aggregateOpeningRoot: ProtocolHash;
         readonly commitment: CompactVssCommitmentValue;
         readonly sourceShareCommitmentRoots: readonly ProtocolHash[];
     }
@@ -442,7 +382,6 @@ export type CompactVssAggregateThresholdCommitmentSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
@@ -464,7 +403,6 @@ export type CompactVssAggregateThresholdOpeningCredential = Readonly<
         readonly rnsPrime: number;
         readonly aggregateShareValues: readonly number[];
         readonly aggregateCommitmentMessageValues: readonly number[];
-        readonly aggregateShareCarryValues: readonly number[];
         readonly aggregateRandomnessByColumn: readonly (readonly number[])[];
         readonly aggregateCommitmentRoot: ProtocolHash;
         readonly aggregateOpeningRoot: ProtocolHash;
@@ -483,7 +421,6 @@ export type CompactVssShareLinkageStatement = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -505,8 +442,6 @@ export type CompactVssShareLinkageStatement = Readonly<
         readonly shamirEvaluationRule: typeof compactVssShareLinkageShamirEvaluationRule;
         readonly aggregateThresholdRule: typeof compactVssShareLinkageAggregateThresholdRule;
         readonly commonKeyRule: typeof compactVssShareLinkageCommonKeyRule;
-        readonly recipientApprovalBoundary: typeof compactVssShareLinkageRecipientApprovalBoundary;
-        readonly proofBoundary: typeof compactVssShareLinkageStatementProofBoundary;
         readonly sourceStatementRecords: readonly CompactVssShareLinkageSourceStatementRecord[];
         readonly statementRoot: ProtocolHash;
     }
@@ -518,7 +453,6 @@ export type CompactVssShareLinkageSourceStatementRecord = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -543,20 +477,22 @@ export type CompactVssShareLinkageSourceStatementRecord = Readonly<
         readonly shamirEvaluationRule: typeof compactVssShareLinkageShamirEvaluationRule;
         readonly aggregateThresholdRule: typeof compactVssShareLinkageAggregateThresholdRule;
         readonly commonKeyRule: typeof compactVssShareLinkageCommonKeyRule;
-        readonly recipientApprovalBoundary: typeof compactVssShareLinkageRecipientApprovalBoundary;
-        readonly proofBoundary: typeof compactVssShareLinkageStatementProofBoundary;
         readonly sourceStatementRoot: ProtocolHash;
     }
 >;
 
 export type CompactVssShareLinkageProofRecordInput = Readonly<{
     readonly proofStatementHash: ProtocolHash;
+    readonly proofStatement: Readonly<
+        JsonRecord & {
+            readonly proofStatementHash: ProtocolHash;
+        }
+    >;
     readonly proofBytesHex: string;
 }>;
 
 export type CompactVssShareLinkageProofMaterialInput = Readonly<{
     readonly sourceStatementRoot: ProtocolHash;
-    readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
     readonly proofRecords: readonly CompactVssShareLinkageProofRecordInput[];
 }>;
 
@@ -565,7 +501,6 @@ export type CompactVssShareLinkageProofRecord = Readonly<
         readonly objectType: 'CompactVssShareLinkageProofRecord';
         readonly objectVersion: 1;
         readonly proofFamily: typeof compactVssShareLinkageProofFamily;
-        readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
         readonly sourceStatementRoot: ProtocolHash;
         readonly proofStatementHash: ProtocolHash;
         readonly proofByteLength: number;
@@ -581,9 +516,7 @@ export type CompactVssShareLinkageProofMaterial = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly proofFamily: typeof compactVssShareLinkageProofFamily;
-        readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -597,6 +530,11 @@ export type CompactVssShareLinkageProofMaterial = Readonly<
         readonly shareLinkageStatementRoot: ProtocolHash;
         readonly sourceStatementRoot: ProtocolHash;
         readonly proofRecords: readonly CompactVssShareLinkageProofRecord[];
+        readonly proofStatements: readonly Readonly<
+            JsonRecord & {
+                readonly proofStatementHash: ProtocolHash;
+            }
+        >[];
         readonly proofMaterialRoot: ProtocolHash;
     }
 >;
@@ -607,9 +545,7 @@ export type CompactVssShareLinkageProofMaterialSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly proofFamily: typeof compactVssShareLinkageProofFamily;
-        readonly proofBoundary: typeof compactVssRestrictedShareLinkageProofBoundary;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -630,14 +566,6 @@ const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const assertProtocolHash = (value: string, fieldName: string): void => {
     if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
-
-const assertHash512Hex = (value: string, fieldName: string): void => {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
-        throw new TypeError(
-            `${fieldName} must be a 512-bit lowercase hex hash.`,
-        );
     }
 };
 
@@ -667,7 +595,8 @@ const assertCompactVssCommitmentRole: (
     if (
         value !== 'coefficient' &&
         value !== 'recipient-share' &&
-        value !== 'aggregate-threshold-share'
+        value !== 'aggregate-threshold-share' &&
+        value !== 'target-decryption-smudging-polynomial-coefficient'
     ) {
         throw new TypeError(`${fieldName} is not supported.`);
     }
@@ -761,6 +690,54 @@ const writeLittleEndianU64 = (
     }
 };
 
+const writeLittleEndianI64 = (
+    bytes: Uint8Array,
+    offset: number,
+    value: number,
+): void => {
+    let remainingValue = BigInt.asUintN(64, BigInt(value));
+    for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
+        bytes[offset + byteIndex] = Number(remainingValue & 0xffn);
+        remainingValue >>= 8n;
+    }
+};
+
+const compactVssOpeningPayloadHash = (input: {
+    readonly messageCoefficients: readonly number[];
+    readonly randomnessByColumn: readonly (readonly number[])[];
+}): string => {
+    const wordCount =
+        2 +
+        input.messageCoefficients.length +
+        input.randomnessByColumn.reduce(
+            (total, column) => total + 1 + column.length,
+            0,
+        );
+    const bytes = new Uint8Array(wordCount * 8);
+    let offset = 0;
+    writeLittleEndianU64(bytes, offset, input.messageCoefficients.length);
+    offset += 8;
+    input.messageCoefficients.forEach((coefficient) => {
+        writeLittleEndianU64(bytes, offset, coefficient);
+        offset += 8;
+    });
+    writeLittleEndianU64(bytes, offset, input.randomnessByColumn.length);
+    offset += 8;
+    input.randomnessByColumn.forEach((column) => {
+        writeLittleEndianU64(bytes, offset, column.length);
+        offset += 8;
+        column.forEach((coefficient) => {
+            writeLittleEndianI64(bytes, offset, coefficient);
+            offset += 8;
+        });
+    });
+
+    return hash512Hex(
+        'sealed-lattice-compact-vss-commitment/opening-payload-v1',
+        [bytes],
+    );
+};
+
 const hexToBytes = (hex: string): Uint8Array => {
     const bytes = new Uint8Array(hex.length / 2);
     for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
@@ -772,6 +749,9 @@ const hexToBytes = (hex: string): Uint8Array => {
 
     return bytes;
 };
+
+const bytesToHex = (bytes: Uint8Array): string =>
+    [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
 const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
     if (value.length === 0 || value.length % 2 !== 0) {
@@ -788,6 +768,109 @@ const proofBytesFromHex = (hex: string, fieldName: string): Uint8Array => {
     assertLowercaseHexBytes(hex, fieldName);
 
     return hexToBytes(hex);
+};
+
+const compactTernaryCode = (coefficient: number, fieldName: string): number => {
+    if (coefficient === -1) {
+        return 0;
+    }
+    if (coefficient === 0) {
+        return 1;
+    }
+    if (coefficient === 1) {
+        return 2;
+    }
+
+    throw new TypeError(`${fieldName} must be a ternary coefficient.`);
+};
+
+export const encodeCompactVssTernaryRandomnessColumnsHex = (
+    randomnessByColumn: readonly (readonly number[])[],
+    ringDegree: number,
+): readonly string[] => {
+    assertPositiveSafeInteger(ringDegree, 'ringDegree');
+    assertOpeningRandomness(randomnessByColumn, ringDegree);
+    const byteLength = Math.ceil(ringDegree / 4);
+
+    return randomnessByColumn.map((randomnessColumn, columnIndex) => {
+        const bytes = new Uint8Array(byteLength);
+        randomnessColumn.forEach((coefficient, coefficientIndex) => {
+            const packedByteIndex = Math.floor(coefficientIndex / 4);
+            const packedBitShift = (coefficientIndex % 4) * 2;
+            bytes[packedByteIndex] =
+                (bytes[packedByteIndex] ?? 0) |
+                (compactTernaryCode(
+                    coefficient,
+                    `randomnessByColumn.${String(columnIndex)}.${String(coefficientIndex)}`,
+                ) <<
+                    packedBitShift);
+        });
+
+        return bytesToHex(bytes);
+    });
+};
+
+export const decodeCompactVssTernaryRandomnessColumnsHex = (
+    packedColumnsHex: readonly string[],
+    ringDegree: number,
+): readonly (readonly number[])[] => {
+    assertPositiveSafeInteger(ringDegree, 'ringDegree');
+    if (packedColumnsHex.length !== compactVssCommitmentRandomnessColumnCount) {
+        throw new Error(
+            'packed compact VSS randomness must contain the compact commitment randomness column count.',
+        );
+    }
+    const byteLength = Math.ceil(ringDegree / 4);
+    const expectedHexLength = byteLength * 2;
+
+    return packedColumnsHex.map((packedColumnHex, columnIndex) => {
+        if (packedColumnHex.length !== expectedHexLength) {
+            throw new Error(
+                `packed compact VSS randomness column ${String(columnIndex)} length must match ringDegree.`,
+            );
+        }
+        assertLowercaseHexBytes(
+            packedColumnHex,
+            `randomnessByColumnPackedTernaryHex.${String(columnIndex)}`,
+        );
+        const bytes = hexToBytes(packedColumnHex);
+        const randomnessColumn = Array.from({ length: ringDegree }, () => 0);
+        for (
+            let packedCoefficientIndex = 0;
+            packedCoefficientIndex < byteLength * 4;
+            packedCoefficientIndex += 1
+        ) {
+            const packedByte = bytes[Math.floor(packedCoefficientIndex / 4)];
+            if (packedByte === undefined) {
+                throw new Error(
+                    'packed compact VSS randomness column is shorter than expected.',
+                );
+            }
+            const code =
+                (packedByte >> ((packedCoefficientIndex % 4) * 2)) & 0b11;
+            if (packedCoefficientIndex >= ringDegree) {
+                if (code !== 0) {
+                    throw new Error(
+                        'packed compact VSS randomness padding must be zero.',
+                    );
+                }
+                continue;
+            }
+            if (code === 0) {
+                randomnessColumn[packedCoefficientIndex] = -1;
+            } else if (code === 1) {
+                randomnessColumn[packedCoefficientIndex] = 0;
+            } else if (code === 2) {
+                randomnessColumn[packedCoefficientIndex] = 1;
+            } else {
+                throw new Error(
+                    `packed compact VSS randomness column ${String(columnIndex)} contains an invalid ternary code.`,
+                );
+            }
+        }
+
+        return randomnessColumn;
+    });
 };
 
 const reduceUnbiasedU64 = (
@@ -1081,7 +1164,6 @@ const evaluateSourceShareForRecipient = (input: {
 type CompactVssAggregateShareSum = Readonly<{
     readonly aggregateShareValues: readonly number[];
     readonly aggregateCommitmentMessageValues: readonly number[];
-    readonly aggregateShareCarryValues: readonly number[];
 }>;
 
 const safeNumberFromBigInt = (value: bigint, fieldName: string): number => {
@@ -1140,12 +1222,6 @@ const sumShareVectorsWithCarries = (
                 `aggregateCommitmentMessageValues.${String(coefficientIndex)}`,
             ),
         ),
-        aggregateShareCarryValues: sums.map((sum, coefficientIndex) =>
-            safeNumberFromBigInt(
-                sum / modulusWide,
-                `aggregateShareCarryValues.${String(coefficientIndex)}`,
-            ),
-        ),
     };
 };
 
@@ -1172,36 +1248,24 @@ export const verifyCompactVssAggregateOpeningCredential = (input: {
         input.ringDegree,
         'aggregateCommitmentMessageValues',
     );
-    assertResidueVector(
-        input.credential.aggregateShareCarryValues,
-        input.participantCount,
-        input.ringDegree,
-        'aggregateShareCarryValues',
-    );
     input.credential.aggregateShareValues.forEach(
         (aggregateShareValue, coefficientIndex) => {
             const aggregateCommitmentMessageValue =
                 input.credential.aggregateCommitmentMessageValues[
                     coefficientIndex
                 ];
-            const aggregateShareCarryValue =
-                input.credential.aggregateShareCarryValues[coefficientIndex];
-            if (
-                aggregateCommitmentMessageValue === undefined ||
-                aggregateShareCarryValue === undefined
-            ) {
+            if (aggregateCommitmentMessageValue === undefined) {
                 throw new Error(
-                    'compact VSS aggregate opening credential carry vectors must match ringDegree.',
+                    'compact VSS aggregate opening credential message vectors must match ringDegree.',
                 );
             }
             if (
-                BigInt(aggregateCommitmentMessageValue) !==
-                BigInt(aggregateShareValue) +
-                    BigInt(aggregateShareCarryValue) *
-                        BigInt(input.credential.rnsPrime)
+                BigInt(aggregateShareValue) !==
+                BigInt(aggregateCommitmentMessageValue) %
+                    BigInt(input.credential.rnsPrime)
             ) {
                 throw new Error(
-                    'compact VSS aggregate opening credential carry relation does not match the reduced aggregate share.',
+                    'compact VSS aggregate opening credential message does not match the reduced aggregate share.',
                 );
             }
         },
@@ -1246,43 +1310,6 @@ const addProductMod = (
     (accumulatedValue + BigInt(leftValue) * BigInt(rightValue)) %
     BigInt(modulus);
 
-const coefficientVectorHash = (
-    domain: string,
-    coefficients: readonly number[],
-): string => {
-    const bytes = new Uint8Array(coefficients.length * 8);
-    coefficients.forEach((coefficient, coefficientIndex) => {
-        let value = BigInt(coefficient);
-        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
-            bytes[coefficientIndex * 8 + byteIndex] = Number(value & 0xffn);
-            value >>= 8n;
-        }
-    });
-
-    return hash512Hex(domain, [bytes]);
-};
-
-const randomnessHash = (
-    randomnessByColumn: readonly (readonly number[])[],
-): string => {
-    const flattenedCoefficients = randomnessByColumn.flatMap((column) =>
-        column.map((coefficient) => BigInt(coefficient)),
-    );
-    const bytes = new Uint8Array(flattenedCoefficients.length * 8);
-    flattenedCoefficients.forEach((coefficient, coefficientIndex) => {
-        let value = BigInt.asUintN(64, coefficient);
-        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
-            bytes[coefficientIndex * 8 + byteIndex] = Number(value & 0xffn);
-            value >>= 8n;
-        }
-    });
-
-    return hash512Hex(
-        'sealed-lattice-compact-vss-commitment/opening-randomness-v1',
-        [bytes],
-    );
-};
-
 const commitmentRoot = (commitment: CompactVssCommitmentValue): ProtocolHash =>
     deriveProtocolHash('SetupCommitmentRoot', commitment);
 
@@ -1306,11 +1333,6 @@ const assertStandaloneCompactVssCommitmentBody = (
         commitment.profileId,
         `${fieldName}.profileId`,
         compactVssCommitmentProfileId,
-    );
-    assertExactStringField(
-        commitment.developmentScope,
-        `${fieldName}.developmentScope`,
-        compactVssCommitmentDevelopmentScope,
     );
     assertCompactVssCommitmentRole(
         commitment.commitmentRole,
@@ -1340,14 +1362,6 @@ const assertStandaloneCompactVssCommitmentBody = (
             `${fieldName} compact commitment dimensions do not match the profile.`,
         );
     }
-    assertHash512Hex(
-        commitment.messageVectorHash512,
-        `${fieldName}.messageVectorHash512`,
-    );
-    assertHash512Hex(
-        commitment.openingRandomnessHash512,
-        `${fieldName}.openingRandomnessHash512`,
-    );
     if (
         commitment.commitmentLimbs.length !==
         compactVssCommitmentModulusLimbIndices.length
@@ -1408,7 +1422,6 @@ const assertCompactVssCommitmentBody = (input: {
     readonly expectedPublicMatrixSeedHash: ProtocolHash;
     readonly expectedRnsLimbIndex: number;
     readonly expectedRnsPrime: number;
-    readonly expectedMessageVectorHash512?: string;
     readonly fieldName: string;
 }): void => {
     const { commitment } = input;
@@ -1433,14 +1446,6 @@ const assertCompactVssCommitmentBody = (input: {
             `${input.fieldName} source limb metadata must match the containing record.`,
         );
     }
-    if (
-        input.expectedMessageVectorHash512 !== undefined &&
-        commitment.messageVectorHash512 !== input.expectedMessageVectorHash512
-    ) {
-        throw new Error(
-            `${input.fieldName}.messageVectorHash512 must match the containing record.`,
-        );
-    }
     if (commitmentRoot(commitment) !== input.expectedCommitmentRoot) {
         throw new Error(
             `${input.fieldName} canonical root must match the containing record.`,
@@ -1448,7 +1453,9 @@ const assertCompactVssCommitmentBody = (input: {
     }
 };
 
-const openingRoot = (input: CompactVssCommitmentOpeningInput): ProtocolHash =>
+export const compactVssCommitmentPrivateOpeningRoot = (
+    input: CompactVssCommitmentOpeningInput,
+): ProtocolHash =>
     deriveProtocolHash('SetupCommitmentRoot', {
         objectType: 'CompactVssCommitmentOpening',
         objectVersion: 1,
@@ -1459,11 +1466,7 @@ const openingRoot = (input: CompactVssCommitmentOpeningInput): ProtocolHash =>
         rnsLimbIndex: input.rnsLimbIndex,
         rnsPrime: input.rnsPrime,
         ringDegree: input.ringDegree,
-        messageVectorHash512: coefficientVectorHash(
-            'sealed-lattice-compact-vss-commitment/message-vector-v1',
-            input.messageCoefficients,
-        ),
-        openingRandomnessHash512: randomnessHash(input.randomnessByColumn),
+        openingPayloadHash512: compactVssOpeningPayloadHash(input),
     });
 
 export const compactVssEncodedCommitmentByteLength = (): number =>
@@ -1515,14 +1518,6 @@ export const decodeCompactVssCommitmentBody = (input: {
     );
     assertPositiveSafeInteger(metadata.rnsPrime, 'metadata.rnsPrime');
     assertPositiveSafeInteger(metadata.ringDegree, 'metadata.ringDegree');
-    assertHash512Hex(
-        metadata.messageVectorHash512,
-        'metadata.messageVectorHash512',
-    );
-    assertHash512Hex(
-        metadata.openingRandomnessHash512,
-        'metadata.openingRandomnessHash512',
-    );
     if (!(commitmentBodyBytes instanceof Uint8Array)) {
         throw new TypeError(
             'compact VSS encoded commitment body must be bytes.',
@@ -1579,7 +1574,6 @@ export const decodeCompactVssCommitmentBody = (input: {
         objectType: 'CompactVssCommitment',
         objectVersion: 1,
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         commitmentRole: metadata.commitmentRole,
         commitmentContextHash: metadata.commitmentContextHash,
         publicMatrixSeedHash: metadata.publicMatrixSeedHash,
@@ -1588,8 +1582,6 @@ export const decodeCompactVssCommitmentBody = (input: {
         ringDegree: metadata.ringDegree,
         outputCoordinateCount: compactVssCommitmentOutputCoordinateCount,
         randomnessColumnCount: compactVssCommitmentRandomnessColumnCount,
-        messageVectorHash512: metadata.messageVectorHash512,
-        openingRandomnessHash512: metadata.openingRandomnessHash512,
         commitmentLimbs,
     };
 };
@@ -1731,7 +1723,6 @@ export const computeCompactVssCommitmentFromOpening = (
         objectType: 'CompactVssCommitment',
         objectVersion: 1,
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         commitmentRole: input.commitmentRole,
         commitmentContextHash,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -1740,11 +1731,6 @@ export const computeCompactVssCommitmentFromOpening = (
         ringDegree: input.ringDegree,
         outputCoordinateCount: compactVssCommitmentOutputCoordinateCount,
         randomnessColumnCount: compactVssCommitmentRandomnessColumnCount,
-        messageVectorHash512: coefficientVectorHash(
-            'sealed-lattice-compact-vss-commitment/message-vector-v1',
-            input.messageCoefficients,
-        ),
-        openingRandomnessHash512: randomnessHash(input.randomnessByColumn),
         commitmentLimbs,
     } satisfies CompactVssCommitmentValue;
 
@@ -1755,7 +1741,6 @@ export const computeCompactVssCommitmentFromOpening = (
         commitment,
         commitmentRoot: commitmentRoot(commitment),
         commitmentContextHash,
-        openingRoot: openingRoot(input),
         encodedCommitmentByteLength: compactVssEncodedCommitmentByteLength(),
     };
 };
@@ -1776,7 +1761,6 @@ export const verifyCompactVssCommitmentOpening = (input: {
         operation: 'verifyCompactVssCommitmentOpening',
         setupProfileId: 'CollectiveBgvSetup-v1',
         commitmentRoot: computation.commitmentRoot,
-        openingRoot: computation.openingRoot,
     };
 };
 
@@ -1871,7 +1855,6 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                     objectType: 'CompactVssCoefficientCommitment',
                     objectVersion: 1,
                     profileId: compactVssCommitmentProfileId,
-                    developmentScope: compactVssCommitmentDevelopmentScope,
                     sourceTrusteeIdentity:
                         sourceTrusteeOpeningState.sourceTrusteeIdentity,
                     sourceTrusteeRosterPosition:
@@ -1881,8 +1864,6 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
                     rnsPrime,
                     shamirCoefficientIndex,
                     coefficientCommitmentRoot: commitment.commitmentRoot,
-                    coefficientVectorHash512:
-                        commitment.commitment.messageVectorHash512,
                     commitment: commitment.commitment,
                 });
             }
@@ -1892,7 +1873,6 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
             objectType: 'CompactVssSourceCoefficientCommitments',
             objectVersion: 1,
             profileId: compactVssCommitmentProfileId,
-            developmentScope: compactVssCommitmentDevelopmentScope,
             sourceTrusteeIdentity:
                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
             sourceTrusteeRosterPosition:
@@ -1918,7 +1898,6 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -1963,15 +1942,6 @@ export const verifyCompactVssCoefficientCommitmentSet = (input: {
         'compact VSS coefficient commitment set profileId',
         compactVssCommitmentProfileId,
     );
-    assertExactStringField(
-        coefficientCommitmentSet.developmentScope,
-        'compact VSS coefficient commitment set developmentScope',
-        compactVssCommitmentDevelopmentScope,
-    );
-    assertProtocolHash(
-        coefficientCommitmentSet.publicMatrixSeedHash,
-        'compact VSS coefficient commitment set publicMatrixSeedHash',
-    );
     assertPositiveSafeInteger(
         coefficientCommitmentSet.participantCount,
         'compact VSS coefficient commitment set participantCount',
@@ -2012,15 +1982,6 @@ export const verifyCompactVssCoefficientCommitmentSet = (input: {
                 sourceTrusteeRecord.profileId,
                 'compact VSS source coefficient commitments profileId',
                 compactVssCommitmentProfileId,
-            );
-            assertExactStringField(
-                sourceTrusteeRecord.developmentScope,
-                'compact VSS source coefficient commitments developmentScope',
-                compactVssCommitmentDevelopmentScope,
-            );
-            assertNonEmptyString(
-                sourceTrusteeRecord.sourceTrusteeIdentity,
-                'compact VSS source coefficient commitments sourceTrusteeIdentity',
             );
             if (
                 sourceTrusteeRecord.sourceTrusteeRosterPosition !==
@@ -2073,21 +2034,6 @@ export const verifyCompactVssCoefficientCommitmentSet = (input: {
                         'compact VSS coefficient commitment profileId',
                         compactVssCommitmentProfileId,
                     );
-                    assertExactStringField(
-                        coefficientCommitment.developmentScope,
-                        'compact VSS coefficient commitment developmentScope',
-                        compactVssCommitmentDevelopmentScope,
-                    );
-                    if (
-                        coefficientCommitment.sourceTrusteeIdentity !==
-                            sourceTrusteeRecord.sourceTrusteeIdentity ||
-                        coefficientCommitment.sourceTrusteeRosterPosition !==
-                            sourceTrusteeRecord.sourceTrusteeRosterPosition
-                    ) {
-                        throw new Error(
-                            'compact VSS coefficient commitment trustee binding must match its source record.',
-                        );
-                    }
                     if (
                         coefficientCommitment.publicMatrixSeedHash !==
                         coefficientCommitmentSet.publicMatrixSeedHash
@@ -2114,10 +2060,6 @@ export const verifyCompactVssCoefficientCommitmentSet = (input: {
                         coefficientCommitment.coefficientCommitmentRoot,
                         'compact VSS coefficient commitment coefficientCommitmentRoot',
                     );
-                    assertHash512Hex(
-                        coefficientCommitment.coefficientVectorHash512,
-                        'compact VSS coefficient commitment coefficientVectorHash512',
-                    );
                     assertCompactVssCommitmentBody({
                         commitment: coefficientCommitment.commitment,
                         expectedCommitmentRole: 'coefficient',
@@ -2127,8 +2069,6 @@ export const verifyCompactVssCoefficientCommitmentSet = (input: {
                             coefficientCommitmentSet.publicMatrixSeedHash,
                         expectedRnsLimbIndex,
                         expectedRnsPrime: coefficientCommitment.rnsPrime,
-                        expectedMessageVectorHash512:
-                            coefficientCommitment.coefficientVectorHash512,
                         fieldName:
                             'compact VSS coefficient commitment commitment',
                     });
@@ -2257,7 +2197,7 @@ export const createCompactVssRecipientShareCommitmentBundle = (input: {
                         rnsLimbIndex,
                         rnsPrime,
                     };
-                    const commitment = computeCompactVssCommitmentFromOpening({
+                    const recipientShareOpening = {
                         commitmentRole: 'recipient-share',
                         commitmentContext,
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -2266,12 +2206,14 @@ export const createCompactVssRecipientShareCommitmentBundle = (input: {
                         ringDegree: input.ringDegree,
                         messageCoefficients: shareValues,
                         randomnessByColumn,
-                    });
+                    } satisfies CompactVssCommitmentOpeningInput;
+                    const commitment = computeCompactVssCommitmentFromOpening(
+                        recipientShareOpening,
+                    );
                     const recordWithoutRoot = {
                         objectType: 'CompactVssRecipientShareCommitment',
                         objectVersion: 1,
                         profileId: compactVssCommitmentProfileId,
-                        developmentScope: compactVssCommitmentDevelopmentScope,
                         sourceTrusteeIdentity:
                             sourceTrusteeOpeningState.sourceTrusteeIdentity,
                         sourceTrusteeRosterPosition:
@@ -2283,9 +2225,6 @@ export const createCompactVssRecipientShareCommitmentBundle = (input: {
                         rnsLimbIndex,
                         rnsPrime,
                         shareCommitmentRoot: commitment.commitmentRoot,
-                        shareOpeningRoot: commitment.openingRoot,
-                        shareVectorHash512:
-                            commitment.commitment.messageVectorHash512,
                         commitment: commitment.commitment,
                     } satisfies CompactVssRecipientShareCommitmentRecord;
                     sourceRecordCommitments.push(recordWithoutRoot);
@@ -2306,7 +2245,10 @@ export const createCompactVssRecipientShareCommitmentBundle = (input: {
                         shareValues,
                         randomnessByColumn,
                         shareCommitmentRoot: commitment.commitmentRoot,
-                        shareOpeningRoot: commitment.openingRoot,
+                        shareOpeningRoot:
+                            compactVssCommitmentPrivateOpeningRoot(
+                                recipientShareOpening,
+                            ),
                     });
                 });
             });
@@ -2314,7 +2256,6 @@ export const createCompactVssRecipientShareCommitmentBundle = (input: {
             objectType: 'CompactVssSourceRecipientShareCommitments',
             objectVersion: 1,
             profileId: compactVssCommitmentProfileId,
-            developmentScope: compactVssCommitmentDevelopmentScope,
             sourceTrusteeIdentity:
                 sourceTrusteeOpeningState.sourceTrusteeIdentity,
             sourceTrusteeRosterPosition:
@@ -2338,7 +2279,6 @@ export const createCompactVssRecipientShareCommitmentBundle = (input: {
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -2385,15 +2325,6 @@ export const verifyCompactVssRecipientShareCommitmentSet = (input: {
         'compact VSS recipient-share commitment set profileId',
         compactVssCommitmentProfileId,
     );
-    assertExactStringField(
-        recipientShareCommitmentSet.developmentScope,
-        'compact VSS recipient-share commitment set developmentScope',
-        compactVssCommitmentDevelopmentScope,
-    );
-    assertProtocolHash(
-        recipientShareCommitmentSet.publicMatrixSeedHash,
-        'compact VSS recipient-share commitment set publicMatrixSeedHash',
-    );
     assertPositiveSafeInteger(
         recipientShareCommitmentSet.participantCount,
         'compact VSS recipient-share commitment set participantCount',
@@ -2430,15 +2361,6 @@ export const verifyCompactVssRecipientShareCommitmentSet = (input: {
                 sourceTrusteeRecord.profileId,
                 'compact VSS source recipient-share commitments profileId',
                 compactVssCommitmentProfileId,
-            );
-            assertExactStringField(
-                sourceTrusteeRecord.developmentScope,
-                'compact VSS source recipient-share commitments developmentScope',
-                compactVssCommitmentDevelopmentScope,
-            );
-            assertNonEmptyString(
-                sourceTrusteeRecord.sourceTrusteeIdentity,
-                'compact VSS source recipient-share commitments sourceTrusteeIdentity',
             );
             if (
                 sourceTrusteeRecord.sourceTrusteeRosterPosition !==
@@ -2483,21 +2405,6 @@ export const verifyCompactVssRecipientShareCommitmentSet = (input: {
                         'compact VSS recipient-share commitment profileId',
                         compactVssCommitmentProfileId,
                     );
-                    assertExactStringField(
-                        recipientShareCommitment.developmentScope,
-                        'compact VSS recipient-share commitment developmentScope',
-                        compactVssCommitmentDevelopmentScope,
-                    );
-                    if (
-                        recipientShareCommitment.sourceTrusteeIdentity !==
-                            sourceTrusteeRecord.sourceTrusteeIdentity ||
-                        recipientShareCommitment.sourceTrusteeRosterPosition !==
-                            sourceTrusteeRecord.sourceTrusteeRosterPosition
-                    ) {
-                        throw new Error(
-                            'compact VSS recipient-share commitment source binding must match its source record.',
-                        );
-                    }
                     assertNonEmptyString(
                         recipientShareCommitment.recipientIdentity,
                         'compact VSS recipient-share commitment recipientIdentity',
@@ -2528,14 +2435,6 @@ export const verifyCompactVssRecipientShareCommitmentSet = (input: {
                         recipientShareCommitment.shareCommitmentRoot,
                         'compact VSS recipient-share commitment shareCommitmentRoot',
                     );
-                    assertProtocolHash(
-                        recipientShareCommitment.shareOpeningRoot,
-                        'compact VSS recipient-share commitment shareOpeningRoot',
-                    );
-                    assertHash512Hex(
-                        recipientShareCommitment.shareVectorHash512,
-                        'compact VSS recipient-share commitment shareVectorHash512',
-                    );
                     assertCompactVssCommitmentBody({
                         commitment: recipientShareCommitment.commitment,
                         expectedCommitmentRole: 'recipient-share',
@@ -2545,8 +2444,6 @@ export const verifyCompactVssRecipientShareCommitmentSet = (input: {
                             recipientShareCommitmentSet.publicMatrixSeedHash,
                         expectedRnsLimbIndex,
                         expectedRnsPrime: recipientShareCommitment.rnsPrime,
-                        expectedMessageVectorHash512:
-                            recipientShareCommitment.shareVectorHash512,
                         fieldName:
                             'compact VSS recipient-share commitment commitment',
                     });
@@ -2605,7 +2502,6 @@ const assertCompatibleCommitment = (
 ): void => {
     const fields: (keyof CompactVssCommitmentValue)[] = [
         'profileId',
-        'developmentScope',
         'publicMatrixSeedHash',
         'rnsLimbIndex',
         'rnsPrime',
@@ -2681,36 +2577,6 @@ export const combineCompactVssCommitments = (
         ...firstCommitment,
         commitmentRole: input.commitmentRole,
         commitmentContextHash,
-        messageVectorHash512:
-            input.combinedMessageVectorHash512 ??
-            hash512Hex(
-                'sealed-lattice-compact-vss-commitment/combined-message-vector-v1',
-                [
-                    new TextEncoder().encode(
-                        input.terms
-                            .map(
-                                (term) =>
-                                    `${term.scalar}:${term.commitment.messageVectorHash512}`,
-                            )
-                            .join('|'),
-                    ),
-                ],
-            ),
-        openingRandomnessHash512:
-            input.combinedOpeningRandomnessHash512 ??
-            hash512Hex(
-                'sealed-lattice-compact-vss-commitment/combined-opening-randomness-v1',
-                [
-                    new TextEncoder().encode(
-                        input.terms
-                            .map(
-                                (term) =>
-                                    `${term.scalar}:${term.commitment.openingRandomnessHash512}`,
-                            )
-                            .join('|'),
-                    ),
-                ],
-            ),
         commitmentLimbs,
     } satisfies CompactVssCommitmentValue;
 
@@ -2721,19 +2587,6 @@ export const combineCompactVssCommitments = (
         commitment,
         commitmentRoot: commitmentRoot(commitment),
         commitmentContextHash,
-        openingRoot: deriveProtocolHash('SetupCommitmentRoot', {
-            objectType: 'CompactVssCombinedOpeningReference',
-            objectVersion: 1,
-            profileId: compactVssCommitmentProfileId,
-            commitmentRole: input.commitmentRole,
-            commitmentContext: input.commitmentContext,
-            terms: input.terms.map((term) => ({
-                scalar: term.scalar,
-                messageVectorHash512: term.commitment.messageVectorHash512,
-                openingRandomnessHash512:
-                    term.commitment.openingRandomnessHash512,
-            })),
-        }),
         encodedCommitmentByteLength: compactVssEncodedCommitmentByteLength(),
     };
 };
@@ -2927,8 +2780,8 @@ export const aggregateCompactVssThresholdShareCommitments = (input: {
                 } satisfies CompactVssCommitmentOpeningInput;
                 const directAggregateCommitment =
                     computeCompactVssCommitmentFromOpening(aggregateOpening);
-                const sourceCommitments = credentials.map((credential) =>
-                    computeCompactVssCommitmentFromOpening({
+                const sourceCommitments = credentials.map((credential) => {
+                    const opening = {
                         commitmentRole: 'recipient-share',
                         commitmentContext: {
                             objectType:
@@ -2951,32 +2804,35 @@ export const aggregateCompactVssThresholdShareCommitments = (input: {
                         ringDegree: input.ringDegree,
                         messageCoefficients: credential.shareValues,
                         randomnessByColumn: credential.randomnessByColumn,
-                    }),
-                );
-                sourceCommitments.forEach((commitment, commitmentIndex) => {
-                    const credential = credentials[commitmentIndex];
-                    if (
-                        commitment.commitmentRoot !==
-                            credential?.shareCommitmentRoot ||
-                        commitment.openingRoot !== credential.shareOpeningRoot
-                    ) {
-                        throw new Error(
-                            'compact VSS recipient share credential does not match its public commitment roots.',
-                        );
-                    }
+                    } satisfies CompactVssCommitmentOpeningInput;
+                    return {
+                        computation:
+                            computeCompactVssCommitmentFromOpening(opening),
+                        openingRoot:
+                            compactVssCommitmentPrivateOpeningRoot(opening),
+                    };
                 });
+                sourceCommitments.forEach(
+                    (sourceCommitment, commitmentIndex) => {
+                        const credential = credentials[commitmentIndex];
+                        if (
+                            sourceCommitment.computation.commitmentRoot !==
+                                credential?.shareCommitmentRoot ||
+                            sourceCommitment.openingRoot !==
+                                credential.shareOpeningRoot
+                        ) {
+                            throw new Error(
+                                'compact VSS recipient share credential does not match its public commitment roots.',
+                            );
+                        }
+                    },
+                );
                 const combinedAggregateCommitment =
                     combineCompactVssCommitments({
                         commitmentRole: 'aggregate-threshold-share',
                         commitmentContext: aggregateOpening.commitmentContext,
-                        combinedMessageVectorHash512:
-                            directAggregateCommitment.commitment
-                                .messageVectorHash512,
-                        combinedOpeningRandomnessHash512:
-                            directAggregateCommitment.commitment
-                                .openingRandomnessHash512,
-                        terms: sourceCommitments.map((commitment) => ({
-                            commitment: commitment.commitment,
+                        terms: sourceCommitments.map((sourceCommitment) => ({
+                            commitment: sourceCommitment.computation.commitment,
                             scalar: 1,
                         })),
                     });
@@ -2992,7 +2848,6 @@ export const aggregateCompactVssThresholdShareCommitments = (input: {
                     objectType: 'CompactVssAggregateThresholdCommitment',
                     objectVersion: 1,
                     profileId: compactVssCommitmentProfileId,
-                    developmentScope: compactVssCommitmentDevelopmentScope,
                     recipientIdentity: recipientTrustee.trusteeIdentity,
                     recipientRosterPosition:
                         recipientTrustee.trusteeRosterPosition,
@@ -3001,7 +2856,6 @@ export const aggregateCompactVssThresholdShareCommitments = (input: {
                     rnsPrime,
                     aggregateCommitmentRoot:
                         directAggregateCommitment.commitmentRoot,
-                    aggregateOpeningRoot: directAggregateCommitment.openingRoot,
                     commitment: directAggregateCommitment.commitment,
                     sourceShareCommitmentRoots: credentials.map(
                         (credential) => credential.shareCommitmentRoot,
@@ -3021,12 +2875,13 @@ export const aggregateCompactVssThresholdShareCommitments = (input: {
                         aggregateShareSum.aggregateShareValues,
                     aggregateCommitmentMessageValues:
                         aggregateShareSum.aggregateCommitmentMessageValues,
-                    aggregateShareCarryValues:
-                        aggregateShareSum.aggregateShareCarryValues,
                     aggregateRandomnessByColumn,
                     aggregateCommitmentRoot:
                         directAggregateCommitment.commitmentRoot,
-                    aggregateOpeningRoot: directAggregateCommitment.openingRoot,
+                    aggregateOpeningRoot:
+                        compactVssCommitmentPrivateOpeningRoot(
+                            aggregateOpening,
+                        ),
                     sourceShareOpeningRoots: credentials.map(
                         (credential) => credential.shareOpeningRoot,
                     ),
@@ -3039,7 +2894,6 @@ export const aggregateCompactVssThresholdShareCommitments = (input: {
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -3086,15 +2940,6 @@ export const verifyCompactVssAggregateThresholdCommitmentSet = (input: {
         aggregateThresholdCommitmentSet.profileId,
         'compact VSS aggregate threshold commitment set profileId',
         compactVssCommitmentProfileId,
-    );
-    assertExactStringField(
-        aggregateThresholdCommitmentSet.developmentScope,
-        'compact VSS aggregate threshold commitment set developmentScope',
-        compactVssCommitmentDevelopmentScope,
-    );
-    assertProtocolHash(
-        aggregateThresholdCommitmentSet.publicMatrixSeedHash,
-        'compact VSS aggregate threshold commitment set publicMatrixSeedHash',
     );
     assertPositiveSafeInteger(
         aggregateThresholdCommitmentSet.participantCount,
@@ -3143,15 +2988,6 @@ export const verifyCompactVssAggregateThresholdCommitmentSet = (input: {
                 'compact VSS aggregate threshold commitment profileId',
                 compactVssCommitmentProfileId,
             );
-            assertExactStringField(
-                recipientRecord.developmentScope,
-                'compact VSS aggregate threshold commitment developmentScope',
-                compactVssCommitmentDevelopmentScope,
-            );
-            assertNonEmptyString(
-                recipientRecord.recipientIdentity,
-                'compact VSS aggregate threshold commitment recipientIdentity',
-            );
             if (
                 recipientRecord.recipientRosterPosition !==
                     expectedRecipientRosterPosition ||
@@ -3174,10 +3010,6 @@ export const verifyCompactVssAggregateThresholdCommitmentSet = (input: {
             assertProtocolHash(
                 recipientRecord.aggregateCommitmentRoot,
                 'compact VSS aggregate threshold commitment aggregateCommitmentRoot',
-            );
-            assertProtocolHash(
-                recipientRecord.aggregateOpeningRoot,
-                'compact VSS aggregate threshold commitment aggregateOpeningRoot',
             );
             assertCompactVssCommitmentBody({
                 commitment: recipientRecord.commitment,
@@ -3314,7 +3146,6 @@ export const createCompactVssShareLinkageStatement = (input: {
                     objectVersion: 1,
                     setupProfileId: 'CollectiveBgvSetup-v1',
                     profileId: compactVssCommitmentProfileId,
-                    developmentScope: compactVssCommitmentDevelopmentScope,
                     ...setupContextFields(input.setupContext),
                     publicMatrixSeedHash: input.publicMatrixSeedHash,
                     targetBasisHash: input.targetBasisHash,
@@ -3340,9 +3171,6 @@ export const createCompactVssShareLinkageStatement = (input: {
                     aggregateThresholdRule:
                         compactVssShareLinkageAggregateThresholdRule,
                     commonKeyRule: compactVssShareLinkageCommonKeyRule,
-                    recipientApprovalBoundary:
-                        compactVssShareLinkageRecipientApprovalBoundary,
-                    proofBoundary: compactVssShareLinkageStatementProofBoundary,
                 } as const satisfies Omit<
                     CompactVssShareLinkageSourceStatementRecord,
                     'sourceStatementRoot'
@@ -3362,7 +3190,6 @@ export const createCompactVssShareLinkageStatement = (input: {
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         ...setupContextFields(input.setupContext),
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         targetBasisHash: input.targetBasisHash,
@@ -3380,9 +3207,6 @@ export const createCompactVssShareLinkageStatement = (input: {
         shamirEvaluationRule: compactVssShareLinkageShamirEvaluationRule,
         aggregateThresholdRule: compactVssShareLinkageAggregateThresholdRule,
         commonKeyRule: compactVssShareLinkageCommonKeyRule,
-        recipientApprovalBoundary:
-            compactVssShareLinkageRecipientApprovalBoundary,
-        proofBoundary: compactVssShareLinkageStatementProofBoundary,
         sourceStatementRecords,
     } as const satisfies Omit<CompactVssShareLinkageStatement, 'statementRoot'>;
 
@@ -3562,15 +3386,6 @@ export const verifyCompactVssShareLinkageStatement = (input: {
         'compact VSS share linkage statement profileId',
         compactVssCommitmentProfileId,
     );
-    assertExactStringField(
-        input.statement.developmentScope,
-        'compact VSS share linkage statement developmentScope',
-        compactVssCommitmentDevelopmentScope,
-    );
-    assertNonEmptyString(
-        input.statement.ceremonyId,
-        'compact VSS share linkage statement ceremonyId',
-    );
     assertNonEmptyString(
         input.statement.setupEpoch,
         'compact VSS share linkage statement setupEpoch',
@@ -3656,16 +3471,6 @@ export const verifyCompactVssShareLinkageStatement = (input: {
         'compact VSS share linkage statement commonKeyRule',
         compactVssShareLinkageCommonKeyRule,
     );
-    assertExactStringField(
-        input.statement.recipientApprovalBoundary,
-        'compact VSS share linkage statement recipientApprovalBoundary',
-        compactVssShareLinkageRecipientApprovalBoundary,
-    );
-    assertExactStringField(
-        input.statement.proofBoundary,
-        'compact VSS share linkage statement proofBoundary',
-        compactVssShareLinkageStatementProofBoundary,
-    );
     if (
         input.statement.sourceStatementRecords.length !==
         input.statement.participantCount
@@ -3689,7 +3494,6 @@ export const verifyCompactVssShareLinkageStatement = (input: {
             for (const [fieldName, expectedValue] of [
                 ['setupProfileId', input.statement.setupProfileId],
                 ['profileId', input.statement.profileId],
-                ['developmentScope', input.statement.developmentScope],
                 ['ceremonyId', input.statement.ceremonyId],
                 ['manifestHash', input.statement.manifestHash],
                 ['rosterHash', input.statement.rosterHash],
@@ -3722,11 +3526,6 @@ export const verifyCompactVssShareLinkageStatement = (input: {
                     input.statement.aggregateThresholdRule,
                 ],
                 ['commonKeyRule', input.statement.commonKeyRule],
-                [
-                    'recipientApprovalBoundary',
-                    input.statement.recipientApprovalBoundary,
-                ],
-                ['proofBoundary', input.statement.proofBoundary],
             ] as const) {
                 if (sourceStatementRecord[fieldName] !== expectedValue) {
                     throw new Error(
@@ -3830,11 +3629,6 @@ const compactVssShareLinkageProofInputsBySourceRoot = (
             proofMaterialInput.sourceStatementRoot,
             `proofMaterialInputs.${String(proofMaterialIndex)}.sourceStatementRoot`,
         );
-        assertExactStringField(
-            proofMaterialInput.proofBoundary,
-            `proofMaterialInputs.${String(proofMaterialIndex)}.proofBoundary`,
-            compactVssRestrictedShareLinkageProofBoundary,
-        );
         const proofRecords: readonly CompactVssShareLinkageProofRecordInput[] =
             proofMaterialInput.proofRecords;
         const proofRecordsShape: unknown = proofRecords;
@@ -3855,6 +3649,14 @@ const compactVssShareLinkageProofInputsBySourceRoot = (
                 );
             }
             proofStatementHashes.add(proofRecordInput.proofStatementHash);
+            if (
+                proofRecordInput.proofStatement.proofStatementHash !==
+                proofRecordInput.proofStatementHash
+            ) {
+                throw new Error(
+                    'compact VSS share-linkage proof material input proofStatement must match proofStatementHash.',
+                );
+            }
             proofBytesFromHex(
                 proofRecordInput.proofBytesHex,
                 `proofMaterialInputs.${String(proofMaterialIndex)}.proofRecords.${String(proofRecordIndex)}.proofBytesHex`,
@@ -3913,8 +3715,6 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
                         objectType: 'CompactVssShareLinkageProofRecord',
                         objectVersion: 1,
                         proofFamily: compactVssShareLinkageProofFamily,
-                        proofBoundary:
-                            compactVssRestrictedShareLinkageProofBoundary,
                         sourceStatementRoot:
                             sourceStatement.sourceStatementRoot,
                         proofStatementHash: proofRecordInput.proofStatementHash,
@@ -3936,14 +3736,15 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
                     };
                 },
             );
+            const proofStatements = proofMaterialInput.proofRecords.map(
+                (proofRecordInput) => proofRecordInput.proofStatement,
+            );
             const proofMaterialWithoutRoot = {
                 objectType: 'CompactVssShareLinkageProofMaterial',
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 profileId: compactVssCommitmentProfileId,
-                developmentScope: compactVssCommitmentDevelopmentScope,
                 proofFamily: compactVssShareLinkageProofFamily,
-                proofBoundary: compactVssRestrictedShareLinkageProofBoundary,
                 ceremonyId: statement.ceremonyId,
                 manifestHash: statement.manifestHash,
                 rosterHash: statement.rosterHash,
@@ -3959,6 +3760,7 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
                 shareLinkageStatementRoot: statement.statementRoot,
                 sourceStatementRoot: sourceStatement.sourceStatementRoot,
                 proofRecords,
+                proofStatements,
             } as const satisfies Omit<
                 CompactVssShareLinkageProofMaterial,
                 'proofMaterialRoot'
@@ -3978,9 +3780,7 @@ export const createCompactVssShareLinkageProofMaterialSet = (input: {
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         proofFamily: compactVssShareLinkageProofFamily,
-        proofBoundary: compactVssRestrictedShareLinkageProofBoundary,
         ceremonyId: statement.ceremonyId,
         manifestHash: statement.manifestHash,
         rosterHash: statement.rosterHash,
@@ -4028,7 +3828,6 @@ export const verifyCompactVssShareLinkageProofMaterialSet = (input: {
     for (const [fieldName, expectedValue] of [
         ['setupProfileId', statement.setupProfileId],
         ['profileId', statement.profileId],
-        ['developmentScope', statement.developmentScope],
         ['ceremonyId', statement.ceremonyId],
         ['manifestHash', statement.manifestHash],
         ['rosterHash', statement.rosterHash],
@@ -4052,19 +3851,6 @@ export const verifyCompactVssShareLinkageProofMaterialSet = (input: {
         'compact VSS share-linkage proof material set proofFamily',
         compactVssShareLinkageProofFamily,
     );
-    assertExactStringField(
-        proofMaterialSet.proofBoundary,
-        'compact VSS share-linkage proof material set proofBoundary',
-        compactVssRestrictedShareLinkageProofBoundary,
-    );
-    if (
-        proofMaterialSet.participantCount !== statement.participantCount ||
-        proofMaterialSet.shareLinkageStatementRoot !== statement.statementRoot
-    ) {
-        throw new Error(
-            'compact VSS share-linkage proof material set must bind the statement root and participant count.',
-        );
-    }
     if (proofMaterialSet.proofMaterials.length !== statement.participantCount) {
         throw new Error(
             'compact VSS share-linkage proof material set must contain one proof per source statement.',
@@ -4092,9 +3878,7 @@ export const verifyCompactVssShareLinkageProofMaterialSet = (input: {
             for (const [fieldName, expectedValue] of [
                 ['setupProfileId', proofMaterialSet.setupProfileId],
                 ['profileId', proofMaterialSet.profileId],
-                ['developmentScope', proofMaterialSet.developmentScope],
                 ['proofFamily', proofMaterialSet.proofFamily],
-                ['proofBoundary', proofMaterialSet.proofBoundary],
                 ['ceremonyId', proofMaterialSet.ceremonyId],
                 ['manifestHash', proofMaterialSet.manifestHash],
                 ['rosterHash', proofMaterialSet.rosterHash],
@@ -4157,7 +3941,6 @@ export const verifyCompactVssShareLinkageProofMaterialSet = (input: {
                 }
                 for (const [fieldName, expectedValue] of [
                     ['proofFamily', proofMaterial.proofFamily],
-                    ['proofBoundary', proofMaterial.proofBoundary],
                     ['sourceStatementRoot', proofMaterial.sourceStatementRoot],
                 ] as const) {
                     if (proofRecord[fieldName] !== expectedValue) {
@@ -4218,6 +4001,35 @@ export const verifyCompactVssShareLinkageProofMaterialSet = (input: {
                 ) {
                     throw new Error(
                         `compact VSS share-linkage proof record ${String(proofRecordIndex)} root does not match its bound proof bytes.`,
+                    );
+                }
+            });
+            const proofStatements: readonly Readonly<
+                JsonRecord & {
+                    readonly proofStatementHash: ProtocolHash;
+                }
+            >[] = proofMaterial.proofStatements;
+            const proofStatementsShape: unknown = proofStatements;
+            if (
+                !Array.isArray(proofStatementsShape) ||
+                proofStatements.length !== proofRecords.length
+            ) {
+                throw new TypeError(
+                    'compact VSS share-linkage proof material proofStatements must contain one statement per proof record.',
+                );
+            }
+            proofStatements.forEach((proofStatement, proofStatementIndex) => {
+                assertProtocolHash(
+                    proofStatement.proofStatementHash,
+                    'compact VSS share-linkage proof statement proofStatementHash',
+                );
+                const proofRecord = proofRecords[proofStatementIndex];
+                if (
+                    proofStatement.proofStatementHash !==
+                    proofRecord?.proofStatementHash
+                ) {
+                    throw new Error(
+                        'compact VSS share-linkage proof statement must match its proof record.',
                     );
                 }
             });
@@ -4335,7 +4147,6 @@ export const compactVssCommitmentMeasurement = (input: {
         objectType: 'CompactVssCommitmentMeasurement',
         objectVersion: 1,
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         participantCount: input.participantCount,
         sourceRnsLimbCount: input.sourceRnsLimbCount,
         targetRnsLimbCount: input.targetRnsLimbCount,
@@ -4352,21 +4163,6 @@ export const compactVssCommitmentMeasurement = (input: {
         totalCompactPublicCommitmentBytes,
         currentFullCoefficientTransportBytes:
             input.currentFullCoefficientTransportBytes,
-        byteAccountingScope:
-            'compact public commitment bodies only: source coefficient commitments, source-to-recipient share commitments, and recipient aggregate-threshold commitments',
-        measuredPublicCommitmentRoles: [
-            'source coefficient commitments',
-            'source-to-recipient share commitments',
-            'recipient aggregate-threshold commitments',
-        ],
-        excludedByteCategories: [
-            'compact commitment transport framing and container metadata',
-            'public share-linkage zero-knowledge proof bytes',
-            'compact same-secret bridge proof bytes',
-            'private mailbox share and opening-credential bytes',
-            'encrypted persistent local-state witness bytes',
-            'target-decryption proof bytes, production smudging proof bytes, and recombination proof material',
-        ],
         byteReduction: {
             removedBytes,
             compactFractionOfCurrent:
@@ -4379,8 +4175,6 @@ export const compactVssCommitmentMeasurement = (input: {
         largestSingleObjectBytes: singleCompactCommitmentBytes,
         largestWasmBoundaryCopyBytes: singleCompactCommitmentBytes,
         budgetComparison: {
-            budgetScope:
-                'compact public commitment bodies are compared with public setup download, source upload, largest-object, and WASM-copy budgets; excluded proof and transport categories are not counted here',
             publicSetupDownloadBudgetBytes:
                 compactVssPublicSetupDownloadBudgetBytes,
             totalCompactPublicCommitmentFractionOfDownloadBudget:
@@ -4448,10 +4242,7 @@ export const compactVssMatrixExpansionProfile = (input?: {
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         matrixKind: 'compact-vss-commitment-key',
-        keyScope:
-            'one common public matrix seed hash is used for compact coefficient, recipient-share, and aggregate threshold commitments',
         ringDegree,
         commitmentModulusLimbIndices: compactVssCommitmentModulusLimbIndices,
         outputCoordinateCount: compactVssCommitmentOutputCoordinateCount,
@@ -4486,16 +4277,12 @@ export const compactVssMatrixExpansionProfile = (input?: {
             'ringDegree',
             'blockIndex',
         ],
-        biasBoundary:
-            'matrix residues and projection indices use rejection sampling; direct modulo reduction without rejection is not part of this profile',
         coordinateCountPerCommitment,
         sampledMatrixResiduesPerCoordinate,
         sampledProjectionIndicesPerCoordinate,
         sampledMatrixResiduesPerCommitment,
         sampledProjectionIndicesPerCommitment,
         residueMultiplyAddsPerCommitment: sampledMatrixResiduesPerCommitment,
-        certificateBoundary:
-            'deterministic matrix-expansion profile only; binding and hiding still require reviewed Module-SIS and MLWE estimator evidence',
     };
 };
 
@@ -4529,6 +4316,11 @@ export const compactVssParameterCertificateInputBinding = (input: {
     if (input.targetRnsPrimes.length === 0) {
         throw new Error('targetRnsPrimes must contain at least one prime.');
     }
+    if (input.targetRnsPrimes.length > acceptedBgvSetupQSharePrimes.length) {
+        throw new Error(
+            'targetRnsPrimes must be a prefix of the canonical target basis.',
+        );
+    }
     input.sourceRnsPrimes.forEach((sourceRnsPrime, rnsLimbIndex) => {
         assertPositiveSafeInteger(
             sourceRnsPrime,
@@ -4540,6 +4332,11 @@ export const compactVssParameterCertificateInputBinding = (input: {
             targetRnsPrime,
             `targetRnsPrimes.${String(rnsLimbIndex)}`,
         );
+        if (targetRnsPrime !== acceptedBgvSetupQSharePrimes[rnsLimbIndex]) {
+            throw new Error(
+                'targetRnsPrimes must match the canonical target basis prefix.',
+            );
+        }
     });
     const ringDegree = input.ringDegree ?? acceptedBgvProfileRingDegree;
     assertPositiveSafeInteger(ringDegree, 'ringDegree');
@@ -4563,12 +4360,28 @@ export const compactVssParameterCertificateInputBinding = (input: {
                 `randomness:${String(randomnessColumnIndex)}`,
         ),
     ];
+    const coordinateCountPerCommitment =
+        compactVssCommitmentModulusLimbIndices.length *
+        compactVssCommitmentOutputCoordinateCount;
+    const sampledMatrixResiduesPerCoordinate =
+        inputColumnLabels.length * compactVssProjectionWeight;
+    const sampledProjectionIndicesPerCoordinate =
+        sampledMatrixResiduesPerCoordinate;
+    const sampledMatrixResiduesPerCommitment =
+        coordinateCountPerCommitment * sampledMatrixResiduesPerCoordinate;
+    const sampledProjectionIndicesPerCommitment =
+        coordinateCountPerCommitment * sampledProjectionIndicesPerCoordinate;
+    const commitmentModulusLimbs = compactVssCommitmentModulusLimbIndices.map(
+        (commitmentModulusIndex) => ({
+            commitmentModulusIndex,
+            modulus: input.sourceRnsPrimes[commitmentModulusIndex],
+        }),
+    );
     const certificateInputBody = {
         objectType: 'CompactVssParameterCertificateInputBinding',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         participantCount: input.participantCount,
         sourceRnsLimbCount: input.sourceRnsPrimes.length,
         targetRnsLimbCount: input.targetRnsPrimes.length,
@@ -4579,15 +4392,12 @@ export const compactVssParameterCertificateInputBinding = (input: {
             coefficientRing: 'Z_q[X]/(X^N+1)',
             commitmentModulusLimbIndices:
                 compactVssCommitmentModulusLimbIndices,
-            commitmentModulusLimbs: compactVssCommitmentModulusLimbIndices.map(
-                (commitmentModulusIndex) => ({
-                    commitmentModulusIndex,
-                    modulus: input.sourceRnsPrimes[commitmentModulusIndex],
-                }),
-            ),
+            commitmentModulusLimbs,
             outputCoordinateCount: compactVssCommitmentOutputCoordinateCount,
             messageWidth: 1,
             randomnessWidth: compactVssCommitmentRandomnessColumnCount,
+            projectionWeight: compactVssProjectionWeight,
+            coordinateCountPerCommitment,
             inputColumnLabels,
             homomorphicAdditionRule:
                 'commitments combine linearly only when profile, public matrix seed, source limb, and commitment modulus order match',
@@ -4595,8 +4405,6 @@ export const compactVssParameterCertificateInputBinding = (input: {
                 'public Shamir and aggregation scalars multiply both message and randomness columns over the same commitment key',
         },
         commonCommitmentKey: {
-            keyScope:
-                'one common public matrix seed hash is used for coefficient, recipient-share, and aggregate threshold commitments',
             matrixResidueHashDomain:
                 'sealed-lattice-compact-vss-commitment/matrix-residue-v1',
             projectionIndexHashDomain:
@@ -4625,8 +4433,15 @@ export const compactVssParameterCertificateInputBinding = (input: {
                 'ringDegree',
                 'blockIndex',
             ],
-            statementBindingRule:
-                'source trustee, recipient trustee, coefficient index, limb, and setup context are bound in statement roots, not by deriving incompatible matrices',
+            sparseProjectionShape: {
+                inputColumnCount: inputColumnLabels.length,
+                projectionWeight: compactVssProjectionWeight,
+                coordinateCountPerCommitment,
+                sampledMatrixResiduesPerCoordinate,
+                sampledProjectionIndicesPerCoordinate,
+                sampledMatrixResiduesPerCommitment,
+                sampledProjectionIndicesPerCommitment,
+            },
         },
         messageEncoding: {
             sourceCoefficientRepresentation:
@@ -4654,39 +4469,19 @@ export const compactVssParameterCertificateInputBinding = (input: {
             },
             {
                 className: 'messageEncodingNorm',
-                coefficientRange:
-                    'source and recipient-share messages satisfy 0 <= messageCoefficient < selectedRnsPrime; aggregate commitment messages satisfy 0 <= messageCoefficient < participantCount * selectedRnsPrime',
-                compressionRule:
-                    'no low-bit compression or CRT packing is part of this development profile',
+                sourceCoefficientUpperBoundMultiplier: 1,
+                recipientShareCoefficientUpperBoundMultiplier: 1,
+                aggregateCoefficientUpperBoundMultiplier:
+                    input.participantCount,
             },
             {
                 className: 'openingRandomnessNorm',
                 randomnessColumnCount:
                     compactVssCommitmentRandomnessColumnCount,
-                requiredCertificateInput:
-                    'certificate must bind distribution and accepted norm for every opening column',
             },
             {
                 className: 'aggregateDealerCount',
                 sourceTrusteeCount: input.participantCount,
-                aggregationRule:
-                    'one recipient aggregate threshold commitment combines every source trustee contribution for that recipient and active target limb',
-            },
-            {
-                className: 'proofExtractedOpeningNorm',
-                requiredCertificateInput:
-                    'public linkage proof backend must emit extractor-bound opening norms',
-            },
-            {
-                className: 'targetDecryptionOpeningNorm',
-                requiredCertificateInput:
-                    'target-decryption proof backend must bind restored compact aggregate openings for the accepted target basis',
-            },
-            {
-                className:
-                    'targetDecryptionRecombinationCoefficientAmplification',
-                requiredCertificateInput:
-                    'target recombination proof must bind denominator-cleared Lagrange coefficients and decoding margin',
             },
         ],
         estimatorInputRows: [
@@ -4697,10 +4492,14 @@ export const compactVssParameterCertificateInputBinding = (input: {
                 ringDegree,
                 commitmentModulusLimbIndices:
                     compactVssCommitmentModulusLimbIndices,
+                commitmentModulusLimbs,
                 outputCoordinateCount:
                     compactVssCommitmentOutputCoordinateCount,
-                shortVectorBoundSource:
-                    'openingRandomnessNorm plus proofExtractedOpeningNorm plus aggregate Shamir scalar L1 amplification',
+                messageWidth: 1,
+                randomnessWidth: compactVssCommitmentRandomnessColumnCount,
+                projectionWeight: compactVssProjectionWeight,
+                sampledMatrixResiduesPerCommitment,
+                sampledProjectionIndicesPerCommitment,
             },
             {
                 rowId: 'compact-vss-module-lwe-hiding-input',
@@ -4709,42 +4508,23 @@ export const compactVssParameterCertificateInputBinding = (input: {
                 ringDegree,
                 commitmentModulusLimbIndices:
                     compactVssCommitmentModulusLimbIndices,
-                openingDistributionSource:
-                    'openingRandomnessNorm with recipient-hidden opening leakage boundary',
+                commitmentModulusLimbs,
+                outputCoordinateCount:
+                    compactVssCommitmentOutputCoordinateCount,
+                messageWidth: 1,
+                randomnessWidth: compactVssCommitmentRandomnessColumnCount,
+                projectionWeight: compactVssProjectionWeight,
+                sampledMatrixResiduesPerCommitment,
+                sampledProjectionIndicesPerCommitment,
             },
         ],
-        proofCoverageInputs: {
-            shareLinkageProof:
-                'one public proof per source trustee should batch every recipient and target limb for coefficient-to-recipient-share linkage',
-            sameSecretBridgeProof:
-                'target-basis compact constant coefficient commitments must bind to the same signed ternary trustee secret as data-basis setup proof roots',
-            targetDecryptionProof:
-                'recipient-owned restored compact aggregate opening material must generate the target-bound decryption share proof without dealer state',
-            smudging:
-                'released smudged target-decryption shares require zero-knowledge proof coverage before production activation',
-            recombination:
-                'target result acceptance requires denominator-cleared Lagrange recombination and decoding-margin verification',
-        },
-        structuredRingDisclosure:
-            'structured-ring attack cost must be reviewed for the selected ring, module shape, modulus limbs, sparse projection, and common-key reuse',
         sameSecretBridgeInput: {
             targetBasisHash: input.targetBasisHash,
             targetRnsPrimes: input.targetRnsPrimes,
             sameSecretProofFamilyBindingRoot:
                 input.sameSecretProofFamilyBindingRoot,
-            compactCommitmentEncoding:
-                'target-basis compact commitments use exact canonical residues and the shared compact matrix key',
             targetBasisLimbOrder: 'profile-order-prefix',
         },
-        missingCertificateInputs: [
-            'reviewed Module-SIS binding estimator row with verifier-accepted opening norms, proof-extracted norms, and multi-target loss',
-            'reviewed Module-LWE hiding estimator row with public sample count, corrupted-recipient openings, and multi-opening loss',
-            'source-batched compact share-linkage proof backend with extractor-bound opening norms',
-            'same-secret bridge proof verification before target-basis compact profile activation',
-            'target-decryption restored-opening proof backend, released-share smudging proof coverage, and recombination proof coverage',
-            'structured-ring attack review for the selected ring, module shape, modulus limbs, sparse projection, and common-key reuse',
-            'supported-phone runtime and memory measurements for compact public proofs, private openings, and restored local-state proof generation',
-        ],
     } as const;
 
     return {
@@ -4753,67 +4533,5 @@ export const compactVssParameterCertificateInputBinding = (input: {
             'CompactVssParameterCertificateInputBindingHash',
             certificateInputBody,
         ),
-    };
-};
-
-export const compactVssPrivateWitnessPayloadMeasurement = (input: {
-    readonly participantCount: number;
-    readonly targetRnsLimbCount: number;
-    readonly ringDegree?: number;
-}): CompactVssPrivateWitnessPayloadMeasurement => {
-    assertPositiveSafeInteger(input.participantCount, 'participantCount');
-    assertPositiveSafeInteger(input.targetRnsLimbCount, 'targetRnsLimbCount');
-    const ringDegree = input.ringDegree ?? acceptedBgvProfileRingDegree;
-    assertPositiveSafeInteger(ringDegree, 'ringDegree');
-    const bytesPerResidue = 8;
-    const payloadVectorsPerCredential =
-        1 + compactVssCommitmentRandomnessColumnCount;
-    const aggregatePayloadVectorsPerCredential =
-        3 + compactVssCommitmentRandomnessColumnCount;
-    const oneSourceRecipientCredentialPayloadBytes =
-        payloadVectorsPerCredential * ringDegree * bytesPerResidue;
-    const oneAggregateCredentialPayloadBytes =
-        aggregatePayloadVectorsPerCredential * ringDegree * bytesPerResidue;
-    const oneRecipientPrivateMailboxCredentialPayloadBytes =
-        input.participantCount *
-        input.targetRnsLimbCount *
-        oneSourceRecipientCredentialPayloadBytes;
-    const oneRecipientPersistentAggregateCredentialPayloadBytes =
-        input.targetRnsLimbCount * oneAggregateCredentialPayloadBytes;
-
-    return {
-        objectType: 'CompactVssPrivateWitnessPayloadMeasurement',
-        objectVersion: 1,
-        profileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
-        participantCount: input.participantCount,
-        targetRnsLimbCount: input.targetRnsLimbCount,
-        ringDegree,
-        bytesPerResidue,
-        randomnessColumnCount: compactVssCommitmentRandomnessColumnCount,
-        oneSourceRecipientCredentialPayloadBytes,
-        oneAggregateCredentialPayloadBytes,
-        oneRecipientPrivateMailboxCredentialPayloadBytes,
-        oneRecipientPersistentAggregateCredentialPayloadBytes,
-        allRecipientsPrivateMailboxCredentialPayloadBytes:
-            input.participantCount *
-            oneRecipientPrivateMailboxCredentialPayloadBytes,
-        allRecipientsPersistentAggregateCredentialPayloadBytes:
-            input.participantCount *
-            oneRecipientPersistentAggregateCredentialPayloadBytes,
-        largestSingleCredentialPayloadBytes: Math.max(
-            oneSourceRecipientCredentialPayloadBytes,
-            oneAggregateCredentialPayloadBytes,
-        ),
-        byteAccountingScope:
-            'compact private opening payload vectors only: one share vector plus opening-randomness vectors for each source-recipient target limb, and one reduced share vector, one carried commitment-message vector, one carry vector, and opening-randomness vectors per persisted aggregate limb',
-        excludedByteCategories: [
-            'private-envelope JSON and canonical-encoding overhead',
-            'mailbox KEM, AEAD, nonce, tag, and associated-data overhead',
-            'source and recipient metadata fields',
-            'source share and opening roots',
-            'encrypted local-state wrapper overhead',
-            'future target-decryption proof bytes',
-        ],
     };
 };

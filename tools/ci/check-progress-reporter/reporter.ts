@@ -14,7 +14,7 @@ import {
     formatLaneProgress,
     formatProgressDuration,
     laneElapsedMilliseconds,
-    laneStatusLabels,
+    laneStatusText,
     terminalColumnCount,
     terminalRowCount,
     truncateLine,
@@ -219,7 +219,7 @@ export class CheckProgressReporter {
             (lane.commands.length > 1 || status === 'stopped')
         ) {
             this.#writeLine(
-                `${laneStatusLabels[status]} ${lane.name} ${formatProgressDuration(
+                `${laneStatusText[status]} ${lane.name} ${formatProgressDuration(
                     lane.durationMilliseconds,
                 )}`,
             );
@@ -321,7 +321,7 @@ export class CheckProgressReporter {
                 ? ''
                 : ` - ${currentCommand.description}${currentCommandExpectedDuration}`;
 
-        return `[${laneStatusLabels[lane.status].padEnd(
+        return `[${laneStatusText[lane.status].padEnd(
             4,
         )}] ${formattedProgress} ${elapsedDuration}${expectedDuration} ${lane.name}${currentCommandText}`;
     }
@@ -351,7 +351,7 @@ export class CheckProgressReporter {
                     ? ''
                     : ` ${event.invocation.description}`;
             this.#writeLine(
-                `${laneStatusLabels[command.status]} ${laneName} ${formatProgressDuration(
+                `${laneStatusText[command.status]} ${laneName} ${formatProgressDuration(
                     event.durationMilliseconds,
                 )}${commandDescription}`,
             );

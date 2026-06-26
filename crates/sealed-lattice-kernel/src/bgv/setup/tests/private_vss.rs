@@ -806,11 +806,16 @@ fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_gen
     let rns_prime = request["privateEnvelope"]["rnsShareOpenings"][0]["rnsPrime"]
         .as_u64()
         .expect("RNS prime");
-    let first_share_value = request["privateEnvelope"]["rnsShareOpenings"][0]["shareValues"][0]
-        .as_u64()
-        .expect("share value");
-    request["privateEnvelope"]["rnsShareOpenings"][0]["shareValues"][0] =
-        serde_json::json!((first_share_value + 1) % rns_prime);
+    let share_values_hex =
+        request["privateEnvelope"]["rnsShareOpenings"][0]["shareValuesLittleEndian48Hex"]
+            .as_str()
+            .expect("packed share values");
+    let mut share_values = share_values_from_little_endian_48_hex(share_values_hex, rns_prime);
+    let first_share_value = *share_values.first().expect("first share value");
+    share_values[0] = (first_share_value + 1) % rns_prime;
+    request["privateEnvelope"]["rnsShareOpenings"][0]["shareValuesLittleEndian48Hex"] = serde_json::json!(
+        share_values_to_little_endian_48_hex(&share_values, rns_prime)
+    );
 
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
@@ -820,6 +825,45 @@ fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_gen
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"
+    );
+}
+
+#[test]
+fn private_vss_share_envelope_verifier_refuses_malformed_packed_share_values() {
+    let mut request =
+        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    request["privateEnvelope"]["rnsShareOpenings"][0]["shareValuesLittleEndian48Hex"] =
+        serde_json::json!("0000");
+
+    let result = verify_private_vss_share_envelope_from_request(&request)
+        .expect("private VSS envelope verification");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "privateVssShareValuesMalformed"
+    );
+}
+
+#[test]
+fn private_vss_share_envelope_verifier_refuses_out_of_range_packed_share_value() {
+    let mut request =
+        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
+    let rns_prime = request["privateEnvelope"]["rnsShareOpenings"][0]["rnsPrime"]
+        .as_u64()
+        .expect("RNS prime");
+    request["privateEnvelope"]["rnsShareOpenings"][0]["shareValuesLittleEndian48Hex"] =
+        serde_json::json!(bytes_to_hex(&rns_prime.to_le_bytes()[..6]));
+
+    let result = verify_private_vss_share_envelope_from_request(&request)
+        .expect("private VSS envelope verification");
+
+    assert_eq!(result["ok"], false);
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "privateVssShareValueOutOfRange"
     );
 }
 
@@ -1031,7 +1075,10 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
             "objectVersion": 1,
             "rnsLimbIndex": rns_limb_index,
             "rnsPrime": rns_prime,
-            "shareValues": share_values,
+            "shareValuesLittleEndian48Hex": share_values_to_little_endian_48_hex(
+                &share_values,
+                rns_prime,
+            ),
             "carryWitnessesDecimal": carry_witnesses_decimal,
             "coefficientCommitmentRoots": coefficient_commitment_roots,
             "aggregateOpening": {
@@ -1123,13 +1170,11 @@ fn proof_shaped_private_vss_share_envelope_request(ring_degree: usize) -> serde_
             .get("rnsPrime")
             .and_then(serde_json::Value::as_u64)
             .expect("RNS prime");
-        let share_values = limb_object
-            .get("shareValues")
-            .and_then(serde_json::Value::as_array)
-            .expect("share values")
-            .iter()
-            .map(|value| value.as_u64().expect("share value"))
-            .collect::<Vec<_>>();
+        let share_values_hex = limb_object
+            .get("shareValuesLittleEndian48Hex")
+            .and_then(serde_json::Value::as_str)
+            .expect("packed share values");
+        let share_values = share_values_from_little_endian_48_hex(share_values_hex, rns_prime);
         let coefficient_commitment_roots = limb_object
             .get("coefficientCommitmentRoots")
             .and_then(serde_json::Value::as_array)
@@ -1333,6 +1378,44 @@ fn move_private_vss_share_proof_bytes_to_transport(
         "proofFamily": "vss-opening-carry",
         "proofMaterials": proof_materials,
     })
+}
+
+fn share_values_to_little_endian_48_hex(share_values: &[u64], rns_prime: u64) -> String {
+    assert!(
+        rns_prime <= (1_u64 << 48),
+        "RNS prime must fit packed 48-bit share value field"
+    );
+    let mut bytes = Vec::with_capacity(share_values.len() * 6);
+    for share_value in share_values {
+        assert!(
+            *share_value < rns_prime,
+            "share value must be a residue below rnsPrime"
+        );
+        bytes.extend_from_slice(&share_value.to_le_bytes()[..6]);
+    }
+
+    bytes_to_hex(&bytes)
+}
+
+fn share_values_from_little_endian_48_hex(share_values_hex: &str, rns_prime: u64) -> Vec<u64> {
+    let share_value_bytes = hex_to_bytes(share_values_hex);
+    assert!(
+        share_value_bytes.len().is_multiple_of(6),
+        "packed share values must contain whole 48-bit fields"
+    );
+    share_value_bytes
+        .chunks_exact(6)
+        .map(|chunk| {
+            let mut bytes = [0_u8; 8];
+            bytes[..6].copy_from_slice(chunk);
+            let share_value = u64::from_le_bytes(bytes);
+            assert!(
+                share_value < rns_prime,
+                "share value must be a residue below rnsPrime"
+            );
+            share_value
+        })
+        .collect()
 }
 
 fn hex_to_bytes(hex: &str) -> Vec<u8> {

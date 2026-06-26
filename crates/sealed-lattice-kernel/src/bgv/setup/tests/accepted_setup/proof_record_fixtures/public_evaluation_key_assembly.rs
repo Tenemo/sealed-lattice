@@ -154,9 +154,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
-        "assemblyStatus": "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate",
         "materialEncoding": "root-bound-public-key-switch-component-roots",
-        "materialSource": "verified-relinearization-and-galois-proof-records",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -178,8 +176,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "galoisKeyShareBatchRoots": galois_key_share_batch_roots,
         "galoisKeyRoots": galois_key_roots,
         "genericKeySwitchKeyRoots": [],
-        "rawKeyBytesEmbedded": false,
-        "verifierGeneratedKeyMaterial": false,
     });
     evaluation_keys["evaluationKeySetHash"] = serde_json::json!(
         derive_protocol_hash("EvaluationKeySetHash", &evaluation_keys)

@@ -6,10 +6,13 @@ import {
 } from '#tools/ci/public-package-policy';
 import {
     collectEntryPointTypeExportNames,
+    validateGeneratedInternalBridgeArtifactTexts,
     validatePublicPackagePolicy,
 } from '#tools/ci/verify-public-package-policy';
 
 const emptyPackagePolicy = {
+    forbiddenGeneratedInternalBridgeMembers: [],
+    forbiddenSdkVendoredInternalBridgeMembers: [],
     forbiddenRuntimeExports: [],
     forbiddenTypeExports: [],
     vendoredCryptoRuntimeModules:
@@ -80,6 +83,78 @@ describe('public package policy', () => {
         expect(failures).toEqual([
             'Forbidden runtime export is public: decryptIntermediateWire',
         ]);
+    });
+
+    it('rejects exact forbidden generated bridge members without matching longer helpers', () => {
+        const failures = validateGeneratedInternalBridgeArtifactTexts(
+            {
+                ...emptyPackagePolicy,
+                forbiddenGeneratedInternalBridgeMembers: [
+                    'GenerateBgvTargetDecryptionShare',
+                    'generateBgvTargetDecryptionShare',
+                ],
+            },
+            [
+                {
+                    relativePath: 'generated/current-bridge.js',
+                    text: `
+                        generateBgvTargetDecryptionShareFromLocalShare: (input) => input;
+                        command: 'GenerateBgvTargetDecryptionShareFromLocalShare';
+                    `,
+                },
+                {
+                    relativePath: 'generated/stale-bridge.js',
+                    text: `
+                        generateBgvTargetDecryptionShare: (input) => input;
+                        command: 'GenerateBgvTargetDecryptionShare';
+                    `,
+                },
+            ],
+        );
+
+        expect(failures).toEqual(
+            [
+                'generated internal bridge artifact contains forbidden member "GenerateBgvTargetDecryptionShare": generated/stale-bridge.js',
+                'generated internal bridge artifact contains forbidden member "generateBgvTargetDecryptionShare": generated/stale-bridge.js',
+            ].sort((left, right) => left.localeCompare(right)),
+        );
+    });
+
+    it('rejects target-decryption development bridge members only in the SDK vendored loader', () => {
+        const failures = validateGeneratedInternalBridgeArtifactTexts(
+            {
+                ...emptyPackagePolicy,
+                forbiddenSdkVendoredInternalBridgeMembers: [
+                    'GenerateBgvTargetDecryptionShareFromLocalShare',
+                    'generateBgvTargetDecryptionShareFromLocalShare',
+                ],
+            },
+            [
+                {
+                    relativePath:
+                        'packages/wasm/dist/transcript-core-bridge/kernel-loader.js',
+                    text: `
+                        generateBgvTargetDecryptionShareFromLocalShare: (input) => input;
+                        command: 'GenerateBgvTargetDecryptionShareFromLocalShare';
+                    `,
+                },
+                {
+                    relativePath:
+                        'packages/sdk/dist/internal/transcript-core-bridge/kernel-loader.js',
+                    text: `
+                        generateBgvTargetDecryptionShareFromLocalShare: (input) => input;
+                        command: 'GenerateBgvTargetDecryptionShareFromLocalShare';
+                    `,
+                },
+            ],
+        );
+
+        expect(failures).toEqual(
+            [
+                'SDK vendored internal bridge artifact contains forbidden member "GenerateBgvTargetDecryptionShareFromLocalShare": packages/sdk/dist/internal/transcript-core-bridge/kernel-loader.js',
+                'SDK vendored internal bridge artifact contains forbidden member "generateBgvTargetDecryptionShareFromLocalShare": packages/sdk/dist/internal/transcript-core-bridge/kernel-loader.js',
+            ].sort((left, right) => left.localeCompare(right)),
+        );
     });
 
     it('rejects target-decryption implementation exports if they reach the SDK facade', async () => {

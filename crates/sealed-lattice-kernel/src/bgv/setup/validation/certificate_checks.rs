@@ -1,4 +1,9 @@
 use super::*;
+use crate::bgv::evaluator::top_k::{
+    CANONICAL_TARGET_CIPHERTEXT_LEVEL, canonical_target_basis_hash,
+    canonical_target_basis_modulus_bits, canonical_target_basis_primes,
+    canonical_target_basis_value,
+};
 
 pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalResult<()> {
     let certificates = value_at_path(setup_package, &["certificates"])?;
@@ -37,6 +42,10 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
         &evaluation_key_streaming_commitment_hash,
         "setup parameter evaluation key streaming commitment hash",
     )?;
+    validate_setup_parameter_target_basis(value_at_path(
+        certificates,
+        &["setupParameterCertificate"],
+    )?)?;
     let expected_target_threshold_decryptability_certificate =
         target_threshold_decryptability_certificate_from_setup_package(setup_package)?;
     let target_threshold_decryptability_certificate =
@@ -94,6 +103,58 @@ pub(super) fn validate_setup_certificates(setup_package: &Value) -> CanonicalRes
     )
 }
 
+fn validate_setup_parameter_target_basis(
+    setup_parameter_certificate: &Value,
+) -> CanonicalResult<()> {
+    compare_hash_at_path(
+        setup_parameter_certificate,
+        &["targetBasisHash"],
+        &canonical_target_basis_hash()?,
+        "setup parameter target basis hash",
+    )?;
+    if value_at_path(setup_parameter_certificate, &["canonicalTargetBasis"])?
+        != &canonical_target_basis_value()?
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "setup parameter canonical target basis does not match the selected evaluator target basis",
+        ));
+    }
+    if usize_at_path(setup_parameter_certificate, &["targetCiphertextLevel"])?
+        != CANONICAL_TARGET_CIPHERTEXT_LEVEL
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "setup parameter target ciphertext level does not match the selected evaluator target level",
+        ));
+    }
+    let target_primes = canonical_target_basis_primes();
+    if usize_at_path(setup_parameter_certificate, &["qTargetPrimeCount"])? != target_primes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "setup parameter target prime count does not match the canonical target basis",
+        ));
+    }
+    if usize_at_path(setup_parameter_certificate, &["qTargetBits"])?
+        != canonical_target_basis_modulus_bits()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "setup parameter target modulus bit count does not match the canonical target basis",
+        ));
+    }
+    if string_at_path(setup_parameter_certificate, &["qTargetProductDecimal"])?
+        != modulus_product_decimal(target_primes.iter().copied())
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "setup parameter target modulus product does not match the canonical target basis",
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> CanonicalResult<String> {
     let wrapped_commitment = value_at_path(certificates, &["evaluationKeyStreamingCommitment"])?;
     let commitment_record = value_at_path(wrapped_commitment, &["commitment"])?;
@@ -143,12 +204,6 @@ fn validate_evaluation_key_streaming_commitment(certificates: &Value) -> Canonic
 fn validate_development_encryption_fixture(setup_package: &Value) -> CanonicalResult<()> {
     let fixture_record =
         value_at_path(setup_package, &["developmentEncryptionFixture", "fixture"])?;
-    compare_string_at_path(
-        fixture_record,
-        &["fixtureScope"],
-        "development-collective-public-key-encryption-fixture",
-        "development encryption fixture scope",
-    )?;
     compare_hash_at_path(
         fixture_record,
         &["collectivePublicKeyRoot"],

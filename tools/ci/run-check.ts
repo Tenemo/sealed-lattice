@@ -505,7 +505,7 @@ const runParallelLane = async (
     };
 };
 
-const statusLabels: Readonly<Record<LaneStatus, string>> = {
+const laneStatusText: Readonly<Record<LaneStatus, string>> = {
     failed: 'FAIL',
     passed: 'PASS',
     stopped: 'STOP',
@@ -526,7 +526,7 @@ const printValidationSummary = (
             result.durationMilliseconds,
         ).padStart(8);
         console.log(
-            `  ${statusLabels[result.status]}  ${duration}  ${result.name}`,
+            `  ${laneStatusText[result.status]}  ${duration}  ${result.name}`,
         );
     }
 

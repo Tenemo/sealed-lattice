@@ -14,12 +14,15 @@ pub(crate) struct LimbColumnLayout {
     pub(crate) total_error_columns: usize,
     pub(crate) private_vss_coefficient_columns: usize,
     pub(crate) compact_vss_coefficient_columns: usize,
+    pub(crate) target_decryption_message_columns: usize,
+    pub(crate) target_decryption_relation_count: usize,
     // Linkage logical columns active in this limb: the binary negative
     // indicator plus the per-commitment opening-randomness columns, or zero
     // outside the commitment fields.
     pub(crate) linkage_randomness_columns: usize,
     pub(crate) private_vss_randomness_columns: usize,
     pub(crate) compact_vss_randomness_columns: usize,
+    pub(crate) target_decryption_randomness_columns: usize,
     pub(crate) mask_column_count: usize,
 }
 
@@ -41,10 +44,14 @@ impl LimbColumnLayout {
             .map(|statement| statement.coefficient_commitments.len())
             .unwrap_or(0);
         let compact_vss_coefficient_columns = statement.compact_vss_coefficient_count(limb_index);
+        let target_decryption_message_columns = statement.target_decryption_message_count();
+        let target_decryption_relation_count =
+            statement.target_decryption_relation_count(limb_index);
         if active_keys.is_empty()
             && statement.linkage_randomness_count(limb_index) == 0
             && private_vss_coefficient_columns == 0
             && compact_vss_coefficient_columns == 0
+            && target_decryption_message_columns == 0
         {
             return Err(invalid_succinct_setup_proof(
                 "limb layout requires an active key or active linkage relations",
@@ -54,6 +61,7 @@ impl LimbColumnLayout {
         let linkage_randomness_columns = statement.linkage_randomness_count(limb_index);
         let private_vss_randomness_columns = statement.private_vss_randomness_count(limb_index);
         let compact_vss_randomness_columns = statement.compact_vss_randomness_count(limb_index);
+        let target_decryption_randomness_columns = statement.target_decryption_randomness_count();
         let ring_degree = statement.ring_degree;
         // The mask columns are sized from the number of published consistency
         // claims, so this must mirror consistency_vector_count() exactly. For
@@ -67,6 +75,9 @@ impl LimbColumnLayout {
             SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
             SuccinctSetupProofFamilyShape::CompactVssShareLinkage => {
                 1 + compact_vss_randomness_columns
+            }
+            SuccinctSetupProofFamilyShape::TargetDecryptionShare => {
+                target_decryption_message_columns + target_decryption_randomness_columns
             }
             _ => {
                 1 + total_error_columns
@@ -89,9 +100,12 @@ impl LimbColumnLayout {
             total_error_columns,
             private_vss_coefficient_columns,
             compact_vss_coefficient_columns,
+            target_decryption_message_columns,
+            target_decryption_relation_count,
             linkage_randomness_columns,
             private_vss_randomness_columns,
             compact_vss_randomness_columns,
+            target_decryption_randomness_columns,
             mask_column_count,
         })
     }
@@ -121,6 +135,10 @@ impl LimbColumnLayout {
         self.family_shape == SuccinctSetupProofFamilyShape::CompactSameSecretBridge
     }
 
+    pub(crate) fn target_decryption_active(&self) -> bool {
+        self.family_shape == SuccinctSetupProofFamilyShape::TargetDecryptionShare
+    }
+
     // Every private-VSS logical witness column committed in the trace: the
     // message (Shamir coefficient) columns, the carry column, and the
     // opening-randomness columns. This is the trace width and the length of the
@@ -140,6 +158,14 @@ impl LimbColumnLayout {
     pub(crate) fn compact_vss_logical_columns(&self) -> usize {
         if self.compact_vss_active() {
             self.compact_vss_coefficient_columns + 2 + self.compact_vss_randomness_columns
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn target_decryption_logical_columns(&self) -> usize {
+        if self.target_decryption_active() {
+            self.target_decryption_message_columns + self.target_decryption_randomness_columns
         } else {
             0
         }
@@ -191,6 +217,8 @@ impl LimbColumnLayout {
             1 + self.private_vss_randomness_columns
         } else if self.compact_vss_active() {
             1 + self.compact_vss_randomness_columns
+        } else if self.target_decryption_active() {
+            self.target_decryption_logical_columns()
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
         }
@@ -269,6 +297,24 @@ impl LimbColumnLayout {
         TRACE_SPLIT * (self.compact_vss_coefficient_columns + 2 + randomness_position) + half
     }
 
+    pub(crate) fn physical_target_decryption_message(
+        &self,
+        message_position: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.target_decryption_active());
+        TRACE_SPLIT * message_position + half
+    }
+
+    pub(crate) fn physical_target_decryption_randomness(
+        &self,
+        randomness_position: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.target_decryption_active());
+        TRACE_SPLIT * (self.target_decryption_message_columns + randomness_position) + half
+    }
+
     pub(crate) fn physical_private_vss_carry(&self, half: usize) -> usize {
         debug_assert!(self.private_vss_active());
         TRACE_SPLIT * self.private_vss_coefficient_columns + half
@@ -288,6 +334,8 @@ impl LimbColumnLayout {
             self.private_vss_logical_columns()
         } else if self.compact_vss_active() {
             self.compact_vss_logical_columns()
+        } else if self.target_decryption_active() {
+            self.target_decryption_logical_columns()
         } else {
             1 + 2 * self.total_error_columns + self.linkage_logical_columns()
         };
@@ -299,6 +347,8 @@ impl LimbColumnLayout {
             self.private_vss_logical_columns()
         } else if self.compact_vss_active() {
             self.compact_vss_logical_columns()
+        } else if self.target_decryption_active() {
+            self.target_decryption_logical_columns()
         } else {
             1 + 2 * self.total_error_columns + self.linkage_logical_columns()
         };
@@ -316,6 +366,8 @@ impl LimbColumnLayout {
             TRACE_SPLIT * (self.private_vss_randomness_columns + self.mask_column_count)
         } else if self.compact_vss_active() {
             TRACE_SPLIT * (self.compact_vss_randomness_columns + self.mask_column_count)
+        } else if self.target_decryption_active() {
+            TRACE_SPLIT * (self.target_decryption_randomness_columns + self.mask_column_count)
         } else {
             self.phase_one_physical_count()
         }

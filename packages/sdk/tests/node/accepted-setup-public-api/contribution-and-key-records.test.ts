@@ -716,8 +716,6 @@ describe('accepted setup public package API in Node', () => {
         expect(galoisKeyShareBatches).toHaveLength(participantCount);
         expect(publicEvaluationKeys).toMatchObject({
             objectType: 'PublicEvaluationKeySet',
-            rawKeyBytesEmbedded: false,
-            verifierGeneratedKeyMaterial: false,
             relinearizationKeyShareRoundsRoot:
                 relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot,
         });

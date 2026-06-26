@@ -202,7 +202,6 @@ export type PrivateVssShareVerification = Readonly<{
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
-    readonly ringDegreeStatus?: 'profile-ring' | 'development-reduced-ring';
     readonly verifiedRnsLimbCount?: number;
     readonly verifiedShamirCoefficientCommitmentCount?: number;
     readonly verifiedPrivateVssShareProofCount?: number;
@@ -229,9 +228,6 @@ export type SetupTransportedVssCoefficientCommitmentMaterialLike =
     ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
 export type VerifiedVssCoefficientCommitmentMaterial =
     ProtocolVerifiedVssCoefficientCommitmentMaterial;
-export type VerifiedSetupProofMaterial = ProtocolVerifiedSetupProofMaterial;
-export type VerifiedSetupProofMaterialSet =
-    ProtocolVerifiedSetupProofMaterialSet;
 export type SetupTransportedPublicKeyShareMaterial =
     ProtocolSetupTransportedPublicKeyShareMaterial;
 export type TransportedSameSecretProofMaterialSet =
@@ -258,11 +254,13 @@ export type VerifySetupPackageInput = Readonly<{
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
-    readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;
 }>;
 
 export type SetupPackageVerificationInputSource = Readonly<
-    Omit<ProtocolSetupPackageVerificationInputSource, 'setupPackage'> & {
+    Omit<
+        ProtocolSetupPackageVerificationInputSource,
+        'setupPackage' | 'verifiedSetupProofMaterials'
+    > & {
         readonly setupPackage: SetupPackage;
     }
 >;
@@ -452,8 +450,20 @@ export const verifyPrivateVssShare = async (
 /** Builds the public-only setup package verification input from package and transported setup material. */
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
-): VerifySetupPackageInput =>
-    createSetupPackageVerificationInputInternal(input);
+): VerifySetupPackageInput => {
+    const {
+        verifiedSetupProofMaterials: omittedCallerProofHandles,
+        ...inputWithoutCallerProofHandles
+    } = input as SetupPackageVerificationInputSource &
+        Readonly<{
+            readonly verifiedSetupProofMaterials?: unknown;
+        }>;
+    void omittedCallerProofHandles;
+
+    return createSetupPackageVerificationInputInternal(
+        inputWithoutCallerProofHandles,
+    );
+};
 
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
@@ -511,7 +521,9 @@ const compactSetupProofMaterialSet = <
     MaterialSet extends SetupProofMaterialTransportSet | undefined,
 >(
     materialSet: MaterialSet,
-    verifiedSetupProofMaterials: VerifiedSetupProofMaterialSet | undefined,
+    verifiedSetupProofMaterials:
+        | ProtocolVerifiedSetupProofMaterialSet
+        | undefined,
 ): MaterialSet => {
     if (
         materialSet === undefined ||
@@ -571,7 +583,7 @@ const streamSetupProofMaterialSet = (
     kernel: TranscriptCoreKernel,
     fieldName: SetupProofMaterialTransportFieldName,
     materialSet: SetupProofMaterialTransportSet | undefined,
-): readonly VerifiedSetupProofMaterial[] => {
+): readonly ProtocolVerifiedSetupProofMaterial[] => {
     if (
         materialSet === undefined ||
         !Array.isArray(materialSet.proofMaterials)
@@ -579,7 +591,7 @@ const streamSetupProofMaterialSet = (
         return [];
     }
 
-    const verifiedMaterials: VerifiedSetupProofMaterial[] = [];
+    const verifiedMaterials: ProtocolVerifiedSetupProofMaterial[] = [];
     materialSet.proofMaterials.forEach((proofMaterialValue, materialIndex) => {
         const chunks = setupProofMaterialChunks(proofMaterialValue);
         if (chunks === undefined) {
@@ -608,7 +620,7 @@ const streamSetupProofMaterialSet = (
             verificationId,
         });
         verifiedMaterials.push(
-            verification.verifiedSetupProofMaterial as VerifiedSetupProofMaterial,
+            verification.verifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
         );
     });
 
@@ -618,33 +630,29 @@ const streamSetupProofMaterialSet = (
 const prepareSetupPackageVerificationInputForKernel = (
     kernel: TranscriptCoreKernel,
     input: VerifySetupPackageInput,
-): VerifySetupPackageInput => {
-    if (input.verifiedSetupProofMaterials !== undefined) {
-        return {
-            ...input,
-            transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-                input.transportedSameSecretProofMaterial,
-                input.verifiedSetupProofMaterials,
-            ),
-            transportedPublicKeyShareProofMaterial:
-                compactSetupProofMaterialSet(
-                    input.transportedPublicKeyShareProofMaterial,
-                    input.verifiedSetupProofMaterials,
-                ),
-            transportedEvaluationKeyShareProofMaterial:
-                compactSetupProofMaterialSet(
-                    input.transportedEvaluationKeyShareProofMaterial,
-                    input.verifiedSetupProofMaterials,
-                ),
-        };
-    }
-
+): VerifySetupPackageInput &
+    Readonly<{
+        readonly verifiedSetupProofMaterials?: ProtocolVerifiedSetupProofMaterialSet;
+    }> => {
+    const {
+        verifiedSetupProofMaterials: omittedCallerProofHandles,
+        ...inputWithoutCallerProofHandles
+    } = input as VerifySetupPackageInput &
+        Readonly<{
+            readonly verifiedSetupProofMaterials?: unknown;
+        }>;
+    void omittedCallerProofHandles;
+    const verificationInput = inputWithoutCallerProofHandles;
     const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
         (fieldName) =>
-            streamSetupProofMaterialSet(kernel, fieldName, input[fieldName]),
+            streamSetupProofMaterialSet(
+                kernel,
+                fieldName,
+                verificationInput[fieldName],
+            ),
     );
     if (verifiedMaterials.length === 0) {
-        return input;
+        return verificationInput;
     }
 
     const verifiedSetupProofMaterials = {
@@ -653,21 +661,21 @@ const prepareSetupPackageVerificationInputForKernel = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofMaterials: verifiedMaterials,
-    } as const satisfies VerifiedSetupProofMaterialSet;
+    } as const satisfies ProtocolVerifiedSetupProofMaterialSet;
 
     return {
-        ...input,
+        ...verificationInput,
         transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-            input.transportedSameSecretProofMaterial,
+            verificationInput.transportedSameSecretProofMaterial,
             verifiedSetupProofMaterials,
         ),
         transportedPublicKeyShareProofMaterial: compactSetupProofMaterialSet(
-            input.transportedPublicKeyShareProofMaterial,
+            verificationInput.transportedPublicKeyShareProofMaterial,
             verifiedSetupProofMaterials,
         ),
         transportedEvaluationKeyShareProofMaterial:
             compactSetupProofMaterialSet(
-                input.transportedEvaluationKeyShareProofMaterial,
+                verificationInput.transportedEvaluationKeyShareProofMaterial,
                 verifiedSetupProofMaterials,
             ),
         verifiedSetupProofMaterials,

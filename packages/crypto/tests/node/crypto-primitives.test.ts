@@ -26,6 +26,10 @@ import {
 const contextHash = deriveProtocolHash('ActionContextHash', {
     context: 'crypto-test',
 });
+const testTextEncoder = new TextEncoder();
+
+const hashCanonicalTestValue = (domain: string, value: unknown): string =>
+    hash512Hex(domain, [testTextEncoder.encode(canonicalJson(value))]);
 
 const createSignedRoot = (
     objectRoot = deriveProtocolHash('BoardHeadHash', { object: 'root' }),
@@ -279,7 +283,8 @@ describe('crypto primitive boundary', () => {
             rnsShareOpenings: [
                 {
                     rnsLimbIndex: 0,
-                    shareValues: [1, 2, 3],
+                    shareValuesLittleEndian48Hex:
+                        '010000000000020000000000030000000000',
                     privateVssShareProof: {
                         objectType: 'PrivateVssShareProof',
                         objectVersion: 1,
@@ -541,7 +546,6 @@ describe('crypto primitive boundary', () => {
                     trusteeRosterPosition: 3,
                     thresholdShareCommitmentRecipientRoot,
                     aggregateThresholdShareRoot,
-                    witnessOwnership: 'recipient-owned-restorable-local-state',
                 },
                 setupContext,
                 trusteeIdentity: 'trustee-3',
@@ -560,8 +564,6 @@ describe('crypto primitive boundary', () => {
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
             setupEpoch: setupContext.setupEpoch,
-            storageProfile: 'encrypted-local-device-state-required',
-            exportPolicy: 'roots-only-no-raw-share-or-opening-export',
             localStateRoot: deriveProtocolHash('LocalTrusteeSetupStateRoot', {
                 trustee: 'trustee-3',
             }),
@@ -609,7 +611,15 @@ describe('crypto primitive boundary', () => {
             localStateRoot: localStateCommitment.localStateRoot,
             aeadNonceHex: aeadNonceBytesHex,
             aeadTagLength: 128,
+            sealedAggregateThresholdShare:
+                localStatePlaintext.sealedAggregateThresholdShare,
+            sealedTargetDecryptionProofWitness:
+                localStatePlaintext.sealedTargetDecryptionProofWitness,
         });
+        expect(encrypted.encryptedLocalState.plaintextByteLength).toBeLessThan(
+            testTextEncoder.encode(canonicalJson(localStatePlaintext))
+                .byteLength,
+        );
         await expect(
             decryptLocalTrusteeState({
                 encryptedLocalState: encrypted.encryptedLocalState,
@@ -640,7 +650,6 @@ describe('crypto primitive boundary', () => {
                 trusteeRosterPosition: 3,
                 thresholdShareCommitmentRecipientRoot,
                 aggregateThresholdShareRoot,
-                witnessOwnership: 'recipient-owned-restorable-local-state',
             },
             materialPlaintextHash:
                 sealedTargetDecryptionProofWitness.materialPlaintextHash,
@@ -692,6 +701,44 @@ describe('crypto primitive boundary', () => {
                 storageKeyBytesHex,
             }),
         ).rejects.toThrow(/storageAad/u);
+
+        const originalTargetCiphertext =
+            encrypted.encryptedLocalState.sealedTargetDecryptionProofWitness
+                .encryptedMaterial.ciphertextBytesHex;
+        const tamperedTargetDecryptionProofWitness = {
+            ...encrypted.encryptedLocalState.sealedTargetDecryptionProofWitness,
+            encryptedMaterial: {
+                ...encrypted.encryptedLocalState
+                    .sealedTargetDecryptionProofWitness.encryptedMaterial,
+                ciphertextBytesHex: `${
+                    originalTargetCiphertext.startsWith('00') ? '01' : '00'
+                }${originalTargetCiphertext.slice(2)}`,
+            },
+        };
+        const tamperedEnvelope = {
+            ...encrypted.encryptedLocalState,
+            sealedTargetDecryptionProofWitness:
+                tamperedTargetDecryptionProofWitness,
+        };
+        const tamperedEnvelopeWithoutHash = {
+            ...tamperedEnvelope,
+        } as Record<string, unknown>;
+        delete tamperedEnvelopeWithoutHash.encryptedLocalStateHash;
+        const tamperedEncryptedLocalState = {
+            ...tamperedEnvelope,
+            encryptedLocalStateHash: hashCanonicalTestValue(
+                'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                tamperedEnvelopeWithoutHash,
+            ),
+        };
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: tamperedEncryptedLocalState,
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/ciphertextBytesHash/u);
     });
 
     it('requires explicit signature expectation bindings unless unbound verification is requested', () => {

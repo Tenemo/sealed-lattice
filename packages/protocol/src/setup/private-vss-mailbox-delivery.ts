@@ -7,7 +7,10 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import type { CompactVssRecipientShareOpeningCredential } from './compact-vss-commitments.js';
+import {
+    encodeCompactVssTernaryRandomnessColumnsHex,
+    type CompactVssRecipientShareOpeningCredential,
+} from './compact-vss-commitments.js';
 import { setupProofProfileId } from './same-secret-consistency-records.js';
 import type { VerifiedVssCoefficientCommitmentMaterial } from './vss-coefficient-commitments.js';
 
@@ -315,7 +318,6 @@ export type TransportedPrivateVssShareProofMaterialSet = Readonly<
 const privateEnvelopeDeliveryContentType = 'private-vss-share-envelope';
 const privateEnvelopeObjectType = 'PrivateVssShareEnvelope';
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
-const localOpeningAcceptedStatus = 'accepted-local-private-vss-opening';
 const setupProfileId = 'CollectiveBgvSetup-v1';
 const privateVssShareProofProfileId =
     'sealed-lattice-private-vss-share-proof-succinct-v1';
@@ -412,6 +414,49 @@ const hexToBytes = (hex: string, fieldName: string): Uint8Array => {
 
 const bytesToHex = (bytes: Uint8Array): string =>
     [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+
+const privateVssShareValueByteLength = 6;
+const maximumPrivateVssShareValueExclusive = 1n << 48n;
+
+const assertPrivateVssSharePrimeFitsPacked48 = (
+    rnsPrime: number,
+    fieldName: string,
+): void => {
+    validatePositiveSafeInteger(rnsPrime, fieldName);
+    if (BigInt(rnsPrime) > maximumPrivateVssShareValueExclusive) {
+        throw new TypeError(`${fieldName} must fit the packed 48-bit field.`);
+    }
+};
+
+const shareValuesToLittleEndian48Hex = (
+    values: readonly number[],
+    rnsPrime: number,
+    fieldName: string,
+): string => {
+    assertPrivateVssSharePrimeFitsPacked48(rnsPrime, 'rnsPrime');
+    const bytes = new Uint8Array(
+        values.length * privateVssShareValueByteLength,
+    );
+    values.forEach((value, valueIndex) => {
+        if (!Number.isSafeInteger(value) || value < 0 || value >= rnsPrime) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must be a residue below rnsPrime.`,
+            );
+        }
+        let remainingValue = BigInt(value);
+        for (
+            let byteIndex = 0;
+            byteIndex < privateVssShareValueByteLength;
+            byteIndex += 1
+        ) {
+            bytes[valueIndex * privateVssShareValueByteLength + byteIndex] =
+                Number(remainingValue & 0xffn);
+            remainingValue >>= 8n;
+        }
+    });
+
+    return bytesToHex(bytes);
+};
 
 const proofRandomnessByteLength = 64;
 
@@ -880,7 +925,7 @@ const compactVssRecipientShareOpeningCredentialForLimb = (
     rnsLimbIndex: number,
     rnsPrime: number,
     shareValues: readonly number[],
-): CompactVssRecipientShareOpeningCredential | undefined => {
+): JsonRecord | undefined => {
     if (input.compactVssRecipientShareOpeningCredentials === undefined) {
         return undefined;
     }
@@ -916,7 +961,21 @@ const compactVssRecipientShareOpeningCredentialForLimb = (
         );
     }
 
-    return credential;
+    const {
+        shareValues: _deliveredShareValues,
+        randomnessByColumn,
+        ...credentialWithoutShareValues
+    } = credential;
+    void _deliveredShareValues;
+
+    return {
+        ...credentialWithoutShareValues,
+        randomnessByColumnPackedTernaryHex:
+            encodeCompactVssTernaryRandomnessColumnsHex(
+                randomnessByColumn,
+                input.ringDegree,
+            ),
+    };
 };
 
 const privateEnvelope = (
@@ -1061,7 +1120,11 @@ const privateEnvelope = (
                 objectVersion: 1,
                 rnsLimbIndex,
                 rnsPrime,
-                shareValues,
+                shareValuesLittleEndian48Hex: shareValuesToLittleEndian48Hex(
+                    shareValues,
+                    rnsPrime,
+                    'shareValues',
+                ),
                 coefficientCommitmentRoots,
                 privateVssShareProof,
                 ...(compactVssRecipientShareOpeningCredential === undefined
@@ -1227,7 +1290,6 @@ const createEnvelopeCommitment = async (
                   transportedPrivateVssShareProofMaterial:
                       privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial,
               }),
-        openingVerificationStatus: localOpeningAcceptedStatus,
     } as const satisfies JsonRecord;
 
     return {

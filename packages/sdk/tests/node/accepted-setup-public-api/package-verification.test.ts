@@ -302,7 +302,7 @@ describe('accepted setup public package API in Node', () => {
         expect(verification.acceptedSetupHandoff).toBeUndefined();
     });
 
-    it('creates compact setup verification input for every verified proof material family', () => {
+    it('keeps setup proof chunks in public verification input', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
             objectVersion: 1,
@@ -328,7 +328,6 @@ describe('accepted setup public package API in Node', () => {
                         setupProofMaterialTransportCases[2],
                     ),
                 ...publicCompanions,
-                verifiedSetupProofMaterials: verifiedSetupProofMaterials(),
             });
 
         expect(verificationInput.setupPackage).toBe(setupPackage);
@@ -352,11 +351,11 @@ describe('accepted setup public package API in Node', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: setupProofMaterialRoot(transportCase),
             });
-            expect(materialSet?.proofMaterials[0]).not.toHaveProperty('chunks');
+            expect(materialSet?.proofMaterials[0]).toHaveProperty('chunks');
         }
     });
 
-    it('keeps setup proof chunks when no verified handle binds that proof root', () => {
+    it('ignores caller-supplied setup proof handles in public verification input', () => {
         const setupPackage = {
             objectType: 'SetupPackage',
             objectVersion: 1,
@@ -365,33 +364,32 @@ describe('accepted setup public package API in Node', () => {
                 [new Uint8Array([9, 10, 11, 12])],
             ),
         };
-        const verificationInput =
-            publicSetupApi.createSetupPackageVerificationInput({
-                setupPackage,
-                transportedSameSecretProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[0],
-                    ),
-                transportedPublicKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[1],
-                    ),
-                transportedEvaluationKeyShareProofMaterial:
-                    transportedSetupProofMaterialSet(
-                        setupProofMaterialTransportCases[2],
-                    ),
-                verifiedSetupProofMaterials: verifiedSetupProofMaterials(
-                    (transportCase) =>
-                        hash512Hex(
-                            'sealed-lattice/test/foreign-setup-proof-material-root',
-                            [
-                                new TextEncoder().encode(
-                                    transportCase.proofFamily,
-                                ),
-                            ],
-                        ),
+        const inputWithCallerProofHandles: Record<string, unknown> = {
+            setupPackage,
+            transportedSameSecretProofMaterial:
+                transportedSetupProofMaterialSet(
+                    setupProofMaterialTransportCases[0],
                 ),
-            });
+            transportedPublicKeyShareProofMaterial:
+                transportedSetupProofMaterialSet(
+                    setupProofMaterialTransportCases[1],
+                ),
+            transportedEvaluationKeyShareProofMaterial:
+                transportedSetupProofMaterialSet(
+                    setupProofMaterialTransportCases[2],
+                ),
+            verifiedSetupProofMaterials: verifiedSetupProofMaterials(
+                (transportCase) =>
+                    hash512Hex(
+                        'sealed-lattice/test/foreign-setup-proof-material-root',
+                        [new TextEncoder().encode(transportCase.proofFamily)],
+                    ),
+            ),
+        };
+        const verificationInput =
+            publicSetupApi.createSetupPackageVerificationInput(
+                inputWithCallerProofHandles,
+            );
 
         for (const transportCase of setupProofMaterialTransportCases) {
             const materialSet = verificationInput[transportCase.fieldName] as
@@ -406,5 +404,8 @@ describe('accepted setup public package API in Node', () => {
             });
             expect(materialSet?.proofMaterials[0]).toHaveProperty('chunks');
         }
+        expect(verificationInput).not.toHaveProperty(
+            'verifiedSetupProofMaterials',
+        );
     });
 });

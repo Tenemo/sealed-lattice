@@ -30,7 +30,7 @@ export const formatProgressDuration = (
     return `${minutes}m${String(seconds).padStart(2, '0')}s`;
 };
 
-export const laneStatusLabels: Readonly<Record<CheckProgressStatus, string>> = {
+export const laneStatusText: Readonly<Record<CheckProgressStatus, string>> = {
     failed: 'fail',
     passed: 'pass',
     running: 'run',

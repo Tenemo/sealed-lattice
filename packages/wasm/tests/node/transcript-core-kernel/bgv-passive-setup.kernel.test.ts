@@ -42,6 +42,24 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
         const repeated = kernel.generateBgvPassiveSetup(setupRequest);
         const certificates = setup.certificates as {
+            readonly setupParameterCertificate: {
+                readonly qTargetBits: number;
+                readonly qTargetProductDecimal: string;
+                readonly qTargetPrimeCount: number;
+                readonly targetCiphertextLevel: number;
+                readonly targetBasisHash: string;
+                readonly canonicalTargetBasis: {
+                    readonly objectType: 'CanonicalTargetBasis';
+                    readonly targetLevel: number;
+                    readonly targetPrimes: readonly number[];
+                };
+            };
+            readonly targetThresholdDecryptabilityCertificate: {
+                readonly targetCiphertextProfile: {
+                    readonly targetPrimeCeilLog2Product: number;
+                    readonly targetBasisHash: string;
+                };
+            };
             readonly publicRlweSamplesByBasis: {
                 readonly QData: {
                     readonly publicKeyShares: number;
@@ -55,8 +73,40 @@ describe('BGV passive passive BGV setup kernel commands', () => {
 
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
-        expect(setup.targetDecryptionStatus).toMatchObject({
+        expect(setup.targetDecryptionProfileBinding).toMatchObject({
             targetDecryptionProfileId: 'BGV-RNS-AsyncTargetDecryption-v1',
+        });
+        expect(
+            certificates.setupParameterCertificate.qTargetBits,
+        ).toBeGreaterThan(0);
+        expect(certificates.setupParameterCertificate).toMatchObject({
+            qTargetPrimeCount: 7,
+            targetCiphertextLevel: 6,
+            canonicalTargetBasis: {
+                objectType: 'CanonicalTargetBasis',
+                targetLevel: 6,
+            },
+        });
+        expect(
+            certificates.setupParameterCertificate.qTargetProductDecimal,
+        ).toMatch(/^[1-9][0-9]+$/u);
+        expect(
+            certificates.setupParameterCertificate.canonicalTargetBasis
+                .targetPrimes,
+        ).toHaveLength(
+            certificates.setupParameterCertificate.qTargetPrimeCount,
+        );
+        expect(
+            certificates.setupParameterCertificate.targetBasisHash,
+        ).toHaveLength(128);
+        expect(
+            certificates.targetThresholdDecryptabilityCertificate
+                .targetCiphertextProfile,
+        ).toMatchObject({
+            targetPrimeCeilLog2Product:
+                certificates.setupParameterCertificate.qTargetBits,
+            targetBasisHash:
+                certificates.setupParameterCertificate.targetBasisHash,
         });
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,
@@ -361,19 +411,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                         setupPackage,
                         ['certificates', 'setupParameterCertificateHash'],
                         validHash('6'),
-                    ),
-            ],
-            [
-                'final security status',
-                (setupPackage) =>
-                    setPathValue(
-                        setupPackage,
-                        [
-                            'certificates',
-                            'setupParameterCertificate',
-                            'finalSecurityStatus',
-                        ],
-                        'pendingQTarget',
                     ),
             ],
             [

@@ -1,4 +1,4 @@
-import { expect } from 'vitest';
+import { expect } from "vitest";
 
 import {
     firstProfileParticipantCount,
@@ -6,21 +6,21 @@ import {
     privateVssMailboxKeyPairForRosterPosition,
     setupTrusteeSignatureSeedLabel,
     type JsonRecord,
-} from '../setup-fixture-primitives.js';
+} from "../setup-fixture-primitives.js";
 
-import { privateVssMailboxEncryptionProfileId } from '#packages/crypto/src/index';
+import { privateVssMailboxEncryptionProfileId } from "#packages/crypto/src/index";
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
     createProtocolSignatureFixture,
-} from '#packages/crypto/tests/support/protocol-signature-fixtures';
+} from "#packages/crypto/tests/support/protocol-signature-fixtures";
 import {
     createPrivateVssMailboxDeliverySetFromReferences,
     createPrivateVssMailboxSourceTrusteeDeliveryReferences,
     type PrivateVssEnvelopeCommitment,
     type PrivateVssMailboxDeliverySetInput,
-} from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
-import { type VssSourceTrusteeOpeningMaterial } from '#packages/protocol/src/setup/vss-coefficient-commitments';
+} from "#packages/protocol/src/setup/private-vss-mailbox-delivery";
+import { type VssSourceTrusteeOpeningMaterial } from "#packages/protocol/src/setup/vss-coefficient-commitments";
 import {
     createVssComplaintSet,
     createVssShareAcceptanceRecord,
@@ -32,24 +32,24 @@ import {
     type ProtocolRootSigner,
     type VssShareAcceptanceRecord,
     type VssShareComplaintRecord,
-} from '#packages/protocol/src/setup/vss-share-verification-records';
+} from "#packages/protocol/src/setup/vss-share-verification-records";
 import type {
     BgvCollectiveSetupProfileDescription,
     TranscriptCoreKernel,
-} from '#packages/wasm/src/index';
+} from "#packages/wasm/src/index";
 
 function collectForbiddenPrivateVssDeliveryFieldPaths(
     value: unknown,
-    objectPath = 'privateVssEnvelopeCommitments',
+    objectPath = "privateVssEnvelopeCommitments",
 ): string[] {
     const forbiddenFieldNames = new Set([
-        'privateEnvelope',
-        'coefficientMessage',
-        'randomnessByColumn',
-        'shareValues',
-        'aggregateOpening',
-        'aggregateOpeningColumns',
-        'carryWitnessesDecimal',
+        "privateEnvelope",
+        "coefficientMessage",
+        "randomnessByColumn",
+        "shareValues",
+        "aggregateOpening",
+        "aggregateOpeningColumns",
+        "carryWitnessesDecimal",
     ]);
     if (Array.isArray(value)) {
         return value.flatMap((item, itemIndex) =>
@@ -59,7 +59,7 @@ function collectForbiddenPrivateVssDeliveryFieldPaths(
             ),
         );
     }
-    if (typeof value !== 'object' || value === null) {
+    if (typeof value !== "object" || value === null) {
         return [];
     }
 
@@ -81,7 +81,7 @@ function collectiveSetupPhaseOrderHash(
     profile: BgvCollectiveSetupProfileDescription,
 ): string {
     return kernel.deriveProtocolHash({
-        namespace: 'CollectiveBgvSetupPhaseOrderHash',
+        namespace: "CollectiveBgvSetupPhaseOrderHash",
         value: profile.phaseOrder.map(
             (phase: {
                 readonly phaseId: string;
@@ -97,14 +97,14 @@ function collectiveSetupPhaseOrderHash(
 function privateVssSourceTrusteeContributionState(
     sourceTrusteeOpeningMaterial: VssSourceTrusteeOpeningMaterial,
     sourceTrusteeRecords: readonly JsonRecord[],
-): PrivateVssMailboxDeliverySetInput['sourceTrusteeContributionStates'][number] {
+): PrivateVssMailboxDeliverySetInput["sourceTrusteeContributionStates"][number] {
     const sourceTrusteeRecord =
         sourceTrusteeRecords[
             sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition
         ];
     if (sourceTrusteeRecord === undefined) {
         throw new Error(
-            'Missing VSS coefficient commitment source trustee record.',
+            "Missing VSS coefficient commitment source trustee record.",
         );
     }
 
@@ -137,12 +137,12 @@ function packageShapePrivateVssEnvelopeAad(input: {
     readonly envelopeSequenceNumber: number;
 }): JsonRecord {
     return {
-        objectType: 'PrivateVssEnvelopeAad',
+        objectType: "PrivateVssEnvelopeAad",
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
+        setupProfileId: "CollectiveBgvSetup-v1",
         mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
-        privateEnvelopeObjectType: 'PrivateVssShareEnvelope',
-        ciphertextContentType: 'private-vss-share-envelope',
+        privateEnvelopeObjectType: "PrivateVssShareEnvelope",
+        ciphertextContentType: "private-vss-share-envelope",
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
@@ -202,21 +202,21 @@ function packageShapePrivateVssEnvelopeReference(input: {
         envelopeSequenceNumber,
     });
     const privateEnvelopeAadHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEnvelopeAadHash',
+        namespace: "PrivateVssEnvelopeAadHash",
         value: privateEnvelopeAad,
     });
     const privateEnvelopeHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssShareEnvelopeHash',
+        namespace: "PrivateVssShareEnvelopeHash",
         value: {
-            fixture: 'package-shape-private-vss-envelope-reference',
+            fixture: "package-shape-private-vss-envelope-reference",
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
         },
     });
     const encryptedEnvelopeHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEncryptedEnvelopeHash',
+        namespace: "PrivateVssEncryptedEnvelopeHash",
         value: {
-            fixture: 'package-shape-private-vss-envelope-reference',
+            fixture: "package-shape-private-vss-envelope-reference",
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
             privateEnvelopeHash,
@@ -224,16 +224,16 @@ function packageShapePrivateVssEnvelopeReference(input: {
         },
     });
     const localVerificationRoot = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssLocalVerificationRoot',
+        namespace: "PrivateVssLocalVerificationRoot",
         value: {
-            fixture: 'package-shape-private-vss-envelope-reference',
+            fixture: "package-shape-private-vss-envelope-reference",
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
             privateEnvelopeHash,
         },
     });
     const referenceWithoutRoot = {
-        objectType: 'PrivateVssEnvelopeCommitment',
+        objectType: "PrivateVssEnvelopeCommitment",
         objectVersion: 1,
         mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
         ceremonyId: input.setupContext.ceremonyId,
@@ -261,16 +261,15 @@ function packageShapePrivateVssEnvelopeReference(input: {
         privateEnvelopeAadHash,
         recipientMailboxPublicKeyHash: recipientMailboxKeyPair.publicKeyHash,
         localVerificationRoot,
-        openingVerificationStatus: 'accepted-local-private-vss-opening',
     } as const satisfies Omit<
         PrivateVssEnvelopeCommitment,
-        'privateEnvelopeCommitmentRoot'
+        "privateEnvelopeCommitmentRoot"
     >;
 
     return {
         ...referenceWithoutRoot,
         privateEnvelopeCommitmentRoot: input.kernel.deriveProtocolHash({
-            namespace: 'PrivateVssEnvelopeCommitmentRoot',
+            namespace: "PrivateVssEnvelopeCommitmentRoot",
             value: referenceWithoutRoot,
         }),
     } as const satisfies PrivateVssEnvelopeCommitment;
@@ -316,7 +315,7 @@ export function packageShapePrivateVssEnvelopeCommitments(
                     kernel.verifyPrivateVssShareEnvelope(input),
             },
             setupContext:
-                setupContext as PrivateVssMailboxDeliverySetInput['setupContext'],
+                setupContext as PrivateVssMailboxDeliverySetInput["setupContext"],
             publicMatrixSeedHash,
             vssCoefficientCommitmentRoot,
             participantCount: firstProfileParticipantCount,
@@ -347,7 +346,7 @@ export async function focusedPrivateVssSourceDeliveryReferences(
     const sourceTrusteeOpeningMaterial =
         privateOpeningMaterialBySourceTrustee[0];
     if (sourceTrusteeOpeningMaterial === undefined) {
-        throw new Error('Missing focused private VSS source trustee state.');
+        throw new Error("Missing focused private VSS source trustee state.");
     }
     const sourceTrusteeContributionState =
         privateVssSourceTrusteeContributionState(
@@ -366,7 +365,7 @@ export async function focusedPrivateVssSourceDeliveryReferences(
                 kernel.verifyPrivateVssShareEnvelope(input),
         },
         setupContext:
-            setupContext as PrivateVssMailboxDeliverySetInput['setupContext'],
+            setupContext as PrivateVssMailboxDeliverySetInput["setupContext"],
         phaseOrderHash: collectiveSetupPhaseOrderHash(kernel, profile),
         publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
         vssCoefficientCommitmentRoot: String(
@@ -377,11 +376,11 @@ export async function focusedPrivateVssSourceDeliveryReferences(
         participantCount: 1,
         deliveryPhaseNumber: 6,
         verificationPhaseNumber: 7,
-        privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
+        privateVssShareProofMaterialEncoding: "binary-chunked-proof-bytes",
         sourceTrusteeContributionState,
         recipients: [
             {
-                recipientIdentity: 'trustee-0',
+                recipientIdentity: "trustee-0",
                 recipientRosterPosition: 0,
                 mailboxPublicKeyBytesHex:
                     recipientMailboxKeyPair.publicKeyBytesHex,
@@ -420,7 +419,7 @@ export async function acceptedVssShareAcceptances(
                 ];
             if (envelopeReference === undefined) {
                 throw new Error(
-                    'Missing private VSS envelope reference for acceptance.',
+                    "Missing private VSS envelope reference for acceptance.",
                 );
             }
             const signRoot: ProtocolRootSigner = (signedRoot) =>
@@ -465,11 +464,11 @@ export async function acceptedVssComplaintSet(
     const envelopeReference = envelopeReferences[0];
     if (envelopeReference === undefined) {
         throw new Error(
-            'Missing private VSS envelope reference for complaint.',
+            "Missing private VSS envelope reference for complaint.",
         );
     }
     const keyFixture = createMlDsaKeyPairFixture(
-        setupTrusteeSignatureSeedLabel('trustee-0'),
+        setupTrusteeSignatureSeedLabel("trustee-0"),
     );
     const signRoot: ProtocolRootSigner = (signedRoot) =>
         createProtocolSignatureFixture({
@@ -493,10 +492,10 @@ export async function acceptedVssComplaintSet(
                 localVerificationRoot: null,
                 refusedObjects: [
                     {
-                        reasonCode: 'private-vss-opening-verification-failed',
+                        reasonCode: "private-vss-opening-verification-failed",
                         message:
-                            'recipient local private VSS opening verification failed',
-                        objectPath: 'privateEnvelope.rnsShareOpenings.0',
+                            "recipient local private VSS opening verification failed",
+                        objectPath: "privateEnvelope.rnsShareOpenings.0",
                     },
                 ],
             } satisfies PrivateVssLocalVerificationFailure,

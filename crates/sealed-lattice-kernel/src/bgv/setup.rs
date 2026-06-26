@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use num_bigint::BigUint;
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
@@ -24,11 +25,13 @@ mod sharing;
 mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
 pub(crate) use trustee_evaluation_key_proof::{
-    generate_compact_same_secret_bridge_proof_from_request,
+    TARGET_DECRYPTION_SHARE_PROOF_FAMILY, generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
+    generate_target_decryption_share_proof_from_request,
     generate_trustee_evaluation_key_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
     verify_compact_vss_share_linkage_proof_from_request,
+    verify_target_decryption_share_proof_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 mod validation;
@@ -47,10 +50,11 @@ pub(crate) use compact_same_secret_bridge::{
     verify_compact_vss_same_secret_bridge_statement_set_request,
 };
 pub(crate) use compact_vss_commitment::{
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
+    compute_compact_vss_commitment_from_opening,
     compute_compact_vss_commitment_from_opening_request,
     decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
-    read_compact_vss_randomness_by_column,
     verify_compact_vss_aggregate_threshold_commitment_set_request,
     verify_compact_vss_coefficient_commitment_set_request,
     verify_compact_vss_commitment_opening_request,
@@ -146,6 +150,15 @@ const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
 const EVALUATION_KEY_STREAMING_COMMITMENT_ID: &str =
     "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-commitment-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
+
+fn modulus_product_decimal(moduli: impl IntoIterator<Item = u64>) -> String {
+    let mut product = BigUint::from(1_u8);
+    for modulus in moduli {
+        product *= BigUint::from(modulus);
+    }
+
+    product.to_str_radix(10)
+}
 
 #[derive(Clone)]
 struct SetupParticipant {

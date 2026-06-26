@@ -67,6 +67,7 @@ pub(in super::super) fn same_secret_proofs_object(
             private_vss_share: None,
             compact_vss_share_linkage: None,
             compact_same_secret_bridge: None,
+            target_decryption_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients: (0..ring_degree)
@@ -116,6 +117,8 @@ pub(in super::super) fn same_secret_proofs_object(
             compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
             compact_vss_recipient_share_opening_randomness: Vec::new(),
             compact_vss_carry_witnesses: Vec::new(),
+            target_decryption_message_vectors: Vec::new(),
+            target_decryption_opening_randomness_by_commitment: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_protocol_hash(
             "SameSecretProofRoot",

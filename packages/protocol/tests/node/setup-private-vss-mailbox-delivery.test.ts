@@ -216,14 +216,30 @@ describe('private VSS mailbox delivery', () => {
                 unknown
             >[]
         )[0];
-        expect(
-            (
-                limbOpening.compactVssRecipientShareOpeningCredential as Record<
-                    string,
-                    unknown
-                >
-            ).shareValues,
-        ).toEqual([1, 2]);
+        expect(limbOpening.shareValuesLittleEndian48Hex).toBe(
+            '010000000000020000000000',
+        );
+        const compactCredential =
+            limbOpening.compactVssRecipientShareOpeningCredential as Record<
+                string,
+                unknown
+            >;
+        const deliveredCredential =
+            compactRecipientShareBundle.recipientShareOpeningCredentials[0];
+        if (deliveredCredential === undefined) {
+            throw new Error(
+                'compact recipient share bundle did not create a delivered credential.',
+            );
+        }
+        expect(compactCredential.shareOpeningRoot).toBe(
+            deliveredCredential.shareOpeningRoot,
+        );
+        expect(compactCredential.shareCommitmentRoot).toBe(
+            deliveredCredential.shareCommitmentRoot,
+        );
+        const packedRandomness =
+            compactCredential.randomnessByColumnPackedTernaryHex;
+        expect(packedRandomness).toEqual(['0a', '05']);
         const transportedProofRecord =
             limbOpening.privateVssShareProof as Record<string, unknown>;
         expect(transportedProofRecord.proofBytesHex).toBeUndefined();

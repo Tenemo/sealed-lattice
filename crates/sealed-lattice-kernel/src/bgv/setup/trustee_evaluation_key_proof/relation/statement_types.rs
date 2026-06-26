@@ -124,6 +124,30 @@ pub(crate) struct CompactSameSecretBridgeStatement {
     pub(crate) target_constant_commitments: Vec<CompactVssShareLinkageCommitment>,
 }
 
+pub(crate) struct TargetDecryptionShareStatement {
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) target_basis_hash: String,
+    pub(crate) trustee_identity: String,
+    pub(crate) trustee_roster_position: u64,
+    pub(crate) target_role: String,
+    pub(crate) target_rns_limb_index: usize,
+    pub(crate) target_rns_prime: u64,
+    pub(crate) interpolation_point: u64,
+    pub(crate) target_ciphertext_component_one: Vec<u64>,
+    pub(crate) released_partial_decryption: Vec<u64>,
+    pub(crate) aggregate_commitment_root: String,
+    pub(crate) aggregate_commitment: CompactVssShareLinkageCommitment,
+    pub(crate) aggregate_message_coefficient_bound: u64,
+    pub(crate) smudging_commitment_set_root: String,
+    pub(crate) smudging_commitment_roots: Vec<String>,
+    pub(crate) smudging_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) smudging_polynomial_degree: usize,
+    pub(crate) smudging_coefficient_bound: i64,
+    pub(crate) smudging_signed_coefficient_offset: i64,
+    pub(crate) smudging_message_coefficient_bound: u64,
+    pub(crate) plaintext_multiple: u64,
+}
+
 // Ceremony context the proof is bound to: the shared base fields, the proof
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
@@ -155,6 +179,7 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) private_vss_share: Option<PrivateVssShareStatement>,
     pub(crate) compact_vss_share_linkage: Option<CompactVssShareLinkageStatement>,
     pub(crate) compact_same_secret_bridge: Option<CompactSameSecretBridgeStatement>,
+    pub(crate) target_decryption_share: Option<TargetDecryptionShareStatement>,
 }
 
 pub(crate) struct TrusteeEvaluationKeyWitness {
@@ -178,6 +203,8 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     pub(crate) compact_vss_coefficient_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
     pub(crate) compact_vss_recipient_share_opening_randomness: Vec<Vec<i64>>,
     pub(crate) compact_vss_carry_witnesses: Vec<i64>,
+    pub(crate) target_decryption_message_vectors: Vec<Vec<i64>>,
+    pub(crate) target_decryption_opening_randomness_by_commitment: Vec<Vec<Vec<i64>>>,
 }
 
 impl EvaluationKeyShareDescriptor {
@@ -382,6 +409,11 @@ impl TrusteeEvaluationKeyStatement {
         {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
         }
+        if let Some(target_decryption_share) = &self.target_decryption_share {
+            return SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+                .len()
+                .max(target_decryption_share.target_rns_limb_index + 1);
+        }
         self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
             if self.same_secret_linkage.is_some() {
                 SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
@@ -448,6 +480,45 @@ impl TrusteeEvaluationKeyStatement {
                     * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
             }
             _ => 0,
+        }
+    }
+
+    pub(crate) fn target_decryption_message_count(&self) -> usize {
+        self.target_decryption_share
+            .as_ref()
+            .map(|statement| 1 + statement.smudging_commitments.len())
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn target_decryption_randomness_count(&self) -> usize {
+        self.target_decryption_share
+            .as_ref()
+            .map(|statement| {
+                (1 + statement.smudging_commitments.len())
+                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+            })
+            .unwrap_or(0)
+    }
+
+    pub(crate) fn target_decryption_relation_count(&self, limb_index: usize) -> usize {
+        match &self.target_decryption_share {
+            Some(statement) => {
+                let commitment_relation_count = if limb_index
+                    < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+                {
+                    (1 + statement.smudging_commitments.len())
+                        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                } else {
+                    0
+                };
+                let target_relation_count = if limb_index == statement.target_rns_limb_index {
+                    LINCHECK_REPETITIONS
+                } else {
+                    0
+                };
+                commitment_relation_count + target_relation_count
+            }
+            None => 0,
         }
     }
 }

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+    deriveTargetDecryptionSmudgingSeedHex,
+    prepareLocalTargetDecryptionShareWitness,
+} from '#packages/protocol/src/target-decryption/local-target-share-witness';
+import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
     type BgvTargetDecryptionShareProofStatement,
@@ -8,12 +12,15 @@ import {
 } from '#packages/wasm/src/index';
 
 type CompactAggregateOpeningBinding = {
-    readonly witnessOwnership: string;
     readonly publicMatrixSeedHash: string;
     readonly shareLinkageStatementRoot: string;
     readonly aggregateThresholdCommitmentRoot: string;
     readonly activeCredentialBindingRoot: string;
     readonly activeCredentialBindings: readonly unknown[];
+};
+
+type CompactAggregateCredentialBinding = {
+    readonly aggregateCommitment: unknown;
 };
 
 type CompactAggregateOpeningWitnessCredentials = {
@@ -28,9 +35,30 @@ type CompactAggregateOpeningWitnessSeed = {
     };
 };
 
+type CompactAggregateOpeningWitnessForMutation =
+    CompactAggregateOpeningWitnessCredentials &
+        CompactAggregateOpeningWitnessSeed;
+
+type CompactAggregateOpeningWitnessContainer = {
+    compactAggregateOpening?: unknown;
+};
+
 type SetupPackageWithCommonRandomness = {
     commonRandomness: {
         publicMatrixSeedHash: string;
+    };
+};
+
+type SetupPackageWithCompactAggregateSet = {
+    compactVssShareLinkageStatement: {
+        statementRoot: string;
+    };
+    compactVssAggregateThresholdCommitmentSet: {
+        aggregateThresholdCommitmentRoot: string;
+        rnsLimbCount: number;
+        recipientRecords: readonly {
+            readonly commitment: unknown;
+        }[];
     };
 };
 
@@ -53,26 +81,58 @@ const rebindProofStatementRoot = (
 };
 
 describe('BGV target-decryption kernel commands', () => {
-    it('generates and verifies target share proof statements from restored compact local state through WASM', async () => {
+    it('generates target share proof statements and checks their bindings from restored compact local state through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const fixture = kernel.generateBgvTargetDecryptionFixture();
         const setupPublicMatrixSeedHash = (
             fixture.setupPackage as unknown as SetupPackageWithCommonRandomness
         ).commonRandomness.publicMatrixSeedHash;
-
-        const seedShare = kernel.generateBgvTargetDecryptionShare({
+        const targetDecryptionCiphertextHash = (
+            fixture.targetAcceptedRecord as {
+                readonly targetCiphertextHash: string;
+            }
+        ).targetCiphertextHash;
+        const restoredCompactLocalWitness = structuredClone(
+            fixture.localTargetShareWitness,
+        );
+        const kernelGeneratedSmudgingWitness =
+            restoredCompactLocalWitness.targetDecryptionSmudging as
+                | { readonly smudgingSeedHex?: unknown }
+                | undefined;
+        delete restoredCompactLocalWitness.targetDecryptionSmudging;
+        const derivedSmudgingSeedHex = deriveTargetDecryptionSmudgingSeedHex({
+            localSmudgingSeedMaterial: fixture.setupPrivateWitness.setupSeed,
             setupPackage: fixture.setupPackage,
-            setupPrivateWitness: fixture.setupPrivateWitness,
             targetAcceptedRecord: fixture.targetAcceptedRecord,
-            targetCiphertextBinding: fixture.targetCiphertextBinding,
-            targetCiphertexts: fixture.targetCiphertexts,
+            targetDecryptionCiphertextHash,
             targetShareProfile: fixture.targetShareProfile,
-            trusteeIdentity: fixture.trusteeIdentity,
         });
+        expect(
+            deriveTargetDecryptionSmudgingSeedHex({
+                localSmudgingSeedMaterial:
+                    fixture.setupPrivateWitness.setupSeed,
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetDecryptionCiphertextHash: 'a'.repeat(128),
+                targetShareProfile: fixture.targetShareProfile,
+            }),
+        ).not.toBe(derivedSmudgingSeedHex);
+        const preparedLocalTargetShareWitness =
+            prepareLocalTargetDecryptionShareWitness({
+                restoredLocalTargetShareWitness: restoredCompactLocalWitness,
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetDecryptionCiphertextHash,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+                localSmudgingSeedMaterial:
+                    fixture.setupPrivateWitness.setupSeed,
+            });
+
         const localShare =
             kernel.generateBgvTargetDecryptionShareFromLocalShare({
                 setupPackage: fixture.setupPackage,
-                localTargetShareWitness: fixture.localTargetShareWitness,
+                localTargetShareWitness: preparedLocalTargetShareWitness,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetCiphertextBinding: fixture.targetCiphertextBinding,
                 targetCiphertexts: fixture.targetCiphertexts,
@@ -80,13 +140,33 @@ describe('BGV target-decryption kernel commands', () => {
                 trusteeIdentity: fixture.trusteeIdentity,
             });
 
-        expect(localShare).toEqual(seedShare);
+        expect(kernelGeneratedSmudgingWitness?.smudgingSeedHex).toBe(
+            derivedSmudgingSeedHex,
+        );
+        expect(
+            preparedLocalTargetShareWitness.targetDecryptionSmudging,
+        ).toEqual(kernelGeneratedSmudgingWitness);
+        expect(
+            preparedLocalTargetShareWitness.targetDecryptionSmudging
+                .targetDecryptionCiphertextHash,
+        ).toBe(targetDecryptionCiphertextHash);
+        expect(() =>
+            prepareLocalTargetDecryptionShareWitness({
+                restoredLocalTargetShareWitness:
+                    fixture.localTargetShareWitness,
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetDecryptionCiphertextHash,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+                localSmudgingSeedMaterial:
+                    fixture.setupPrivateWitness.setupSeed,
+            }),
+        ).toThrow(/already contains target-decryption smudging material/u);
         expect(localShare.sharePayload.smudgingInputReport).toMatchObject({
             objectType: 'TargetDecryptionSmudgingInputReport',
             smudgingProfileId:
                 'sealed-lattice-target-decryption-zero-share-smudging-development-v1',
-            zeroSharingRule:
-                'smudging masks are Shamir shares of zero over each active RNS prime and cancel under target-decryption Lagrange recombination',
         });
         expect(
             localShare.sharePayload.smudgingInputReport.roleReports,
@@ -99,8 +179,8 @@ describe('BGV target-decryption kernel commands', () => {
         );
 
         const localWitnessWithoutCompactOpening = structuredClone(
-            fixture.localTargetShareWitness,
-        );
+            preparedLocalTargetShareWitness,
+        ) as CompactAggregateOpeningWitnessContainer;
         delete localWitnessWithoutCompactOpening.compactAggregateOpening;
         let missingCompactOpeningError: unknown;
         try {
@@ -129,9 +209,9 @@ describe('BGV target-decryption kernel commands', () => {
         ).toContain('compactAggregateOpening');
 
         const localWitnessWithoutOneOpeningCredential = structuredClone(
-            fixture.localTargetShareWitness,
-        ) as typeof fixture.localTargetShareWitness &
-            CompactAggregateOpeningWitnessCredentials;
+            preparedLocalTargetShareWitness,
+        ) as typeof preparedLocalTargetShareWitness &
+            CompactAggregateOpeningWitnessForMutation;
         localWitnessWithoutOneOpeningCredential.compactAggregateOpening.compactAggregateOpeningCredentials =
             localWitnessWithoutOneOpeningCredential.compactAggregateOpening.compactAggregateOpeningCredentials.slice(
                 1,
@@ -164,9 +244,9 @@ describe('BGV target-decryption kernel commands', () => {
         ).toContain('missing active limb');
 
         const localWitnessWithWrongPublicMatrixSeed = structuredClone(
-            fixture.localTargetShareWitness,
-        ) as typeof fixture.localTargetShareWitness &
-            CompactAggregateOpeningWitnessSeed;
+            preparedLocalTargetShareWitness,
+        ) as typeof preparedLocalTargetShareWitness &
+            CompactAggregateOpeningWitnessForMutation;
         localWitnessWithWrongPublicMatrixSeed.compactAggregateOpening.publicMatrixSeedHash =
             '0'.repeat(128);
         let wrongPublicMatrixSeedError: unknown;
@@ -198,7 +278,7 @@ describe('BGV target-decryption kernel commands', () => {
         const proofStatement =
             kernel.deriveBgvTargetDecryptionShareProofStatement({
                 setupPackage: fixture.setupPackage,
-                localTargetShareWitness: fixture.localTargetShareWitness,
+                localTargetShareWitness: preparedLocalTargetShareWitness,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetCiphertextBinding: fixture.targetCiphertextBinding,
                 targetCiphertexts: fixture.targetCiphertexts,
@@ -208,6 +288,13 @@ describe('BGV target-decryption kernel commands', () => {
             });
         const compactBinding =
             proofStatement.compactAggregateOpeningBinding as CompactAggregateOpeningBinding;
+        const acceptedAggregateThresholdCommitmentRoot = (
+            fixture.setupPackage as unknown as SetupPackageWithCompactAggregateSet
+        ).compactVssAggregateThresholdCommitmentSet
+            .aggregateThresholdCommitmentRoot;
+        const acceptedShareLinkageStatementRoot = (
+            fixture.setupPackage as unknown as SetupPackageWithCompactAggregateSet
+        ).compactVssShareLinkageStatement.statementRoot;
 
         expect(proofStatement).toMatchObject({
             objectType: 'BgvTargetDecryptionShareProofStatement',
@@ -215,24 +302,12 @@ describe('BGV target-decryption kernel commands', () => {
             shareRoot: localShare.shareRoot,
             smudgingInputReportHash:
                 localShare.sharePayload.smudgingInputReportHash,
-            oneShotTargetContextRule:
-                'one accepted target context and target ciphertext pair require one target-decryption share proof statement',
-            restoredWitnessOwnershipRule:
-                'the prover uses recipient-owned restored compact aggregate opening material; source credentials alone are not a target-decryption share proof witness',
-            targetBasisRule:
-                'the share payload, target ciphertexts, compact aggregate openings, and accepted target record use the declared canonical target basis and active target limbs',
-            smudgingRequirement:
-                'released smudged decryption shares require zero-knowledge proof coverage before production target-decryption activation',
-            recombinationRequirement:
-                'target result acceptance requires denominator-cleared Lagrange recombination and decoding-margin verification before production activation',
-            proofBoundary:
-                'statement binding only; production activation still requires a zero-knowledge target-decryption proof backend for restored compact openings and released smudged shares',
         });
         expect(compactBinding).toMatchObject({
-            witnessOwnership: 'recipient-owned-restorable-local-state',
             publicMatrixSeedHash: setupPublicMatrixSeedHash,
-            shareLinkageStatementRoot: '4'.repeat(128),
-            aggregateThresholdCommitmentRoot: '5'.repeat(128),
+            shareLinkageStatementRoot: acceptedShareLinkageStatementRoot,
+            aggregateThresholdCommitmentRoot:
+                acceptedAggregateThresholdCommitmentRoot,
             activeCredentialBindingRoot: kernel.deriveProtocolHash({
                 namespace:
                     'TargetDecryptionCompactAggregateOpeningCredentialBindingRoot',
@@ -246,9 +321,26 @@ describe('BGV target-decryption kernel commands', () => {
             }),
         });
         expect(compactBinding.activeCredentialBindings).toHaveLength(7);
+        const activeCredentialBindings =
+            compactBinding.activeCredentialBindings as readonly CompactAggregateCredentialBinding[];
+        const acceptedAggregateSet = (
+            fixture.setupPackage as unknown as SetupPackageWithCompactAggregateSet
+        ).compactVssAggregateThresholdCommitmentSet;
+        activeCredentialBindings.forEach(
+            (activeCredentialBinding, limbIndex) => {
+                const acceptedRecordIndex =
+                    proofStatement.rosterPosition *
+                        acceptedAggregateSet.rnsLimbCount +
+                    limbIndex;
+                expect(activeCredentialBinding.aggregateCommitment).toEqual(
+                    acceptedAggregateSet.recipientRecords[acceptedRecordIndex]
+                        ?.commitment,
+                );
+            },
+        );
 
         const verification =
-            kernel.verifyBgvTargetDecryptionShareProofStatement({
+            kernel.verifyBgvTargetDecryptionShareProofStatementBinding({
                 setupPackage: fixture.setupPackage,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetCiphertextBinding: fixture.targetCiphertextBinding,
@@ -259,20 +351,107 @@ describe('BGV target-decryption kernel commands', () => {
             });
 
         expect(verification).toMatchObject({
-            ok: true,
-            operation: 'verifyBgvTargetDecryptionShareProofStatement',
-            proofStatementRoot: proofStatement.proofStatementRoot,
-            targetDecryptionShareHash: localShare.targetDecryptionShareHash,
-            shareRoot: localShare.shareRoot,
-            smudgingInputReportHash:
-                localShare.sharePayload.smudgingInputReportHash,
-            smudgingRequirement:
-                'released smudged decryption shares require zero-knowledge proof coverage before production target-decryption activation',
-            recombinationRequirement:
-                'target result acceptance requires denominator-cleared Lagrange recombination and decoding-margin verification before production activation',
-            proofBoundary:
-                'statement binding only; production activation still requires a zero-knowledge target-decryption proof backend for restored compact openings and released smudged shares',
+            ok: false,
+            operation: 'verifyBgvTargetDecryptionShareProofStatementBinding',
+            refusalReason: 'TargetDecryptionProofUnavailable',
         });
+
+        let invalidProofMaterialGenerationError: unknown;
+        try {
+            kernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(
+                {
+                    setupPackage: fixture.setupPackage,
+                    localTargetShareWitness: preparedLocalTargetShareWitness,
+                    targetAcceptedRecord: fixture.targetAcceptedRecord,
+                    targetCiphertextBinding: fixture.targetCiphertextBinding,
+                    targetCiphertexts: fixture.targetCiphertexts,
+                    targetShareProfile: fixture.targetShareProfile,
+                    trusteeIdentity: fixture.trusteeIdentity,
+                    targetDecryptionShare: localShare,
+                    proofStatement,
+                    proofRandomnessSource: 'invalid-fixture-source',
+                    proofRandomnessSeedHex: '11'.repeat(64),
+                    proofRandomnessNonceHex: '22'.repeat(64),
+                },
+            );
+        } catch (error: unknown) {
+            invalidProofMaterialGenerationError = error;
+        }
+        expect(invalidProofMaterialGenerationError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (
+                invalidProofMaterialGenerationError as TranscriptCoreKernelCommandError
+            ).code,
+        ).toBe('InvalidProtocolObject');
+        expect(
+            (
+                invalidProofMaterialGenerationError as TranscriptCoreKernelCommandError
+            ).message,
+        ).toContain('proofRandomnessSource');
+
+        let missingProofMaterialRootError: unknown;
+        const malformedProofMaterial = {
+            objectType: 'BgvTargetDecryptionShareProofMaterial',
+            objectVersion: 1,
+        } as unknown as Parameters<
+            TranscriptCoreKernel['verifyBgvTargetDecryptionShareProofMaterial']
+        >[0]['proofMaterial'];
+        try {
+            kernel.verifyBgvTargetDecryptionShareProofMaterial({
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                targetDecryptionShare: localShare,
+                proofStatement,
+                proofMaterial: malformedProofMaterial,
+            });
+        } catch (error: unknown) {
+            missingProofMaterialRootError = error;
+        }
+        expect(missingProofMaterialRootError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (missingProofMaterialRootError as TranscriptCoreKernelCommandError)
+                .code,
+        ).toBe('InvalidFixture');
+        expect(
+            (missingProofMaterialRootError as TranscriptCoreKernelCommandError)
+                .message,
+        ).toContain('proofMaterialRoot');
+
+        let missingRecombinationQuorumError: unknown;
+        try {
+            kernel.verifyAndRecombineBgvTargetDecryptionShares({
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                targetDecryptionShares: [],
+                proofStatements: [],
+                proofMaterials: [],
+            });
+        } catch (error: unknown) {
+            missingRecombinationQuorumError = error;
+        }
+        expect(missingRecombinationQuorumError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (
+                missingRecombinationQuorumError as TranscriptCoreKernelCommandError
+            ).code,
+        ).toBe('MalformedLength');
+        expect(
+            (
+                missingRecombinationQuorumError as TranscriptCoreKernelCommandError
+            ).message,
+        ).toContain('interpolation quorum');
 
         const reboundWrongShareRoot = rebindProofStatementRoot(kernel, {
             ...proofStatement,
@@ -280,7 +459,7 @@ describe('BGV target-decryption kernel commands', () => {
         });
         let thrownError: unknown;
         try {
-            kernel.verifyBgvTargetDecryptionShareProofStatement({
+            kernel.verifyBgvTargetDecryptionShareProofStatementBinding({
                 setupPackage: fixture.setupPackage,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetCiphertextBinding: fixture.targetCiphertextBinding,
@@ -297,154 +476,5 @@ describe('BGV target-decryption kernel commands', () => {
         expect((thrownError as TranscriptCoreKernelCommandError).code).toBe(
             'ProfileComponentMismatch',
         );
-
-        const reboundWeakenedSmudgingRequirement = rebindProofStatementRoot(
-            kernel,
-            {
-                ...proofStatement,
-                smudgingRequirement:
-                    'released decryption shares require no smudging',
-            },
-        );
-        let obligationError: unknown;
-        try {
-            kernel.verifyBgvTargetDecryptionShareProofStatement({
-                setupPackage: fixture.setupPackage,
-                targetAcceptedRecord: fixture.targetAcceptedRecord,
-                targetCiphertextBinding: fixture.targetCiphertextBinding,
-                targetCiphertexts: fixture.targetCiphertexts,
-                targetShareProfile: fixture.targetShareProfile,
-                targetDecryptionShare: localShare,
-                proofStatement: reboundWeakenedSmudgingRequirement,
-            });
-        } catch (error: unknown) {
-            obligationError = error;
-        }
-
-        expect(obligationError).toBeInstanceOf(
-            TranscriptCoreKernelCommandError,
-        );
-        expect((obligationError as TranscriptCoreKernelCommandError).code).toBe(
-            'ProfileComponentMismatch',
-        );
-
-        const reboundWeakenedProofBoundary = rebindProofStatementRoot(kernel, {
-            ...proofStatement,
-            proofBoundary: 'statement binding only',
-        });
-        let proofBoundaryError: unknown;
-        try {
-            kernel.verifyBgvTargetDecryptionShareProofStatement({
-                setupPackage: fixture.setupPackage,
-                targetAcceptedRecord: fixture.targetAcceptedRecord,
-                targetCiphertextBinding: fixture.targetCiphertextBinding,
-                targetCiphertexts: fixture.targetCiphertexts,
-                targetShareProfile: fixture.targetShareProfile,
-                targetDecryptionShare: localShare,
-                proofStatement: reboundWeakenedProofBoundary,
-            });
-        } catch (error: unknown) {
-            proofBoundaryError = error;
-        }
-
-        expect(proofBoundaryError).toBeInstanceOf(
-            TranscriptCoreKernelCommandError,
-        );
-        expect(
-            (proofBoundaryError as TranscriptCoreKernelCommandError).code,
-        ).toBe('ProfileComponentMismatch');
-    }, 120_000);
-
-    it('reports denominator-cleared recombination inputs through WASM', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const fixture = kernel.generateBgvTargetDecryptionFixture();
-        const firstShare = kernel.generateBgvTargetDecryptionShare({
-            setupPackage: fixture.setupPackage,
-            setupPrivateWitness: fixture.setupPrivateWitness,
-            targetAcceptedRecord: fixture.targetAcceptedRecord,
-            targetCiphertextBinding: fixture.targetCiphertextBinding,
-            targetCiphertexts: fixture.targetCiphertexts,
-            targetShareProfile: fixture.targetShareProfile,
-            trusteeIdentity: 'trustee-1',
-        });
-        const thirdShare = kernel.generateBgvTargetDecryptionShare({
-            setupPackage: fixture.setupPackage,
-            setupPrivateWitness: fixture.setupPrivateWitness,
-            targetAcceptedRecord: fixture.targetAcceptedRecord,
-            targetCiphertextBinding: fixture.targetCiphertextBinding,
-            targetCiphertexts: fixture.targetCiphertexts,
-            targetShareProfile: fixture.targetShareProfile,
-            trusteeIdentity: 'trustee-3',
-        });
-
-        const recombined = kernel.recombineBgvTargetDecryptionShares({
-            setupPackage: fixture.setupPackage,
-            targetAcceptedRecord: fixture.targetAcceptedRecord,
-            targetCiphertextBinding: fixture.targetCiphertextBinding,
-            targetCiphertexts: fixture.targetCiphertexts,
-            targetShareProfile: fixture.targetShareProfile,
-            decryptionShares: [thirdShare, firstShare],
-        });
-        const report = recombined.recombinationInputReport;
-
-        expect(recombined).toMatchObject({
-            ok: true,
-            operation: 'recombineBgvTargetDecryptionShares',
-            selectedBoardPositions: [2, 3],
-            selectedRosterPositions: [2, 0],
-            decryptScaling: 1,
-        });
-        expect(report).toMatchObject({
-            objectType: 'TargetDecryptionRecombinationInputReport',
-            selectedShareCount: 2,
-            activeRnsLimbCount: 7,
-            smudgingProfileId:
-                'sealed-lattice-target-decryption-zero-share-smudging-development-v1',
-            smudgingCombinationRule:
-                'smudging masks are Shamir shares of zero over each active RNS prime and cancel under target-decryption Lagrange recombination',
-            recombinationCoefficientEquation:
-                'denominatorProductModuloPrime * lagrangeCoefficientModuloPrime = numeratorProductModuloPrime mod rnsPrime',
-        });
-        expect(recombined.recombinationInputReportHash).toBe(
-            kernel.deriveProtocolHash({
-                namespace: 'TargetDecryptionRecombinationInputReportHash',
-                value: report,
-            }),
-        );
-        expect(report.activeRnsLimbReports).toHaveLength(
-            report.activeRnsLimbCount,
-        );
-        expect(report.selectedShares[0]).toMatchObject({
-            trusteeIdentity: 'trustee-3',
-            boardPosition: 2,
-            rosterPosition: 2,
-            interpolationPoint: 3,
-            shareRoot: thirdShare.shareRoot,
-            targetDecryptionShareHash: thirdShare.targetDecryptionShareHash,
-            smudgingInputReportHash:
-                thirdShare.sharePayload.smudgingInputReportHash,
-        });
-        expect(report.selectedShares[1]).toMatchObject({
-            trusteeIdentity: 'trustee-1',
-            smudgingInputReportHash:
-                firstShare.sharePayload.smudgingInputReportHash,
-        });
-
-        const firstLimbReport = report.activeRnsLimbReports[0];
-        if (firstLimbReport === undefined) {
-            throw new Error('expected an active recombination limb report');
-        }
-        expect(firstLimbReport.lagrangeTerms).toHaveLength(2);
-        for (const lagrangeTerm of firstLimbReport.lagrangeTerms) {
-            const checkedNumerator = Number(
-                (BigInt(lagrangeTerm.denominatorProductModuloPrime) *
-                    BigInt(lagrangeTerm.lagrangeCoefficientModuloPrime)) %
-                    BigInt(firstLimbReport.rnsPrime),
-            );
-            expect(checkedNumerator).toBe(
-                lagrangeTerm.numeratorProductModuloPrime,
-            );
-        }
-        expect(report.decodingMargin.centeredPositiveMargin).toBeGreaterThan(0);
     }, 120_000);
 });

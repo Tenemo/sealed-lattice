@@ -18,8 +18,6 @@ export const isJsonRecord = (value: unknown): value is JsonRecord =>
     typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export const publicKeyShareProofFamily = 'public-key-share';
-export const publicKeyShareProofBindingStatus =
-    'public-key-share-proof-required';
 export const publicKeyShareMaterialEncoding =
     'embedded-full-public-key-share-coefficients';
 export const publicKeyShareMaterialTransportEncoding =
@@ -75,7 +73,6 @@ export type PublicKeyShareRecord = Readonly<
         readonly shareComponent: 'component-zero-b_i';
         readonly rnsLimbCount: number;
         readonly shareCoefficientVectorHash512ByLimb: readonly PublicKeyShareCoefficientVectorHash[];
-        readonly proofBindingStatus: typeof publicKeyShareProofBindingStatus;
         readonly publicKeyShareRoot: ProtocolHash;
     }
 >;
@@ -86,7 +83,6 @@ export type PublicKeyShareSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
-        readonly proofBindingStatus: typeof publicKeyShareProofBindingStatus;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -119,8 +115,6 @@ export type PublicKeyShareProofRecord = Readonly<
         readonly sameSecretStatementRoot: ProtocolHash;
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly rnsLimbCount: number;
-        readonly errorSupport: 'checked-by-public-key-share-succinct-proof-set';
-        readonly proofBytesStatus: 'supplied-by-public-key-share-succinct-proof-set';
         readonly publicKeyShareProofRoot: ProtocolHash;
     }
 >;
@@ -370,7 +364,6 @@ export type CollectivePublicKey = Readonly<
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly aggregationStatus: 'succinct-proof-aggregated-with-accepted-setup-proof-accounting';
         readonly materialEncoding: 'embedded-full-collective-public-key-coefficients';
         readonly participantCount: number;
         readonly rnsLimbCount: number;

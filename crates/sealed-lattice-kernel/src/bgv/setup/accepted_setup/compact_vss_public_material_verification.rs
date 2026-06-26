@@ -12,11 +12,10 @@ const COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
 const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "compactVssShareLinkageStatement";
 const COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD: &str =
     "compactVssShareLinkageProofMaterialSet";
-const COMPACT_VSS_RESTRICTED_PROOF_STATEMENTS_FIELD: &str = "compactVssRestrictedProofStatements";
 
 pub(super) fn verify_optional_compact_vss_public_material(
     setup_package: &Value,
-    request: &Value,
+    _request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let compact_public_material_fields = [
         COMPACT_VSS_COEFFICIENT_COMMITMENT_SET_FIELD,
@@ -62,6 +61,17 @@ pub(super) fn verify_optional_compact_vss_public_material(
     let share_linkage_statement = setup_package
         .get(COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD)
         .expect("field count confirmed compact VSS share-linkage statement is present");
+    let accepted_public_matrix_seed_hash =
+        match hash_at_path(setup_package, &["commonRandomness", "publicMatrixSeedHash"]) {
+            Ok(public_matrix_seed_hash) => public_matrix_seed_hash,
+            Err(error) => {
+                return Ok(Some(compact_vss_public_material_refusal(
+                    "compactVssPublicMatrixSeedMissing",
+                    error.message,
+                    "setupPackage.commonRandomness.publicMatrixSeedHash",
+                )?));
+            }
+        };
 
     let statement_verification_request = json!({
         "statement": share_linkage_statement,
@@ -78,6 +88,26 @@ pub(super) fn verify_optional_compact_vss_public_material(
             format!("setupPackage.{COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD}"),
         )?));
     }
+    let compact_public_matrix_seed_hash =
+        hash_at_path(share_linkage_statement, &["publicMatrixSeedHash"])?;
+    if compact_public_matrix_seed_hash != accepted_public_matrix_seed_hash {
+        return Ok(Some(compact_vss_public_material_refusal(
+            "compactVssPublicMatrixSeedMismatch",
+            "compact VSS public material publicMatrixSeedHash must match setupPackage.commonRandomness.publicMatrixSeedHash",
+            format!(
+                "setupPackage.{COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD}.publicMatrixSeedHash"
+            ),
+        )?));
+    }
+    let compact_target_basis_hash = hash_at_path(share_linkage_statement, &["targetBasisHash"])?;
+    let expected_target_basis_hash = canonical_target_basis_hash()?;
+    if compact_target_basis_hash != expected_target_basis_hash {
+        return Ok(Some(compact_vss_public_material_refusal(
+            "compactVssTargetBasisMismatch",
+            "compact VSS public material targetBasisHash must match the canonical target basis",
+            format!("setupPackage.{COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD}.targetBasisHash"),
+        )?));
+    }
 
     let Some(proof_material_set) = proof_material_set else {
         return Ok(Some(compact_vss_public_material_refusal(
@@ -87,27 +117,9 @@ pub(super) fn verify_optional_compact_vss_public_material(
         )?));
     };
 
-    let Some(restricted_proof_statements) =
-        request.get(COMPACT_VSS_RESTRICTED_PROOF_STATEMENTS_FIELD)
-    else {
-        return Ok(Some(compact_vss_public_material_refusal(
-            "compactVssShareLinkageProofStatementsMissing",
-            "compact VSS share-linkage proof material requires matching restricted proof statements for accepted setup verification",
-            format!("request.{COMPACT_VSS_RESTRICTED_PROOF_STATEMENTS_FIELD}"),
-        )?));
-    };
-    if !matches!(restricted_proof_statements, Value::Array(values) if !values.is_empty()) {
-        return Ok(Some(compact_vss_public_material_refusal(
-            "compactVssShareLinkageProofStatementsMissing",
-            "compact VSS share-linkage proof material requires at least one matching restricted proof statement for accepted setup verification",
-            format!("request.{COMPACT_VSS_RESTRICTED_PROOF_STATEMENTS_FIELD}"),
-        )?));
-    }
-
     let proof_material_verification_request = json!({
         "statement": share_linkage_statement,
         "proofMaterialSet": proof_material_set,
-        "restrictedProofStatements": restricted_proof_statements,
     });
     if let Err(error) = verify_compact_vss_share_linkage_proof_material_set_request(
         &proof_material_verification_request,
@@ -220,64 +232,127 @@ mod tests {
     }
 
     #[test]
-    fn optional_compact_vss_public_material_refuses_proof_material_without_restricted_statements()
+    fn optional_compact_vss_public_material_refuses_mismatched_common_randomness_seed()
+    -> CanonicalResult<()> {
+        let mut fixture = compact_vss_public_material_fixture()?;
+        fixture.setup_package["commonRandomness"]["publicMatrixSeedHash"] = json!("0".repeat(128));
+
+        let response =
+            verify_optional_compact_vss_public_material(&fixture.setup_package, &json!({}))?
+                .expect("compact VSS public material with mismatched accepted seed must refuse");
+
+        assert_eq!(response["verifierStatus"], json!("refused"));
+        assert_eq!(
+            response["refusedObjects"][0]["reasonCode"],
+            json!("compactVssPublicMatrixSeedMismatch")
+        );
+        assert_eq!(
+            response["refusedObjects"][0]["objectPath"],
+            json!("setupPackage.compactVssShareLinkageStatement.publicMatrixSeedHash")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn optional_compact_vss_public_material_refuses_mismatched_target_basis() -> CanonicalResult<()>
+    {
+        let mut fixture = compact_vss_public_material_fixture()?;
+        let source_statement_records =
+            fixture.setup_package["compactVssShareLinkageStatement"]["sourceStatementRecords"]
+                .as_array_mut()
+                .expect("compact VSS source statement records");
+        for source_statement in source_statement_records {
+            source_statement["targetBasisHash"] = json!("1".repeat(128));
+            source_statement["sourceStatementRoot"] = json!(derive_protocol_hash(
+                "SetupProofRecordBindingHash",
+                &value_without_root_field(
+                    source_statement,
+                    "sourceStatementRoot",
+                    "compact VSS share-linkage source statement",
+                )?,
+            )?);
+        }
+        fixture.setup_package["compactVssShareLinkageStatement"]["targetBasisHash"] =
+            json!("1".repeat(128));
+        fixture.setup_package["compactVssShareLinkageStatement"]["statementRoot"] =
+            json!(derive_protocol_hash(
+                "SetupProofRecordBindingHash",
+                &value_without_root_field(
+                    &fixture.setup_package["compactVssShareLinkageStatement"],
+                    "statementRoot",
+                    "compact VSS share-linkage statement",
+                )?,
+            )?);
+
+        let response =
+            verify_optional_compact_vss_public_material(&fixture.setup_package, &json!({}))?
+                .expect("compact VSS public material with mismatched target basis must refuse");
+
+        assert_eq!(response["verifierStatus"], json!("refused"));
+        assert_eq!(
+            response["refusedObjects"][0]["reasonCode"],
+            json!("compactVssTargetBasisMismatch")
+        );
+        assert_eq!(
+            response["refusedObjects"][0]["objectPath"],
+            json!("setupPackage.compactVssShareLinkageStatement.targetBasisHash")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn optional_compact_vss_public_material_refuses_proof_material_without_packaged_statements()
     -> CanonicalResult<()> {
         let mut fixture = compact_vss_public_material_fixture()?;
         fixture.setup_package["compactVssShareLinkageProofMaterialSet"] =
             compact_vss_share_linkage_proof_material_set(&fixture.share_linkage_statement)?;
         let response =
             verify_optional_compact_vss_public_material(&fixture.setup_package, &json!({}))?
-                .expect("compact VSS proof material without restricted statements must refuse");
+                .expect("compact VSS proof material without packaged statements must refuse");
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactVssShareLinkageProofStatementsMissing")
+            json!("compactVssShareLinkageProofMaterialInvalid")
         );
         assert_eq!(
             response["refusedObjects"][0]["objectPath"],
-            json!("request.compactVssRestrictedProofStatements")
+            json!("setupPackage.compactVssShareLinkageProofMaterialSet")
         );
         Ok(())
     }
 
     #[test]
-    fn optional_compact_vss_public_material_refuses_empty_restricted_statement_list()
+    fn optional_compact_vss_public_material_refuses_empty_packaged_statement_list()
     -> CanonicalResult<()> {
         let mut fixture = compact_vss_public_material_fixture()?;
-        fixture.setup_package["compactVssShareLinkageProofMaterialSet"] =
+        let mut proof_material_set =
             compact_vss_share_linkage_proof_material_set(&fixture.share_linkage_statement)?;
+        proof_material_set["proofMaterials"][0]["proofStatements"] = json!([]);
+        fixture.setup_package["compactVssShareLinkageProofMaterialSet"] = proof_material_set;
 
-        let response = verify_optional_compact_vss_public_material(
-            &fixture.setup_package,
-            &json!({
-                "compactVssRestrictedProofStatements": [],
-            }),
-        )?
-        .expect("empty restricted compact VSS proof statement list must refuse");
+        let response =
+            verify_optional_compact_vss_public_material(&fixture.setup_package, &json!({}))?
+                .expect("empty packaged compact VSS proof statement list must refuse");
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactVssShareLinkageProofStatementsMissing")
+            json!("compactVssShareLinkageProofMaterialInvalid")
         );
         assert_eq!(
             response["refusedObjects"][0]["objectPath"],
-            json!("request.compactVssRestrictedProofStatements")
+            json!("setupPackage.compactVssShareLinkageProofMaterialSet")
         );
         Ok(())
     }
 
     #[test]
-    fn optional_compact_vss_public_material_accepts_verified_restricted_proof_material()
+    fn optional_compact_vss_public_material_accepts_verified_packaged_proof_material()
     -> CanonicalResult<()> {
         let fixture = compact_vss_verified_proof_material_fixture()?;
-        let response = verify_optional_compact_vss_public_material(
-            &fixture.setup_package,
-            &json!({
-                "compactVssRestrictedProofStatements": fixture.restricted_proof_statements,
-            }),
-        )?;
+        let response =
+            verify_optional_compact_vss_public_material(&fixture.setup_package, &json!({}))?;
 
         assert!(
             response.is_none(),
@@ -293,7 +368,6 @@ mod tests {
 
     struct CompactVssVerifiedProofMaterialFixture {
         setup_package: Value,
-        restricted_proof_statements: Vec<Value>,
     }
 
     fn compact_vss_public_material_fixture() -> CanonicalResult<CompactVssPublicMaterialFixture> {
@@ -308,9 +382,13 @@ mod tests {
             &recipient_share_commitment_set,
             &aggregate_threshold_commitment_set,
         );
+        let public_matrix_seed_hash = share_linkage_statement["publicMatrixSeedHash"].clone();
 
         Ok(CompactVssPublicMaterialFixture {
             setup_package: json!({
+                "commonRandomness": {
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                },
                 "compactVssCoefficientCommitmentSet": coefficient_commitment_set,
                 "compactVssRecipientShareCommitmentSet": recipient_share_commitment_set,
                 "compactVssAggregateThresholdCommitmentSet": aggregate_threshold_commitment_set,
@@ -340,21 +418,19 @@ mod tests {
             source_statement,
             &proof_fixture,
         )?;
+        let public_matrix_seed_hash = share_linkage_statement["publicMatrixSeedHash"].clone();
 
         Ok(CompactVssVerifiedProofMaterialFixture {
             setup_package: json!({
+                "commonRandomness": {
+                    "publicMatrixSeedHash": public_matrix_seed_hash,
+                },
                 "compactVssCoefficientCommitmentSet": coefficient_commitment_set,
                 "compactVssRecipientShareCommitmentSet": recipient_share_commitment_set,
                 "compactVssAggregateThresholdCommitmentSet": aggregate_threshold_commitment_set,
                 "compactVssShareLinkageStatement": share_linkage_statement,
                 "compactVssShareLinkageProofMaterialSet": proof_material_set,
             }),
-            restricted_proof_statements: vec![json!({
-                "proofStatementHash": proof_fixture.proof_statement_hash,
-                "context": proof_fixture.context,
-                "ringDegree": proof_fixture.ring_degree,
-                "compactVssShareLinkage": proof_fixture.compact_share_linkage_statement,
-            })],
         })
     }
 
@@ -564,7 +640,6 @@ mod tests {
                     "objectType": "CompactVssCoefficientCommitment",
                     "objectVersion": 1,
                     "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-                    "developmentScope": "development-only-not-certified-for-production-use",
                     "sourceTrusteeIdentity": "source-0",
                     "sourceTrusteeRosterPosition": 0,
                     "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
@@ -572,7 +647,6 @@ mod tests {
                     "rnsPrime": rns_prime,
                     "shamirCoefficientIndex": shamir_coefficient_index,
                     "coefficientCommitmentRoot": coefficient_commitment_roots[shamir_coefficient_index],
-                    "coefficientVectorHash512": commitment["messageVectorHash512"].clone(),
                     "commitment": commitment.clone(),
                 })
             })
@@ -581,7 +655,6 @@ mod tests {
             "objectType": "CompactVssSourceCoefficientCommitments",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
@@ -600,7 +673,6 @@ mod tests {
             "objectType": "CompactVssRecipientShareCommitment",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "recipientIdentity": "recipient-0",
@@ -609,20 +681,12 @@ mod tests {
             "rnsLimbIndex": 0,
             "rnsPrime": rns_prime,
             "shareCommitmentRoot": recipient_share_commitment_root,
-            "shareOpeningRoot": derive_protocol_hash(
-                "SetupCommitmentRoot",
-                &json!({
-                    "fixture": "compact-vss-accepted-proof-recipient-opening",
-                }),
-            )?,
-            "shareVectorHash512": recipient_share_commitment["messageVectorHash512"].clone(),
             "commitment": recipient_share_commitment.clone(),
         });
         let source_record = json!({
             "objectType": "CompactVssSourceRecipientShareCommitments",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "recipientShareCommitments": [recipient_share_record],
@@ -643,7 +707,6 @@ mod tests {
                     "objectType": "CompactVssCoefficientCommitment",
                     "objectVersion": 1,
                     "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-                    "developmentScope": "development-only-not-certified-for-production-use",
                     "sourceTrusteeIdentity": "source-0",
                     "sourceTrusteeRosterPosition": 0,
                     "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
@@ -651,7 +714,6 @@ mod tests {
                     "rnsPrime": fixture.rns_prime,
                     "shamirCoefficientIndex": shamir_coefficient_index,
                     "coefficientCommitmentRoot": fixture.coefficient_commitment_roots[shamir_coefficient_index],
-                    "coefficientVectorHash512": commitment["messageVectorHash512"].clone(),
                     "commitment": commitment.clone(),
                 })
             })
@@ -660,7 +722,6 @@ mod tests {
             "objectType": "CompactVssSourceCoefficientCommitments",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
@@ -675,7 +736,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
             "participantCount": 1,
             "rnsLimbCount": 1,
@@ -698,7 +758,6 @@ mod tests {
             "objectType": "CompactVssRecipientShareCommitment",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "recipientIdentity": "recipient-0",
@@ -707,20 +766,12 @@ mod tests {
             "rnsLimbIndex": 0,
             "rnsPrime": fixture.rns_prime,
             "shareCommitmentRoot": fixture.recipient_share_commitment_root,
-            "shareOpeningRoot": derive_protocol_hash(
-                "SetupCommitmentRoot",
-                &json!({
-                    "fixture": "compact-vss-accepted-proof-recipient-opening",
-                }),
-            )?,
-            "shareVectorHash512": fixture.recipient_share_commitment["messageVectorHash512"].clone(),
             "commitment": fixture.recipient_share_commitment.clone(),
         });
         let mut source_record = json!({
             "objectType": "CompactVssSourceRecipientShareCommitments",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "recipientShareCommitments": [recipient_share_record],
@@ -734,7 +785,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
             "participantCount": 1,
             "rnsLimbCount": 1,
@@ -756,19 +806,12 @@ mod tests {
             "objectType": "CompactVssAggregateThresholdCommitment",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "recipientIdentity": "recipient-0",
             "recipientRosterPosition": 0,
             "recipientTrusteePoint": 1,
             "rnsLimbIndex": 0,
             "rnsPrime": fixture.rns_prime,
             "aggregateCommitmentRoot": fixture.aggregate_threshold_commitment_root,
-            "aggregateOpeningRoot": derive_protocol_hash(
-                "SetupCommitmentRoot",
-                &json!({
-                    "fixture": "compact-vss-accepted-proof-aggregate-opening",
-                }),
-            )?,
             "commitment": fixture.aggregate_threshold_commitment.clone(),
             "sourceShareCommitmentRoots": [fixture.recipient_share_commitment_root],
         });
@@ -777,7 +820,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
             "participantCount": 1,
             "rnsLimbCount": 1,
@@ -802,7 +844,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "ceremonyId": "compact-vss-accepted-proof-test",
             "manifestHash": compact_vss_verified_hash("11"),
             "rosterHash": compact_vss_verified_hash("22"),
@@ -812,7 +853,7 @@ mod tests {
             "commitmentProfileHash": compact_vss_verified_hash("66"),
             "setupEpoch": "setup-epoch",
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
-            "targetBasisHash": compact_vss_verified_hash("88"),
+            "targetBasisHash": canonical_target_basis_hash()?,
             "sourceTrusteeIdentity": "source-0",
             "sourceTrusteeRosterPosition": 0,
             "participantCount": 1,
@@ -827,8 +868,6 @@ mod tests {
             "shamirEvaluationRule": "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point",
             "aggregateThresholdRule": "aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb",
             "commonKeyRule": "coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile",
-            "recipientApprovalBoundary": "recipient signatures or acknowledgements are not accepted as evidence for an invalid public recipient-share commitment",
-            "proofBoundary": "statement binding only; zero-knowledge linkage proof backend is not implemented yet",
         });
         let mut source_statement = source_statement_without_root;
         source_statement["sourceStatementRoot"] = json!(derive_protocol_hash(
@@ -840,7 +879,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "ceremonyId": "compact-vss-accepted-proof-test",
             "manifestHash": compact_vss_verified_hash("11"),
             "rosterHash": compact_vss_verified_hash("22"),
@@ -850,7 +888,7 @@ mod tests {
             "commitmentProfileHash": compact_vss_verified_hash("66"),
             "setupEpoch": "setup-epoch",
             "publicMatrixSeedHash": compact_vss_verified_public_matrix_seed_hash(),
-            "targetBasisHash": compact_vss_verified_hash("88"),
+            "targetBasisHash": canonical_target_basis_hash()?,
             "participantCount": 1,
             "targetRnsLimbCount": 1,
             "thresholdDegree": 3,
@@ -862,8 +900,6 @@ mod tests {
             "shamirEvaluationRule": "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point",
             "aggregateThresholdRule": "aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb",
             "commonKeyRule": "coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile",
-            "recipientApprovalBoundary": "recipient signatures or acknowledgements are not accepted as evidence for an invalid public recipient-share commitment",
-            "proofBoundary": "statement binding only; zero-knowledge linkage proof backend is not implemented yet",
             "sourceStatementRecords": [source_statement],
         });
         let mut statement = statement_without_root;
@@ -885,7 +921,6 @@ mod tests {
             "objectType": "CompactVssShareLinkageProofRecord",
             "objectVersion": 1,
             "proofFamily": "compact-vss-share-linkage",
-            "proofBoundary": "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend",
             "sourceStatementRoot": source_statement["sourceStatementRoot"].clone(),
             "proofStatementHash": proof_fixture.proof_statement_hash,
             "proofByteLength": proof_bytes.len(),
@@ -900,14 +935,18 @@ mod tests {
             "SetupProofRecordBindingHash",
             &proof_record,
         )?);
+        let proof_statement = json!({
+            "proofStatementHash": proof_fixture.proof_statement_hash,
+            "context": proof_fixture.context,
+            "ringDegree": proof_fixture.ring_degree,
+            "compactVssShareLinkage": proof_fixture.compact_share_linkage_statement,
+        });
         let proof_material_without_root = json!({
             "objectType": "CompactVssShareLinkageProofMaterial",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "proofFamily": "compact-vss-share-linkage",
-            "proofBoundary": "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend",
             "ceremonyId": statement["ceremonyId"].clone(),
             "manifestHash": statement["manifestHash"].clone(),
             "rosterHash": statement["rosterHash"].clone(),
@@ -921,6 +960,7 @@ mod tests {
             "shareLinkageStatementRoot": statement["statementRoot"].clone(),
             "sourceStatementRoot": source_statement["sourceStatementRoot"].clone(),
             "proofRecords": [proof_record],
+            "proofStatements": [proof_statement],
         });
         let mut proof_material = proof_material_without_root;
         proof_material["proofMaterialRoot"] = json!(derive_protocol_hash(
@@ -932,9 +972,7 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "proofFamily": "compact-vss-share-linkage",
-            "proofBoundary": "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend",
             "ceremonyId": statement["ceremonyId"].clone(),
             "manifestHash": statement["manifestHash"].clone(),
             "rosterHash": statement["rosterHash"].clone(),
@@ -1026,6 +1064,29 @@ mod tests {
         byte_pair.repeat(64)
     }
 
+    fn value_without_root_field(
+        value: &Value,
+        root_field_name: &str,
+        description: &str,
+    ) -> CanonicalResult<Value> {
+        let object = value.as_object().ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{description} must be a JSON object"),
+            )
+        })?;
+        if !object.contains_key(root_field_name) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{description} must include {root_field_name}"),
+            ));
+        }
+        let mut object_without_root = object.clone();
+        object_without_root.remove(root_field_name);
+
+        Ok(Value::Object(object_without_root))
+    }
+
     fn compact_vss_share_linkage_proof_material_set(statement: &Value) -> CanonicalResult<Value> {
         let source_statements =
             statement["sourceStatementRecords"]
@@ -1047,9 +1108,7 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "proofFamily": "compact-vss-share-linkage",
-            "proofBoundary": "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend",
             "ceremonyId": statement["ceremonyId"].clone(),
             "manifestHash": statement["manifestHash"].clone(),
             "rosterHash": statement["rosterHash"].clone(),
@@ -1081,9 +1140,7 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "proofFamily": "compact-vss-share-linkage",
-            "proofBoundary": "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend",
             "ceremonyId": statement["ceremonyId"].clone(),
             "manifestHash": statement["manifestHash"].clone(),
             "rosterHash": statement["rosterHash"].clone(),
@@ -1136,7 +1193,6 @@ mod tests {
             "objectType": "CompactVssShareLinkageProofRecord",
             "objectVersion": 1,
             "proofFamily": "compact-vss-share-linkage",
-            "proofBoundary": "restricted native compact share-linkage proof over ternary opening randomness; not a target-ready compact proof backend",
             "sourceStatementRoot": source_statement_root,
             "proofStatementHash": proof_statement_hash,
             "proofByteLength": proof_bytes.len(),

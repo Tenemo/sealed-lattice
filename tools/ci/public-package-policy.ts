@@ -5,12 +5,36 @@ export type VendoredProtocolRuntimeEntryExport = {
 };
 
 export type PublicPackagePolicy = {
+    readonly forbiddenGeneratedInternalBridgeMembers: readonly string[];
+    readonly forbiddenSdkVendoredInternalBridgeMembers: readonly string[];
     readonly forbiddenRuntimeExports: readonly string[];
     readonly forbiddenTypeExports: readonly string[];
     readonly vendoredCryptoRuntimeModules: readonly string[];
     readonly vendoredProtocolRuntimeEntryExports: readonly VendoredProtocolRuntimeEntryExport[];
     readonly vendoredProtocolRuntimeModules: readonly string[];
 };
+
+export const forbiddenGeneratedInternalBridgeMembers = [
+    'GenerateBgvTargetDecryptionShare',
+    'generateBgvTargetDecryptionShare',
+] as const;
+
+export const forbiddenSdkVendoredInternalBridgeMembers = [
+    'GenerateBgvTargetDecryptionFixture',
+    'generateBgvTargetDecryptionFixture',
+    'GenerateBgvTargetDecryptionShareFromLocalShare',
+    'generateBgvTargetDecryptionShareFromLocalShare',
+    'DeriveBgvTargetDecryptionShareProofStatement',
+    'deriveBgvTargetDecryptionShareProofStatement',
+    'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+    'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+    'VerifyBgvTargetDecryptionShareProofMaterial',
+    'verifyBgvTargetDecryptionShareProofMaterial',
+    'VerifyBgvTargetDecryptionShareProofStatementBinding',
+    'verifyBgvTargetDecryptionShareProofStatementBinding',
+    'VerifyAndRecombineBgvTargetDecryptionShares',
+    'verifyAndRecombineBgvTargetDecryptionShares',
+] as const;
 
 export const forbiddenTypeExports = [
     'BallotEncryptionRandomness',
@@ -22,6 +46,16 @@ export const forbiddenTypeExports = [
     'BgvPassiveSetupParticipantInput',
     'BgvPassiveSetupVerification',
     'BgvPublicEvaluationKeyMaterial',
+    'BgvTargetCiphertextPairInput',
+    'BgvTargetDecryptionDevelopmentFixture',
+    'BgvTargetDecryptionRecombination',
+    'BgvTargetDecryptionShare',
+    'BgvTargetDecryptionSharePayload',
+    'BgvTargetDecryptionShareProofMaterial',
+    'BgvTargetDecryptionShareProofMaterialVerification',
+    'BgvTargetDecryptionShareProofStatement',
+    'BgvTargetDecryptionShareProofStatementBindingVerification',
+    'BgvTargetDecryptionSmudgingInputReport',
     'DirectEncryptedBallotProofWitness',
     'DirectEncryptedBallotWitness',
     'EvaluationKeyProofCommonInput',
@@ -39,6 +73,8 @@ export const forbiddenTypeExports = [
     'TopKEvaluatorDirectAggregateEvaluation',
     'TopKEvaluatorDirectAggregateEvaluationInput',
     'TopKEvaluatorDirectAggregateInput',
+    'VerifiedSetupProofMaterial',
+    'VerifiedSetupProofMaterialSet',
 ] as const;
 
 export const forbiddenRuntimeExports = [
@@ -63,6 +99,7 @@ export const forbiddenRuntimeExports = [
     'derivePlaintextTopKOracle',
     'describeBgvOperationRegistry',
     'describeBgvRnsProfile',
+    'deriveBgvTargetDecryptionShareProofStatement',
     'dockerOracle',
     'encodeBgvBatchPlaintext',
     'exportDirectBallotWitness',
@@ -72,6 +109,10 @@ export const forbiddenRuntimeExports = [
     'fieldModulus',
     'generateBgvBaseConversionFixture',
     'generateBgvCiphertextConventionFixture',
+    'generateBgvTargetDecryptionFixture',
+    'generateBgvTargetDecryptionShare',
+    'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+    'generateBgvTargetDecryptionShareFromLocalShare',
     'generateBgvPassiveSetupPackage',
     'generateDirectEncryptedBallot',
     'generateDirectEncryptedBallotProofWitness',
@@ -98,6 +139,9 @@ export const forbiddenRuntimeExports = [
     'verifyBgvCiphertextObject',
     'verifyBgvLattigoOracle',
     'verifyBgvPlaintextObject',
+    'verifyBgvTargetDecryptionShareProofStatementBinding',
+    'verifyBgvTargetDecryptionShareProofMaterial',
+    'verifyAndRecombineBgvTargetDecryptionShares',
     'verifyDirectEncryptedBallotProofWitness',
     'verifyDirectEncryptedBallotWitness',
     'verifyLattigoOracle',
@@ -256,6 +300,8 @@ export const vendoredProtocolRuntimeEntryExports = [
 ] as const satisfies readonly VendoredProtocolRuntimeEntryExport[];
 
 export const publicPackagePolicy = {
+    forbiddenGeneratedInternalBridgeMembers,
+    forbiddenSdkVendoredInternalBridgeMembers,
     forbiddenTypeExports,
     forbiddenRuntimeExports,
     vendoredCryptoRuntimeModules,

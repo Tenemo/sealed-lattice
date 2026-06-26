@@ -67,15 +67,12 @@ const setupCommitmentSecurityCertificateBody = (
             commitmentRowCount: 3,
             publicMatrixSource:
                 'full-roster-common-randomness-XOF-unbiased-residue-stream',
-            matrixHashBound: true,
         },
         freshOpeningDistribution: {
             distribution: 'coefficientwise-centered-ternary',
             coefficientSet: [-1, 0, 1],
             infinityNormBound: 1,
             randomnessWidth: 5,
-            rawOpeningExported: false,
-            perCoefficientOpeningExported: false,
         },
         fullWidthMessageBound: {
             messageSource: 'per-RNS-prime-Shamir-coefficient-ring-element',
@@ -85,8 +82,6 @@ const setupCommitmentSecurityCertificateBody = (
             ),
             commitmentModulusProductDecimal:
                 commitmentModulusProduct.toString(),
-            freshMessageNoWrap:
-                BigInt(maxSourceMessageModulus - 1) < commitmentModulusProduct,
         },
         aggregateOpeningBounds: {
             shamirCoefficientCount: setupProfile.qDec,
@@ -103,33 +98,6 @@ const setupCommitmentSecurityCertificateBody = (
                 maxThresholdLiftedCoefficient.toString(),
             commitmentModulusProductDecimal:
                 commitmentModulusProduct.toString(),
-            recipientAndThresholdNoWrap: true,
-        },
-        multiOpeningLeakage: {
-            recipientAggregateOpeningsArePublic: false,
-            recipientAggregateOpeningsAreMailboxPlaintext: false,
-            maxCorruptRecipientsBeforeThreshold: setupProfile.qDec - 1,
-            shamirPolynomialDegree: setupProfile.qDec - 1,
-            rawCoefficientOpeningsExported: false,
-            perCoefficientRandomnessExported: false,
-            thresholdBoundary:
-                'recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses',
-        },
-        bindingAssumption: {
-            assumption: 'Module-SIS',
-            boundTarget:
-                'two-valid-openings-to-one-commitment-yield-short-module-SIS-solution',
-            moduleRank: 2,
-            randomnessWidth: 5,
-            commitmentModulusProductCeilBits: commitmentModulusProductBits,
-            extractedOpeningInfinityBound: Number(thresholdScalarSum),
-        },
-        hidingAssumption: {
-            assumption:
-                'Module-LWE with recipient-hidden proof-witness opening leakage boundary',
-            openingDistribution: 'coefficientwise-centered-ternary',
-            publicMatrixDistribution: 'hash-derived-uniform-residue-stream',
-            lowEntropySecretHiding: true,
         },
         estimatorRows: [
             {
@@ -140,8 +108,6 @@ const setupCommitmentSecurityCertificateBody = (
                 moduleRank: 2,
                 modulusCeilBits: commitmentModulusProductBits,
                 shortVectorInfinityBoundDecimal: thresholdScalarSum.toString(),
-                accountingBasis:
-                    'accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds',
             },
             {
                 rowId: 'first-profile-module-lwe-hiding-row',
@@ -151,8 +117,6 @@ const setupCommitmentSecurityCertificateBody = (
                 moduleRank: 2,
                 secretDistribution: 'centered-ternary-opening',
                 modulusCeilBits: commitmentModulusProductBits,
-                accountingBasis:
-                    'accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary',
             },
         ],
     };

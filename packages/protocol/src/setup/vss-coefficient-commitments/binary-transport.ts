@@ -23,7 +23,6 @@ import {
     setupCommitmentRootPayload,
 } from './commitment-values.js';
 import {
-    acceptedBgvProfileRingDegree,
     setupCommitmentModulusLimbIndices,
     setupCommitmentProfileId,
     setupCommitmentRowCount,
@@ -563,10 +562,6 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
         thresholdDegree: input.thresholdDegree,
         rnsLimbCount: input.rnsLimbCount,
         ringDegree: input.ringDegree,
-        ringDegreeStatus:
-            input.ringDegree === acceptedBgvProfileRingDegree
-                ? 'profile-ring'
-                : 'development-reduced-ring',
         materialRecordCount: input.materialRecordCount,
         transport: {
             transportProfileId: setupTransportProfileId,

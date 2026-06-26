@@ -1,320 +1,321 @@
+use std::collections::BTreeSet;
+
 use super::*;
 
-pub(super) fn recombine_target_decryption_shares(
-    setup_binding: &SetupBinding,
-    target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
-    mut shares: Vec<PartialDecryptionShare>,
+const TARGET_DECRYPTION_PLAINTEXT_COEFFICIENT_HASH_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-plaintext-coefficients-v1";
+const TARGET_DECRYPTION_PLAINTEXT_SLOT_HASH_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-plaintext-slots-v1";
+
+pub(super) struct TargetDecryptionShareProofBundle<'a> {
+    pub(super) target_decryption_share: &'a Value,
+    pub(super) proof_statement: &'a Value,
+    pub(super) proof_material: &'a Value,
+}
+
+pub(super) struct TargetDecryptionRecombinationInput<'a> {
+    pub(super) setup_binding: &'a SetupBinding,
+    pub(super) target_accepted: &'a TargetAcceptedBinding,
+    pub(super) target_ciphertexts: &'a TargetCiphertextPair,
+    pub(super) target_share_profile: &'a TargetShareProfile,
+    pub(super) proof_bundles: Vec<TargetDecryptionShareProofBundle<'a>>,
+}
+
+struct VerifiedTargetDecryptionShare {
+    trustee_identity: String,
+    roster_position: usize,
+    interpolation_point: u64,
+    target_decryption_share_hash: String,
+    target_share_proof_statement_root: String,
+    proof_material_root: String,
+    target_id_partials_by_limb: Vec<Vec<u64>>,
+    target_order_partials_by_limb: Vec<Vec<u64>>,
+}
+
+struct RecombinedTargetPlaintext {
+    coefficient_hash: String,
+    slot_hash: String,
+    option_values: Vec<u64>,
+}
+
+pub(super) fn verify_and_recombine_target_decryption_shares(
+    input: TargetDecryptionRecombinationInput<'_>,
 ) -> CanonicalResult<Value> {
-    if shares.len() < target_share_profile.minimum_shares_for_interpolation {
+    if input.proof_bundles.len() != input.target_share_profile.minimum_shares_for_interpolation {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "target recombination requires at least minimumSharesForInterpolation valid shares",
+            "target recombination requires exactly the interpolation quorum of proof-backed shares",
         ));
     }
-    let mut identities = BTreeSet::new();
-    let mut roster_positions = BTreeSet::new();
-    let mut board_positions = BTreeSet::new();
-    for share in &shares {
-        let trustee_identity = string_at_path(&share.record, &["trusteeIdentity"])?.to_string();
-        if !identities.insert(trustee_identity)
-            || !roster_positions.insert(share.roster_position)
-            || !board_positions.insert(share.board_position)
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "target recombination rejects duplicate trustee, roster-position, or board-position shares",
-            ));
-        }
-    }
-    // Shares are selected deterministically by board position, but interpolation uses the roster-derived abscissa; the triple dedup prevents a trustee from re-submitting under a different board/roster slot.
-    shares.sort_by_key(|share| share.board_position);
-    let selected = shares
-        .into_iter()
-        .take(target_share_profile.minimum_shares_for_interpolation)
-        .collect::<Vec<_>>();
-    let selected_roster_positions = selected
+
+    let mut verified_shares = input
+        .proof_bundles
         .iter()
-        .map(|share| share.roster_position)
-        .collect::<Vec<_>>();
-    let selected_board_positions = selected
-        .iter()
-        .map(|share| share.board_position)
-        .collect::<Vec<_>>();
-    let target_id_slots =
-        recombine_ciphertext_slots(&target_ciphertexts.target_id, &selected, |share| {
-            &share.target_id_partials
-        })?;
-    let target_order_slots =
-        recombine_ciphertext_slots(&target_ciphertexts.target_order, &selected, |share| {
-            &share.target_order_partials
-        })?;
-    let decoded_target_ids = packed_target_values(&target_id_slots);
-    let decoded_target_orders = packed_target_values(&target_order_slots);
-    let recombination_input_report = recombination_input_report_value(
-        setup_binding,
-        target_accepted,
-        target_ciphertexts,
-        target_share_profile,
-        &selected,
-        &decoded_target_ids,
-        &decoded_target_orders,
+        .map(|proof_bundle| verify_target_decryption_share_for_recombination(&input, proof_bundle))
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    verified_shares.sort_by_key(|share| (share.interpolation_point, share.roster_position));
+    validate_unique_recombination_points(&verified_shares)?;
+
+    let target_id_plaintext = recombine_target_role(
+        &input.target_ciphertexts.target_id,
+        &verified_shares,
+        |share| &share.target_id_partials_by_limb,
     )?;
-    let recombination_input_report_hash = derive_protocol_hash(
-        "TargetDecryptionRecombinationInputReportHash",
-        &recombination_input_report,
-    )?;
-    let target_result_root = derive_protocol_hash(
-        "TargetDecryptionResultHash",
-        &json!({
-            "objectType": "TargetDecryptionResult",
-            "objectVersion": 1,
-            "setupPackageHash": setup_binding.setup_package_hash,
-            "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-            "targetContextHash": target_accepted.target_context_hash,
-            "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-            "targetShareProfileHash": target_share_profile.hash,
-            "recombinationInputReportHash": recombination_input_report_hash,
-            "selectedBoardPositions": selected_board_positions,
-            "selectedRosterPositions": selected_roster_positions,
-            "decodedTargetIds": decoded_target_ids,
-            "decodedTargetOrders": decoded_target_orders,
-        }),
+    let target_order_plaintext = recombine_target_role(
+        &input.target_ciphertexts.target_order,
+        &verified_shares,
+        |share| &share.target_order_partials_by_limb,
     )?;
 
-    Ok(json!({
-        "ok": true,
-        "operation": "recombineBgvTargetDecryptionShares",
-        "targetDecryptionResultHash": target_result_root,
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "recombinationInputReport": recombination_input_report,
-        "recombinationInputReportHash": recombination_input_report_hash,
-        "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
-        "decryptionThreshold": target_share_profile.decryption_threshold,
-        "decryptionShareQuorum": target_share_profile.decryption_share_quorum,
-        "selectedBoardPositions": selected_board_positions,
-        "selectedRosterPositions": selected_roster_positions,
-        "decodedTargetIds": decoded_target_ids,
-        "decodedTargetOrders": decoded_target_orders,
-        "decryptScaling": 1,
-    }))
-}
-
-fn recombination_input_report_value(
-    setup_binding: &SetupBinding,
-    target_accepted: &TargetAcceptedBinding,
-    target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
-    selected_shares: &[PartialDecryptionShare],
-    decoded_target_ids: &[u64],
-    decoded_target_orders: &[u64],
-) -> CanonicalResult<Value> {
-    let selected_share_records = selected_shares
+    let share_inputs = verified_shares
         .iter()
         .map(|share| {
-            Ok(json!({
-                "trusteeIdentity": string_at_path(&share.record, &["trusteeIdentity"])?,
+            json!({
+                "trusteeIdentity": share.trustee_identity,
                 "rosterPosition": share.roster_position,
-                "boardPosition": share.board_position,
                 "interpolationPoint": share.interpolation_point,
-                "shareRoot": hash_at_path(&share.record, &["shareRoot"])?,
-                "targetDecryptionShareHash": hash_at_path(&share.record, &["targetDecryptionShareHash"])?,
-                "smudgingInputReportHash": share.smudging_input_report_hash.as_str(),
-            }))
+                "targetDecryptionShareHash": share.target_decryption_share_hash,
+                "targetShareProofStatementRoot": share.target_share_proof_statement_root,
+                "proofMaterialRoot": share.proof_material_root,
+            })
         })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let active_rns_limb_reports = target_ciphertexts
-        .target_id
-        .primes()
+        .collect::<Vec<_>>();
+    let mut result = json!({
+        "ok": true,
+        "operation": "verifyAndRecombineBgvTargetDecryptionShares",
+        "setupPackageHash": input.setup_binding.setup_package_hash,
+        "ceremonyId": input.setup_binding.ceremony_id,
+        "electionManifestHash": input.setup_binding.election_manifest_hash,
+        "targetAcceptedRecordHash": input.target_accepted.target_accepted_record_hash,
+        "targetContextHash": input.target_accepted.target_context_hash,
+        "targetCiphertextHash": input.target_accepted.target_ciphertext_hash,
+        "targetDecryptionCiphertextHash": input.target_ciphertexts.target_ciphertext_hash,
+        "targetCiphertextBindingHash": input.target_ciphertexts.target_ciphertext_binding_hash,
+        "targetIdRoot": input.target_ciphertexts.target_id_root,
+        "targetOrderRoot": input.target_ciphertexts.target_order_root,
+        "targetShareProfileHash": input.target_share_profile.hash,
+        "targetBasisHash": input.target_accepted.target_basis_hash,
+        "minimumSharesForInterpolation": input.target_share_profile.minimum_shares_for_interpolation,
+        "decryptionThreshold": input.target_share_profile.decryption_threshold,
+        "shareCount": share_inputs.len(),
+        "activeRnsLimbCount": input.target_ciphertexts.target_id.level + 1,
+        "ringDegree": POLYNOMIAL_DEGREE,
+        "plaintextModulus": PLAINTEXT_MODULUS,
+        "optionCount": MAXIMUM_OPTION_COUNT,
+        "topCount": input.target_ciphertexts.top_count,
+        "shareInputs": share_inputs,
+        "targetIdPlaintextCoefficientHash512": target_id_plaintext.coefficient_hash,
+        "targetIdPlaintextSlotHash512": target_id_plaintext.slot_hash,
+        "targetIdOptionValues": target_id_plaintext.option_values,
+        "targetOrderPlaintextCoefficientHash512": target_order_plaintext.coefficient_hash,
+        "targetOrderPlaintextSlotHash512": target_order_plaintext.slot_hash,
+        "targetOrderOptionValues": target_order_plaintext.option_values,
+    });
+    result["targetDecryptionResultHash"] =
+        json!(derive_protocol_hash("TargetDecryptionResultHash", &result)?);
+
+    Ok(result)
+}
+
+fn verify_target_decryption_share_for_recombination(
+    input: &TargetDecryptionRecombinationInput<'_>,
+    proof_bundle: &TargetDecryptionShareProofBundle<'_>,
+) -> CanonicalResult<VerifiedTargetDecryptionShare> {
+    let trustee_identity = string_at_path(proof_bundle.proof_statement, &["trusteeIdentity"])?;
+    let participant = input
+        .setup_binding
+        .participants
         .iter()
-        .enumerate()
-        .map(|(rns_limb_index, rns_prime)| {
-            let lagrange_terms =
-                lagrange_coefficient_terms_at_zero_mod(selected_shares, *rns_prime)?
-                    .iter()
-                    .map(lagrange_coefficient_term_value)
-                    .collect::<Vec<_>>();
-            Ok(json!({
-                "rnsLimbIndex": rns_limb_index,
-                "rnsPrime": rns_prime,
-                "lagrangeTerms": lagrange_terms,
-            }))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let maximum_decoded_value = decoded_target_ids
-        .iter()
-        .chain(decoded_target_orders.iter())
-        .copied()
-        .max()
-        .unwrap_or(0);
-    let centered_positive_limit = (crate::bgv::profile::PLAINTEXT_MODULUS - 1) / 2;
-    if maximum_decoded_value > centered_positive_limit {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "target decryption decoded values exceed the centered plaintext decoding margin",
-        ));
-    }
-
-    Ok(json!({
-        "objectType": "TargetDecryptionRecombinationInputReport",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "setupPackageHash": setup_binding.setup_package_hash,
-        "targetAcceptedRecordHash": target_accepted.target_accepted_record_hash,
-        "targetContextHash": target_accepted.target_context_hash,
-        "targetCiphertextHash": target_accepted.target_ciphertext_hash,
-        "targetShareProfileHash": target_share_profile.hash,
-        "targetBasisHash": target_accepted.target_basis_hash,
-        "targetIdRoot": target_ciphertexts.target_id_root,
-        "targetOrderRoot": target_ciphertexts.target_order_root,
-        "minimumSharesForInterpolation": target_share_profile.minimum_shares_for_interpolation,
-        "decryptionThreshold": target_share_profile.decryption_threshold,
-        "selectedShareCount": selected_shares.len(),
-        "selectedShares": selected_share_records,
-        "smudgingProfileId": TARGET_DECRYPTION_SMUDGING_PROFILE_ID,
-        "smudgingDevelopmentScope": TARGET_DECRYPTION_SMUDGING_DEVELOPMENT_SCOPE,
-        "smudgingCombinationRule": TARGET_DECRYPTION_SMUDGING_ZERO_SHARING_RULE,
-        "smudgingProofBoundary": TARGET_DECRYPTION_SMUDGING_PROOF_BOUNDARY,
-        "activeRnsLimbCount": active_rns_limb_reports.len(),
-        "activeRnsLimbReports": active_rns_limb_reports,
-        "recombinationCoefficientEquation": "denominatorProductModuloPrime * lagrangeCoefficientModuloPrime = numeratorProductModuloPrime mod rnsPrime",
-        "decodingMargin": {
-            "plaintextModulus": crate::bgv::profile::PLAINTEXT_MODULUS,
-            "centeredPositiveLimit": centered_positive_limit,
-            "maximumDecodedTargetValue": maximum_decoded_value,
-            "centeredPositiveMargin": centered_positive_limit - maximum_decoded_value,
-            "marginRule": "decoded target id and order residues must remain in the nonnegative centered plaintext range after recombination",
-        },
-    }))
-}
-
-pub(super) fn recombine_ciphertext_slots<F>(
-    ciphertext: &Ciphertext,
-    shares: &[PartialDecryptionShare],
-    partials: F,
-) -> CanonicalResult<Vec<u64>>
-where
-    F: Fn(&PartialDecryptionShare) -> &[Vec<u64>],
-{
-    // c0 is the message-bearing component; adding the sum of lambda_i * (c1*s_i) reconstructs c0 + c1*s = m + p*e, then centered reduction mod p recovers m.
-    let mut accumulator = ciphertext.components[0].clone();
-    for (limb_index, modulus) in ciphertext.primes().iter().enumerate() {
-        let coefficients = lagrange_coefficients_at_zero_mod(shares, *modulus)?;
-        for (share, lagrange_coefficient) in shares.iter().zip(coefficients) {
-            let share_partials = partials(share);
-            for coefficient_index in 0..POLYNOMIAL_DEGREE {
-                let weighted = mul_mod(
-                    share_partials[limb_index][coefficient_index],
-                    lagrange_coefficient,
-                    *modulus,
-                )?;
-                accumulator[limb_index][coefficient_index] = add_mod(
-                    accumulator[limb_index][coefficient_index],
-                    weighted,
-                    *modulus,
-                )?;
-            }
-        }
-    }
-    let coefficients = decryption_accumulator_to_coefficients(ciphertext, &accumulator)?;
-
-    forward_negacyclic_ntt(&coefficients, crate::bgv::profile::PLAINTEXT_MODULUS)
-}
-
-// Interpolation is per RNS prime field, so abscissae must stay distinct mod each prime; the reduction is identity for the tiny roster points but the check is required in general.
-pub(super) fn lagrange_coefficients_at_zero_mod(
-    shares: &[PartialDecryptionShare],
-    modulus: u64,
-) -> CanonicalResult<Vec<u64>> {
-    Ok(lagrange_coefficient_terms_at_zero_mod(shares, modulus)?
-        .iter()
-        .map(|term| term.lagrange_coefficient_modulo_prime)
-        .collect())
-}
-
-struct LagrangeCoefficientTerm {
-    selected_share_index: usize,
-    roster_position: usize,
-    board_position: usize,
-    interpolation_point: u64,
-    numerator_product_modulo_prime: u64,
-    denominator_product_modulo_prime: u64,
-    denominator_inverse_modulo_prime: u64,
-    lagrange_coefficient_modulo_prime: u64,
-}
-
-fn lagrange_coefficient_terms_at_zero_mod(
-    shares: &[PartialDecryptionShare],
-    modulus: u64,
-) -> CanonicalResult<Vec<LagrangeCoefficientTerm>> {
-    let mut terms = Vec::with_capacity(shares.len());
-    for (share_index, share) in shares.iter().enumerate() {
-        let x_i = share.interpolation_point % modulus;
-        if x_i == 0 {
-            return Err(CanonicalError::new(
+        .find(|candidate| candidate.trustee_identity == trustee_identity)
+        .ok_or_else(|| {
+            CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "target decryption interpolation point must be non-zero modulo the data prime",
-            ));
-        }
-        let mut numerator = 1_u64;
-        let mut denominator = 1_u64;
-        for (other_index, other_share) in shares.iter().enumerate() {
-            if other_index == share_index {
-                continue;
-            }
-            let x_j = other_share.interpolation_point % modulus;
-            if x_j == 0 || x_i == x_j {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "target decryption interpolation points must be non-zero and distinct",
-                ));
-            }
-            numerator = mul_mod(numerator, modulus - x_j, modulus)?;
-            let difference = if x_i >= x_j {
-                x_i - x_j
-            } else {
-                modulus - (x_j - x_i)
-            };
-            denominator = mul_mod(denominator, difference, modulus)?;
-        }
-        let denominator_inverse = inverse_mod(denominator, modulus)?;
-        terms.push(LagrangeCoefficientTerm {
-            selected_share_index: share_index,
-            roster_position: share.roster_position,
-            board_position: share.board_position,
-            interpolation_point: share.interpolation_point,
-            numerator_product_modulo_prime: numerator,
-            denominator_product_modulo_prime: denominator,
-            denominator_inverse_modulo_prime: denominator_inverse,
-            lagrange_coefficient_modulo_prime: mul_mod(numerator, denominator_inverse, modulus)?,
-        });
-    }
+                "target recombination proof statement trustee is not part of the setup roster",
+            )
+        })?;
+    let verification = verify_target_decryption_share_proof_material(
+        TargetDecryptionShareProofMaterialVerificationInput {
+            setup_binding: input.setup_binding,
+            target_accepted: input.target_accepted,
+            target_ciphertexts: input.target_ciphertexts,
+            target_share_profile: input.target_share_profile,
+            participant,
+            target_decryption_share: proof_bundle.target_decryption_share,
+            proof_statement: proof_bundle.proof_statement,
+            proof_material: proof_bundle.proof_material,
+        },
+    )?;
+    read_partial_decryption_share(
+        proof_bundle.target_decryption_share,
+        input.setup_binding,
+        input.target_accepted,
+        input.target_ciphertexts,
+        input.target_share_profile,
+    )?;
+    let payload = value_at_path(proof_bundle.target_decryption_share, &["sharePayload"])?;
 
-    Ok(terms)
-}
-
-fn lagrange_coefficient_term_value(term: &LagrangeCoefficientTerm) -> Value {
-    json!({
-        "selectedShareIndex": term.selected_share_index,
-        "rosterPosition": term.roster_position,
-        "boardPosition": term.board_position,
-        "interpolationPoint": term.interpolation_point,
-        "numeratorProductModuloPrime": term.numerator_product_modulo_prime,
-        "denominatorProductModuloPrime": term.denominator_product_modulo_prime,
-        "denominatorInverseModuloPrime": term.denominator_inverse_modulo_prime,
-        "lagrangeCoefficientModuloPrime": term.lagrange_coefficient_modulo_prime,
+    Ok(VerifiedTargetDecryptionShare {
+        trustee_identity: participant.trustee_identity.clone(),
+        roster_position: participant.roster_position,
+        interpolation_point: participant.interpolation_point,
+        target_decryption_share_hash: hash_at_path(
+            proof_bundle.target_decryption_share,
+            &["targetDecryptionShareHash"],
+        )?
+        .to_string(),
+        target_share_proof_statement_root: hash_at_path(
+            proof_bundle.proof_statement,
+            &["proofStatementRoot"],
+        )?
+        .to_string(),
+        proof_material_root: hash_at_path(&verification, &["proofMaterialRoot"])?.to_string(),
+        target_id_partials_by_limb: read_partial_limb_set(
+            payload,
+            "targetId",
+            input.target_ciphertexts.target_id.level,
+        )?,
+        target_order_partials_by_limb: read_partial_limb_set(
+            payload,
+            "targetOrder",
+            input.target_ciphertexts.target_order.level,
+        )?,
     })
 }
 
-pub(super) fn packed_target_values(slots: &[u64]) -> Vec<u64> {
+fn validate_unique_recombination_points(
+    verified_shares: &[VerifiedTargetDecryptionShare],
+) -> CanonicalResult<()> {
+    let mut roster_positions = BTreeSet::new();
+    let mut interpolation_points = BTreeSet::new();
+    for share in verified_shares {
+        if share.interpolation_point == 0 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "target recombination share interpolation points must be non-zero",
+            ));
+        }
+        if !roster_positions.insert(share.roster_position) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "target recombination shares must not repeat a roster position",
+            ));
+        }
+        if !interpolation_points.insert(share.interpolation_point) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "target recombination shares must not repeat an interpolation point",
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn recombine_target_role(
+    ciphertext: &Ciphertext,
+    verified_shares: &[VerifiedTargetDecryptionShare],
+    partials_for_share: fn(&VerifiedTargetDecryptionShare) -> &[Vec<u64>],
+) -> CanonicalResult<RecombinedTargetPlaintext> {
+    if ciphertext.components.len() != 2 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "target recombination requires two-component target ciphertexts",
+        ));
+    }
+    let mut decryption_accumulator = ciphertext.components[0].clone();
+    let interpolation_points = verified_shares
+        .iter()
+        .map(|share| share.interpolation_point)
+        .collect::<Vec<_>>();
+    for (rns_limb_index, modulus) in ciphertext.primes().iter().copied().enumerate() {
+        let interpolation_weights = lagrange_weights_at_zero(&interpolation_points, modulus)?;
+        for (share_index, share) in verified_shares.iter().enumerate() {
+            let partials_by_limb = partials_for_share(share);
+            let partial_limb = partials_by_limb.get(rns_limb_index).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "target recombination share is missing an active limb",
+                )
+            })?;
+            if partial_limb.len() != POLYNOMIAL_DEGREE {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "target recombination share limb has the wrong coefficient count",
+                ));
+            }
+            let interpolation_weight = interpolation_weights[share_index];
+            for (accumulator_coefficient, partial_coefficient) in decryption_accumulator
+                [rns_limb_index]
+                .iter_mut()
+                .zip(partial_limb.iter())
+            {
+                let weighted_partial =
+                    mul_mod_fast(*partial_coefficient, interpolation_weight, modulus);
+                *accumulator_coefficient =
+                    add_mod_fast(*accumulator_coefficient, weighted_partial, modulus);
+            }
+        }
+    }
+
+    let coefficients = decryption_accumulator_to_coefficients(ciphertext, &decryption_accumulator)?;
+    let slots = forward_negacyclic_ntt(&coefficients, PLAINTEXT_MODULUS)?;
+
+    Ok(RecombinedTargetPlaintext {
+        coefficient_hash: coefficient_vector_hash512(
+            &coefficients,
+            TARGET_DECRYPTION_PLAINTEXT_COEFFICIENT_HASH_DOMAIN,
+        ),
+        slot_hash: coefficient_vector_hash512(&slots, TARGET_DECRYPTION_PLAINTEXT_SLOT_HASH_DOMAIN),
+        option_values: target_option_values_from_slots(&slots)?,
+    })
+}
+
+fn target_option_values_from_slots(slots: &[u64]) -> CanonicalResult<Vec<u64>> {
     (0..MAXIMUM_OPTION_COUNT)
-        .map(|option| slots[packed_score_slot(option)])
+        .map(|option_index| {
+            slots
+                .get(packed_score_slot(option_index))
+                .copied()
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "target plaintext slot vector does not cover every supported option",
+                    )
+                })
+        })
+        .collect()
+}
+
+fn lagrange_weights_at_zero(
+    interpolation_points: &[u64],
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    interpolation_points
+        .iter()
+        .enumerate()
+        .map(|(participant_index, selected_point)| {
+            let selected_point = *selected_point % modulus;
+            let mut numerator = 1_u64;
+            let mut denominator = 1_u64;
+            for (other_participant_index, other_point) in interpolation_points.iter().enumerate() {
+                if other_participant_index == participant_index {
+                    continue;
+                }
+                let other_point = *other_point % modulus;
+                if selected_point == other_point {
+                    return Err(CanonicalError::new(
+                        CanonicalErrorCode::ProfileComponentMismatch,
+                        "target recombination interpolation points must be distinct modulo every active prime",
+                    ));
+                }
+                numerator = mul_mod(numerator, sub_mod(0, other_point, modulus)?, modulus)?;
+                denominator = mul_mod(
+                    denominator,
+                    sub_mod(selected_point, other_point, modulus)?,
+                    modulus,
+                )?;
+            }
+            mul_mod(numerator, inverse_mod(denominator, modulus)?, modulus)
+        })
         .collect()
 }

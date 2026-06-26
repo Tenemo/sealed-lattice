@@ -422,14 +422,13 @@ describe('setup proof material streaming in the public package', () => {
     });
 
     it.each(setupProofMaterialTransportCases)(
-        'forwards caller-supplied $proofFamily proof handles without re-streaming chunks',
+        'ignores caller-supplied $proofFamily proof handles and streams chunks',
         async (transportCase) => {
             const suppliedHandles = verifiedSetupProofMaterials(
                 transportCase,
                 alternateProofHash,
             );
-
-            await publicPackage.verifySetupPackage({
+            const inputWithCallerProofHandles = {
                 setupPackage: {
                     objectType: 'SetupPackage',
                     objectVersion: 1,
@@ -437,17 +436,27 @@ describe('setup proof material streaming in the public package', () => {
                 [transportCase.fieldName]:
                     transportedSetupProofMaterialSet(transportCase),
                 verifiedSetupProofMaterials: suppliedHandles,
-            });
+            } as Parameters<typeof publicPackage.verifySetupPackage>[0] &
+                Readonly<{
+                    readonly verifiedSetupProofMaterials: typeof suppliedHandles;
+                }>;
+
+            await publicPackage.verifySetupPackage(inputWithCallerProofHandles);
 
             expect(
                 mockKernel.beginSetupProofMaterialTransportStream,
-            ).not.toHaveBeenCalled();
+            ).toHaveBeenCalledOnce();
             expect(
                 mockKernel.absorbSetupProofMaterialTransportStreamChunk,
-            ).not.toHaveBeenCalled();
+            ).toHaveBeenCalledWith(
+                expect.objectContaining({
+                    chunkIndex: 0,
+                    bytesHex: 'abcd',
+                }),
+            );
             expect(
                 mockKernel.finishSetupProofMaterialTransportStream,
-            ).not.toHaveBeenCalled();
+            ).toHaveBeenCalledOnce();
 
             const finalVerifyInput = mockKernel.verifyCollectiveBgvSetup.mock
                 .calls[0]?.[0] as JsonRecord | undefined;
@@ -459,8 +468,19 @@ describe('setup proof material streaming in the public package', () => {
             expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
                 'chunks',
             );
-            expect(finalVerifyInput?.verifiedSetupProofMaterials).toBe(
+            expect(finalVerifyInput?.verifiedSetupProofMaterials).not.toBe(
                 suppliedHandles,
+            );
+            expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject(
+                {
+                    proofMaterials: [
+                        expect.objectContaining({
+                            proofFamily: transportCase.proofFamily,
+                            proofMaterialRoot: proofHash,
+                            proofFullObjectHash: proofHash,
+                        }),
+                    ],
+                },
             );
         },
     );

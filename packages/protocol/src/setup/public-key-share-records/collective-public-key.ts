@@ -135,8 +135,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        aggregationStatus:
-            'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

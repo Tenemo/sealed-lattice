@@ -630,11 +630,12 @@ export const localStateInput = (
         sourceTrusteeCommitmentRoot,
         rnsShareOpenings: [
             {
-                objectType: 'PrivateVssShareOpening',
+                objectType: 'PrivateVssShareLimbOpening',
                 objectVersion: 1,
                 rnsLimbIndex: 0,
                 rnsPrime: 65_537,
-                shareValues: [7, 11, 13, 17],
+                shareValuesLittleEndian48Hex:
+                    '0700000000000b00000000000d0000000000110000000000',
             },
         ],
     };

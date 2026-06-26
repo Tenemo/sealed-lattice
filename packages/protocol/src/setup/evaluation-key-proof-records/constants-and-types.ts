@@ -14,14 +14,10 @@ export type EvaluationKeyShareProofFamily =
     | 'galois-key-share';
 
 export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
-export const publicEvaluationKeyAssemblyStatus =
-    'assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate';
 export const publicEvaluationKeyMaterialEncoding =
     'root-bound-public-key-switch-component-roots';
 export const publicEvaluationKeyTransportMaterialEncoding =
     'binary-chunked-public-evaluation-key-root-manifest';
-export const publicEvaluationKeyMaterialSource =
-    'verified-relinearization-and-galois-proof-records';
 export const publicEvaluationKeyMaterialTransportSetObjectType =
     'SetupTransportedPublicEvaluationKeyMaterialSet';
 export const publicEvaluationKeyMaterialTransportObjectType =
@@ -383,12 +379,6 @@ export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
-    readonly proofRandomness: Readonly<{
-        readonly source: string;
-        readonly binding?: string;
-        readonly nonceHash?: ProtocolHash;
-        readonly retention: string;
-    }>;
 }>;
 
 export type TrusteeEvaluationKeyProofGenerator = (
@@ -461,9 +451,7 @@ export type PublicEvaluationKeySet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupProofProfileId: typeof setupProofProfileId;
-        readonly assemblyStatus: typeof publicEvaluationKeyAssemblyStatus;
         readonly materialEncoding: typeof publicEvaluationKeyMaterialEncoding;
-        readonly materialSource: typeof publicEvaluationKeyMaterialSource;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -477,8 +465,6 @@ export type PublicEvaluationKeySet = Readonly<
         readonly galoisKeyShareBatchRoots: readonly GaloisKeyShareBatchRootReference[];
         readonly galoisKeyRoots: readonly GaloisKeyRootReference[];
         readonly genericKeySwitchKeyRoots: readonly ProtocolHash[];
-        readonly rawKeyBytesEmbedded: false;
-        readonly verifierGeneratedKeyMaterial: false;
         readonly publicEvaluationKeyMaterialEncoding?: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
         readonly publicEvaluationKeyMaterialChunkSizeBytes?: number;

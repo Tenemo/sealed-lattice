@@ -28,7 +28,7 @@ use super::relation::{
     CompactSameSecretBridgeStatement, CompactVssShareLinkageCommitment,
     CompactVssShareLinkagePublicVectorInput, CompactVssShareLinkageStatement,
     EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
-    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
+    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement, TargetDecryptionShareStatement,
     build_compact_vss_share_linkage_public_vectors,
 };
 use super::{
@@ -51,8 +51,11 @@ use crate::bgv::evaluator::top_k::{
 // the sibling tests can keep referencing them through `super::` unchanged after
 // the move under this `tests/` directory.
 use super::{
-    COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
+    COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
+    generate_target_decryption_share_proof_from_request,
     generate_trustee_evaluation_key_proof_from_request, prover,
+    verify_target_decryption_share_proof_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 
@@ -70,6 +73,7 @@ mod relation_algebra;
 mod same_secret_linkage;
 mod soundness_rejection;
 mod statement_validation;
+mod target_decryption_share;
 
 const SMALL_RING_DEGREE: usize = 128;
 const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
@@ -187,6 +191,7 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
         }),
         compact_vss_share_linkage: None,
         compact_same_secret_bridge: None,
+        target_decryption_share: None,
     }
 }
 

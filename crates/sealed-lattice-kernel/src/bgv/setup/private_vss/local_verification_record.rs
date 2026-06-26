@@ -6,7 +6,6 @@ pub(super) fn local_verification_record(
     source_trustee_binding: &SourceTrusteeCommitmentBinding,
     envelope_binding: &PrivateEnvelopeBinding,
     ring_degree: usize,
-    ring_degree_status: &str,
     limb_verifications: &[LimbVerification],
 ) -> CanonicalResult<Value> {
     let roster = super::accepted_setup::accepted_roster_from_setup_context(setup_context);
@@ -78,7 +77,6 @@ pub(super) fn local_verification_record(
         "recipientRosterPosition": envelope_binding.recipient_roster_position,
         "sourceTrusteeCommitmentRoot": source_trustee_binding.source_trustee_commitment_root,
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "verifiedRnsLimbCount": limb_verifications.len(),
         "verifiedShamirCoefficientCommitmentCount": limb_verifications.len() * roster.decryption_threshold as usize,
         "verifiedPrivateVssShareProofCount": limb_verifications.len(),

@@ -33,13 +33,6 @@ pub(in crate::bgv::setup) fn threshold_verification_material(
         "trusteeThresholdVerificationKeyHashes": trustee_threshold_verification_key_hashes,
         "participantInterpolationUniverse": participant_points,
         "secretShareDomain": "BGV-RNS-secret-share-polynomial-over-selected-Q-data",
-        "passiveSetupVerificationScope": [
-            "transcript-binding",
-            "identity-binding",
-            "roster-binding",
-            "profile-binding",
-            "recovery-device-epoch-binding"
-        ],
     });
     let threshold_share_verification_key_root =
         derive_protocol_hash("ThresholdShareVerificationKeyRoot", &verification_key_set)?;

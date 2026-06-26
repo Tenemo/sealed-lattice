@@ -91,7 +91,6 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
         ],
         requiredGaloisKeySchedule,
         requiredGaloisSetHash,
-        genericKeySwitchPolicy: 'refused-unless-explicitly-required',
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {
@@ -402,11 +401,6 @@ const stubGenerator = (
             sameSecretLinkageIncluded: true,
             proofByteLength: proofBytesHex.length / 2,
             proofBytesHex,
-            proofRandomness: {
-                source: input.proofRandomnessSource,
-                retention:
-                    'proof randomness seed material is consumed for proof generation and is not returned',
-            },
         };
     };
 };

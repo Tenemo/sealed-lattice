@@ -355,8 +355,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
         public_evaluation_key_material_manifest(&package, &package["evaluationKeys"])
             .expect("public evaluation-key material manifest");
     let mut tampered_manifest = expected_manifest;
-    tampered_manifest["materialSource"] =
-        serde_json::json!("tampered-public-evaluation-key-material");
+    tampered_manifest["evaluatorKeyScheduleRoot"] = serde_json::json!(valid_hash('f'));
     let tampered_material_bytes =
         encode_public_evaluation_key_material_manifest(&tampered_manifest)
             .expect("tampered public evaluation-key material bytes");

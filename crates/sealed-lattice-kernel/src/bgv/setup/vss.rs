@@ -62,7 +62,6 @@ pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
         "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",
         "carryWitnessDomain": "non-negative-bounded-integer",
         "commitmentReductionRule": "prove-unreduced-lifted-share-with-hidden-carry-and-opening",
-        "recipientWitnessDisclosure": "share-values-only; aggregate openings and carry witnesses are zero-knowledge proof witnesses",
     })
 }
 

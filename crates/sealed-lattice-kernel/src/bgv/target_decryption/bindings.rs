@@ -1,5 +1,9 @@
 use super::*;
 
+const COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
+    "compactVssAggregateThresholdCommitmentSet";
+const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "compactVssShareLinkageStatement";
+
 pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
     validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
     let setup_context_hashes = collective_bgv_setup_context_hashes_from_package(setup_package)?;
@@ -13,13 +17,16 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         hash_at_path(setup_package, &["commonRandomness", "publicMatrixSeedHash"])?.to_string();
     let target_decryption_profile_hash = hash_at_path(
         setup_package,
-        &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+        &[
+            "targetDecryptionProfileBinding",
+            "targetDecryptionProfileHash",
+        ],
     )?
     .to_string();
     let target_decryption_profile_binding_hash = hash_at_path(
         setup_package,
         &[
-            "targetDecryptionStatus",
+            "targetDecryptionProfileBinding",
             "targetDecryptionProfileBindingHash",
         ],
     )?
@@ -66,6 +73,22 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
             })
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
+    let compact_aggregate_threshold_commitment_set = setup_package
+        .get(COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
+        .map(|aggregate_set| {
+            read_compact_aggregate_threshold_commitment_set_binding(
+                aggregate_set,
+                &public_matrix_seed_hash,
+                &participants,
+            )
+        })
+        .transpose()?;
+    let compact_share_linkage_statement_root = setup_package
+        .get(COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD)
+        .map(|statement| {
+            hash_at_path(statement, &["statementRoot"]).map(std::borrow::ToOwned::to_owned)
+        })
+        .transpose()?;
 
     Ok(SetupBinding {
         setup_package_hash,
@@ -81,11 +104,121 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         target_decryption_profile_hash,
         target_decryption_profile_binding_hash,
         public_matrix_seed_hash,
+        compact_share_linkage_statement_root,
         participants,
         threshold_verification: ThresholdVerificationBinding {
             threshold_share_verification_key_root,
             threshold_share_verification_key_hash,
         },
+        compact_aggregate_threshold_commitment_set,
+    })
+}
+
+fn read_compact_aggregate_threshold_commitment_set_binding(
+    aggregate_set: &Value,
+    setup_public_matrix_seed_hash: &str,
+    participants: &[ParticipantBinding],
+) -> CanonicalResult<CompactAggregateThresholdCommitmentSetBinding> {
+    verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
+        "aggregateThresholdCommitmentSet": aggregate_set,
+    }))?;
+    let aggregate_threshold_commitment_root =
+        hash_at_path(aggregate_set, &["aggregateThresholdCommitmentRoot"])?.to_string();
+    compare_hash_field(
+        aggregate_set,
+        "publicMatrixSeedHash",
+        setup_public_matrix_seed_hash,
+        "compact aggregate threshold commitment set public matrix seed hash",
+    )?;
+    let participant_count = usize_at_path(aggregate_set, &["participantCount"])?;
+    if participant_count != participants.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "compact aggregate threshold commitment set participant count does not match the setup participants",
+        ));
+    }
+    let rns_limb_count = usize_at_path(aggregate_set, &["rnsLimbCount"])?;
+    if rns_limb_count > DATA_PRIMES.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "compact aggregate threshold commitment set has more limbs than the canonical data basis",
+        ));
+    }
+    let ring_degree = usize_at_path(aggregate_set, &["ringDegree"])?;
+    if ring_degree != POLYNOMIAL_DEGREE {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "compact aggregate threshold commitment set ring degree does not match the setup profile",
+        ));
+    }
+
+    let records = array_at_path(aggregate_set, &["recipientRecords"])?;
+    let mut recipient_records = Vec::with_capacity(participants.len());
+    for (recipient_position, participant) in participants.iter().enumerate() {
+        let mut limb_records = Vec::with_capacity(rns_limb_count);
+        for (rns_limb_index, expected_rns_prime) in
+            DATA_PRIMES.iter().copied().enumerate().take(rns_limb_count)
+        {
+            let record_index = recipient_position
+                .checked_mul(rns_limb_count)
+                .and_then(|base| base.checked_add(rns_limb_index))
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact aggregate threshold commitment record index overflowed",
+                    )
+                })?;
+            let record = records.get(record_index).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact aggregate threshold commitment set is missing a recipient limb record",
+                )
+            })?;
+            compare_string_field(
+                record,
+                "recipientIdentity",
+                &participant.trustee_identity,
+                "compact aggregate threshold commitment recipient identity",
+            )?;
+            compare_unsigned_field(
+                record,
+                "recipientRosterPosition",
+                participant.roster_position as u64,
+                "compact aggregate threshold commitment recipient roster position",
+            )?;
+            compare_unsigned_field(
+                record,
+                "recipientTrusteePoint",
+                participant.interpolation_point,
+                "compact aggregate threshold commitment recipient trustee point",
+            )?;
+            compare_unsigned_field(
+                record,
+                "rnsLimbIndex",
+                rns_limb_index as u64,
+                "compact aggregate threshold commitment RNS limb index",
+            )?;
+            let rns_prime = unsigned_at_path(record, &["rnsPrime"])?;
+            if rns_prime != expected_rns_prime {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::ProfileComponentMismatch,
+                    "compact aggregate threshold commitment RNS prime does not match the canonical data basis",
+                ));
+            }
+            limb_records.push(CompactAggregateThresholdCommitmentRecordBinding {
+                rns_prime,
+                aggregate_commitment_root: hash_at_path(record, &["aggregateCommitmentRoot"])?
+                    .to_string(),
+                aggregate_commitment: value_at_path(record, &["commitment"])?.clone(),
+            });
+        }
+        recipient_records.push(limb_records);
+    }
+
+    Ok(CompactAggregateThresholdCommitmentSetBinding {
+        aggregate_threshold_commitment_root,
+        rns_limb_count,
+        recipient_records,
     })
 }
 

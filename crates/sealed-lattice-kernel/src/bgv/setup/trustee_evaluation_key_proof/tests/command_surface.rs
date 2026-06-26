@@ -222,10 +222,6 @@ fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate with nonce");
-    assert_eq!(
-        generated["proofRandomness"]["binding"],
-        "seed and nonce are bound to statement hash, proof family, trustee identity, roster position, and setup epoch before proof masking"
-    );
 
     let mut changed_nonce_request = generate_request.clone();
     changed_nonce_request["proofRandomnessNonceHex"] = serde_json::json!("11".repeat(64));
@@ -242,6 +238,14 @@ fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
     assert!(
         super::generate_trustee_evaluation_key_proof_from_request(&short_seed_request).is_err(),
         "short proof randomness seed material must reject"
+    );
+
+    let mut uppercase_seed_request = generate_request.clone();
+    uppercase_seed_request["proofRandomnessSeedHex"] =
+        serde_json::json!(PROOF_RANDOMNESS_SEED.to_ascii_uppercase());
+    assert!(
+        super::generate_trustee_evaluation_key_proof_from_request(&uppercase_seed_request).is_err(),
+        "uppercase proof randomness seed material must reject"
     );
 
     let mut missing_nonce_request = generate_request;

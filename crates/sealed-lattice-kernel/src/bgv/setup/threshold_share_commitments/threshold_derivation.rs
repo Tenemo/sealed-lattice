@@ -12,7 +12,6 @@ pub(super) fn threshold_share_commitment_set(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     ring_degree: usize,
-    ring_degree_status: &str,
     roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
@@ -29,7 +28,6 @@ pub(super) fn threshold_share_commitment_set(
             &recipient_identity,
             recipient_roster_position,
             ring_degree,
-            ring_degree_status,
             roster,
             source_trustee_bindings,
             coefficient_commitments,
@@ -48,7 +46,6 @@ pub(super) fn threshold_share_commitment_set(
         "thresholdDegree": roster.decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "recipientRecords": recipient_records,
     });
     copy_context_fields(&mut commitment_set, setup_context)?;
@@ -80,7 +77,6 @@ fn threshold_share_recipient_record(
     recipient_identity: &str,
     recipient_roster_position: u64,
     ring_degree: usize,
-    ring_degree_status: &str,
     roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
     coefficient_commitments: &BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>,
@@ -110,7 +106,6 @@ fn threshold_share_recipient_record(
             recipient_roster_position,
             recipient_roster_position_usize,
             roster.decryption_threshold as usize,
-            ring_degree_status,
             &threshold_limb,
         )?);
     }
@@ -126,7 +121,6 @@ fn threshold_share_recipient_record(
         "recipientRosterPosition": recipient_roster_position,
         "trusteePoint": trustee_point,
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "limbCommitments": limb_commitments,
     });
     copy_context_fields(&mut recipient_record, setup_context)?;
@@ -218,7 +212,6 @@ pub(super) fn threshold_limb_commitment_value(
     recipient_roster_position: u64,
     recipient_roster_position_usize: usize,
     decryption_threshold: usize,
-    ring_degree_status: &str,
     threshold_limb: &ThresholdLimbCommitment,
 ) -> CanonicalResult<Value> {
     let mut value = threshold_limb_commitment_root_payload(
@@ -230,7 +223,6 @@ pub(super) fn threshold_limb_commitment_value(
         decryption_threshold,
         threshold_limb,
     )?;
-    value["ringDegreeStatus"] = json!(ring_degree_status);
     value["thresholdShareCommitmentRoot"] = json!(threshold_limb.threshold_share_commitment_root);
 
     Ok(value)
@@ -261,11 +253,6 @@ pub(super) fn threshold_limb_commitment_root_payload(
         "rnsLimbIndex": threshold_limb.rns_limb_index,
         "rnsPrime": threshold_limb.rns_prime,
         "ringDegree": threshold_limb.commitment.ring_degree,
-        "ringDegreeStatus": if threshold_limb.commitment.ring_degree == POLYNOMIAL_DEGREE {
-            "profile-ring"
-        } else {
-            "development-reduced-ring"
-        },
         "shamirCoefficientScalarsDecimal": shamir_coefficient_scalars(
             trustee_point,
             decryption_threshold,
@@ -324,7 +311,6 @@ pub(super) fn transported_vss_material_set_value(
     setup_context: &Value,
     public_matrix_seed_hash: &str,
     ring_degree: usize,
-    ring_degree_status: &str,
     roster: &AcceptedRosterParameters,
     material_record_count: usize,
     vss_coefficient_commitment_root: &str,
@@ -348,7 +334,6 @@ pub(super) fn transported_vss_material_set_value(
         "thresholdDegree": roster.decryption_threshold,
         "rnsLimbCount": DATA_PRIMES.len(),
         "ringDegree": ring_degree,
-        "ringDegreeStatus": ring_degree_status,
         "materialRecordCount": material_record_count,
         "transport": {
             "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,

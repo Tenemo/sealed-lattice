@@ -271,14 +271,6 @@ const setupKeyCorrectnessCertificateBody = (
         objectVersion: 1,
         setupProfileId,
         ...contextFieldsForCertificate(input.setupContext),
-        setupProofProfileBinding:
-            'fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate',
-        keyCorrectnessScope:
-            'collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records',
-        keyCorrectnessTheorem: {
-            activeMaliciousPrototypeBoundary:
-                'malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading',
-        },
         collectivePublicKey: {
             collectivePublicKeyRoot,
             sourceRoots: {

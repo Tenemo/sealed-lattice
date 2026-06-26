@@ -130,20 +130,26 @@ pub(super) fn validate_setup_package_internal_bindings(
     )?;
     compare_string_at_path(
         setup_package,
-        &["targetDecryptionStatus", "targetDecryptionProfileId"],
+        &[
+            "targetDecryptionProfileBinding",
+            "targetDecryptionProfileId",
+        ],
         TARGET_DECRYPTION_PROFILE_ID,
         "target decryption profile id",
     )?;
     compare_hash_at_path(
         setup_package,
-        &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+        &[
+            "targetDecryptionProfileBinding",
+            "targetDecryptionProfileHash",
+        ],
         &target_decryption_profile_hash,
         "target decryption profile hash",
     )?;
     compare_hash_at_path(
         setup_package,
         &[
-            "targetDecryptionStatus",
+            "targetDecryptionProfileBinding",
             "targetDecryptionProfileBindingHash",
         ],
         &target_decryption_profile_binding_hash,

@@ -203,7 +203,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "evaluationKeys": evaluation_keys,
         "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
-        "targetDecryptionStatus": {
+        "targetDecryptionProfileBinding": {
             "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
             "targetDecryptionProfileHash": target_decryption_profile_hash,
             "targetDecryptionProfileBindingHash": target_decryption_profile_binding_hash,

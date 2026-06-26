@@ -6,8 +6,12 @@ use self::evaluation_keys::{
 };
 use super::*;
 use crate::bgv::evaluator::records::target_layout_hash;
+use crate::bgv::evaluator::top_k::{
+    CANONICAL_TARGET_CIPHERTEXT_LEVEL, canonical_target_basis_hash,
+    canonical_target_basis_modulus_bits, canonical_target_basis_primes,
+    canonical_target_basis_value,
+};
 use crate::bgv::profile::SPECIAL_PRIME;
-use num_bigint::BigUint;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn setup_certificates(
@@ -28,6 +32,10 @@ pub(super) fn setup_certificates(
 ) -> CanonicalResult<Value> {
     let q_data_bits = data_basis_modulus_bits();
     let q_extended_utility_bits = extended_basis_modulus_bits();
+    let q_target_bits = canonical_target_basis_modulus_bits();
+    let canonical_target_basis = canonical_target_basis_value()?;
+    let canonical_target_basis_hash = canonical_target_basis_hash()?;
+    let target_primes = canonical_target_basis_primes();
     let rotation_key_roots = evaluation_keys["rotationKeyRoots"]
         .as_array()
         .expect("rotation key roots use array");
@@ -69,7 +77,12 @@ pub(super) fn setup_certificates(
             DATA_PRIMES.iter().copied().chain([SPECIAL_PRIME]),
         ),
         "qpPublicBits": null,
-        "qTargetBits": null,
+        "qTargetBits": q_target_bits,
+        "qTargetProductDecimal": modulus_product_decimal(target_primes.iter().copied()),
+        "qTargetPrimeCount": target_primes.len(),
+        "targetCiphertextLevel": CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        "targetBasisHash": canonical_target_basis_hash,
+        "canonicalTargetBasis": canonical_target_basis,
         "publicEvaluationKeyBasis": BgvBasisKind::Data.basis_id(),
         "collectiveSecretDistributionCertificateHash": collective_secret_distribution_certificate_hash,
         "errorDistributionCertificateHash": error_distribution_certificate_hash,
@@ -103,15 +116,6 @@ pub(super) fn setup_certificates(
         "evaluationKeyStreamingCommitment": evaluation_key_streaming_commitment,
         "developmentEncryptionFixtureHash": development_encryption_fixture["fixtureHash"],
     }))
-}
-
-fn modulus_product_decimal(moduli: impl IntoIterator<Item = u64>) -> String {
-    let mut product = BigUint::from(1_u8);
-    for modulus in moduli {
-        product *= BigUint::from(modulus);
-    }
-
-    product.to_str_radix(10)
 }
 
 pub(super) fn collective_secret_distribution_certificate(
@@ -236,12 +240,15 @@ pub(super) fn target_threshold_decryptability_certificate_from_setup_package(
         value_at_path(setup_package, &["thresholdVerificationMaterial"])?,
         string_at_path(
             setup_package,
-            &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+            &[
+                "targetDecryptionProfileBinding",
+                "targetDecryptionProfileHash",
+            ],
         )?,
         string_at_path(
             setup_package,
             &[
-                "targetDecryptionStatus",
+                "targetDecryptionProfileBinding",
                 "targetDecryptionProfileBindingHash",
             ],
         )?,
@@ -292,6 +299,18 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "encryptedBallotAggregateLayoutHash": encrypted_ballot_aggregate_layout_hash()?,
         "directComparisonProfileHash": direct_comparison_profile_hash()?,
     });
+    let target_primes = canonical_target_basis_primes();
+    let target_ciphertext_profile = json!({
+        "plaintextModulus": PLAINTEXT_MODULUS,
+        "polynomialDegree": POLYNOMIAL_DEGREE,
+        "basisId": BgvBasisKind::Data.basis_id(),
+        "targetLevel": CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        "targetPrimeCount": target_primes.len(),
+        "targetPrimeProductDecimal": modulus_product_decimal(target_primes.iter().copied()),
+        "targetPrimeCeilLog2Product": canonical_target_basis_modulus_bits(),
+        "targetBasisHash": canonical_target_basis_hash()?,
+        "canonicalTargetBasis": canonical_target_basis_value()?,
+    });
     let threshold_binding = json!({
         "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
         "targetDecryptionProfileHash": target_decryption_profile_hash,
@@ -320,6 +339,7 @@ pub(super) fn target_threshold_decryptability_certificate_for_setup_parts(
         "setupBinding": setup_binding,
         "keyBinding": key_binding,
         "ciphertextProfile": ciphertext_profile,
+        "targetCiphertextProfile": target_ciphertext_profile,
         "thresholdBinding": threshold_binding,
     }))
 }

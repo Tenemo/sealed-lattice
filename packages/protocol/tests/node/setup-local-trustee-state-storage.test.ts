@@ -53,6 +53,27 @@ type CompactTargetProofWitnessFixture = NonNullable<
     GeneratedLocalStateFixtureInput['compactVssTargetProofWitness']
 >;
 
+const shareValuesToLittleEndian48Hex = (
+    values: readonly number[],
+    rnsPrime: number,
+): string => {
+    const bytes = new Uint8Array(values.length * 6);
+    values.forEach((value, valueIndex) => {
+        if (!Number.isSafeInteger(value) || value < 0 || value >= rnsPrime) {
+            throw new TypeError('fixture share value must be below rnsPrime.');
+        }
+        let remainingValue = BigInt(value);
+        for (let byteIndex = 0; byteIndex < 6; byteIndex += 1) {
+            bytes[valueIndex * 6 + byteIndex] = Number(remainingValue & 0xffn);
+            remainingValue >>= 8n;
+        }
+    });
+
+    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
+        '',
+    );
+};
+
 const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
     const sealedAggregateThresholdShare =
         await encryptLocalTrusteeSetupSealedMaterial({
@@ -86,7 +107,6 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
                     storageInputBase.thresholdShareCommitmentRecipientRoot,
                 aggregateThresholdShareRoot:
                     sealedAggregateThresholdShare.materialRoot,
-                witnessOwnership: 'recipient-owned-restorable-local-state',
             },
             setupContext,
             trusteeIdentity: storageInputBase.trusteeIdentity,
@@ -128,6 +148,7 @@ const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
 
 const generatedLocalStateInput = (
     compactVssRecipientShareOpeningCredential?: unknown,
+    deliveredShareValues: readonly number[] = [7, 11, 13, 17],
 ): GeneratedLocalStateFixtureInput => {
     const trusteeIdentity = 'trustee-0';
     const trusteeRosterPosition = 0;
@@ -154,7 +175,10 @@ const generatedLocalStateInput = (
                 objectVersion: 1,
                 rnsLimbIndex: 0,
                 rnsPrime: 65_537,
-                shareValues: [7, 11, 13, 17],
+                shareValuesLittleEndian48Hex: shareValuesToLittleEndian48Hex(
+                    deliveredShareValues,
+                    65_537,
+                ),
                 ...(compactVssRecipientShareOpeningCredential === undefined
                     ? {}
                     : { compactVssRecipientShareOpeningCredential }),
@@ -444,7 +468,10 @@ describe('local trustee setup state storage', () => {
         const compactState =
             await createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
                 ...generatedInput,
-                compactVssTargetProofWitness: compactWitness,
+                compactVssTargetProofWitness: {
+                    ...compactWitness,
+                    targetDecryptionRnsLimbCount: 1,
+                },
             });
 
         expect(
@@ -485,7 +512,6 @@ describe('local trustee setup state storage', () => {
                     .thresholdShareCommitmentRecipientRoot,
             aggregateThresholdShareRoot:
                 compactState.localStateCommitment.aggregateThresholdShareRoot,
-            witnessOwnership: 'recipient-owned-restorable-local-state',
             compactAggregateOpening: {
                 objectType: 'LocalTrusteeCompactVssAggregateOpeningWitness',
                 objectVersion: 1,
@@ -508,11 +534,29 @@ describe('local trustee setup state storage', () => {
                             generatedInput.trusteeRosterPosition,
                         rnsLimbIndex: 0,
                         rnsPrime: 65_537,
-                        aggregateShareValues: [7, 11, 13, 17],
                     }),
                 ],
             },
         });
+        const restoredCompactWitnessMaterial =
+            restoredCompactWitness.materialPlaintext as {
+                readonly compactAggregateOpening: {
+                    readonly compactAggregateOpeningCredentials: readonly unknown[];
+                };
+            };
+        expect(
+            restoredCompactWitnessMaterial.compactAggregateOpening
+                .compactAggregateOpeningCredentials,
+        ).toHaveLength(1);
+        await expect(
+            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+                ...generatedInput,
+                compactVssTargetProofWitness: {
+                    ...compactWitness,
+                    targetDecryptionRnsLimbCount: 2,
+                },
+            }),
+        ).rejects.toThrow(/targetDecryptionRnsLimbCount/u);
         await expect(
             decryptLocalTrusteeSetupSealedMaterial({
                 sealedMaterial:
@@ -547,7 +591,6 @@ describe('local trustee setup state storage', () => {
                             ...firstCredential,
                             aggregateShareValues: [8, 11, 13, 17],
                             aggregateCommitmentMessageValues: [8, 11, 13, 17],
-                            aggregateShareCarryValues: [0, 0, 0, 0],
                         },
                     ],
                 },
@@ -628,17 +671,17 @@ describe('local trustee setup state storage', () => {
 
         await expect(
             createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
-                ...generatedLocalStateInput({
-                    ...firstRecipientCredential,
-                    shareValues: [8, 11, 13, 17],
-                }),
+                ...generatedLocalStateInput(
+                    firstRecipientCredential,
+                    [8, 11, 13, 17],
+                ),
                 compactVssTargetProofWitness: {
                     aggregateThresholdCommitmentSet:
                         compactWitness.aggregateThresholdCommitmentSet,
                     shareLinkageStatement: compactWitness.shareLinkageStatement,
                 },
             }),
-        ).rejects.toThrow(/delivered private VSS share values/u);
+        ).rejects.toThrow(/recipient share opening credential does not open/u);
     });
 
     it('rejects public compact linkage material without recipient-owned openings', async () => {

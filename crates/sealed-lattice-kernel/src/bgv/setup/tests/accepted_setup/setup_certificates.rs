@@ -376,7 +376,7 @@ fn he_security_certificate_records_direct_evaluator_parameter_margins() {
     // The forward-looking target-decryption profile identifier stays bound; the
     // self-attested readiness/coverage flags around it were dropped.
     assert!(
-        certificate["targetDecryptionStatus"]["targetDecryptionProfileId"]
+        certificate["targetDecryptionProfileBinding"]["targetDecryptionProfileId"]
             .as_str()
             .is_some_and(|profile_id| !profile_id.is_empty())
     );

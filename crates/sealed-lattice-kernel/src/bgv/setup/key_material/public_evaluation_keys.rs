@@ -50,9 +50,6 @@ pub(in crate::bgv::setup) fn evaluation_keys(
         "relinearizationKeyRoot": material_binding.relinearization_key_root,
         "rotationKeyRoots": material_binding.rotation_key_roots,
         "keySwitchKeyRoot": material_binding.key_switch_key_root,
-        "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
-        "finalRotSetClosure": "encrypted-aggregate-evaluator-closure",
-        "regenerateIfRotSetChanges": true,
     });
     let evaluation_key_root = derive_protocol_hash("EvalKeyRoot", &evaluation_key_record)?;
 

@@ -26,8 +26,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
     let max_threshold_lifted_coefficient =
         u128::from(max_source_message_modulus - 1) * threshold_scalar_sum;
     let commitment_modulus_product_bits = ceil_log2_fixture(&commitment_modulus_product);
-    let fresh_message_no_wrap =
-        BigUint::from(max_source_message_modulus - 1) < commitment_modulus_product.clone();
     let certificate = serde_json::json!({
         "objectType": "SetupCommitmentSecurityCertificate",
         "objectVersion": 1,
@@ -49,22 +47,18 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "randomnessWidth": 5,
             "commitmentRowCount": 3,
             "publicMatrixSource": "full-roster-common-randomness-XOF-unbiased-residue-stream",
-            "matrixHashBound": true,
         },
         "freshOpeningDistribution": {
             "distribution": "coefficientwise-centered-ternary",
             "coefficientSet": [-1, 0, 1],
             "infinityNormBound": 1,
             "randomnessWidth": 5,
-            "rawOpeningExported": false,
-            "perCoefficientOpeningExported": false,
         },
         "fullWidthMessageBound": {
             "messageSource": "per-RNS-prime-Shamir-coefficient-ring-element",
             "maxSourceMessageModulus": max_source_message_modulus,
             "maxFreshMessageCoefficientDecimal": (max_source_message_modulus - 1).to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-            "freshMessageNoWrap": fresh_message_no_wrap,
         },
         "aggregateOpeningBounds": {
             "shamirCoefficientCount": decryption_threshold,
@@ -77,30 +71,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
             "thresholdShareOpeningInfinityBound": threshold_scalar_sum_u64,
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-            "recipientAndThresholdNoWrap": true,
-        },
-        "multiOpeningLeakage": {
-            "recipientAggregateOpeningsArePublic": false,
-            "recipientAggregateOpeningsAreMailboxPlaintext": false,
-            "maxCorruptRecipientsBeforeThreshold": decryption_threshold - 1,
-            "shamirPolynomialDegree": decryption_threshold - 1,
-            "rawCoefficientOpeningsExported": false,
-            "perCoefficientRandomnessExported": false,
-            "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
-        },
-        "bindingAssumption": {
-            "assumption": "Module-SIS",
-            "boundTarget": "two-valid-openings-to-one-commitment-yield-short-module-SIS-solution",
-            "moduleRank": 2,
-            "randomnessWidth": 5,
-            "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
-            "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
-        },
-        "hidingAssumption": {
-            "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
-            "openingDistribution": "coefficientwise-centered-ternary",
-            "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
-            "lowEntropySecretHiding": true,
         },
         "estimatorRows": [
             {
@@ -111,7 +81,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
                 "moduleRank": 2,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -121,7 +90,6 @@ pub(super) fn setup_commitment_security_certificate_fixture(
                 "moduleRank": 2,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
     });

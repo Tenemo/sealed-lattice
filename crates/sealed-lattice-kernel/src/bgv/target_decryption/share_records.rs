@@ -6,13 +6,13 @@ pub(super) fn read_partial_decryption_share(
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
-) -> CanonicalResult<PartialDecryptionShare> {
+) -> CanonicalResult<()> {
     if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare"
         || unsigned_at_path(share, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "target recombination accepts only BgvTargetDecryptionShare records",
+            "target decryption accepts only BgvTargetDecryptionShare records",
         ));
     }
     let trustee_identity = string_at_path(share, &["trusteeIdentity"])?;
@@ -74,23 +74,14 @@ pub(super) fn read_partial_decryption_share(
         "target decryption smudging input report hash",
     )?;
 
-    Ok(PartialDecryptionShare {
-        record: share.clone(),
-        target_id_partials: read_partial_limb_set(
-            payload,
-            "targetId",
-            target_ciphertexts.target_id.level,
-        )?,
-        target_order_partials: read_partial_limb_set(
-            payload,
-            "targetOrder",
-            target_ciphertexts.target_order.level,
-        )?,
-        smudging_input_report_hash,
-        roster_position: participant.roster_position,
-        board_position: participant.board_position,
-        interpolation_point: participant.interpolation_point,
-    })
+    read_partial_limb_set(payload, "targetId", target_ciphertexts.target_id.level)?;
+    read_partial_limb_set(
+        payload,
+        "targetOrder",
+        target_ciphertexts.target_order.level,
+    )?;
+
+    Ok(())
 }
 
 pub(super) fn compare_share_record_fields(
@@ -381,12 +372,6 @@ fn validate_target_decryption_smudging_input_report(
         TARGET_DECRYPTION_SMUDGING_PROFILE_ID,
         "target decryption smudging input report profile",
     )?;
-    compare_string_field(
-        report,
-        "developmentScope",
-        TARGET_DECRYPTION_SMUDGING_DEVELOPMENT_SCOPE,
-        "target decryption smudging input report development scope",
-    )?;
     for (field_name, expected) in [
         (
             "setupPackageHash",
@@ -474,24 +459,6 @@ fn validate_target_decryption_smudging_input_report(
             "target decryption smudging input report coefficient bound does not match its target decryption binding",
         ));
     }
-    for (field_name, expected) in [
-        (
-            "zeroSharingRule",
-            TARGET_DECRYPTION_SMUDGING_ZERO_SHARING_RULE,
-        ),
-        (
-            "correctnessRule",
-            TARGET_DECRYPTION_SMUDGING_CORRECTNESS_RULE,
-        ),
-        ("proofBoundary", TARGET_DECRYPTION_SMUDGING_PROOF_BOUNDARY),
-    ] {
-        compare_string_field(
-            report,
-            field_name,
-            expected,
-            "target decryption smudging input report rule",
-        )?;
-    }
     let role_reports = array_at_path(report, &["roleReports"])?;
     if role_reports.len() != 2 {
         return Err(CanonicalError::new(
@@ -550,7 +517,6 @@ fn validate_target_decryption_smudging_role_report(
             DATA_PRIMES[rns_limb_index],
             "target decryption smudging limb report prime",
         )?;
-        hash_at_path(limb_report, &["noiseShareHash512"])?;
         let maximum_absolute_noise_share =
             unsigned_at_path(limb_report, &["maximumAbsoluteNoiseShare"])?;
         if maximum_absolute_noise_share > maximum_reported_noise_share {

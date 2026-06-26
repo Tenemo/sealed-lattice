@@ -22,7 +22,7 @@ const DEVELOPMENT_TARGET_DECRYPTION_TRUSTEE_IDENTITY: &str = "trustee-1";
 pub(crate) fn generate_bgv_target_decryption_fixture_from_request(
     _request: &Value,
 ) -> CanonicalResult<Value> {
-    let setup_package = development_setup_package()?;
+    let mut setup_package = development_setup_package()?;
     let setup_binding = read_setup_binding(&setup_package)?;
     let evaluator_key = development_evaluator_key_from_passive_setup_package(
         &setup_package,
@@ -39,31 +39,63 @@ pub(crate) fn generate_bgv_target_decryption_fixture_from_request(
         &target_ciphertext_binding,
         &target_accepted,
     )?;
-    let participant = setup_binding
+    let compact_aggregate_threshold_commitment_set =
+        development_compact_aggregate_threshold_commitment_set(
+            &setup_binding,
+            &target_share_profile,
+            &evaluator_key,
+        )?;
+    let aggregate_threshold_commitment_root = hash_at_path(
+        &compact_aggregate_threshold_commitment_set,
+        &["aggregateThresholdCommitmentRoot"],
+    )?
+    .to_string();
+    setup_package["compactVssAggregateThresholdCommitmentSet"] =
+        compact_aggregate_threshold_commitment_set;
+    setup_package["compactVssShareLinkageStatement"] = json!({
+        "objectType": "CompactVssShareLinkageStatement",
+        "objectVersion": 1,
+        "statementRoot": "4".repeat(128),
+    });
+    let compact_setup_binding = read_setup_binding(&setup_package)?;
+    let quorum_local_target_share_witnesses = compact_setup_binding
         .participants
         .iter()
-        .find(|candidate| {
-            candidate.trustee_identity == DEVELOPMENT_TARGET_DECRYPTION_TRUSTEE_IDENTITY
+        .take(target_share_profile.minimum_shares_for_interpolation)
+        .map(|quorum_participant| {
+            Ok(json!({
+                "trusteeIdentity": quorum_participant.trustee_identity.as_str(),
+                "localTargetShareWitness": development_local_target_share_witness(
+                    &compact_setup_binding,
+                    &target_accepted,
+                    &target_ciphertext_pair,
+                    &target_share_profile,
+                    quorum_participant,
+                    &evaluator_key,
+                    &aggregate_threshold_commitment_root,
+                )?,
+            }))
         })
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "development target-decryption fixture trustee is missing from setup",
-            )
-        })?;
-    let local_target_share_witness = development_local_target_share_witness(
-        &setup_binding,
-        &target_accepted,
-        &target_ciphertext_pair,
-        &target_share_profile,
-        participant,
-        &evaluator_key,
-    )?;
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    let mut local_target_share_witness = None;
+    for quorum_witness in &quorum_local_target_share_witnesses {
+        if string_at_path(quorum_witness, &["trusteeIdentity"])?
+            == DEVELOPMENT_TARGET_DECRYPTION_TRUSTEE_IDENTITY
+        {
+            local_target_share_witness =
+                Some(value_at_path(quorum_witness, &["localTargetShareWitness"])?.clone());
+        }
+    }
+    let local_target_share_witness = local_target_share_witness.ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "development target-decryption fixture trustee is missing from quorum witnesses",
+        )
+    })?;
 
     Ok(json!({
         "objectType": "BgvTargetDecryptionDevelopmentFixture",
         "objectVersion": 1,
-        "fixtureScope": "development-target-decryption-command-parity",
         "setupPackage": setup_package,
         "setupPrivateWitness": {
             "setupSeed": DEVELOPMENT_TARGET_DECRYPTION_SETUP_SEED,
@@ -74,7 +106,89 @@ pub(crate) fn generate_bgv_target_decryption_fixture_from_request(
         "targetShareProfile": target_share_profile_record,
         "trusteeIdentity": DEVELOPMENT_TARGET_DECRYPTION_TRUSTEE_IDENTITY,
         "localTargetShareWitness": local_target_share_witness,
+        "quorumLocalTargetShareWitnesses": quorum_local_target_share_witnesses,
     }))
+}
+
+fn development_compact_aggregate_threshold_commitment_set(
+    setup_binding: &SetupBinding,
+    target_share_profile: &TargetShareProfile,
+    evaluator_key: &DevelopmentBgvKey,
+) -> CanonicalResult<Value> {
+    let rns_limb_count = CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1;
+    let mut recipient_records =
+        Vec::with_capacity(setup_binding.participants.len() * rns_limb_count);
+    for participant in &setup_binding.participants {
+        let share_by_limb = derive_threshold_secret_share_by_limb(
+            evaluator_key,
+            &setup_binding.setup_package_hash,
+            &target_share_profile.hash,
+            DEVELOPMENT_TARGET_DECRYPTION_SETUP_SEED,
+            participant.interpolation_point,
+            target_share_profile.minimum_shares_for_interpolation,
+            CANONICAL_TARGET_CIPHERTEXT_LEVEL,
+        )?;
+        for (rns_limb_index, share_values) in share_by_limb.iter().enumerate() {
+            let rns_prime = DATA_PRIMES[rns_limb_index];
+            let aggregate_commitment_message_values =
+                development_compact_aggregate_opening_values(share_values, rns_prime);
+            let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
+            let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
+                rns_prime,
+                setup_binding.participants.len(),
+            )?;
+            let computation =
+                compute_compact_aggregate_opening(CompactAggregateOpeningRootsInput {
+                    setup_binding,
+                    participant,
+                    setup_epoch: DEVELOPMENT_TARGET_DECRYPTION_SETUP_EPOCH,
+                    public_matrix_seed_hash: &setup_binding.public_matrix_seed_hash,
+                    rns_limb_index,
+                    rns_prime,
+                    aggregate_commitment_message_values: &aggregate_commitment_message_values,
+                    message_coefficient_bound,
+                    aggregate_randomness_by_column: &aggregate_randomness_by_column,
+                })?;
+            let source_share_commitment_roots = (0..setup_binding.participants.len())
+                .map(|_| Value::String("9".repeat(128)))
+                .collect::<Vec<_>>();
+            recipient_records.push(json!({
+                "objectType": "CompactVssAggregateThresholdCommitment",
+                "objectVersion": 1,
+                "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+                "recipientIdentity": participant.trustee_identity.as_str(),
+                "recipientRosterPosition": participant.roster_position,
+                "recipientTrusteePoint": participant.interpolation_point,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "aggregateCommitmentRoot": computation.commitment_root,
+                "commitment": computation.commitment,
+                "sourceShareCommitmentRoots": source_share_commitment_roots,
+            }));
+        }
+    }
+
+    let mut set = json!({
+        "objectType": "CompactVssAggregateThresholdCommitmentSet",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+        "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
+        "participantCount": setup_binding.participants.len(),
+        "rnsLimbCount": rns_limb_count,
+        "ringDegree": POLYNOMIAL_DEGREE,
+        "recipientRecords": recipient_records,
+    });
+    set["aggregateThresholdCommitmentRoot"] =
+        json!(derive_protocol_hash("ThresholdShareCommitmentRoot", &set)?);
+
+    Ok(set)
+}
+
+fn development_compact_aggregate_opening_values(share_values: &[u64], rns_prime: u64) -> Vec<u64> {
+    let mut aggregate_commitment_message_values = share_values.to_vec();
+    aggregate_commitment_message_values[0] += rns_prime;
+    aggregate_commitment_message_values
 }
 
 fn development_setup_package() -> CanonicalResult<Value> {
@@ -235,7 +349,7 @@ fn development_target_accepted_record(
         )?,
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,
-        "targetDecryptionProfileHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileHash"],
+        "targetDecryptionProfileHash": setup_package["targetDecryptionProfileBinding"]["targetDecryptionProfileHash"],
         "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
         "targetBasisHash": target_basis_hash,
         "boardSequence": 0,
@@ -255,6 +369,7 @@ fn development_local_target_share_witness(
     target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
     evaluator_key: &DevelopmentBgvKey,
+    aggregate_threshold_commitment_root: &str,
 ) -> CanonicalResult<Value> {
     let share_by_limb = derive_threshold_secret_share_by_limb(
         evaluator_key,
@@ -266,18 +381,23 @@ fn development_local_target_share_witness(
         CANONICAL_TARGET_CIPHERTEXT_LEVEL,
     )?;
     let public_matrix_seed_hash = setup_binding.public_matrix_seed_hash.clone();
-    let share_linkage_statement_root = "4".repeat(128);
-    let aggregate_threshold_commitment_root = "5".repeat(128);
+    let share_linkage_statement_root = setup_binding
+        .compact_share_linkage_statement_root
+        .as_ref()
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "development target-decryption fixture requires compact share-linkage statement",
+            )
+        })?;
     let compact_aggregate_opening_credentials = share_by_limb
         .iter()
         .enumerate()
         .map(|(rns_limb_index, share_values)| {
             let aggregate_randomness_by_column = vec![vec![0_i64; POLYNOMIAL_DEGREE]; 2];
             let rns_prime = DATA_PRIMES[rns_limb_index];
-            let mut aggregate_commitment_message_values = share_values.clone();
-            let mut aggregate_share_carry_values = vec![0_u64; POLYNOMIAL_DEGREE];
-            aggregate_commitment_message_values[0] += rns_prime;
-            aggregate_share_carry_values[0] = 1;
+            let aggregate_commitment_message_values =
+                development_compact_aggregate_opening_values(share_values, rns_prime);
             let message_coefficient_bound = compact_aggregate_message_coefficient_bound(
                 rns_prime,
                 setup_binding.participants.len(),
@@ -305,11 +425,11 @@ fn development_local_target_share_witness(
                 "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": aggregate_commitment_root,
                 "aggregateOpeningRoot": aggregate_opening_root,
-                "aggregateShareValues": share_values,
-                "aggregateCommitmentMessageValues": aggregate_commitment_message_values,
-                "aggregateShareCarryValues": aggregate_share_carry_values,
-                "aggregateRandomnessByColumn": aggregate_randomness_by_column,
-                "sourceShareOpeningRoots": [],
+                "aggregateCommitmentMessageValuesLeHex": coefficient_vector_le_hex(&aggregate_commitment_message_values),
+                "aggregateRandomnessByColumnSignedByteHex": aggregate_randomness_by_column
+                    .iter()
+                    .map(|column| signed_byte_vector_hex(column))
+                    .collect::<CanonicalResult<Vec<_>>>()?,
             }))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -333,7 +453,6 @@ fn development_local_target_share_witness(
         "thresholdShareCommitmentRecipientRoot": "1".repeat(128),
         "aggregateThresholdShareRoot": "2".repeat(128),
         "sourcePrivateEnvelopeReferences": [],
-        "witnessOwnership": TARGET_DECRYPTION_RESTORED_WITNESS_OWNERSHIP,
         "targetDecryptionSmudging": target_decryption_smudging_witness_value(
             setup_binding,
             target_accepted,
@@ -346,7 +465,6 @@ fn development_local_target_share_witness(
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,
             "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash()?,
             "shareLinkageStatementRoot": share_linkage_statement_root,

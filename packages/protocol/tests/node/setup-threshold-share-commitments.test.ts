@@ -223,7 +223,6 @@ describe('threshold-share commitment derivation', () => {
             recipientRosterPosition: 0,
             trusteePoint: 1,
             ringDegree,
-            ringDegreeStatus: 'development-reduced-ring',
         });
         expect(firstRecipientFirstLimb).toMatchObject({
             objectType: 'ThresholdShareCommitment',
@@ -231,7 +230,6 @@ describe('threshold-share commitment derivation', () => {
             rnsPrime: qSharePrimes[0],
             trusteePoint: 1,
             ringDegree,
-            ringDegreeStatus: 'development-reduced-ring',
             shamirCoefficientScalarsDecimal: ['1', '1'],
         });
         expect(

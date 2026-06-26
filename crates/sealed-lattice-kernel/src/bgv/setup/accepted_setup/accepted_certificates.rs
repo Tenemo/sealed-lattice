@@ -233,23 +233,18 @@ fn setup_commitment_security_certificate_value_for_roster(
             "randomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
             "commitmentRowCount": SETUP_COMMITMENT_ROW_COUNT,
             "publicMatrixSource": "full-roster-common-randomness-XOF-unbiased-residue-stream",
-            "matrixHashBound": true,
         },
         "freshOpeningDistribution": {
             "distribution": "coefficientwise-centered-ternary",
             "coefficientSet": [-1, 0, 1],
             "infinityNormBound": SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND,
             "randomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-            "rawOpeningExported": false,
-            "perCoefficientOpeningExported": false,
         },
         "fullWidthMessageBound": {
             "messageSource": "per-RNS-prime-Shamir-coefficient-ring-element",
             "maxSourceMessageModulus": max_source_message_modulus,
             "maxFreshMessageCoefficientDecimal": (max_source_message_modulus - 1).to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-            "freshMessageNoWrap": BigUint::from(max_source_message_modulus - 1)
-                < commitment_modulus_product,
         },
         "aggregateOpeningBounds": {
             "shamirCoefficientCount": roster.decryption_threshold,
@@ -262,30 +257,6 @@ fn setup_commitment_security_certificate_value_for_roster(
             "thresholdShareOpeningInfinityBound": threshold_scalar_sum_u64,
             "maxThresholdLiftedCoefficientDecimal": max_threshold_lifted_coefficient.to_string(),
             "commitmentModulusProductDecimal": commitment_modulus_product.to_string(),
-            "recipientAndThresholdNoWrap": true,
-        },
-        "multiOpeningLeakage": {
-            "recipientAggregateOpeningsArePublic": false,
-            "recipientAggregateOpeningsAreMailboxPlaintext": false,
-            "maxCorruptRecipientsBeforeThreshold": roster.decryption_threshold - 1,
-            "shamirPolynomialDegree": roster.decryption_threshold - 1,
-            "rawCoefficientOpeningsExported": false,
-            "perCoefficientRandomnessExported": false,
-            "thresholdBoundary": "recipient-aggregate-openings-and-carry-witnesses-are-private-proof-witnesses",
-        },
-        "bindingAssumption": {
-            "assumption": "Module-SIS",
-            "boundTarget": "two-valid-openings-to-one-commitment-yield-short-module-SIS-solution",
-            "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
-            "randomnessWidth": SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-            "commitmentModulusProductCeilBits": commitment_modulus_product_bits,
-            "extractedOpeningInfinityBound": threshold_scalar_sum_u64,
-        },
-        "hidingAssumption": {
-            "assumption": "Module-LWE with recipient-hidden proof-witness opening leakage boundary",
-            "openingDistribution": "coefficientwise-centered-ternary",
-            "publicMatrixDistribution": "hash-derived-uniform-residue-stream",
-            "lowEntropySecretHiding": true,
         },
         "estimatorRows": [
             {
@@ -296,7 +267,6 @@ fn setup_commitment_security_certificate_value_for_roster(
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "modulusCeilBits": commitment_modulus_product_bits,
                 "shortVectorInfinityBoundDecimal": threshold_scalar_sum.to_string(),
-                "accountingBasis": "accepted Module-SIS binding row under FPS25 commitment references and no-wrap threshold-opening bounds"
             },
             {
                 "rowId": "first-profile-module-lwe-hiding-row",
@@ -306,7 +276,6 @@ fn setup_commitment_security_certificate_value_for_roster(
                 "moduleRank": SETUP_COMMITMENT_MODULE_RANK,
                 "secretDistribution": "centered-ternary-opening",
                 "modulusCeilBits": commitment_modulus_product_bits,
-                "accountingBasis": "accepted Module-LWE hiding row under FPS25/ACC18 references and recipient-hidden opening leakage boundary"
             }
         ],
     }))
@@ -693,11 +662,6 @@ pub(in crate::bgv::setup) fn setup_key_correctness_certificate_value(
         "carryAwareVssShareRelationProfileHash": value_string(setup_context, "carryAwareVssShareRelationProfileHash")?,
         "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
-        "setupProofProfileBinding": "fixed-setup-proof-profile-bound-by-setup-proof-accounting-certificate",
-        "keyCorrectnessScope": "collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records",
-        "keyCorrectnessTheorem": {
-            "activeMaliciousPrototypeBoundary": "malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading",
-        },
         "collectivePublicKey": {
             "collectivePublicKeyRoot": collective_public_key_root,
             "sourceRoots": {
@@ -1189,7 +1153,7 @@ pub(in crate::bgv::setup) fn accepted_he_security_certificate_value_for_roster(
             largest_exposed_modulus_bits,
             extended_basis_bits,
         ),
-        "targetDecryptionStatus": {
+        "targetDecryptionProfileBinding": {
             "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID
         }
     }))
@@ -1474,15 +1438,6 @@ fn he_lattice_estimator_rows_value(
             }
         }
     })
-}
-
-fn modulus_product_decimal(moduli: impl IntoIterator<Item = u64>) -> String {
-    let mut product = BigUint::from(1_u8);
-    for modulus in moduli {
-        product *= BigUint::from(modulus);
-    }
-
-    product.to_str_radix(10)
 }
 
 fn he_security_certificate_refusal(

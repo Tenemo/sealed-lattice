@@ -7,7 +7,6 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     compactVssCommitmentBinaryFormat,
-    compactVssCommitmentDevelopmentScope,
     compactVssCommitmentProfileId,
     verifyCompactVssCoefficientCommitmentSet,
     type CompactVssCoefficientCommitmentSet,
@@ -44,14 +43,8 @@ export const sameSecretBoundProofFamilies = [
     'galois-key-share',
 ] as const;
 
-export const sameSecretGenericKeySwitchBindingPolicy =
-    'absent-unless-frozen-schedule-requires-proof-family';
-export const sameSecretTargetDecryptionBindingPolicy =
-    'later-target-share-must-bind-threshold-share-commitment';
 export const compactVssSameSecretBridgeRelation =
     'target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof';
-export const compactVssSameSecretBridgeProofBoundary =
-    'restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence';
 export const compactVssSameSecretBridgeProofFamily =
     'compact-same-secret-bridge';
 const compactVssSameSecretBridgeProofBytesHashDomain =
@@ -90,8 +83,6 @@ export type SameSecretConsistencyStatementRecord = Readonly<
         readonly constantCoefficientCommitmentRoots: readonly SameSecretConstantCoefficientCommitmentRoot[];
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly boundSecretDependentProofFamilies: typeof sameSecretBoundProofFamilies;
-        readonly genericKeySwitchBindingPolicy: typeof sameSecretGenericKeySwitchBindingPolicy;
-        readonly targetDecryptionBindingPolicy: typeof sameSecretTargetDecryptionBindingPolicy;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly sameSecretRelation: typeof sameSecretRelation;
         readonly sameSecretStatementRoot: ProtocolHash;
@@ -209,7 +200,6 @@ export type CompactVssSameSecretBridgeStatementRecord = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly compactCommitmentProfileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly ceremonyId: string;
@@ -235,7 +225,6 @@ export type CompactVssSameSecretBridgeStatementRecord = Readonly<
         readonly targetBasisLimbOrder: typeof compactVssSameSecretBridgeTargetBasisLimbOrder;
         readonly targetConstantCoefficientCommitmentRoots: readonly CompactVssSameSecretBridgeTargetConstantCommitmentRoot[];
         readonly relation: typeof compactVssSameSecretBridgeRelation;
-        readonly proofBoundary: typeof compactVssSameSecretBridgeProofBoundary;
         readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
     }
 >;
@@ -246,7 +235,6 @@ export type CompactVssSameSecretBridgeStatementSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly compactCommitmentProfileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly ceremonyId: string;
@@ -278,6 +266,11 @@ export type CompactVssSameSecretBridgeStatementSet = Readonly<
 export type CompactVssSameSecretBridgeProofRecordInput = Readonly<{
     readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
     readonly proofStatementHash: ProtocolHash;
+    readonly proofStatement: Readonly<
+        JsonRecord & {
+            readonly proofStatementHash: ProtocolHash;
+        }
+    >;
     readonly proofBytesHex: string;
 }>;
 
@@ -286,7 +279,6 @@ export type CompactVssSameSecretBridgeProofRecord = Readonly<
         readonly objectType: 'CompactVssSameSecretBridgeProofRecord';
         readonly objectVersion: 1;
         readonly proofFamily: typeof compactVssSameSecretBridgeProofFamily;
-        readonly proofBoundary: typeof compactVssSameSecretBridgeProofBoundary;
         readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
         readonly proofStatementHash: ProtocolHash;
         readonly proofByteLength: number;
@@ -302,10 +294,8 @@ export type CompactVssSameSecretBridgeProofMaterialSet = Readonly<
         readonly objectVersion: 1;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly compactCommitmentProfileId: typeof compactVssCommitmentProfileId;
-        readonly developmentScope: typeof compactVssCommitmentDevelopmentScope;
         readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof compactVssSameSecretBridgeProofFamily;
-        readonly proofBoundary: typeof compactVssSameSecretBridgeProofBoundary;
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -325,6 +315,11 @@ export type CompactVssSameSecretBridgeProofMaterialSet = Readonly<
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly compactSameSecretBridgeStatementSetRoot: ProtocolHash;
         readonly proofRecords: readonly CompactVssSameSecretBridgeProofRecord[];
+        readonly proofStatements: readonly Readonly<
+            JsonRecord & {
+                readonly proofStatementHash: ProtocolHash;
+            }
+        >[];
         readonly proofMaterialSetRoot: ProtocolHash;
     }
 >;
@@ -1098,8 +1093,6 @@ const sameSecretProofFamilyBindingPayload = (): JsonRecord => ({
     sameSecretRelation,
     anchorArgument: sameSecretAnchorArgument,
     boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-    genericKeySwitchBindingPolicy: sameSecretGenericKeySwitchBindingPolicy,
-    targetDecryptionBindingPolicy: sameSecretTargetDecryptionBindingPolicy,
 });
 
 const sameSecretProofFamilyBindingRoot = (): ProtocolHash =>
@@ -1140,8 +1133,6 @@ const createStatementRecord = (
         constantCoefficientCommitmentRoots: constantRoots,
         trusteeSecretCommitmentRoot,
         boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-        genericKeySwitchBindingPolicy: sameSecretGenericKeySwitchBindingPolicy,
-        targetDecryptionBindingPolicy: sameSecretTargetDecryptionBindingPolicy,
         sameSecretProofFamilyBindingRoot: proofFamilyBindingRoot,
         sameSecretRelation,
     } as const satisfies Omit<
@@ -1616,7 +1607,6 @@ export const createCompactVssSameSecretBridgeStatementSet = (
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 compactCommitmentProfileId: compactVssCommitmentProfileId,
-                developmentScope: compactVssCommitmentDevelopmentScope,
                 setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
                 ...contextFields(input.setupContext),
@@ -1645,7 +1635,6 @@ export const createCompactVssSameSecretBridgeStatementSet = (
                         compactCoefficientCommitmentSet.rnsLimbCount,
                     ),
                 relation: compactVssSameSecretBridgeRelation,
-                proofBoundary: compactVssSameSecretBridgeProofBoundary,
             } as const satisfies Omit<
                 CompactVssSameSecretBridgeStatementRecord,
                 'compactSameSecretBridgeStatementRoot'
@@ -1665,7 +1654,6 @@ export const createCompactVssSameSecretBridgeStatementSet = (
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         compactCommitmentProfileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ...contextFields(input.setupContext),
@@ -1945,7 +1933,6 @@ export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
     for (const [fieldName, expectedValue] of [
         ['setupProfileId', 'CollectiveBgvSetup-v1'],
         ['compactCommitmentProfileId', compactVssCommitmentProfileId],
-        ['developmentScope', compactVssCommitmentDevelopmentScope],
         ['setupProofProfileId', setupProofProfileId],
         ['proofFamily', sameSecretProofFamily],
     ] as const) {
@@ -2039,7 +2026,6 @@ export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
                     'compactCommitmentProfileId',
                     statementSet.compactCommitmentProfileId,
                 ],
-                ['developmentScope', statementSet.developmentScope],
                 ['setupProofProfileId', statementSet.setupProofProfileId],
                 ['proofFamily', statementSet.proofFamily],
             ] as const) {
@@ -2116,11 +2102,6 @@ export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
                 statementRecord.relation,
                 'compact same-secret bridge statement relation',
                 compactVssSameSecretBridgeRelation,
-            );
-            assertExactString(
-                statementRecord.proofBoundary,
-                'compact same-secret bridge statement proofBoundary',
-                compactVssSameSecretBridgeProofBoundary,
             );
             if (
                 statementRecord.targetConstantCoefficientCommitmentRoots
@@ -2219,6 +2200,14 @@ const compactVssSameSecretBridgeProofInputsByStatementRoot = (
             proofRecordInput.proofStatementHash,
             `proofRecordInputs.${String(proofRecordIndex)}.proofStatementHash`,
         );
+        if (
+            proofRecordInput.proofStatement.proofStatementHash !==
+            proofRecordInput.proofStatementHash
+        ) {
+            throw new Error(
+                'compact same-secret bridge proof statement hash must match its proof record input.',
+            );
+        }
         if (proofStatementHashes.has(proofRecordInput.proofStatementHash)) {
             throw new Error(
                 'compact same-secret bridge proof record inputs must not repeat a proof statement hash.',
@@ -2282,7 +2271,6 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
                 objectType: 'CompactVssSameSecretBridgeProofRecord',
                 objectVersion: 1,
                 proofFamily: compactVssSameSecretBridgeProofFamily,
-                proofBoundary: compactVssSameSecretBridgeProofBoundary,
                 compactSameSecretBridgeStatementRoot:
                     statementRecord.compactSameSecretBridgeStatementRoot,
                 proofStatementHash: proofRecordInput.proofStatementHash,
@@ -2304,15 +2292,27 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
             };
         },
     );
+    const proofStatements = statementSet.statementRecords.map(
+        (statementRecord) => {
+            const proofRecordInput = proofInputsByStatementRoot.get(
+                statementRecord.compactSameSecretBridgeStatementRoot,
+            );
+            if (proofRecordInput === undefined) {
+                throw new Error(
+                    'compact same-secret bridge proof material inputs must cover every bridge statement.',
+                );
+            }
+
+            return proofRecordInput.proofStatement;
+        },
+    );
     const proofMaterialSetWithoutRoot = {
         objectType: 'CompactVssSameSecretBridgeProofMaterialSet',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         compactCommitmentProfileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         setupProofProfileId,
         proofFamily: compactVssSameSecretBridgeProofFamily,
-        proofBoundary: compactVssSameSecretBridgeProofBoundary,
         ...contextFields(statementSet),
         targetBasisHash: statementSet.targetBasisHash,
         publicMatrixSeedHash: statementSet.publicMatrixSeedHash,
@@ -2328,6 +2328,7 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
         compactSameSecretBridgeStatementSetRoot:
             statementSet.compactSameSecretBridgeStatementSetRoot,
         proofRecords,
+        proofStatements,
     } as const satisfies Omit<
         CompactVssSameSecretBridgeProofMaterialSet,
         'proofMaterialSetRoot'
@@ -2363,10 +2364,8 @@ export const verifyCompactVssSameSecretBridgeProofMaterialSet = (input: {
     for (const [fieldName, expectedValue] of [
         ['setupProfileId', statementSet.setupProfileId],
         ['compactCommitmentProfileId', statementSet.compactCommitmentProfileId],
-        ['developmentScope', statementSet.developmentScope],
         ['setupProofProfileId', statementSet.setupProofProfileId],
         ['proofFamily', compactVssSameSecretBridgeProofFamily],
-        ['proofBoundary', compactVssSameSecretBridgeProofBoundary],
         ['ceremonyId', statementSet.ceremonyId],
         ['manifestHash', statementSet.manifestHash],
         ['rosterHash', statementSet.rosterHash],
@@ -2412,10 +2411,13 @@ export const verifyCompactVssSameSecretBridgeProofMaterialSet = (input: {
         );
     }
     if (
-        proofMaterialSet.proofRecords.length !== statementSet.participantCount
+        proofMaterialSet.proofRecords.length !==
+            statementSet.participantCount ||
+        proofMaterialSet.proofStatements.length !==
+            statementSet.participantCount
     ) {
         throw new Error(
-            'compact same-secret bridge proof material set must contain one proof record per bridge statement.',
+            'compact same-secret bridge proof material set must contain one proof record and one proof statement per bridge statement.',
         );
     }
     const proofStatementHashes = new Set<ProtocolHash>();
@@ -2438,7 +2440,6 @@ export const verifyCompactVssSameSecretBridgeProofMaterialSet = (input: {
         }
         for (const [fieldName, expectedValue] of [
             ['proofFamily', proofMaterialSet.proofFamily],
-            ['proofBoundary', proofMaterialSet.proofBoundary],
             [
                 'compactSameSecretBridgeStatementRoot',
                 statementRecord.compactSameSecretBridgeStatementRoot,
@@ -2460,6 +2461,20 @@ export const verifyCompactVssSameSecretBridgeProofMaterialSet = (input: {
             );
         }
         proofStatementHashes.add(proofRecord.proofStatementHash);
+        const proofStatement =
+            proofMaterialSet.proofStatements[proofRecordIndex];
+        if (proofStatement === undefined) {
+            throw new Error(
+                'compact same-secret bridge proof material set has no matching proof statement.',
+            );
+        }
+        if (
+            proofStatement.proofStatementHash !== proofRecord.proofStatementHash
+        ) {
+            throw new Error(
+                'compact same-secret bridge proof statement hash must match its proof record.',
+            );
+        }
         assertPositiveSafeInteger(
             proofRecord.proofByteLength,
             'compact same-secret bridge proof record proofByteLength',

@@ -125,6 +125,58 @@ const sdkProtocolRuntimeIndexSource =
                 `export { ${entry.exports.join(', ')} } from './${entry.source}';`,
         )
         .join('\n') + '\n';
+const sdkVendoredBridgeDevelopmentTargetDecryptionMembers = [
+    'generateBgvTargetDecryptionFixture',
+    'generateBgvTargetDecryptionShareFromLocalShare',
+    'deriveBgvTargetDecryptionShareProofStatement',
+    'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+    'verifyBgvTargetDecryptionShareProofMaterial',
+    'verifyBgvTargetDecryptionShareProofStatementBinding',
+    'verifyAndRecombineBgvTargetDecryptionShares',
+] as const;
+
+export const stripSdkVendoredBridgeMembers = (
+    sourceText: string,
+    memberNames: readonly string[],
+): string => {
+    const lineEnding = sourceText.includes('\r\n') ? '\r\n' : '\n';
+    const sourceLines = sourceText.split(/\r?\n/u);
+    const strippedLines: string[] = [];
+    const strippedMembers = new Set<string>();
+    const memberLinePattern = /^ {16}([A-Za-z_$][\w$]*)\s*:/u;
+
+    let sourceLineIndex = 0;
+    while (sourceLineIndex < sourceLines.length) {
+        const match = memberLinePattern.exec(
+            sourceLines[sourceLineIndex] ?? '',
+        );
+        if (match !== null && memberNames.includes(match[1] ?? '')) {
+            strippedMembers.add(match[1] ?? '');
+            sourceLineIndex += 1;
+            while (
+                sourceLineIndex < sourceLines.length &&
+                !memberLinePattern.test(sourceLines[sourceLineIndex] ?? '')
+            ) {
+                sourceLineIndex += 1;
+            }
+            continue;
+        }
+
+        strippedLines.push(sourceLines[sourceLineIndex] ?? '');
+        sourceLineIndex += 1;
+    }
+
+    const missingMembers = memberNames.filter(
+        (memberName) => !strippedMembers.has(memberName),
+    );
+    if (missingMembers.length > 0) {
+        throw new Error(
+            `SDK vendored bridge member stripping missed: ${missingMembers.join(', ')}.`,
+        );
+    }
+
+    return strippedLines.join(lineEnding);
+};
 
 export const transpileSdkInternalSource = (
     sourceText: string,
@@ -190,7 +242,14 @@ export const buildSdkBridge = async (): Promise<void> => {
                 bridgePartsOutputDirectoryPath,
                 relativeSourcePath.replace(/\.ts$/u, '.js'),
             );
-            const bridgePartSourceText = await readFile(sourcePath, 'utf8');
+            const rawBridgePartSourceText = await readFile(sourcePath, 'utf8');
+            const bridgePartSourceText =
+                relativeSourcePath === 'kernel-loader.ts'
+                    ? stripSdkVendoredBridgeMembers(
+                          rawBridgePartSourceText,
+                          sdkVendoredBridgeDevelopmentTargetDecryptionMembers,
+                      )
+                    : rawBridgePartSourceText;
             const bridgePartOutputText = transpileSdkInternalSource(
                 bridgePartSourceText,
                 sourcePath,

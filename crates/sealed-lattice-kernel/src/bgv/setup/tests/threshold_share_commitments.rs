@@ -10,7 +10,6 @@ fn threshold_share_commitment_derivation_recomputes_all_recipient_limb_commitmen
     assert_eq!(result["ok"], true);
     assert_eq!(result["operation"], "deriveThresholdShareCommitments");
     assert_eq!(result["ringDegree"], 8);
-    assert_eq!(result["ringDegreeStatus"], "development-reduced-ring");
     assert_eq!(result["participantCount"], 10);
     assert_eq!(result["rnsLimbCount"], serde_json::json!(DATA_PRIMES.len()));
     assert_eq!(result["thresholdDegree"], 4);
@@ -118,10 +117,6 @@ fn threshold_share_commitment_derivation_consumes_transported_binary_material() 
         "deriveThresholdShareCommitmentsFromTransport"
     );
     assert_eq!(transport_result["ringDegree"], 64);
-    assert_eq!(
-        transport_result["ringDegreeStatus"],
-        "development-reduced-ring"
-    );
     assert_eq!(
         transport_result["thresholdShareCommitmentRoot"],
         json_result["thresholdShareCommitmentRoot"]

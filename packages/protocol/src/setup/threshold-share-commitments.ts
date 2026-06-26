@@ -46,7 +46,6 @@ export type ThresholdShareCommitmentLimb = Readonly<
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
         readonly shamirCoefficientScalarsDecimal: readonly string[];
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly commitmentLimbs: readonly ThresholdCommitmentRowHash[];
@@ -74,7 +73,6 @@ export type ThresholdShareCommitmentRecipient = Readonly<
         readonly recipientRosterPosition: number;
         readonly trusteePoint: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
         readonly limbCommitments: readonly ThresholdShareCommitmentLimb[];
         readonly recipientCommitmentRoot: ProtocolHash;
     }
@@ -100,7 +98,6 @@ export type ThresholdShareCommitmentSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
         readonly recipientRecords: readonly ThresholdShareCommitmentRecipient[];
         readonly thresholdShareCommitmentRoot: ProtocolHash;
     }
@@ -488,14 +485,6 @@ const parseMaterialSet = (
         'vssCoefficientCommitmentMaterial.ringDegree',
     );
     if (
-        materialSet.ringDegreeStatus !== 'profile-ring' &&
-        materialSet.ringDegreeStatus !== 'development-reduced-ring'
-    ) {
-        throw new Error(
-            'vssCoefficientCommitmentMaterial.ringDegreeStatus must be profile-ring or development-reduced-ring.',
-        );
-    }
-    if (
         materialSet.materialEncoding === 'full-public-setup-commitment-values'
     ) {
         const coefficientCommitments = assertJsonRecordArray(
@@ -731,7 +720,6 @@ const aggregateThresholdCommitmentLimb = (
     rnsPrime: number,
     thresholdDegree: number,
     ringDegree: number,
-    ringDegreeStatus: 'profile-ring' | 'development-reduced-ring',
     trusteePoint: number,
 ): ThresholdShareCommitmentLimb => {
     if (trusteePoint >= rnsPrime) {
@@ -837,7 +825,6 @@ const aggregateThresholdCommitmentLimb = (
         rnsLimbIndex,
         rnsPrime,
         ringDegree,
-        ringDegreeStatus,
         shamirCoefficientScalarsDecimal: coefficientScalars.map((scalar) =>
             scalar.toString(),
         ),
@@ -866,7 +853,6 @@ const deriveRecipientCommitment = (
     rnsPrimes: readonly number[],
     thresholdDegree: number,
     ringDegree: number,
-    ringDegreeStatus: 'profile-ring' | 'development-reduced-ring',
 ): ThresholdShareCommitmentRecipient => {
     // Shamir evaluation point = rosterPosition + 1 (point 0 holds the secret); scalars [1, x, x^2, ...] evaluate the committed polynomial at x via the additive homomorphism, so points must be nonzero and distinct mod every Q_share prime.
     const trusteePoint = recipientRecord.sourceTrusteeRosterPosition + 1;
@@ -882,7 +868,6 @@ const deriveRecipientCommitment = (
         recipientRosterPosition: recipientRecord.sourceTrusteeRosterPosition,
         trusteePoint,
         ringDegree,
-        ringDegreeStatus,
         limbCommitments: rnsPrimes.map((rnsPrime, rnsLimbIndex) =>
             aggregateThresholdCommitmentLimb(
                 setupContext,
@@ -895,7 +880,6 @@ const deriveRecipientCommitment = (
                 rnsPrime,
                 thresholdDegree,
                 ringDegree,
-                ringDegreeStatus,
                 trusteePoint,
             ),
         ),
@@ -1035,7 +1019,6 @@ export const deriveThresholdShareCommitments = (
             rnsPrimes,
             materialSet.thresholdDegree,
             materialSet.ringDegree,
-            materialSet.ringDegreeStatus,
         ),
     );
 
@@ -1052,7 +1035,6 @@ export const deriveThresholdShareCommitments = (
         thresholdDegree: materialSet.thresholdDegree,
         rnsLimbCount: materialSet.rnsLimbCount,
         ringDegree: materialSet.ringDegree,
-        ringDegreeStatus: materialSet.ringDegreeStatus,
         recipientRecords,
     } as const satisfies Omit<
         ThresholdShareCommitmentSet,

@@ -40,6 +40,40 @@ pub(in crate::bgv) fn coefficient_vector_from_le_hex(
         .collect())
 }
 
+pub(in crate::bgv) fn signed_byte_vector_hex(coefficients: &[i64]) -> CanonicalResult<String> {
+    let mut bytes = Vec::with_capacity(coefficients.len());
+    for coefficient in coefficients {
+        let signed_byte = i8::try_from(*coefficient).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "signed coefficient does not fit signed-byte encoding",
+            )
+        })?;
+        bytes.push(signed_byte as u8);
+    }
+
+    Ok(encode_hex(&bytes))
+}
+
+pub(in crate::bgv) fn signed_byte_vector_from_hex(
+    value: &str,
+    expected_coefficient_count: usize,
+    length_error_message: &'static str,
+) -> CanonicalResult<Vec<i64>> {
+    let bytes = decode_hex(value)?;
+    if bytes.len() != expected_coefficient_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            length_error_message,
+        ));
+    }
+
+    Ok(bytes
+        .into_iter()
+        .map(|byte| i64::from(i8::from_ne_bytes([byte])))
+        .collect())
+}
+
 pub(in crate::bgv) fn coefficient_vector_hash512(coefficients: &[u64], domain: &str) -> String {
     hash512_hex(domain, &[&coefficient_vector_bytes(coefficients)])
 }

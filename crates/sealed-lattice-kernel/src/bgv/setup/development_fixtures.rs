@@ -134,7 +134,6 @@ pub(super) fn development_encryption_fixture(
         "canonicalByteLength": canonical_bytes.len(),
         "messageSlotSample": message_slots,
         "sampleModulus": modulus,
-        "fixtureScope": "development-collective-public-key-encryption-fixture",
     });
     let fixture_hash =
         derive_protocol_hash("BGVDevelopmentEncryptionFixtureHash", &fixture_record)?;

@@ -88,6 +88,48 @@ fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure
         serde_json::json!(extended_basis_modulus_bits())
     );
     assert_eq!(
+        setup_parameter_certificate["qTargetBits"],
+        serde_json::json!(crate::bgv::evaluator::top_k::canonical_target_basis_modulus_bits())
+    );
+    assert_eq!(
+        setup_parameter_certificate["qTargetPrimeCount"],
+        serde_json::json!(crate::bgv::evaluator::top_k::canonical_target_basis_primes().len())
+    );
+    assert_eq!(
+        setup_parameter_certificate["targetCiphertextLevel"],
+        serde_json::json!(crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL)
+    );
+    assert_eq!(
+        setup_parameter_certificate["targetBasisHash"],
+        serde_json::json!(
+            crate::bgv::evaluator::top_k::canonical_target_basis_hash().expect("target basis hash")
+        )
+    );
+    assert_eq!(
+        setup_parameter_certificate["canonicalTargetBasis"],
+        crate::bgv::evaluator::top_k::canonical_target_basis_value()
+            .expect("canonical target basis")
+    );
+    let target_prime_product = crate::bgv::evaluator::top_k::canonical_target_basis_primes()
+        .iter()
+        .fold(num_bigint::BigUint::from(1_u8), |product, modulus| {
+            product * num_bigint::BigUint::from(*modulus)
+        });
+    assert_eq!(
+        setup_parameter_certificate["qTargetProductDecimal"],
+        serde_json::json!(target_prime_product.to_str_radix(10))
+    );
+    assert_eq!(
+        package["certificates"]["targetThresholdDecryptabilityCertificate"]["targetCiphertextProfile"]
+            ["targetBasisHash"],
+        setup_parameter_certificate["targetBasisHash"]
+    );
+    assert_eq!(
+        package["certificates"]["targetThresholdDecryptabilityCertificate"]["targetCiphertextProfile"]
+            ["targetPrimeCeilLog2Product"],
+        setup_parameter_certificate["qTargetBits"]
+    );
+    assert_eq!(
         public_samples["QPPublic"]["relinearizationKeys"],
         serde_json::json!(0)
     );

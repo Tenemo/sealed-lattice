@@ -89,14 +89,6 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
 /// historical fixture path use this, so its bytes stay identical.
 const FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT: u64 = 10;
 
-/// Internal fixture toggle that forces the streamed VSS coefficient commitment
-/// material path at the reduced development ring. The streamed path is what
-/// produces the transported coefficient commitment material the terminal
-/// accepted-setup verifier streams, so the reduced-ring dynamic-roster accept
-/// fixture uses it. The production-recorded ring status the derivation writes
-/// is still "development-reduced-ring"; this string never leaves the fixtures.
-const DEVELOPMENT_REDUCED_RING_STREAMED_STATUS: &str = "development-reduced-ring-streamed";
-
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // The reduced development ring must stay provable by the trustee
     // evaluation-key argument: the trace splits each vector in two and the
@@ -118,7 +110,7 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
 pub(super) fn minimal_collective_setup_package_for_participant_count(
     participant_count: u64,
 ) -> serde_json::Value {
-    build_collective_setup_package_fixture(128, "development-reduced-ring", participant_count)
+    build_collective_setup_package_fixture(128, participant_count)
 }
 
 pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
@@ -127,7 +119,6 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
         .get_or_init(|| {
             let package_fixture = build_collective_setup_package_fixture_parts(
                 POLYNOMIAL_DEGREE,
-                "profile-ring",
                 FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
                 None,
             );
@@ -157,7 +148,6 @@ pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
 ) -> TerminalProfileRingSetupPackageFixture {
     let package_fixture = build_collective_setup_package_fixture_parts(
         128,
-        DEVELOPMENT_REDUCED_RING_STREAMED_STATUS,
         participant_count,
         Some(stream_derivation_purpose),
     );
@@ -174,16 +164,10 @@ pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
 
 fn build_collective_setup_package_fixture(
     vss_material_ring_degree: usize,
-    vss_material_ring_degree_status: &str,
     participant_count: u64,
 ) -> serde_json::Value {
-    build_collective_setup_package_fixture_parts(
-        vss_material_ring_degree,
-        vss_material_ring_degree_status,
-        participant_count,
-        None,
-    )
-    .package
+    build_collective_setup_package_fixture_parts(vss_material_ring_degree, participant_count, None)
+        .package
 }
 
 // The collective setup context shared by the package fixtures. Every fixture
@@ -224,7 +208,6 @@ fn collective_setup_context_fixture(
 
 fn build_collective_setup_package_fixture_parts(
     vss_material_ring_degree: usize,
-    vss_material_ring_degree_status: &str,
     participant_count: u64,
     stream_derivation_purpose: Option<&str>,
 ) -> CollectiveSetupPackageFixture {
@@ -430,11 +413,10 @@ fn build_collective_setup_package_fixture_parts(
     // transported coefficient commitment material the accepted-setup verifier
     // streams. Reduced-ring tests pass a purpose so repeated fixture builds at
     // the same roster size never share live derivation state.
-    let stream_vss_material = (vss_material_ring_degree == POLYNOMIAL_DEGREE
-        && vss_material_ring_degree_status == "profile-ring")
-        || vss_material_ring_degree_status == DEVELOPMENT_REDUCED_RING_STREAMED_STATUS;
+    let stream_vss_material =
+        vss_material_ring_degree == POLYNOMIAL_DEGREE || stream_derivation_purpose.is_some();
     let vss_components = if stream_vss_material {
-        let derivation_id = if vss_material_ring_degree_status == "profile-ring" {
+        let derivation_id = if vss_material_ring_degree == POLYNOMIAL_DEGREE {
             "terminal-profile-ring-vss-material-stream".to_string()
         } else {
             let stream_derivation_purpose =
@@ -470,7 +452,6 @@ fn build_collective_setup_package_fixture_parts(
                 setup_epoch,
                 public_matrix_seed_hash,
                 vss_material_ring_degree,
-                vss_material_ring_degree_status,
                 participant_count,
             );
         let threshold_share_commitments =

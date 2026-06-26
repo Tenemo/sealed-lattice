@@ -1,23 +1,43 @@
 import { performance } from 'node:perf_hooks';
 
-import { deriveProtocolHash } from '#packages/crypto/src/index.js';
 import {
+    createPrivateVssMailboxKeyPair,
+    deriveProtocolHash,
+    hash512Hex,
+} from '#packages/crypto/src/index.js';
+import {
+    aggregateCompactVssThresholdShareCommitments,
     compactVssCommitmentBinaryFormat,
-    compactVssCommitmentDevelopmentScope,
     compactVssCommitmentRandomnessColumnCount,
     compactVssCommitmentProfileId,
     compactVssCommitmentMeasurement,
     computeCompactVssCommitmentFromOpening,
+    createCompactVssCoefficientCommitmentSet,
+    createCompactVssRecipientShareCommitmentBundle,
+    createCompactVssShareLinkageStatement,
     decodeCompactVssCommitmentBody,
     encodeCompactVssCommitmentBody,
     verifyCompactVssCommitmentOpening,
+    type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssCommitmentBodyMetadata,
     type CompactVssCommitmentOpeningInput,
     type CompactVssCommitmentValue,
+    type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageStatement,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import {
+    createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
+    type GeneratedLocalTrusteeSetupStateInput,
+    type GeneratedLocalTrusteeSetupStateResult,
+} from '#packages/protocol/src/setup/local-trustee-setup-state.js';
+import {
+    createPrivateVssMailboxDeliverySet,
+    type PrivateVssMailboxDeliveryKernel,
+    type PrivateVssMailboxDeliverySet,
+    type PrivateVssSourceTrusteeContributionState,
+} from '#packages/protocol/src/setup/private-vss-mailbox-delivery.js';
+import {
     compactVssSameSecretBridgeIntegerSupport,
-    compactVssSameSecretBridgeProofBoundary,
     compactVssSameSecretBridgeRelation,
     compactVssSameSecretBridgeSignedRepresentativeConvention,
     compactVssSameSecretBridgeTargetBasisLimbOrder,
@@ -31,6 +51,7 @@ import {
     acceptedBgvProfileRingDegree,
     acceptedBgvSetupQSharePrimes,
 } from '#packages/protocol/src/setup/vss-coefficient-commitments.js';
+import type { CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records.js';
 import { loadTranscriptCoreKernel } from '#packages/wasm/src/index.js';
 import type {
     BgvCompactVssCommitmentBodyMetadata,
@@ -40,6 +61,7 @@ import type {
     BgvTrusteeEvaluationKeyStatementContext,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge.js';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 const warmRunCount = 5;
 const firstProfileParticipantCount = 10;
@@ -50,6 +72,15 @@ const restrictedProofRingDegree = 128;
 const restrictedProofSourceMessageModulus = 140_737_487_306_753;
 const restrictedProofCoefficientCount = 3;
 const restrictedProofRecipientRosterPosition = 2;
+const minimumPublicCommitmentReductionFactor = 2_800;
+const maximumWarmWasmFullProfileGenerationSeconds = 30;
+const maximumWarmWasmFullProfileVerificationSeconds = 30;
+const maximumMeasuredDevelopmentArtifactJsonBytes = 16 * 1024 * 1024;
+const privateVssShareProofFramingSampleBytes = 32;
+const targetProofMaterialMeasurementRequested =
+    process.env.SEALED_LATTICE_MEASURE_TARGET_PROOF_MATERIAL === '1';
+
+type JsonRecord = Readonly<Record<string, unknown>>;
 
 type TimedSamples = Readonly<{
     readonly coldMilliseconds: number;
@@ -133,6 +164,125 @@ type RestrictedCompactSameSecretBridgeProofMaterialMeasurement = Readonly<{
             TranscriptCoreKernel['verifyCompactVssSameSecretBridgeProofMaterialSet']
         >
     >;
+}>;
+
+type TargetDecryptionDevelopmentArtifactMeasurement = Readonly<{
+    readonly localTargetShareWitnessJsonBytes: number;
+    readonly targetDecryptionSmudgingWitnessJsonBytes: number;
+    readonly compactAggregateOpeningWitnessJsonBytes: number;
+    readonly compactAggregateOpeningCredentialCount: number;
+    readonly compactAggregateOpeningCredentialsJsonBytes: number;
+    readonly targetShareJsonBytes: number;
+    readonly targetSharePayloadJsonBytes: number;
+    readonly smudgingInputReportJsonBytes: number;
+    readonly proofStatementJsonBytes: number;
+    readonly statementBindingVerificationJsonBytes: number;
+    readonly largestSingleObjectJsonBytes: number;
+}>;
+
+type TargetDecryptionProofMaterialAndRecombinationMeasurement = Readonly<{
+    readonly measurementMode: string;
+    readonly shareCount: number;
+    readonly proofMaterialJsonBytesByShare: readonly number[];
+    readonly proofMaterialJsonBytesTotal: number;
+    readonly proofMaterialProofRecordCountByShare: readonly number[];
+    readonly proofMaterialTotalProofByteLengthByShare: readonly number[];
+    readonly proofMaterialTotalProofByteLength: number;
+    readonly proofMaterialGenerationMilliseconds: number;
+    readonly proofMaterialVerificationJsonBytesByShare: readonly number[];
+    readonly proofMaterialVerificationJsonBytesTotal: number;
+    readonly proofMaterialVerificationMilliseconds: number;
+    readonly proofGatedRecombinationJsonBytes: number;
+    readonly proofGatedRecombinationMilliseconds: number;
+    readonly largestSingleObjectJsonBytes: number;
+}>;
+
+type TargetDecryptionProofMaterialAndRecombinationNotMeasured = Readonly<{
+    readonly measurementMode: string;
+}>;
+
+type TargetDecryptionDevelopmentMeasurements = Readonly<{
+    readonly artifacts: TargetDecryptionDevelopmentArtifactMeasurement;
+    readonly proofMaterialAndRecombination:
+        | TargetDecryptionProofMaterialAndRecombinationMeasurement
+        | TargetDecryptionProofMaterialAndRecombinationNotMeasured;
+}>;
+
+type TargetDecryptionShareMeasurementBundle = Readonly<{
+    readonly trusteeIdentity: string;
+    readonly localTargetShareWitness: JsonRecord;
+    readonly targetShare: ReturnType<
+        TranscriptCoreKernel['generateBgvTargetDecryptionShareFromLocalShare']
+    >;
+    readonly proofStatement: ReturnType<
+        TranscriptCoreKernel['deriveBgvTargetDecryptionShareProofStatement']
+    >;
+}>;
+
+type PrivateMailboxDevelopmentArtifactMeasurement = Readonly<{
+    readonly qShareLimbCount: number;
+    readonly ringDegree: number;
+    readonly thresholdDegree: number;
+    readonly sourceRecipientEnvelopeCountInFirstProfile: number;
+    readonly sourceRecipientEnvelopeCountPerSourceInFirstProfile: number;
+    readonly buildMilliseconds: number;
+    readonly privateShareProofFramingSampleBytesPerLimb: number;
+    readonly privateShareProofFramingSampleBytesTotal: number;
+    readonly compactRecipientShareOpeningCredentialCount: number;
+    readonly compactRecipientShareOpeningCredentialsJsonBytes: number;
+    readonly privateEnvelopeJsonBytes: number;
+    readonly transportedPrivateVssShareProofMaterialJsonBytes: number;
+    readonly privateEnvelopeAadJsonBytes: number;
+    readonly encryptedEnvelopeJsonBytes: number;
+    readonly envelopeReferenceJsonBytes: number;
+    readonly deliverySetJsonBytes: number;
+    readonly envelopeReferenceJsonBytesExtrapolatedToFirstProfile: number;
+    readonly sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile: number;
+    readonly sourceTrusteeUploadBudgetMarginBytes: number;
+    readonly largestSingleObjectJsonBytes: number;
+}>;
+
+type EncryptedLocalStateDevelopmentArtifactMeasurement = Readonly<{
+    readonly qShareLimbCount: number;
+    readonly ringDegree: number;
+    readonly sourceEnvelopeCount: number;
+    readonly buildMilliseconds: number;
+    readonly aggregateThresholdSharePlaintextBytes: number;
+    readonly targetDecryptionProofWitnessPlaintextBytes: number;
+    readonly localStatePlaintextJsonBytes: number;
+    readonly encryptedLocalStateJsonBytes: number;
+    readonly localStateCommitmentJsonBytes: number;
+    readonly sealedAggregateThresholdShareJsonBytes: number;
+    readonly sealedTargetDecryptionProofWitnessJsonBytes: number;
+    readonly largestSingleObjectJsonBytes: number;
+}>;
+
+type PrivateStateDevelopmentArtifactMeasurement = Readonly<{
+    readonly privateMailbox: PrivateMailboxDevelopmentArtifactMeasurement;
+    readonly encryptedLocalState: EncryptedLocalStateDevelopmentArtifactMeasurement;
+    readonly largestSingleObjectJsonBytes: number;
+}>;
+
+type FullRingPrivateStateFixture = Readonly<{
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly vssCoefficientCommitmentRoot: ProtocolHash;
+    readonly sourceTrusteeContributionState: PrivateVssSourceTrusteeContributionState;
+    readonly recipientTrustees: readonly {
+        readonly trusteeIdentity: string;
+        readonly trusteeRosterPosition: number;
+    }[];
+    readonly mailboxPublicKeyBytesHex: string;
+    readonly compactRecipientShareOpeningCredentials: ReturnType<
+        typeof createCompactVssRecipientShareCommitmentBundle
+    >['recipientShareOpeningCredentials'];
+    readonly compactRecipientShareOpeningCredentialsJsonBytes: number;
+    readonly coefficientCommitmentSet: ReturnType<
+        typeof createCompactVssCoefficientCommitmentSet
+    >;
+    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
+    readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
+    readonly shareLinkageStatement: CompactVssShareLinkageStatement;
 }>;
 
 const median = (samples: readonly number[]): number => {
@@ -374,7 +524,10 @@ const restrictedCompactShareLinkageProofFixture =
 const restrictedCompactSameSecretBridgeProofFixture =
     (): RestrictedCompactSameSecretBridgeProofFixture => {
         const publicMatrixSeedHash = repeatedProtocolHash('8');
-        const targetRnsPrimes = [restrictedProofSourceMessageModulus];
+        const targetRnsPrimes = acceptedBgvSetupQSharePrimes.slice(
+            0,
+            targetRnsLimbCount,
+        );
         const secretCoefficients = Array.from(
             { length: restrictedProofRingDegree },
             (_unusedCoefficient, coefficientIndex) => {
@@ -448,7 +601,6 @@ const restrictedCompactSameSecretBridgeProofFixture =
                 objectVersion: 1,
                 setupProfileId: 'CollectiveBgvSetup-v1',
                 compactCommitmentProfileId: compactVssCommitmentProfileId,
-                developmentScope: compactVssCommitmentDevelopmentScope,
                 setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily: 'same-secret-linkage-anchor',
                 ceremonyId: 'compact-same-secret-bridge-proof-measurement',
@@ -478,7 +630,6 @@ const restrictedCompactSameSecretBridgeProofFixture =
                     compactVssSameSecretBridgeTargetBasisLimbOrder,
                 targetConstantCoefficientCommitmentRoots,
                 relation: compactVssSameSecretBridgeRelation,
-                proofBoundary: compactVssSameSecretBridgeProofBoundary,
             },
         );
 
@@ -551,8 +702,6 @@ const compactCommitmentBodyMetadata = (
     rnsLimbIndex: commitment.rnsLimbIndex,
     rnsPrime: commitment.rnsPrime,
     ringDegree: commitment.ringDegree,
-    messageVectorHash512: commitment.messageVectorHash512,
-    openingRandomnessHash512: commitment.openingRandomnessHash512,
 });
 
 const measureTypeScriptPath = (
@@ -700,7 +849,7 @@ const measureRestrictedCompactSameSecretBridgeProof = (
             'restricted compact same-secret bridge proof byte lengths differ.',
         );
     }
-    if (verification.lastResult.targetRnsLimbCount !== 1) {
+    if (verification.lastResult.targetRnsLimbCount !== targetRnsLimbCount) {
         throw new Error(
             'restricted compact same-secret bridge proof target limb count differs.',
         );
@@ -745,7 +894,6 @@ const restrictedCompactSameSecretBridgeStatementSet = (
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         compactCommitmentProfileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ceremonyId: fixture.context.ceremonyId,
@@ -776,7 +924,6 @@ const restrictedCompactSameSecretBridgeStatementSet = (
         targetBasisLimbOrder: compactVssSameSecretBridgeTargetBasisLimbOrder,
         targetConstantCoefficientCommitmentRoots,
         relation: compactVssSameSecretBridgeRelation,
-        proofBoundary: compactVssSameSecretBridgeProofBoundary,
     } as const;
     const statementRecord = {
         ...statementRecordWithoutRoot,
@@ -790,7 +937,6 @@ const restrictedCompactSameSecretBridgeStatementSet = (
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         compactCommitmentProfileId: compactVssCommitmentProfileId,
-        developmentScope: compactVssCommitmentDevelopmentScope,
         setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ceremonyId: fixture.context.ceremonyId,
@@ -844,6 +990,13 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
                     fixture.compactSameSecretBridge
                         .compactSameSecretBridgeStatementRoot,
                 proofStatementHash: proofGeneration.lastResult.statementHash,
+                proofStatement: {
+                    proofStatementHash:
+                        proofGeneration.lastResult.statementHash,
+                    context: fixture.context,
+                    ringDegree: restrictedProofRingDegree,
+                    compactSameSecretBridge: fixture.compactSameSecretBridge,
+                },
                 proofBytesHex: proofGeneration.lastResult.proofBytesHex,
             },
         ],
@@ -856,15 +1009,6 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
         kernel.verifyCompactVssSameSecretBridgeProofMaterialSet({
             statementSet,
             proofMaterialSet,
-            restrictedProofStatements: [
-                {
-                    proofStatementHash:
-                        proofGeneration.lastResult.statementHash,
-                    context: fixture.context,
-                    ringDegree: restrictedProofRingDegree,
-                    compactSameSecretBridge: fixture.compactSameSecretBridge,
-                },
-            ],
         }),
     );
 
@@ -895,9 +1039,1049 @@ const scaledSeconds = (
     totalCommitments: number,
 ): number => (millisecondsPerCommitment * totalCommitments) / 1_000;
 
+const assertAtMost = (
+    measuredValue: number,
+    maximumValue: number,
+    description: string,
+): void => {
+    if (measuredValue > maximumValue) {
+        throw new Error(
+            `${description} exceeded: measured ${measuredValue}, budget ${maximumValue}.`,
+        );
+    }
+};
+
+const assertAtLeast = (
+    measuredValue: number,
+    minimumValue: number,
+    description: string,
+): void => {
+    if (measuredValue < minimumValue) {
+        throw new Error(
+            `${description} missed: measured ${measuredValue}, required at least ${minimumValue}.`,
+        );
+    }
+};
+
 const equalBytes = (left: Uint8Array, right: Uint8Array): boolean =>
     left.byteLength === right.byteLength &&
     left.every((leftByte, byteIndex) => leftByte === right[byteIndex]);
+
+const jsonByteLength = (value: unknown): number =>
+    Buffer.byteLength(JSON.stringify(value), 'utf8');
+
+const objectField = (
+    value: unknown,
+    fieldName: string,
+): Readonly<Record<string, unknown>> => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${fieldName} parent must be an object.`);
+    }
+    const fieldValue = (value as Record<string, unknown>)[fieldName];
+    if (
+        typeof fieldValue !== 'object' ||
+        fieldValue === null ||
+        Array.isArray(fieldValue)
+    ) {
+        throw new Error(`${fieldName} must be an object.`);
+    }
+
+    return fieldValue as Readonly<Record<string, unknown>>;
+};
+
+const arrayField = (value: unknown, fieldName: string): readonly unknown[] => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${fieldName} parent must be an object.`);
+    }
+    const fieldValue = (value as Record<string, unknown>)[fieldName];
+    if (!Array.isArray(fieldValue)) {
+        throw new Error(`${fieldName} must be an array.`);
+    }
+
+    return fieldValue;
+};
+
+const numberField = (value: unknown, fieldName: string): number => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${fieldName} parent must be an object.`);
+    }
+    const fieldValue = (value as Record<string, unknown>)[fieldName];
+    if (typeof fieldValue !== 'number') {
+        throw new Error(`${fieldName} must be a number.`);
+    }
+
+    return fieldValue;
+};
+
+const stringField = (value: unknown, fieldName: string): string => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${fieldName} parent must be an object.`);
+    }
+    const fieldValue = (value as Record<string, unknown>)[fieldName];
+    if (typeof fieldValue !== 'string') {
+        throw new Error(`${fieldName} must be a string.`);
+    }
+
+    return fieldValue;
+};
+
+const protocolRecord = (value: unknown, fieldName: string): JsonRecord => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        throw new Error(`${fieldName} must be an object.`);
+    }
+
+    return value as JsonRecord;
+};
+
+const assertTargetStatementBindingIsProofless = (value: unknown): void => {
+    const record = protocolRecord(
+        value,
+        'target-decryption statement-binding result',
+    );
+    if (
+        record.ok !== false ||
+        record.refusalReason !== 'TargetDecryptionProofUnavailable'
+    ) {
+        throw new Error(
+            'Target-decryption statement binding must remain proof-unavailable and non-accepting until proof verification exists.',
+        );
+    }
+};
+
+const measurementHash = (label: string): ProtocolHash =>
+    deriveProtocolHash('SetupProofRecordBindingHash', {
+        objectType: 'CompactVssManualMeasurementReference',
+        objectVersion: 1,
+        label,
+    });
+
+const measurementSetupContext = (): CollectiveBgvSetupContext => ({
+    ceremonyId: 'compact-vss-manual-measurement',
+    manifestHash: measurementHash('manifest'),
+    rosterHash: measurementHash('roster'),
+    setupProfileHash: measurementHash('setup-profile'),
+    qShareHash: measurementHash('q-share'),
+    carryAwareVssShareRelationProfileHash: measurementHash(
+        'carry-aware-vss-share-relation-profile',
+    ),
+    commitmentProfileHash: measurementHash('commitment-profile'),
+    setupEpoch: 'compact-vss-measurement-epoch',
+});
+
+const deterministicResidueVector = (
+    rnsPrime: number,
+    rnsLimbIndex: number,
+    shamirCoefficientIndex: number,
+): readonly number[] => {
+    const modulus = BigInt(rnsPrime);
+    const limbOffset = BigInt(101 + rnsLimbIndex * 4_099);
+    const coefficientOffset = BigInt(1_009 + shamirCoefficientIndex * 8_191);
+
+    return Array.from(
+        { length: acceptedBgvProfileRingDegree },
+        (_unused, coefficientIndex) => {
+            const residue =
+                (BigInt(coefficientIndex + 1) * 65_537n +
+                    limbOffset +
+                    coefficientOffset) %
+                modulus;
+
+            return Number((modulus - 1n - residue) % modulus);
+        },
+    );
+};
+
+const deterministicRandomnessColumns = (
+    seedOffset: number,
+    ringDegree: number,
+): readonly (readonly number[])[] =>
+    Array.from(
+        { length: compactVssCommitmentRandomnessColumnCount },
+        (_unusedColumn, columnIndex) =>
+            Array.from(
+                { length: ringDegree },
+                (_unusedCoefficient, coefficientIndex) =>
+                    ((seedOffset + columnIndex * 11 + coefficientIndex * 17) %
+                        3) -
+                    1,
+            ),
+    );
+
+const sourceTrusteeContributionState = (
+    setupContext: CollectiveBgvSetupContext,
+    publicMatrixSeedHash: ProtocolHash,
+): PrivateVssSourceTrusteeContributionState => {
+    const sourceTrusteeIdentity = 'trustee-0';
+    const sourceTrusteeRosterPosition = 0;
+    const coefficientOpenings = acceptedBgvSetupQSharePrimes.flatMap(
+        (rnsPrime, rnsLimbIndex) =>
+            Array.from(
+                { length: firstProfileThresholdDegree },
+                (_unused, shamirCoefficientIndex) => {
+                    const commitmentRoot = measurementHash(
+                        `source-coefficient-${String(rnsLimbIndex)}-${String(
+                            shamirCoefficientIndex,
+                        )}`,
+                    );
+
+                    return {
+                        rnsLimbIndex,
+                        rnsPrime,
+                        shamirCoefficientIndex,
+                        commitmentRoot,
+                        coefficientMessage: deterministicResidueVector(
+                            rnsPrime,
+                            rnsLimbIndex,
+                            shamirCoefficientIndex,
+                        ),
+                        randomnessByColumn: [],
+                    };
+                },
+            ),
+    );
+    const coefficientCommitments = coefficientOpenings.map((opening) => ({
+        objectType: 'VssCoefficientCommitment',
+        objectVersion: 1,
+        ...setupContext,
+        sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        publicMatrixSeedHash,
+        rnsLimbIndex: opening.rnsLimbIndex,
+        rnsPrime: opening.rnsPrime,
+        shamirCoefficientIndex: opening.shamirCoefficientIndex,
+        commitmentRoot: opening.commitmentRoot,
+    }));
+    const sourceTrusteeRecordWithoutRoot = {
+        objectType: 'VssSourceTrusteeCoefficientCommitments',
+        objectVersion: 1,
+        ...setupContext,
+        sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        publicMatrixSeedHash,
+        coefficientCommitments,
+    };
+    const sourceTrusteeCommitmentRoot = deriveProtocolHash(
+        'VssCoefficientCommitmentRoot',
+        sourceTrusteeRecordWithoutRoot,
+    );
+    const sourceTrusteeCoefficientCommitmentRecord = {
+        ...sourceTrusteeRecordWithoutRoot,
+        sourceTrusteeCommitmentRoot,
+    };
+
+    return {
+        sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        sourceTrusteeCommitmentRoot,
+        sourceTrusteeCoefficientCommitmentRecord,
+        sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+        coefficientOpenings,
+    };
+};
+
+const fullRingPrivateStateFixture = (): FullRingPrivateStateFixture => {
+    const setupContext = measurementSetupContext();
+    const publicMatrixSeedHash = measurementHash('public-matrix-seed');
+    const sourceState = sourceTrusteeContributionState(
+        setupContext,
+        publicMatrixSeedHash,
+    );
+    const recipientTrustees = [
+        {
+            trusteeIdentity: 'trustee-0',
+            trusteeRosterPosition: 0,
+        },
+    ] as const;
+    const coefficientCommitmentSet = createCompactVssCoefficientCommitmentSet({
+        setupContext,
+        publicMatrixSeedHash,
+        participantCount: 1,
+        qSharePrimes: acceptedBgvSetupQSharePrimes,
+        ringDegree: acceptedBgvProfileRingDegree,
+        thresholdDegree: firstProfileThresholdDegree,
+        sourceTrusteeOpeningStates: [sourceState],
+        coefficientOpeningRandomness: ({
+            rnsLimbIndex,
+            shamirCoefficientIndex,
+            ringDegree,
+        }) =>
+            deterministicRandomnessColumns(
+                3 + rnsLimbIndex * 43 + shamirCoefficientIndex * 271,
+                ringDegree,
+            ),
+    });
+    const recipientShareBundle = createCompactVssRecipientShareCommitmentBundle(
+        {
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount: 1,
+            qSharePrimes: acceptedBgvSetupQSharePrimes,
+            ringDegree: acceptedBgvProfileRingDegree,
+            thresholdDegree: firstProfileThresholdDegree,
+            sourceTrusteeOpeningStates: [sourceState],
+            recipientTrustees,
+            shareOpeningRandomness: ({ rnsLimbIndex, ringDegree }) =>
+                deterministicRandomnessColumns(
+                    19 + rnsLimbIndex * 71,
+                    ringDegree,
+                ),
+        },
+    );
+    const aggregateBundle = aggregateCompactVssThresholdShareCommitments({
+        setupContext,
+        publicMatrixSeedHash,
+        participantCount: 1,
+        qSharePrimes: acceptedBgvSetupQSharePrimes,
+        ringDegree: acceptedBgvProfileRingDegree,
+        recipientTrustees,
+        recipientShareOpeningCredentials:
+            recipientShareBundle.recipientShareOpeningCredentials,
+    });
+    const shareLinkageStatement = createCompactVssShareLinkageStatement({
+        setupContext,
+        publicMatrixSeedHash,
+        targetBasisHash: measurementHash('target-basis'),
+        coefficientCommitmentSet,
+        recipientShareCommitmentSet:
+            recipientShareBundle.recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet:
+            aggregateBundle.aggregateThresholdCommitmentSet,
+    });
+    const mailboxKeyPair = createPrivateVssMailboxKeyPair(
+        measurementHash('mailbox-key'),
+    );
+
+    return {
+        setupContext,
+        publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot:
+            coefficientCommitmentSet.coefficientCommitmentRoot,
+        sourceTrusteeContributionState: sourceState,
+        recipientTrustees,
+        mailboxPublicKeyBytesHex: mailboxKeyPair.publicKeyBytesHex,
+        compactRecipientShareOpeningCredentials:
+            recipientShareBundle.recipientShareOpeningCredentials,
+        compactRecipientShareOpeningCredentialsJsonBytes: jsonByteLength(
+            recipientShareBundle.recipientShareOpeningCredentials,
+        ),
+        coefficientCommitmentSet,
+        recipientShareCommitmentSet:
+            recipientShareBundle.recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet:
+            aggregateBundle.aggregateThresholdCommitmentSet,
+        shareLinkageStatement,
+    };
+};
+
+const privateVssShareProofFramingSample = (
+    rnsLimbIndex: number,
+): JsonRecord => {
+    const proofBytes = Uint8Array.from(
+        { length: privateVssShareProofFramingSampleBytes },
+        (_unused, byteIndex) => (rnsLimbIndex * 29 + byteIndex) % 256,
+    );
+    const proofBytesHex = Buffer.from(proofBytes).toString('hex');
+
+    return {
+        objectType: 'PrivateVssShareProof',
+        objectVersion: 1,
+        proofProfileId: 'sealed-lattice-private-vss-share-proof-succinct-v1',
+        setupProofProfileId: setupProofProfileId,
+        proofFamily: 'vss-opening-carry',
+        proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
+        proofStatementRoot: measurementHash(
+            `private-share-proof-statement-${String(rnsLimbIndex)}`,
+        ),
+        statementHash: measurementHash(
+            `private-share-proof-statement-hash-${String(rnsLimbIndex)}`,
+        ),
+        proofAccountingHash: measurementHash(
+            'private-share-proof-accounting-sample',
+        ),
+        proofSizeBytes: proofBytes.byteLength,
+        proofBytesHash: hash512Hex(
+            'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1',
+            [proofBytes],
+        ),
+        proofMaterialRoot: measurementHash(
+            `private-share-proof-material-${String(rnsLimbIndex)}`,
+        ),
+        proofBytesHex,
+    };
+};
+
+const privateMailboxMeasurementKernel = (
+    observedPrivateEnvelopes: JsonRecord[],
+    observedTransportedProofMaterials: JsonRecord[],
+): PrivateVssMailboxDeliveryKernel => ({
+    deriveProtocolHash: ({ namespace, value }) =>
+        deriveProtocolHash(namespace, value),
+    verifyPrivateVssShareEnvelope: (input) => {
+        const privateEnvelope = protocolRecord(
+            input.privateEnvelope,
+            'privateEnvelope',
+        );
+        observedPrivateEnvelopes.push(privateEnvelope);
+        if (input.transportedPrivateVssShareProofMaterial !== undefined) {
+            observedTransportedProofMaterials.push(
+                protocolRecord(
+                    input.transportedPrivateVssShareProofMaterial,
+                    'transportedPrivateVssShareProofMaterial',
+                ),
+            );
+        }
+        const privateEnvelopeHash = deriveProtocolHash(
+            'PrivateVssShareEnvelopeHash',
+            privateEnvelope,
+        );
+
+        return {
+            ok: true,
+            privateEnvelopeHash,
+            localVerificationRoot: deriveProtocolHash(
+                'PrivateVssLocalVerificationRoot',
+                {
+                    privateEnvelopeHash,
+                    publicMatrixSeedHash: input.publicMatrixSeedHash,
+                },
+            ),
+            verifiedPrivateVssShareProofCount:
+                acceptedBgvSetupQSharePrimes.length,
+            refusedObjects: [],
+        };
+    },
+});
+
+const firstEnvelopeReference = (
+    deliverySet: PrivateVssMailboxDeliverySet,
+): JsonRecord => {
+    const envelopeReference = deliverySet.envelopeReferences[0];
+    if (envelopeReference === undefined) {
+        throw new Error('private mailbox measurement produced no envelope.');
+    }
+
+    return envelopeReference;
+};
+
+const localStateInputFromPrivateMailbox = (
+    fixture: FullRingPrivateStateFixture,
+    deliverySet: PrivateVssMailboxDeliverySet,
+    verifiedPrivateEnvelope: JsonRecord,
+): GeneratedLocalTrusteeSetupStateInput => {
+    const envelopeReference = firstEnvelopeReference(deliverySet);
+    const aggregateRecord =
+        fixture.aggregateThresholdCommitmentSet.recipientRecords[0];
+    if (aggregateRecord === undefined) {
+        throw new Error(
+            'compact aggregate measurement fixture produced no recipient record.',
+        );
+    }
+
+    return {
+        setupContext: fixture.setupContext,
+        trusteeIdentity: 'trustee-0',
+        trusteeRosterPosition: 0,
+        deviceEpoch: 1,
+        thresholdShareCommitments: {
+            objectType: 'ThresholdShareCommitmentSet',
+            objectVersion: 1,
+            ...fixture.setupContext,
+            recipientRecords: [
+                {
+                    objectType: 'ThresholdShareCommitmentRecipient',
+                    objectVersion: 1,
+                    recipientIdentity: 'trustee-0',
+                    recipientRosterPosition: 0,
+                    recipientCommitmentRoot:
+                        aggregateRecord.aggregateCommitmentRoot,
+                },
+            ],
+        },
+        privateVssEnvelopeCommitments: deliverySet,
+        verifiedPrivateVssShareEnvelopes: [verifiedPrivateEnvelope],
+        vssShareAcceptances: {
+            objectType: 'VssShareAcceptanceSet',
+            objectVersion: 1,
+            ...fixture.setupContext,
+            acceptanceRecords: [
+                {
+                    objectType: 'VssShareAcceptance',
+                    objectVersion: 1,
+                    ...fixture.setupContext,
+                    sourceTrusteeIdentity:
+                        envelopeReference.sourceTrusteeIdentity,
+                    sourceTrusteeRosterPosition:
+                        envelopeReference.sourceTrusteeRosterPosition,
+                    recipientIdentity: 'trustee-0',
+                    recipientRosterPosition: 0,
+                    privateVssEnvelopeCommitmentRoot:
+                        deliverySet.privateVssEnvelopeCommitmentRoot,
+                    privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
+                    localVerificationRoot:
+                        envelopeReference.localVerificationRoot,
+                    acceptanceRoot: measurementHash('acceptance-root'),
+                },
+            ],
+        },
+        storageKeyBytesHex: '61'.repeat(32),
+        localStateAeadNonceBytesHex: '62'.repeat(12),
+        sealedAggregateThresholdShareAeadNonceBytesHex: '63'.repeat(12),
+        sealedTargetDecryptionProofWitnessAeadNonceBytesHex: '64'.repeat(12),
+        compactVssTargetProofWitness: {
+            aggregateThresholdCommitmentSet:
+                fixture.aggregateThresholdCommitmentSet,
+            targetDecryptionRnsLimbCount: targetRnsLimbCount,
+            shareLinkageStatement: fixture.shareLinkageStatement,
+        },
+    };
+};
+
+const encryptedLocalStateMeasurement = (
+    localState: GeneratedLocalTrusteeSetupStateResult,
+    sourceEnvelopeCount: number,
+    buildMilliseconds: number,
+): EncryptedLocalStateDevelopmentArtifactMeasurement => {
+    const sealedAggregateThresholdShare =
+        localState.localStatePlaintext.sealedAggregateThresholdShare;
+    const sealedTargetDecryptionProofWitness =
+        localState.localStatePlaintext.sealedTargetDecryptionProofWitness;
+    const localStatePlaintextJsonBytes = jsonByteLength(
+        localState.localStatePlaintext,
+    );
+    const encryptedLocalStateJsonBytes = jsonByteLength(
+        localState.encryptedLocalState,
+    );
+    const localStateCommitmentJsonBytes = jsonByteLength(
+        localState.localStateCommitment,
+    );
+    const sealedAggregateThresholdShareJsonBytes = jsonByteLength(
+        sealedAggregateThresholdShare,
+    );
+    const sealedTargetDecryptionProofWitnessJsonBytes = jsonByteLength(
+        sealedTargetDecryptionProofWitness,
+    );
+
+    return {
+        qShareLimbCount: acceptedBgvSetupQSharePrimes.length,
+        ringDegree: acceptedBgvProfileRingDegree,
+        sourceEnvelopeCount,
+        buildMilliseconds,
+        aggregateThresholdSharePlaintextBytes:
+            sealedAggregateThresholdShare.encryptedMaterial.plaintextByteLength,
+        targetDecryptionProofWitnessPlaintextBytes:
+            sealedTargetDecryptionProofWitness.encryptedMaterial
+                .plaintextByteLength,
+        localStatePlaintextJsonBytes,
+        encryptedLocalStateJsonBytes,
+        localStateCommitmentJsonBytes,
+        sealedAggregateThresholdShareJsonBytes,
+        sealedTargetDecryptionProofWitnessJsonBytes,
+        largestSingleObjectJsonBytes: Math.max(
+            localStatePlaintextJsonBytes,
+            encryptedLocalStateJsonBytes,
+            localStateCommitmentJsonBytes,
+            sealedAggregateThresholdShareJsonBytes,
+            sealedTargetDecryptionProofWitnessJsonBytes,
+        ),
+    };
+};
+
+const measurePrivateStateDevelopmentArtifacts =
+    async (): Promise<PrivateStateDevelopmentArtifactMeasurement> => {
+        const fixture = fullRingPrivateStateFixture();
+        const observedPrivateEnvelopes: JsonRecord[] = [];
+        const observedTransportedProofMaterials: JsonRecord[] = [];
+        const mailboxStartedAtMilliseconds = performance.now();
+        const deliverySet = await createPrivateVssMailboxDeliverySet({
+            kernel: privateMailboxMeasurementKernel(
+                observedPrivateEnvelopes,
+                observedTransportedProofMaterials,
+            ),
+            setupContext: fixture.setupContext,
+            phaseOrderHash: measurementHash('phase-order'),
+            publicMatrixSeedHash: fixture.publicMatrixSeedHash,
+            vssCoefficientCommitmentRoot: fixture.vssCoefficientCommitmentRoot,
+            qSharePrimes: acceptedBgvSetupQSharePrimes,
+            ringDegree: acceptedBgvProfileRingDegree,
+            participantCount: 1,
+            deliveryPhaseNumber: 6,
+            verificationPhaseNumber: 7,
+            privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
+            privateVssShareProofFactory: ({ rnsLimbIndex }) =>
+                privateVssShareProofFramingSample(rnsLimbIndex),
+            compactVssRecipientShareOpeningCredentials:
+                fixture.compactRecipientShareOpeningCredentials,
+            sourceTrusteeContributionStates: [
+                fixture.sourceTrusteeContributionState,
+            ],
+            recipients: [
+                {
+                    recipientIdentity: 'trustee-0',
+                    recipientRosterPosition: 0,
+                    mailboxPublicKeyBytesHex: fixture.mailboxPublicKeyBytesHex,
+                },
+            ],
+        });
+        const mailboxBuildMilliseconds =
+            performance.now() - mailboxStartedAtMilliseconds;
+        const envelopeReference = firstEnvelopeReference(deliverySet);
+        const privateEnvelope = observedPrivateEnvelopes[0];
+        if (privateEnvelope === undefined) {
+            throw new Error(
+                'private mailbox measurement did not observe the private envelope.',
+            );
+        }
+        const transportedPrivateVssShareProofMaterial =
+            observedTransportedProofMaterials[0];
+        if (transportedPrivateVssShareProofMaterial === undefined) {
+            throw new Error(
+                'private mailbox measurement did not observe transported proof material.',
+            );
+        }
+        const encryptedEnvelope = objectField(
+            envelopeReference,
+            'encryptedEnvelope',
+        );
+        const privateEnvelopeAad = objectField(
+            envelopeReference,
+            'privateEnvelopeAad',
+        );
+        const sourceRecipientEnvelopeCountInFirstProfile =
+            firstProfileParticipantCount * firstProfileParticipantCount;
+        const sourceRecipientEnvelopeCountPerSourceInFirstProfile =
+            firstProfileParticipantCount;
+        const envelopeReferenceJsonBytes = jsonByteLength(envelopeReference);
+        const sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile =
+            envelopeReferenceJsonBytes *
+            sourceRecipientEnvelopeCountPerSourceInFirstProfile;
+        const privateMailbox: PrivateMailboxDevelopmentArtifactMeasurement = {
+            qShareLimbCount: acceptedBgvSetupQSharePrimes.length,
+            ringDegree: acceptedBgvProfileRingDegree,
+            thresholdDegree: firstProfileThresholdDegree,
+            sourceRecipientEnvelopeCountInFirstProfile,
+            sourceRecipientEnvelopeCountPerSourceInFirstProfile,
+            buildMilliseconds: mailboxBuildMilliseconds,
+            privateShareProofFramingSampleBytesPerLimb:
+                privateVssShareProofFramingSampleBytes,
+            privateShareProofFramingSampleBytesTotal:
+                privateVssShareProofFramingSampleBytes *
+                acceptedBgvSetupQSharePrimes.length,
+            compactRecipientShareOpeningCredentialCount:
+                acceptedBgvSetupQSharePrimes.length,
+            compactRecipientShareOpeningCredentialsJsonBytes:
+                fixture.compactRecipientShareOpeningCredentialsJsonBytes,
+            privateEnvelopeJsonBytes: jsonByteLength(privateEnvelope),
+            transportedPrivateVssShareProofMaterialJsonBytes: jsonByteLength(
+                transportedPrivateVssShareProofMaterial,
+            ),
+            privateEnvelopeAadJsonBytes: jsonByteLength(privateEnvelopeAad),
+            encryptedEnvelopeJsonBytes: jsonByteLength(encryptedEnvelope),
+            envelopeReferenceJsonBytes,
+            deliverySetJsonBytes: jsonByteLength(deliverySet),
+            envelopeReferenceJsonBytesExtrapolatedToFirstProfile:
+                envelopeReferenceJsonBytes *
+                sourceRecipientEnvelopeCountInFirstProfile,
+            sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile,
+            sourceTrusteeUploadBudgetMarginBytes:
+                268_435_456 -
+                sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile,
+            largestSingleObjectJsonBytes: Math.max(
+                jsonByteLength(privateEnvelope),
+                jsonByteLength(transportedPrivateVssShareProofMaterial),
+                jsonByteLength(encryptedEnvelope),
+                envelopeReferenceJsonBytes,
+                jsonByteLength(deliverySet),
+            ),
+        };
+        const localStateInput = localStateInputFromPrivateMailbox(
+            fixture,
+            deliverySet,
+            privateEnvelope,
+        );
+        const localStateStartedAtMilliseconds = performance.now();
+        const localState =
+            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+                localStateInput,
+            );
+        const localStateBuildMilliseconds =
+            performance.now() - localStateStartedAtMilliseconds;
+        const encryptedLocalState = encryptedLocalStateMeasurement(
+            localState,
+            deliverySet.envelopeReferences.length,
+            localStateBuildMilliseconds,
+        );
+
+        return {
+            privateMailbox,
+            encryptedLocalState,
+            largestSingleObjectJsonBytes: Math.max(
+                privateMailbox.largestSingleObjectJsonBytes,
+                encryptedLocalState.largestSingleObjectJsonBytes,
+            ),
+        };
+    };
+
+const measureTargetDecryptionDevelopmentArtifacts = (
+    kernel: TranscriptCoreKernel,
+): TargetDecryptionDevelopmentMeasurements => {
+    const fixture = kernel.generateBgvTargetDecryptionFixture();
+    const minimumSharesForInterpolation = numberField(
+        fixture.targetShareProfile,
+        'minimumSharesForInterpolation',
+    );
+    const quorumWitnesses = arrayField(
+        fixture,
+        'quorumLocalTargetShareWitnesses',
+    )
+        .slice(0, minimumSharesForInterpolation)
+        .map((quorumWitness, quorumWitnessIndex) => {
+            const quorumWitnessRecord = protocolRecord(
+                quorumWitness,
+                `quorumLocalTargetShareWitnesses[${String(quorumWitnessIndex)}]`,
+            );
+
+            return {
+                trusteeIdentity: stringField(
+                    quorumWitnessRecord,
+                    'trusteeIdentity',
+                ),
+                localTargetShareWitness: objectField(
+                    quorumWitnessRecord,
+                    'localTargetShareWitness',
+                ),
+            };
+        });
+    if (quorumWitnesses.length !== minimumSharesForInterpolation) {
+        throw new Error(
+            'target-decryption measurement fixture did not produce the interpolation quorum.',
+        );
+    }
+    const targetShareBundles: readonly TargetDecryptionShareMeasurementBundle[] =
+        quorumWitnesses.map((quorumWitness) => {
+            const targetShare =
+                kernel.generateBgvTargetDecryptionShareFromLocalShare({
+                    setupPackage: fixture.setupPackage,
+                    localTargetShareWitness:
+                        quorumWitness.localTargetShareWitness,
+                    targetAcceptedRecord: fixture.targetAcceptedRecord,
+                    targetCiphertextBinding: fixture.targetCiphertextBinding,
+                    targetCiphertexts: fixture.targetCiphertexts,
+                    targetShareProfile: fixture.targetShareProfile,
+                    trusteeIdentity: quorumWitness.trusteeIdentity,
+                });
+            const proofStatement =
+                kernel.deriveBgvTargetDecryptionShareProofStatement({
+                    setupPackage: fixture.setupPackage,
+                    localTargetShareWitness:
+                        quorumWitness.localTargetShareWitness,
+                    targetAcceptedRecord: fixture.targetAcceptedRecord,
+                    targetCiphertextBinding: fixture.targetCiphertextBinding,
+                    targetCiphertexts: fixture.targetCiphertexts,
+                    targetShareProfile: fixture.targetShareProfile,
+                    trusteeIdentity: quorumWitness.trusteeIdentity,
+                    targetDecryptionShare: targetShare,
+                });
+
+            return {
+                trusteeIdentity: quorumWitness.trusteeIdentity,
+                localTargetShareWitness: quorumWitness.localTargetShareWitness,
+                targetShare,
+                proofStatement,
+            };
+        });
+    const firstTargetShareBundle = targetShareBundles[0];
+    if (firstTargetShareBundle === undefined) {
+        throw new Error(
+            'target-decryption measurement fixture produced no target share bundle.',
+        );
+    }
+    const statementBindingVerification =
+        kernel.verifyBgvTargetDecryptionShareProofStatementBinding({
+            setupPackage: fixture.setupPackage,
+            targetAcceptedRecord: fixture.targetAcceptedRecord,
+            targetCiphertextBinding: fixture.targetCiphertextBinding,
+            targetCiphertexts: fixture.targetCiphertexts,
+            targetShareProfile: fixture.targetShareProfile,
+            targetDecryptionShare: firstTargetShareBundle.targetShare,
+            proofStatement: firstTargetShareBundle.proofStatement,
+        });
+    assertTargetStatementBindingIsProofless(statementBindingVerification);
+    const targetShareJsonBytes = jsonByteLength(
+        firstTargetShareBundle.targetShare,
+    );
+    const targetSharePayloadJsonBytes = jsonByteLength(
+        firstTargetShareBundle.targetShare.sharePayload,
+    );
+    const smudgingInputReportJsonBytes = jsonByteLength(
+        firstTargetShareBundle.targetShare.sharePayload.smudgingInputReport,
+    );
+    const proofStatementJsonBytes = jsonByteLength(
+        firstTargetShareBundle.proofStatement,
+    );
+    const statementBindingVerificationJsonBytes = jsonByteLength(
+        statementBindingVerification,
+    );
+    const localTargetShareWitnessJsonBytes = jsonByteLength(
+        firstTargetShareBundle.localTargetShareWitness,
+    );
+    const targetDecryptionSmudgingWitness = objectField(
+        firstTargetShareBundle.localTargetShareWitness,
+        'targetDecryptionSmudging',
+    );
+    const compactAggregateOpeningWitness = objectField(
+        firstTargetShareBundle.localTargetShareWitness,
+        'compactAggregateOpening',
+    );
+    const compactAggregateOpeningCredentials = arrayField(
+        compactAggregateOpeningWitness,
+        'compactAggregateOpeningCredentials',
+    );
+    const artifacts: TargetDecryptionDevelopmentArtifactMeasurement = {
+        localTargetShareWitnessJsonBytes,
+        targetDecryptionSmudgingWitnessJsonBytes: jsonByteLength(
+            targetDecryptionSmudgingWitness,
+        ),
+        compactAggregateOpeningWitnessJsonBytes: jsonByteLength(
+            compactAggregateOpeningWitness,
+        ),
+        compactAggregateOpeningCredentialCount:
+            compactAggregateOpeningCredentials.length,
+        compactAggregateOpeningCredentialsJsonBytes: jsonByteLength(
+            compactAggregateOpeningCredentials,
+        ),
+        targetShareJsonBytes,
+        targetSharePayloadJsonBytes,
+        smudgingInputReportJsonBytes,
+        proofStatementJsonBytes,
+        statementBindingVerificationJsonBytes,
+        largestSingleObjectJsonBytes: Math.max(
+            localTargetShareWitnessJsonBytes,
+            jsonByteLength(targetDecryptionSmudgingWitness),
+            jsonByteLength(compactAggregateOpeningWitness),
+            jsonByteLength(compactAggregateOpeningCredentials),
+            targetShareJsonBytes,
+            proofStatementJsonBytes,
+            statementBindingVerificationJsonBytes,
+        ),
+    };
+
+    if (!targetProofMaterialMeasurementRequested) {
+        return {
+            artifacts,
+            proofMaterialAndRecombination: {
+                measurementMode:
+                    'Set SEALED_LATTICE_MEASURE_TARGET_PROOF_MATERIAL=1 to run the heavy target-decryption proof-material and proof-gated recombination measurement.',
+            },
+        };
+    }
+
+    const proofMaterialStartedAtMilliseconds = performance.now();
+    const proofMaterials = targetShareBundles.map((targetShareBundle, index) =>
+        kernel.generateBgvTargetDecryptionShareProofMaterialFromLocalWitness({
+            setupPackage: fixture.setupPackage,
+            localTargetShareWitness: targetShareBundle.localTargetShareWitness,
+            targetAcceptedRecord: fixture.targetAcceptedRecord,
+            targetCiphertextBinding: fixture.targetCiphertextBinding,
+            targetCiphertexts: fixture.targetCiphertexts,
+            targetShareProfile: fixture.targetShareProfile,
+            trusteeIdentity: targetShareBundle.trusteeIdentity,
+            targetDecryptionShare: targetShareBundle.targetShare,
+            proofStatement: targetShareBundle.proofStatement,
+            proofRandomnessSource: 'development-deterministic-fixture',
+            proofRandomnessSeedHex: (0x21 + index * 2)
+                .toString(16)
+                .padStart(2, '0')
+                .repeat(64),
+            proofRandomnessNonceHex: (0x22 + index * 2)
+                .toString(16)
+                .padStart(2, '0')
+                .repeat(64),
+        }),
+    );
+    const proofMaterialGenerationMilliseconds =
+        performance.now() - proofMaterialStartedAtMilliseconds;
+
+    const proofMaterialVerificationStartedAtMilliseconds = performance.now();
+    const proofMaterialVerifications = proofMaterials.map(
+        (proofMaterial, index) => {
+            const targetShareBundle = targetShareBundles[index];
+            if (targetShareBundle === undefined) {
+                throw new Error(
+                    'target-decryption proof material has no matching share bundle.',
+                );
+            }
+
+            return kernel.verifyBgvTargetDecryptionShareProofMaterial({
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                targetDecryptionShare: targetShareBundle.targetShare,
+                proofStatement: targetShareBundle.proofStatement,
+                proofMaterial,
+            });
+        },
+    );
+    const proofMaterialVerificationMilliseconds =
+        performance.now() - proofMaterialVerificationStartedAtMilliseconds;
+
+    const recombinationStartedAtMilliseconds = performance.now();
+    const recombination = kernel.verifyAndRecombineBgvTargetDecryptionShares({
+        setupPackage: fixture.setupPackage,
+        targetAcceptedRecord: fixture.targetAcceptedRecord,
+        targetCiphertextBinding: fixture.targetCiphertextBinding,
+        targetCiphertexts: fixture.targetCiphertexts,
+        targetShareProfile: fixture.targetShareProfile,
+        targetDecryptionShares: targetShareBundles.map(
+            (targetShareBundle) => targetShareBundle.targetShare,
+        ),
+        proofStatements: targetShareBundles.map(
+            (targetShareBundle) => targetShareBundle.proofStatement,
+        ),
+        proofMaterials,
+    });
+    const proofGatedRecombinationMilliseconds =
+        performance.now() - recombinationStartedAtMilliseconds;
+
+    const proofMaterialJsonBytesByShare = proofMaterials.map(jsonByteLength);
+    const proofMaterialVerificationJsonBytesByShare =
+        proofMaterialVerifications.map(jsonByteLength);
+    const proofGatedRecombinationJsonBytes = jsonByteLength(recombination);
+    const proofMaterialAndRecombination: TargetDecryptionProofMaterialAndRecombinationMeasurement =
+        {
+            measurementMode:
+                'heavy target-decryption proof-material and proof-gated recombination measurement',
+            shareCount: targetShareBundles.length,
+            proofMaterialJsonBytesByShare,
+            proofMaterialJsonBytesTotal: proofMaterialJsonBytesByShare.reduce(
+                (totalBytes, shareBytes) => totalBytes + shareBytes,
+                0,
+            ),
+            proofMaterialProofRecordCountByShare: proofMaterials.map(
+                (proofMaterial) =>
+                    numberField(proofMaterial, 'proofRecordCount'),
+            ),
+            proofMaterialTotalProofByteLengthByShare: proofMaterials.map(
+                (proofMaterial) =>
+                    numberField(proofMaterial, 'totalProofByteLength'),
+            ),
+            proofMaterialTotalProofByteLength: proofMaterials.reduce(
+                (totalBytes, proofMaterial) =>
+                    totalBytes +
+                    numberField(proofMaterial, 'totalProofByteLength'),
+                0,
+            ),
+            proofMaterialGenerationMilliseconds,
+            proofMaterialVerificationJsonBytesByShare,
+            proofMaterialVerificationJsonBytesTotal:
+                proofMaterialVerificationJsonBytesByShare.reduce(
+                    (totalBytes, verificationBytes) =>
+                        totalBytes + verificationBytes,
+                    0,
+                ),
+            proofMaterialVerificationMilliseconds,
+            proofGatedRecombinationJsonBytes,
+            proofGatedRecombinationMilliseconds,
+            largestSingleObjectJsonBytes: Math.max(
+                ...proofMaterialJsonBytesByShare,
+                ...proofMaterialVerificationJsonBytesByShare,
+                proofGatedRecombinationJsonBytes,
+            ),
+        };
+
+    return {
+        artifacts,
+        proofMaterialAndRecombination,
+    };
+};
+
+const implementedDevelopmentArtifactByteAccounting = (
+    measurement: ReturnType<typeof compactVssCommitmentMeasurement>,
+    restrictedProofMeasurement: RestrictedCompactShareLinkageProofMeasurement,
+    restrictedBridgeProofMeasurement: RestrictedCompactSameSecretBridgeProofMeasurement,
+    restrictedBridgeProofMaterialMeasurement: RestrictedCompactSameSecretBridgeProofMaterialMeasurement,
+    privateStateMeasurement: PrivateStateDevelopmentArtifactMeasurement,
+    targetDecryptionMeasurement: TargetDecryptionDevelopmentMeasurements,
+): Readonly<Record<string, unknown>> => {
+    const restrictedShareLinkageProofByteLength =
+        restrictedProofMeasurement.generation.lastResult.proofByteLength;
+    const restrictedSameSecretBridgeProofByteLength =
+        restrictedBridgeProofMeasurement.generation.lastResult.proofByteLength;
+    const restrictedProofPayloadBytes =
+        restrictedShareLinkageProofByteLength +
+        restrictedSameSecretBridgeProofByteLength;
+
+    return {
+        compactPublicCommitmentBodies: {
+            byteLength: measurement.totalCompactPublicCommitmentBytes,
+            byteReduction: measurement.byteReduction,
+        },
+        reducedRingProofSamples: {
+            ringDegree: restrictedProofRingDegree,
+            shareLinkageProofByteLength: restrictedShareLinkageProofByteLength,
+            sameSecretBridgeProofByteLength:
+                restrictedSameSecretBridgeProofByteLength,
+            combinedProofPayloadBytes: restrictedProofPayloadBytes,
+            sameSecretBridgeProofMaterialJsonBytes:
+                restrictedBridgeProofMaterialMeasurement.proofMaterialSetJsonBytes,
+        },
+        privateStateDevelopmentArtifacts: privateStateMeasurement,
+        targetDecryptionDevelopmentArtifacts:
+            targetDecryptionMeasurement.artifacts,
+        targetDecryptionProofMaterialAndRecombinationArtifacts:
+            targetDecryptionMeasurement.proofMaterialAndRecombination,
+    };
+};
+
+const enforceManualMeasurementBudgets = (input: {
+    readonly measurement: ReturnType<typeof compactVssCommitmentMeasurement>;
+    readonly wasmWarmGenerationExtrapolatedSeconds: number;
+    readonly wasmWarmVerificationExtrapolatedSeconds: number;
+    readonly targetDecryptionDevelopmentArtifactMeasurement: TargetDecryptionDevelopmentArtifactMeasurement;
+}): void => {
+    assertAtMost(
+        input.measurement.totalCompactPublicCommitmentBytes,
+        input.measurement.budgetComparison.publicSetupDownloadBudgetBytes,
+        'compact public commitment bodies',
+    );
+    assertAtMost(
+        input.measurement.budgetComparison.oneSourcePublicCommitmentUploadBytes,
+        input.measurement.budgetComparison.sourceTrusteeUploadBudgetBytes,
+        'one source trustee public compact commitment upload body',
+    );
+    assertAtMost(
+        input.measurement.largestSingleObjectBytes,
+        input.measurement.budgetComparison.largestSingleObjectBudgetBytes,
+        'largest compact public commitment body',
+    );
+    assertAtMost(
+        input.measurement.largestWasmBoundaryCopyBytes,
+        input.measurement.budgetComparison.largestWasmBoundaryCopyBudgetBytes,
+        'largest compact public WASM boundary copy',
+    );
+    assertAtLeast(
+        input.measurement.byteReduction.reductionFactor,
+        minimumPublicCommitmentReductionFactor,
+        'compact public commitment body reduction factor',
+    );
+    assertAtMost(
+        input.wasmWarmGenerationExtrapolatedSeconds,
+        maximumWarmWasmFullProfileGenerationSeconds,
+        'WASM warm full-profile compact commitment generation extrapolation',
+    );
+    assertAtMost(
+        input.wasmWarmVerificationExtrapolatedSeconds,
+        maximumWarmWasmFullProfileVerificationSeconds,
+        'WASM warm full-profile compact commitment verification extrapolation',
+    );
+    assertAtMost(
+        input.targetDecryptionDevelopmentArtifactMeasurement
+            .largestSingleObjectJsonBytes,
+        maximumMeasuredDevelopmentArtifactJsonBytes,
+        'largest measured target-decryption development JSON artifact',
+    );
+};
 
 const main = async (): Promise<void> => {
     const opening = fullRingOpening();
@@ -933,6 +2117,10 @@ const main = async (): Promise<void> => {
             restrictedBridgeProofFixture,
             restrictedBridgeProofMeasurement.generation,
         );
+    const privateStateDevelopmentArtifactMeasurement =
+        await measurePrivateStateDevelopmentArtifacts();
+    const targetDecryptionDevelopmentArtifactMeasurement =
+        measureTargetDecryptionDevelopmentArtifacts(kernel);
     if (
         typeScriptMeasurement.generation.lastResult.commitmentRoot !==
         wasmMeasurement.generation.lastResult.commitmentRoot
@@ -974,58 +2162,120 @@ const main = async (): Promise<void> => {
         measurement.cpuWorkModel.sourceCoefficientCommitments +
         measurement.cpuWorkModel.recipientShareCommitments +
         measurement.cpuWorkModel.aggregateThresholdCommitments;
+    const typeScriptWarmGenerationExtrapolatedSeconds = scaledSeconds(
+        typeScriptMeasurement.generation.samples.warmMedianMilliseconds,
+        totalCommitments,
+    );
+    const typeScriptWarmVerificationExtrapolatedSeconds = scaledSeconds(
+        typeScriptMeasurement.verification.samples.warmMedianMilliseconds,
+        totalCommitments,
+    );
+    const wasmWarmGenerationExtrapolatedSeconds = scaledSeconds(
+        wasmMeasurement.generation.samples.warmMedianMilliseconds,
+        totalCommitments,
+    );
+    const wasmWarmVerificationExtrapolatedSeconds = scaledSeconds(
+        wasmMeasurement.verification.samples.warmMedianMilliseconds,
+        totalCommitments,
+    );
+    try {
+        enforceManualMeasurementBudgets({
+            measurement,
+            wasmWarmGenerationExtrapolatedSeconds,
+            wasmWarmVerificationExtrapolatedSeconds,
+            targetDecryptionDevelopmentArtifactMeasurement:
+                targetDecryptionDevelopmentArtifactMeasurement.artifacts,
+        });
+    } catch (error) {
+        console.error(
+            JSON.stringify(
+                {
+                    objectType: 'CompactVssManualMeasurementBudgetFailure',
+                    objectVersion: 1,
+                    developmentMeasurementBudgets: {
+                        maximumWarmWasmFullProfileGenerationSeconds,
+                        maximumWarmWasmFullProfileVerificationSeconds,
+                        maximumMeasuredDevelopmentArtifactJsonBytes,
+                    },
+                    wasm: {
+                        generation: wasmMeasurement.generation.samples,
+                        verification: wasmMeasurement.verification.samples,
+                        warmGenerationExtrapolatedSeconds:
+                            wasmWarmGenerationExtrapolatedSeconds,
+                        warmVerificationExtrapolatedSeconds:
+                            wasmWarmVerificationExtrapolatedSeconds,
+                    },
+                    targetDecryptionDevelopmentArtifactMeasurement,
+                },
+                null,
+                2,
+            ),
+        );
+        throw error;
+    }
 
     console.log(
         JSON.stringify(
             {
                 objectType: 'CompactVssManualMeasurementReport',
                 objectVersion: 1,
-                measurementScope:
-                    'manual local CPU sanity and static compact VSS public commitment accounting; not supported-phone evidence',
                 ringDegree: opening.ringDegree,
                 warmRunCount,
                 totalCommitments,
+                developmentMeasurementBudgets: {
+                    minimumPublicCommitmentReductionFactor,
+                    publicSetupDownloadBudgetBytes:
+                        measurement.budgetComparison
+                            .publicSetupDownloadBudgetBytes,
+                    sourceTrusteeUploadBudgetBytes:
+                        measurement.budgetComparison
+                            .sourceTrusteeUploadBudgetBytes,
+                    largestSingleObjectBudgetBytes:
+                        measurement.budgetComparison
+                            .largestSingleObjectBudgetBytes,
+                    largestWasmBoundaryCopyBudgetBytes:
+                        measurement.budgetComparison
+                            .largestWasmBoundaryCopyBudgetBytes,
+                    maximumWarmWasmFullProfileGenerationSeconds,
+                    maximumWarmWasmFullProfileVerificationSeconds,
+                    maximumMeasuredDevelopmentArtifactJsonBytes,
+                },
                 byteReduction: measurement.byteReduction,
                 totalCompactPublicCommitmentBytes:
                     measurement.totalCompactPublicCommitmentBytes,
                 currentFullCoefficientTransportBytes:
                     measurement.currentFullCoefficientTransportBytes,
                 cpuWorkModel: measurement.cpuWorkModel,
+                implementedDevelopmentArtifactByteAccounting:
+                    implementedDevelopmentArtifactByteAccounting(
+                        measurement,
+                        restrictedProofMeasurement,
+                        restrictedBridgeProofMeasurement,
+                        restrictedBridgeProofMaterialMeasurement,
+                        privateStateDevelopmentArtifactMeasurement,
+                        targetDecryptionDevelopmentArtifactMeasurement,
+                    ),
                 typeScript: {
                     generation: typeScriptMeasurement.generation.samples,
                     bodyEncoding: typeScriptMeasurement.bodyEncoding.samples,
                     bodyDecoding: typeScriptMeasurement.bodyDecoding.samples,
                     verification: typeScriptMeasurement.verification.samples,
-                    warmGenerationExtrapolatedSeconds: scaledSeconds(
-                        typeScriptMeasurement.generation.samples
-                            .warmMedianMilliseconds,
-                        totalCommitments,
-                    ),
-                    warmVerificationExtrapolatedSeconds: scaledSeconds(
-                        typeScriptMeasurement.verification.samples
-                            .warmMedianMilliseconds,
-                        totalCommitments,
-                    ),
+                    warmGenerationExtrapolatedSeconds:
+                        typeScriptWarmGenerationExtrapolatedSeconds,
+                    warmVerificationExtrapolatedSeconds:
+                        typeScriptWarmVerificationExtrapolatedSeconds,
                 },
                 wasm: {
                     generation: wasmMeasurement.generation.samples,
                     bodyEncoding: wasmMeasurement.bodyEncoding.samples,
                     bodyDecoding: wasmMeasurement.bodyDecoding.samples,
                     verification: wasmMeasurement.verification.samples,
-                    warmGenerationExtrapolatedSeconds: scaledSeconds(
-                        wasmMeasurement.generation.samples
-                            .warmMedianMilliseconds,
-                        totalCommitments,
-                    ),
-                    warmVerificationExtrapolatedSeconds: scaledSeconds(
-                        wasmMeasurement.verification.samples
-                            .warmMedianMilliseconds,
-                        totalCommitments,
-                    ),
+                    warmGenerationExtrapolatedSeconds:
+                        wasmWarmGenerationExtrapolatedSeconds,
+                    warmVerificationExtrapolatedSeconds:
+                        wasmWarmVerificationExtrapolatedSeconds,
                 },
                 restrictedCompactShareLinkageProof: {
-                    measurementScope:
-                        'restricted native/WASM proof command over ternary opening randomness at reduced ring degree; not target-ready compact proof evidence',
                     ringDegree: restrictedProofRingDegree,
                     sourceMessageModulus: restrictedProofSourceMessageModulus,
                     coefficientCommitmentCount:
@@ -1034,9 +2284,6 @@ const main = async (): Promise<void> => {
                     proofByteLength:
                         restrictedProofMeasurement.generation.lastResult
                             .proofByteLength,
-                    proofBoundary:
-                        restrictedProofMeasurement.generation.lastResult
-                            .proofBoundary,
                     statementHash:
                         restrictedProofMeasurement.generation.lastResult
                             .statementHash,
@@ -1045,19 +2292,16 @@ const main = async (): Promise<void> => {
                         restrictedProofMeasurement.verification.samples,
                 },
                 restrictedCompactSameSecretBridgeProof: {
-                    measurementScope:
-                        'restricted native/WASM proof command over target-basis compact constant openings at reduced ring degree; not target-ready compact proof evidence',
                     ringDegree: restrictedProofRingDegree,
-                    targetRnsPrime: restrictedProofSourceMessageModulus,
+                    targetRnsPrimes:
+                        restrictedBridgeProofFixture.compactSameSecretBridge
+                            .targetRnsPrimes,
                     targetRnsLimbCount:
                         restrictedBridgeProofMeasurement.generation.lastResult
                             .targetRnsLimbCount,
                     proofByteLength:
                         restrictedBridgeProofMeasurement.generation.lastResult
                             .proofByteLength,
-                    proofBoundary:
-                        restrictedBridgeProofMeasurement.generation.lastResult
-                            .proofBoundary,
                     statementHash:
                         restrictedBridgeProofMeasurement.generation.lastResult
                             .statementHash,
@@ -1067,8 +2311,6 @@ const main = async (): Promise<void> => {
                         restrictedBridgeProofMeasurement.verification.samples,
                 },
                 restrictedCompactSameSecretBridgeProofMaterial: {
-                    measurementScope:
-                        'restricted package-level proof material verification over one generated bridge proof; not target-ready compact proof evidence',
                     proofMaterialSetJsonBytes:
                         restrictedBridgeProofMaterialMeasurement.proofMaterialSetJsonBytes,
                     compactSameSecretBridgeStatementSetRoot:

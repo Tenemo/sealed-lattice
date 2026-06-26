@@ -32,8 +32,6 @@ pub(super) fn same_secret_consistency_object(
                 "relinearization-key-share",
                 "galois-key-share",
             ],
-            "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
-            "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
         }),
     )
     .expect("same-secret proof family binding root");
@@ -117,8 +115,6 @@ pub(super) fn same_secret_consistency_object(
                 "relinearization-key-share",
                 "galois-key-share",
             ],
-            "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
-            "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
             "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         });

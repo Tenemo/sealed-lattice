@@ -56,9 +56,11 @@ mod verifier;
 pub(crate) use commands::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
+    generate_target_decryption_share_proof_from_request,
     generate_trustee_evaluation_key_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
     verify_compact_vss_share_linkage_proof_from_request,
+    verify_target_decryption_share_proof_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 
@@ -104,6 +106,7 @@ pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
 pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(crate) const COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "compact-vss-share-linkage";
 pub(crate) const COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "compact-same-secret-bridge";
+pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
 // Canonical hash of transported same-secret linkage anchor proof bytes.
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(

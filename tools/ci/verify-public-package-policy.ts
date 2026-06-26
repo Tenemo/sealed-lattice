@@ -18,6 +18,36 @@ const sdkRuntimePath = path.resolve(
     'dist',
     'index.js',
 );
+const generatedInternalBridgeArtifactPaths = [
+    path.resolve(
+        repoRoot,
+        'packages',
+        'wasm',
+        'dist',
+        'transcript-core-bridge',
+        'kernel-loader.js',
+    ),
+    path.resolve(
+        repoRoot,
+        'packages',
+        'wasm',
+        'dist',
+        'transcript-core-bridge',
+        'kernel-types.d.ts',
+    ),
+    path.resolve(
+        repoRoot,
+        'packages',
+        'sdk',
+        'dist',
+        'internal',
+        'transcript-core-bridge',
+        'kernel-loader.js',
+    ),
+] as const;
+const sdkVendoredInternalBridgeArtifactRelativePaths = new Set([
+    'packages/sdk/dist/internal/transcript-core-bridge/kernel-loader.js',
+]);
 const protocolSourceDirectoryPath = path.resolve(
     repoRoot,
     'packages',
@@ -36,6 +66,12 @@ const sortedUnique = (values: readonly string[]): string[] =>
 
 const toPosixPath = (filePath: string): string =>
     filePath.split(path.sep).join('/');
+
+const escapeRegExp = (value: string): string =>
+    value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+const exactGeneratedMemberPattern = (memberName: string): RegExp =>
+    new RegExp(`(?<![\\w$])${escapeRegExp(memberName)}(?![\\w$])`, 'u');
 
 const duplicates = (values: readonly string[]): string[] => {
     const seen = new Set<string>();
@@ -317,6 +353,108 @@ const validateVendoredCryptoRuntime = async (
     return failures.sort((left, right) => left.localeCompare(right));
 };
 
+export type GeneratedInternalBridgeArtifactText = {
+    readonly relativePath: string;
+    readonly text: string;
+};
+
+export const validateGeneratedInternalBridgeArtifactTexts = (
+    policy: PublicPackagePolicy,
+    artifactTexts: readonly GeneratedInternalBridgeArtifactText[],
+): string[] => {
+    const failures: string[] = [];
+
+    failures.push(
+        ...validateUnique(
+            'forbiddenGeneratedInternalBridgeMembers',
+            policy.forbiddenGeneratedInternalBridgeMembers,
+        ),
+        ...validateUnique(
+            'forbiddenSdkVendoredInternalBridgeMembers',
+            policy.forbiddenSdkVendoredInternalBridgeMembers,
+        ),
+    );
+
+    if (
+        policy.forbiddenGeneratedInternalBridgeMembers.length === 0 &&
+        policy.forbiddenSdkVendoredInternalBridgeMembers.length === 0
+    ) {
+        return failures;
+    }
+
+    for (const artifactText of artifactTexts) {
+        for (const memberName of policy.forbiddenGeneratedInternalBridgeMembers) {
+            if (
+                exactGeneratedMemberPattern(memberName).test(artifactText.text)
+            ) {
+                failures.push(
+                    `generated internal bridge artifact contains forbidden member "${memberName}": ${artifactText.relativePath}`,
+                );
+            }
+        }
+        if (
+            sdkVendoredInternalBridgeArtifactRelativePaths.has(
+                artifactText.relativePath,
+            )
+        ) {
+            for (const memberName of policy.forbiddenSdkVendoredInternalBridgeMembers) {
+                if (
+                    exactGeneratedMemberPattern(memberName).test(
+                        artifactText.text,
+                    )
+                ) {
+                    failures.push(
+                        `SDK vendored internal bridge artifact contains forbidden member "${memberName}": ${artifactText.relativePath}`,
+                    );
+                }
+            }
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
+};
+
+const loadGeneratedInternalBridgeArtifactTexts = async (): Promise<{
+    readonly failures: readonly string[];
+    readonly artifactTexts: readonly GeneratedInternalBridgeArtifactText[];
+}> => {
+    const failures: string[] = [];
+    const artifactTexts: GeneratedInternalBridgeArtifactText[] = [];
+
+    for (const artifactPath of generatedInternalBridgeArtifactPaths) {
+        const relativePath = toPosixPath(path.relative(repoRoot, artifactPath));
+        try {
+            artifactTexts.push({
+                relativePath,
+                text: await fs.readFile(artifactPath, 'utf8'),
+            });
+        } catch {
+            failures.push(
+                `generated internal bridge artifact is missing: ${relativePath}`,
+            );
+        }
+    }
+
+    return {
+        failures,
+        artifactTexts,
+    };
+};
+
+const validateGeneratedInternalBridgeArtifacts = async (
+    policy: PublicPackagePolicy,
+): Promise<string[]> => {
+    const loadedArtifacts = await loadGeneratedInternalBridgeArtifactTexts();
+
+    return [
+        ...loadedArtifacts.failures,
+        ...validateGeneratedInternalBridgeArtifactTexts(
+            policy,
+            loadedArtifacts.artifactTexts,
+        ),
+    ].sort((left, right) => left.localeCompare(right));
+};
+
 export const validatePublicPackagePolicy = async (
     policy: PublicPackagePolicy,
     runtimeExports: readonly string[],
@@ -352,6 +490,7 @@ export const validatePublicPackagePolicy = async (
     failures.push(
         ...(await validateVendoredProtocolRuntime(policy, runtimeExportSet)),
         ...(await validateVendoredCryptoRuntime(policy)),
+        ...(await validateGeneratedInternalBridgeArtifacts(policy)),
     );
 
     return sortedUnique(failures);

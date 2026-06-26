@@ -15,12 +15,10 @@ import {
     compactVssSameSecretBridgeIntegerSupport,
     sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
-    sameSecretGenericKeySwitchBindingPolicy,
     compactVssSameSecretBridgeSignedRepresentativeConvention,
     compactVssSameSecretBridgeTargetBasisLimbOrder,
     sameSecretProofFamily,
     sameSecretRelation,
-    sameSecretTargetDecryptionBindingPolicy,
     setupCommitmentProfileId,
     setupProofProfileId,
     type SameSecretProofMaterial,
@@ -208,10 +206,6 @@ describe('same-secret consistency statement builders', () => {
                 sameSecretRelation,
                 anchorArgument: sameSecretAnchorArgument,
                 boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-                genericKeySwitchBindingPolicy:
-                    sameSecretGenericKeySwitchBindingPolicy,
-                targetDecryptionBindingPolicy:
-                    sameSecretTargetDecryptionBindingPolicy,
             },
         );
         const expectedTrusteeSecretCommitmentRoot = deriveProtocolHash(
@@ -448,6 +442,11 @@ describe('same-secret consistency statement builders', () => {
                         proofStatementHash: fixtureHash(
                             `compact-same-secret-bridge-proof-statement-${String(statementIndex)}`,
                         ),
+                        proofStatement: {
+                            proofStatementHash: fixtureHash(
+                                `compact-same-secret-bridge-proof-statement-${String(statementIndex)}`,
+                            ),
+                        },
                         proofBytesHex: `${String(statementIndex).padStart(2, '0')}aa55`,
                     }),
                 ),
@@ -540,6 +539,16 @@ describe('same-secret consistency statement builders', () => {
                         statementIndex === 0
                             ? fixtureHash('duplicate-bridge-proof-statement')
                             : fixtureHash('duplicate-bridge-proof-statement'),
+                    proofStatement: {
+                        proofStatementHash:
+                            statementIndex === 0
+                                ? fixtureHash(
+                                      'duplicate-bridge-proof-statement',
+                                  )
+                                : fixtureHash(
+                                      'duplicate-bridge-proof-statement',
+                                  ),
+                    },
                     proofBytesHex: `${String(statementIndex).padStart(2, '0')}bb66`,
                 }),
             );
@@ -759,45 +768,6 @@ describe('same-secret consistency statement builders', () => {
                 },
             }),
         ).toThrow(/proofBytesHex/u);
-
-        const unsupportedBoundaryStatement = {
-            ...firstBridgeStatement,
-            proofBoundary: 'unsupported compact same-secret bridge boundary',
-        } as unknown as typeof firstBridgeStatement;
-        const {
-            compactSameSecretBridgeStatementRoot: _oldStatementRoot,
-            ...unsupportedBoundaryStatementWithoutRoot
-        } = unsupportedBoundaryStatement;
-        const reboundUnsupportedBoundaryStatement = {
-            ...unsupportedBoundaryStatement,
-            compactSameSecretBridgeStatementRoot: deriveProtocolHash(
-                'SetupProofRecordBindingHash',
-                unsupportedBoundaryStatementWithoutRoot,
-            ),
-        };
-        const unsupportedBoundarySet = {
-            ...bridgeStatementSet,
-            statementRecords: [
-                reboundUnsupportedBoundaryStatement,
-                ...bridgeStatementSet.statementRecords.slice(1),
-            ],
-        } as unknown as typeof bridgeStatementSet;
-        const {
-            compactSameSecretBridgeStatementSetRoot: _oldStatementSetRoot,
-            ...unsupportedBoundarySetWithoutRoot
-        } = unsupportedBoundarySet;
-
-        expect(() =>
-            verifyCompactVssSameSecretBridgeStatementSet({
-                statementSet: {
-                    ...unsupportedBoundarySet,
-                    compactSameSecretBridgeStatementSetRoot: deriveProtocolHash(
-                        'SetupProofRecordBindingHash',
-                        unsupportedBoundarySetWithoutRoot,
-                    ),
-                },
-            }),
-        ).toThrow(/proofBoundary/u);
 
         const unsupportedSignedConventionSet = {
             ...bridgeStatementSet,

@@ -57,6 +57,14 @@ export type LocalTrusteeSetupStateSealedMaterial = Readonly<
     }
 >;
 
+type LocalTrusteeSetupStateSealedMaterialReference = Readonly<{
+    readonly objectType: 'LocalTrusteeSetupStateSealedMaterialReference';
+    readonly objectVersion: 1;
+    readonly materialClass: LocalTrusteeSetupStateSealedMaterialClass;
+    readonly materialRoot: ProtocolHash;
+    readonly ciphertextReference: ProtocolHash;
+}>;
+
 export type LocalTrusteeSetupStateSealedPayload = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeSetupStateSealedPayload';
@@ -72,6 +80,26 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
         readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
         readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
         readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
+        readonly issuedVssAcceptanceRoots: readonly ProtocolHash[];
+        readonly issuedVssComplaintRoots: readonly ProtocolHash[];
+    }
+>;
+
+type LocalTrusteeSetupStateStorageManifest = Readonly<
+    JsonRecord & {
+        readonly objectType: 'LocalTrusteeSetupStateStorageManifest';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly ceremonyId: string;
+        readonly manifestHash: ProtocolHash;
+        readonly rosterHash: ProtocolHash;
+        readonly setupEpoch: string;
+        readonly trusteeIdentity: string;
+        readonly trusteeRosterPosition: number;
+        readonly deviceEpoch: number;
+        readonly thresholdShareCommitmentRecipientRoot: ProtocolHash;
+        readonly sealedAggregateThresholdShareReference: LocalTrusteeSetupStateSealedMaterialReference;
+        readonly sealedTargetDecryptionProofWitnessReference: LocalTrusteeSetupStateSealedMaterialReference;
         readonly issuedVssAcceptanceRoots: readonly ProtocolHash[];
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
     }
@@ -96,8 +124,6 @@ export type LocalTrusteeStateStorageEncryptionInput = {
             readonly issuedVssAcceptanceRoot: ProtocolHash;
             readonly issuedVssComplaintRoots: readonly ProtocolHash[];
             readonly localStateRoot: ProtocolHash;
-            readonly storageProfile: 'encrypted-local-device-state-required';
-            readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
         }
     >;
     readonly setupContext: unknown;
@@ -122,6 +148,8 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<Record<string, unknown>>;
         readonly storageAadHash: ProtocolHash;
+        readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+        readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
@@ -205,6 +233,24 @@ const localTrusteeSealedPayloadFieldNames = [
     'issuedVssComplaintRoots',
 ] as const;
 
+const localTrusteeStorageManifestFieldNames = [
+    'objectType',
+    'objectVersion',
+    'setupProfileId',
+    'ceremonyId',
+    'manifestHash',
+    'rosterHash',
+    'setupEpoch',
+    'trusteeIdentity',
+    'trusteeRosterPosition',
+    'deviceEpoch',
+    'thresholdShareCommitmentRecipientRoot',
+    'sealedAggregateThresholdShareReference',
+    'sealedTargetDecryptionProofWitnessReference',
+    'issuedVssAcceptanceRoots',
+    'issuedVssComplaintRoots',
+] as const;
+
 const sealedMaterialFieldNames = [
     'objectType',
     'objectVersion',
@@ -212,6 +258,14 @@ const sealedMaterialFieldNames = [
     'materialRoot',
     'ciphertextReference',
     'encryptedMaterial',
+] as const;
+
+const sealedMaterialReferenceFieldNames = [
+    'objectType',
+    'objectVersion',
+    'materialClass',
+    'materialRoot',
+    'ciphertextReference',
 ] as const;
 
 const encryptedSealedMaterialFieldNames = [
@@ -506,22 +560,6 @@ const assertCommitmentHeader = (
     if (localStateCommitment.objectVersion !== 1) {
         throw new TypeError('localStateCommitment.objectVersion must be 1.');
     }
-    if (
-        localStateCommitment.storageProfile !==
-        'encrypted-local-device-state-required'
-    ) {
-        throw new TypeError(
-            'localStateCommitment.storageProfile must require encrypted local device state.',
-        );
-    }
-    if (
-        localStateCommitment.exportPolicy !==
-        'roots-only-no-raw-share-or-opening-export'
-    ) {
-        throw new TypeError(
-            'localStateCommitment.exportPolicy must forbid raw share and opening export.',
-        );
-    }
     assertProtocolHash(
         localStateCommitment.localStateRoot,
         'localStateCommitment.localStateRoot',
@@ -815,6 +853,92 @@ const validateSealedMaterial = (
     return material as LocalTrusteeSetupStateSealedMaterial;
 };
 
+const sealedMaterialReference = (
+    material: LocalTrusteeSetupStateSealedMaterial,
+): LocalTrusteeSetupStateSealedMaterialReference => ({
+    objectType: 'LocalTrusteeSetupStateSealedMaterialReference',
+    objectVersion: 1,
+    materialClass: material.materialClass,
+    materialRoot: material.materialRoot,
+    ciphertextReference: material.ciphertextReference,
+});
+
+const validateSealedMaterialReference = (
+    value: unknown,
+    expectedMaterial: LocalTrusteeSetupStateSealedMaterial,
+    objectPath: string,
+): LocalTrusteeSetupStateSealedMaterialReference => {
+    const reference = assertJsonRecord(value, objectPath);
+    assertExactFields(reference, sealedMaterialReferenceFieldNames, objectPath);
+    if (
+        reference.objectType !== 'LocalTrusteeSetupStateSealedMaterialReference'
+    ) {
+        throw new TypeError(
+            `${objectPath}.objectType must be LocalTrusteeSetupStateSealedMaterialReference.`,
+        );
+    }
+    if (reference.objectVersion !== 1) {
+        throw new TypeError(`${objectPath}.objectVersion must be 1.`);
+    }
+    if (reference.materialClass !== expectedMaterial.materialClass) {
+        throw new TypeError(
+            `${objectPath}.materialClass must match the sealed material.`,
+        );
+    }
+    const materialRoot = stringField(
+        reference,
+        'materialRoot',
+        `${objectPath}.materialRoot`,
+    );
+    assertProtocolHash(materialRoot, `${objectPath}.materialRoot`);
+    if (materialRoot !== expectedMaterial.materialRoot) {
+        throw new Error(
+            `${objectPath}.materialRoot must match sealed material.`,
+        );
+    }
+    const ciphertextReference = stringField(
+        reference,
+        'ciphertextReference',
+        `${objectPath}.ciphertextReference`,
+    );
+    assertProtocolHash(
+        ciphertextReference,
+        `${objectPath}.ciphertextReference`,
+    );
+    if (ciphertextReference !== expectedMaterial.ciphertextReference) {
+        throw new Error(
+            `${objectPath}.ciphertextReference must match sealed material.`,
+        );
+    }
+
+    return reference as LocalTrusteeSetupStateSealedMaterialReference;
+};
+
+const localStateStorageManifestFromPlaintext = (
+    localStatePlaintext: LocalTrusteeSetupStateSealedPayload,
+): LocalTrusteeSetupStateStorageManifest => ({
+    objectType: 'LocalTrusteeSetupStateStorageManifest',
+    objectVersion: 1,
+    setupProfileId: localStatePlaintext.setupProfileId,
+    ceremonyId: localStatePlaintext.ceremonyId,
+    manifestHash: localStatePlaintext.manifestHash,
+    rosterHash: localStatePlaintext.rosterHash,
+    setupEpoch: localStatePlaintext.setupEpoch,
+    trusteeIdentity: localStatePlaintext.trusteeIdentity,
+    trusteeRosterPosition: localStatePlaintext.trusteeRosterPosition,
+    deviceEpoch: localStatePlaintext.deviceEpoch,
+    thresholdShareCommitmentRecipientRoot:
+        localStatePlaintext.thresholdShareCommitmentRecipientRoot,
+    sealedAggregateThresholdShareReference: sealedMaterialReference(
+        localStatePlaintext.sealedAggregateThresholdShare,
+    ),
+    sealedTargetDecryptionProofWitnessReference: sealedMaterialReference(
+        localStatePlaintext.sealedTargetDecryptionProofWitness,
+    ),
+    issuedVssAcceptanceRoots: localStatePlaintext.issuedVssAcceptanceRoots,
+    issuedVssComplaintRoots: localStatePlaintext.issuedVssComplaintRoots,
+});
+
 const validateLocalStatePlaintext = (
     localStatePlaintext: unknown,
     localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
@@ -936,6 +1060,117 @@ const validateLocalStatePlaintext = (
     }
 
     return plaintext as LocalTrusteeSetupStateSealedPayload;
+};
+
+const validateLocalStateStorageManifest = (
+    manifestValue: unknown,
+    localStateCommitment: LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
+    setupContext: unknown,
+    sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial,
+    sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial,
+): LocalTrusteeSetupStateSealedPayload => {
+    const manifest = assertJsonRecord(
+        manifestValue,
+        'localStateStorageManifest',
+    );
+    assertExactFields(
+        manifest,
+        localTrusteeStorageManifestFieldNames,
+        'localStateStorageManifest',
+    );
+    if (manifest.objectType !== 'LocalTrusteeSetupStateStorageManifest') {
+        throw new TypeError(
+            'localStateStorageManifest.objectType must be LocalTrusteeSetupStateStorageManifest.',
+        );
+    }
+    if (manifest.objectVersion !== 1) {
+        throw new TypeError(
+            'localStateStorageManifest.objectVersion must be 1.',
+        );
+    }
+    const setupProfileId = stringField(
+        manifest,
+        'setupProfileId',
+        'localStateStorageManifest.setupProfileId',
+    );
+    if (setupProfileId !== 'CollectiveBgvSetup-v1') {
+        throw new TypeError(
+            'localStateStorageManifest.setupProfileId must be CollectiveBgvSetup-v1.',
+        );
+    }
+    const ceremonyId = stringField(
+        manifest,
+        'ceremonyId',
+        'localStateStorageManifest.ceremonyId',
+    );
+    const manifestHash = stringField(
+        manifest,
+        'manifestHash',
+        'localStateStorageManifest.manifestHash',
+    );
+    const rosterHash = stringField(
+        manifest,
+        'rosterHash',
+        'localStateStorageManifest.rosterHash',
+    );
+    const setupEpoch = stringField(
+        manifest,
+        'setupEpoch',
+        'localStateStorageManifest.setupEpoch',
+    );
+    const trusteeIdentity = stringField(
+        manifest,
+        'trusteeIdentity',
+        'localStateStorageManifest.trusteeIdentity',
+    );
+    const trusteeRosterPosition = numberField(
+        manifest,
+        'trusteeRosterPosition',
+    );
+    const deviceEpoch = numberField(manifest, 'deviceEpoch');
+    const thresholdShareCommitmentRecipientRoot = stringField(
+        manifest,
+        'thresholdShareCommitmentRecipientRoot',
+        'localStateStorageManifest.thresholdShareCommitmentRecipientRoot',
+    );
+    validateSealedMaterialReference(
+        manifest.sealedAggregateThresholdShareReference,
+        sealedAggregateThresholdShare,
+        'localStateStorageManifest.sealedAggregateThresholdShareReference',
+    );
+    validateSealedMaterialReference(
+        manifest.sealedTargetDecryptionProofWitnessReference,
+        sealedTargetDecryptionProofWitness,
+        'localStateStorageManifest.sealedTargetDecryptionProofWitnessReference',
+    );
+
+    return validateLocalStatePlaintext(
+        {
+            objectType: 'LocalTrusteeSetupStateSealedPayload',
+            objectVersion: 1,
+            setupProfileId,
+            ceremonyId,
+            manifestHash,
+            rosterHash,
+            setupEpoch,
+            trusteeIdentity,
+            trusteeRosterPosition,
+            deviceEpoch,
+            thresholdShareCommitmentRecipientRoot,
+            sealedAggregateThresholdShare,
+            sealedTargetDecryptionProofWitness,
+            issuedVssAcceptanceRoots: protocolHashArrayField(
+                manifest,
+                'issuedVssAcceptanceRoots',
+            ),
+            issuedVssComplaintRoots: protocolHashArrayField(
+                manifest,
+                'issuedVssComplaintRoots',
+            ),
+        },
+        localStateCommitment,
+        setupContext,
+    );
 };
 
 export const encryptLocalTrusteeSetupSealedMaterial = async (
@@ -1169,8 +1404,13 @@ export const encryptLocalTrusteeState = async (
         'sealed-lattice-local-trustee-state/commitment-hash-v1',
         input.localStateCommitment,
     );
-    const plaintextJson = canonicalJson(localStatePlaintext);
+    const manifestPlaintext =
+        localStateStorageManifestFromPlaintext(localStatePlaintext);
+    const plaintextJson = canonicalJson(manifestPlaintext);
     const plaintextBytes = textEncoder.encode(plaintextJson);
+    const localStatePlaintextBytes = textEncoder.encode(
+        canonicalJson(localStatePlaintext),
+    );
     const keyBytes = deriveAesGcmKeyBytes(
         storageKeyBytes,
         input.localStateCommitment.localStateRoot,
@@ -1198,6 +1438,10 @@ export const encryptLocalTrusteeState = async (
         localStateCommitmentHash,
         storageAad: associatedData,
         storageAadHash,
+        sealedAggregateThresholdShare:
+            localStatePlaintext.sealedAggregateThresholdShare,
+        sealedTargetDecryptionProofWitness:
+            localStatePlaintext.sealedTargetDecryptionProofWitness,
         keyCommitmentHash: hashBytes(
             'sealed-lattice-local-trustee-state/storage-key-commitment-v1',
             storageKeyBytes,
@@ -1223,7 +1467,7 @@ export const encryptLocalTrusteeState = async (
         },
         localStatePlaintextHash: hash512Hex(
             'sealed-lattice-local-trustee-state/plaintext-hash-v1',
-            [plaintextBytes],
+            [localStatePlaintextBytes],
         ),
         storageAadHash,
     };
@@ -1273,10 +1517,12 @@ export const decryptLocalTrusteeState = async (
             'encryptedLocalState.encryptedLocalStateHash does not match the canonical envelope.',
         );
     }
+    const localStateCommitment = input.encryptedLocalState.storageAad
+        .localStateCommitment as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
+    assertCommitmentHeader(localStateCommitment);
     const expectedAssociatedData = storageAad(
         input.setupContext,
-        input.encryptedLocalState.storageAad
-            .localStateCommitment as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'],
+        localStateCommitment,
     );
     if (
         canonicalJson(input.encryptedLocalState.storageAad) !==
@@ -1298,6 +1544,22 @@ export const decryptLocalTrusteeState = async (
             'encryptedLocalState.storageAadHash does not match storageAad.',
         );
     }
+    const sealedAggregateThresholdShare = validateSealedMaterial(
+        input.encryptedLocalState.sealedAggregateThresholdShare,
+        'aggregate-threshold-share-sealed',
+        localStateCommitment.aggregateThresholdShareRoot,
+        input.setupContext,
+        localStateCommitment,
+        'encryptedLocalState.sealedAggregateThresholdShare',
+    );
+    const sealedTargetDecryptionProofWitness = validateSealedMaterial(
+        input.encryptedLocalState.sealedTargetDecryptionProofWitness,
+        'target-decryption-proof-witness-sealed',
+        localStateCommitment.targetDecryptionProofWitnessRoot,
+        input.setupContext,
+        localStateCommitment,
+        'encryptedLocalState.sealedTargetDecryptionProofWitness',
+    );
     const storageKeyBytes = decodeFixedHex(
         input.storageKeyBytesHex,
         aesGcmKeyByteLength,
@@ -1348,23 +1610,25 @@ export const decryptLocalTrusteeState = async (
             'decrypted local trustee state byte length does not match plaintextByteLength.',
         );
     }
-    const parsedLocalStatePlaintext: unknown = JSON.parse(
+    const parsedLocalStateManifest: unknown = JSON.parse(
         textDecoder.decode(plaintextBytes),
     );
-    const localStateCommitment = input.encryptedLocalState.storageAad
-        .localStateCommitment as LocalTrusteeStateStorageEncryptionInput['localStateCommitment'];
-    assertCommitmentHeader(localStateCommitment);
-    const localStatePlaintext = validateLocalStatePlaintext(
-        parsedLocalStatePlaintext,
+    const localStatePlaintext = validateLocalStateStorageManifest(
+        parsedLocalStateManifest,
         localStateCommitment,
         input.setupContext,
+        sealedAggregateThresholdShare,
+        sealedTargetDecryptionProofWitness,
+    );
+    const localStatePlaintextBytes = textEncoder.encode(
+        canonicalJson(localStatePlaintext),
     );
 
     return {
         localStatePlaintext,
         localStatePlaintextHash: hash512Hex(
             'sealed-lattice-local-trustee-state/plaintext-hash-v1',
-            [plaintextBytes],
+            [localStatePlaintextBytes],
         ),
         storageAadHash: expectedAadHash,
     };

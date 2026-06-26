@@ -76,7 +76,6 @@ pub(super) fn public_key_shares_object(
             "shareComponent": "component-zero-b_i",
             "rnsLimbCount": DATA_PRIMES.len(),
             "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
-            "proofBindingStatus": "public-key-share-proof-required",
         });
         share_record["publicKeyShareRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareRoot", &share_record)
@@ -94,7 +93,6 @@ pub(super) fn public_key_shares_object(
         "objectVersion": 1,
         "setupProfileId": "CollectiveBgvSetup-v1",
         "setupProofProfileId": "SealedLattice-SetupProof-v1",
-        "proofBindingStatus": "public-key-share-proof-required",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -180,8 +178,6 @@ pub(super) fn public_key_share_proofs_object(
             "sameSecretStatementRoot": same_secret_statement["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": same_secret_statement["trusteeSecretCommitmentRoot"],
             "rnsLimbCount": DATA_PRIMES.len(),
-            "errorSupport": "checked-by-public-key-share-succinct-proof-set",
-            "proofBytesStatus": "supplied-by-public-key-share-succinct-proof-set",
         });
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
             derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
@@ -270,7 +266,6 @@ pub(super) fn evaluator_key_schedule_object(
         "relinearizationLevelSchedule": schedule_profile["relinearizationLevelSchedule"],
         "requiredGaloisKeySchedule": schedule_profile["requiredGaloisKeySchedule"],
         "requiredGaloisSetHash": schedule_profile["requiredGaloisSetHash"],
-        "genericKeySwitchPolicy": "refused-unless-explicitly-required",
     });
     schedule["evaluatorKeyScheduleRoot"] = serde_json::json!(
         derive_protocol_hash("EvaluatorKeyScheduleRoot", &schedule)

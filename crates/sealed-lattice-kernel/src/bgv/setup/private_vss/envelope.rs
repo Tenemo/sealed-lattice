@@ -1,7 +1,71 @@
 use super::*;
+use crate::transcript_core::decode_hex;
 
 const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";
 const PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE: &str = "PrivateVssShareLimbOpening";
+const PRIVATE_VSS_SHARE_VALUE_BYTE_LENGTH: usize = 6;
+const MAXIMUM_PRIVATE_VSS_SHARE_VALUE_EXCLUSIVE: u64 = 1_u64 << 48;
+
+fn private_vss_share_values_from_little_endian_48_hex(
+    limb_opening: &Value,
+    rns_prime: u64,
+) -> Result<Vec<u64>, PrivateVssRefusal> {
+    let object_path = "privateEnvelope.rnsShareOpenings.shareValuesLittleEndian48Hex";
+    if rns_prime > MAXIMUM_PRIVATE_VSS_SHARE_VALUE_EXCLUSIVE {
+        return Err(PrivateVssRefusal::new(
+            "privateVssRnsPrimePackedShareValueOverflow",
+            "private VSS limb opening rnsPrime must fit the packed 48-bit share-value field",
+            "privateEnvelope.rnsShareOpenings.rnsPrime",
+        ));
+    }
+    let encoded_share_values = string_field(
+        limb_opening,
+        "shareValuesLittleEndian48Hex",
+        object_path,
+        "privateVssShareValuesMissing",
+        "private VSS limb opening must include shareValuesLittleEndian48Hex",
+    )?;
+    if !encoded_share_values
+        .len()
+        .is_multiple_of(PRIVATE_VSS_SHARE_VALUE_BYTE_LENGTH * 2)
+    {
+        return Err(PrivateVssRefusal::new(
+            "privateVssShareValuesMalformed",
+            "private VSS packed share values must contain whole 48-bit little-endian fields",
+            object_path,
+        ));
+    }
+    if !encoded_share_values
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(PrivateVssRefusal::new(
+            "privateVssShareValuesMalformed",
+            "private VSS packed share values must be lowercase hex",
+            object_path,
+        ));
+    }
+    let share_value_bytes = decode_hex(encoded_share_values).map_err(|error| {
+        PrivateVssRefusal::new("privateVssShareValuesMalformed", error.message, object_path)
+    })?;
+    let mut share_values =
+        Vec::with_capacity(share_value_bytes.len() / PRIVATE_VSS_SHARE_VALUE_BYTE_LENGTH);
+    for chunk in share_value_bytes.chunks_exact(PRIVATE_VSS_SHARE_VALUE_BYTE_LENGTH) {
+        let mut value_bytes = [0_u8; 8];
+        value_bytes[..PRIVATE_VSS_SHARE_VALUE_BYTE_LENGTH].copy_from_slice(chunk);
+        let share_value = u64::from_le_bytes(value_bytes);
+        if share_value >= rns_prime {
+            return Err(PrivateVssRefusal::new(
+                "privateVssShareValueOutOfRange",
+                "private VSS packed share values must be residues below rnsPrime",
+                object_path,
+            ));
+        }
+        share_values.push(share_value);
+    }
+
+    Ok(share_values)
+}
 
 pub(super) fn verify_private_envelope_header(
     private_envelope: &Value,
@@ -264,22 +328,17 @@ fn verify_private_envelope_limb(
         )));
     }
 
-    let share_values = match u64_vector_field(
-        limb_opening,
-        "shareValues",
-        "privateEnvelope.rnsShareOpenings.shareValues",
-        "privateVssShareValuesMissing",
-        "private VSS limb opening must include shareValues",
-    ) {
-        Ok(share_values) => share_values,
-        Err(refusal) => return Ok(Err(refusal)),
-    };
+    let share_values =
+        match private_vss_share_values_from_little_endian_48_hex(limb_opening, rns_prime) {
+            Ok(share_values) => share_values,
+            Err(refusal) => return Ok(Err(refusal)),
+        };
     let ring_degree = share_values.len();
     if ring_degree == 0 {
         return Ok(Err(PrivateVssRefusal::new(
             "privateVssShareValuesEmpty",
             "private VSS share vector must be non-empty",
-            "privateEnvelope.rnsShareOpenings.shareValues",
+            "privateEnvelope.rnsShareOpenings.shareValuesLittleEndian48Hex",
         )));
     }
 

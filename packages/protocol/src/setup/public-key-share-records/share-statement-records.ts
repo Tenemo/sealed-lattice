@@ -6,7 +6,6 @@ import {
 } from '../same-secret-consistency-records.js';
 
 import {
-    publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
@@ -180,7 +179,6 @@ export const createPublicKeyShareSet = (
                 rnsLimbCount: input.qSharePrimes.length,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
-                proofBindingStatus: publicKeyShareProofBindingStatus,
             } as const satisfies Omit<
                 PublicKeyShareRecord,
                 'publicKeyShareRoot'
@@ -200,7 +198,6 @@ export const createPublicKeyShareSet = (
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
         setupProofProfileId,
-        proofBindingStatus: publicKeyShareProofBindingStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -302,9 +299,6 @@ export const createPublicKeyShareProofSet = (
                 trusteeSecretCommitmentRoot:
                     sameSecretStatement.trusteeSecretCommitmentRoot,
                 rnsLimbCount: input.qSharePrimes.length,
-                errorSupport: 'checked-by-public-key-share-succinct-proof-set',
-                proofBytesStatus:
-                    'supplied-by-public-key-share-succinct-proof-set',
             } as const satisfies Omit<
                 PublicKeyShareProofRecord,
                 'publicKeyShareProofRoot'

@@ -7,8 +7,6 @@ use crate::bgv::setup::compact_same_secret_bridge::{
 const COMPACT_SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD: &str = "compactSameSecretBridgeStatementSet";
 const COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD: &str =
     "compactSameSecretBridgeProofMaterialSet";
-const COMPACT_SAME_SECRET_BRIDGE_PROOF_STATEMENTS_FIELD: &str =
-    "compactSameSecretBridgeProofStatements";
 
 pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
     setup_package: &Value,
@@ -87,22 +85,6 @@ pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
             format!("setupPackage.{COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD}"),
         )?));
     };
-    let Some(restricted_proof_statements) =
-        request.get(COMPACT_SAME_SECRET_BRIDGE_PROOF_STATEMENTS_FIELD)
-    else {
-        return Ok(Some(compact_same_secret_bridge_refusal(
-            "compactSameSecretBridgeProofStatementsMissing",
-            "compact same-secret bridge proof material requires matching restricted proof statements for accepted setup verification",
-            format!("request.{COMPACT_SAME_SECRET_BRIDGE_PROOF_STATEMENTS_FIELD}"),
-        )?));
-    };
-    if !matches!(restricted_proof_statements, Value::Array(values) if !values.is_empty()) {
-        return Ok(Some(compact_same_secret_bridge_refusal(
-            "compactSameSecretBridgeProofStatementsMissing",
-            "compact same-secret bridge proof material requires at least one matching restricted proof statement for accepted setup verification",
-            format!("request.{COMPACT_SAME_SECRET_BRIDGE_PROOF_STATEMENTS_FIELD}"),
-        )?));
-    }
 
     let mut proof_material_request = bridge_request;
     let proof_material_request_object = proof_material_request
@@ -110,10 +92,6 @@ pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
         .expect("compact bridge proof material request is a JSON object");
     proof_material_request_object
         .insert("proofMaterialSet".to_string(), proof_material_set.clone());
-    proof_material_request_object.insert(
-        "restrictedProofStatements".to_string(),
-        restricted_proof_statements.clone(),
-    );
 
     match verify_compact_vss_same_secret_bridge_proof_material_set_request(&proof_material_request)
     {
@@ -237,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_refuses_proof_material_without_restricted_statements()
+    fn optional_compact_same_secret_bridge_refuses_proof_material_without_packaged_statements()
     -> CanonicalResult<()> {
         let (statement_set, same_secret_consistency, same_secret_proofs) =
             compact_same_secret_bridge_statement_set_with_evidence()?;
@@ -251,26 +229,27 @@ mod tests {
             }),
             &json!({}),
         )?
-        .expect("compact bridge proof material without restricted statements must refuse");
+        .expect("compact bridge proof material without packaged statements must refuse");
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactSameSecretBridgeProofStatementsMissing")
+            json!("compactSameSecretBridgeProofMaterialInvalid")
         );
         assert_eq!(
             response["refusedObjects"][0]["objectPath"],
-            json!("request.compactSameSecretBridgeProofStatements")
+            json!("setupPackage.compactSameSecretBridgeProofMaterialSet")
         );
         Ok(())
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_refuses_empty_restricted_statement_list()
+    fn optional_compact_same_secret_bridge_refuses_empty_packaged_statement_list()
     -> CanonicalResult<()> {
         let (statement_set, same_secret_consistency, same_secret_proofs) =
             compact_same_secret_bridge_statement_set_with_evidence()?;
-        let proof_material_set = compact_same_secret_bridge_proof_material_set(&statement_set)?;
+        let mut proof_material_set = compact_same_secret_bridge_proof_material_set(&statement_set)?;
+        proof_material_set["proofStatements"] = json!([]);
         let response = verify_optional_compact_same_secret_bridge_statement_set(
             &json!({
                 "compactSameSecretBridgeStatementSet": statement_set,
@@ -278,39 +257,100 @@ mod tests {
                 "sameSecretConsistency": same_secret_consistency,
                 "sameSecretProofs": same_secret_proofs,
             }),
-            &json!({
-                "compactSameSecretBridgeProofStatements": [],
-            }),
+            &json!({}),
         )?
-        .expect("empty compact bridge proof statement list must refuse");
+        .expect("empty compact bridge packaged proof statement list must refuse");
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactSameSecretBridgeProofStatementsMissing")
+            json!("compactSameSecretBridgeProofMaterialInvalid")
         );
         assert_eq!(
             response["refusedObjects"][0]["objectPath"],
-            json!("request.compactSameSecretBridgeProofStatements")
+            json!("setupPackage.compactSameSecretBridgeProofMaterialSet")
         );
         Ok(())
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_accepts_verified_restricted_proof_material()
+    fn optional_compact_same_secret_bridge_accepts_verified_packaged_proof_material()
     -> CanonicalResult<()> {
         let fixture = compact_same_secret_bridge_verified_proof_material_fixture()?;
         let response = verify_optional_compact_same_secret_bridge_statement_set(
             &fixture.setup_package,
-            &json!({
-                "compactSameSecretBridgeProofStatements": fixture.restricted_proof_statements,
-            }),
+            &json!({}),
         )?;
 
         assert!(
             response.is_none(),
             "valid compact same-secret bridge proof material was refused: {response:?}"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn optional_compact_same_secret_bridge_refuses_packaged_proof_statement_mismatches()
+    -> CanonicalResult<()> {
+        let fixture = compact_same_secret_bridge_verified_proof_material_fixture()?;
+
+        let mut wrong_same_secret_statement_root = fixture.setup_package.clone();
+        wrong_same_secret_statement_root["compactSameSecretBridgeProofMaterialSet"]["proofStatements"]
+            [0]["compactSameSecretBridge"]["sameSecretStatementRoot"] = json!("0".repeat(128));
+        assert_compact_same_secret_bridge_proof_material_refusal(
+            wrong_same_secret_statement_root,
+            "sameSecretStatementRoot",
+        )?;
+
+        let mut wrong_same_secret_proof_root = fixture.setup_package.clone();
+        wrong_same_secret_proof_root["compactSameSecretBridgeProofMaterialSet"]["proofStatements"]
+            [0]["compactSameSecretBridge"]["sameSecretProofRoot"] = json!("0".repeat(128));
+        assert_compact_same_secret_bridge_proof_material_refusal(
+            wrong_same_secret_proof_root,
+            "sameSecretProofRoot",
+        )?;
+
+        let mut wrong_target_basis_hash = fixture.setup_package.clone();
+        wrong_target_basis_hash["compactSameSecretBridgeProofMaterialSet"]["proofStatements"][0]
+            ["compactSameSecretBridge"]["targetBasisHash"] = json!("0".repeat(128));
+        assert_compact_same_secret_bridge_proof_material_refusal(
+            wrong_target_basis_hash,
+            "targetBasisHash",
+        )?;
+
+        let mut wrong_target_prime = fixture.setup_package.clone();
+        wrong_target_prime["compactSameSecretBridgeProofMaterialSet"]["proofStatements"][0]["compactSameSecretBridge"]
+            ["targetRnsPrimes"][0] = json!(DATA_PRIMES[1]);
+        assert_compact_same_secret_bridge_proof_material_refusal(
+            wrong_target_prime,
+            "target prime",
+        )?;
+
+        let mut wrong_target_constant_root = fixture.setup_package.clone();
+        wrong_target_constant_root["compactSameSecretBridgeProofMaterialSet"]["proofStatements"]
+            [0]["compactSameSecretBridge"]["targetConstantCommitmentRoots"][0] =
+            json!("0".repeat(128));
+        assert_compact_same_secret_bridge_proof_material_refusal(
+            wrong_target_constant_root,
+            "target commitment root",
+        )?;
+
+        let mut wrong_target_commitment_body = fixture.setup_package;
+        let target_commitment = &mut wrong_target_commitment_body["compactSameSecretBridgeProofMaterialSet"]
+            ["proofStatements"][0]["compactSameSecretBridge"]["targetConstantCommitments"][0];
+        let modulus = target_commitment["commitmentLimbs"][0]["modulus"]
+            .as_u64()
+            .expect("target commitment modulus");
+        let coordinate = target_commitment["commitmentLimbs"][0]["coordinates"][0]
+            .as_u64()
+            .expect("target commitment coordinate");
+        target_commitment["commitmentLimbs"][0]["coordinates"][0] =
+            json!((coordinate + 1) % modulus);
+        assert_compact_same_secret_bridge_proof_material_refusal(
+            wrong_target_commitment_body,
+            "root does not match its compact commitment object",
+        )?;
+
         Ok(())
     }
 
@@ -340,6 +380,34 @@ mod tests {
             response["refusedObjects"][0]["objectPath"],
             json!("setupPackage.compactSameSecretBridgeStatementSet")
         );
+        Ok(())
+    }
+
+    fn assert_compact_same_secret_bridge_proof_material_refusal(
+        setup_package: Value,
+        expected_message_fragment: &str,
+    ) -> CanonicalResult<()> {
+        let response =
+            verify_optional_compact_same_secret_bridge_statement_set(&setup_package, &json!({}))?
+                .expect("compact bridge proof material mismatch must refuse");
+
+        assert_eq!(response["verifierStatus"], json!("refused"));
+        assert_eq!(
+            response["refusedObjects"][0]["reasonCode"],
+            json!("compactSameSecretBridgeProofMaterialInvalid")
+        );
+        assert_eq!(
+            response["refusedObjects"][0]["objectPath"],
+            json!("setupPackage.compactSameSecretBridgeProofMaterialSet")
+        );
+        let message = response["refusedObjects"][0]["message"]
+            .as_str()
+            .expect("compact bridge refusal message");
+        assert!(
+            message.contains(expected_message_fragment),
+            "expected compact bridge refusal message to contain {expected_message_fragment:?}, got {message:?}"
+        );
+
         Ok(())
     }
 
@@ -407,7 +475,6 @@ mod tests {
                     "objectType": "CompactVssSameSecretBridgeProofRecord",
                     "objectVersion": 1,
                     "proofFamily": "compact-same-secret-bridge",
-                    "proofBoundary": "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence",
                     "compactSameSecretBridgeStatementRoot": statement_record["compactSameSecretBridgeStatementRoot"],
                     "proofStatementHash": if proof_record_index == 0 {
                         "1".repeat(128)
@@ -434,10 +501,8 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "compact-same-secret-bridge",
-            "proofBoundary": "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence",
             "ceremonyId": statement_set["ceremonyId"],
             "manifestHash": statement_set["manifestHash"],
             "rosterHash": statement_set["rosterHash"],
@@ -469,7 +534,6 @@ mod tests {
 
     struct CompactSameSecretBridgeVerifiedProofMaterialFixture {
         setup_package: Value,
-        restricted_proof_statements: Vec<Value>,
     }
 
     fn compact_same_secret_bridge_verified_proof_material_fixture()
@@ -562,11 +626,15 @@ mod tests {
         });
         let generation =
             generate_compact_same_secret_bridge_proof_from_request(&generation_request)?;
+        let proof_statement = json!({
+            "proofStatementHash": generation["statementHash"],
+            "context": generation_request["context"],
+            "ringDegree": generation_request["ringDegree"],
+            "compactSameSecretBridge": generation_request["compactSameSecretBridge"],
+        });
         let proof_material_set = single_participant_compact_same_secret_bridge_proof_material_set(
             &statement_set,
-            generation["statementHash"]
-                .as_str()
-                .expect("statement hash"),
+            proof_statement,
             generation["proofBytesHex"].as_str().expect("proof bytes"),
         )?;
 
@@ -577,12 +645,6 @@ mod tests {
                 "sameSecretConsistency": same_secret_consistency,
                 "sameSecretProofs": same_secret_proofs,
             }),
-            restricted_proof_statements: vec![json!({
-                "proofStatementHash": generation["statementHash"],
-                "context": generation_request["context"],
-                "ringDegree": generation_request["ringDegree"],
-                "compactSameSecretBridge": generation_request["compactSameSecretBridge"],
-            })],
         })
     }
 
@@ -710,7 +772,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -741,7 +802,6 @@ mod tests {
                 "coefficientCommitmentRoot": target_commitment_root,
             }],
             "relation": "target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof",
-            "proofBoundary": "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence",
         });
         let mut statement_record = statement_record_without_root;
         statement_record["compactSameSecretBridgeStatementRoot"] = json!(derive_protocol_hash(
@@ -753,7 +813,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -790,15 +849,17 @@ mod tests {
 
     fn single_participant_compact_same_secret_bridge_proof_material_set(
         statement_set: &Value,
-        proof_statement_hash: &str,
+        proof_statement: Value,
         proof_bytes_hex: &str,
     ) -> CanonicalResult<Value> {
+        let proof_statement_hash = proof_statement["proofStatementHash"]
+            .as_str()
+            .expect("proof statement hash");
         let proof_bytes = crate::transcript_core::decode_hex(proof_bytes_hex)?;
         let proof_record_without_root = json!({
             "objectType": "CompactVssSameSecretBridgeProofRecord",
             "objectVersion": 1,
             "proofFamily": "compact-same-secret-bridge",
-            "proofBoundary": "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence",
             "compactSameSecretBridgeStatementRoot": statement_set["statementRecords"][0]["compactSameSecretBridgeStatementRoot"],
             "proofStatementHash": proof_statement_hash,
             "proofByteLength": proof_bytes.len(),
@@ -818,10 +879,8 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "compact-same-secret-bridge",
-            "proofBoundary": "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence",
             "ceremonyId": statement_set["ceremonyId"],
             "manifestHash": statement_set["manifestHash"],
             "rosterHash": statement_set["rosterHash"],
@@ -841,6 +900,7 @@ mod tests {
             "sameSecretProofFamilyBindingRoot": statement_set["sameSecretProofFamilyBindingRoot"],
             "compactSameSecretBridgeStatementSetRoot": statement_set["compactSameSecretBridgeStatementSetRoot"],
             "proofRecords": [proof_record],
+            "proofStatements": [proof_statement],
         });
         let mut proof_material_set = proof_material_set_without_root;
         proof_material_set["proofMaterialSetRoot"] = json!(derive_protocol_hash(
@@ -861,7 +921,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -979,8 +1038,6 @@ mod tests {
                 "relinearization-key-share",
                 "galois-key-share"
             ],
-            "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
-            "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
             "sameSecretProofFamilyBindingRoot": "c".repeat(128),
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         });
@@ -1144,7 +1201,7 @@ mod tests {
             .map(|rns_limb_index| {
                 json!({
                     "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": if rns_limb_index == 0 { 97 } else { 193 },
+                    "rnsPrime": DATA_PRIMES[rns_limb_index],
                     "shamirCoefficientIndex": 0,
                     "coefficientCommitmentRoot": compact_same_secret_bridge_root(
                         trustee_roster_position,
@@ -1158,7 +1215,6 @@ mod tests {
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
             "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
-            "developmentScope": "development-only-not-certified-for-production-use",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -1196,7 +1252,6 @@ mod tests {
             "targetBasisLimbOrder": "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime",
             "targetConstantCoefficientCommitmentRoots": target_constant_coefficient_commitment_roots,
             "relation": "target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof",
-            "proofBoundary": "restricted native compact same-secret bridge proof over target-basis compact constant commitments; not target-ready package proof evidence",
         });
         statement["compactSameSecretBridgeStatementRoot"] = json!(derive_protocol_hash(
             "SetupProofRecordBindingHash",

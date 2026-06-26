@@ -57,10 +57,12 @@ import type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
-    BgvTargetDecryptionResult,
+    BgvTargetDecryptionRecombination,
     BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofMaterial,
+    BgvTargetDecryptionShareProofMaterialVerification,
     BgvTargetDecryptionShareProofStatement,
-    BgvTargetDecryptionShareProofStatementVerification,
+    BgvTargetDecryptionShareProofStatementBindingVerification,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
     BgvThresholdShareCommitmentTransportStreamAbort,
@@ -121,10 +123,12 @@ export type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
-    BgvTargetDecryptionResult,
+    BgvTargetDecryptionRecombination,
     BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareProofMaterial,
+    BgvTargetDecryptionShareProofMaterialVerification,
     BgvTargetDecryptionShareProofStatement,
-    BgvTargetDecryptionShareProofStatementVerification,
+    BgvTargetDecryptionShareProofStatementBindingVerification,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
     BgvThresholdShareCommitmentTransportStreamAbort,
@@ -203,17 +207,6 @@ export type TranscriptCoreKernel = {
         }[];
     }): Record<string, unknown>;
     generateBgvTargetDecryptionFixture(): BgvTargetDecryptionDevelopmentFixture;
-    generateBgvTargetDecryptionShare(input: {
-        readonly setupPackage: BgvPassiveSetupPackage;
-        readonly setupPrivateWitness: {
-            readonly setupSeed: string;
-        };
-        readonly targetAcceptedRecord: unknown;
-        readonly targetCiphertextBinding: unknown;
-        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-        readonly targetShareProfile: unknown;
-        readonly trusteeIdentity: string;
-    }): BgvTargetDecryptionShare;
     generateBgvTargetDecryptionShareFromLocalShare(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly localTargetShareWitness: unknown;
@@ -233,7 +226,21 @@ export type TranscriptCoreKernel = {
         readonly trusteeIdentity: string;
         readonly targetDecryptionShare: BgvTargetDecryptionShare;
     }): BgvTargetDecryptionShareProofStatement;
-    verifyBgvTargetDecryptionShareProofStatement(input: {
+    generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly localTargetShareWitness: unknown;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly trusteeIdentity: string;
+        readonly targetDecryptionShare: BgvTargetDecryptionShare;
+        readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+        readonly proofRandomnessSource: string;
+        readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
+    }): BgvTargetDecryptionShareProofMaterial;
+    verifyBgvTargetDecryptionShareProofMaterial(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly targetAcceptedRecord: unknown;
         readonly targetCiphertextBinding: unknown;
@@ -241,15 +248,27 @@ export type TranscriptCoreKernel = {
         readonly targetShareProfile: unknown;
         readonly targetDecryptionShare: BgvTargetDecryptionShare;
         readonly proofStatement: BgvTargetDecryptionShareProofStatement;
-    }): BgvTargetDecryptionShareProofStatementVerification;
-    recombineBgvTargetDecryptionShares(input: {
+        readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
+    }): BgvTargetDecryptionShareProofMaterialVerification;
+    verifyBgvTargetDecryptionShareProofStatementBinding(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly targetAcceptedRecord: unknown;
         readonly targetCiphertextBinding: unknown;
         readonly targetCiphertexts: BgvTargetCiphertextPairInput;
         readonly targetShareProfile: unknown;
-        readonly decryptionShares: readonly BgvTargetDecryptionShare[];
-    }): BgvTargetDecryptionResult;
+        readonly targetDecryptionShare: BgvTargetDecryptionShare;
+        readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+    }): BgvTargetDecryptionShareProofStatementBindingVerification;
+    verifyAndRecombineBgvTargetDecryptionShares(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly targetDecryptionShares: readonly BgvTargetDecryptionShare[];
+        readonly proofStatements: readonly BgvTargetDecryptionShareProofStatement[];
+        readonly proofMaterials: readonly BgvTargetDecryptionShareProofMaterial[];
+    }): BgvTargetDecryptionRecombination;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -403,9 +422,6 @@ export type TranscriptCoreKernel = {
     verifyCompactVssShareLinkageProofMaterialSet(input: {
         readonly statement: Readonly<Record<string, unknown>>;
         readonly proofMaterialSet: Readonly<Record<string, unknown>>;
-        readonly restrictedProofStatements?: readonly Readonly<
-            Record<string, unknown>
-        >[];
     }): BgvCompactVssShareLinkageProofMaterialSetVerification;
     verifyCompactVssSameSecretBridgeStatementSet(input: {
         readonly statementSet: Readonly<Record<string, unknown>>;
@@ -423,9 +439,6 @@ export type TranscriptCoreKernel = {
         readonly transportedSameSecretProofMaterial?: Readonly<
             Record<string, unknown>
         >;
-        readonly restrictedProofStatements?: readonly Readonly<
-            Record<string, unknown>
-        >[];
     }): BgvCompactVssSameSecretBridgeProofMaterialSetVerification;
     deriveThresholdShareCommitments(input: {
         readonly setupContext: unknown;
@@ -595,18 +608,6 @@ type TranscriptCoreKernelCommand =
           readonly command: 'GenerateBgvTargetDecryptionFixture';
       }
     | {
-          readonly command: 'GenerateBgvTargetDecryptionShare';
-          readonly setupPackage: BgvPassiveSetupPackage;
-          readonly setupPrivateWitness: {
-              readonly setupSeed: string;
-          };
-          readonly targetAcceptedRecord: unknown;
-          readonly targetCiphertextBinding: unknown;
-          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
-          readonly targetShareProfile: unknown;
-          readonly trusteeIdentity: string;
-      }
-    | {
           readonly command: 'GenerateBgvTargetDecryptionShareFromLocalShare';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly localTargetShareWitness: unknown;
@@ -628,7 +629,33 @@ type TranscriptCoreKernelCommand =
           readonly targetDecryptionShare: BgvTargetDecryptionShare;
       }
     | {
-          readonly command: 'VerifyBgvTargetDecryptionShareProofStatement';
+          readonly command: 'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly localTargetShareWitness: unknown;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly trusteeIdentity: string;
+          readonly targetDecryptionShare: BgvTargetDecryptionShare;
+          readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+          readonly proofRandomnessSource: string;
+          readonly proofRandomnessSeedHex: string;
+          readonly proofRandomnessNonceHex: string;
+      }
+    | {
+          readonly command: 'VerifyBgvTargetDecryptionShareProofMaterial';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly targetDecryptionShare: BgvTargetDecryptionShare;
+          readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+          readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
+      }
+    | {
+          readonly command: 'VerifyBgvTargetDecryptionShareProofStatementBinding';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly targetAcceptedRecord: unknown;
           readonly targetCiphertextBinding: unknown;
@@ -638,13 +665,15 @@ type TranscriptCoreKernelCommand =
           readonly proofStatement: BgvTargetDecryptionShareProofStatement;
       }
     | {
-          readonly command: 'RecombineBgvTargetDecryptionShares';
+          readonly command: 'VerifyAndRecombineBgvTargetDecryptionShares';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly targetAcceptedRecord: unknown;
           readonly targetCiphertextBinding: unknown;
           readonly targetCiphertexts: BgvTargetCiphertextPairInput;
           readonly targetShareProfile: unknown;
-          readonly decryptionShares: readonly BgvTargetDecryptionShare[];
+          readonly targetDecryptionShares: readonly BgvTargetDecryptionShare[];
+          readonly proofStatements: readonly BgvTargetDecryptionShareProofStatement[];
+          readonly proofMaterials: readonly BgvTargetDecryptionShareProofMaterial[];
       }
     | {
           readonly command: 'VerifyBgvPassiveSetup';
@@ -818,9 +847,6 @@ type TranscriptCoreKernelCommand =
           readonly command: 'VerifyCompactVssShareLinkageProofMaterialSet';
           readonly statement: Readonly<Record<string, unknown>>;
           readonly proofMaterialSet: Readonly<Record<string, unknown>>;
-          readonly restrictedProofStatements?: readonly Readonly<
-              Record<string, unknown>
-          >[];
       }
     | {
           readonly command: 'VerifyCompactVssSameSecretBridgeStatementSet';
@@ -840,9 +866,6 @@ type TranscriptCoreKernelCommand =
           readonly transportedSameSecretProofMaterial?: Readonly<
               Record<string, unknown>
           >;
-          readonly restrictedProofStatements?: readonly Readonly<
-              Record<string, unknown>
-          >[];
       }
     | {
           readonly command: 'DeriveThresholdShareCommitments';

@@ -167,6 +167,28 @@ pub(crate) fn batched_row_check_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
+    if layout.target_decryption_active() {
+        for randomness_position in 0..layout.target_decryption_randomness_columns {
+            for half in 0..TRACE_SPLIT {
+                let randomness = column_values
+                    [layout.physical_target_decryption_randomness(randomness_position, half)];
+                let cube =
+                    domain.value_mul(&domain.value_mul(&randomness, &randomness), &randomness);
+                absorb(&domain.value_sub(&cube, &randomness), &mut accumulated);
+            }
+        }
+        for mask_column in 0..layout.mask_column_count {
+            for half in 0..TRACE_SPLIT {
+                let mask = column_values[layout.physical_mask(mask_column, half)];
+                absorb(
+                    &domain.value_sub(&domain.value_mul(&mask, &mask), &mask),
+                    &mut accumulated,
+                );
+            }
+        }
+
+        return accumulated;
+    }
     for half in 0..TRACE_SPLIT {
         let secret = column_values[layout.physical_secret(half)];
         let cube = domain.value_mul(&domain.value_mul(&secret, &secret), &secret);
@@ -369,6 +391,64 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
 
         return accumulated;
     }
+    if layout.target_decryption_active() {
+        let mut claim_alpha_index = 0_usize;
+        for consistency_vector in 0..layout.consistency_vector_count() {
+            for repetition in 0..CONSISTENCY_REPETITIONS {
+                let alpha_value = &consistency_alpha[claim_alpha_index];
+                claim_alpha_index += 1;
+                for half in 0..TRACE_SPLIT {
+                    let witness_value =
+                        if consistency_vector < layout.target_decryption_message_columns {
+                            column_values[layout
+                                .physical_target_decryption_message(consistency_vector, half)]
+                        } else {
+                            column_values[layout.physical_target_decryption_randomness(
+                                consistency_vector - layout.target_decryption_message_columns,
+                                half,
+                            )]
+                        };
+                    let consistency_product =
+                        domain.value_mul(&publics.consistency[repetition][half], &witness_value);
+                    accumulated = tower.add(
+                        &accumulated,
+                        &domain.challenge_times(alpha_value, &consistency_product),
+                    );
+                }
+            }
+        }
+        for (mask_column, mask_selector) in publics.mask_selector.iter().enumerate() {
+            for half in 0..TRACE_SPLIT {
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(
+                        &mask_selector[half],
+                        &column_values[layout.physical_mask(mask_column, half)],
+                    ),
+                );
+            }
+        }
+        debug_assert_eq!(
+            publics.linkage.len(),
+            layout.target_decryption_logical_columns()
+        );
+        for (column_index, relation_values) in publics.linkage.iter().enumerate() {
+            for (half, relation_value) in relation_values.iter().enumerate().take(TRACE_SPLIT) {
+                let column_value = target_decryption_column_value::<Domain>(
+                    column_values,
+                    layout,
+                    column_index,
+                    half,
+                );
+                accumulated = tower.add(
+                    &accumulated,
+                    &domain.challenge_times(relation_value, &column_value),
+                );
+            }
+        }
+
+        return accumulated;
+    }
     for (repetition, (secret_factor, u_power)) in publics
         .secret_factor
         .iter()
@@ -493,6 +573,22 @@ fn compact_vss_column_value<Domain: CompositionColumnDomain>(
     } else {
         column_values[layout.physical_compact_vss_randomness(
             vector_index - layout.compact_vss_coefficient_columns - 2,
+            half,
+        )]
+    }
+}
+
+fn target_decryption_column_value<Domain: CompositionColumnDomain>(
+    column_values: &[Domain::Value],
+    layout: &LimbColumnLayout,
+    vector_index: usize,
+    half: usize,
+) -> Domain::Value {
+    if vector_index < layout.target_decryption_message_columns {
+        column_values[layout.physical_target_decryption_message(vector_index, half)]
+    } else {
+        column_values[layout.physical_target_decryption_randomness(
+            vector_index - layout.target_decryption_message_columns,
             half,
         )]
     }
