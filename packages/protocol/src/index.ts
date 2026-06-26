@@ -280,15 +280,12 @@ export type {
     SetupContributionAssemblyInput,
 } from './setup/setup-contribution-orchestration.js';
 export type {
-    BgvHeSecurityCertificate,
     BgvRnsParametersForCertificates,
     CollectiveBgvSetupParametersForCertificates,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
     SetupCertificates,
     SetupCertificatesInput,
-    SetupCommitmentSecurityCertificate,
-    SetupProofAccountingCertificate,
     SetupTransportCertificate,
 } from './setup/setup-certificates.js';
 export type {
@@ -297,7 +294,6 @@ export type {
     SetupPackageInput,
     SetupPackageVerificationInput,
     SetupPackageVerificationInputSource,
-    SetupKeyCorrectnessCertificate,
 } from './setup/setup-package-assembly.js';
 export type {
     ThresholdShareCommitmentLimb,

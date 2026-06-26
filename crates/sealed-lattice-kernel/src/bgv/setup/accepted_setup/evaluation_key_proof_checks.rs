@@ -93,12 +93,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
 
 fn trustee_evaluation_key_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
     setup_package.get("evaluationKeys").is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificate")
-            .is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificateHash")
-            .is_some()
 }
 
 fn verify_trustee_evaluation_key_proof_set(

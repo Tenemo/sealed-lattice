@@ -59,11 +59,10 @@ pub(crate) use commands::{
 };
 
 pub(in crate::bgv::setup) use accounting::{
-    succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
-    succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
-    succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
+    succinct_evaluation_key_proof_accounting_hash, succinct_private_vss_share_accounting_hash,
+    succinct_private_vss_share_accounting_value, succinct_public_key_share_accounting_hash,
+    succinct_public_key_share_accounting_value,
     succinct_same_secret_linkage_anchor_accounting_hash,
-    succinct_same_secret_linkage_anchor_accounting_value,
 };
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;

@@ -31,12 +31,9 @@ import {
 const manifestOpaqueBindingFieldNames = new Set([
     'heParamHash',
     'bgvPassiveSetupPackageHash',
-    'bgvSetupParameterCertificateHash',
     'bgvParametersHash',
     'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
-    'collectiveSecretDistributionCertificateHash',
-    'errorDistributionCertificateHash',
     'keySwitchDecompositionHash',
     'ballotValidityProofParametersHash',
     'comparisonInputDerivationCircuitHash',
@@ -53,7 +50,6 @@ const manifestOpaqueBindingFieldNames = new Set([
     'thresholdShareVerificationKeyHash',
     'trusteeThresholdVerificationKeyHash',
     'targetDecryptionParametersHash',
-    'targetThresholdDecryptabilityCertificateHash',
     'targetBasisHash',
     'mobileRuntimeParametersHash',
 ]);
@@ -88,12 +84,9 @@ const collectManifestOpaqueBindingRefusals = (
     const requiredHashFields = [
         bindings.heParamHash,
         bindings.bgvPassiveSetupPackageHash,
-        bindings.bgvSetupParameterCertificateHash,
         bindings.bgvParametersHash,
         bindings.bgvPublicKeyRoot,
         bindings.collectivePublicKeyRoot,
-        bindings.collectiveSecretDistributionCertificateHash,
-        bindings.errorDistributionCertificateHash,
         bindings.keySwitchDecompositionHash,
         bindings.ballotValidityProofParametersHash,
         bindings.comparisonInputDerivationCircuitHash,
@@ -110,7 +103,6 @@ const collectManifestOpaqueBindingRefusals = (
         bindings.thresholdShareVerificationKeyHash,
         bindings.trusteeThresholdVerificationKeyHash,
         bindings.targetDecryptionParametersHash,
-        bindings.targetThresholdDecryptabilityCertificateHash,
         bindings.targetBasisHash,
         bindings.mobileRuntimeParametersHash,
     ];

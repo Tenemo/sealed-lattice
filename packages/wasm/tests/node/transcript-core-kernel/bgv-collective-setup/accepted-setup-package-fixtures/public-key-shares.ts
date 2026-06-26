@@ -191,9 +191,9 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
     const publicDerivations = commonRandomness.publicDerivations as JsonRecord;
     const crpRoots = publicDerivations.crpRoots as JsonRecord;
     const publicA = publicDerivations.bgvPublicA as JsonRecord;
-    const setupProofAccountingCertificate = jsonRecord(
-        setupPackage.setupProofAccountingCertificate,
-        'setupPackage.setupProofAccountingCertificate',
+    const canonicalSuccinctProofs = jsonRecord(
+        setupPackage.publicKeyShareSuccinctProofs,
+        'setupPackage.publicKeyShareSuccinctProofs',
     );
     const publicKeyShares = setupPackage.publicKeyShares as PublicKeyShareSet;
     const proofBytesHex = '00';
@@ -224,7 +224,7 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
         publicKeyShareMaterial:
             setupPackage.publicKeyShareMaterial as PublicKeyShareMaterialSet,
         proofAccountingHash: String(
-            setupProofAccountingCertificate.publicKeyShareProofAccountingHash,
+            canonicalSuccinctProofs.proofAccountingHash,
         ),
         proofMaterials,
     });

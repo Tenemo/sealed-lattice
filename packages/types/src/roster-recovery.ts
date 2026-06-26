@@ -59,12 +59,9 @@ export type ManifestPolicyHashes = {
 export type ManifestOpaqueBindings = {
     readonly heParamHash: ProtocolHash;
     readonly bgvPassiveSetupPackageHash: ProtocolHash;
-    readonly bgvSetupParameterCertificateHash: ProtocolHash;
     readonly bgvParametersHash: ProtocolHash;
     readonly bgvPublicKeyRoot: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
-    readonly collectiveSecretDistributionCertificateHash: ProtocolHash;
-    readonly errorDistributionCertificateHash: ProtocolHash;
     readonly keySwitchDecompositionHash: ProtocolHash;
     readonly ballotValidityProofParametersHash: ProtocolHash;
     readonly comparisonInputDerivationCircuitHash: ProtocolHash;
@@ -81,7 +78,6 @@ export type ManifestOpaqueBindings = {
     readonly thresholdShareVerificationKeyHash: ProtocolHash;
     readonly trusteeThresholdVerificationKeyHash: ProtocolHash;
     readonly targetDecryptionParametersHash: ProtocolHash;
-    readonly targetThresholdDecryptabilityCertificateHash: ProtocolHash;
     readonly targetBasisHash: ProtocolHash;
     readonly mobileRuntimeParametersHash: ProtocolHash;
 };

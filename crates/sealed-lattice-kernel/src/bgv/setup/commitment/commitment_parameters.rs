@@ -49,11 +49,7 @@ pub(in super::super) fn setup_commitment_parameters_value() -> CanonicalResult<V
         },
         "assumptions": {
             "hiding": "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings",
-            "binding": "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix",
-            "requiredCertificates": [
-                "SetupCommitmentSecurityCertificate",
-                "SetupProofAccountingCertificate"
-            ]
+            "binding": "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix"
         },
         "serialization": {
             "largeCoefficientMaterial": "binary-chunked-transport",

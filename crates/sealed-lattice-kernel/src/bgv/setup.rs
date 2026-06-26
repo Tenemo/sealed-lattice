@@ -6,7 +6,6 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
-mod development_fixtures;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
@@ -64,11 +63,10 @@ pub(crate) use threshold_share_commitments::{
 };
 
 use sampling::{
-    dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
-    negacyclic_product_mod, sample_bounded_collective_error_share_distribution,
+    dense_public_residues, negacyclic_product_mod,
+    sample_bounded_collective_error_share_distribution,
     sample_bounded_collective_secret_share_distribution, sample_positions, sample_public_residues,
-    sample_signed_values, sample_values, signed_to_modulus_residue,
-    signed_to_plaintext_scaled_residue,
+    signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
 };
 
 use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
@@ -77,7 +75,6 @@ use crate::{
         coefficient_codec::{
             coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
         },
-        encoding::encode_batch_plaintext_slots,
         evaluator::{
             engine::{BgvPublicKey, DevelopmentBgvKey},
             key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
@@ -88,11 +85,6 @@ use crate::{
         parameters::{
             BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
             data_basis_modulus_bits, extended_basis_modulus_bits,
-        },
-        rns::RnsPolynomial,
-        serialization::{
-            BgvObjectKind, canonical_bytes_hash, ciphertext_root, plaintext_root,
-            serialize_bgv_object,
         },
         setup_helpers::{
             array_at_path, compare_derived_hash, compare_expected_string, compare_hash_at_path,
@@ -105,13 +97,8 @@ use crate::{
     hashing::{canonical_json, chunk_root, derive_canonical_object_hash, hash512, hash512_hex},
 };
 
-pub(crate) const KEY_SWITCH_DECOMPOSITION_SCHEME_ID: &str =
-    "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
-pub(crate) const SELECTED_ROT_SET_ID: &str = "compact-generator-basis-packed-rank-rot-set-v1";
 const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
-const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
-    "sealed-lattice-passive-bgv-setup-development-encryption-fixture-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
 
 #[derive(Clone)]
@@ -150,65 +137,6 @@ struct VerifiedParticipantSetupBinding {
     public_key_share_root: String,
     participant_setup_record_hash: String,
     trustee_threshold_verification_key_hash: String,
-}
-
-pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
-    Ok(json!({
-        "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
-        "keySwitchDecompositionSchemeId": KEY_SWITCH_DECOMPOSITION_SCHEME_ID,
-        "selectedRotSetId": SELECTED_ROT_SET_ID,
-        "canonicalObjects": [
-            "BgvPassiveSetupPackage",
-            "ParticipantBgvSetupRecord",
-            "BgvPublicKeyShare",
-            "BgvCollectivePublicKey",
-            "BgvCollectivePublicKeyCoefficientMaterial",
-            "ThresholdShareVerificationKeySet",
-            "TrusteeThresholdVerificationKey",
-            "BgvRelinearizationKey",
-            "BgvRotationKey",
-            "BgvKeySwitchKey",
-            "BgvEvaluationKeySet",
-            "BgvEvaluationKeyMaterialCommitment",
-            "BgvPublicEvaluationKeyMaterial",
-            "BgvEvaluationKeyStreamingCommitment",
-            "BgvSetupParameterCertificate",
-            "CollectiveSecretDistributionCertificate",
-            "ErrorDistributionCertificate",
-            "EvaluationKeySizeCertificate",
-            "BgvDevelopmentEncryptionFixture"
-        ],
-        "reservedRootsAndHashes": [
-            "BGVPassiveSetupPackageHash",
-            "ParticipantBgvSetupRecordHash",
-            "PublicKeyShareRoot",
-            "BGVPublicCommonRandomPolynomialRoot",
-            "BGVPublicKeyRoot",
-            "CollectivePublicKeyRoot",
-            "ThresholdShareVerificationKeyRoot",
-            "ThresholdShareVerificationKeyHash",
-            "TrusteeThresholdVerificationKeyHash",
-            "RelinearizationKeyRoot",
-            "RotationKeyRoot",
-            "KeySwitchKeyRoot",
-            "KeySwitchDecompositionHash",
-            "EvalKeyRoot",
-            "EvaluationKeySetHash",
-            "EvaluationKeySizeParametersHash",
-            "CollectiveSecretDistributionCertificateHash",
-            "ErrorDistributionCertificateHash",
-            "BGVHeSecurityCertificateHash",
-            "BGVSetupParameterCertificateHash",
-            "SetupProofRecordBindingHash",
-            "SetupProofAccountingCertificateHash",
-            "SetupKeyCorrectnessCertificateHash",
-            "BGVDevelopmentEncryptionFixtureHash",
-            "RotSetHash",
-            "ComparisonInputDerivationCircuitHash",
-            "EncryptedComparisonInputHash",
-            "EncryptedSparseTargetProjectionHash"
-        ],
-    }))
 }
 
 pub(crate) fn generate_passive_setup_package_from_request(

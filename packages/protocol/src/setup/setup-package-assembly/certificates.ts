@@ -1,7 +1,3 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-
-import { firstClosureRosterSize } from '../../lifecycle/roster-policy.js';
-import type { GaloisKeyShareBatch } from '../evaluation-key-proof-records.js';
 import type {
     CollectivePublicKey,
     SetupPackagePublicKeyShareMaterialSet,
@@ -15,37 +11,18 @@ import {
 } from '../public-key-share-records.js';
 import type { SameSecretProofSet } from '../same-secret-consistency-records.js';
 import { createSetupCertificates } from '../setup-certificates.js';
-import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
-import {
-    assertObjectRecord,
-    contextFieldNames,
-    hashField,
-    optionalNestedHashValue,
-    optionalTopLevelHashValue,
-} from './constants-and-assertions.js';
 import { setupCertificateTransportedObjectsFromPackageInput } from './transported-material.js';
 import type {
-    ActiveStaticSetupTheoremCertificate,
-    ActiveStaticSetupTheoremCertificateBody,
-    JsonRecord,
-    SetupKeyCorrectnessCertificate,
-    SetupKeyCorrectnessCertificateBody,
     SetupPackageCertificateRecords,
     SetupPackageInput,
-    SetupPackageInputWithDerivedCollectivePublicKey,
 } from './types.js';
 
 export const resolveSetupCertificateRecords = (
     input: SetupPackageInput,
 ): SetupPackageCertificateRecords => {
     if (input.setupCertificateInput !== undefined) {
-        if (
-            input.setupCommitmentSecurityCertificate !== undefined ||
-            input.setupTransportCertificate !== undefined ||
-            input.setupProofAccountingCertificate !== undefined ||
-            input.heSecurityCertificate !== undefined
-        ) {
+        if (input.setupTransportCertificate !== undefined) {
             throw new Error(
                 'setupCertificateInput must not be mixed with prebuilt setup certificate records.',
             );
@@ -72,35 +49,16 @@ export const resolveSetupCertificateRecords = (
         });
     }
 
-    if (
-        input.setupCommitmentSecurityCertificate === undefined ||
-        input.setupTransportCertificate === undefined ||
-        input.setupProofAccountingCertificate === undefined ||
-        input.heSecurityCertificate === undefined
-    ) {
+    if (input.setupTransportCertificate === undefined) {
         throw new Error(
-            'setupCertificateInput or all setup certificate records are required.',
+            'setupCertificateInput or the setup transport certificate record is required.',
         );
     }
 
     return {
-        setupCommitmentSecurityCertificate:
-            input.setupCommitmentSecurityCertificate,
         setupTransportCertificate: input.setupTransportCertificate,
-        setupProofAccountingCertificate: input.setupProofAccountingCertificate,
-        heSecurityCertificate: input.heSecurityCertificate,
     };
 };
-
-const contextFieldsForCertificate = (
-    setupContext: CollectiveBgvSetupContext,
-): JsonRecord =>
-    Object.fromEntries(
-        contextFieldNames.map((fieldName) => [
-            fieldName,
-            setupContext[fieldName],
-        ]),
-    );
 
 const qSharePrimesFromPublicKeyShares = (
     publicKeyShares: PublicKeyShareSet,
@@ -225,246 +183,4 @@ export const derivedCollectivePublicKey = (
         ...commonCollectivePublicKeyInput,
         publicKeyShareMaterial,
     });
-};
-
-const galoisBatchRootEntries = (
-    galoisKeyShareBatches: readonly GaloisKeyShareBatch[],
-): readonly JsonRecord[] =>
-    galoisKeyShareBatches.map((batch, batchIndex) => ({
-        trusteeIdentity: batch.trusteeIdentity,
-        trusteeRosterPosition: batch.trusteeRosterPosition,
-        galoisKeyShareBatchRoot: hashField(
-            batch,
-            'galoisKeyShareBatchRoot',
-            `galoisKeyShareBatches.${String(batchIndex)}`,
-        ),
-    }));
-
-const setupKeyCorrectnessCertificateBody = (
-    input: SetupPackageInputWithDerivedCollectivePublicKey,
-    certificates: SetupPackageCertificateRecords,
-): SetupKeyCorrectnessCertificateBody => {
-    const collectivePublicKeyRoot = hashField(
-        input.collectivePublicKey,
-        'collectivePublicKeyRoot',
-        'collectivePublicKey',
-    );
-    const evaluationKeySetHash = hashField(
-        input.evaluationKeys,
-        'evaluationKeySetHash',
-        'evaluationKeys',
-    );
-    const publicKeyShareMaterialSetRoot = hashField(
-        input.publicKeyShareMaterial,
-        'publicKeyShareMaterialSetRoot',
-        'publicKeyShareMaterial',
-    );
-    const publicKeyShareSuccinctProofSetRoot = hashField(
-        input.publicKeyShareSuccinctProofs,
-        'publicKeyShareSuccinctProofSetRoot',
-        'publicKeyShareSuccinctProofs',
-    );
-
-    return {
-        objectType: 'SetupKeyCorrectnessCertificate',
-        objectVersion: 1,
-        ...contextFieldsForCertificate(input.setupContext),
-        setupProofBinding:
-            'fixed-setup-proof-bound-by-setup-proof-accounting-certificate',
-        keyCorrectnessScope:
-            'collective-public-key-and-public-evaluation-key-roots-derived-from-proof-bearing-setup-records',
-        keyCorrectnessTheorem: {
-            activeMaliciousPrototypeBoundary:
-                'malformed roots, reordered trustee records, stale schedules, missing proof material, inconsistent collective public-key material, and unscheduled evaluation keys are refused before accepted runtime loading',
-        },
-        collectivePublicKey: {
-            collectivePublicKeyRoot,
-            sourceRoots: {
-                publicKeyShareSetRoot: hashField(
-                    input.publicKeyShares,
-                    'publicKeyShareSetRoot',
-                    'publicKeyShares',
-                ),
-                publicKeyShareProofSetRoot: hashField(
-                    input.publicKeyShareProofs,
-                    'publicKeyShareProofSetRoot',
-                    'publicKeyShareProofs',
-                ),
-                publicKeyShareMaterialSetRoot,
-                publicKeyShareSuccinctProofSetRoot,
-            },
-        },
-        publicEvaluationKeys: {
-            evaluationKeySetHash,
-            evaluatorKeyScheduleRoot: hashField(
-                input.evaluatorKeySchedule,
-                'evaluatorKeyScheduleRoot',
-                'evaluatorKeySchedule',
-            ),
-            relinearizationKeyShareRoundsRoot: hashField(
-                input.relinearizationKeyShareRounds,
-                'relinearizationKeyShareRoundsRoot',
-                'relinearizationKeyShareRounds',
-            ),
-            galoisKeyShareBatchRoots: galoisBatchRootEntries(
-                input.galoisKeyShareBatches,
-            ),
-            requiredGaloisSetHash: hashField(
-                input.evaluatorKeySchedule,
-                'requiredGaloisSetHash',
-                'evaluatorKeySchedule',
-            ),
-        },
-        certificateDependencies: {
-            setupProofAccountingCertificateHash: hashField(
-                certificates.setupProofAccountingCertificate,
-                'setupProofAccountingCertificateHash',
-                'setupProofAccountingCertificate',
-            ),
-            heSecurityCertificateHash: hashField(
-                certificates.heSecurityCertificate,
-                'heSecurityCertificateHash',
-                'heSecurityCertificate',
-            ),
-        },
-    };
-};
-
-export const createSetupKeyCorrectnessCertificate = (
-    input: SetupPackageInputWithDerivedCollectivePublicKey,
-    certificates: SetupPackageCertificateRecords,
-): SetupKeyCorrectnessCertificate => {
-    const certificateBody = setupKeyCorrectnessCertificateBody(
-        input,
-        certificates,
-    );
-
-    return {
-        ...certificateBody,
-        setupKeyCorrectnessCertificateHash:
-            deriveCanonicalObjectHash(certificateBody),
-    };
-};
-
-const activeStaticSetupTheoremCertificateBody = (
-    setupPackage: Readonly<Record<string, unknown>>,
-): ActiveStaticSetupTheoremCertificateBody => {
-    const setupContext = assertObjectRecord(
-        setupPackage.setupContext,
-        'setupPackage.setupContext',
-    );
-    // Mirror the kernel's accepted_roster_from_setup_context: an absent or
-    // non-positive-integer participantCount means the first closure roster
-    // (n=10), so n=10 packages that omit the field stay byte-identical; a
-    // present value drives the 3..20 roster. Range enforcement happens at
-    // kernel verification, not at assembly.
-    const declaredParticipantCount = setupContext.participantCount;
-    const participantCount =
-        typeof declaredParticipantCount === 'number' &&
-        Number.isInteger(declaredParticipantCount) &&
-        declaredParticipantCount > 0
-            ? declaredParticipantCount
-            : firstClosureRosterSize;
-    // q_dec = floor(n/3)+1, full-roster quorums = n; mirrors the kernel's
-    // current roster-derived ActiveStaticSetupTheoremCertificate convention so
-    // n=10 stays byte-identical. Dynamic 3..20 packages still need their own
-    // certificate if a later parameter set uses stricter backend threshold semantics.
-    const decryptionThreshold = Math.floor(participantCount / 3) + 1;
-
-    return {
-        objectType: 'ActiveStaticSetupTheoremCertificate',
-        objectVersion: 1,
-        ...contextFieldsForCertificate(
-            setupContext as unknown as CollectiveBgvSetupContext,
-        ),
-        adversaryModel: {
-            secretConfidentialityCorruptTrusteeBound: decryptionThreshold - 1,
-            fullRosterSetupCompletionRequired: true,
-        },
-        livenessModel: {
-            model: 'secure-with-abort',
-            setupCompletionQuorum: participantCount,
-            participantCount,
-        },
-        dependencyHashes: {
-            setupCommitmentSecurityCertificateHash: hashField(
-                setupPackage,
-                'setupCommitmentSecurityCertificateHash',
-                'setupPackage',
-            ),
-            setupTransportCertificateHash: hashField(
-                setupPackage,
-                'setupTransportCertificateHash',
-                'setupPackage',
-            ),
-            setupProofAccountingCertificateHash: hashField(
-                setupPackage,
-                'setupProofAccountingCertificateHash',
-                'setupPackage',
-            ),
-            heSecurityCertificateHash: hashField(
-                setupPackage,
-                'heSecurityCertificateHash',
-                'setupPackage',
-            ),
-            setupKeyCorrectnessCertificateHash: optionalTopLevelHashValue(
-                setupPackage,
-                'setupKeyCorrectnessCertificateHash',
-            ),
-        },
-        terminalRoots: {
-            thresholdShareCommitmentRoot: optionalTopLevelHashValue(
-                setupPackage,
-                'thresholdShareCommitmentRoot',
-            ),
-            sameSecretProofSetRoot: optionalNestedHashValue(
-                setupPackage,
-                'sameSecretProofs',
-                'sameSecretProofSetRoot',
-            ),
-            publicKeyShareMaterialSetRoot: optionalNestedHashValue(
-                setupPackage,
-                'publicKeyShareMaterial',
-                'publicKeyShareMaterialSetRoot',
-            ),
-            publicKeyShareSuccinctProofSetRoot: optionalNestedHashValue(
-                setupPackage,
-                'publicKeyShareSuccinctProofs',
-                'publicKeyShareSuccinctProofSetRoot',
-            ),
-            collectivePublicKeyRoot: optionalNestedHashValue(
-                setupPackage,
-                'collectivePublicKey',
-                'collectivePublicKeyRoot',
-            ),
-            evaluatorKeyScheduleRoot: optionalNestedHashValue(
-                setupPackage,
-                'evaluatorKeySchedule',
-                'evaluatorKeyScheduleRoot',
-            ),
-            evaluationKeySetHash: optionalNestedHashValue(
-                setupPackage,
-                'evaluationKeys',
-                'evaluationKeySetHash',
-            ),
-            publicEvaluationKeyMaterialRoot: optionalNestedHashValue(
-                setupPackage,
-                'evaluationKeys',
-                'publicEvaluationKeyMaterialRoot',
-            ),
-        },
-    };
-};
-
-export const createActiveStaticSetupTheoremCertificate = (
-    setupPackage: Readonly<Record<string, unknown>>,
-): ActiveStaticSetupTheoremCertificate => {
-    const certificateBody =
-        activeStaticSetupTheoremCertificateBody(setupPackage);
-
-    return {
-        ...certificateBody,
-        activeStaticSetupTheoremCertificateHash:
-            deriveCanonicalObjectHash(certificateBody),
-    };
 };

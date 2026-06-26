@@ -131,7 +131,6 @@ export type TranscriptCoreKernel = {
     ): TranscriptCoreFixtureVerification;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeBgvOperationRegistry(): unknown;
-    describeBgvPassiveSetupObjectModel(): unknown;
     describeCollectiveBgvSetupParameters(): BgvCollectiveSetupParametersDescription;
     deriveCollectiveBgvSetupPublicDerivations(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -384,9 +383,6 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'ValidateBgvEvaluatorOperation';
           readonly operation: string;
-      }
-    | {
-          readonly command: 'DescribeBgvPassiveSetupObjectModel';
       }
     | {
           readonly command: 'DescribeCollectiveBgvSetupParameters';

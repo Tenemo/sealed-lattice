@@ -14,7 +14,7 @@ fn first_closure_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "8c65fec155e76df2e8048d90e4bb4c80270bf4d91babc69e2601d8cbcbeafa7b91a789afd4e2fc236a6da1d66d9ff6c45062c0ebf70689d0dcb1331c9f0a75e9",
+        "fd5802b210e03721471dd52b481cef2fc57f8a253c4fc6712ed9e337fa8d891d44c28f17f7f4ac688fc10e9e9de97dd749a65767f0a33f25462b0c9b5c9e3065",
     );
 }
 
@@ -56,13 +56,6 @@ fn collective_setup_parameters_expose_first_closure_state_machine() {
         "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix"
     );
     assert_eq!(
-        setup_parameters["commitment"]["assumptions"]["requiredCertificates"],
-        serde_json::json!([
-            "SetupCommitmentSecurityCertificate",
-            "SetupProofAccountingCertificate"
-        ])
-    );
-    assert_eq!(
         setup_parameters["publicVssCommitmentMaterialSize"]["objectType"],
         "PublicVssCommitmentMaterialSize"
     );
@@ -73,10 +66,6 @@ fn collective_setup_parameters_expose_first_closure_state_machine() {
     assert_eq!(
         setup_parameters["publicVssCommitmentMaterialSize"]["fullMaterialCoefficientBytes"],
         serde_json::json!(1_604_321_280_u64)
-    );
-    assert_eq!(
-        setup_parameters["publicVssCommitmentMaterialSize"]["fullMaterialCoefficientMebibytes"],
-        1_530
     );
     assert_eq!(setup_parameters["setupProof"]["objectType"], "SetupProof");
     let setup_proof_families = setup_parameters["setupProof"]["proofFamilies"]

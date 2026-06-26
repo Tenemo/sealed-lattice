@@ -4,12 +4,14 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeRelativeTypesSpecifier,
+    filesystemMaximumRetries,
     sdkCryptoRuntimeSourceRelativePaths,
     rewriteTypesImports,
     sdkProtocolRuntimeSourceRelativePaths,
     stripSdkExcludedTypesPackageExports,
     transpileBridgeSource,
     transpileSdkInternalSource,
+    withTransientFilesystemRetries,
 } from '#tools/ci/build-sdk-bridge';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
@@ -123,5 +125,62 @@ describe('SDK bridge build helpers', () => {
         expect(sdkCryptoRuntimeSourceRelativePaths).not.toContain(
             'tests/support/protocol-signature-fixtures.ts',
         );
+    });
+});
+
+describe('transient filesystem retry helper', () => {
+    // The retry helper guards the in-place rm -rf and recreate-and-write steps
+    // of the SDK runtime vendoring against the Windows delete-pending race that
+    // surfaces under load as transient ENOENT/EPERM/EBUSY/ENOTEMPTY failures.
+    const noDelay = (): Promise<void> => Promise.resolve();
+
+    const transientError = (code: string): NodeJS.ErrnoException =>
+        Object.assign(new Error(`transient ${code}`), { code });
+
+    it('retries transient filesystem errors until the operation succeeds', async () => {
+        let attempts = 0;
+        const result = await withTransientFilesystemRetries(
+            (): Promise<string> => {
+                attempts += 1;
+                if (attempts === 1) {
+                    return Promise.reject(transientError('ENOTEMPTY'));
+                }
+                if (attempts === 2) {
+                    return Promise.reject(transientError('ENOENT'));
+                }
+
+                return Promise.resolve('written');
+            },
+            noDelay,
+        );
+
+        expect(result).toBe('written');
+        expect(attempts).toBe(3);
+    });
+
+    it('rethrows non-transient errors immediately without retrying', async () => {
+        let attempts = 0;
+        await expect(
+            withTransientFilesystemRetries((): Promise<never> => {
+                attempts += 1;
+
+                return Promise.reject(transientError('ENOSPC'));
+            }, noDelay),
+        ).rejects.toMatchObject({ code: 'ENOSPC' });
+
+        expect(attempts).toBe(1);
+    });
+
+    it('gives up after the maximum number of retries on a persistent transient error', async () => {
+        let attempts = 0;
+        await expect(
+            withTransientFilesystemRetries((): Promise<never> => {
+                attempts += 1;
+
+                return Promise.reject(transientError('EPERM'));
+            }, noDelay),
+        ).rejects.toMatchObject({ code: 'EPERM' });
+
+        expect(attempts).toBe(filesystemMaximumRetries);
     });
 });

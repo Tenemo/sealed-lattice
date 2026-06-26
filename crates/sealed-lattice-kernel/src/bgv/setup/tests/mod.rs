@@ -11,11 +11,10 @@ use super::{
     DATA_PRIMES, POLYNOMIAL_DEGREE,
     abort_threshold_share_commitment_transport_derivation_stream_request,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
-    begin_threshold_share_commitment_transport_derivation_stream_request, data_basis_modulus_bits,
-    dense_centered_binomial_coefficients, derive_threshold_share_commitments_from_request,
+    begin_threshold_share_commitment_transport_derivation_stream_request,
+    derive_threshold_share_commitments_from_request,
     derive_threshold_share_commitments_from_transport_request,
     describe_collective_bgv_setup_parameters, development_evaluator_key_from_passive_setup_package,
-    extended_basis_modulus_bits,
     finish_threshold_share_commitment_transport_derivation_stream_request,
     generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
     release_verified_transported_vss_material_request, sample_public_residues,
@@ -63,7 +62,7 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "08424172486182b3c80ba5b7446670602a878951ee2cd946f8b454e6e6cceb2acab0866d4fe2a9f748fe55e0867d67826d9a24bab8731434006c4d63c6fa10fa";
+const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "bd1a68b384704cd71bbf2d84a5270938387180d74c5499c7feed921a4ea7dcc3957517a4caab1fafcb0b42ab9878c82de3a8a5701b0e361393232047f6d625dc";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
@@ -297,10 +296,4 @@ fn assert_setup_package_payload_is_rejected(
             .is_err(),
         "{mutation_description} should be rejected"
     );
-}
-
-fn centered_binomial_eta2_value_from_byte(byte: u8) -> i64 {
-    i64::from(byte & 1) + i64::from((byte >> 1) & 1)
-        - i64::from((byte >> 2) & 1)
-        - i64::from((byte >> 3) & 1)
 }

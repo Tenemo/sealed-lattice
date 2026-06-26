@@ -16,23 +16,6 @@ import {
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
 describe('BGV passive passive BGV setup kernel commands', () => {
-    it('describes the frozen passive setup object model', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const objectModel = kernel.describeBgvPassiveSetupObjectModel() as {
-            readonly reservedRootsAndHashes: readonly string[];
-        };
-
-        expect(objectModel.reservedRootsAndHashes).toEqual(
-            expect.arrayContaining([
-                'BGVPassiveSetupPackageHash',
-                'CollectiveSecretDistributionCertificateHash',
-                'BGVPublicCommonRandomPolynomialRoot',
-                'EvaluationKeySizeParametersHash',
-                'ThresholdShareVerificationKeyRoot',
-            ]),
-        );
-    });
-
     it('generates deterministic full-roster passive setup material and verifies it', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
@@ -351,41 +334,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                             'rotationKeyRoot',
                         ],
                         validHash('5'),
-                    ),
-            ],
-            [
-                'certificate hash',
-                (setupPackage) =>
-                    setPathValue(
-                        setupPackage,
-                        ['certificates', 'setupParameterCertificateHash'],
-                        validHash('6'),
-                    ),
-            ],
-            [
-                'final security status',
-                (setupPackage) =>
-                    setPathValue(
-                        setupPackage,
-                        [
-                            'certificates',
-                            'setupParameterCertificate',
-                            'finalSecurityStatus',
-                        ],
-                        'pendingQTarget',
-                    ),
-            ],
-            [
-                'development encryption claim',
-                (setupPackage) =>
-                    setPathValue(
-                        setupPackage,
-                        [
-                            'developmentEncryptionFixture',
-                            'fixture',
-                            'directProofClaim',
-                        ],
-                        true,
                     ),
             ],
             [

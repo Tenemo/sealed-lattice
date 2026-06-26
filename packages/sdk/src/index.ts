@@ -281,12 +281,7 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     }>;
     readonly certificateRoots: Readonly<{
-        readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificateHash: ProtocolHash;
-        readonly setupProofAccountingCertificateHash: ProtocolHash;
-        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
-        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
-        readonly heSecurityCertificateHash: ProtocolHash;
     }>;
     readonly acceptedSetupHandoffRoot: ProtocolHash;
 }>;

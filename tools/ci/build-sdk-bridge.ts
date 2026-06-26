@@ -161,12 +161,73 @@ export const transpileSdkInternalSource = (
 export const transpileBridgeSource = (sourceText: string): string =>
     transpileSdkInternalSource(sourceText, bridgeSourcePath);
 
+const filesystemRetryDelayMilliseconds = 50;
+export const filesystemMaximumRetries = 12;
+
+const delayMilliseconds = (milliseconds: number): Promise<void> =>
+    new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+    });
+
+// Concurrent filesystem activity inside a build output directory (Windows
+// antivirus and search indexers, or a heavily loaded CI run) can leave that
+// directory in a transient delete-pending or briefly non-empty state. An
+// in-place `rm -rf` and the writes that recreate it then intermittently fail
+// with ENOENT, EPERM, EBUSY, or ENOTEMPTY even though nothing is actually
+// wrong. These codes are transient, so retrying with a short linear backoff
+// lets the foreign handle close and the operation succeed.
+const transientFilesystemErrorCodes = new Set([
+    'ENOENT',
+    'EPERM',
+    'EACCES',
+    'EBUSY',
+    'ENOTEMPTY',
+    'EMFILE',
+    'ENFILE',
+]);
+
+export const withTransientFilesystemRetries = async <ResultType>(
+    operation: () => Promise<ResultType>,
+    delay: (milliseconds: number) => Promise<void> = delayMilliseconds,
+): Promise<ResultType> => {
+    for (let attempt = 1; ; attempt += 1) {
+        try {
+            return await operation();
+        } catch (error) {
+            const errorCode = (error as NodeJS.ErrnoException).code;
+            if (
+                attempt >= filesystemMaximumRetries ||
+                errorCode === undefined ||
+                !transientFilesystemErrorCodes.has(errorCode)
+            ) {
+                throw error;
+            }
+            await delay(filesystemRetryDelayMilliseconds * attempt);
+        }
+    }
+};
+
+// Recreating an output directory in place is the racy step, so deletion uses
+// Node's built-in Windows retry handling for EBUSY/EPERM/ENOTEMPTY.
+const removeOutputDirectory = (directoryPath: string): Promise<void> =>
+    rm(directoryPath, {
+        recursive: true,
+        force: true,
+        maxRetries: filesystemMaximumRetries,
+        retryDelay: filesystemRetryDelayMilliseconds,
+    });
+
+const writeOutputFile = (outputPath: string, contents: string): Promise<void> =>
+    withTransientFilesystemRetries(async () => {
+        await mkdir(path.dirname(outputPath), { recursive: true });
+        await writeFile(outputPath, contents, 'utf8');
+    });
+
 export const buildSdkBridge = async (): Promise<void> => {
     const sourceText = await readFile(bridgeSourcePath, 'utf8');
     const outputText = transpileBridgeSource(sourceText);
 
-    await mkdir(path.dirname(bridgeOutputPath), { recursive: true });
-    await writeFile(bridgeOutputPath, outputText, 'utf8');
+    await writeOutputFile(bridgeOutputPath, outputText);
 
     const bridgePartSourcePaths = await collectFiles(
         bridgePartsSourceDirectoryPath,
@@ -175,11 +236,7 @@ export const buildSdkBridge = async (): Promise<void> => {
         },
     );
 
-    await rm(bridgePartsOutputDirectoryPath, {
-        recursive: true,
-        force: true,
-    });
-    await mkdir(bridgePartsOutputDirectoryPath, { recursive: true });
+    await removeOutputDirectory(bridgePartsOutputDirectoryPath);
     await Promise.all(
         bridgePartSourcePaths.map(async (sourcePath) => {
             const relativeSourcePath = path.relative(
@@ -196,18 +253,13 @@ export const buildSdkBridge = async (): Promise<void> => {
                 sourcePath,
             );
 
-            await mkdir(path.dirname(outputPath), { recursive: true });
-            await writeFile(outputPath, bridgePartOutputText, 'utf8');
+            await writeOutputFile(outputPath, bridgePartOutputText);
         }),
     );
 };
 
 export const buildSdkProtocolRuntime = async (): Promise<void> => {
-    await rm(electionFoundationOutputDirectoryPath, {
-        recursive: true,
-        force: true,
-    });
-    await mkdir(electionFoundationOutputDirectoryPath, { recursive: true });
+    await removeOutputDirectory(electionFoundationOutputDirectoryPath);
 
     await Promise.all(
         sdkProtocolRuntimeSourceRelativePaths.map(
@@ -226,24 +278,18 @@ export const buildSdkProtocolRuntime = async (): Promise<void> => {
                     sourcePath,
                 );
 
-                await mkdir(path.dirname(outputPath), { recursive: true });
-                await writeFile(outputPath, outputText, 'utf8');
+                await writeOutputFile(outputPath, outputText);
             },
         ),
     );
-    await writeFile(
+    await writeOutputFile(
         path.join(electionFoundationOutputDirectoryPath, 'index.js'),
         sdkProtocolRuntimeIndexSource,
-        'utf8',
     );
 };
 
 export const buildSdkCryptoRuntime = async (): Promise<void> => {
-    await rm(cryptoOutputDirectoryPath, {
-        recursive: true,
-        force: true,
-    });
-    await mkdir(cryptoOutputDirectoryPath, { recursive: true });
+    await removeOutputDirectory(cryptoOutputDirectoryPath);
 
     await Promise.all(
         sdkCryptoRuntimeSourceRelativePaths.map(async (relativeSourcePath) => {
@@ -261,8 +307,7 @@ export const buildSdkCryptoRuntime = async (): Promise<void> => {
                 sourcePath,
             );
 
-            await mkdir(path.dirname(outputPath), { recursive: true });
-            await writeFile(outputPath, outputText, 'utf8');
+            await writeOutputFile(outputPath, outputText);
         }),
     );
 };

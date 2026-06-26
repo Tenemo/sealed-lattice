@@ -14,7 +14,6 @@ pub(super) fn public_rlwe_samples_by_basis(
             "modulusBits": q_data_bits,
             "publicKeyShares": participant_count,
             "collectivePublicKey": 1,
-            "developmentEncryptionFixtures": 1,
             "relinearizationKeys": DATA_PRIMES.len() - 1,
             "rotationKeys": rotation_key_count,
             "keySwitchKeys": 1,

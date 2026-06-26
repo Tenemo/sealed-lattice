@@ -172,10 +172,6 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         objectType: 'BGVPassiveSetupPackageHash',
         setup: 'passive-full-roster-bgv',
     }),
-    bgvSetupParameterCertificateHash: deriveCanonicalObjectHash({
-        objectType: 'BGVSetupParameterCertificateHash',
-        setup: 'parameter-certificate',
-    }),
     bgvParametersHash,
     bgvPublicKeyRoot: deriveCanonicalObjectHash({
         objectType: 'BGVPublicKeyRoot',
@@ -184,14 +180,6 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     collectivePublicKeyRoot: deriveCanonicalObjectHash({
         objectType: 'CollectivePublicKeyRoot',
         key: 'bgv-collective',
-    }),
-    collectiveSecretDistributionCertificateHash: deriveCanonicalObjectHash({
-        objectType: 'CollectiveSecretDistributionCertificateHash',
-        setup: 'secret-distribution',
-    }),
-    errorDistributionCertificateHash: deriveCanonicalObjectHash({
-        objectType: 'ErrorDistributionCertificateHash',
-        setup: 'error-distribution',
     }),
     keySwitchDecompositionHash: deriveCanonicalObjectHash({
         objectType: 'KeySwitchDecompositionHash',
@@ -257,11 +245,6 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
     targetDecryptionParametersHash: deriveCanonicalObjectHash({
         objectType: 'TargetDecryptionParametersHash',
         parameters: targetDecryptionId,
-    }),
-    targetThresholdDecryptabilityCertificateHash: deriveCanonicalObjectHash({
-        objectType: 'TargetThresholdDecryptabilityCertificateHash',
-        parameters: targetDecryptionId,
-        targetOnly: true,
     }),
     targetBasisHash: deriveFixtureHash('fixture-target-basis-v1', {
         parameters: 'direct-target-basis-v1',

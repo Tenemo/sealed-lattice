@@ -308,7 +308,6 @@ fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proo
         serde_json::json!(valid_hash('4'));
     rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
     rebind_trustee_evaluation_key_proof_set_root(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -714,7 +713,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_tr
         .expect("trustee evaluation-key proof records")
         .push(duplicate_proof_record);
     rebind_trustee_evaluation_key_proof_set_root(&mut extra_proof_package);
-    rebind_setup_key_correctness_certificate(&mut extra_proof_package);
     rebind_collective_setup_package_hash(&mut extra_proof_package);
     assert_refuses_trustee_evaluation_key_proof_variant(
         extra_proof_package,
@@ -728,7 +726,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_tr
         duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
     rebind_trustee_evaluation_key_proof_record_root(&mut duplicate_proof_package, 1);
     rebind_trustee_evaluation_key_proof_set_root(&mut duplicate_proof_package);
-    rebind_setup_key_correctness_certificate(&mut duplicate_proof_package);
     rebind_collective_setup_package_hash(&mut duplicate_proof_package);
     assert_refuses_trustee_evaluation_key_proof_variant(
         duplicate_proof_package,
@@ -817,7 +814,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statemen
         serde_json::json!(valid_hash('4'));
     rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
     rebind_trustee_evaluation_key_proof_set_root(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result =
@@ -994,7 +990,6 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
     }
     rebind_trustee_evaluation_key_proof_record_root(package, 0);
     rebind_trustee_evaluation_key_proof_set_root(package);
-    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 }
 
@@ -1118,12 +1113,11 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
 // public matrix derivations, VSS coefficient commitments, the n*n private VSS
 // envelope set, same-secret consistency, public-key shares and succinct proofs,
 // the relinearization/Galois evaluation-key records and their aggregate roots,
-// the public evaluation-key set, the roster-derived commitment-security and HE
-// security certificates, the active-static and key-correctness certificates,
-// and the roster-and-ring-derived transported VSS material metadata. The only
+// the public evaluation-key set, and the roster-and-ring-derived transported
+// VSS material metadata. The only
 // remaining refusal is the roster-independent full-ring boundary,
-// which proves the dynamic-roster machinery and the roster-derived certificates
-// accept n != 10 exactly as far as the full-ring boundary permits. Genuine terminal
+// which proves the dynamic-roster machinery accepts n != 10 exactly as far as
+// the full-ring boundary permits. Genuine terminal
 // `accepted` at the full ring for n != 10 is deferred until the n = 10
 // supported-phone runtime evidence work; the certified setup/evaluator parameters
 // remain n = 10 only, so no full-ring n != 10 fixture runs in any lane.
@@ -1185,8 +1179,7 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_g
         // counts, common randomness and roster-derived public matrix
         // derivations, VSS coefficient commitments, the n*n private VSS envelope
         // set, same-secret consistency, public-key shares/proofs, evaluation-key
-        // records, the roster-derived commitment-security and HE-security
-        // certificates, and the roster-and-ring-derived transported VSS material
+        // records, and the roster-and-ring-derived transported VSS material
         // metadata) must have been accepted for both the smallest and the
         // largest supported roster, so the only refusal is the roster-independent
         // full-ring claim gate. A roster-dependent refusal - or a fixture

@@ -40,7 +40,6 @@ describe('collective BGV setup kernel commands', () => {
             ringDegree: 32768,
             ringDegreeStatus: 'full-ring',
             fullMaterialCoefficientBytes: 1_604_321_280,
-            fullMaterialCoefficientMebibytes: 1530,
             streamingRequirement:
                 'binary-chunked-stream-verification-with-one-commitment-resident',
         });
@@ -66,10 +65,6 @@ describe('collective BGV setup kernel commands', () => {
             hiding: 'Module-LWE over the selected commitment modulus limbs with short centered-ternary openings',
             binding:
                 'Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix',
-            requiredCertificates: [
-                'SetupCommitmentSecurityCertificate',
-                'SetupProofAccountingCertificate',
-            ],
         });
         expect(parameters.evaluatorKeySchedule).toMatchObject({
             objectType: 'EvaluatorKeySchedule',

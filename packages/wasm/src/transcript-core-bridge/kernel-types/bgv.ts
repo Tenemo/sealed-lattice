@@ -299,7 +299,6 @@ export type BgvPassiveSetupPackage = {
         readonly record: unknown;
         readonly rotSet: unknown;
     };
-    readonly developmentEncryptionFixture: Readonly<Record<string, unknown>>;
     readonly certificates: Readonly<Record<string, unknown>>;
     readonly targetDecryptionStatus: {
         readonly targetDecryptionParametersHash: ProtocolHash;
@@ -400,15 +399,6 @@ export type BgvCollectiveSetupParametersDescription = {
             Record<string, unknown>
         >[];
     };
-    readonly acceptedCertificateTemplates: Readonly<{
-        readonly setupCommitmentSecurityCertificate: Readonly<
-            Record<string, unknown>
-        >;
-        readonly setupProofAccountingCertificate: Readonly<
-            Record<string, unknown>
-        >;
-        readonly heSecurityCertificate: Readonly<Record<string, unknown>>;
-    }>;
     readonly evaluatorKeySchedule: {
         readonly objectType: 'EvaluatorKeySchedule';
         readonly objectVersion: 1;
@@ -543,12 +533,7 @@ export type BgvAcceptedSetupHandoff = {
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     };
     readonly certificateRoots: {
-        readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificateHash: ProtocolHash;
-        readonly setupProofAccountingCertificateHash: ProtocolHash;
-        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
-        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
-        readonly heSecurityCertificateHash: ProtocolHash;
     };
     readonly acceptedSetupHandoffRoot: ProtocolHash;
 };

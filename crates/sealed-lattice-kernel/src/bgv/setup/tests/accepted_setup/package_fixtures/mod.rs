@@ -528,13 +528,6 @@ fn build_collective_setup_package_fixture_parts(
         &public_key_share_proofs,
         participant_count,
     );
-    let setup_commitment_security_certificate =
-        setup_commitment_security_certificate_fixture(&setup_parameters, participant_count);
-    let setup_commitment_security_certificate_hash = setup_commitment_security_certificate
-        .get("setupCommitmentSecurityCertificateHash")
-        .and_then(serde_json::Value::as_str)
-        .expect("setup commitment security certificate hash")
-        .to_string();
     let setup_transport_certificate =
         match &vss_components.transported_vss_coefficient_commitment_material {
             Some(transported_vss_coefficient_commitment_material) => {
@@ -554,31 +547,6 @@ fn build_collective_setup_package_fixture_parts(
         .and_then(serde_json::Value::as_str)
         .expect("setup transport certificate hash")
         .to_string();
-    let setup_proof_accounting_certificate_hash_value =
-        setup_proof_accounting_certificate_hash().expect("setup proof accounting certificate hash");
-    let mut setup_proof_accounting_certificate =
-        setup_proof_accounting_certificate_value().expect("setup proof accounting certificate");
-    setup_proof_accounting_certificate["setupProofAccountingCertificateHash"] =
-        serde_json::json!(setup_proof_accounting_certificate_hash_value.clone());
-    // The HE security certificate binds the roster public-key-share count, so it
-    // is built for this package's roster to match the verifier's per-roster
-    // recompute (accepted_certificates::accepted_he_security_certificate_value_for_roster).
-    let he_security_roster =
-        crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
-            participant_count,
-        );
-    let he_security_certificate_hash =
-        crate::bgv::setup::accepted_setup::accepted_he_security_certificate_hash_for_roster(
-            &he_security_roster,
-        )
-        .expect("HE security certificate hash");
-    let mut he_security_certificate =
-        crate::bgv::setup::accepted_setup::accepted_he_security_certificate_value_for_roster(
-            &he_security_roster,
-        )
-        .expect("HE security certificate");
-    he_security_certificate["heSecurityCertificateHash"] =
-        serde_json::json!(he_security_certificate_hash.clone());
     let mut package = serde_json::json!({
         "objectType": "SetupPackage",
         "objectVersion": 1,
@@ -600,16 +568,9 @@ fn build_collective_setup_package_fixture_parts(
         "galoisKeyShareBatches": [],
         "trusteeEvaluationKeyProofs": {},
         "evaluationKeys": {},
-        "setupCommitmentSecurityCertificate": setup_commitment_security_certificate,
-        "setupCommitmentSecurityCertificateHash": setup_commitment_security_certificate_hash,
         "setupTransportCertificate": setup_transport_certificate,
         "setupTransportCertificateHash": setup_transport_certificate_hash,
-        "setupProofAccountingCertificate": setup_proof_accounting_certificate,
-        "setupProofAccountingCertificateHash": setup_proof_accounting_certificate_hash_value,
-        "heSecurityCertificate": he_security_certificate,
-        "heSecurityCertificateHash": he_security_certificate_hash,
     });
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     CollectiveSetupPackageFixture {
@@ -632,7 +593,6 @@ fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Val
         FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
     );
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package
@@ -650,7 +610,6 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> s
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package
@@ -667,7 +626,6 @@ fn build_collective_public_key_bearing_collective_setup_package() -> serde_json:
     package["collectivePublicKey"] = collective_public_key_object(&package);
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     package

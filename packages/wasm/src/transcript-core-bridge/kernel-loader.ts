@@ -270,10 +270,6 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'ValidateBgvEvaluatorOperation',
                         operation: input.operation,
                     }),
-                describeBgvPassiveSetupObjectModel: (): unknown =>
-                    executeCommand<unknown>({
-                        command: 'DescribeBgvPassiveSetupObjectModel',
-                    }),
                 describeCollectiveBgvSetupParameters:
                     (): BgvCollectiveSetupParametersDescription =>
                         executeCommand<BgvCollectiveSetupParametersDescription>(

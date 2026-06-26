@@ -1,11 +1,9 @@
 use super::*;
 use super::{
     certificates::{
-        collective_secret_distribution_certificate, error_distribution_certificate,
         key_switch_decomposition_parameters, passive_setup_evaluator_context_bindings,
         public_common_random_polynomial_root, setup_certificates, target_decryption_parameters,
     },
-    development_fixtures::development_encryption_fixture,
     key_material::{collective_public_key, evaluation_keys, threshold_verification_material},
     participant_material::participant_setup_material,
 };
@@ -16,13 +14,6 @@ use rayon::prelude::*;
 
 pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> CanonicalResult<Value> {
     let bgv_parameters_hash = bgv_parameters_hash()?;
-    let collective_secret_distribution_certificate =
-        collective_secret_distribution_certificate(input.participants.len())?;
-    let collective_secret_distribution_certificate_hash =
-        derive_canonical_object_hash(&collective_secret_distribution_certificate)?;
-    let error_distribution_certificate = error_distribution_certificate()?;
-    let error_distribution_certificate_hash =
-        derive_canonical_object_hash(&error_distribution_certificate)?;
     let key_switch_decomposition = key_switch_decomposition_parameters()?;
     let key_switch_decomposition_hash = derive_canonical_object_hash(&key_switch_decomposition)?;
     let target_decryption_parameters = target_decryption_parameters(&bgv_parameters_hash)?;
@@ -97,8 +88,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         &collective_public_key,
         &key_switch_decomposition_hash,
     )?;
-    let development_encryption_fixture =
-        development_encryption_fixture(input, &collective_public_key)?;
     let setup_inputs = json!({
         "ceremonyId": input.ceremony_id,
         "manifestHash": input.manifest_hash,
@@ -110,20 +99,10 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "setupSeedHash": input.setup_seed_hash,
     });
     let certificates = setup_certificates(
-        input,
-        &setup_inputs,
-        &collective_public_key,
-        &threshold_verification_material,
-        &collective_secret_distribution_certificate,
-        &collective_secret_distribution_certificate_hash,
-        &error_distribution_certificate,
-        &error_distribution_certificate_hash,
+        input.participants.len(),
         &key_switch_decomposition,
         &key_switch_decomposition_hash,
-        &target_decryption_parameters_hash,
-        &target_decryption_parameters_binding_hash,
         &evaluation_keys,
-        &development_encryption_fixture,
     )?;
     let evaluator_context_bindings = passive_setup_evaluator_context_bindings(&setup_inputs)?;
 
@@ -145,7 +124,6 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "collectivePublicKey": collective_public_key,
         "thresholdVerificationMaterial": threshold_verification_material,
         "evaluationKeys": evaluation_keys,
-        "developmentEncryptionFixture": development_encryption_fixture,
         "certificates": certificates,
         "targetDecryptionStatus": {
             "targetDecryptionParametersHash": target_decryption_parameters_hash,

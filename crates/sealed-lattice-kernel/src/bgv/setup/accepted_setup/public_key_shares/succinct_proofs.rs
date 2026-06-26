@@ -28,12 +28,6 @@ fn public_key_share_succinct_proofs_have_terminal_dependents(setup_package: &Val
         || setup_package.get("galoisKeyShareBatches").is_some()
         || setup_package.get("trusteeEvaluationKeyProofs").is_some()
         || setup_package.get("evaluationKeys").is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificate")
-            .is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificateHash")
-            .is_some()
 }
 
 pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(

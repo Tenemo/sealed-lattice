@@ -27,11 +27,6 @@ import {
     vssSourceTrusteeOpeningState,
 } from './support.js';
 
-const heEstimatorArtifactCanonicalSha256 =
-    '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
-const heEstimatorArtifactCanonicalization =
-    'recursively sorted JSON object keys, two-space indentation, trailing newline';
-
 describe('accepted setup public package API in Node', () => {
     it('creates a roots-only setup contribution and refuses raw fields in the public record', async () => {
         const kernel = await loadPublicTranscriptCoreKernel();
@@ -563,41 +558,11 @@ describe('accepted setup public package API in Node', () => {
                 },
             }),
         ).toThrow(/chunkHashes length/u);
-        const setupCommitmentSecurityCertificate =
-            setupCertificates.setupCommitmentSecurityCertificate as Record<
-                string,
-                unknown
-            >;
         const setupTransportCertificate =
             setupCertificates.setupTransportCertificate as Record<
                 string,
                 unknown
             >;
-        const heSecurityCertificate =
-            setupCertificates.heSecurityCertificate as Record<string, unknown>;
-        const heAssessedRing = heSecurityCertificate.assessedRing as Record<
-            string,
-            unknown
-        >;
-        const heEstimatorBinding =
-            heSecurityCertificate.estimatorBinding as Record<string, unknown>;
-
-        expect(heAssessedRing.largestExposedBasisClass).toBe('Q_data');
-        expect(heAssessedRing.largestExposedModulusBits).toBe(
-            heAssessedRing.dataPrimeCeilLog2Product,
-        );
-        expect(heAssessedRing.largestExposedModulusBits).not.toBe(
-            heAssessedRing.extendedUtilityCeilLog2Product,
-        );
-        expect(heEstimatorBinding).toMatchObject({
-            estimatorCommit: '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5',
-            estimatorDefaultCostModel: 'RC.MATZOV',
-            estimatorOutputCanonicalization:
-                heEstimatorArtifactCanonicalization,
-            estimatorOutputCanonicalSha256: heEstimatorArtifactCanonicalSha256,
-            largestExposedBasisClass: 'Q_data',
-            largestExposedModulusBits: heAssessedRing.dataPrimeCeilLog2Product,
-        });
         const commonRandomnessWithoutRoot = {
             objectType: 'SetupCommonRandomness',
             objectVersion: 1,
@@ -729,9 +694,7 @@ describe('accepted setup public package API in Node', () => {
             },
             privateVssEnvelopeCommitmentRoot,
             evaluationKeys: publicEvaluationKeys,
-            setupCommitmentSecurityCertificate,
             setupTransportCertificate,
-            heSecurityCertificate,
         });
         expect(setupPackage.collectivePublicKeyRoot).toBe(
             (setupPackage.collectivePublicKey as Record<string, unknown>)
@@ -777,9 +740,6 @@ describe('accepted setup public package API in Node', () => {
                 }),
             ),
         ]);
-        expect(setupPackage.setupCommitmentSecurityCertificateHash).toBe(
-            setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash,
-        );
         expect(
             (setupPackage.thresholdShareCommitments as Record<string, unknown>)
                 .thresholdShareCommitmentRoot,

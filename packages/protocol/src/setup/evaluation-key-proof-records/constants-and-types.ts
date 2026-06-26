@@ -14,7 +14,7 @@ export type EvaluationKeyShareProofFamily =
 
 export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
 export const publicEvaluationKeyAssemblyStatus =
-    'assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate';
+    'assembled-from-proof-bearing-shares';
 export const publicEvaluationKeyMaterialEncoding =
     'root-bound-public-key-switch-component-roots';
 export const publicEvaluationKeyTransportMaterialEncoding =

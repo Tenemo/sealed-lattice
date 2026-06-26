@@ -95,7 +95,6 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let missing_transport_result =
@@ -159,7 +158,6 @@ fn collective_setup_verifier_uses_stream_verified_vss_material_without_chunk_sid
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -205,7 +203,6 @@ fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
     let mut forged_verified_material =
         stream_derivation["verifiedVssCoefficientCommitmentMaterial"].clone();

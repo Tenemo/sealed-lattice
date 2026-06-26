@@ -56,19 +56,10 @@ fn passive_setup_collective_key_uses_evaluator_decryptable_contract() {
 }
 
 #[test]
-fn passive_setup_security_certificate_keeps_special_prime_out_of_public_exposure() {
+fn passive_setup_keeps_special_prime_out_of_public_exposure() {
     let package = setup_package_ref();
-    let setup_parameter_certificate = &package["certificates"]["setupParameterCertificate"];
     let public_samples = &package["certificates"]["publicRlweSamplesByBasis"];
 
-    assert_eq!(
-        setup_parameter_certificate["qDataBits"],
-        serde_json::json!(data_basis_modulus_bits())
-    );
-    assert_eq!(
-        setup_parameter_certificate["qExtendedUtilityBits"],
-        serde_json::json!(extended_basis_modulus_bits())
-    );
     assert_eq!(
         public_samples["QPPublic"]["relinearizationKeys"],
         serde_json::json!(0)
@@ -122,19 +113,6 @@ fn passive_setup_marks_default_development_seed_usage() {
 
 #[test]
 fn passive_setup_uses_rejection_sampled_setup_distributions() {
-    let package = setup_package();
-    assert_eq!(
-        package["certificates"]["errorDistributionCertificate"]["crpPublicSampleDistribution"]["distributionKind"],
-        "hash-to-modulus-rejection-sampled-uniform-public-sample"
-    );
-    assert_eq!(
-        package["certificates"]["errorDistributionCertificate"]["rejectionSamplingRules"]
-            .as_array()
-            .expect("rejection sampling rules")
-            .len(),
-        2
-    );
-
     assert_eq!(reduce_unbiased_u64(u64::MAX, 3), None);
     assert_eq!(reduce_unbiased_u64(u64::MAX, 2), Some(1));
     assert_eq!(reduce_unbiased_u64(6, 3), Some(0));

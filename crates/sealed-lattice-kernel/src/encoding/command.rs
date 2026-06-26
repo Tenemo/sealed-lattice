@@ -17,7 +17,6 @@ enum TranscriptCoreCommand {
     DescribeBgvRnsParameters,
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
-    DescribeBgvPassiveSetupObjectModel,
     DescribeCollectiveBgvSetupParameters,
     DeriveCollectiveBgvSetupPublicDerivations,
     GenerateBgvPassiveSetup,
@@ -207,7 +206,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
-        | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
         | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
         | TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
@@ -254,9 +252,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
             crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
-        }
-        TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
-            crate::bgv::commands::describe_bgv_passive_setup_object_model()
         }
         TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
             crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request()

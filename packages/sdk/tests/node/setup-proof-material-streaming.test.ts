@@ -238,7 +238,7 @@ describe('setup proof material streaming in the public package', () => {
                 qTargetState: 'downstream-null',
             },
             certificateRoots: {
-                heSecurityCertificateHash: proofHash,
+                setupTransportCertificateHash: proofHash,
             },
         };
         mockKernel = {

@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { setupRequest } from '../bgv-passive-setup-fixtures.js';
 
 import {
-    acceptedActiveStaticSetupTheoremCertificate,
     acceptedPublicKeyShareMaterial,
     acceptedShapedSetupPackage,
     acceptedVssCoefficientCommitments,
@@ -145,12 +144,6 @@ describe('collective BGV setup kernel commands', () => {
                 parameters,
                 setupPackage,
             );
-        const activeStaticSetupTheoremCertificate =
-            acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-        setupPackage.activeStaticSetupTheoremCertificate =
-            activeStaticSetupTheoremCertificate;
-        setupPackage.activeStaticSetupTheoremCertificateHash =
-            activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
         rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
         const result = kernel.verifyCollectiveBgvSetup({
@@ -205,12 +198,6 @@ describe('collective BGV setup kernel commands', () => {
                 parameters,
                 setupPackage,
             );
-        const activeStaticSetupTheoremCertificate =
-            acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-        setupPackage.activeStaticSetupTheoremCertificate =
-            activeStaticSetupTheoremCertificate;
-        setupPackage.activeStaticSetupTheoremCertificateHash =
-            activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
         rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
         const result = kernel.verifyCollectiveBgvSetup({

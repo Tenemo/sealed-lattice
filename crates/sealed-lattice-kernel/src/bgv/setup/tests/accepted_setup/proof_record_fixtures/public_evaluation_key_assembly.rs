@@ -146,7 +146,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
     let mut evaluation_keys = serde_json::json!({
         "objectType": "PublicEvaluationKeySet",
         "objectVersion": 1,
-        "assemblyStatus": "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate",
+        "assemblyStatus": "assembled-from-proof-bearing-shares",
         "materialEncoding": "root-bound-public-key-switch-component-roots",
         "materialSource": "verified-relinearization-and-galois-proof-records",
         "ceremonyId": setup_context["ceremonyId"],
@@ -227,7 +227,6 @@ pub(in super::super) fn add_public_evaluation_key_material_transport(
             chunk_hashes: transport_hashes.chunk_hashes.clone(),
         },
     );
-    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     serde_json::json!({

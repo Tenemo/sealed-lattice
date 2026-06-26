@@ -6,7 +6,6 @@ mod proof_record_fixtures;
 mod public_key_share_proofs;
 mod record_rebinding;
 mod same_secret_proofs;
-mod setup_certificates;
 mod transport_policy;
 mod vss_material;
 
@@ -59,8 +58,7 @@ use self::proof_record_fixtures::{
 };
 use self::record_rebinding::{
     drift_all_occurrences, drift_hash, private_vss_envelope_commitment_record_root_input,
-    private_vss_envelope_commitment_set_root_input, rebind_active_static_setup_theorem_certificate,
-    rebind_collective_evaluator_key_schedule_root, rebind_collective_he_security_certificate_hash,
+    private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
     rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,
     rebind_collective_public_key_root, rebind_collective_public_key_share_proof_roots,
     rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
@@ -72,7 +70,6 @@ use self::record_rebinding::{
     rebind_collective_vss_commitment_roots, rebind_collective_vss_complaint_root,
     rebind_first_private_vss_encrypted_envelope_hash,
     rebind_first_private_vss_envelope_commitment_record_root, rebind_same_secret_proof_record_root,
-    rebind_setup_key_correctness_certificate, rebind_setup_proof_accounting_certificate_hash,
     rebind_trustee_evaluation_key_proof_record_root, rebind_trustee_evaluation_key_proof_set_root,
 };
 
@@ -82,24 +79,19 @@ use super::super::accepted_setup::{
     PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING, PUBLIC_KEY_SHARE_MATERIAL_BINARY_FORMAT,
     PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING, PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_OBJECT_TYPE,
     TrusteeEvaluationKeyStatementInputs, accepted_hashes_from_package,
-    accepted_he_security_certificate_value, accepted_key_switch_decomposition_hash,
-    accepted_setup_collective_public_key_from_package,
+    accepted_key_switch_decomposition_hash, accepted_setup_collective_public_key_from_package,
     accepted_setup_public_galois_keys_from_transport,
     accepted_setup_public_relinearization_keys_from_transport,
-    active_static_setup_theorem_certificate_hash, active_static_setup_theorem_certificate_value,
     encode_public_evaluation_key_material_manifest, public_evaluation_key_material_manifest,
     public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
     public_key_share_coefficient_vector_hash, public_key_share_material_transport_hashes,
     public_key_share_succinct_proof_material_root,
     register_verified_trustee_evaluation_key_proof_material_chunks,
     round_one_public_aggregate_diagonals_from_package, same_secret_anchor_proof_material_root,
-    setup_key_correctness_certificate_hash, setup_key_correctness_certificate_value,
-    setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
     stored_verified_trustee_evaluation_key_proof_material_chunks_for_test,
     trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
     verify_collective_bgv_setup_package, verify_full_ring_material,
-    verify_required_public_evaluation_key_set_for_test,
-    verify_setup_key_correctness_certificate_for_test, verify_terminal_setup_transport_policy,
+    verify_required_public_evaluation_key_set_for_test, verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_material::{
     EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -133,7 +125,6 @@ use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };
 use crate::transcript_core::decode_hex;
-use num_bigint::BigUint;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Instant;

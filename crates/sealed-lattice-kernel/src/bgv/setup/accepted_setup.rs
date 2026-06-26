@@ -1,9 +1,9 @@
-mod accepted_certificates;
 mod common_randomness;
 mod evaluation_key_material_transport;
 mod evaluation_key_proof_checks;
 mod evaluation_key_share_rounds;
 mod evaluator_key_schedule;
+mod nested_hash;
 mod phase_transcript;
 mod private_vss_envelopes;
 mod public_key_share_material;
@@ -15,18 +15,6 @@ mod transport_policy;
 mod vss_coefficient_commitments;
 mod vss_complaints_and_acceptances;
 
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::accepted_certificates::{
-    accepted_he_security_certificate_hash_for_roster,
-    accepted_he_security_certificate_value_for_roster,
-};
-#[cfg(test)]
-pub(super) use self::accepted_certificates::{
-    accepted_he_security_certificate_value, active_static_setup_theorem_certificate_hash,
-    active_static_setup_theorem_certificate_value, setup_key_correctness_certificate_hash,
-    setup_key_correctness_certificate_value, setup_proof_accounting_certificate_hash,
-    setup_proof_accounting_certificate_value,
-};
 #[cfg(test)]
 pub(super) use self::evaluation_key_material_transport::encode_public_evaluation_key_material_manifest;
 #[cfg(test)]
@@ -44,15 +32,6 @@ pub(super) use self::transport_policy::{
     verify_full_ring_material, verify_terminal_setup_transport_policy,
 };
 
-use self::accepted_certificates::{
-    accepted_he_security_certificate_with_hash_value, optional_nested_hash_value,
-    package_nested_hash, setup_commitment_security_certificate_with_hash_value,
-    setup_package_requires_setup_key_correctness_certificate,
-    setup_proof_accounting_certificate_with_hash_value,
-    verify_active_static_setup_theorem_certificate, verify_commitment_security_certificate,
-    verify_he_security_certificate, verify_setup_key_correctness_certificate,
-    verify_setup_proof_accounting_certificate,
-};
 #[cfg(test)]
 pub(in crate::bgv::setup) use self::common_randomness::derive_collective_bgv_setup_public_derivations as derive_collective_bgv_setup_public_derivations_for_roster;
 use self::common_randomness::{
@@ -85,6 +64,7 @@ use self::evaluator_key_schedule::{
     verify_context_fields_match, verify_evaluator_key_schedule, verify_generic_key_switch_policy,
     verify_pending_evaluation_key_material_boundary,
 };
+use self::nested_hash::{optional_nested_hash_value, package_nested_hash};
 use self::phase_transcript::{
     setup_context_string, verify_abort_absence, verify_phase_transcript,
     verify_setup_intent_roster_hash,
@@ -147,7 +127,6 @@ use std::{
 #[cfg(test)]
 use std::{fs, io::Write};
 
-use num_bigint::BigUint;
 use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
@@ -155,11 +134,10 @@ use super::*;
 use super::{
     commitment::{
         SETUP_COMMITMENT_MODULE_RANK, SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
-        SETUP_COMMITMENT_RANDOMNESS_INFINITY_BOUND, SETUP_COMMITMENT_RANDOMNESS_WIDTH,
-        SETUP_COMMITMENT_ROW_COUNT, parse_setup_commitment_full_value,
-        setup_commitment_matrix_sampled_entries, setup_commitment_modulus_limb_values,
-        setup_commitment_modulus_product, setup_commitment_modulus_product_ceil_bits,
-        setup_commitment_parameters_value, setup_commitment_root,
+        SETUP_COMMITMENT_RANDOMNESS_WIDTH, SETUP_COMMITMENT_ROW_COUNT,
+        parse_setup_commitment_full_value, setup_commitment_matrix_sampled_entries,
+        setup_commitment_modulus_limb_values, setup_commitment_parameters_value,
+        setup_commitment_root,
     },
     evaluation_key_share_material::{
         EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
@@ -184,7 +162,6 @@ use crate::bgv::evaluator::top_k::{
     SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
     packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
 };
-use crate::bgv::parameters::SPECIAL_PRIME;
 use crate::hashing::derive_canonical_object_hash;
 use crate::protocol_signatures::{
     ProtocolSignatureExpectation, verify_protocol_signature_envelope,
@@ -333,12 +310,6 @@ const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-tra
 const SETUP_TRANSPORT_CERTIFICATE_OBJECT_TYPE: &str = "SetupTransportCertificate";
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
 const SETUP_TRANSPORTED_OBJECT_TYPE: &str = "SetupTransportedObject";
-const SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE: &str =
-    "SetupCommitmentSecurityCertificate";
-const SETUP_PROOF_ACCOUNTING_CERTIFICATE_OBJECT_TYPE: &str = "SetupProofAccountingCertificate";
-const SETUP_KEY_CORRECTNESS_CERTIFICATE_OBJECT_TYPE: &str = "SetupKeyCorrectnessCertificate";
-const ACTIVE_STATIC_SETUP_THEOREM_CERTIFICATE_OBJECT_TYPE: &str =
-    "ActiveStaticSetupTheoremCertificate";
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const SETUP_TRANSPORT_STORAGE_QUOTA_BYTES: u64 = 2_147_483_648;
 const SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES: u64 = 1_572_864;
@@ -367,7 +338,6 @@ const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_NAME: &str = "publicEvalu
 const SETUP_TRANSPORTED_PUBLIC_EVALUATION_KEY_MATERIAL_ROLE: &str =
     "public-evaluation-key-runtime-material";
 const SETUP_TRANSPORTED_OBJECT_LOADING_POLICY: &str = "stream-verified-before-object-use";
-const HE_SECURITY_CERTIFICATE_OBJECT_TYPE: &str = "BgvHeSecurityCertificate";
 const PRIVATE_VSS_ENVELOPE_DELIVERY_PHASE_NUMBER: u64 = 6;
 const PRIVATE_VSS_ENVELOPE_VERIFICATION_PHASE_NUMBER: u64 = 7;
 const EVALUATOR_REPLAY_SCHEME_LABEL: &str = "direct-encrypted-ballot-evaluator-replay";
@@ -425,18 +395,8 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "galoisKeyShareBatches",
     "trusteeEvaluationKeyProofs",
     "evaluationKeys",
-    "setupCommitmentSecurityCertificate",
-    "setupCommitmentSecurityCertificateHash",
     "setupTransportCertificate",
     "setupTransportCertificateHash",
-    "setupProofAccountingCertificate",
-    "setupProofAccountingCertificateHash",
-    "setupKeyCorrectnessCertificate",
-    "setupKeyCorrectnessCertificateHash",
-    "activeStaticSetupTheoremCertificate",
-    "activeStaticSetupTheoremCertificateHash",
-    "heSecurityCertificate",
-    "heSecurityCertificateHash",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -520,11 +480,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Valu
         "setupProof": setup_proof_parameters_value()?,
         "setupTransport": setup_transport_parameters_value_for_roster(&first_closure_roster_parameters())?,
         "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(&first_closure_roster_parameters())?,
-        "acceptedCertificateTemplates": {
-            "setupCommitmentSecurityCertificate": setup_commitment_security_certificate_with_hash_value()?,
-            "setupProofAccountingCertificate": setup_proof_accounting_certificate_with_hash_value()?,
-            "heSecurityCertificate": accepted_he_security_certificate_with_hash_value()?,
-        },
         "verifierStatuses": [
             "accepted",
             "pending",
@@ -605,13 +560,6 @@ pub(in crate::bgv::setup) fn verify_required_public_evaluation_key_set_for_test(
     request: &Value,
 ) -> CanonicalResult<Option<Value>> {
     verify_required_public_evaluation_key_set(setup_package, request)
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn verify_setup_key_correctness_certificate_for_test(
-    setup_package: &Value,
-) -> CanonicalResult<Option<Value>> {
-    verify_setup_key_correctness_certificate(setup_package)
 }
 
 fn verify_collective_setup_package(
@@ -713,22 +661,7 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_commitment_security_certificate(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_setup_proof_accounting_certificate(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_he_security_certificate(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_setup_key_correctness_certificate(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
     if let Some(response) = verify_transport_certificate(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_active_static_setup_theorem_certificate(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
     let declares_public_runtime_material =
@@ -1114,10 +1047,6 @@ fn setup_proof_parameters_value() -> CanonicalResult<Value> {
     }))
 }
 
-fn setup_proof_record_binding_value() -> CanonicalResult<Value> {
-    super::setup_proof::setup_proof_record_binding_value(&setup_parameters_hash()?)
-}
-
 fn setup_proof_family_descriptions() -> CanonicalResult<Vec<Value>> {
     let family_descriptions = ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES
         .iter()
@@ -1163,17 +1092,8 @@ fn setup_proof_family_descriptions() -> CanonicalResult<Vec<Value>> {
 }
 
 fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Option<Value>> {
-    let setup_key_correctness_certificate_required =
-        setup_package_requires_setup_key_correctness_certificate(setup_package);
     let missing_objects = REQUIRED_FINAL_OBJECTS
         .iter()
-        .filter(|field_name| {
-            setup_key_correctness_certificate_required
-                || !matches!(
-                    **field_name,
-                    "setupKeyCorrectnessCertificate" | "setupKeyCorrectnessCertificateHash"
-                )
-        })
         .filter(|field_name| setup_package.get(**field_name).is_none())
         .map(|field_name| (*field_name).to_string())
         .collect::<Vec<_>>();
@@ -1277,12 +1197,7 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
         "thresholdShareCommitmentRoot",
         "publicKeyShareSetRoot",
         "publicKeyShareProofSetRoot",
-        "setupCommitmentSecurityCertificateHash",
         "setupTransportCertificateHash",
-        "setupProofAccountingCertificateHash",
-        "setupKeyCorrectnessCertificateHash",
-        "activeStaticSetupTheoremCertificateHash",
-        "heSecurityCertificateHash",
     ] {
         if let Some(hash) = setup_package.get(field_name).and_then(Value::as_str) {
             accepted_hashes.push(hash.to_string());
@@ -1466,27 +1381,10 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             )?,
         },
         "certificateRoots": {
-            "setupCommitmentSecurityCertificateHash": value_string(
-                setup_package,
-                "setupCommitmentSecurityCertificateHash",
-            )?,
             "setupTransportCertificateHash": value_string(
                 setup_package,
                 "setupTransportCertificateHash",
             )?,
-            "setupProofAccountingCertificateHash": value_string(
-                setup_package,
-                "setupProofAccountingCertificateHash",
-            )?,
-            "setupKeyCorrectnessCertificateHash": value_string(
-                setup_package,
-                "setupKeyCorrectnessCertificateHash",
-            )?,
-            "activeStaticSetupTheoremCertificateHash": value_string(
-                setup_package,
-                "activeStaticSetupTheoremCertificateHash",
-            )?,
-            "heSecurityCertificateHash": value_string(setup_package, "heSecurityCertificateHash")?,
         },
     });
     let handoff_root = derive_canonical_object_hash(&handoff)?;

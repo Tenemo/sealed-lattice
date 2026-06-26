@@ -744,7 +744,6 @@ fn assemble_transported_public_setup_companions(
         );
     terminal_phase("generated trustee evaluation-key proofs");
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
-    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
     append_transport_certificate_entries_from_material_set(
         &mut package,
@@ -775,7 +774,6 @@ fn assemble_transported_public_setup_companions(
     let public_evaluation_key_material = add_public_evaluation_key_material_transport(&mut package);
     terminal_phase("generated public evaluation-key material");
 
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
     terminal_phase("rebound terminal certificates and package hash");
 
@@ -921,7 +919,6 @@ pub(super) fn rebind_public_evaluation_key_material_transport(
     package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
         derive_canonical_object_hash(&package["evaluationKeys"]).expect("evaluation key set hash")
     );
-    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     let material_entry =

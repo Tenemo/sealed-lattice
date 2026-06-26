@@ -368,16 +368,6 @@ const assertCertificateBindings = (
     certificates: SetupPackageCertificateRecords,
 ): void => {
     assertObjectType(
-        certificates.setupCommitmentSecurityCertificate,
-        'setupCommitmentSecurityCertificate',
-        'SetupCommitmentSecurityCertificate',
-    );
-    hashField(
-        certificates.setupCommitmentSecurityCertificate,
-        'setupCommitmentSecurityCertificateHash',
-        'setupCommitmentSecurityCertificate',
-    );
-    assertObjectType(
         certificates.setupTransportCertificate,
         'setupTransportCertificate',
         'SetupTransportCertificate',
@@ -386,26 +376,6 @@ const assertCertificateBindings = (
         certificates.setupTransportCertificate,
         'setupTransportCertificateHash',
         'setupTransportCertificate',
-    );
-    assertObjectType(
-        certificates.setupProofAccountingCertificate,
-        'setupProofAccountingCertificate',
-        'SetupProofAccountingCertificate',
-    );
-    hashField(
-        certificates.setupProofAccountingCertificate,
-        'setupProofAccountingCertificateHash',
-        'setupProofAccountingCertificate',
-    );
-    assertObjectType(
-        certificates.heSecurityCertificate,
-        'heSecurityCertificate',
-        'BgvHeSecurityCertificate',
-    );
-    hashField(
-        certificates.heSecurityCertificate,
-        'heSecurityCertificateHash',
-        'heSecurityCertificate',
     );
 };
 

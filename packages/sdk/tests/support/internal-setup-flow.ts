@@ -67,14 +67,10 @@ import type {
     SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
     SameSecretProofSet as ProtocolSameSecretProofSet,
     SameSecretProofSetInput as ProtocolSameSecretProofSetInput,
-    BgvHeSecurityCertificate as ProtocolBgvHeSecurityCertificate,
     SetupCertificates as ProtocolSetupCertificates,
-    SetupCommitmentSecurityCertificate as ProtocolSetupCommitmentSecurityCertificate,
-    SetupProofAccountingCertificate as ProtocolSetupProofAccountingCertificate,
     SetupCertificateTransportedObjectInput as ProtocolSetupCertificateTransportedObjectInput,
     SetupTransportCertificate as ProtocolSetupTransportCertificate,
     SetupContributionAssemblyInput,
-    SetupKeyCorrectnessCertificate as ProtocolSetupKeyCorrectnessCertificate,
     SetupPackage as ProtocolSetupPackage,
     SetupPackageInput as ProtocolSetupPackageInput,
     SetupPhaseParticipantObjectInput as ProtocolSetupPhaseParticipantObjectInput,
@@ -511,14 +507,7 @@ export type SetupCertificatesInput = Readonly<{
 }>;
 
 export type SetupCertificates = ProtocolSetupCertificates;
-export type SetupCommitmentSecurityCertificate =
-    ProtocolSetupCommitmentSecurityCertificate;
-export type SetupProofAccountingCertificate =
-    ProtocolSetupProofAccountingCertificate;
 export type SetupTransportCertificate = ProtocolSetupTransportCertificate;
-export type BgvHeSecurityCertificate = ProtocolBgvHeSecurityCertificate;
-export type SetupKeyCorrectnessCertificate =
-    ProtocolSetupKeyCorrectnessCertificate;
 
 export type SetupPackageInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
@@ -552,10 +541,7 @@ export type SetupPackageInput = Readonly<{
         SetupCertificatesInput,
         'vssCoefficientCommitmentMaterial'
     >;
-    readonly setupCommitmentSecurityCertificate?: JsonRecord;
     readonly setupTransportCertificate?: JsonRecord;
-    readonly setupProofAccountingCertificate?: JsonRecord;
-    readonly heSecurityCertificate?: JsonRecord;
 }>;
 
 export type SetupPackage = ProtocolSetupPackage;

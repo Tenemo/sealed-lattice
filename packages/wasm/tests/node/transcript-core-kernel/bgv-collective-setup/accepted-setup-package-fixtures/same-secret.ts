@@ -56,9 +56,9 @@ export function sameSecretProofsWithDriftedStatementHashes(
 ): SameSecretProofSet {
     const sameSecretConsistency =
         setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet;
-    const setupProofAccountingCertificate = jsonRecord(
-        setupPackage.setupProofAccountingCertificate,
-        'setupPackage.setupProofAccountingCertificate',
+    const canonicalSameSecretProofs = jsonRecord(
+        setupPackage.sameSecretProofs,
+        'setupPackage.sameSecretProofs',
     );
     const proofBytesHex = '00';
     const proofMaterials: SameSecretProofMaterial[] =
@@ -80,7 +80,7 @@ export function sameSecretProofsWithDriftedStatementHashes(
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
         proofAccountingHash: String(
-            setupProofAccountingCertificate.sameSecretLinkageAnchorProofAccountingHash,
+            canonicalSameSecretProofs.proofAccountingHash,
         ),
         proofMaterials,
     });
@@ -123,9 +123,9 @@ export function sameSecretProofsWithGeneratedProofs(
     vssCoefficientCommitmentBundle: VssCoefficientCommitmentBundle,
 ): SameSecretProofSet {
     const setupContext = setupPackage.setupContext as CollectiveBgvSetupContext;
-    const setupProofAccountingCertificate = jsonRecord(
-        setupPackage.setupProofAccountingCertificate,
-        'setupPackage.setupProofAccountingCertificate',
+    const canonicalSameSecretProofs = jsonRecord(
+        setupPackage.sameSecretProofs,
+        'setupPackage.sameSecretProofs',
     );
     const vssCoefficientCommitmentMaterial = jsonRecord(
         setupPackage.vssCoefficientCommitmentMaterial,
@@ -259,7 +259,7 @@ export function sameSecretProofsWithGeneratedProofs(
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
         proofAccountingHash: String(
-            setupProofAccountingCertificate.sameSecretLinkageAnchorProofAccountingHash,
+            canonicalSameSecretProofs.proofAccountingHash,
         ),
         proofMaterials,
     });

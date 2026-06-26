@@ -284,77 +284,6 @@ pub(super) fn dense_public_residues_with_degree(
     }
 }
 
-pub(super) fn dense_small_coefficients(
-    seed_hash: &str,
-    identity: &str,
-    label: &str,
-    minimum: i64,
-    maximum: i64,
-) -> Vec<i64> {
-    let width = u64::try_from(maximum - minimum + 1).expect("small distribution width fits u64");
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        (0..POLYNOMIAL_DEGREE)
-            .into_par_iter()
-            .map(|position| {
-                minimum
-                    + i64::try_from(sample_small_distribution_offset(
-                        seed_hash, identity, label, position, width,
-                    ))
-                    .expect("small distribution offset fits i64")
-            })
-            .collect()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        (0..POLYNOMIAL_DEGREE)
-            .map(|position| {
-                minimum
-                    + i64::try_from(sample_small_distribution_offset(
-                        seed_hash, identity, label, position, width,
-                    ))
-                    .expect("small distribution offset fits i64")
-            })
-            .collect()
-    }
-}
-
-pub(super) fn dense_centered_binomial_coefficients(
-    seed_hash: &str,
-    identity: &str,
-    label: &str,
-) -> Vec<i64> {
-    let mut coefficients = Vec::with_capacity(POLYNOMIAL_DEGREE);
-    let mut block_index = 0_u64;
-    while coefficients.len() < POLYNOMIAL_DEGREE {
-        let block_index_text = block_index.to_string();
-        let output = hash512(
-            "sealed-lattice-bgv-rns/sample-centered-binomial-eta2-dense-v1",
-            &[
-                seed_hash.as_bytes(),
-                identity.as_bytes(),
-                label.as_bytes(),
-                block_index_text.as_bytes(),
-            ],
-        );
-        for byte in output {
-            coefficients.push(centered_binomial_eta2_from_bits(byte));
-            if coefficients.len() == POLYNOMIAL_DEGREE {
-                break;
-            }
-            coefficients.push(centered_binomial_eta2_from_bits(byte >> 4));
-            if coefficients.len() == POLYNOMIAL_DEGREE {
-                break;
-            }
-        }
-        block_index = block_index
-            .checked_add(1)
-            .expect("centered binomial block index overflowed");
-    }
-
-    coefficients
-}
-
 fn centered_binomial_eta2_coefficient(
     seed_hash: &str,
     identity: &str,
@@ -424,30 +353,6 @@ pub(super) fn negacyclic_product_mod(
     inverse_negacyclic_ntt_in_place(&mut left_ntt, modulus)?;
 
     Ok(left_ntt)
-}
-
-pub(super) fn sample_values(values: &[u64]) -> Vec<Value> {
-    sample_positions()
-        .into_iter()
-        .map(|position| {
-            json!({
-                "position": position,
-                "value": values[position],
-            })
-        })
-        .collect()
-}
-
-pub(super) fn sample_signed_values(values: &[i64]) -> Vec<Value> {
-    sample_positions()
-        .into_iter()
-        .map(|position| {
-            json!({
-                "position": position,
-                "value": values[position],
-            })
-        })
-        .collect()
 }
 
 pub(super) fn sample_residue(seed_hash: &str, label: &str, position: usize, modulus: u64) -> u64 {

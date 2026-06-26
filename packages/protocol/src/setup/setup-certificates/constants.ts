@@ -1,10 +1,3 @@
-export const dataBasisId = 'sealed-lattice-bgv-rns-data-basis-v1';
-export const setupProofBytesDomain =
-    'sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1';
-export const setupProofSerialization = 'binary';
-export const setupProofByteDecoder =
-    'sealed-lattice-succinct-setup-proof-byte-decoder-v1';
-export const setupProofFamilies = ['vss-opening-carry'] as const;
 export const setupTransportChunkSizeBytes = 1_048_576;
 export const setupTransportStorageQuotaBytes = 2_147_483_648;
 export const setupTransportLargestSingleBufferBytes = 1_572_864;

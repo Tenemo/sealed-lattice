@@ -22,7 +22,7 @@ use crate::{
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
             derive_threshold_share_commitments_from_transport_request,
-            describe_collective_bgv_setup_parameters, describe_passive_setup_object_model,
+            describe_collective_bgv_setup_parameters,
             finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
             generate_passive_setup_package_from_request,
@@ -103,10 +103,6 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
         ),
         None,
     ))
-}
-
-pub(crate) fn describe_bgv_passive_setup_object_model() -> CanonicalResult<Value> {
-    describe_passive_setup_object_model()
 }
 
 pub(crate) fn describe_collective_bgv_setup_parameters_from_request() -> CanonicalResult<Value> {
@@ -492,8 +488,7 @@ mod tests {
         let encoded = encode_bgv_batch_plaintext_from_request(&serde_json::json!({
             "slots": [0, 1, 65_536, 17, 99],
             "level": 0,
-            "layoutBinding": layout_binding,
-            "includeCanonicalBytesHex": true
+            "layoutBinding": layout_binding
         }))
         .expect("encoded fixture");
 
@@ -501,28 +496,17 @@ mod tests {
             encoded["plaintextRoot"],
             "e1ee6ae0c273b721b8a264351e321ce1aa48c918e68be4a70124ff955341a4057a0a828d30f28821270d043d60988cd16fbaf03b51e3b53d617a9f4fccff733d"
         );
-        assert_eq!(
-            encoded["canonicalBytesHash512"],
-            "1ae2996a3a78bf246c97407c5b54fd2fac1743438e1b14c4058c9324d03718fff8938b362ec26b9edb3e04e3404c40edbf18e689a2d89693821893e6c57d573d"
-        );
-        assert_eq!(encoded["canonicalByteLength"], 90_311);
 
         let ciphertext =
             generate_bgv_ciphertext_convention_fixture_from_request(&serde_json::json!({
                 "leftSlots": [1, 2, 3],
-                "rightSlots": [4, 5, 6],
-                "includeCanonicalBytesHex": true
+                "rightSlots": [4, 5, 6]
             }))
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
             "13b81ddfad714f9d2acfbea317fc2903a6fb923cdd896249bccb6d16fa34f23074fd1227ce54462b9090812b31ecc7ab3c9340ad7a9d754924ac4c8c5c25debd"
         );
-        assert_eq!(
-            ciphertext["canonicalBytesHash512"],
-            "a6f70bb9a39ed57a1033692d91c46a771869a93914d1a2192e205dd0f6cd59698cca4eb719cc9e870c0eba48048e30c266b3c4e3fb63e86e97f30dec97ec5956"
-        );
-        assert_eq!(ciphertext["canonicalByteLength"], 180_521);
 
         let base_conversion =
             generate_bgv_base_conversion_fixture_from_request(&serde_json::json!({

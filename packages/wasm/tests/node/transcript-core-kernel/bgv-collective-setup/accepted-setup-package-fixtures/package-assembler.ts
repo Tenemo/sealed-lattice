@@ -11,10 +11,6 @@ import {
 } from '../setup-fixture-primitives.js';
 
 import {
-    acceptedActiveStaticSetupTheoremCertificate,
-    acceptedHeSecurityCertificate,
-    acceptedSetupCommitmentSecurityCertificate,
-    acceptedSetupProofAccountingCertificate,
     acceptedSetupTransportCertificate,
     rebindCollectiveSetupPackageHash,
 } from './certificates.js';
@@ -206,12 +202,6 @@ async function buildAcceptedShapedSetupPackage(
         publicKeyShares,
         publicKeyShareProofs,
     );
-    const setupCommitmentSecurityCertificate =
-        acceptedSetupCommitmentSecurityCertificate(setupParameters);
-    const setupProofAccountingCertificate =
-        acceptedSetupProofAccountingCertificate(setupParameters);
-    const heSecurityCertificate =
-        acceptedHeSecurityCertificate(setupParameters);
     const setupTransportCertificate = acceptedSetupTransportCertificate(
         kernel,
         setupParameters,
@@ -238,25 +228,10 @@ async function buildAcceptedShapedSetupPackage(
         galoisKeyShareBatches: [],
         trusteeEvaluationKeyProofs: {},
         evaluationKeys: {},
-        setupCommitmentSecurityCertificate,
-        setupCommitmentSecurityCertificateHash:
-            setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash,
         setupTransportCertificate,
         setupTransportCertificateHash:
             setupTransportCertificate.setupTransportCertificateHash,
-        setupProofAccountingCertificate,
-        setupProofAccountingCertificateHash:
-            setupProofAccountingCertificate.setupProofAccountingCertificateHash,
-        heSecurityCertificate,
-        heSecurityCertificateHash:
-            heSecurityCertificate.heSecurityCertificateHash,
     };
-    const activeStaticSetupTheoremCertificate =
-        acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-    setupPackage.activeStaticSetupTheoremCertificate =
-        activeStaticSetupTheoremCertificate;
-    setupPackage.activeStaticSetupTheoremCertificateHash =
-        activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
     rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
     return setupPackage;

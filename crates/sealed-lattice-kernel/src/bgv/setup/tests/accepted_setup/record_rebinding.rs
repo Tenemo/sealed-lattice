@@ -1,5 +1,3 @@
-use super::*;
-
 use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn rebind_collective_setup_package_hash(package: &mut serde_json::Value) {
@@ -338,7 +336,6 @@ pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_j
         derive_canonical_object_hash(&package["sameSecretProofs"])
             .expect("same-secret proof set root")
     );
-    rebind_active_static_setup_theorem_certificate(package);
 }
 
 pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
@@ -370,7 +367,6 @@ pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut se
         derive_canonical_object_hash(&package["publicKeyShareSuccinctProofs"])
             .expect("public-key succinct proof set root")
     );
-    rebind_active_static_setup_theorem_certificate(package);
 }
 
 pub(super) fn rebind_collective_public_key_root(package: &mut serde_json::Value) {
@@ -384,7 +380,6 @@ pub(super) fn rebind_collective_public_key_root(package: &mut serde_json::Value)
     );
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
-    rebind_active_static_setup_theorem_certificate(package);
 }
 
 pub(super) fn rebind_collective_public_key_share_roots(package: &mut serde_json::Value) {
@@ -484,53 +479,4 @@ pub(super) fn rebind_trustee_evaluation_key_proof_record_root(
     proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
         derive_canonical_object_hash(proof_record).expect("trustee evaluation-key proof root")
     );
-}
-
-pub(super) fn rebind_collective_he_security_certificate_hash(package: &mut serde_json::Value) {
-    package["heSecurityCertificate"]
-        .as_object_mut()
-        .expect("HE security certificate")
-        .remove("heSecurityCertificateHash");
-    let he_security_certificate_hash =
-        derive_canonical_object_hash(&package["heSecurityCertificate"])
-            .expect("HE security certificate hash");
-    package["heSecurityCertificate"]["heSecurityCertificateHash"] =
-        serde_json::json!(he_security_certificate_hash.clone());
-    package["heSecurityCertificateHash"] = serde_json::json!(he_security_certificate_hash);
-}
-
-pub(super) fn rebind_setup_proof_accounting_certificate_hash(package: &mut serde_json::Value) {
-    package["setupProofAccountingCertificate"]
-        .as_object_mut()
-        .expect("setup proof accounting certificate")
-        .remove("setupProofAccountingCertificateHash");
-    let setup_proof_accounting_certificate_hash =
-        derive_canonical_object_hash(&package["setupProofAccountingCertificate"])
-            .expect("setup proof accounting certificate hash");
-    package["setupProofAccountingCertificate"]["setupProofAccountingCertificateHash"] =
-        serde_json::json!(setup_proof_accounting_certificate_hash.clone());
-    package["setupProofAccountingCertificateHash"] =
-        serde_json::json!(setup_proof_accounting_certificate_hash);
-}
-
-pub(super) fn rebind_setup_key_correctness_certificate(package: &mut serde_json::Value) {
-    let mut certificate = setup_key_correctness_certificate_value(package)
-        .expect("setup key correctness certificate");
-    let certificate_hash = setup_key_correctness_certificate_hash(package)
-        .expect("setup key correctness certificate hash");
-    certificate["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash.clone());
-    package["setupKeyCorrectnessCertificate"] = certificate;
-    package["setupKeyCorrectnessCertificateHash"] = serde_json::json!(certificate_hash);
-    rebind_active_static_setup_theorem_certificate(package);
-}
-
-pub(super) fn rebind_active_static_setup_theorem_certificate(package: &mut serde_json::Value) {
-    let mut certificate = active_static_setup_theorem_certificate_value(package)
-        .expect("active-static setup theorem certificate");
-    let certificate_hash = active_static_setup_theorem_certificate_hash(package)
-        .expect("active-static setup theorem certificate hash");
-    certificate["activeStaticSetupTheoremCertificateHash"] =
-        serde_json::json!(certificate_hash.clone());
-    package["activeStaticSetupTheoremCertificate"] = certificate;
-    package["activeStaticSetupTheoremCertificateHash"] = serde_json::json!(certificate_hash);
 }

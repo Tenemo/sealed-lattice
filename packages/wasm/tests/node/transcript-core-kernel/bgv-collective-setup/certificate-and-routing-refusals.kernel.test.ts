@@ -49,38 +49,6 @@ describe('collective BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses malformed commitment security certificates', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters();
-        const baseSetupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            parameters,
-        );
-        const malformedCommitmentCertificatePackage =
-            cloneJsonRecord(baseSetupPackage);
-        const malformedCommitmentCertificate =
-            malformedCommitmentCertificatePackage.setupCommitmentSecurityCertificate as JsonRecord;
-        (
-            malformedCommitmentCertificate.aggregateOpeningBounds as JsonRecord
-        ).thresholdShareOpeningInfinityBound = 11_109;
-        rebindCollectiveSetupPackageHash(
-            kernel,
-            malformedCommitmentCertificatePackage,
-        );
-
-        const malformedCommitmentCertificateResult =
-            kernel.verifyCollectiveBgvSetup({
-                setupPackage: malformedCommitmentCertificatePackage,
-            });
-
-        expect(malformedCommitmentCertificateResult.verifierStatus).toBe(
-            'refused',
-        );
-        expect(
-            malformedCommitmentCertificateResult.refusedObjects[0]?.reasonCode,
-        ).toBe('commitmentSecurityCertificatePayloadMismatch');
-    });
-
     it('refuses JSON setup transport certificates', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const parameters = kernel.describeCollectiveBgvSetupParameters();

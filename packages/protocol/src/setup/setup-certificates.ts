@@ -8,14 +8,11 @@
 // path and public surface unchanged.
 export { createSetupCertificates } from './setup-certificates/assembly.js';
 export type {
-    BgvHeSecurityCertificate,
     BgvRnsParametersForCertificates,
     CollectiveBgvSetupParametersForCertificates,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
     SetupCertificates,
     SetupCertificatesInput,
-    SetupCommitmentSecurityCertificate,
-    SetupProofAccountingCertificate,
     SetupTransportCertificate,
 } from './setup-certificates/types.js';

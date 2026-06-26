@@ -1,9 +1,7 @@
-import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from './constants.js';
 import type {
-    CollectiveBgvSetupParametersForCertificates,
     JsonRecord,
     SetupCertificateTransportedObjectInput,
 } from './types.js';
@@ -18,9 +16,6 @@ export const assertObjectRecord = (
 
     return value as JsonRecord;
 };
-
-const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
-    JSON.parse(JSON.stringify(value)) as JsonRecord;
 
 export const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
@@ -52,46 +47,7 @@ export const hashField = (
     return fieldValue;
 };
 
-export const acceptedCertificateTemplate = (
-    setupParameters: CollectiveBgvSetupParametersForCertificates,
-    templateFieldName: string,
-    objectType: string,
-    hashFieldName: string,
-): JsonRecord | null => {
-    const templates = setupParameters.acceptedCertificateTemplates;
-    if (templates === undefined) {
-        return null;
-    }
-    const certificate = assertObjectRecord(
-        templates[templateFieldName],
-        `setupParameters.acceptedCertificateTemplates.${templateFieldName}`,
-    );
-    if (certificate.objectType !== objectType) {
-        throw new Error(
-            `setupParameters.acceptedCertificateTemplates.${templateFieldName}.objectType must be ${objectType}.`,
-        );
-    }
-    const certificateHash = stringField(
-        certificate,
-        hashFieldName,
-        `setupParameters.acceptedCertificateTemplates.${templateFieldName}`,
-    );
-    assertProtocolHash(
-        certificateHash,
-        `setupParameters.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName}`,
-    );
-    const hashInput = cloneJsonRecord(certificate);
-    delete hashInput[hashFieldName];
-    if (deriveCanonicalObjectHash(hashInput) !== certificateHash) {
-        throw new Error(
-            `setupParameters.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName} must match the certificate body.`,
-        );
-    }
-
-    return cloneJsonRecord(certificate);
-};
-
-export const numberField = (
+const numberField = (
     value: Readonly<Record<string, unknown>>,
     fieldName: string,
     objectPath: string,
@@ -231,57 +187,3 @@ export const numberArrayField = (
         return item;
     });
 };
-
-export const scalarPowerSum = (
-    coefficientCount: number,
-    trusteePoint: number,
-): bigint => {
-    let scalarSum = 0n;
-    let trusteePower = 1n;
-    const trusteePointWide = BigInt(trusteePoint);
-    for (
-        let coefficientIndex = 0;
-        coefficientIndex < coefficientCount;
-        coefficientIndex += 1
-    ) {
-        scalarSum += trusteePower;
-        if (coefficientIndex + 1 < coefficientCount) {
-            trusteePower *= trusteePointWide;
-        }
-    }
-
-    return scalarSum;
-};
-
-export const ceilLog2Bigint = (value: bigint): number => {
-    if (value <= 1n) {
-        return 0;
-    }
-
-    return (value - 1n).toString(2).length;
-};
-
-export const modulusProductDecimal = (moduli: readonly number[]): string =>
-    moduli
-        .reduce((product, modulus) => product * BigInt(modulus), 1n)
-        .toString();
-
-export const moduliBitLengthSum = (moduli: readonly number[]): number =>
-    moduli.reduce(
-        (bitLengthSum, modulus) => bitLengthSum + modulus.toString(2).length,
-        0,
-    );
-
-export const keySwitchComponentPolynomialCount = (
-    entries: readonly Readonly<{ readonly level: number }>[],
-): number =>
-    entries.reduce((total, entry) => {
-        if (!Number.isSafeInteger(entry.level) || entry.level < 0) {
-            throw new TypeError(
-                'evaluatorKeySchedule levels must be non-negative safe integers.',
-            );
-        }
-        const digitCount = entry.level + 1;
-
-        return total + digitCount * digitCount;
-    }, 0);

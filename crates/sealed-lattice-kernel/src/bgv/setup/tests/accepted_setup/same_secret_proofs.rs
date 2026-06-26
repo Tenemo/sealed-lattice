@@ -213,7 +213,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -262,7 +261,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
         "same-secret-proof-material",
         DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
     );
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
