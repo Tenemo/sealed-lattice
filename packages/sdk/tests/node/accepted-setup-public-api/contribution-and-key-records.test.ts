@@ -180,17 +180,12 @@ describe('accepted setup public package API in Node', () => {
                 sameSecretConsistency,
                 publicKeyShares,
             });
-        const sameSecretLinkageAnchorProofAccountingHash = hashFromKernel(
-            kernel,
-            'same-secret-linkage-anchor-proof-accounting',
-        );
         const sameSecretProofs = publicSetupApi.createSameSecretProofSet({
             setupContext,
             qSharePrimes,
             participantCount,
             sameSecretConsistency,
             vssCoefficientCommitmentMaterial,
-            proofAccountingHash: sameSecretLinkageAnchorProofAccountingHash,
             proofMaterials: (
                 sameSecretConsistency.statementRecords as readonly Record<
                     string,
@@ -212,10 +207,6 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShares,
                 materialContributions: publicKeyShareMaterialContributions,
             });
-        const publicKeyShareProofAccountingHash = hashFromKernel(
-            kernel,
-            'public-key-share-proof-accounting',
-        );
         const publicKeyShareSuccinctProofs =
             publicSetupApi.createPublicKeyShareSuccinctProofSet({
                 setupContext,
@@ -229,7 +220,6 @@ describe('accepted setup public package API in Node', () => {
                 publicKeyShares,
                 publicKeyShareProofs,
                 publicKeyShareMaterial,
-                proofAccountingHash: publicKeyShareProofAccountingHash,
                 proofMaterials: (
                     publicKeyShareProofs.proofRecords as readonly Record<
                         string,

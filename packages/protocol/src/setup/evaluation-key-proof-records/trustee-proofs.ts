@@ -3,7 +3,6 @@ import {
     hash512Hex,
     setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     setupProofChunkManifestRoot,
@@ -517,7 +516,6 @@ export const createTrusteeEvaluationKeyProofs = (
         input.transportedEvaluationKeyShareComponentMaterial,
     );
 
-    let proofAccountingHash: ProtocolHash | undefined;
     const proofRecords = sameSecretProofReferences.map((proofReference) => {
         const witness = witnessesByRosterPosition.get(
             proofReference.trusteeRosterPosition,
@@ -707,17 +705,6 @@ export const createTrusteeEvaluationKeyProofs = (
             );
         }
         assertProtocolHash(
-            generatedProof.proofAccountingHash,
-            'generatedProof.proofAccountingHash',
-        );
-        if (proofAccountingHash === undefined) {
-            proofAccountingHash = generatedProof.proofAccountingHash;
-        } else if (proofAccountingHash !== generatedProof.proofAccountingHash) {
-            throw new Error(
-                'trustee evaluation-key proofs must pin one proof accounting hash.',
-            );
-        }
-        assertProtocolHash(
             generatedProof.statementHash,
             'generatedProof.statementHash',
         );
@@ -778,7 +765,7 @@ export const createTrusteeEvaluationKeyProofs = (
                 deriveCanonicalObjectHash(recordWithoutRoot),
         } as TrusteeEvaluationKeyProofRecord;
     });
-    if (proofAccountingHash === undefined) {
+    if (proofRecords.length === 0) {
         throw new Error(
             'trustee evaluation-key proofs require at least one participant.',
         );
@@ -793,7 +780,6 @@ export const createTrusteeEvaluationKeyProofs = (
         objectType: 'TrusteeEvaluationKeyProofSet',
         objectVersion: 1,
         proofFamily: trusteeEvaluationKeyProofFamily,
-        proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

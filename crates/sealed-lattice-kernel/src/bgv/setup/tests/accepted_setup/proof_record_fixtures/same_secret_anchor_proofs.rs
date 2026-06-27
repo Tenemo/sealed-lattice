@@ -180,9 +180,6 @@ pub(in super::super) fn same_secret_proofs_object(
         "objectVersion": 1,
         "proofFamily":
             crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
-        "proofAccountingHash":
-            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()
-                .expect("same-secret anchor accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],

@@ -778,33 +778,6 @@ fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_accounting_hash_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_accounting_hash_drift",
-    );
-    let (mut package, request) = transported_public_setup_package_and_request();
-    package["trusteeEvaluationKeyProofs"]["proofAccountingHash"] =
-        serde_json::json!(valid_hash('1'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result =
-        verify_collective_bgv_setup_package(&package, &request).expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("proofAccountingHash")
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift",

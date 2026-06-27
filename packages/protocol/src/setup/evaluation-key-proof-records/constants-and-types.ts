@@ -299,7 +299,6 @@ export type TrusteeEvaluationKeyProofSet = Readonly<
         readonly objectType: 'TrusteeEvaluationKeyProofSet';
         readonly objectVersion: 1;
         readonly proofFamily: typeof trusteeEvaluationKeyProofFamily;
-        readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -358,7 +357,6 @@ export type TrusteeEvaluationKeyStatementContext = Readonly<{
 export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly ok: true;
     readonly operation: 'generateTrusteeEvaluationKeyProof';
-    readonly proofAccountingHash: ProtocolHash;
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
     readonly keyCount: number;

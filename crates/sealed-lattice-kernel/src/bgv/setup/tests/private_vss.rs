@@ -192,13 +192,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         })
         .expect("private VSS proof record");
     assert_eq!(proof_record["proofFamily"], "vss-opening-carry");
-    assert_eq!(
-        proof_record["proofAccountingHash"],
-        serde_json::json!(
-            succinct_private_vss_share_accounting_hash()
-                .expect("private VSS succinct accounting hash")
-        )
-    );
     assert!(proof_record.get("relationCommitmentHash").is_none());
     assert!(proof_record.get("tboxCommitmentPrefixHash").is_none());
     assert!(proof_record.get("proofBytesHex").is_some());
@@ -231,12 +224,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         proof_record["proofBytesHash"]
             .as_str()
             .expect("proof bytes hash")
-    );
-    assert_eq!(
-        verification.proof_accounting_hash,
-        proof_record["proofAccountingHash"]
-            .as_str()
-            .expect("proof accounting hash")
     );
 }
 
@@ -645,19 +632,6 @@ fn private_vss_share_envelope_verifier_refuses_transported_private_share_proof_m
         &request,
         "missing the requested proofMaterialRoot",
     );
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_private_share_proof_accounting_hash_drift() {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    replace_first_private_vss_proof_hash(
-        &mut request,
-        "proofAccountingHash",
-        "private-vss-proof-accounting-hash-drift",
-    );
-
-    assert_private_vss_share_proof_refusal_contains(&request, "proofAccountingHash");
 }
 
 #[test]

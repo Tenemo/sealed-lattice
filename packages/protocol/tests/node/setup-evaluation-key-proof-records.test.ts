@@ -383,7 +383,6 @@ const stubGenerator = (
         return {
             ok: true,
             operation: 'generateTrusteeEvaluationKeyProof',
-            proofAccountingHash: fixtureHash('proof-accounting'),
             statementHash: fixtureHash(
                 `statement-${String(input.context.trusteeRosterPosition)}`,
             ),
@@ -841,9 +840,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         expect(trusteeEvaluationKeyProofs.proofFamily).toBe(
             trusteeEvaluationKeyProofFamily,
         );
-        expect(trusteeEvaluationKeyProofs.proofAccountingHash).toBe(
-            fixtureHash('proof-accounting'),
-        );
         expect(trusteeEvaluationKeyProofs.keySwitchDecompositionHash).toBe(
             fixtureHash('key-switch-decomposition'),
         );
@@ -890,41 +886,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         expect(
             trusteeEvaluationKeyProofs.trusteeEvaluationKeyProofSetRoot,
         ).toBe(deriveCanonicalObjectHash(proofSetWithoutRoot));
-    });
-
-    it('rejects generators that drift the proof accounting hash across trustees', () => {
-        const fixture = evaluationKeyFixture();
-        const { relinearizationKeyShareRounds, galoisKeyShareBatches } =
-            builtRoundsAndBatches(fixture);
-        let generatedCount = 0;
-        const driftingGenerator: TrusteeEvaluationKeyProofGenerator = (
-            input,
-        ) => {
-            const baseline = stubGenerator([])(input);
-            generatedCount += 1;
-
-            return {
-                ...baseline,
-                proofAccountingHash:
-                    generatedCount === 1
-                        ? baseline.proofAccountingHash
-                        : fixtureHash('drifted-proof-accounting'),
-            };
-        };
-        expect(() =>
-            createTrusteeEvaluationKeyProofs({
-                ...fixture.commonInput,
-                relinearizationKeyShareRounds,
-                galoisKeyShareBatches,
-                keySwitchDecompositionHash: fixtureHash(
-                    'key-switch-decomposition',
-                ),
-                trusteeWitnesses: trusteeWitnesses(),
-                trusteeEvaluationKeyProofGenerator: driftingGenerator,
-            }),
-        ).toThrow(
-            'trustee evaluation-key proofs must pin one proof accounting hash',
-        );
     });
 
     it('rejects generators that return the wrong key count', () => {

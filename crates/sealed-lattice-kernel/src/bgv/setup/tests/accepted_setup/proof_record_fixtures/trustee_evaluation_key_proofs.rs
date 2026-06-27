@@ -206,8 +206,6 @@ fn trustee_evaluation_key_proofs_object_inner(
         "objectType": "TrusteeEvaluationKeyProofSet",
         "objectVersion": 1,
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        "proofAccountingHash": succinct_evaluation_key_proof_accounting_hash()
-            .expect("succinct evaluation-key proof accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],

@@ -6,7 +6,7 @@
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Every roster participant is intended to act as both voter and trustee. Untrusted services may store and distribute transcript objects, but the verification path is participant mobile browsers, not servers or dedicated heavy verifier machines.
 
-The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
+The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
 
 ## Selected direction
 
@@ -26,11 +26,11 @@ The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top
 
 ## Current package boundary
 
-The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and narrow setup-development verification helpers. Reserved complete-protocol entry points fail closed until the matching implementation and verification work is complete.
+The public package currently exposes helpers for poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and narrow setup-development verification.
 
 Threshold derivation is a helper, not a security certificate. The first target profile above is the only current setup/evaluator evidence profile; other roster sizes returned by helper APIs need their own profile certificates, runtime measurements, and security review before they carry a security or mobile claim.
 
-Current package tests are development evidence only. They do not replace supported mobile runtime evidence, production hardening, or the complete protocol security boundary in [SECURITY.md](SECURITY.md).
+Package tests are development evidence. Read [SECURITY.md](SECURITY.md) before treating any result as security evidence.
 
 ## Installation
 
@@ -84,8 +84,8 @@ const thresholdParameters = deriveThresholdParameters({
 - public encrypted ballot package creation, verification, or accepted proof transport APIs;
 - public encrypted ballot aggregation APIs;
 - public bounded-domain mobile evaluator replay APIs;
-- production target-bound decryption, target recombination, or result release APIs;
-- production security claims; see [SECURITY.md](SECURITY.md).
+- target-bound decryption, target recombination, or result release APIs;
+- security claims beyond [SECURITY.md](SECURITY.md).
 
 The public package must not expose raw BGV decryption, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
 
@@ -142,7 +142,7 @@ pnpm run test:lattigo-oracle
 pnpm run smoke:pack:npm
 ```
 
-Heavy proof lanes are development verification for setup/proof changes. They do not replace supported-phone runtime evidence or production security review; see [SECURITY.md](SECURITY.md) for the public boundary. Detailed maintainer evidence is kept separately from the public security posture.
+Heavy proof lanes are maintainer evidence for setup/proof changes. They do not change the public boundary in [SECURITY.md](SECURITY.md).
 
 Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
 

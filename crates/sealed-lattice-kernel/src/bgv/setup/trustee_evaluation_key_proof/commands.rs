@@ -1,12 +1,5 @@
 use serde_json::{Value, json};
 
-use super::accounting::{
-    succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
-    succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
-    succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
-    succinct_same_secret_linkage_anchor_accounting_hash,
-    succinct_same_secret_linkage_anchor_accounting_value,
-};
 use super::proof_codec::{
     decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
 };
@@ -24,43 +17,6 @@ use crate::hashing::{derive_canonical_object_hash, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
-
-// The accounting object each migrated family carries on its command responses.
-// The argument machinery is shared, so only the family label and accounting
-// object differ.
-fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<String> {
-    match shape {
-        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-            succinct_same_secret_linkage_anchor_accounting_hash()
-        }
-        SuccinctSetupProofFamilyShape::PublicKeyShare => {
-            succinct_public_key_share_accounting_hash()
-        }
-        SuccinctSetupProofFamilyShape::PrivateVssShare => {
-            succinct_private_vss_share_accounting_hash()
-        }
-        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
-            succinct_evaluation_key_proof_accounting_hash()
-        }
-    }
-}
-
-fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<Value> {
-    match shape {
-        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-            succinct_same_secret_linkage_anchor_accounting_value()
-        }
-        SuccinctSetupProofFamilyShape::PublicKeyShare => {
-            succinct_public_key_share_accounting_value()
-        }
-        SuccinctSetupProofFamilyShape::PrivateVssShare => {
-            succinct_private_vss_share_accounting_value()
-        }
-        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
-            succinct_evaluation_key_proof_accounting_value()
-        }
-    }
-}
 
 // Generate one trustee-batched evaluation-key proof from a JSON request. The
 // statement carries the ceremony context, the key descriptors with embedded
@@ -113,13 +69,10 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
 
     let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-    let shape = statement.family_shape()?;
-
     Ok(json!({
         "ok": true,
         "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
-        "proofAccountingHash": family_accounting_hash(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "keyCount": statement.keys.len(),
@@ -186,14 +139,10 @@ pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
     let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
-    let shape = statement.family_shape()?;
-
     Ok(json!({
         "ok": true,
         "operation": "verifyTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
-        "proofAccountingHash": family_accounting_hash(shape)?,
-        "proofAccounting": family_accounting_value(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
         "keyCount": statement.keys.len(),

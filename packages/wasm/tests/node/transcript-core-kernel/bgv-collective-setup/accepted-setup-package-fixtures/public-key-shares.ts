@@ -3,7 +3,6 @@ import {
     coefficientVectorLittleEndianHex,
     firstRosterParticipantCount,
     hexToBytes,
-    jsonRecord,
     minimumSuccinctProofFixtureRingDegree,
     publicKeyShareCoefficientVectorHash,
     type JsonRecord,
@@ -191,10 +190,6 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
     const publicDerivations = commonRandomness.publicDerivations as JsonRecord;
     const crpRoots = publicDerivations.crpRoots as JsonRecord;
     const publicA = publicDerivations.bgvPublicA as JsonRecord;
-    const canonicalSuccinctProofs = jsonRecord(
-        setupPackage.publicKeyShareSuccinctProofs,
-        'setupPackage.publicKeyShareSuccinctProofs',
-    );
     const publicKeyShares = setupPackage.publicKeyShares as PublicKeyShareSet;
     const proofBytesHex = '00';
     const proofMaterials: PublicKeyShareSuccinctProofMaterial[] =
@@ -223,9 +218,6 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
             setupPackage.publicKeyShareProofs as PublicKeyShareProofSet,
         publicKeyShareMaterial:
             setupPackage.publicKeyShareMaterial as PublicKeyShareMaterialSet,
-        proofAccountingHash: String(
-            canonicalSuccinctProofs.proofAccountingHash,
-        ),
         proofMaterials,
     });
 }

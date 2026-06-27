@@ -56,10 +56,6 @@ export function sameSecretProofsWithDriftedStatementHashes(
 ): SameSecretProofSet {
     const sameSecretConsistency =
         setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet;
-    const canonicalSameSecretProofs = jsonRecord(
-        setupPackage.sameSecretProofs,
-        'setupPackage.sameSecretProofs',
-    );
     const proofBytesHex = '00';
     const proofMaterials: SameSecretProofMaterial[] =
         sameSecretConsistency.statementRecords.map((statementRecord) => ({
@@ -79,9 +75,6 @@ export function sameSecretProofsWithDriftedStatementHashes(
         sameSecretConsistency,
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
-        proofAccountingHash: String(
-            canonicalSameSecretProofs.proofAccountingHash,
-        ),
         proofMaterials,
     });
 }
@@ -123,10 +116,6 @@ export function sameSecretProofsWithGeneratedProofs(
     vssCoefficientCommitmentBundle: VssCoefficientCommitmentBundle,
 ): SameSecretProofSet {
     const setupContext = setupPackage.setupContext as CollectiveBgvSetupContext;
-    const canonicalSameSecretProofs = jsonRecord(
-        setupPackage.sameSecretProofs,
-        'setupPackage.sameSecretProofs',
-    );
     const vssCoefficientCommitmentMaterial = jsonRecord(
         setupPackage.vssCoefficientCommitmentMaterial,
         'setupPackage.vssCoefficientCommitmentMaterial',
@@ -258,9 +247,6 @@ export function sameSecretProofsWithGeneratedProofs(
             setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet,
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
-        proofAccountingHash: String(
-            canonicalSameSecretProofs.proofAccountingHash,
-        ),
         proofMaterials,
     });
 }

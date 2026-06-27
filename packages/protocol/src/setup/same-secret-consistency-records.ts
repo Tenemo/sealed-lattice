@@ -148,7 +148,6 @@ export type SameSecretProofSet = Readonly<
         readonly objectType: 'SameSecretProofSet';
         readonly objectVersion: 1;
         readonly proofFamily: typeof sameSecretProofFamily;
-        readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly sameSecretConsistencyRoot: ProtocolHash;
@@ -174,7 +173,6 @@ export type SameSecretProofSetInput = {
     readonly participantCount: number;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly vssCoefficientCommitmentMaterial: SetupPackageVssCoefficientCommitmentMaterialSet;
-    readonly proofAccountingHash: ProtocolHash;
     readonly proofMaterials: readonly SameSecretProofMaterial[];
 };
 
@@ -429,7 +427,6 @@ const validateProofSetInput = (input: SameSecretProofSetInput): void => {
             'vssCoefficientCommitmentMaterial must match the same-secret statement set.',
         );
     }
-    assertProtocolHash(input.proofAccountingHash, 'proofAccountingHash');
 };
 
 const sortedSourceTrusteeRecords = (
@@ -798,7 +795,6 @@ export const createSameSecretProofSet = (
         objectType: 'SameSecretProofSet',
         objectVersion: 1,
         proofFamily: sameSecretProofFamily,
-        proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

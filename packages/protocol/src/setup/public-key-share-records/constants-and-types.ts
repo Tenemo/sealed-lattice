@@ -307,7 +307,6 @@ export type PublicKeyShareSuccinctProofSet = Readonly<
         readonly objectType: 'PublicKeyShareSuccinctProofSet';
         readonly objectVersion: 1;
         readonly proofFamily: typeof publicKeyShareProofFamily;
-        readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -437,7 +436,6 @@ export type PublicKeyShareSuccinctProofSetInput = Omit<
     readonly sameSecretProofs: SameSecretProofSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial: SetupPackagePublicKeyShareMaterialSet;
-    readonly proofAccountingHash: ProtocolHash;
     readonly proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[];
 };
 

@@ -175,9 +175,6 @@ fn public_key_share_commands_round_trip_with_family_label() {
     assert_eq!(generated["proofFamily"], "public-key-share");
     assert_eq!(generated["keyCount"], 1);
     assert_eq!(generated["sameSecretLinkageIncluded"], true);
-    let expected_accounting_hash =
-        super::accounting::succinct_public_key_share_accounting_hash().expect("accounting hash");
-    assert_eq!(generated["proofAccountingHash"], expected_accounting_hash);
 
     let mut verify_request = statement_request_value(&statement);
     verify_request["proofBytesHex"] = generated["proofBytesHex"].clone();
@@ -186,10 +183,6 @@ fn public_key_share_commands_round_trip_with_family_label() {
     assert_eq!(verified["ok"], true);
     assert_eq!(verified["proofFamily"], "public-key-share");
     assert_eq!(verified["statementHash"], generated["statementHash"]);
-    assert_eq!(
-        verified["proofAccounting"]["proofFamily"],
-        "public-key-share"
-    );
 
     // A public-key share request whose context carries the wrong binding
     // labels (the anchor's) must be refused.

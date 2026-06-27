@@ -67,8 +67,6 @@ pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_BYTE_DECODER,
-        "privateVssShareProofAccountingHash":
-            crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
     }))
 }
 

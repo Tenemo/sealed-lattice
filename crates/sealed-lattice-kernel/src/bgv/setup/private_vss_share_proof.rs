@@ -20,7 +20,7 @@ use super::{
         TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
         decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
         private_vss_share_succinct_proof_bytes_hash, prove_evaluation_key_share,
-        succinct_private_vss_share_accounting_hash, verify_evaluation_key_share,
+        verify_evaluation_key_share,
     },
 };
 
@@ -56,7 +56,6 @@ pub(super) struct PrivateVssShareSuccinctProofVerification {
     pub(super) proof_statement_root: String,
     pub(super) proof_material_root: String,
     pub(super) statement_hash_hex: String,
-    pub(super) proof_accounting_hash: String,
 }
 
 pub(super) struct PrivateVssShareSuccinctProofWitness {
@@ -145,20 +144,12 @@ pub(super) fn verify_private_vss_share_succinct_relation_proof(
             "private VSS share proofMaterialRoot must match the embedded proof material",
         ));
     }
-    let proof_accounting_hash = succinct_private_vss_share_accounting_hash()?;
-    if value_string(input.proof_record, "proofAccountingHash")? != proof_accounting_hash {
-        return Err(invalid_private_vss_share_proof(
-            "private VSS share proofAccountingHash must match the accepted succinct accounting object",
-        ));
-    }
-
     Ok(PrivateVssShareSuccinctProofVerification {
         proof_size_bytes,
         proof_bytes_hash,
         proof_statement_root,
         proof_material_root,
         statement_hash_hex,
-        proof_accounting_hash,
     })
 }
 
@@ -265,16 +256,9 @@ fn validate_private_vss_share_proof_record(proof_record: &Value) -> CanonicalRes
             ));
         }
     }
-    expect_string_field(
-        proof_record,
-        "proofAccountingHash",
-        &succinct_private_vss_share_accounting_hash()?,
-        "private VSS share proofAccountingHash does not match the accepted succinct accounting object",
-    )?;
     for field_name in [
         "proofStatementRoot",
         "statementHash",
-        "proofAccountingHash",
         "proofBytesHash",
         "proofMaterialRoot",
     ] {
@@ -709,7 +693,6 @@ fn private_vss_share_succinct_statement_value(
         "objectVersion": 1,
         "setupProofBinding": setup_proof_binding,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
-        "proofAccountingHash": succinct_private_vss_share_accounting_hash()?,
         "setupContext": input.setup_context,
         "publicMatrixSeedHash": input.public_matrix_seed_hash,
         "privateEnvelopeAadHash": input.private_envelope_aad_hash,
@@ -959,14 +942,11 @@ pub(super) fn private_vss_share_succinct_proof_record(
         proof_bytes.len(),
         &proof_bytes_hash,
     )?;
-    let proof_accounting_hash = succinct_private_vss_share_accounting_hash()?;
-
     Ok(json!({
         "objectType": "PrivateVssShareProof",
         "objectVersion": 1,
         "proofFamily": PRIVATE_VSS_SHARE_PROOF_FAMILY,
         "proofBytesEncoding": "embedded-binary-proof-bytes-hex",
-        "proofAccountingHash": proof_accounting_hash,
         "proofStatementRoot": proof_statement_root,
         "statementHash": statement_hash_hex,
         "proofSizeBytes": proof_bytes.len(),

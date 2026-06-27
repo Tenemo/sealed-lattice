@@ -34,7 +34,6 @@ use super::{
         PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
         verify_private_vss_share_succinct_relation_proof,
     },
-    trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash,
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
 use crate::bgv::evaluator::{

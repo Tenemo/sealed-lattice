@@ -58,12 +58,6 @@ pub(crate) use commands::{
     verify_trustee_evaluation_key_proof_from_request,
 };
 
-pub(in crate::bgv::setup) use accounting::{
-    succinct_evaluation_key_proof_accounting_hash, succinct_private_vss_share_accounting_hash,
-    succinct_private_vss_share_accounting_value, succinct_public_key_share_accounting_hash,
-    succinct_public_key_share_accounting_value,
-    succinct_same_secret_linkage_anchor_accounting_hash,
-};
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;

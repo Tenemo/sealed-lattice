@@ -113,8 +113,7 @@ use super::super::setup_proof::{
 use super::super::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
-    public_key_share_succinct_proof_bytes_hash, succinct_evaluation_key_proof_accounting_hash,
-    trustee_evaluation_key_proof_bytes_hash,
+    public_key_share_succinct_proof_bytes_hash, trustee_evaluation_key_proof_bytes_hash,
 };
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};

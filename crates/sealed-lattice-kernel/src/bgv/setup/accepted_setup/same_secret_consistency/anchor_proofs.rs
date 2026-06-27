@@ -11,8 +11,7 @@ use rayon::prelude::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
     TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    same_secret_anchor_proof_bytes_hash, succinct_same_secret_linkage_anchor_accounting_hash,
-    verify_evaluation_key_share,
+    same_secret_anchor_proof_bytes_hash, verify_evaluation_key_share,
 };
 
 pub(in super::super) fn verify_optional_same_secret_proofs(
@@ -56,11 +55,7 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs",
         )?));
     }
-    let anchor_accounting_hash = succinct_same_secret_linkage_anchor_accounting_hash()?;
-    for (field_name, expected_value) in [
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-        ("proofAccountingHash", anchor_accounting_hash.as_str()),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_proof_refusal(
                 "sameSecretProofSetParametersMismatch",

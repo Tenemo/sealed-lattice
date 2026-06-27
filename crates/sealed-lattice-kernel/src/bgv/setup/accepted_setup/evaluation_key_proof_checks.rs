@@ -8,8 +8,7 @@ use rayon::prelude::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    succinct_evaluation_key_proof_accounting_hash, trustee_evaluation_key_proof_bytes_hash,
-    verify_evaluation_key_share,
+    trustee_evaluation_key_proof_bytes_hash, verify_evaluation_key_share,
 };
 use crate::hashing::to_hex;
 
@@ -124,15 +123,6 @@ fn verify_trustee_evaluation_key_proof_set(
                 format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
             ));
         }
-    }
-    let expected_accounting_hash = succinct_evaluation_key_proof_accounting_hash()?;
-    if proof_set.get("proofAccountingHash").and_then(Value::as_str)
-        != Some(expected_accounting_hash.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trusteeEvaluationKeyProofs.proofAccountingHash must pin the repo-owned succinct evaluation-key proof accounting",
-        ));
     }
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),

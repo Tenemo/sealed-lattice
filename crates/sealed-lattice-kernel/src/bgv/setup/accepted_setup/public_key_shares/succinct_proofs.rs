@@ -12,8 +12,7 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
     PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
     TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    public_key_share_succinct_proof_bytes_hash, succinct_public_key_share_accounting_hash,
-    verify_evaluation_key_share,
+    public_key_share_succinct_proof_bytes_hash, verify_evaluation_key_share,
 };
 
 pub(super) fn public_key_share_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
@@ -176,11 +175,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
     }
-    let expected_accounting_hash = succinct_public_key_share_accounting_hash()?;
-    for (field_name, expected_value) in [
-        ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
-        ("proofAccountingHash", expected_accounting_hash.as_str()),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_succinct_proof_refusal(
                 "publicKeyShareSuccinctProofSetParametersMismatch",

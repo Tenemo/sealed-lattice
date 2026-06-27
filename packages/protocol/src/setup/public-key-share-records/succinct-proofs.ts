@@ -391,7 +391,6 @@ export const createPublicKeyShareSuccinctProofSet = (
     input: PublicKeyShareSuccinctProofSetInput,
 ): PublicKeyShareSuccinctProofSet => {
     validateCommonInput(input);
-    assertProtocolHash(input.proofAccountingHash, 'proofAccountingHash');
     assertContextMatches(
         input.setupContext,
         input.sameSecretConsistency,
@@ -525,7 +524,6 @@ export const createPublicKeyShareSuccinctProofSet = (
         objectType: 'PublicKeyShareSuccinctProofSet',
         objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
-        proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,

@@ -795,8 +795,7 @@ pub(super) fn setup_parameters_hash_for_roster(
 // inlined Q_share primes and public VSS commitment material sizing, and the BGV
 // parameters hash. Each part is a deterministic function of the roster and fixed
 // parameters, so this hash subsumes the former collection of per-component setup
-// parameter hashes. The two proof-accounting hashes stay as hashes because they
-// summarize succinct proof family accounting bound elsewhere.
+// parameter hashes.
 pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupParameters",
@@ -817,8 +816,6 @@ pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> Canon
         "setupProof": setup_proof_parameters_value()?,
         "setupTransport": setup_transport_parameters_value_for_roster(roster)?,
         "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(roster)?,
-        "privateVssShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
-        "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
     }))
 }
 
@@ -1012,14 +1009,6 @@ fn setup_proof_parameters_value() -> CanonicalResult<Value> {
             }
         },
         "proofFamilies": setup_proof_family_descriptions()?,
-        "privateVssShareProofAccounting": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_value()?,
-        "privateVssShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
-        "publicKeyShareProofAccounting": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_value()?,
-        "publicKeyShareProofAccountingHash": super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
-        "sameSecretLinkageAnchorProofAccountingHash":
-            super::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
-        "trusteeEvaluationKeyProofAccountingHash":
-            super::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
         "proofSerialization": {
             "encoding": SETUP_PROOF_SERIALIZATION,
             "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
@@ -1051,30 +1040,26 @@ fn setup_proof_family_descriptions() -> CanonicalResult<Vec<Value>> {
     let family_descriptions = ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES
         .iter()
         .map(|proof_family| {
-            let (statement, witness, no_wrap_rule, proof_accounting_hash) = match *proof_family {
+            let (statement, witness, no_wrap_rule) = match *proof_family {
                 "same-secret-linkage-anchor" => (
                     "same-secret linkage anchor opens every accepted VSS constant commitment to one short trustee secret",
                     "one ternary trustee secret, negative indicators, and opening randomness for every accepted Q_share constant commitment",
                     "commitment openings are checked over the accepted commitment-modulus fields and cross-limb consistency binds one centered integer secret",
-                    super::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()?,
                 ),
                 "public-key-share" => (
                     "public-key share relation proves b_l + a_l*s - p*e = 0 over every accepted Q_share limb",
                     "one ternary trustee secret, one centered-binomial error vector, and the selected limb-zero commitment opening randomness",
                     "the selected limb-zero opening links the share secret to the same-secret anchor; ternary support makes the congruent secrets equal",
-                    super::trustee_evaluation_key_proof::succinct_public_key_share_accounting_hash()?,
                 ),
                 "vss-opening-carry" => (
                     "private VSS share opens the homomorphic coefficient-commitment combination with explicit q_l carry",
                     "private share, coefficient openings, and bounded non-negative carry",
                     "unreduced lifted share relation must hold below the commitment modulus product",
-                    super::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
                 ),
                 "trustee-evaluation-key" => (
                     "trustee evaluation-key relation proves every scheduled relinearization and Galois share against the committed trustee secret",
                     "one trustee secret, schedule-bound key-switch source witnesses, component openings, carry witnesses, and same-secret linkage openings",
                     "round-one, round-two, and Galois source relations are enforced against the frozen evaluator schedule and recomputed public aggregates",
-                    super::trustee_evaluation_key_proof::succinct_evaluation_key_proof_accounting_hash()?,
                 ),
                 _ => unreachable!("ACCEPTED_SETUP_SUCCINCT_PROOF_FAMILIES is fixed in this module"),
             };
@@ -1083,7 +1068,6 @@ fn setup_proof_family_descriptions() -> CanonicalResult<Vec<Value>> {
                 "statement": statement,
                 "witness": witness,
                 "noWrapRule": no_wrap_rule,
-                "proofAccountingHash": proof_accounting_hash,
             }))
         })
         .collect::<CanonicalResult<Vec<_>>>()?;

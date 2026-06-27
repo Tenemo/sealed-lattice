@@ -6,7 +6,7 @@ use crate::hashing::derive_canonical_object_hash;
 fn first_closure_setup_parameters_hash_is_byte_stable() {
     // Byte-identity guard for the current n=10 closure setup parameters. This
     // pin tracks the full n=10 binding, including the inlined sub-configuration
-    // values, the proof-accounting sub-hashes, and the BGV parameters; if those
+    // values and the BGV parameters; if those
     // binding inputs intentionally change, re-pin to the new n=10 value and
     // treat stale proof corpora as invalid.
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
@@ -14,7 +14,7 @@ fn first_closure_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "fd5802b210e03721471dd52b481cef2fc57f8a253c4fc6712ed9e337fa8d891d44c28f17f7f4ac688fc10e9e9de97dd749a65767f0a33f25462b0c9b5c9e3065",
+        "9bb6bb6f51746b57eb3e85763552876c02c9260c85c76b4680a49704665c98a3dffd4e4a92e6e9f51dbb79c65ae116dd6e0de79369379ec51e9aacb0db327a21",
     );
 }
 

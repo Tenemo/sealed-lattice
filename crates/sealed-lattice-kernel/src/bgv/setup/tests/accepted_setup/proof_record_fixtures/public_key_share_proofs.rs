@@ -318,7 +318,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
         PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
         TrusteeEvaluationKeyStatement, public_key_share_succinct_proof_bytes_hash,
-        succinct_public_key_share_accounting_hash,
     };
     let setup_context = &package["setupContext"];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -524,8 +523,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "objectType": "PublicKeyShareSuccinctProofSet",
         "objectVersion": 1,
         "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
-        "proofAccountingHash": succinct_public_key_share_accounting_hash()
-            .expect("public-key share succinct accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
