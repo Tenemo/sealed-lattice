@@ -1,41 +1,70 @@
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod bindings;
 mod ciphertext_codec;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod command;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod compact_opening;
+#[cfg(feature = "target-decryption-development-commands")]
 mod development_fixture;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod json_fields;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod proof_material;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod proof_relation;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod proof_slice;
-mod recombination;
+mod result_verification;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_generation;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_records;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_statement;
+
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use bindings::*;
 pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use ciphertext_codec::*;
+#[cfg(feature = "target-decryption-development-commands")]
+pub(crate) use command::verify_bgv_target_decryption_share_binary_proof_material_from_request;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
     generate_bgv_target_decryption_share_from_local_share_request,
     generate_bgv_target_decryption_share_proof_material_from_local_witness_request,
-    generate_bgv_target_decryption_share_proof_slice_from_local_witness_request,
-    verify_and_recombine_bgv_target_decryption_shares_from_request,
     verify_bgv_target_decryption_share_proof_material_from_request,
     verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use compact_opening::*;
-pub(crate) use development_fixture::generate_bgv_target_decryption_fixture_from_request;
+#[cfg(feature = "target-decryption-development-commands")]
+pub(crate) use development_fixture::generate_bgv_target_decryption_development_fixture_from_request;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use json_fields::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use proof_material::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use proof_relation::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use proof_slice::*;
-use recombination::*;
+pub(crate) use result_verification::verify_target_decryption_result_from_request;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_generation::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_records::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_statement::*;
 
 use serde_json::{Value, json};
 
+use crate::{
+    bgv::evaluator::top_k::TIE_POLICY, encoding::CanonicalResult, hashing::derive_protocol_hash,
+};
+
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::{
     bgv::{
         coefficient_codec::{
@@ -43,19 +72,12 @@ use crate::{
             signed_byte_vector_from_hex, signed_byte_vector_hex,
         },
         evaluator::{
-            engine::{
-                Ciphertext, DevelopmentBgvKey, decryption_accumulator_to_coefficients,
-                negacyclic_mul, signed_residue,
-            },
+            engine::{Ciphertext, DevelopmentBgvKey, negacyclic_mul, signed_residue},
             prg::DeterministicSampler,
             records::MAXIMUM_OPTION_COUNT,
-            top_k::{
-                TIE_POLICY, canonical_target_basis_hash, packed_score_slot,
-                validate_canonical_target_ciphertext,
-            },
+            top_k::{canonical_target_basis_hash, validate_canonical_target_ciphertext},
         },
-        modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
-        ntt::forward_negacyclic_ntt,
+        modular_arithmetic::{add_mod_fast, mul_mod, mul_mod_fast},
         profile::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
@@ -73,33 +95,53 @@ use crate::{
             usize_at_path, value_at_path,
         },
     },
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{derive_protocol_hash, hash512_hex},
-    transcript_core::decode_hex,
+    encoding::{CanonicalError, CanonicalErrorCode},
+    hashing::hash512_hex,
+    transcript_core::{decode_hex, decode_standard_base64, encode_standard_base64},
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "target-decryption-development-commands")]
+use crate::{
+    bgv::setup::{
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_chunk_hash,
+        setup_proof_material_chunk_manifest_root, setup_proof_material_full_object_hash,
+    },
+    transcript_core::encode_hex,
+};
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(feature = "target-decryption-development-commands", test)
+))]
 use rayon::prelude::*;
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_SHARE_PAYLOAD_ENCODING: &str =
     "coefficient-domain-u64-little-endian-partial-decryption-limbs";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_RANDOMNESS_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-randomness-v1";
-const TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice-bgv-rns/target-decryption-share-proof-bytes-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) const TARGET_DECRYPTION_SMUDGING_PROFILE_ID: &str =
     "sealed-lattice-target-decryption-zero-share-smudging-development-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 #[derive(Clone)]
 struct TargetShareProfile {
     decryption_threshold: usize,
@@ -108,6 +150,7 @@ struct TargetShareProfile {
     hash: String,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct ParticipantBinding {
     trustee_identity: String,
     roster_position: usize,
@@ -118,11 +161,13 @@ struct ParticipantBinding {
     trustee_threshold_verification_key_hash: String,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct ThresholdVerificationBinding {
     threshold_share_verification_key_root: String,
     threshold_share_verification_key_hash: String,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct SetupBinding {
     setup_package_hash: String,
     ceremony_id: String,
@@ -143,18 +188,22 @@ struct SetupBinding {
         Option<CompactAggregateThresholdCommitmentSetBinding>,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct CompactAggregateThresholdCommitmentSetBinding {
     aggregate_threshold_commitment_root: String,
     rns_limb_count: usize,
     recipient_records: Vec<Vec<CompactAggregateThresholdCommitmentRecordBinding>>,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct CompactAggregateThresholdCommitmentRecordBinding {
     rns_prime: u64,
     aggregate_commitment_root: String,
+    aggregate_opening_root: String,
     aggregate_commitment: Value,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct TargetAcceptedBinding {
     target_accepted_record_hash: String,
     target_proposal_hash: String,
@@ -169,6 +218,7 @@ struct TargetAcceptedBinding {
     target_basis_hash: String,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 struct TargetCiphertextPair {
     target_id: Ciphertext,
     target_order: Ciphertext,
@@ -176,7 +226,6 @@ struct TargetCiphertextPair {
     target_order_root: String,
     target_ciphertext_hash: String,
     target_ciphertext_binding_hash: String,
-    top_count: usize,
 }
 
 #[cfg(test)]

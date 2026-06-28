@@ -1,16 +1,19 @@
 use super::super::evaluation_domain::EvaluationDomainPlan;
 use super::super::relation::{
     LimbColumnLayout, TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
+    claim_mask_digit_count_for_global_claim,
 };
 use super::super::*;
 use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
+use num_bigint::BigInt;
 
-// Global mask bits for one claim, identical across every limb where the claim
+// Global mask digits for one claim, identical across every limb where the claim
 // appears, so the masked claims stay comparable as centered integers.
-pub(in super::super) fn claim_mask_bits(
+pub(in super::super) fn claim_mask_digits(
     proof_randomness_seed_hex: &str,
     global_claim_id: u64,
+    mask_digit_count: usize,
 ) -> Vec<u8> {
     let mut sampler = DeterministicSampler::new(
         CLAIM_MASK_DOMAIN,
@@ -19,9 +22,12 @@ pub(in super::super) fn claim_mask_bits(
             &global_claim_id.to_le_bytes(),
         ],
     );
-    let raw = sampler.bytes(CLAIM_MASK_DIGIT_COUNT);
 
-    raw.into_iter().map(|byte| byte & 1).collect()
+    sampler
+        .uniform_residues(CLAIM_MASK_RADIX, mask_digit_count)
+        .into_iter()
+        .map(|digit| u8::try_from(digit).expect("claim mask digit fits u8"))
+        .collect()
 }
 
 // Global claim identity for the cross-limb comparison and the shared mask:
@@ -32,18 +38,25 @@ pub(in super::super) fn global_claim_id(
     layout: &LimbColumnLayout,
     local_claim_index: usize,
 ) -> u64 {
-    let repetition = local_claim_index % CONSISTENCY_REPETITIONS;
-    let vector_index = local_claim_index / CONSISTENCY_REPETITIONS;
-    if layout.private_vss_active()
-        || layout.compact_vss_active()
-        || layout.target_decryption_active()
-    {
+    let repetition = local_claim_index % layout.consistency_repetitions;
+    let vector_index = local_claim_index / layout.consistency_repetitions;
+    if layout.target_decryption_active() {
+        let global_vector_index = if vector_index < layout.target_decryption_message_columns {
+            statement
+                .target_decryption_message_global_index(layout.limb_index, vector_index)
+                .expect("target-decryption message column is in the layout")
+        } else {
+            statement.target_decryption_total_message_count() + vector_index
+                - layout.target_decryption_message_columns
+        };
+
+        return (global_vector_index * layout.consistency_repetitions + repetition) as u64;
+    }
+    if layout.private_vss_active() || layout.compact_vss_active() {
         debug_assert!(
-            statement.private_vss_share.is_some()
-                || statement.compact_vss_share_linkage.is_some()
-                || statement.target_decryption_share.is_some()
+            statement.private_vss_share.is_some() || statement.compact_vss_share_linkage.is_some()
         );
-        return (vector_index * CONSISTENCY_REPETITIONS + repetition) as u64;
+        return (vector_index * layout.consistency_repetitions + repetition) as u64;
     }
     if vector_index == 0 {
         return repetition as u64;
@@ -58,7 +71,8 @@ pub(in super::super) fn global_claim_id(
                 .map(|key| key.digit_count())
                 .sum::<usize>()
                 + remaining;
-            return ((1 + global_error_position) * CONSISTENCY_REPETITIONS + repetition) as u64;
+            return ((1 + global_error_position) * layout.consistency_repetitions + repetition)
+                as u64;
         }
         remaining -= digit_count;
     }
@@ -71,10 +85,11 @@ pub(in super::super) fn global_claim_id(
         .sum::<usize>();
     let linkage_position = remaining;
     debug_assert!(linkage_position < 1 + layout.linkage_randomness_columns);
-    ((1 + total_error_vectors + linkage_position) * CONSISTENCY_REPETITIONS + repetition) as u64
+    ((1 + total_error_vectors + linkage_position) * layout.consistency_repetitions + repetition)
+        as u64
 }
 
-// The binary mask digit columns for one limb, as logical length-N vectors.
+// The base-3 mask digit columns for one limb, as logical length-N vectors.
 pub(super) fn mask_digit_columns(
     statement: &TrusteeEvaluationKeyStatement,
     layout: &LimbColumnLayout,
@@ -82,13 +97,14 @@ pub(super) fn mask_digit_columns(
 ) -> Vec<Vec<u64>> {
     let mut columns = vec![vec![0_u64; layout.ring_degree]; layout.mask_column_count];
     for local_claim in 0..layout.claim_count() {
-        let bits = claim_mask_bits(
+        let digits = claim_mask_digits(
             proof_randomness_seed_hex,
             global_claim_id(statement, layout, local_claim),
+            layout.claim_mask_digit_count(local_claim),
         );
-        for (digit_index, bit) in bits.iter().enumerate() {
+        for (digit_index, digit) in digits.iter().enumerate() {
             let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
-            columns[column][half * layout.trace_size + half_position] = u64::from(*bit);
+            columns[column][half * layout.trace_size + half_position] = u64::from(*digit);
         }
     }
 
@@ -125,13 +141,13 @@ pub(super) fn masked_half_coefficients(
 // vector and consistency repetition, the clear integer combination of the
 // signed witness plus the shared smudging mask. Every limb publishes the
 // residues of these integers, so the cross-limb binding is integer equality
-// recovered by lifting from two limb fields.
+// recovered by lifting from the statement-selected proof fields.
 pub(super) fn global_claim_integers(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
     consistency_vectors: &[Vec<u64>],
     proof_randomness_seed_hex: &str,
-) -> Vec<i128> {
+) -> Vec<BigInt> {
     let mut signed_vectors: Vec<&[i64]> = Vec::new();
     if statement.private_vss_share.is_some() {
         // The message (Shamir coefficient) columns carry no consistency claim:
@@ -148,16 +164,18 @@ pub(super) fn global_claim_integers(
             }
         }
     } else if statement.compact_vss_share_linkage.is_some() {
-        signed_vectors.push(&witness.compact_vss_carry_witnesses);
-        for randomness_columns in
-            &witness.compact_vss_coefficient_opening_randomness_by_shamir_index
-        {
-            for column in randomness_columns {
-                signed_vectors.push(column);
+        // Compact share-linkage consistency claims are only the lifted carry for
+        // each recipient/source-limb item. Opening randomness stays committed,
+        // ternary row-checked, and consumed by the compact opening lincheck, but
+        // it does not carry a separate cross-field integer-equality claim.
+        // This order must match consistency_vector_count and the compact branch
+        // of batched_sumcheck_value ([carry_by_item...]).
+        if witness.compact_vss_carry_witnesses_by_item.is_empty() {
+            signed_vectors.push(&witness.compact_vss_carry_witnesses);
+        } else {
+            for carry_witnesses in &witness.compact_vss_carry_witnesses_by_item {
+                signed_vectors.push(carry_witnesses);
             }
-        }
-        for column in &witness.compact_vss_recipient_share_opening_randomness {
-            signed_vectors.push(column);
         }
     } else if statement.target_decryption_share.is_some() {
         for message_vector in &witness.target_decryption_message_vectors {
@@ -185,7 +203,7 @@ pub(super) fn global_claim_integers(
             }
         }
     }
-    let mut integers = Vec::with_capacity(signed_vectors.len() * CONSISTENCY_REPETITIONS);
+    let mut integers = Vec::with_capacity(signed_vectors.len() * consistency_vectors.len());
     for signed_vector in &signed_vectors {
         for consistency_vector in consistency_vectors {
             let global_id = integers.len() as u64;
@@ -193,14 +211,18 @@ pub(super) fn global_claim_integers(
             for (coefficient, combination) in signed_vector.iter().zip(consistency_vector.iter()) {
                 clear_sum += i128::from(*coefficient) * i128::from(*combination);
             }
-            let bits = claim_mask_bits(proof_randomness_seed_hex, global_id);
-            let mut mask_integer = 0_i128;
-            for (digit_index, bit) in bits.iter().enumerate() {
-                if *bit == 1 {
-                    mask_integer += 1_i128 << digit_index;
-                }
+            let digits = claim_mask_digits(
+                proof_randomness_seed_hex,
+                global_id,
+                claim_mask_digit_count_for_global_claim(statement, global_id),
+            );
+            let mut mask_integer = BigInt::from(0_u8);
+            let mut digit_weight = BigInt::from(1_u8);
+            for digit in digits {
+                mask_integer += BigInt::from(digit) * &digit_weight;
+                digit_weight *= CLAIM_MASK_RADIX;
             }
-            integers.push(clear_sum + mask_integer);
+            integers.push(BigInt::from(clear_sum) + mask_integer);
         }
     }
 

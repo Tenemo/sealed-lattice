@@ -225,6 +225,25 @@ impl EvaluationDomainPlan {
     // outside H: F(z) = (z^m - 1) / m * sum_i values_i * omega^i / (z - omega^i).
 }
 
+pub(super) fn coefficients_from_coset_evaluations(
+    evaluations: &[u64],
+    offset: u64,
+    root: u64,
+    modulus: u64,
+) -> CanonicalResult<Vec<u64>> {
+    let plan = build_cyclic_transform_plan(evaluations.len(), root, modulus)?;
+    let mut coefficients = evaluations.to_vec();
+    cyclic_transform_in_place(&mut coefficients, &plan, true);
+    let offset_inverse = inverse_mod(offset, modulus)?;
+    let mut offset_power = 1_u64;
+    for coefficient in coefficients.iter_mut() {
+        *coefficient = mul_mod_fast(*coefficient, offset_power, modulus);
+        offset_power = mul_mod_fast(offset_power, offset_inverse, modulus);
+    }
+
+    Ok(coefficients)
+}
+
 // Montgomery batch inversion; fails on a zero element.
 pub(super) fn batch_inverse(values: &[u64], modulus: u64) -> CanonicalResult<Vec<u64>> {
     let mut prefix_products = Vec::with_capacity(values.len());
@@ -336,4 +355,56 @@ pub(super) fn negacyclic_transpose_product(
     }
 
     Ok(transposed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bgv::profile::DATA_PRIMES;
+
+    fn evaluate_polynomial(coefficients: &[u64], point: u64, modulus: u64) -> u64 {
+        let mut accumulated = 0_u64;
+        for coefficient in coefficients.iter().rev() {
+            accumulated = add_mod_fast(
+                mul_mod_fast(accumulated, point, modulus),
+                *coefficient,
+                modulus,
+            );
+        }
+
+        accumulated
+    }
+
+    fn deterministic_coefficients(length: usize, modulus: u64) -> Vec<u64> {
+        (0..length)
+            .map(|coefficient_index| {
+                let mixed = (coefficient_index as u128 + 11)
+                    * (coefficient_index as u128 + 29)
+                    * 1_315_423_911_u128
+                    + 17;
+                (mixed % u128::from(modulus)) as u64
+            })
+            .collect()
+    }
+
+    #[test]
+    fn folded_coset_interpolation_recovers_coefficients() {
+        let modulus = DATA_PRIMES[0];
+        let plan = EvaluationDomainPlan::new(modulus, MINIMUM_TRACE_SIZE).unwrap();
+        let length = plan.extension_size / 2;
+        let offset = mul_mod_fast(plan.coset_offset, plan.coset_offset, modulus);
+        let root = mul_mod_fast(plan.extension_root, plan.extension_root, modulus);
+        let coefficients = deterministic_coefficients(length, modulus);
+        let mut point = offset;
+        let mut evaluations = Vec::with_capacity(length);
+        for _ in 0..length {
+            evaluations.push(evaluate_polynomial(&coefficients, point, modulus));
+            point = mul_mod_fast(point, root, modulus);
+        }
+
+        let recovered =
+            coefficients_from_coset_evaluations(&evaluations, offset, root, modulus).unwrap();
+
+        assert_eq!(recovered, coefficients);
+    }
 }

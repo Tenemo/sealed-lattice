@@ -24,14 +24,19 @@ mod setup_proof;
 mod sharing;
 mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use trustee_evaluation_key_proof::{
-    TARGET_DECRYPTION_SHARE_PROOF_FAMILY, generate_compact_same_secret_bridge_proof_from_request,
+    TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+    generate_target_decryption_share_proof_bytes_from_request,
+    succinct_target_decryption_share_accounting_hash,
+    verify_target_decryption_share_proof_bytes_from_request,
+};
+pub(crate) use trustee_evaluation_key_proof::{
+    generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
-    generate_target_decryption_share_proof_from_request,
     generate_trustee_evaluation_key_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
     verify_compact_vss_share_linkage_proof_from_request,
-    verify_target_decryption_share_proof_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 mod validation;
@@ -49,16 +54,20 @@ pub(crate) use compact_same_secret_bridge::{
     verify_compact_vss_same_secret_bridge_proof_material_set_request,
     verify_compact_vss_same_secret_bridge_statement_set_request,
 };
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use compact_vss_commitment::{
     COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
     compute_compact_vss_commitment_from_opening,
+};
+pub(crate) use compact_vss_commitment::{
     compute_compact_vss_commitment_from_opening_request,
     decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
     verify_compact_vss_aggregate_threshold_commitment_set_request,
     verify_compact_vss_coefficient_commitment_set_request,
     verify_compact_vss_commitment_opening_request,
     verify_compact_vss_recipient_share_commitment_set_request,
+    verify_compact_vss_share_linkage_binary_proof_material_request,
     verify_compact_vss_share_linkage_proof_material_set_request,
     verify_compact_vss_share_linkage_statement_request,
 };
@@ -73,6 +82,11 @@ pub(crate) use public_evaluation_key_material::{
 #[cfg(test)]
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
+};
+#[cfg(feature = "target-decryption-development-commands")]
+pub(crate) use setup_proof::{
+    SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_chunk_hash,
+    setup_proof_material_chunk_manifest_root, setup_proof_material_full_object_hash,
 };
 pub(crate) use setup_proof::{
     absorb_setup_proof_material_transport_stream_chunk_request,
@@ -181,6 +195,7 @@ struct PassiveSetupInput {
     participants: Vec<SetupParticipant>,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) struct CollectiveBgvSetupContextHashes {
     pub(crate) roster_hash: String,
     pub(crate) setup_profile_hash: String,
@@ -189,6 +204,7 @@ pub(crate) struct CollectiveBgvSetupContextHashes {
     pub(crate) commitment_profile_hash: String,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) fn collective_bgv_setup_context_hashes_from_package(
     setup_package: &Value,
 ) -> CanonicalResult<CollectiveBgvSetupContextHashes> {

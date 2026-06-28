@@ -1,11 +1,12 @@
 use super::*;
+use crate::bgv::setup::trustee_evaluation_key_proof::merkle_commitment::MERKLE_DIGEST_BYTES;
 
 // Exact byte accounting of an encoded trustee evaluation-key proof, broken down
 // by component. The formulas mirror `proof_codec::encode_trustee_evaluation_key_proof`
 // exactly and are self-checked in `profile_trustee_proof_size_breakdown` against a
-// real `encode(...).len()`. Sizes are parameterised by `field_element_bytes`,
+// real `encode(...).len()`. Sizes are parameterised by `field_residue_bits`,
 // `hash_bytes`, and `salt_bytes` so the same function predicts the effect of a
-// serialization lever (narrower field residues, narrower hashes) before it is
+// serialization change (narrower field residues, narrower hashes) before it is
 // implemented. Length-prefix `u64`s are fixed at eight bytes and tracked under
 // `length_prefixes` so they are never confused with field or hash bytes.
 #[derive(Default, Debug, Clone)]
@@ -16,7 +17,7 @@ struct ProofSizeBreakdown {
     deep_evaluations: usize,
     low_degree_fold_roots: usize,
     low_degree_final_coefficients: usize,
-    low_degree_query_pairs: usize,
+    low_degree_query_siblings: usize,
     low_degree_query_paths: usize,
     phase_one_rows: usize,
     phase_one_paths: usize,
@@ -33,7 +34,7 @@ impl ProofSizeBreakdown {
             + self.deep_evaluations
             + self.low_degree_fold_roots
             + self.low_degree_final_coefficients
-            + self.low_degree_query_pairs
+            + self.low_degree_query_siblings
             + self.low_degree_query_paths
             + self.phase_one_rows
             + self.phase_one_paths
@@ -44,11 +45,11 @@ impl ProofSizeBreakdown {
 
     // Bytes that carry field residues (base or extension), i.e. everything a
     // narrower field encoding would shrink.
-    fn field_element_bytes(&self) -> usize {
+    fn field_residue_bytes(&self) -> usize {
         self.masked_consistency_claims
             + self.deep_evaluations
             + self.low_degree_final_coefficients
-            + self.low_degree_query_pairs
+            + self.low_degree_query_siblings
             + self.phase_one_rows
             + self.phase_two_rows
     }
@@ -71,25 +72,43 @@ impl ProofSizeBreakdown {
 }
 
 fn committed_fold_count(initial_degree_bound: usize) -> usize {
-    let fold_ratio = initial_degree_bound / LOW_DEGREE_FINAL_COEFFICIENT_COUNT;
+    let final_coefficient_count =
+        low_degree_final_coefficient_count(initial_degree_bound).expect("final coefficient count");
+    let fold_ratio = initial_degree_bound / final_coefficient_count;
     fold_ratio.trailing_zeros() as usize - 1
+}
+
+fn packed_residue_bytes(residue_count: usize, field_residue_bits: usize) -> usize {
+    residue_count
+        .checked_mul(field_residue_bits)
+        .expect("field residue bit count must fit usize")
+        .div_ceil(8)
+}
+
+fn extension_slice_bytes(element_count: usize, field_residue_bits: usize) -> usize {
+    let residue_count = element_count
+        .checked_mul(CHALLENGE_EXTENSION_DEGREE)
+        .expect("extension residue count must fit usize");
+    packed_residue_bytes(residue_count, field_residue_bits)
 }
 
 fn add_low_degree_size(
     breakdown: &mut ProofSizeBreakdown,
     extension_size: usize,
     initial_degree_bound: usize,
-    extension_element_bytes: usize,
+    field_residue_bits: usize,
     hash_bytes: usize,
 ) {
     let folds = committed_fold_count(initial_degree_bound);
+    let final_coefficient_count =
+        low_degree_final_coefficient_count(initial_degree_bound).expect("final coefficient count");
     breakdown.length_prefixes += 8; // folded-layer-root count
     breakdown.low_degree_fold_roots += folds * hash_bytes;
     breakdown.low_degree_final_coefficients +=
-        LOW_DEGREE_FINAL_COEFFICIENT_COUNT * extension_element_bytes;
+        extension_slice_bytes(final_coefficient_count, field_residue_bits);
     for _query in 0..LOW_DEGREE_QUERY_COUNT {
         for fold_index in 0..folds {
-            breakdown.low_degree_query_pairs += 2 * extension_element_bytes;
+            breakdown.low_degree_query_siblings += extension_slice_bytes(1, field_residue_bits);
             breakdown.length_prefixes += 8; // path-length prefix
             breakdown.low_degree_query_paths +=
                 folded_layer_path_length(extension_size, fold_index) * hash_bytes;
@@ -99,27 +118,27 @@ fn add_low_degree_size(
 
 fn analyze_proof_size(
     statement: &TrusteeEvaluationKeyStatement,
-    field_element_bytes: usize,
+    field_residue_bits: usize,
     hash_bytes: usize,
     salt_bytes: usize,
 ) -> ProofSizeBreakdown {
-    let extension_element_bytes = CHALLENGE_EXTENSION_DEGREE * field_element_bytes;
     let mut breakdown = ProofSizeBreakdown::default();
     // Proof magic plus the limb-count prefix.
     breakdown.length_prefixes += 8 + 8;
-    for limb_index in 0..statement.limb_count() {
+    for limb_index in statement.proof_limb_indices() {
         let layout = LimbColumnLayout::new(statement, limb_index).expect("limb layout");
         let trace_size = layout.trace_size;
         let extension_size = trace_size * DOMAIN_BLOWUP;
-        let tree_depth = extension_size.trailing_zeros() as usize;
+        let phase_tree_depth = (extension_size / 2).trailing_zeros() as usize;
         let phase_one_columns = layout.phase_one_physical_count();
         let total_columns = phase_one_columns + PHASE_TWO_COLUMN_COUNT;
         let claim_count = layout.claim_count();
 
         breakdown.commitment_roots += 2 * hash_bytes;
-        breakdown.masked_consistency_claims += claim_count * field_element_bytes;
+        breakdown.masked_consistency_claims +=
+            packed_residue_bytes(claim_count, field_residue_bits);
         breakdown.deep_evaluations +=
-            DEEP_EVALUATION_POINT_COUNT * total_columns * extension_element_bytes;
+            DEEP_EVALUATION_POINT_COUNT * extension_slice_bytes(total_columns, field_residue_bits);
 
         // Main batched low-degree proof and the residual low-degree proof.
         let commitment_bound = COMMITMENT_BOUND_FACTOR * trace_size;
@@ -127,34 +146,29 @@ fn analyze_proof_size(
             &mut breakdown,
             extension_size,
             commitment_bound,
-            extension_element_bytes,
+            field_residue_bits,
             hash_bytes,
         );
         add_low_degree_size(
             &mut breakdown,
             extension_size,
             trace_size,
-            extension_element_bytes,
+            field_residue_bits,
             hash_bytes,
         );
 
-        // Phase (witness/quotient tree) query openings: two coset-pair slots.
+        // Phase (witness/quotient tree) query openings: two coset-pair slots
+        // bound by one salted pair leaf per phase tree.
         for _query in 0..LOW_DEGREE_QUERY_COUNT {
             for _slot in 0..2 {
-                breakdown.phase_one_rows += phase_one_columns * field_element_bytes;
-                breakdown.leaf_salts += salt_bytes;
-                breakdown.phase_one_paths += tree_depth * hash_bytes;
-                breakdown.phase_two_rows += PHASE_TWO_COLUMN_COUNT * extension_element_bytes;
-                breakdown.leaf_salts += salt_bytes;
-                breakdown.phase_two_paths += tree_depth * hash_bytes;
+                breakdown.phase_one_rows +=
+                    packed_residue_bytes(phase_one_columns, field_residue_bits);
+                breakdown.phase_two_rows +=
+                    extension_slice_bytes(PHASE_TWO_COLUMN_COUNT, field_residue_bits);
             }
-        }
-        for _query in 0..LOW_DEGREE_QUERY_COUNT {
-            for _slot in 0..2 {
-                breakdown.phase_two_rows += PHASE_TWO_COLUMN_COUNT * extension_element_bytes;
-                breakdown.leaf_salts += salt_bytes;
-                breakdown.phase_two_paths += tree_depth * hash_bytes;
-            }
+            breakdown.leaf_salts += 2 * salt_bytes;
+            breakdown.phase_one_paths += phase_tree_depth * hash_bytes;
+            breakdown.phase_two_paths += phase_tree_depth * hash_bytes;
         }
     }
 
@@ -281,12 +295,17 @@ fn profile_trustee_proof_size_breakdown() {
     verify_evaluation_key_share(&statement, &proof).expect("verify");
     let verify_elapsed = verify_start.elapsed();
 
-    // The analyzer models the pre-batch encoding (one independent Merkle path per
-    // opened leaf), so it equals the size the proof would have without lever 2.
+    // The analyzer models an unbatched encoding (one independent Merkle path per
+    // opened leaf), so it equals the size the proof would have without batched
+    // openings.
     // The real encoded proof carries batched openings, so the difference is the
     // measured batching saving; batching only ever removes bytes.
-    let independent_paths =
-        analyze_proof_size(&statement, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
+    let independent_paths = analyze_proof_size(
+        &statement,
+        FIELD_RESIDUE_BIT_WIDTH,
+        MERKLE_DIGEST_BYTES,
+        LEAF_SALT_BYTES,
+    );
     assert!(
         encoded.len() <= independent_paths.total(),
         "batched encoding must not exceed the independent-path encoding"
@@ -297,10 +316,6 @@ fn profile_trustee_proof_size_breakdown() {
         .map(|limb| {
             let batched_node_count = limb.witness_batch_opening.authentication_nodes.len()
                 + limb.quotient_batch_opening.authentication_nodes.len()
-                + limb
-                    .sumcheck_residual_batch_opening
-                    .authentication_nodes
-                    .len()
                 + limb
                     .low_degree
                     .layer_batch_openings
@@ -313,7 +328,7 @@ fn profile_trustee_proof_size_breakdown() {
                     .iter()
                     .map(|opening| opening.authentication_nodes.len())
                     .sum::<usize>();
-            batched_node_count * 64
+            batched_node_count * MERKLE_DIGEST_BYTES
         })
         .sum();
     let measured_saving = independent_paths.total() - encoded.len();
@@ -322,7 +337,7 @@ fn profile_trustee_proof_size_breakdown() {
     println!(
         "measurement schedule: ring_degree={measurement_ring_degree} keys={} limbs={} prove={:?} verify={:?}",
         statement.keys.len(),
-        statement.limb_count(),
+        statement.proof_limb_count(),
         prove_elapsed,
         verify_elapsed,
     );
@@ -338,12 +353,12 @@ fn profile_trustee_proof_size_breakdown() {
     );
 
     // Full first-profile shape at the production ring degree. The analyzer gives
-    // the exact independent-path (post lever 1) size; the batched size is
-    // estimated by scaling its path bytes by the measured node ratio. The
-    // measurement ring is one binary level shallower than full size, and deeper
-    // trees share proportionally fewer interior nodes (only the top log2(leaves)
-    // levels overlap), so the true full-size batched total is marginally above
-    // this estimate; the gate run records the exact value.
+    // the exact independent-path size for the current residue encoding; the
+    // batched size is estimated by scaling its path bytes by the measured node
+    // ratio. The measurement ring is one binary level shallower than full size,
+    // and deeper trees share proportionally fewer interior nodes (only the top
+    // log2(leaves) levels overlap), so the true full-size batched total is
+    // marginally above this estimate; the gate run records the exact value.
     let schedule = full_profile_schedule_shape();
     let linkage_commitment_count = schedule
         .iter()
@@ -351,8 +366,16 @@ fn profile_trustee_proof_size_breakdown() {
         .max()
         .expect("schedule is non-empty");
     let full = shape_only_trustee_statement(&schedule, POLYNOMIAL_DEGREE, linkage_commitment_count);
-    let before_lever_one = analyze_proof_size(&full, 8, 64, LEAF_SALT_BYTES);
-    let full_independent = analyze_proof_size(&full, FIELD_RESIDUE_BYTE_WIDTH, 64, LEAF_SALT_BYTES);
+    let full_sixty_four_bit_independent =
+        analyze_proof_size(&full, 64, MERKLE_DIGEST_BYTES, LEAF_SALT_BYTES);
+    let full_forty_eight_bit_independent =
+        analyze_proof_size(&full, 48, MERKLE_DIGEST_BYTES, LEAF_SALT_BYTES);
+    let full_independent = analyze_proof_size(
+        &full,
+        FIELD_RESIDUE_BIT_WIDTH,
+        MERKLE_DIGEST_BYTES,
+        LEAF_SALT_BYTES,
+    );
     let estimated_full_batched = full_independent.total() as f64
         - full_independent.path_bytes() as f64 * (1.0 - batched_node_ratio);
     let mebibyte = 1024.0 * 1024.0;
@@ -362,23 +385,27 @@ fn profile_trustee_proof_size_breakdown() {
         full.limb_count(),
     );
     println!(
-        "FULL-N before lever 1 (8-byte field, independent paths): {:.1} MiB",
-        before_lever_one.total() as f64 / mebibyte,
+        "FULL-N with 64-bit field residues and independent paths: {:.1} MiB",
+        full_sixty_four_bit_independent.total() as f64 / mebibyte,
     );
     println!(
-        "FULL-N after lever 1 (6-byte field, independent paths): {:.1} MiB | field bytes {:.1} MiB | hash bytes {:.1} MiB (of which paths {:.1} MiB)",
+        "FULL-N with 48-bit field residues and independent paths: {:.1} MiB",
+        full_forty_eight_bit_independent.total() as f64 / mebibyte,
+    );
+    println!(
+        "FULL-N with {FIELD_RESIDUE_BIT_WIDTH}-bit packed field residues and independent paths: {:.1} MiB | field bytes {:.1} MiB | hash bytes {:.1} MiB (of which paths {:.1} MiB)",
         full_independent.total() as f64 / mebibyte,
-        full_independent.field_element_bytes() as f64 / mebibyte,
+        full_independent.field_residue_bytes() as f64 / mebibyte,
         full_independent.hash_bytes() as f64 / mebibyte,
         full_independent.path_bytes() as f64 / mebibyte,
     );
     println!(
-        "FULL-N after lever 2 (estimated batched paths): ~{:.1} MiB ({:.1}% below lever 1, {:.1}% below the original 8-byte baseline); exact value from the gate run",
+        "FULL-N with {FIELD_RESIDUE_BIT_WIDTH}-bit packed field residues and estimated batched paths: ~{:.1} MiB ({:.1}% below independent paths, {:.1}% below the 64-bit baseline); exact value from the gate run",
         estimated_full_batched / mebibyte,
         100.0 * (full_independent.total() as f64 - estimated_full_batched)
             / full_independent.total() as f64,
-        100.0 * (before_lever_one.total() as f64 - estimated_full_batched)
-            / before_lever_one.total() as f64,
+        100.0 * (full_sixty_four_bit_independent.total() as f64 - estimated_full_batched)
+            / full_sixty_four_bit_independent.total() as f64,
     );
 }
 
@@ -436,7 +463,7 @@ fn run_full_ring_benchmark(level: usize, schedule: BenchmarkSchedule) {
     let verify_elapsed = verify_start.elapsed();
 
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof).len();
-    let limb_count = statement.limb_count();
+    let limb_count = statement.proof_limb_count();
     let key_count = statement.keys.len();
     println!("succinct evaluation-key prototype benchmark ({schedule:?}, level {level})");
     println!("  ring degree:        {POLYNOMIAL_DEGREE}");

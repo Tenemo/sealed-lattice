@@ -24,6 +24,8 @@ import type {
     BgvCompactSameSecretBridgeProofVerification,
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
+    BgvCompactVssShareLinkageBinaryProofMaterialTransport,
+    BgvCompactVssShareLinkageBinaryProofMaterialVerification,
     BgvCompactVssShareLinkageProofGeneration,
     BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofVerification,
@@ -44,8 +46,10 @@ import type {
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetDecryptionDevelopmentFixture,
-    BgvTargetDecryptionRecombination,
+    BgvTargetDecryptionResultVerification,
     BgvTargetDecryptionShare,
+    BgvTargetDecryptionShareBinaryProofMaterialTransport,
+    BgvTargetDecryptionShareBinaryProofMaterialVerification,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionShareProofMaterialVerification,
     BgvTargetDecryptionShareProofStatement,
@@ -92,6 +96,58 @@ const hexToBytes = (hex: string): Uint8Array => {
 
     return bytes;
 };
+
+const compactVssShareLinkageProofMaterialReference = <TransportValue>(
+    transportedMaterial: TransportValue,
+): TransportValue => {
+    if (
+        transportedMaterial === undefined ||
+        transportedMaterial === null ||
+        typeof transportedMaterial !== 'object' ||
+        !Object.prototype.hasOwnProperty.call(transportedMaterial, 'chunks')
+    ) {
+        return transportedMaterial;
+    }
+    const { chunks: omittedChunks, ...transportedMaterialReference } =
+        transportedMaterial as Record<string, unknown>;
+    void omittedChunks;
+
+    return transportedMaterialReference as TransportValue;
+};
+
+const compactVssShareLinkageProofMaterialForCommand = (
+    transportedMaterial: BgvCompactVssShareLinkageBinaryProofMaterialTransport,
+): Readonly<Record<string, unknown>> => ({
+    ...transportedMaterial,
+    chunks: transportedMaterial.chunks.map((chunk) => {
+        if (!(chunk instanceof Uint8Array)) {
+            throw new TypeError(
+                'compact VSS share-linkage proof material chunks must be Uint8Array values.',
+            );
+        }
+
+        return {
+            bytesHex: bytesToHex(Uint8Array.from(chunk)),
+        };
+    }),
+});
+
+const targetDecryptionShareProofMaterialForCommand = (
+    transportedMaterial: BgvTargetDecryptionShareBinaryProofMaterialTransport,
+): Readonly<Record<string, unknown>> => ({
+    ...transportedMaterial,
+    chunks: transportedMaterial.chunks.map((chunk) => {
+        if (!(chunk instanceof Uint8Array)) {
+            throw new TypeError(
+                'target-decryption share proof material chunks must be Uint8Array values.',
+            );
+        }
+
+        return {
+            bytesHex: bytesToHex(Uint8Array.from(chunk)),
+        };
+    }),
+});
 
 type BgvCompactVssCommitmentBodyEncodingResponse = Omit<
     BgvCompactVssCommitmentBodyEncoding,
@@ -350,10 +406,11 @@ export const createTranscriptCoreKernelLoader = (
                         workingLevel: input.workingLevel,
                         rotationKeys: input.rotationKeys,
                     }),
-                generateBgvTargetDecryptionFixture:
+                generateBgvTargetDecryptionDevelopmentFixture:
                     (): BgvTargetDecryptionDevelopmentFixture =>
                         executeCommand<BgvTargetDecryptionDevelopmentFixture>({
-                            command: 'GenerateBgvTargetDecryptionFixture',
+                            command:
+                                'GenerateBgvTargetDecryptionDevelopmentFixture',
                         }),
                 generateBgvTargetDecryptionShareFromLocalShare: (
                     input,
@@ -398,7 +455,6 @@ export const createTranscriptCoreKernelLoader = (
                         trusteeIdentity: input.trusteeIdentity,
                         targetDecryptionShare: input.targetDecryptionShare,
                         proofStatement: input.proofStatement,
-                        proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -420,6 +476,27 @@ export const createTranscriptCoreKernelLoader = (
                             proofMaterial: input.proofMaterial,
                         },
                     ),
+                verifyBgvTargetDecryptionShareBinaryProofMaterial: (
+                    input,
+                ): BgvTargetDecryptionShareBinaryProofMaterialVerification =>
+                    executeCommand<BgvTargetDecryptionShareBinaryProofMaterialVerification>(
+                        {
+                            command:
+                                'VerifyBgvTargetDecryptionShareBinaryProofMaterial',
+                            setupPackage: input.setupPackage,
+                            targetAcceptedRecord: input.targetAcceptedRecord,
+                            targetCiphertextBinding:
+                                input.targetCiphertextBinding,
+                            targetCiphertexts: input.targetCiphertexts,
+                            targetShareProfile: input.targetShareProfile,
+                            targetDecryptionShare: input.targetDecryptionShare,
+                            proofStatement: input.proofStatement,
+                            transportedProofMaterial:
+                                targetDecryptionShareProofMaterialForCommand(
+                                    input.transportedProofMaterial,
+                                ),
+                        },
+                    ),
                 verifyBgvTargetDecryptionShareProofStatementBinding: (
                     input,
                 ): BgvTargetDecryptionShareProofStatementBindingVerification =>
@@ -437,20 +514,11 @@ export const createTranscriptCoreKernelLoader = (
                             proofStatement: input.proofStatement,
                         },
                     ),
-                verifyAndRecombineBgvTargetDecryptionShares: (
-                    input,
-                ): BgvTargetDecryptionRecombination =>
-                    executeCommand<BgvTargetDecryptionRecombination>({
-                        command: 'VerifyAndRecombineBgvTargetDecryptionShares',
-                        setupPackage: input.setupPackage,
-                        targetAcceptedRecord: input.targetAcceptedRecord,
-                        targetCiphertextBinding: input.targetCiphertextBinding,
-                        targetCiphertexts: input.targetCiphertexts,
-                        targetShareProfile: input.targetShareProfile,
-                        targetDecryptionShares: input.targetDecryptionShares,
-                        proofStatements: input.proofStatements,
-                        proofMaterials: input.proofMaterials,
-                    }),
+                verifyTargetDecryptionResult:
+                    (): BgvTargetDecryptionResultVerification =>
+                        executeCommand<BgvTargetDecryptionResultVerification>({
+                            command: 'VerifyTargetDecryptionResult',
+                        }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',
@@ -482,6 +550,10 @@ export const createTranscriptCoreKernelLoader = (
                                 input.verifiedVssCoefficientCommitmentMaterial,
                             transportedSameSecretProofMaterial:
                                 input.transportedSameSecretProofMaterial,
+                            transportedCompactVssShareLinkageProofMaterial:
+                                compactVssShareLinkageProofMaterialReference(
+                                    input.transportedCompactVssShareLinkageProofMaterial,
+                                ),
                             transportedPublicKeyShareMaterial:
                                 input.transportedPublicKeyShareMaterial,
                             transportedPublicKeyShareProofMaterial:
@@ -539,7 +611,6 @@ export const createTranscriptCoreKernelLoader = (
                             input.coefficientMessagesByShamirIndex,
                         openingRandomnessByShamirIndex:
                             input.openingRandomnessByShamirIndex,
-                        proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -557,7 +628,6 @@ export const createTranscriptCoreKernelLoader = (
                         negativeIndicatorCoefficients:
                             input.negativeIndicatorCoefficients,
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
-                        proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -588,7 +658,11 @@ export const createTranscriptCoreKernelLoader = (
                         recipientShareOpeningRandomness:
                             input.recipientShareOpeningRandomness,
                         carryWitnesses: input.carryWitnesses,
-                        proofRandomnessSource: input.proofRandomnessSource,
+                        recipientShareMessagesByItem:
+                            input.recipientShareMessagesByItem,
+                        recipientShareOpeningRandomnessByItem:
+                            input.recipientShareOpeningRandomnessByItem,
+                        carryWitnessesByItem: input.carryWitnessesByItem,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -614,7 +688,6 @@ export const createTranscriptCoreKernelLoader = (
                         negativeIndicatorCoefficients:
                             input.negativeIndicatorCoefficients,
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
-                        proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -757,6 +830,28 @@ export const createTranscriptCoreKernelLoader = (
                                 'VerifyCompactVssShareLinkageProofMaterialSet',
                             statement: input.statement,
                             proofMaterialSet: input.proofMaterialSet,
+                            coefficientCommitmentSet:
+                                input.coefficientCommitmentSet,
+                            recipientShareCommitmentSet:
+                                input.recipientShareCommitmentSet,
+                        },
+                    ),
+                verifyCompactVssShareLinkageBinaryProofMaterial: (
+                    input,
+                ): BgvCompactVssShareLinkageBinaryProofMaterialVerification =>
+                    executeCommand<BgvCompactVssShareLinkageBinaryProofMaterialVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssShareLinkageBinaryProofMaterial',
+                            statement: input.statement,
+                            transportedCompactVssShareLinkageProofMaterial:
+                                compactVssShareLinkageProofMaterialForCommand(
+                                    input.transportedProofMaterial,
+                                ),
+                            coefficientCommitmentSet:
+                                input.coefficientCommitmentSet,
+                            recipientShareCommitmentSet:
+                                input.recipientShareCommitmentSet,
                         },
                     ),
                 verifyCompactVssSameSecretBridgeStatementSet: (

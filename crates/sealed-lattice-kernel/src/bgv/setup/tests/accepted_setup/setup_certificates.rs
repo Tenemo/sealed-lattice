@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 use crate::bgv::profile::{data_basis_modulus_bits, extended_basis_modulus_bits};
 
 const HE_LATTICE_ESTIMATOR_OUTPUT_CANONICAL_SHA256: &str =
@@ -30,6 +30,115 @@ fn collective_setup_verifier_refuses_malformed_commitment_security_certificate()
         |package| {
             package["setupCommitmentSecurityCertificate"]["aggregateOpeningBounds"]["thresholdShareOpeningInfinityBound"] =
                 serde_json::json!(11_109_u64);
+        },
+        "commitmentSecurityCertificatePayloadMismatch",
+    );
+}
+
+#[test]
+fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
+    let package = minimal_collective_setup_package();
+    let certificate = package["setupCommitmentSecurityCertificate"]
+        .as_object()
+        .expect("setup commitment security certificate");
+    let compact_binding = certificate["compactVssParameterCertificateInputBinding"]
+        .as_object()
+        .expect("compact VSS parameter certificate input binding");
+    let compact_binding_hash = compact_binding["compactVssParameterCertificateInputBindingHash"]
+        .as_str()
+        .expect("compact binding hash");
+
+    assert_eq!(
+        certificate["compactVssParameterCertificateInputBindingHash"],
+        compact_binding["compactVssParameterCertificateInputBindingHash"]
+    );
+    let mut compact_binding_body = serde_json::Value::Object(compact_binding.clone());
+    compact_binding_body
+        .as_object_mut()
+        .expect("compact binding body")
+        .remove("compactVssParameterCertificateInputBindingHash");
+    assert_eq!(
+        compact_binding_hash,
+        derive_protocol_hash(
+            "CompactVssParameterCertificateInputBindingHash",
+            &compact_binding_body
+        )
+        .expect("compact VSS parameter certificate input binding hash")
+    );
+    assert_eq!(
+        compact_binding["profileId"],
+        "sealed-lattice-compact-vss-sparse-linear-v1"
+    );
+    assert_eq!(compact_binding["objectVersion"], serde_json::json!(2));
+    assert_eq!(
+        compact_binding["commitmentRelation"]["projectionWeight"],
+        serde_json::json!(32)
+    );
+    assert_eq!(
+        compact_binding["commonCommitmentKey"]["sparseProjectionShape"]["sampledMatrixResiduesPerCommitment"],
+        serde_json::json!(6_144)
+    );
+    assert_eq!(
+        compact_binding["normInputClasses"][0]["maximumOneSourceShamirScalarL1"],
+        serde_json::json!(1_111)
+    );
+    assert_eq!(
+        compact_binding["normInputClasses"][0]["oneRecipientAggregateShamirScalarL1"],
+        serde_json::json!(11_110)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["openingWitnessRows"][0]["rowId"],
+        "compact-vss-fresh-opening-witness"
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["openingWitnessRows"][0]["witnessCoefficientCount"],
+        serde_json::json!(131_072)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["openingWitnessRows"][1]["messageCoefficientUpperBoundMultiplier"],
+        serde_json::json!(10)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["openingWitnessRows"][1]["randomnessDifferenceInfinityBound"],
+        serde_json::json!(20)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["linearRelationRows"][0]["combinedRelationTermL1"],
+        serde_json::json!(1_112)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["linearRelationRows"][1]["combinedRelationTermL1"],
+        serde_json::json!(11)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["targetBasisReductionRows"][0]["sourceSignedRepresentativeInfinityBound"],
+        serde_json::json!(1)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["reviewReductionRows"][0]["problem"],
+        "Module-SIS"
+    );
+    assert_eq!(
+        compact_binding["estimatorInputRows"][0]["rowId"],
+        "compact-vss-module-sis-binding-input"
+    );
+    assert_eq!(
+        compact_binding["estimatorInputRows"][1]["rowId"],
+        "compact-vss-module-lwe-hiding-input"
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_compact_vss_parameter_binding() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_compact_vss_parameter_binding",
+    );
+    assert_minimal_collective_setup_package_refused(
+        "malformed compact VSS parameter input binding in commitment security certificate",
+        |package| {
+            package["setupCommitmentSecurityCertificate"]["compactVssParameterCertificateInputBinding"]
+                ["parameterReviewInputs"]["openingWitnessRows"][1]["randomnessDifferenceInfinityBound"] =
+                serde_json::json!(18_u64);
         },
         "commitmentSecurityCertificatePayloadMismatch",
     );

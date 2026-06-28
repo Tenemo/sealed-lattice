@@ -110,6 +110,7 @@ fn target_decryption_share_proof_statement_value(
                 })?;
             if accepted_record.rns_prime != binding.rns_prime
                 || accepted_record.aggregate_commitment_root != binding.aggregate_commitment_root
+                || accepted_record.aggregate_opening_root != binding.aggregate_opening_root
             {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ProfileComponentMismatch,
@@ -122,6 +123,7 @@ fn target_decryption_share_proof_statement_value(
                 "rnsLimbIndex": binding.limb_index,
                 "rnsPrime": binding.rns_prime,
                 "aggregateCommitmentRoot": binding.aggregate_commitment_root,
+                "aggregateOpeningRoot": binding.aggregate_opening_root,
                 "aggregateCommitment": accepted_record.aggregate_commitment.clone(),
             }))
         })
@@ -145,6 +147,7 @@ fn target_decryption_share_proof_statement_value(
         "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
         "setupPackageHash": setup_binding.setup_package_hash,
         "ceremonyId": setup_binding.ceremony_id,
+        "setupEpoch": local_witness.setup_epoch,
         "electionManifestHash": setup_binding.election_manifest_hash,
         "thresholdProfileHash": setup_binding.threshold_profile_hash,
         "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
@@ -393,6 +396,7 @@ pub(super) fn validate_target_decryption_share_proof_statement_shape(
             )?;
         }
     }
+    string_at_path(proof_statement, &["setupEpoch"])?;
     for (field_name, expected) in [
         (
             "decryptionThreshold",
@@ -610,14 +614,14 @@ fn validate_target_decryption_smudging_commitment_set(
     }
     let mut record_index = 0_usize;
     for role in TARGET_DECRYPTION_SMUDGING_ROLES {
-        for rns_limb_index in 0..active_limb_count {
+        for (rns_limb_index, &rns_prime) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
             for polynomial_degree_index in 1..=polynomial_degree {
                 validate_smudging_commitment_record(
                     &records[record_index],
                     setup_binding,
                     role,
                     rns_limb_index,
-                    DATA_PRIMES[rns_limb_index],
+                    rns_prime,
                     polynomial_degree_index,
                 )?;
                 record_index += 1;
@@ -924,6 +928,12 @@ fn validate_compact_aggregate_opening_statement_binding(
             "aggregateCommitmentRoot",
             &accepted_record.aggregate_commitment_root,
             "target decryption compact aggregate credential binding accepted aggregate commitment record",
+        )?;
+        compare_hash_field(
+            credential_binding,
+            "aggregateOpeningRoot",
+            &accepted_record.aggregate_opening_root,
+            "target decryption compact aggregate credential binding accepted aggregate opening record",
         )?;
         let aggregate_commitment = value_at_path(credential_binding, &["aggregateCommitment"])?;
         crate::bgv::setup::encode_compact_vss_commitment_body_request(&json!({

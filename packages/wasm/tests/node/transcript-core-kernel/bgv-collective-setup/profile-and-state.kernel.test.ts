@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 
 import { setupRequest, validHash } from '../bgv-passive-setup-fixtures.js';
 
@@ -102,20 +102,25 @@ describe('collective BGV setup kernel commands', () => {
         expect(profile.canonicalTargetBasisHash).toHaveLength(128);
         expect(profile.compactVssMatrixExpansionProfile).toMatchObject({
             objectType: 'CompactVssMatrixExpansionProfile',
-            profileId: 'SealedLattice-CompactLinearCommitment-Development-v1',
+            profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
             matrixKind: 'compact-vss-commitment-key',
             ringDegree: 32_768,
             commitmentModulusLimbIndices: [0, 1, 2],
             outputCoordinateCount: 16,
             projectionWeight: 32,
             randomnessColumnCount: 2,
-            inputColumnLabels: ['message', 'randomness:0', 'randomness:1'],
+            inputColumnLabels: [
+                'message:0',
+                'message:1',
+                'randomness:0',
+                'randomness:1',
+            ],
             coordinateCountPerCommitment: 48,
-            sampledMatrixResiduesPerCoordinate: 96,
-            sampledProjectionIndicesPerCoordinate: 96,
-            sampledMatrixResiduesPerCommitment: 4_608,
-            sampledProjectionIndicesPerCommitment: 4_608,
-            residueMultiplyAddsPerCommitment: 4_608,
+            sampledMatrixResiduesPerCoordinate: 128,
+            sampledProjectionIndicesPerCoordinate: 128,
+            sampledMatrixResiduesPerCommitment: 6_144,
+            sampledProjectionIndicesPerCommitment: 6_144,
+            residueMultiplyAddsPerCommitment: 6_144,
         });
         expect(
             profile.compactVssMatrixExpansionProfile
@@ -132,30 +137,37 @@ describe('collective BGV setup kernel commands', () => {
             profile.compactVssParameterCertificateInputBinding;
         expect(certificateInputBinding).toMatchObject({
             objectType: 'CompactVssParameterCertificateInputBinding',
-            profileId: 'SealedLattice-CompactLinearCommitment-Development-v1',
+            objectVersion: 2,
+            profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
             participantCount: 10,
             sourceRnsLimbCount: 17,
             targetRnsLimbCount: 7,
             thresholdDegree: 4,
             ringDegree: 32_768,
             commitmentRelation: {
-                relation: 'C = A0 * m + A1 * r mod q_c',
+                relation:
+                    'C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c',
                 outputCoordinateCount: 16,
-                messageWidth: 1,
+                messageWidth: 2,
                 randomnessWidth: 2,
                 projectionWeight: 32,
                 coordinateCountPerCommitment: 48,
-                inputColumnLabels: ['message', 'randomness:0', 'randomness:1'],
+                inputColumnLabels: [
+                    'message:0',
+                    'message:1',
+                    'randomness:0',
+                    'randomness:1',
+                ],
             },
             commonCommitmentKey: {
                 sparseProjectionShape: {
-                    inputColumnCount: 3,
+                    inputColumnCount: 4,
                     projectionWeight: 32,
                     coordinateCountPerCommitment: 48,
-                    sampledMatrixResiduesPerCoordinate: 96,
-                    sampledProjectionIndicesPerCoordinate: 96,
-                    sampledMatrixResiduesPerCommitment: 4_608,
-                    sampledProjectionIndicesPerCommitment: 4_608,
+                    sampledMatrixResiduesPerCoordinate: 128,
+                    sampledProjectionIndicesPerCoordinate: 128,
+                    sampledMatrixResiduesPerCommitment: 6_144,
+                    sampledProjectionIndicesPerCommitment: 6_144,
                 },
             },
             sameSecretBridgeInput: {
@@ -184,22 +196,58 @@ describe('collective BGV setup kernel commands', () => {
             recipientShareCoefficientUpperBoundMultiplier: 1,
             aggregateCoefficientUpperBoundMultiplier: 10,
         });
+        expect(certificateInputBinding.parameterReviewInputs).toMatchObject({
+            inputVersion: 1,
+            openingWitnessRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-fresh-opening-witness',
+                    witnessCoefficientCount: 131_072,
+                    randomnessDifferenceInfinityBound: 2,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-aggregate-opening-witness',
+                    messageCoefficientUpperBoundMultiplier: 10,
+                    randomnessDifferenceInfinityBound: 20,
+                }),
+            ],
+            linearRelationRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-recipient-share-shamir-evaluation',
+                    combinedRelationTermL1: 1_112,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-aggregate-threshold-public-sum',
+                    combinedRelationTermL1: 11,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-one-recipient-aggregate-from-source-coefficients',
+                    oneRecipientAggregateShamirScalarL1: 11_110,
+                }),
+            ],
+            targetBasisReductionRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-same-secret-bridge-target-reduction',
+                    sourceSignedRepresentativeInfinityBound: 1,
+                    targetBasisHash: profile.canonicalTargetBasisHash,
+                }),
+            ],
+        });
         expect(certificateInputBinding.estimatorInputRows).toEqual([
             expect.objectContaining({
                 rowId: 'compact-vss-module-sis-binding-input',
                 problem: 'Module-SIS',
                 outputCoordinateCount: 16,
                 projectionWeight: 32,
-                sampledMatrixResiduesPerCommitment: 4_608,
-                sampledProjectionIndicesPerCommitment: 4_608,
+                sampledMatrixResiduesPerCommitment: 6_144,
+                sampledProjectionIndicesPerCommitment: 6_144,
             }),
             expect.objectContaining({
                 rowId: 'compact-vss-module-lwe-hiding-input',
                 problem: 'Module-LWE',
                 outputCoordinateCount: 16,
                 projectionWeight: 32,
-                sampledMatrixResiduesPerCommitment: 4_608,
-                sampledProjectionIndicesPerCommitment: 4_608,
+                sampledMatrixResiduesPerCommitment: 6_144,
+                sampledProjectionIndicesPerCommitment: 6_144,
             }),
         ]);
         const sameSecretBridgeInput = expectRecord(

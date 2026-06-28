@@ -227,19 +227,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "proofRandomnessNonceHex must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let proof_randomness_source = request
-        .get("proofRandomnessSource")
-        .and_then(Value::as_str)
-        .unwrap_or("fresh-csprng");
-    if !matches!(
-        proof_randomness_source,
-        "fresh-csprng" | "development-deterministic-fixture"
-    ) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
-        ));
-    }
     let share_values_hash = derive_protocol_hash(
         "PrivateVssLocalVerificationRoot",
         &json!({

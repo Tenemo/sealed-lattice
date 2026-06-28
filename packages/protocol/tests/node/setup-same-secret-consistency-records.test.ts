@@ -2,33 +2,37 @@ import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
-    createCompactVssCoefficientCommitmentSet,
-    createCompactVssSameSecretBridgeProofMaterialSet,
-    createCompactVssSameSecretBridgeStatementSet,
     createBinaryChunkedSameSecretProofMaterialTransport,
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
     createVssCoefficientCommitmentBundle,
-    verifyCompactVssSameSecretBridgeStatementSet,
-    verifyCompactVssSameSecretBridgeProofMaterialSet,
-    compactVssCommitmentBinaryFormat,
-    compactVssSameSecretBridgeIntegerSupport,
     sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
-    compactVssSameSecretBridgeSignedRepresentativeConvention,
-    compactVssSameSecretBridgeTargetBasisLimbOrder,
     sameSecretProofFamily,
     sameSecretRelation,
     setupCommitmentProfileId,
     setupProofProfileId,
     type SameSecretProofMaterial,
-    type CompactVssSameSecretBridgeProofMaterialSet,
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientCommitmentRecord,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
+import {
+    compactVssCommitmentBinaryFormat,
+    createCompactVssCoefficientCommitmentSet,
+} from '#packages/protocol/src/setup/compact-vss-commitments';
+import {
+    compactVssSameSecretBridgeIntegerSupport,
+    compactVssSameSecretBridgeSignedRepresentativeConvention,
+    compactVssSameSecretBridgeTargetBasisLimbOrder,
+    createCompactVssSameSecretBridgeProofMaterialSet,
+    createCompactVssSameSecretBridgeStatementSet,
+    verifyCompactVssSameSecretBridgeProofMaterialSet,
+    verifyCompactVssSameSecretBridgeStatementSet,
+    type CompactVssSameSecretBridgeProofMaterialSet,
+} from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { setupCommitmentComputer } from '#tests/support/setup-commitment-computer';
 import {
     makeSetupContext,
@@ -439,14 +443,6 @@ describe('same-secret consistency statement builders', () => {
                     (statementRecord, statementIndex) => ({
                         compactSameSecretBridgeStatementRoot:
                             statementRecord.compactSameSecretBridgeStatementRoot,
-                        proofStatementHash: fixtureHash(
-                            `compact-same-secret-bridge-proof-statement-${String(statementIndex)}`,
-                        ),
-                        proofStatement: {
-                            proofStatementHash: fixtureHash(
-                                `compact-same-secret-bridge-proof-statement-${String(statementIndex)}`,
-                            ),
-                        },
                         proofBytesHex: `${String(statementIndex).padStart(2, '0')}aa55`,
                     }),
                 ),
@@ -468,7 +464,12 @@ describe('same-secret consistency statement builders', () => {
         expect(firstBridgeProofRecord.proofBytesHash).toBe(
             hash512Hex(
                 'sealed-lattice/setup/compact-same-secret-bridge/proof-bytes-v1',
-                [Buffer.from(firstBridgeProofRecord.proofBytesHex, 'hex')],
+                [
+                    Buffer.from(
+                        firstBridgeProofRecord.proofBytesBase64,
+                        'base64',
+                    ),
+                ],
             ),
         );
         expect(firstBridgeProofRecord.proofRecordRoot).toBe(
@@ -530,35 +531,6 @@ describe('same-secret consistency statement builders', () => {
             }),
         ).toThrow(/statement/u);
 
-        const duplicateProofHashInputs =
-            bridgeStatementSet.statementRecords.map(
-                (statementRecord, statementIndex) => ({
-                    compactSameSecretBridgeStatementRoot:
-                        statementRecord.compactSameSecretBridgeStatementRoot,
-                    proofStatementHash:
-                        statementIndex === 0
-                            ? fixtureHash('duplicate-bridge-proof-statement')
-                            : fixtureHash('duplicate-bridge-proof-statement'),
-                    proofStatement: {
-                        proofStatementHash:
-                            statementIndex === 0
-                                ? fixtureHash(
-                                      'duplicate-bridge-proof-statement',
-                                  )
-                                : fixtureHash(
-                                      'duplicate-bridge-proof-statement',
-                                  ),
-                    },
-                    proofBytesHex: `${String(statementIndex).padStart(2, '0')}bb66`,
-                }),
-            );
-        expect(() =>
-            createCompactVssSameSecretBridgeProofMaterialSet({
-                statementSet: bridgeStatementSet,
-                proofRecordInputs: duplicateProofHashInputs,
-            }),
-        ).toThrow(/repeat a proof statement hash/u);
-
         const transportedSameSecretProofMaterial =
             createBinaryChunkedSameSecretProofMaterialTransport(
                 sameSecretProofMaterials,
@@ -606,7 +578,7 @@ describe('same-secret consistency statement builders', () => {
         const tamperedProofMaterial = tamperedTransportedSameSecretProofMaterial
             .proofMaterials[0] as
             | {
-                  chunks: { bytesHex: string }[];
+                  chunks: { bytesBase64: string }[];
               }
             | undefined;
         if (tamperedProofMaterial === undefined) {
@@ -620,7 +592,7 @@ describe('same-secret consistency statement builders', () => {
                 'same-secret transported proof material fixture is missing a proof chunk.',
             );
         }
-        tamperedProofChunk.bytesHex = 'ff';
+        tamperedProofChunk.bytesBase64 = '/w==';
         expect(() =>
             verifyCompactVssSameSecretBridgeStatementSet({
                 statementSet: transportedBridgeStatementSet,

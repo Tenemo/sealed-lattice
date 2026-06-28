@@ -1,3 +1,4 @@
+import type { CompactVssShareLinkageBinaryProofMaterialTransportLike } from '../compact-vss-commitments.js';
 import { chunklessSetupProofMaterialSetForVerificationInput } from '../setup-proof-material-transport.js';
 import type {
     SetupTransportedVssCoefficientCommitmentMaterial,
@@ -39,6 +40,25 @@ const publicVssMaterialReferenceForVerificationInput = (
     return transportedMaterialReference;
 };
 
+const compactVssShareLinkageProofMaterialReferenceForVerificationInput = (
+    transportedMaterial:
+        | CompactVssShareLinkageBinaryProofMaterialTransportLike
+        | undefined,
+): CompactVssShareLinkageBinaryProofMaterialTransportLike | undefined => {
+    if (
+        transportedMaterial === undefined ||
+        !Object.prototype.hasOwnProperty.call(transportedMaterial, 'chunks')
+    ) {
+        return transportedMaterial;
+    }
+
+    const { chunks: omittedChunks, ...transportedMaterialReference } =
+        transportedMaterial;
+    void omittedChunks;
+
+    return transportedMaterialReference;
+};
+
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): SetupPackageVerificationInput => {
@@ -51,6 +71,10 @@ export const createSetupPackageVerificationInput = (
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedSameSecretProofMaterial,
             input.verifiedSetupProofMaterials,
+        );
+    const transportedCompactVssShareLinkageProofMaterial =
+        compactVssShareLinkageProofMaterialReferenceForVerificationInput(
+            input.transportedCompactVssShareLinkageProofMaterial,
         );
     const transportedPublicKeyShareProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
@@ -81,6 +105,12 @@ export const createSetupPackageVerificationInput = (
             : {
                   transportedSameSecretProofMaterial:
                       transportedSameSecretProofMaterial,
+              }),
+        ...(transportedCompactVssShareLinkageProofMaterial === undefined
+            ? {}
+            : {
+                  transportedCompactVssShareLinkageProofMaterial:
+                      transportedCompactVssShareLinkageProofMaterial,
               }),
         ...(input.transportedPublicKeyShareMaterial === undefined
             ? {}

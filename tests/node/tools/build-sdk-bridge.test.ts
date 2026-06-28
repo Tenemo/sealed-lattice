@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -8,9 +9,11 @@ import {
     rewriteTypesImports,
     sdkProtocolRuntimeSourceRelativePaths,
     stripSdkExcludedTypesPackageExports,
+    stripSdkVendoredBridgeMembers,
     transpileBridgeSource,
     transpileSdkInternalSource,
 } from '#tools/ci/build-sdk-bridge';
+import { sdkVendoredBridgeRemovedMembers } from '#tools/ci/public-package-policy';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');
@@ -123,5 +126,28 @@ describe('SDK bridge build helpers', () => {
         expect(sdkCryptoRuntimeSourceRelativePaths).not.toContain(
             'tests/support/protocol-signature-fixtures.ts',
         );
+    });
+
+    it('strips development target-decryption members from the SDK bridge copy', async () => {
+        const loaderSource = await readFile(
+            path.resolve(
+                'packages/wasm/src/transcript-core-bridge/kernel-loader.ts',
+            ),
+            'utf8',
+        );
+        const strippedSource = stripSdkVendoredBridgeMembers(
+            loaderSource,
+            sdkVendoredBridgeRemovedMembers,
+        );
+        const outputText = transpileSdkInternalSource(
+            strippedSource,
+            'packages/wasm/src/transcript-core-bridge/kernel-loader.ts',
+        );
+
+        for (const memberName of sdkVendoredBridgeRemovedMembers) {
+            expect(outputText).not.toContain(memberName);
+        }
+        expect(outputText).toContain('verifyTargetDecryptionResult');
+        expect(outputText).toContain('VerifyTargetDecryptionResult');
     });
 });

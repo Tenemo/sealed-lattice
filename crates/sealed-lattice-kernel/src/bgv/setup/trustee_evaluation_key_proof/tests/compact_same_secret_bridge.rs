@@ -1,4 +1,5 @@
 use super::*;
+use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
 use crate::bgv::setup::compact_vss_commitment::{
     CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
 };
@@ -62,6 +63,17 @@ fn compact_same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
         "tampering with the public compact target constant must reject"
     );
+
+    let (mut wrong_target_basis_statement, _unused_witness) = compact_same_secret_bridge_instance();
+    wrong_target_basis_statement
+        .compact_same_secret_bridge
+        .as_mut()
+        .expect("compact bridge statement")
+        .target_basis_hash = repeated_hash("c1");
+    assert!(
+        wrong_target_basis_statement.validate_shape().is_err(),
+        "compact same-secret bridge statements must bind the canonical target basis hash"
+    );
 }
 
 fn compact_same_secret_bridge_instance() -> (
@@ -70,6 +82,7 @@ fn compact_same_secret_bridge_instance() -> (
 ) {
     let ring_degree = SMALL_RING_DEGREE;
     let public_matrix_seed_hash = repeated_hash("cd");
+    let target_basis_hash = canonical_target_basis_hash().expect("canonical target basis hash");
     let target_rns_limb_count = 7_usize;
     let target_rns_primes = DATA_PRIMES[..target_rns_limb_count].to_vec();
     let secret_coefficients = (0..ring_degree)
@@ -145,7 +158,7 @@ fn compact_same_secret_bridge_instance() -> (
             public_matrix_seed_hash,
             source_trustee_identity: "trustee-0".to_string(),
             source_trustee_roster_position: 0,
-            target_basis_hash: repeated_hash("c1"),
+            target_basis_hash,
             target_rns_primes,
             target_constant_commitment_roots: (0..target_rns_limb_count)
                 .map(|target_rns_limb_index| {
@@ -173,6 +186,9 @@ fn compact_same_secret_bridge_instance() -> (
         compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
         compact_vss_recipient_share_opening_randomness: Vec::new(),
         compact_vss_carry_witnesses: Vec::new(),
+        compact_vss_recipient_share_messages_by_item: Vec::new(),
+        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+        compact_vss_carry_witnesses_by_item: Vec::new(),
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
     };

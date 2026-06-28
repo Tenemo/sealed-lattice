@@ -3,7 +3,10 @@ import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import { setupCommitmentProfileId, setupProfileId } from './constants.js';
 import {
     acceptedCertificateTemplate,
+    assertDerivedHashMatches,
+    assertObjectRecord,
     ceilLog2Bigint,
+    hashField,
     scalarPowerSum,
 } from './field-helpers.js';
 import {
@@ -14,7 +17,84 @@ import type {
     CollectiveBgvSetupProfileForCertificates,
     SetupCommitmentSecurityCertificate,
     SetupCommitmentSecurityCertificateBody,
+    JsonRecord,
 } from './types.js';
+
+const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
+    JSON.parse(JSON.stringify(value)) as JsonRecord;
+
+const validatedCompactVssParameterCertificateInputBinding = (
+    value: unknown,
+    objectPath: string,
+    expectedBindingHash?: string,
+): JsonRecord => {
+    const compactBinding = assertObjectRecord(value, objectPath);
+    const bindingHash = hashField(
+        compactBinding,
+        'compactVssParameterCertificateInputBindingHash',
+        objectPath,
+    );
+    if (
+        expectedBindingHash !== undefined &&
+        bindingHash !== expectedBindingHash
+    ) {
+        throw new Error(
+            `${objectPath}.compactVssParameterCertificateInputBindingHash must match the profile compact VSS parameter certificate input binding hash.`,
+        );
+    }
+    const bindingBody = cloneJsonRecord(compactBinding);
+    delete bindingBody.compactVssParameterCertificateInputBindingHash;
+    assertDerivedHashMatches(
+        'CompactVssParameterCertificateInputBindingHash',
+        bindingBody,
+        bindingHash,
+        `${objectPath}.compactVssParameterCertificateInputBindingHash`,
+    );
+
+    return cloneJsonRecord(compactBinding);
+};
+
+const compactVssParameterCertificateInputBindingForProfile = (
+    setupProfile: CollectiveBgvSetupProfileForCertificates,
+): JsonRecord => {
+    const profileBindingHash = hashField(
+        setupProfile,
+        'compactVssParameterCertificateInputBindingHash',
+        'setupProfile',
+    );
+
+    return validatedCompactVssParameterCertificateInputBinding(
+        setupProfile.compactVssParameterCertificateInputBinding,
+        'setupProfile.compactVssParameterCertificateInputBinding',
+        profileBindingHash,
+    );
+};
+
+const validateSetupCommitmentTemplateCompactBinding = (
+    template: JsonRecord,
+    compactVssParameterCertificateInputBinding: JsonRecord,
+): void => {
+    const expectedBindingHash = hashField(
+        compactVssParameterCertificateInputBinding,
+        'compactVssParameterCertificateInputBindingHash',
+        'setupProfile.compactVssParameterCertificateInputBinding',
+    );
+    const templateBindingHash = hashField(
+        template,
+        'compactVssParameterCertificateInputBindingHash',
+        'setupProfile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
+    );
+    if (templateBindingHash !== expectedBindingHash) {
+        throw new Error(
+            'setupProfile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate.compactVssParameterCertificateInputBindingHash must match the profile compact VSS parameter certificate input binding hash.',
+        );
+    }
+    validatedCompactVssParameterCertificateInputBinding(
+        template.compactVssParameterCertificateInputBinding,
+        'setupProfile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate.compactVssParameterCertificateInputBinding',
+        expectedBindingHash,
+    );
+};
 
 const setupCommitmentSecurityCertificateBody = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
@@ -42,6 +122,8 @@ const setupCommitmentSecurityCertificateBody = (
     const commitmentModulusProductBits = ceilLog2Bigint(
         commitmentModulusProduct,
     );
+    const compactVssParameterCertificateInputBinding =
+        compactVssParameterCertificateInputBindingForProfile(setupProfile);
 
     return {
         objectType: 'SetupCommitmentSecurityCertificate',
@@ -53,6 +135,9 @@ const setupCommitmentSecurityCertificateBody = (
         qShareHash: setupProfile.qShareHash,
         carryAwareVssShareRelationProfileHash:
             setupProfile.carryAwareVssShareRelationProfileHash,
+        compactVssParameterCertificateInputBindingHash:
+            compactVssParameterCertificateInputBinding.compactVssParameterCertificateInputBindingHash,
+        compactVssParameterCertificateInputBinding,
         ringAndMatrixParameters: {
             coefficientRing: 'Z_q[X]/(X^N+1)',
             ringDegree: 32_768,
@@ -125,6 +210,8 @@ const setupCommitmentSecurityCertificateBody = (
 export const createSetupCommitmentSecurityCertificate = (
     setupProfile: CollectiveBgvSetupProfileForCertificates,
 ): SetupCommitmentSecurityCertificate => {
+    const compactVssParameterCertificateInputBinding =
+        compactVssParameterCertificateInputBindingForProfile(setupProfile);
     const template = acceptedCertificateTemplate(
         setupProfile,
         'setupCommitmentSecurityCertificate',
@@ -133,6 +220,10 @@ export const createSetupCommitmentSecurityCertificate = (
         'SetupCommitmentSecurityCertificateHash',
     );
     if (template !== null) {
+        validateSetupCommitmentTemplateCompactBinding(
+            template,
+            compactVssParameterCertificateInputBinding,
+        );
         return template as SetupCommitmentSecurityCertificate;
     }
 

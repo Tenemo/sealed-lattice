@@ -137,9 +137,6 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
         readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSource?:
-            | 'fresh-csprng'
-            | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }) => {
@@ -1083,7 +1080,6 @@ const privateEnvelope = (
                                 coefficientOpenings.map(
                                     (opening) => opening.randomnessByColumn,
                                 ),
-                            proofRandomnessSource: 'fresh-csprng',
                             proofRandomnessSeedHex,
                             proofRandomnessNonceHex,
                         });

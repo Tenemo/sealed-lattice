@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 use crate::bgv::{
     evaluator::engine::encode_slots_to_coefficients,
     evaluator::records::target_layout_hash,
@@ -265,18 +265,23 @@ fn compact_aggregate_threshold_commitment_set(
             let source_share_commitment_roots = (0..setup_binding.participants.len())
                 .map(|_| json!("9".repeat(128)))
                 .collect::<Vec<_>>();
+            let source_share_opening_roots = (0..setup_binding.participants.len())
+                .map(|_| json!("8".repeat(128)))
+                .collect::<Vec<_>>();
             recipient_records.push(json!({
                 "objectType": "CompactVssAggregateThresholdCommitment",
                 "objectVersion": 1,
-                "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+                "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": computation.commitment_root,
+                "aggregateOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
                 "sourceShareCommitmentRoots": source_share_commitment_roots,
+                "sourceShareOpeningRoots": source_share_opening_roots,
             }));
         }
     }
@@ -285,7 +290,7 @@ fn compact_aggregate_threshold_commitment_set(
         "objectType": "CompactVssAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": rns_limb_count,
@@ -415,78 +420,6 @@ fn verify_share_proof_statement_binding(
     }))
 }
 
-struct TargetShareProofMaterialBundle {
-    target_decryption_share: Value,
-    proof_statement: Value,
-    proof_material: Value,
-}
-
-struct TargetShareProofMaterialBundleInput<'a> {
-    setup_package: &'a Value,
-    accepted_record: &'a Value,
-    target_ciphertext_binding: &'a Value,
-    target_ciphertexts: &'a Value,
-    target_share_profile: &'a Value,
-    trustee_identity: &'a str,
-    proof_randomness_seed_hex: String,
-    proof_randomness_nonce_hex: String,
-}
-
-fn generate_target_share_proof_material_bundle(
-    input: TargetShareProofMaterialBundleInput<'_>,
-) -> TargetShareProofMaterialBundle {
-    let local_target_share_witness_value = local_target_share_witness(
-        input.setup_package,
-        input.accepted_record,
-        input.target_ciphertext_binding,
-        input.target_ciphertexts,
-        input.target_share_profile,
-        input.trustee_identity,
-    );
-    let target_decryption_share = generate_local_share(
-        input.setup_package,
-        input.accepted_record,
-        input.target_ciphertext_binding,
-        input.target_ciphertexts,
-        input.target_share_profile,
-        &local_target_share_witness_value,
-        input.trustee_identity,
-    );
-    let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: input.setup_package,
-        accepted_record: input.accepted_record,
-        target_ciphertext_binding: input.target_ciphertext_binding,
-        target_ciphertexts: input.target_ciphertexts,
-        target_share_profile: input.target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &target_decryption_share,
-        trustee_identity: input.trustee_identity,
-    })
-    .expect("target share proof statement");
-    let proof_material =
-        generate_bgv_target_decryption_share_proof_material_from_local_witness_request(&json!({
-            "setupPackage": input.setup_package,
-            "targetAcceptedRecord": input.accepted_record,
-            "targetCiphertextBinding": input.target_ciphertext_binding,
-            "targetCiphertexts": input.target_ciphertexts,
-            "targetShareProfile": input.target_share_profile,
-            "localTargetShareWitness": local_target_share_witness_value,
-            "targetDecryptionShare": &target_decryption_share,
-            "proofStatement": &proof_statement,
-            "trusteeIdentity": input.trustee_identity,
-            "proofRandomnessSource": "development-deterministic-fixture",
-            "proofRandomnessSeedHex": input.proof_randomness_seed_hex,
-            "proofRandomnessNonceHex": input.proof_randomness_nonce_hex,
-        }))
-        .expect("target share proof material");
-
-    TargetShareProofMaterialBundle {
-        target_decryption_share,
-        proof_statement,
-        proof_material,
-    }
-}
-
 fn rebind_share_proof_statement_root(statement: &mut Value) {
     let statement_object = statement
         .as_object_mut()
@@ -495,27 +428,6 @@ fn rebind_share_proof_statement_root(statement: &mut Value) {
     statement["proofStatementRoot"] = json!(
         derive_protocol_hash("BgvTargetDecryptionShareProofStatementRoot", statement)
             .expect("target share proof statement root")
-    );
-}
-
-fn rebind_target_proof_record_root(proof_record: &mut Value) {
-    let proof_bytes = decode_hex(
-        proof_record["proofBytesHex"]
-            .as_str()
-            .expect("proof bytes hex"),
-    )
-    .expect("decode proof bytes");
-    proof_record["proofBytesHash"] = json!(hash512_hex(
-        TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
-        &[&proof_bytes],
-    ));
-    proof_record
-        .as_object_mut()
-        .expect("proof record object")
-        .remove("proofRecordRoot");
-    proof_record["proofRecordRoot"] = json!(
-        derive_protocol_hash("TargetDecryptionShareProofRecordRoot", proof_record)
-            .expect("target proof record root")
     );
 }
 
@@ -750,7 +662,7 @@ fn local_target_share_witness(
         "compactAggregateOpening": {
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,
-            "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
             "shareLinkageStatementRoot": share_linkage_statement_root,
@@ -881,8 +793,7 @@ fn assert_smudging_recombines_to_zero(
         .first()
         .expect("at least one smudging share")
         .len();
-    for rns_limb_index in 0..active_limb_count {
-        let modulus = DATA_PRIMES[rns_limb_index];
+    for (rns_limb_index, &modulus) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
         let lagrange_weights = lagrange_weights_at_zero(interpolation_points, modulus)
             .expect("Lagrange weights at zero");
         let mut reconstructed_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
@@ -1250,160 +1161,6 @@ fn target_share_proof_statement_binds_compact_local_witness_and_share() {
 }
 
 #[test]
-fn target_share_proof_slice_command_uses_restored_compact_witness() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let mut local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile_value,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-    let proof_randomness_seed_hex = "11".repeat(64);
-    let proof_randomness_nonce_hex = "12".repeat(64);
-
-    let generated =
-        generate_bgv_target_decryption_share_proof_slice_from_local_witness_request(&json!({
-            "setupPackage": setup_package,
-            "targetAcceptedRecord": accepted_record,
-            "targetCiphertextBinding": target_ciphertext_binding,
-            "targetCiphertexts": target_ciphertexts,
-            "targetShareProfile": target_share_profile_value,
-            "localTargetShareWitness": local_target_share_witness_value,
-            "targetDecryptionShare": local_share,
-            "proofStatement": statement,
-            "trusteeIdentity": "trustee-1",
-            "targetRole": "targetId",
-            "targetRnsLimbIndex": 0,
-            "proofRandomnessSource": "development-deterministic-fixture",
-            "proofRandomnessSeedHex": proof_randomness_seed_hex.clone(),
-            "proofRandomnessNonceHex": proof_randomness_nonce_hex.clone(),
-        }))
-        .expect("target proof slice generation");
-
-    assert_eq!(generated["ok"], true);
-    assert_eq!(
-        generated["operation"],
-        json!("generateBgvTargetDecryptionShareProofSliceFromLocalWitness")
-    );
-    assert_eq!(generated["targetRole"], json!("targetId"));
-    assert_eq!(generated["targetRnsLimbIndex"], json!(0));
-    let proof_bytes = decode_hex(
-        generated["proofBytesHex"]
-            .as_str()
-            .expect("proof bytes hex"),
-    )
-    .expect("decode proof bytes");
-    assert_eq!(
-        generated["proofBytesHash"],
-        json!(hash512_hex(
-            TARGET_DECRYPTION_SHARE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes]
-        ))
-    );
-    assert!(
-        !generated["proofSliceStatement"]
-            .as_object()
-            .expect("proof slice statement")
-            .contains_key("targetDecryptionMessageVectors"),
-        "public proof slice statement must not carry private message vectors"
-    );
-    assert_eq!(
-        generated["proofSliceStatement"]["targetDecryptionShare"]["aggregateMessageCoefficientBound"],
-        json!(DATA_PRIMES[0] * 3)
-    );
-
-    let mut verify_request = generated["proofSliceStatement"].clone();
-    verify_request["proofBytesHex"] = generated["proofBytesHex"].clone();
-    let verified =
-        crate::bgv::setup::verify_target_decryption_share_proof_from_request(&verify_request)
-            .expect("verify generated target proof slice");
-    assert_eq!(verified["ok"], true);
-    assert_eq!(verified["statementHash"], generated["statementHash"]);
-
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile_value,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let statement = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile_value,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect("target share proof statement");
-    replace_u64_le_hex_word(
-        &mut local_target_share_witness_value["compactAggregateOpening"]["compactAggregateOpeningCredentials"]
-            [0]["aggregateCommitmentMessageValuesLeHex"],
-        0,
-        DATA_PRIMES[0] - 1,
-    );
-    let error =
-        generate_bgv_target_decryption_share_proof_slice_from_local_witness_request(&json!({
-            "setupPackage": setup_package,
-            "targetAcceptedRecord": accepted_record,
-            "targetCiphertextBinding": target_ciphertext_binding,
-            "targetCiphertexts": target_ciphertexts,
-            "targetShareProfile": target_share_profile_value,
-            "localTargetShareWitness": local_target_share_witness_value,
-            "targetDecryptionShare": local_share,
-            "proofStatement": statement,
-            "trusteeIdentity": "trustee-1",
-            "targetRole": "targetId",
-            "targetRnsLimbIndex": 0,
-            "proofRandomnessSource": "development-deterministic-fixture",
-            "proofRandomnessSeedHex": proof_randomness_seed_hex,
-            "proofRandomnessNonceHex": proof_randomness_nonce_hex,
-        }))
-        .expect_err("tampered aggregate opening must not generate a proof slice");
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
-    assert!(error.message.contains("opening root"), "{}", error.message);
-}
-
-#[test]
 #[ignore = "heavy target-decryption proof material test"]
 fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
@@ -1448,7 +1205,6 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
             "targetDecryptionShare": &local_share,
             "proofStatement": &statement,
             "trusteeIdentity": "trustee-1",
-            "proofRandomnessSource": "development-deterministic-fixture",
             "proofRandomnessSeedHex": "21".repeat(64),
             "proofRandomnessNonceHex": "22".repeat(64),
         }))
@@ -1458,24 +1214,41 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
         proof_material["objectType"],
         json!("BgvTargetDecryptionShareProofMaterial")
     );
-    assert_eq!(proof_material["activeRnsLimbCount"], json!(7));
-    assert_eq!(proof_material["targetRoleCount"], json!(2));
-    assert_eq!(proof_material["proofRecordCount"], json!(14));
     assert_eq!(
         proof_material["proofRecords"]
             .as_array()
             .expect("proof records")
             .len(),
-        14
+        1
     );
     assert_eq!(
-        proof_material["proofStatements"]
-            .as_array()
-            .expect("proof statements")
-            .len(),
-        14
+        proof_material["objectVersion"],
+        json!(8),
+        "all-active-limb target proof material uses the compacted record layout"
     );
-
+    assert!(
+        proof_material
+            .get("targetShareProofStatementRoot")
+            .is_none(),
+        "target proof material should not duplicate the high-level statement root"
+    );
+    assert_eq!(
+        proof_material["proofRecords"][0]["objectVersion"],
+        json!(7),
+        "target proof records use the verifier-derived coverage layout"
+    );
+    assert!(
+        proof_material["proofRecords"][0]
+            .get("proofRecordRoot")
+            .is_none(),
+        "target proof records should not duplicate a record root inside the material root"
+    );
+    assert!(
+        proof_material["proofRecords"][0]
+            .get("proofBytesBase64")
+            .is_some(),
+        "proof material should package proof bytes as base64"
+    );
     let verified = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
         "setupPackage": &setup_package,
         "targetAcceptedRecord": &accepted_record,
@@ -1488,7 +1261,6 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
     }))
     .expect("verify target proof material");
     assert_eq!(verified["ok"], true);
-    assert_eq!(verified["verifiedProofCount"], json!(14));
     assert_eq!(
         verified["proofMaterialRoot"],
         proof_material["proofMaterialRoot"]
@@ -1499,13 +1271,6 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
         .as_array_mut()
         .expect("proof records")
         .pop();
-    missing_record_material["proofStatements"]
-        .as_array_mut()
-        .expect("proof statements")
-        .pop();
-    missing_record_material["proofRecordCount"] = json!(1);
-    missing_record_material["totalProofByteLength"] =
-        missing_record_material["proofRecords"][0]["proofByteLength"].clone();
     rebind_target_proof_material_root(&mut missing_record_material);
     let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
         "setupPackage": &setup_package,
@@ -1520,15 +1285,14 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
     .expect_err("missing proof material coverage must reject");
     assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     assert!(
-        error.message.contains("one proof record and statement"),
+        error.message.contains("all-active-limb proof record"),
         "{}",
         error.message
     );
 
-    let mut mismatched_statement_material = proof_material.clone();
-    mismatched_statement_material["proofStatements"][0]["context"]["targetShareProofStatementRoot"] =
-        json!("0".repeat(128));
-    rebind_target_proof_material_root(&mut mismatched_statement_material);
+    let mut invalid_base64_material = proof_material.clone();
+    invalid_base64_material["proofRecords"][0]["proofBytesBase64"] = json!("not canonical base64");
+    rebind_target_proof_material_root(&mut invalid_base64_material);
     let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
         "setupPackage": &setup_package,
         "targetAcceptedRecord": &accepted_record,
@@ -1537,31 +1301,26 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
         "targetShareProfile": &target_share_profile_value,
         "targetDecryptionShare": &local_share,
         "proofStatement": &statement,
-        "proofMaterial": mismatched_statement_material,
+        "proofMaterial": invalid_base64_material,
     }))
-    .expect_err("packaged proof statement root mismatch must reject");
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    .expect_err("malformed base64 proof bytes must reject");
     assert!(
-        error
-            .message
-            .contains("packaged proof statement context root"),
+        error.message.contains("proofBytesBase64"),
         "{}",
         error.message
     );
 
     let mut tampered_proof_material = proof_material;
-    let mut proof_bytes_hex = tampered_proof_material["proofRecords"][0]["proofBytesHex"]
+    let proof_bytes_base64 = tampered_proof_material["proofRecords"][0]["proofBytesBase64"]
         .as_str()
-        .expect("proof bytes hex")
+        .expect("proof bytes base64")
         .to_string();
-    let replacement = if proof_bytes_hex.as_bytes()[0] == b'0' {
-        '1'
-    } else {
-        '0'
-    };
-    proof_bytes_hex.replace_range(0..1, &replacement.to_string());
-    tampered_proof_material["proofRecords"][0]["proofBytesHex"] = json!(proof_bytes_hex);
-    rebind_target_proof_record_root(&mut tampered_proof_material["proofRecords"][0]);
+    let mut proof_bytes =
+        decode_standard_base64(&proof_bytes_base64, "target-decryption proofBytesBase64")
+            .expect("target proof bytes");
+    proof_bytes[0] ^= 1;
+    tampered_proof_material["proofRecords"][0]["proofBytesBase64"] =
+        json!(encode_standard_base64(&proof_bytes));
     rebind_target_proof_material_root(&mut tampered_proof_material);
     let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
         "setupPackage": &setup_package,
@@ -1582,159 +1341,15 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
 }
 
 #[test]
-fn target_decryption_recombination_rejects_missing_or_mismatched_proof_backed_quorum() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
+fn target_decryption_result_verifier_refuses_compact_vss_public_material() {
+    let result =
+        verify_target_decryption_result_from_request(&json!({})).expect("fail-closed result");
 
-    let empty_error = verify_and_recombine_bgv_target_decryption_shares_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShares": [],
-        "proofStatements": [],
-        "proofMaterials": [],
-    }))
-    .expect_err("target recombination must require a quorum");
-    assert_eq!(empty_error.code, CanonicalErrorCode::MalformedLength);
-    assert!(
-        empty_error.message.contains("interpolation quorum"),
-        "{}",
-        empty_error.message
-    );
-
-    let mismatched_error = verify_and_recombine_bgv_target_decryption_shares_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShares": [{}],
-        "proofStatements": [],
-        "proofMaterials": [],
-    }))
-    .expect_err("target recombination inputs must have matching array lengths");
-    assert_eq!(mismatched_error.code, CanonicalErrorCode::MalformedLength);
-    assert!(
-        mismatched_error.message.contains("matching share"),
-        "{}",
-        mismatched_error.message
-    );
-}
-
-#[test]
-#[ignore = "heavy target-decryption proof-backed recombination test"]
-fn heavy_target_decryption_recombines_proof_backed_shares() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile_value = target_share_profile(&setup_package);
-    let first_bundle =
-        generate_target_share_proof_material_bundle(TargetShareProofMaterialBundleInput {
-            setup_package: &setup_package,
-            accepted_record: &accepted_record,
-            target_ciphertext_binding: &target_ciphertext_binding,
-            target_ciphertexts: &target_ciphertexts,
-            target_share_profile: &target_share_profile_value,
-            trustee_identity: "trustee-1",
-            proof_randomness_seed_hex: "21".repeat(64),
-            proof_randomness_nonce_hex: "22".repeat(64),
-        });
-    let second_bundle =
-        generate_target_share_proof_material_bundle(TargetShareProofMaterialBundleInput {
-            setup_package: &setup_package,
-            accepted_record: &accepted_record,
-            target_ciphertext_binding: &target_ciphertext_binding,
-            target_ciphertexts: &target_ciphertexts,
-            target_share_profile: &target_share_profile_value,
-            trustee_identity: "trustee-2",
-            proof_randomness_seed_hex: "23".repeat(64),
-            proof_randomness_nonce_hex: "24".repeat(64),
-        });
-
-    let result = verify_and_recombine_bgv_target_decryption_shares_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShares": [
-            &first_bundle.target_decryption_share,
-            &second_bundle.target_decryption_share,
-        ],
-        "proofStatements": [
-            &first_bundle.proof_statement,
-            &second_bundle.proof_statement,
-        ],
-        "proofMaterials": [
-            &first_bundle.proof_material,
-            &second_bundle.proof_material,
-        ],
-    }))
-    .expect("proof-backed recombination");
-
-    assert_eq!(result["ok"], true);
+    assert_eq!(result["ok"], json!(false));
+    assert_eq!(result["operation"], json!("verifyTargetDecryptionResult"));
     assert_eq!(
-        result["operation"],
-        json!("verifyAndRecombineBgvTargetDecryptionShares")
-    );
-    assert_eq!(result["shareCount"], json!(2));
-    assert_eq!(result["activeRnsLimbCount"], json!(7));
-    assert_eq!(
-        result["targetDecryptionResultHash"]
-            .as_str()
-            .expect("result hash")
-            .len(),
-        128
-    );
-    let mut expected_target_ids = vec![0_u64; MAXIMUM_OPTION_COUNT];
-    let mut expected_target_orders = vec![0_u64; MAXIMUM_OPTION_COUNT];
-    expected_target_ids[0] = 1;
-    expected_target_ids[2] = 3;
-    expected_target_orders[0] = 1;
-    expected_target_orders[2] = 2;
-    assert_eq!(
-        result["targetIdOptionValues"],
-        json!(expected_target_ids),
-        "target id options"
-    );
-    assert_eq!(
-        result["targetOrderOptionValues"],
-        json!(expected_target_orders),
-        "target order options"
-    );
-
-    let mut tampered_share = first_bundle.target_decryption_share.clone();
-    change_first_partial_decryption_coefficient(&mut tampered_share);
-    let tampered_error = verify_and_recombine_bgv_target_decryption_shares_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShares": [
-            tampered_share,
-            &second_bundle.target_decryption_share,
-        ],
-        "proofStatements": [
-            &first_bundle.proof_statement,
-            &second_bundle.proof_statement,
-        ],
-        "proofMaterials": [
-            &first_bundle.proof_material,
-            &second_bundle.proof_material,
-        ],
-    }))
-    .expect_err("proof-backed recombination must reject a tampered share");
-    assert!(
-        tampered_error.message.contains("share root")
-            || tampered_error.message.contains("share hash")
-            || tampered_error
-                .message
-                .contains("partial-decryption limb hash"),
-        "{}",
-        tampered_error.message
+        result["refusalReason"],
+        json!("CompactVssPublicMaterialNotBinding")
     );
 }
 

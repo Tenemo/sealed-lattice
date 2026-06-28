@@ -4,6 +4,7 @@ import {
     encryptLocalTrusteeSetupSealedMaterial,
     encryptLocalTrusteeState,
     type EncryptedLocalTrusteeSetupState,
+    type LocalTrusteeSetupStateSealedMaterial,
     type LocalTrusteeSetupStateSealedPayload,
     type LocalTrusteeStateStorageDecryptionResult,
 } from '@sealed-lattice/crypto';
@@ -86,11 +87,14 @@ export type GeneratedLocalTrusteeSetupStateInput = Readonly<{
 export type GeneratedLocalTrusteeSetupStateResult =
     LocalTrusteeSetupStateEncryptionResult &
         Readonly<{
-            readonly localStatePlaintext: LocalTrusteeSetupStateSealedPayload;
+            readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+            readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
         }>;
 
 export type LocalTrusteeSetupStateDecryptionInput = Readonly<{
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+    readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
     readonly expectedLocalStateRoot: ProtocolHash;
     readonly setupContext: CollectiveBgvSetupContext;
     readonly storageKeyBytesHex: string;
@@ -1109,6 +1113,7 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
         const sourceShareCommitmentRoots = new Set(
             record.sourceShareCommitmentRoots,
         );
+        const sourceShareOpeningRoots = new Set(record.sourceShareOpeningRoots);
         const aggregateCommitmentMessageValues = Array.from(
             { length: aggregateThresholdCommitmentSet.ringDegree },
             () => 0n,
@@ -1137,7 +1142,10 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                     record.recipientTrusteePoint ||
                 credential.shareValues.length !==
                     aggregateThresholdCommitmentSet.ringDegree ||
-                !sourceShareCommitmentRoots.has(credential.shareCommitmentRoot)
+                !sourceShareCommitmentRoots.has(
+                    credential.shareCommitmentRoot,
+                ) ||
+                !sourceShareOpeningRoots.has(credential.shareOpeningRoot)
             ) {
                 throw new Error(
                     'compact VSS recipient share opening credential must match the public aggregate threshold commitment record.',
@@ -1465,7 +1473,8 @@ const buildTargetDecryptionProofWitnessMaterial = (
                     record.recipientTrusteePoint ||
                 credential.rnsPrime !== record.rnsPrime ||
                 credential.aggregateCommitmentRoot !==
-                    record.aggregateCommitmentRoot
+                    record.aggregateCommitmentRoot ||
+                credential.aggregateOpeningRoot !== record.aggregateOpeningRoot
             ) {
                 throw new Error(
                     'compact VSS aggregate opening credential must match its public aggregate commitment record.',
@@ -1701,7 +1710,10 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
 
     return {
         ...encryptedLocalState,
-        localStatePlaintext,
+        sealedAggregateThresholdShare:
+            sealedAggregateThresholdShare.sealedMaterial,
+        sealedTargetDecryptionProofWitness:
+            sealedTargetDecryptionProofWitness.sealedMaterial,
     };
 };
 

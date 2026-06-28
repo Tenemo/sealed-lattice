@@ -7,6 +7,10 @@ pub(crate) use self::material_transport::{
     begin_setup_proof_material_transport_stream_request,
     finish_setup_proof_material_transport_stream_request, setup_proof_material_transport_hashes,
 };
+pub(crate) use self::material_transport::{
+    setup_proof_material_chunk_hash, setup_proof_material_chunk_manifest_root,
+    setup_proof_material_full_object_hash,
+};
 
 use serde_json::{Value, json};
 use sha3::{

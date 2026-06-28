@@ -18,6 +18,13 @@ const sdkRuntimePath = path.resolve(
     'dist',
     'index.js',
 );
+const sdkKernelWasmPath = path.resolve(
+    repoRoot,
+    'packages',
+    'sdk',
+    'dist',
+    'sealed-lattice-kernel.wasm',
+);
 const generatedInternalBridgeArtifactPaths = [
     path.resolve(
         repoRoot,
@@ -60,6 +67,13 @@ const cryptoSourceDirectoryPath = path.resolve(
     'crypto',
     'src',
 );
+const protocolRootEntryPath = path.resolve(
+    repoRoot,
+    'packages',
+    'protocol',
+    'src',
+    'index.ts',
+);
 
 const sortedUnique = (values: readonly string[]): string[] =>
     [...new Set(values)].sort((left, right) => left.localeCompare(right));
@@ -87,6 +101,34 @@ const duplicates = (values: readonly string[]): string[] => {
     return [...duplicateValues].sort((left, right) =>
         left.localeCompare(right),
     );
+};
+
+const collectNamedReExports = (sourceText: string): string[] => {
+    const exportNames: string[] = [];
+    const namedExportPattern =
+        /export\s+(?:type\s+)?\{(?<body>[^}]+)\}\s+from\s+['"][^'"]+['"]/gu;
+
+    for (const match of sourceText.matchAll(namedExportPattern)) {
+        const body = match.groups?.body;
+        if (body === undefined) {
+            continue;
+        }
+
+        exportNames.push(
+            ...body
+                .split(',')
+                .map((part) => part.trim())
+                .filter((part) => part.length > 0)
+                .map((part) => part.replace(/^type\s+/u, ''))
+                .map((part) => {
+                    const [exportName, aliasName] = part.split(/\s+as\s+/u);
+
+                    return (aliasName ?? exportName).trim();
+                }),
+        );
+    }
+
+    return sortedUnique(exportNames);
 };
 
 const protocolRuntimeSourcePathForEntrySource = (source: string): string =>
@@ -353,6 +395,32 @@ const validateVendoredCryptoRuntime = async (
     return failures.sort((left, right) => left.localeCompare(right));
 };
 
+const validateProtocolRootExports = async (
+    policy: PublicPackagePolicy,
+): Promise<string[]> => {
+    const failures: string[] = [];
+    const protocolRootExportSet = new Set(
+        collectNamedReExports(await fs.readFile(protocolRootEntryPath, 'utf8')),
+    );
+
+    failures.push(
+        ...validateUnique(
+            'forbiddenProtocolRootExports',
+            policy.forbiddenProtocolRootExports,
+        ),
+    );
+
+    for (const exportName of policy.forbiddenProtocolRootExports) {
+        if (protocolRootExportSet.has(exportName)) {
+            failures.push(
+                `Forbidden protocol root export is public: ${exportName}`,
+            );
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
+};
+
 export type GeneratedInternalBridgeArtifactText = {
     readonly relativePath: string;
     readonly text: string;
@@ -373,7 +441,22 @@ export const validateGeneratedInternalBridgeArtifactTexts = (
             'forbiddenSdkVendoredInternalBridgeMembers',
             policy.forbiddenSdkVendoredInternalBridgeMembers,
         ),
+        ...validateUnique(
+            'sdkVendoredBridgeRemovedMembers',
+            policy.sdkVendoredBridgeRemovedMembers,
+        ),
     );
+
+    const forbiddenSdkVendoredInternalBridgeMemberSet = new Set(
+        policy.forbiddenSdkVendoredInternalBridgeMembers,
+    );
+    for (const memberName of policy.sdkVendoredBridgeRemovedMembers) {
+        if (!forbiddenSdkVendoredInternalBridgeMemberSet.has(memberName)) {
+            failures.push(
+                `sdkVendoredBridgeRemovedMembers member "${memberName}" is not listed in forbiddenSdkVendoredInternalBridgeMembers`,
+            );
+        }
+    }
 
     if (
         policy.forbiddenGeneratedInternalBridgeMembers.length === 0 &&
@@ -455,6 +538,56 @@ const validateGeneratedInternalBridgeArtifacts = async (
     ].sort((left, right) => left.localeCompare(right));
 };
 
+export const validateSdkKernelCommandStrings = (
+    policy: PublicPackagePolicy,
+    sdkKernelWasmBytes: Uint8Array,
+    relativePath = 'packages/sdk/dist/sealed-lattice-kernel.wasm',
+): string[] => {
+    const failures: string[] = [];
+    failures.push(
+        ...validateUnique(
+            'forbiddenSdkKernelCommandStrings',
+            policy.forbiddenSdkKernelCommandStrings,
+        ),
+    );
+
+    if (policy.forbiddenSdkKernelCommandStrings.length === 0) {
+        return failures;
+    }
+
+    const wasmBuffer = Buffer.from(sdkKernelWasmBytes);
+    for (const commandName of policy.forbiddenSdkKernelCommandStrings) {
+        if (wasmBuffer.indexOf(Buffer.from(commandName, 'utf8')) !== -1) {
+            failures.push(
+                `SDK kernel WASM contains forbidden command string "${commandName}": ${relativePath}`,
+            );
+        }
+    }
+
+    return failures.sort((left, right) => left.localeCompare(right));
+};
+
+const validateSdkKernelWasm = async (
+    policy: PublicPackagePolicy,
+): Promise<string[]> => {
+    if (policy.forbiddenSdkKernelCommandStrings.length === 0) {
+        return [];
+    }
+
+    const relativePath = toPosixPath(
+        path.relative(repoRoot, sdkKernelWasmPath),
+    );
+    try {
+        return validateSdkKernelCommandStrings(
+            policy,
+            await fs.readFile(sdkKernelWasmPath),
+            relativePath,
+        );
+    } catch {
+        return [`SDK kernel WASM artifact is missing: ${relativePath}`];
+    }
+};
+
 export const validatePublicPackagePolicy = async (
     policy: PublicPackagePolicy,
     runtimeExports: readonly string[],
@@ -490,7 +623,9 @@ export const validatePublicPackagePolicy = async (
     failures.push(
         ...(await validateVendoredProtocolRuntime(policy, runtimeExportSet)),
         ...(await validateVendoredCryptoRuntime(policy)),
+        ...(await validateProtocolRootExports(policy)),
         ...(await validateGeneratedInternalBridgeArtifacts(policy)),
+        ...(await validateSdkKernelWasm(policy)),
     );
 
     return sortedUnique(failures);

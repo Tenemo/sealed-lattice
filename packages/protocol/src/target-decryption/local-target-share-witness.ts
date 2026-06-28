@@ -8,15 +8,15 @@ import {
 
 type JsonRecord = Record<string, unknown>;
 
-export const targetDecryptionSmudgingProfileId =
+const targetDecryptionSmudgingProfileId =
     'sealed-lattice-target-decryption-zero-share-smudging-development-v1';
-export const targetDecryptionSmudgingSeedHashDomain =
+const targetDecryptionSmudgingSeedHashDomain =
     'sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1';
-export const targetDecryptionPlaintextMultiple = 65_537;
+const targetDecryptionPlaintextMultiple = 65_537;
 
 const textEncoder = new TextEncoder();
 
-export type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
+type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
     readonly localSmudgingSeedMaterial: string;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
@@ -24,7 +24,7 @@ export type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
     readonly targetShareProfile: unknown;
 }>;
 
-export type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
+type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
     JsonRecord & {
         readonly objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness';
         readonly objectVersion: 1;
@@ -44,7 +44,7 @@ export type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
     }
 >;
 
-export type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
+type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
     readonly restoredLocalTargetShareWitness: unknown;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
@@ -54,7 +54,7 @@ export type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
     readonly localSmudgingSeedMaterial: string;
 }>;
 
-export type PreparedLocalTargetDecryptionShareWitness = Readonly<
+type PreparedLocalTargetDecryptionShareWitness = Readonly<
     JsonRecord & {
         readonly targetDecryptionSmudging: LocalTrusteeTargetDecryptionSmudgingWitness;
     }
@@ -260,7 +260,7 @@ export const deriveTargetDecryptionSmudgingSeedHex = (
     ]);
 };
 
-export const createLocalTrusteeTargetDecryptionSmudgingWitness = (
+const createLocalTrusteeTargetDecryptionSmudgingWitness = (
     input: LocalTargetDecryptionShareWitnessPreparationInput,
 ): LocalTrusteeTargetDecryptionSmudgingWitness => {
     const trusteeIdentity = input.trusteeIdentity;

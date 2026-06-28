@@ -6,9 +6,12 @@ export type VendoredProtocolRuntimeEntryExport = {
 
 export type PublicPackagePolicy = {
     readonly forbiddenGeneratedInternalBridgeMembers: readonly string[];
+    readonly forbiddenProtocolRootExports: readonly string[];
+    readonly forbiddenSdkKernelCommandStrings: readonly string[];
     readonly forbiddenSdkVendoredInternalBridgeMembers: readonly string[];
     readonly forbiddenRuntimeExports: readonly string[];
     readonly forbiddenTypeExports: readonly string[];
+    readonly sdkVendoredBridgeRemovedMembers: readonly string[];
     readonly vendoredCryptoRuntimeModules: readonly string[];
     readonly vendoredProtocolRuntimeEntryExports: readonly VendoredProtocolRuntimeEntryExport[];
     readonly vendoredProtocolRuntimeModules: readonly string[];
@@ -19,21 +22,104 @@ export const forbiddenGeneratedInternalBridgeMembers = [
     'generateBgvTargetDecryptionShare',
 ] as const;
 
+export const forbiddenProtocolRootExports = [
+    'GeneratedCompactVssTargetProofWitnessInput',
+    'aggregateCompactVssThresholdShareCommitments',
+    'combineCompactVssCommitments',
+    'compactVssAggregateMessageCoefficientBound',
+    'compactVssCommitmentBinaryFormat',
+    'compactVssCommitmentMeasurement',
+    'compactVssCommitmentModulusLimbIndices',
+    'compactVssCommitmentOutputCoordinateCount',
+    'compactVssCommitmentProfileId',
+    'compactVssCommitmentRandomnessColumnCount',
+    'compactVssEncodedCommitmentByteLength',
+    'compactVssProjectionWeight',
+    'compactVssSameSecretBridgeIntegerSupport',
+    'compactVssSameSecretBridgeProofFamily',
+    'compactVssSameSecretBridgeRelation',
+    'compactVssSameSecretBridgeSignedRepresentativeConvention',
+    'compactVssSameSecretBridgeTargetBasisLimbOrder',
+    'compactVssShareLinkageAggregateThresholdRule',
+    'compactVssShareLinkageCommonKeyRule',
+    'compactVssShareLinkageProofBatchingRule',
+    'compactVssShareLinkageProofFamily',
+    'compactVssShareLinkageShamirEvaluationRule',
+    'computeCompactVssCommitmentFromOpening',
+    'createCompactVssCoefficientCommitmentSet',
+    'createCompactVssRecipientShareCommitmentBundle',
+    'createCompactVssSameSecretBridgeProofMaterialSet',
+    'createCompactVssSameSecretBridgeStatementSet',
+    'createCompactVssShareLinkageProofMaterialSet',
+    'createCompactVssShareLinkageStatement',
+    'decodeCompactVssCommitmentBody',
+    'decodeCompactVssTernaryRandomnessColumnsHex',
+    'encodeCompactVssCommitmentBody',
+    'encodeCompactVssTernaryRandomnessColumnsHex',
+    'verifyCompactVssAggregateOpeningCredential',
+    'verifyCompactVssAggregateThresholdCommitmentSet',
+    'verifyCompactVssCoefficientCommitmentSet',
+    'verifyCompactVssCommitmentOpening',
+    'verifyCompactVssRecipientShareCommitmentSet',
+    'verifyCompactVssSameSecretBridgeProofMaterialSet',
+    'verifyCompactVssSameSecretBridgeStatementSet',
+    'verifyCompactVssShareLinkageProofMaterialSet',
+    'verifyCompactVssShareLinkageStatement',
+    'CompactVssAggregateThresholdCommitmentSet',
+    'CompactVssAggregateThresholdOpeningCredential',
+    'CompactVssCoefficientCommitmentSet',
+    'CompactVssCommitmentBodyMetadata',
+    'CompactVssCommitmentValue',
+    'CompactVssRecipientShareOpeningCredential',
+    'CompactVssRecipientShareCommitmentSet',
+    'CompactVssSameSecretBridgeProofMaterialSet',
+    'CompactVssSameSecretBridgeProofRecord',
+    'CompactVssSameSecretBridgeProofRecordInput',
+    'CompactVssSameSecretBridgeStatementRecord',
+    'CompactVssSameSecretBridgeStatementSet',
+    'CompactVssSameSecretBridgeStatementSetInput',
+    'CompactVssSameSecretBridgeTargetConstantCommitmentRoot',
+    'CompactVssShareLinkageProofMaterial',
+    'CompactVssShareLinkageProofMaterialInput',
+    'CompactVssShareLinkageProofMaterialSet',
+    'CompactVssShareLinkageProofRecord',
+    'CompactVssShareLinkageProofRecordInput',
+    'CompactVssShareLinkageStatement',
+] as const;
+
+export const sdkVendoredBridgeRemovedMembers = [
+    'generateBgvTargetDecryptionDevelopmentFixture',
+    'generateBgvTargetDecryptionShareFromLocalShare',
+    'deriveBgvTargetDecryptionShareProofStatement',
+    'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+    'verifyBgvTargetDecryptionShareProofMaterial',
+    'verifyBgvTargetDecryptionShareBinaryProofMaterial',
+    'verifyBgvTargetDecryptionShareProofStatementBinding',
+] as const;
+
+export const forbiddenSdkKernelCommandStrings = [
+    'GenerateBgvTargetDecryptionDevelopmentFixture',
+    'GenerateBgvTargetDecryptionShareFromLocalShare',
+    'DeriveBgvTargetDecryptionShareProofStatement',
+    'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
+    'VerifyBgvTargetDecryptionShareProofMaterial',
+    'VerifyBgvTargetDecryptionShareBinaryProofMaterial',
+    'VerifyBgvTargetDecryptionShareProofStatementBinding',
+] as const;
+
 export const forbiddenSdkVendoredInternalBridgeMembers = [
     'GenerateBgvTargetDecryptionFixture',
     'generateBgvTargetDecryptionFixture',
+    'GenerateBgvTargetDecryptionDevelopmentFixture',
     'GenerateBgvTargetDecryptionShareFromLocalShare',
-    'generateBgvTargetDecryptionShareFromLocalShare',
     'DeriveBgvTargetDecryptionShareProofStatement',
-    'deriveBgvTargetDecryptionShareProofStatement',
     'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-    'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
     'VerifyBgvTargetDecryptionShareProofMaterial',
-    'verifyBgvTargetDecryptionShareProofMaterial',
+    'VerifyBgvTargetDecryptionShareBinaryProofMaterial',
     'VerifyBgvTargetDecryptionShareProofStatementBinding',
-    'verifyBgvTargetDecryptionShareProofStatementBinding',
     'VerifyAndRecombineBgvTargetDecryptionShares',
     'verifyAndRecombineBgvTargetDecryptionShares',
+    ...sdkVendoredBridgeRemovedMembers,
 ] as const;
 
 export const forbiddenTypeExports = [
@@ -51,6 +137,8 @@ export const forbiddenTypeExports = [
     'BgvTargetDecryptionRecombination',
     'BgvTargetDecryptionShare',
     'BgvTargetDecryptionSharePayload',
+    'BgvTargetDecryptionShareBinaryProofMaterialTransport',
+    'BgvTargetDecryptionShareBinaryProofMaterialVerification',
     'BgvTargetDecryptionShareProofMaterial',
     'BgvTargetDecryptionShareProofMaterialVerification',
     'BgvTargetDecryptionShareProofStatement',
@@ -68,6 +156,9 @@ export const forbiddenTypeExports = [
     'RawBgvSecretKey',
     'RelinearizationKeyShareProofGeneration',
     'SparseTargetProjectionWitness',
+    'TargetDecryptionAcceptedResult',
+    'TargetDecryptionCiphertextPair',
+    'TargetDecryptionShareEvidence',
     'TopKEvaluatorDevelopmentEvaluation',
     'TopKEvaluatorDevelopmentEvaluationInput',
     'TopKEvaluatorDirectAggregateEvaluation',
@@ -75,6 +166,7 @@ export const forbiddenTypeExports = [
     'TopKEvaluatorDirectAggregateInput',
     'VerifiedSetupProofMaterial',
     'VerifiedSetupProofMaterialSet',
+    'VerifyTargetDecryptionResultInput',
 ] as const;
 
 export const forbiddenRuntimeExports = [
@@ -110,6 +202,7 @@ export const forbiddenRuntimeExports = [
     'generateBgvBaseConversionFixture',
     'generateBgvCiphertextConventionFixture',
     'generateBgvTargetDecryptionFixture',
+    'generateBgvTargetDecryptionDevelopmentFixture',
     'generateBgvTargetDecryptionShare',
     'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
     'generateBgvTargetDecryptionShareFromLocalShare',
@@ -140,6 +233,7 @@ export const forbiddenRuntimeExports = [
     'verifyBgvLattigoOracle',
     'verifyBgvPlaintextObject',
     'verifyBgvTargetDecryptionShareProofStatementBinding',
+    'verifyBgvTargetDecryptionShareBinaryProofMaterial',
     'verifyBgvTargetDecryptionShareProofMaterial',
     'verifyAndRecombineBgvTargetDecryptionShares',
     'verifyDirectEncryptedBallotProofWitness',
@@ -176,6 +270,7 @@ export const vendoredProtocolRuntimeModules = [
     'roster/object-validation.ts',
     'roster/verification.ts',
     'setup/compact-vss-commitments.ts',
+    'setup/proof-byte-encoding.ts',
     'setup/common-randomness-records.ts',
     'setup/binary-chunk-writer.ts',
     'setup/evaluation-key-proof-records.ts',
@@ -230,6 +325,7 @@ export const vendoredProtocolRuntimeModules = [
 ] as const;
 
 export const vendoredCryptoRuntimeModules = [
+    'canonical-base64.ts',
     'canonical-json.ts',
     'hashes.ts',
     'index.ts',
@@ -301,9 +397,12 @@ export const vendoredProtocolRuntimeEntryExports = [
 
 export const publicPackagePolicy = {
     forbiddenGeneratedInternalBridgeMembers,
+    forbiddenProtocolRootExports,
+    forbiddenSdkKernelCommandStrings,
     forbiddenSdkVendoredInternalBridgeMembers,
     forbiddenTypeExports,
     forbiddenRuntimeExports,
+    sdkVendoredBridgeRemovedMembers,
     vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,

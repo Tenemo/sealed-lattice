@@ -385,6 +385,62 @@ fn collective_setup_verifier_refuses_unrequested_setup_transport_object() {
 }
 
 #[test]
+fn collective_setup_verifier_refuses_compact_share_linkage_transport_without_package_root() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_compact_share_linkage_transport_without_package_root",
+    );
+    let mut package = minimal_collective_setup_package();
+    append_setup_transport_certificate_object(
+        &mut package,
+        SetupTransportCertificateObjectFixture {
+            object_name: "compactVssShareLinkageProofMaterial",
+            object_role: "compact-vss-share-linkage-proof-material",
+            object_root: valid_hash('a'),
+            byte_length: 64,
+            full_object_hash: valid_hash('b'),
+            chunk_root: setup_transport_chunk_manifest_root_fixture(
+                1,
+                64,
+                &[valid_hash('c')],
+                &valid_hash('b'),
+            ),
+            chunk_hashes: vec![valid_hash('c')],
+        },
+    );
+    rebind_collective_setup_package_hash(&mut package);
+
+    let result = verify_collective_bgv_setup_package(
+        &package,
+        &serde_json::json!({
+            "transportedCompactVssShareLinkageProofMaterial": {
+                "proofMaterialSetRoot": valid_hash('a'),
+                "totalByteLength": 64_u64,
+                "fullObjectHash": valid_hash('b'),
+                "chunkRoot": setup_transport_chunk_manifest_root_fixture(
+                    1,
+                    64,
+                    &[valid_hash('c')],
+                    &valid_hash('b'),
+                ),
+                "chunkHashes": [valid_hash('c')],
+            },
+        }),
+    )
+    .expect("verification response");
+
+    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["currentPhase"], "setupPackageVerification");
+    assert_eq!(
+        result["refusedObjects"][0]["reasonCode"],
+        "transportedObjectBindingMissing"
+    );
+    assert_eq!(
+        result["refusedObjects"][0]["objectPath"],
+        "setupPackage.compactVssShareLinkageProofMaterialSet.proofMaterialSetRoot"
+    );
+}
+
+#[test]
 fn collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar",

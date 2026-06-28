@@ -90,7 +90,7 @@ const evaluateOpenVoting = (
         context.ballotValidityProofProfileFrozen !== true ||
         context.evaluatorReplayProfileFrozen !== true ||
         context.targetOutputLayoutFrozen !== true ||
-        context.targetDecryptionProfileReferencePresent !== true
+        !nonEmptyHash(context.targetDecryptionProfileReferenceHash)
     ) {
         return refuseAction(action, 'FrozenStateIncomplete');
     }
@@ -136,7 +136,7 @@ const evaluateEncryptedBallotProofs = (
     ) {
         return refuseAction(action, 'turnoutFloorNotReached');
     }
-    if (context.directProofTransportPresent !== true) {
+    if (!nonEmptyHash(context.directProofTransportRoot)) {
         return refuseAction(action, 'MissingDirectProofTransport');
     }
 
@@ -167,7 +167,7 @@ const evaluateEvaluatorReplay = (
     if (context.encryptedBallotAggregateComputed !== true) {
         return refuseAction(action, 'EncryptedBallotAggregateMissing');
     }
-    if (context.mobileReplayEvidencePresent !== true) {
+    if (!nonEmptyHash(context.mobileReplayEvidenceRoot)) {
         return refuseAction(action, 'MissingMobileReplayEvidence');
     }
 
@@ -184,10 +184,10 @@ const evaluateTargetAcceptance = (
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.evaluatorReplaySucceeded !== true) {
+    if (!nonEmptyHash(context.evaluatorReplayRecordHash)) {
         return refuseAction(action, 'EvaluatorReplayMissing');
     }
-    if (context.targetFinalityAccepted !== true) {
+    if (!nonEmptyHash(context.targetFinalityRecordHash)) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
 
@@ -204,10 +204,10 @@ const evaluateDecryptionShare = (
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.targetFinalityAccepted !== true) {
+    if (!nonEmptyHash(context.targetFinalityRecordHash)) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.targetAccepted !== true) {
+    if (!nonEmptyHash(context.targetAcceptedRecordHash)) {
         return refuseAction(action, 'TargetNotAccepted');
     }
     if (getCertifiedDecryptionShareQuorum(context) === undefined) {
@@ -218,7 +218,7 @@ const evaluateDecryptionShare = (
     if (recoveryRefusal !== undefined) {
         return refuseAction(action, recoveryRefusal);
     }
-    if (context.targetDecryptionCertificatePresent !== true) {
+    if (!nonEmptyHash(context.targetDecryptionCertificateHash)) {
         return refuseAction(action, 'MissingTargetDecryptionCertificate');
     }
 
@@ -245,7 +245,7 @@ const evaluateTargetDecryptionProfile = (
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.targetDecryptionCertificatePresent !== true) {
+    if (!nonEmptyHash(context.targetDecryptionCertificateHash)) {
         return refuseAction(action, 'MissingTargetDecryptionCertificate');
     }
 
@@ -263,13 +263,13 @@ const evaluateRecombination = (
     ) {
         return refuseAction(action, 'InvalidLifecycleState');
     }
-    if (context.targetAccepted !== true) {
+    if (!nonEmptyHash(context.targetAcceptedRecordHash)) {
         return refuseAction(action, 'TargetNotAccepted');
     }
-    if (context.targetFinalityAccepted !== true) {
+    if (!nonEmptyHash(context.targetFinalityRecordHash)) {
         return refuseAction(action, 'TargetFinalityCheckpointMissing');
     }
-    if (context.targetDecryptionProfileVerified !== true) {
+    if (!nonEmptyHash(context.targetDecryptionProofProfileEvidenceRoot)) {
         return refuseAction(action, 'TargetDecryptionProfileNotCertified');
     }
     const certifiedDecryptionShareQuorum =
@@ -285,8 +285,11 @@ const evaluateRecombination = (
     ) {
         return refuseAction(action, 'FirstThresholdSharesNotReached');
     }
-    if (context.targetDecryptionClosureApplied !== true) {
-        return refuseAction(action, 'TargetDecryptionClosureMissing');
+    if (!nonEmptyHash(context.targetDecryptionCertificateHash)) {
+        return refuseAction(action, 'MissingTargetDecryptionCertificate');
+    }
+    if (!nonEmptyHash(context.targetDecryptionShareEvidenceRoot)) {
+        return refuseAction(action, 'TargetDecryptionShareEvidenceMissing');
     }
 
     return allowAction(action);
@@ -316,9 +319,6 @@ const evaluateRosterBoundEnvironment = (
         context.rosterExternalAcceptanceHash
     ) {
         return refuseAction(action, 'RosterExternalAcceptanceHashMismatch');
-    }
-    if (context.runtimeProfileSupported === false) {
-        return refuseAction(action, 'OutsideMeasuredRuntimeProfile');
     }
     return undefined;
 };

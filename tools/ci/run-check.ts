@@ -225,7 +225,7 @@ const buildRustKernelLane = (): ValidationLane => ({
 // The heavier protocol, kernel-heavy Node project, ignored Rust kernel heavy
 // tests, and the Playwright browser projects stay in their standalone lanes for
 // pre-push verification.
-const buildParallelLanes = (
+export const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
     const lane = (
@@ -314,6 +314,10 @@ const buildParallelLanes = (
             'exec',
             'tsx',
             './tools/ci/verify-public-package-policy.ts',
+        ]),
+        lane('Review compact VSS parameters', 'compact-vss-parameter-review', [
+            'run',
+            'review:compact-vss-parameters',
         ]),
         lane('Verify test lane coverage', 'test-lane-coverage', [
             'exec',

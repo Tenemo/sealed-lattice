@@ -1,5 +1,5 @@
 use super::proof_codec::{
-    FIELD_RESIDUE_BYTE_WIDTH, decode_trustee_evaluation_key_proof,
+    FIELD_RESIDUE_BIT_WIDTH, decode_trustee_evaluation_key_proof,
     encode_trustee_evaluation_key_proof,
 };
 use super::prover::prove_evaluation_key_share;
@@ -25,15 +25,20 @@ use std::time::Instant;
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
 use super::merkle_commitment::LEAF_SALT_BYTES;
 use super::relation::{
-    CompactSameSecretBridgeStatement, CompactVssShareLinkageCommitment,
+    CompactSameSecretBridgeStatement, CompactVssShareLinkageCommitment, CompactVssShareLinkageItem,
     CompactVssShareLinkagePublicVectorInput, CompactVssShareLinkageStatement,
     EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
-    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement, TargetDecryptionShareStatement,
-    build_compact_vss_share_linkage_public_vectors,
+    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
+    TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
+    TargetDecryptionShareStatement, build_compact_vss_share_linkage_public_vectors,
+    masked_claim_bounds_for_global_claim,
 };
 use super::{
-    COMMITMENT_BOUND_FACTOR, CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP,
-    LOW_DEGREE_FINAL_COEFFICIENT_COUNT, LOW_DEGREE_QUERY_COUNT,
+    CLAIM_MASK_RADIX, COMMITMENT_BOUND_FACTOR, CONSISTENCY_COEFFICIENT_BITS,
+    CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP, LINCHECK_REPETITIONS,
+    LOW_DEGREE_QUERY_COUNT, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT, low_degree_final_coefficient_count,
 };
 use crate::bgv::evaluator::records::MAXIMUM_OPTION_COUNT;
 use crate::bgv::evaluator::top_k::{
@@ -53,9 +58,9 @@ use crate::bgv::evaluator::top_k::{
 use super::{
     COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
     TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
-    generate_target_decryption_share_proof_from_request,
+    generate_target_decryption_share_proof_bytes_from_request,
     generate_trustee_evaluation_key_proof_from_request, prover,
-    verify_target_decryption_share_proof_from_request,
+    verify_target_decryption_share_proof_bytes_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 
@@ -298,7 +303,6 @@ fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
 }
 
 fn proof_randomness_fields(request: &mut serde_json::Value) {
-    request["proofRandomnessSource"] = serde_json::json!("development-deterministic-fixture");
     request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 }
@@ -365,6 +369,11 @@ fn public_key_share_statement_hash_vector_request() -> serde_json::Value {
 }
 
 fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
+    let component_b_by_limb = DATA_PRIMES
+        .iter()
+        .take(2)
+        .map(|_| zero_u64_vector())
+        .collect::<Vec<_>>();
     let mut request = serde_json::json!({
         "context": vector_context_base(serde_json::json!({
             "requiredGaloisSetHash": repeated_hash("33"),
@@ -376,13 +385,13 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
         "ringDegree": SMALL_RING_DEGREE,
         "keys": [{
             "proofFamily": "relinearization-round-one",
-            "level": 0,
+            "level": 1,
             "keySwitchDomain": "relinearization-round-one",
             "keySwitchSeedHex": repeated_hash("42"),
-            "componentBByDigit": [[zero_u64_vector()]],
+            "componentBByDigit": [component_b_by_limb.clone(), component_b_by_limb],
         }],
         "secretCoefficients": zero_i64_vector(),
-        "errorCoefficientsByKey": [[zero_i64_vector()]],
+        "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector()]],
     });
     proof_randomness_fields(&mut request);
     request

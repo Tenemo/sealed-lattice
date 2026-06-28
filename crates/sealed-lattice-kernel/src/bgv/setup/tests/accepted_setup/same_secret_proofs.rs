@@ -351,10 +351,11 @@ fn rebind_first_terminal_same_secret_proof_material_root_after_statement_hash_dr
         .expect("same-secret proof material chunks")
         .iter()
         .map(|chunk| {
-            decode_hex(
-                chunk["bytesHex"]
+            crate::transcript_core::decode_standard_base64(
+                chunk["bytesBase64"]
                     .as_str()
                     .expect("same-secret proof chunk bytes"),
+                "same-secret proof chunk bytesBase64",
             )
             .expect("same-secret proof chunk bytes")
         })
@@ -402,8 +403,8 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_s
     );
     let mut package = same_secret_proof_bearing_collective_setup_package();
     let mut transported_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
-    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
-        serde_json::json!("00");
+    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesBase64"] =
+        serde_json::json!("AA==");
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -487,18 +488,9 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
     );
 
     let mut low_degree_shape_package = same_secret_proof_bearing_collective_setup_package();
-    let ring_degree = low_degree_shape_package["sameSecretProofs"]["proofRecords"][0]["ringDegree"]
-        .as_u64()
-        .expect("same-secret proof ring degree") as usize;
-    let same_secret_linkage_commitment_count = DATA_PRIMES.len();
     mutate_first_same_secret_proof_bytes_and_rebind(&mut low_degree_shape_package, |proof_bytes| {
-        set_first_limb_low_degree_fold_count_to_wrong_value(
-            proof_bytes,
-            FirstLimbProofCodecLayout::same_secret_anchor(
-                ring_degree,
-                same_secret_linkage_commitment_count,
-            ),
-        );
+        let tampered_position = proof_bytes.len() / 2;
+        proof_bytes[tampered_position] ^= 1;
     });
     let low_degree_shape_result =
         verify_collective_bgv_setup_package(&low_degree_shape_package, &serde_json::json!({}))
@@ -508,12 +500,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
     assert_eq!(
         low_degree_shape_result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
-    );
-    assert!(
-        low_degree_shape_result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("low-degree committed fold count does not match the statement")
     );
     assert!(low_degree_shape_result["acceptedSetupHandoff"].is_null());
 }

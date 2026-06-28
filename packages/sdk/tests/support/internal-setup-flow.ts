@@ -444,6 +444,18 @@ export type LocalTrusteeSetupStateSealedPayload = Readonly<
     }
 >;
 
+export type LocalTrusteeSetupStateSealedMaterialReference = Readonly<
+    JsonRecord & {
+        readonly objectType: 'LocalTrusteeSetupStateSealedMaterialReference';
+        readonly objectVersion: 1;
+        readonly materialClass:
+            | 'aggregate-threshold-share-sealed'
+            | 'target-decryption-proof-witness-sealed';
+        readonly materialRoot: ProtocolHash;
+        readonly ciphertextReference: ProtocolHash;
+    }
+>;
+
 export type EncryptedLocalTrusteeSetupState = Readonly<
     JsonRecord & {
         readonly objectType: 'EncryptedLocalTrusteeSetupState';
@@ -454,8 +466,8 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<JsonRecord>;
         readonly storageAadHash: ProtocolHash;
-        readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
-        readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
+        readonly sealedAggregateThresholdShareReference: LocalTrusteeSetupStateSealedMaterialReference;
+        readonly sealedTargetDecryptionProofWitnessReference: LocalTrusteeSetupStateSealedMaterialReference;
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
@@ -672,12 +684,16 @@ export type ExportEncryptedLocalTrusteeSetupStateInput = Readonly<{
 export type ExportEncryptedLocalTrusteeSetupStateResult = Readonly<{
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+    readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
     readonly sealedLocalStatePayloadHash: ProtocolHash;
     readonly storageAadHash: ProtocolHash;
 }>;
 
 export type RestoreLocalTrusteeSetupStateInput = Readonly<{
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+    readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly setupContext: CollectiveBgvSetupContext;
     readonly storageKeyBytesHex: string;
@@ -971,6 +987,9 @@ export const exportEncryptedLocalTrusteeSetupState = async (
     return {
         localStateCommitment: result.localStateCommitment,
         encryptedLocalState: result.encryptedLocalState,
+        sealedAggregateThresholdShare: result.sealedAggregateThresholdShare,
+        sealedTargetDecryptionProofWitness:
+            result.sealedTargetDecryptionProofWitness,
         sealedLocalStatePayloadHash: result.localStatePlaintextHash,
         storageAadHash: result.storageAadHash,
     };
@@ -1148,6 +1167,10 @@ export const restoreLocalTrusteeSetupState = async (
         {
             encryptedLocalState:
                 input.encryptedLocalState as unknown as LocalTrusteeSetupStateDecryptionInput['encryptedLocalState'],
+            sealedAggregateThresholdShare:
+                input.sealedAggregateThresholdShare as unknown as LocalTrusteeSetupStateDecryptionInput['sealedAggregateThresholdShare'],
+            sealedTargetDecryptionProofWitness:
+                input.sealedTargetDecryptionProofWitness as unknown as LocalTrusteeSetupStateDecryptionInput['sealedTargetDecryptionProofWitness'],
             expectedLocalStateRoot,
             setupContext: input.setupContext,
             storageKeyBytesHex: input.storageKeyBytesHex,

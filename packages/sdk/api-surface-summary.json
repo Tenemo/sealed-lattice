@@ -14,7 +14,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "14ad3dc81a7d8fd7aa8b35d7bb2698385ab229619b560cc6cf65c2611af978dd",
+    "reachableDeclarationHash": "cb401815c6d78e4a0e8ebb0b61e205522c540bb81ee604929b525d1ce87f3dc8",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveFrozenRosterProfile",
@@ -35,6 +35,7 @@
         "verifyRosterExternalAcceptance",
         "verifyRosterManifestTranscript",
         "verifySetupPackage",
+        "verifyTargetDecryptionResult",
         "verifyTargetFinality",
         "verifyTranscript",
         "verifyTranscriptCoreFixture"
@@ -126,6 +127,7 @@
         "SmallRosterPolicy",
         "StructuredProtocolVerificationResult",
         "TargetBoundShareSelectionProfile",
+        "TargetDecryptionResultVerification",
         "TargetFinalityCheckpoint",
         "TargetFinalityPolicy",
         "TargetFinalityRecord",

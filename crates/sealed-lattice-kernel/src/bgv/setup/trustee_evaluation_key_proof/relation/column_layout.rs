@@ -1,21 +1,88 @@
 use super::super::*;
 use super::*;
 
+type CompactVssMessageEncodingLayout =
+    crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout;
+type CompactVssMessageRangeEvidence =
+    crate::bgv::setup::compact_vss_commitment::CompactVssMessageRangeEvidence;
+
+fn compact_vss_message_encoding_layouts_for_bounds(
+    message_bounds: Vec<u64>,
+    range_evidence: CompactVssMessageRangeEvidence,
+) -> CanonicalResult<Vec<CompactVssMessageEncodingLayout>> {
+    message_bounds
+        .into_iter()
+        .map(|message_bound| {
+            let layout =
+                crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                message_bound,
+            )?;
+            Ok(match range_evidence {
+                CompactVssMessageRangeEvidence::DigitAndTritColumns => layout,
+                CompactVssMessageRangeEvidence::DigitColumnsOnly => {
+                    layout.with_digit_columns_only()
+                }
+            })
+        })
+        .collect()
+}
+
+fn compact_vss_message_encoding_offsets_for_layouts(
+    layouts: &[CompactVssMessageEncodingLayout],
+) -> CanonicalResult<Vec<usize>> {
+    let mut offsets = Vec::with_capacity(layouts.len() + 1);
+    let mut offset = 0_usize;
+    offsets.push(offset);
+    for layout in layouts {
+        offset = offset
+            .checked_add(layout.encoding_column_count())
+            .ok_or_else(|| invalid_succinct_setup_proof("compact VSS column layout overflowed"))?;
+        offsets.push(offset);
+    }
+
+    Ok(offsets)
+}
+
+fn compact_vss_message_encoding_total(offsets: &[usize]) -> usize {
+    offsets.last().copied().unwrap_or(0)
+}
+
+fn compact_vss_message_position_for_encoding_column(
+    offsets: &[usize],
+    vector_index: usize,
+) -> Option<(usize, usize)> {
+    offsets
+        .windows(2)
+        .enumerate()
+        .find(|(_, window)| vector_index >= window[0] && vector_index < window[1])
+        .map(|(message_position, window)| (message_position, vector_index - window[0]))
+}
+
 // Per-limb physical column layout. Every logical length-N vector occupies
 // TRACE_SPLIT physical columns of length N / TRACE_SPLIT, in half order. The
 // layout is: secret halves, then per active key per digit the error halves,
 // then the matching error-square halves, then the claim-mask digit halves.
 pub(crate) struct LimbColumnLayout {
+    pub(crate) limb_index: usize,
     pub(crate) ring_degree: usize,
     pub(crate) trace_size: usize,
     pub(crate) family_shape: SuccinctSetupProofFamilyShape,
+    pub(crate) consistency_repetitions: usize,
     // (key index, digit count) per active key, in key order.
     pub(crate) active_keys: Vec<(usize, usize)>,
     pub(crate) total_error_columns: usize,
     pub(crate) private_vss_coefficient_columns: usize,
     pub(crate) compact_vss_coefficient_columns: usize,
+    pub(crate) compact_vss_coefficient_relation_columns: usize,
+    pub(crate) compact_vss_item_columns: usize,
     pub(crate) target_decryption_message_columns: usize,
     pub(crate) target_decryption_relation_count: usize,
+    compact_vss_message_encoding_layouts: Vec<CompactVssMessageEncodingLayout>,
+    compact_vss_message_encoding_offsets: Vec<usize>,
+    compact_same_secret_bridge_message_encoding_layouts: Vec<CompactVssMessageEncodingLayout>,
+    compact_same_secret_bridge_message_encoding_offsets: Vec<usize>,
+    target_decryption_message_encoding_layouts: Vec<CompactVssMessageEncodingLayout>,
+    target_decryption_message_encoding_offsets: Vec<usize>,
     // Linkage logical columns active in this limb: the binary negative
     // indicator plus the per-commitment opening-randomness columns, or zero
     // outside the commitment fields.
@@ -23,6 +90,8 @@ pub(crate) struct LimbColumnLayout {
     pub(crate) private_vss_randomness_columns: usize,
     pub(crate) compact_vss_randomness_columns: usize,
     pub(crate) target_decryption_randomness_columns: usize,
+    claim_mask_digit_counts: Vec<usize>,
+    claim_mask_slot_offsets: Vec<usize>,
     pub(crate) mask_column_count: usize,
 }
 
@@ -44,9 +113,59 @@ impl LimbColumnLayout {
             .map(|statement| statement.coefficient_commitments.len())
             .unwrap_or(0);
         let compact_vss_coefficient_columns = statement.compact_vss_coefficient_count(limb_index);
-        let target_decryption_message_columns = statement.target_decryption_message_count();
+        let compact_vss_coefficient_relation_columns =
+            statement.compact_vss_coefficient_relation_count(limb_index);
+        let compact_vss_item_columns = statement.compact_vss_item_count(limb_index);
+        let target_decryption_message_columns =
+            statement.target_decryption_message_count(limb_index);
         let target_decryption_relation_count =
             statement.target_decryption_relation_count(limb_index);
+        let compact_vss_range_evidence =
+            if family_shape == SuccinctSetupProofFamilyShape::CompactVssShareLinkage
+                && limb_index == SETUP_COMMITMENT_MODULUS_LIMB_INDICES[0]
+            {
+                CompactVssMessageRangeEvidence::DigitAndTritColumns
+            } else {
+                CompactVssMessageRangeEvidence::DigitColumnsOnly
+            };
+        let compact_vss_message_encoding_layouts = compact_vss_message_encoding_layouts_for_bounds(
+            statement.compact_vss_message_bounds(limb_index),
+            compact_vss_range_evidence,
+        )?;
+        if compact_vss_message_encoding_layouts.len()
+            != compact_vss_coefficient_columns + compact_vss_item_columns
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS statement bounds do not match the active message columns",
+            ));
+        }
+        let compact_vss_message_encoding_offsets =
+            compact_vss_message_encoding_offsets_for_layouts(
+                &compact_vss_message_encoding_layouts,
+            )?;
+        let compact_same_secret_bridge_message_encoding_layouts =
+            compact_vss_message_encoding_layouts_for_bounds(
+                statement.compact_same_secret_bridge_message_bounds(limb_index),
+                CompactVssMessageRangeEvidence::DigitAndTritColumns,
+            )?;
+        let compact_same_secret_bridge_message_encoding_offsets =
+            compact_vss_message_encoding_offsets_for_layouts(
+                &compact_same_secret_bridge_message_encoding_layouts,
+            )?;
+        let target_decryption_message_encoding_layouts =
+            compact_vss_message_encoding_layouts_for_bounds(
+                statement.target_decryption_message_bounds(limb_index),
+                CompactVssMessageRangeEvidence::DigitAndTritColumns,
+            )?;
+        if target_decryption_message_encoding_layouts.len() != target_decryption_message_columns {
+            return Err(invalid_succinct_setup_proof(
+                "target-decryption statement bounds do not match the active message columns",
+            ));
+        }
+        let target_decryption_message_encoding_offsets =
+            compact_vss_message_encoding_offsets_for_layouts(
+                &target_decryption_message_encoding_layouts,
+            )?;
         if active_keys.is_empty()
             && statement.linkage_randomness_count(limb_index) == 0
             && private_vss_coefficient_columns == 0
@@ -61,7 +180,8 @@ impl LimbColumnLayout {
         let linkage_randomness_columns = statement.linkage_randomness_count(limb_index);
         let private_vss_randomness_columns = statement.private_vss_randomness_count(limb_index);
         let compact_vss_randomness_columns = statement.compact_vss_randomness_count(limb_index);
-        let target_decryption_randomness_columns = statement.target_decryption_randomness_count();
+        let target_decryption_randomness_columns =
+            statement.target_decryption_randomness_count(limb_index);
         let ring_degree = statement.ring_degree;
         // The mask columns are sized from the number of published consistency
         // claims, so this must mirror consistency_vector_count() exactly. For
@@ -69,12 +189,16 @@ impl LimbColumnLayout {
         // consistency claim (their cross-field consistency is argued globally,
         // not by a per-claim mask; see consistency_vector_count), so the count is
         // the carry plus the opening-randomness columns, not the full logical
-        // column count. Sizing the masks from the logical column count instead
-        // would commit unused mask columns for claims that are never published.
+        // column count. Compact VSS share-linkage claims the per-item carries
+        // plus every compact message digit; the digit claims let later
+        // commitment fields omit the duplicated trit range-evidence columns
+        // without allowing per-field digit witnesses to drift.
         let consistency_vector_count = match family_shape {
             SuccinctSetupProofFamilyShape::PrivateVssShare => 1 + private_vss_randomness_columns,
             SuccinctSetupProofFamilyShape::CompactVssShareLinkage => {
-                1 + compact_vss_randomness_columns
+                compact_vss_item_columns
+                    + (compact_vss_coefficient_columns + compact_vss_item_columns)
+                        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
             }
             SuccinctSetupProofFamilyShape::TargetDecryptionShare => {
                 target_decryption_message_columns + target_decryption_randomness_columns
@@ -88,24 +212,79 @@ impl LimbColumnLayout {
                     }
             }
         };
-        let claim_count = consistency_vector_count * CONSISTENCY_REPETITIONS;
-        let mask_slot_count = claim_count * CLAIM_MASK_DIGIT_COUNT;
+        let consistency_repetitions = family_shape.consistency_repetitions();
+        let claim_count = consistency_vector_count * consistency_repetitions;
+        let claim_mask_digit_counts = (0..claim_count)
+            .map(|claim_index| {
+                if family_shape == SuccinctSetupProofFamilyShape::TargetDecryptionShare {
+                    let vector_index = claim_index / consistency_repetitions;
+                    if vector_index < target_decryption_message_columns {
+                        let global_message_index = statement
+                            .target_decryption_message_global_index(limb_index, vector_index)
+                            .expect("target-decryption message column is in the layout");
+                        match statement
+                            .target_decryption_message_claim_kind(global_message_index)
+                            .expect("target-decryption message column has a claim kind")
+                        {
+                            TargetDecryptionMessageClaimKind::AggregateOpening => {
+                                TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
+                            }
+                            TargetDecryptionMessageClaimKind::SmudgingOpening => {
+                                TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT
+                            }
+                        }
+                    } else {
+                        TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT
+                    }
+                } else if family_shape == SuccinctSetupProofFamilyShape::CompactVssShareLinkage {
+                    let vector_index = claim_index / consistency_repetitions;
+                    if vector_index < compact_vss_item_columns {
+                        COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT
+                    } else {
+                        COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT
+                    }
+                } else {
+                    family_shape.claim_mask_digit_count()
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut claim_mask_slot_offsets = Vec::with_capacity(claim_count + 1);
+        let mut mask_slot_count = 0_usize;
+        claim_mask_slot_offsets.push(mask_slot_count);
+        for digit_count in &claim_mask_digit_counts {
+            mask_slot_count = mask_slot_count.checked_add(*digit_count).ok_or_else(|| {
+                invalid_succinct_setup_proof("claim mask column count overflowed")
+            })?;
+            claim_mask_slot_offsets.push(mask_slot_count);
+        }
         let mask_column_count = mask_slot_count.div_ceil(ring_degree);
 
         Ok(Self {
+            limb_index,
             ring_degree,
             trace_size: ring_degree / TRACE_SPLIT,
             family_shape,
+            consistency_repetitions,
             active_keys,
             total_error_columns,
             private_vss_coefficient_columns,
             compact_vss_coefficient_columns,
+            compact_vss_coefficient_relation_columns,
+            compact_vss_item_columns,
             target_decryption_message_columns,
             target_decryption_relation_count,
+            compact_vss_message_encoding_layouts,
+            compact_vss_message_encoding_offsets,
+            compact_same_secret_bridge_message_encoding_layouts,
+            compact_same_secret_bridge_message_encoding_offsets,
+            target_decryption_message_encoding_layouts,
+            target_decryption_message_encoding_offsets,
             linkage_randomness_columns,
             private_vss_randomness_columns,
             compact_vss_randomness_columns,
             target_decryption_randomness_columns,
+            claim_mask_digit_counts,
+            claim_mask_slot_offsets,
             mask_column_count,
         })
     }
@@ -157,7 +336,9 @@ impl LimbColumnLayout {
 
     pub(crate) fn compact_vss_logical_columns(&self) -> usize {
         if self.compact_vss_active() {
-            self.compact_vss_coefficient_columns + 2 + self.compact_vss_randomness_columns
+            self.compact_vss_message_encoding_columns()
+                + self.compact_vss_item_columns
+                + self.compact_vss_randomness_columns
         } else {
             0
         }
@@ -165,7 +346,8 @@ impl LimbColumnLayout {
 
     pub(crate) fn target_decryption_logical_columns(&self) -> usize {
         if self.target_decryption_active() {
-            self.target_decryption_message_columns + self.target_decryption_randomness_columns
+            self.target_decryption_message_encoding_columns()
+                + self.target_decryption_randomness_columns
         } else {
             0
         }
@@ -181,9 +363,19 @@ impl LimbColumnLayout {
 
     pub(crate) fn compact_vss_relation_count(&self) -> usize {
         if self.compact_vss_active() {
-            (self.compact_vss_coefficient_columns + 1)
+            let decoder_relation_count = if self.compact_vss_digit_decoder_relations_active() {
+                (self.compact_vss_coefficient_relation_columns + self.compact_vss_item_columns)
+                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                    * LINCHECK_REPETITIONS
+            } else {
+                0
+            };
+            self.compact_vss_coefficient_relation_columns
                 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-                + 1
+                + self.compact_vss_item_columns
+                    * (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                        + LINCHECK_REPETITIONS)
+                + decoder_relation_count
         } else {
             0
         }
@@ -191,7 +383,8 @@ impl LimbColumnLayout {
 
     // Logical witness vectors carrying cross-limb consistency claims: the
     // shared secret first, then every active key's error vectors in order,
-    // then the linkage negative indicator and opening-randomness vectors.
+    // then the linkage negative indicator and opening-randomness vectors. Family
+    // shapes with their own lifted relations override this shape below.
     pub(crate) fn consistency_vector_count(&self) -> usize {
         if self.private_vss_active() {
             // The message (Shamir coefficient) columns carry no cross-field
@@ -216,16 +409,146 @@ impl LimbColumnLayout {
             // because they remain witnesses for the opening and share linchecks.
             1 + self.private_vss_randomness_columns
         } else if self.compact_vss_active() {
-            1 + self.compact_vss_randomness_columns
+            // Compact share-linkage claims the lifted carry for each
+            // recipient/source-limb item and every compact message digit.
+            // Message digit claims are what make the digit-only later
+            // commitment limbs sound: opening and share-relation linchecks keep
+            // consuming the digits in each field, while these claims bind the
+            // digits to one lifted integer vector across the carried fields.
+            // Opening randomness remains committed and ternary row-checked in
+            // each proof limb, but it is not consumed downstream and does not
+            // need a separate cross-field integer claim.
+            self.compact_vss_item_columns
+                + self.compact_vss_message_vector_count()
+                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
         } else if self.target_decryption_active() {
-            self.target_decryption_logical_columns()
+            self.target_decryption_message_columns + self.target_decryption_randomness_columns
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
         }
     }
 
     pub(crate) fn claim_count(&self) -> usize {
-        self.consistency_vector_count() * CONSISTENCY_REPETITIONS
+        self.consistency_vector_count() * self.consistency_repetitions
+    }
+
+    pub(crate) fn compact_vss_message_vector_count(&self) -> usize {
+        self.compact_vss_coefficient_columns + self.compact_vss_item_columns
+    }
+
+    pub(crate) fn compact_vss_digit_decoder_relations_active(&self) -> bool {
+        self.compact_vss_message_encoding_layouts
+            .first()
+            .copied()
+            .map(CompactVssMessageEncodingLayout::has_digit_decoder_relations)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn compact_vss_message_encoding_layout(
+        &self,
+        message_position: usize,
+    ) -> CompactVssMessageEncodingLayout {
+        self.compact_vss_message_encoding_layouts[message_position]
+    }
+
+    pub(crate) fn compact_vss_message_encoding_columns(&self) -> usize {
+        compact_vss_message_encoding_total(&self.compact_vss_message_encoding_offsets)
+    }
+
+    pub(crate) fn compact_vss_message_encoding_column_count(
+        &self,
+        message_position: usize,
+    ) -> usize {
+        self.compact_vss_message_encoding_offsets[message_position + 1]
+            - self.compact_vss_message_encoding_offsets[message_position]
+    }
+
+    pub(crate) fn compact_vss_message_trit_count(
+        &self,
+        message_position: usize,
+        digit_index: usize,
+    ) -> usize {
+        self.compact_vss_message_encoding_layouts[message_position]
+            .digit_trit_count(digit_index)
+            .expect("compact VSS digit is in the layout")
+    }
+
+    pub(crate) fn compact_vss_message_position_for_encoding_column(
+        &self,
+        vector_index: usize,
+    ) -> Option<(usize, usize)> {
+        compact_vss_message_position_for_encoding_column(
+            &self.compact_vss_message_encoding_offsets,
+            vector_index,
+        )
+    }
+
+    pub(crate) fn compact_same_secret_bridge_target_count(&self) -> usize {
+        if self.compact_same_secret_bridge_active() {
+            self.linkage_randomness_columns
+                / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn compact_same_secret_bridge_message_encoding_columns(&self) -> usize {
+        compact_vss_message_encoding_total(
+            &self.compact_same_secret_bridge_message_encoding_offsets,
+        )
+    }
+
+    pub(crate) fn compact_same_secret_bridge_message_trit_count(
+        &self,
+        target_index: usize,
+        digit_index: usize,
+    ) -> usize {
+        self.compact_same_secret_bridge_message_encoding_layouts[target_index]
+            .digit_trit_count(digit_index)
+            .expect("compact same-secret bridge digit is in the layout")
+    }
+
+    pub(crate) fn compact_same_secret_bridge_message_position_for_encoding_column(
+        &self,
+        vector_index: usize,
+    ) -> Option<(usize, usize)> {
+        compact_vss_message_position_for_encoding_column(
+            &self.compact_same_secret_bridge_message_encoding_offsets,
+            vector_index,
+        )
+    }
+
+    pub(crate) fn compact_same_secret_bridge_logical_columns(&self) -> usize {
+        if self.compact_same_secret_bridge_active() {
+            2 + self.compact_same_secret_bridge_message_encoding_columns()
+                + self.linkage_randomness_columns
+        } else {
+            0
+        }
+    }
+
+    pub(crate) fn target_decryption_message_encoding_columns(&self) -> usize {
+        compact_vss_message_encoding_total(&self.target_decryption_message_encoding_offsets)
+    }
+
+    pub(crate) fn target_decryption_message_trit_count(
+        &self,
+        message_position: usize,
+        digit_index: usize,
+    ) -> usize {
+        self.target_decryption_message_encoding_layouts[message_position]
+            .digit_trit_count(digit_index)
+            .expect("target-decryption message digit is in the layout")
+    }
+
+    pub(crate) fn target_decryption_message_position_for_encoding_column(
+        &self,
+        vector_index: usize,
+    ) -> Option<(usize, usize)> {
+        compact_vss_message_position_for_encoding_column(
+            &self.target_decryption_message_encoding_offsets,
+            vector_index,
+        )
     }
 
     pub(crate) fn physical_secret(&self, half: usize) -> usize {
@@ -257,6 +580,12 @@ impl LimbColumnLayout {
     ) -> usize {
         debug_assert!(self.linkage_active());
         debug_assert!(!self.private_vss_active());
+        if self.compact_same_secret_bridge_active() {
+            return TRACE_SPLIT
+                * (2 + self.compact_same_secret_bridge_message_encoding_columns()
+                    + randomness_position)
+                + half;
+        }
         TRACE_SPLIT * (1 + 2 * self.total_error_columns + 1 + randomness_position) + half
     }
 
@@ -271,21 +600,64 @@ impl LimbColumnLayout {
 
     pub(crate) fn physical_compact_vss_message(
         &self,
-        coefficient_index: usize,
+        message_position: usize,
+        encoding_column: usize,
         half: usize,
     ) -> usize {
         debug_assert!(self.compact_vss_active());
-        TRACE_SPLIT * coefficient_index + half
+        debug_assert!(message_position < self.compact_vss_message_vector_count());
+        debug_assert!(
+            encoding_column < self.compact_vss_message_encoding_column_count(message_position)
+        );
+        TRACE_SPLIT
+            * (self.compact_vss_message_encoding_offsets[message_position] + encoding_column)
+            + half
     }
 
-    pub(crate) fn physical_compact_vss_recipient_message(&self, half: usize) -> usize {
-        debug_assert!(self.compact_vss_active());
-        TRACE_SPLIT * self.compact_vss_coefficient_columns + half
+    pub(crate) fn physical_compact_vss_message_trit(
+        &self,
+        message_position: usize,
+        digit_index: usize,
+        trit_index: usize,
+        half: usize,
+    ) -> usize {
+        let encoding_column = self.compact_vss_message_encoding_layouts[message_position]
+            .trit_encoding_column(digit_index, trit_index)
+            .expect("compact VSS message trit is in the layout");
+        self.physical_compact_vss_message(message_position, encoding_column, half)
     }
 
-    pub(crate) fn physical_compact_vss_carry(&self, half: usize) -> usize {
+    pub(crate) fn physical_compact_vss_message_digit(
+        &self,
+        message_position: usize,
+        digit_index: usize,
+        half: usize,
+    ) -> usize {
+        let encoding_column = self.compact_vss_message_encoding_layouts[message_position]
+            .digit_encoding_column(digit_index)
+            .expect("compact VSS message digit is in the layout");
+        self.physical_compact_vss_message(message_position, encoding_column, half)
+    }
+
+    pub(crate) fn physical_compact_vss_recipient_message_at(
+        &self,
+        item_index: usize,
+        encoding_column: usize,
+        half: usize,
+    ) -> usize {
         debug_assert!(self.compact_vss_active());
-        TRACE_SPLIT * (self.compact_vss_coefficient_columns + 1) + half
+        debug_assert!(item_index < self.compact_vss_item_columns);
+        self.physical_compact_vss_message(
+            self.compact_vss_coefficient_columns + item_index,
+            encoding_column,
+            half,
+        )
+    }
+
+    pub(crate) fn physical_compact_vss_carry_at(&self, item_index: usize, half: usize) -> usize {
+        debug_assert!(self.compact_vss_active());
+        debug_assert!(item_index < self.compact_vss_item_columns);
+        TRACE_SPLIT * (self.compact_vss_message_encoding_columns() + item_index) + half
     }
 
     pub(crate) fn physical_compact_vss_randomness(
@@ -294,16 +666,87 @@ impl LimbColumnLayout {
         half: usize,
     ) -> usize {
         debug_assert!(self.compact_vss_active());
-        TRACE_SPLIT * (self.compact_vss_coefficient_columns + 2 + randomness_position) + half
+        TRACE_SPLIT
+            * (self.compact_vss_message_encoding_columns()
+                + self.compact_vss_item_columns
+                + randomness_position)
+            + half
     }
 
-    pub(crate) fn physical_target_decryption_message(
+    pub(crate) fn physical_compact_same_secret_bridge_message(
+        &self,
+        target_index: usize,
+        encoding_column: usize,
+        half: usize,
+    ) -> usize {
+        debug_assert!(self.compact_same_secret_bridge_active());
+        debug_assert!(target_index < self.compact_same_secret_bridge_target_count());
+        debug_assert!(
+            encoding_column
+                < self.compact_same_secret_bridge_message_encoding_layouts[target_index]
+                    .encoding_column_count()
+        );
+        TRACE_SPLIT
+            * (2 + self.compact_same_secret_bridge_message_encoding_offsets[target_index]
+                + encoding_column)
+            + half
+    }
+
+    pub(crate) fn physical_compact_same_secret_bridge_message_trit(
+        &self,
+        target_index: usize,
+        digit_index: usize,
+        trit_index: usize,
+        half: usize,
+    ) -> usize {
+        let encoding_column = self.compact_same_secret_bridge_message_encoding_layouts
+            [target_index]
+            .trit_encoding_column(digit_index, trit_index)
+            .expect("compact same-secret bridge message trit is in the layout");
+        self.physical_compact_same_secret_bridge_message(target_index, encoding_column, half)
+    }
+
+    pub(crate) fn physical_target_decryption_message_encoding(
         &self,
         message_position: usize,
+        encoding_column: usize,
         half: usize,
     ) -> usize {
         debug_assert!(self.target_decryption_active());
-        TRACE_SPLIT * message_position + half
+        debug_assert!(message_position < self.target_decryption_message_columns);
+        debug_assert!(
+            encoding_column
+                < self.target_decryption_message_encoding_layouts[message_position]
+                    .encoding_column_count()
+        );
+        TRACE_SPLIT
+            * (self.target_decryption_message_encoding_offsets[message_position] + encoding_column)
+            + half
+    }
+
+    pub(crate) fn physical_target_decryption_message_digit(
+        &self,
+        message_position: usize,
+        digit_index: usize,
+        half: usize,
+    ) -> usize {
+        let encoding_column = self.target_decryption_message_encoding_layouts[message_position]
+            .digit_encoding_column(digit_index)
+            .expect("target-decryption message digit is in the layout");
+        self.physical_target_decryption_message_encoding(message_position, encoding_column, half)
+    }
+
+    pub(crate) fn physical_target_decryption_message_trit(
+        &self,
+        message_position: usize,
+        digit_index: usize,
+        trit_index: usize,
+        half: usize,
+    ) -> usize {
+        let encoding_column = self.target_decryption_message_encoding_layouts[message_position]
+            .trit_encoding_column(digit_index, trit_index)
+            .expect("target-decryption message trit is in the layout");
+        self.physical_target_decryption_message_encoding(message_position, encoding_column, half)
     }
 
     pub(crate) fn physical_target_decryption_randomness(
@@ -312,7 +755,8 @@ impl LimbColumnLayout {
         half: usize,
     ) -> usize {
         debug_assert!(self.target_decryption_active());
-        TRACE_SPLIT * (self.target_decryption_message_columns + randomness_position) + half
+        TRACE_SPLIT * (self.target_decryption_message_encoding_columns() + randomness_position)
+            + half
     }
 
     pub(crate) fn physical_private_vss_carry(&self, half: usize) -> usize {
@@ -334,6 +778,8 @@ impl LimbColumnLayout {
             self.private_vss_logical_columns()
         } else if self.compact_vss_active() {
             self.compact_vss_logical_columns()
+        } else if self.compact_same_secret_bridge_active() {
+            self.compact_same_secret_bridge_logical_columns()
         } else if self.target_decryption_active() {
             self.target_decryption_logical_columns()
         } else {
@@ -347,6 +793,8 @@ impl LimbColumnLayout {
             self.private_vss_logical_columns()
         } else if self.compact_vss_active() {
             self.compact_vss_logical_columns()
+        } else if self.compact_same_secret_bridge_active() {
+            self.compact_same_secret_bridge_logical_columns()
         } else if self.target_decryption_active() {
             self.target_decryption_logical_columns()
         } else {
@@ -365,22 +813,55 @@ impl LimbColumnLayout {
         if self.private_vss_active() {
             TRACE_SPLIT * (self.private_vss_randomness_columns + self.mask_column_count)
         } else if self.compact_vss_active() {
-            TRACE_SPLIT * (self.compact_vss_randomness_columns + self.mask_column_count)
+            let compact_vss_message_trit_columns = self
+                .compact_vss_message_encoding_layouts
+                .iter()
+                .map(|layout| layout.total_trit_count())
+                .sum::<usize>();
+            TRACE_SPLIT
+                * (compact_vss_message_trit_columns
+                    + self.compact_vss_randomness_columns
+                    + self.mask_column_count)
+        } else if self.compact_same_secret_bridge_active() {
+            let compact_same_secret_bridge_message_trit_columns = self
+                .compact_same_secret_bridge_message_encoding_layouts
+                .iter()
+                .map(|layout| layout.total_trit_count())
+                .sum::<usize>();
+            TRACE_SPLIT
+                * (1 + 1
+                    + compact_same_secret_bridge_message_trit_columns
+                    + self.linkage_randomness_columns
+                    + self.mask_column_count)
         } else if self.target_decryption_active() {
-            TRACE_SPLIT * (self.target_decryption_randomness_columns + self.mask_column_count)
+            let target_decryption_message_trit_columns = self
+                .target_decryption_message_encoding_layouts
+                .iter()
+                .map(|layout| layout.total_trit_count())
+                .sum::<usize>();
+            TRACE_SPLIT
+                * (target_decryption_message_trit_columns
+                    + self.target_decryption_randomness_columns
+                    + self.mask_column_count)
         } else {
             self.phase_one_physical_count()
         }
     }
 
-    // Mask slot of one claim digit: claims are laid out consecutively with
-    // CLAIM_MASK_DIGIT_COUNT binary digits each.
+    pub(crate) fn claim_mask_digit_count(&self, claim_index: usize) -> usize {
+        self.claim_mask_digit_counts[claim_index]
+    }
+
+    // Mask slot of one claim digit: claims are laid out consecutively with the
+    // selected digit count for that claim.
     pub(crate) fn mask_slot(
         &self,
         claim_index: usize,
         digit_index: usize,
     ) -> (usize, usize, usize) {
-        let slot = claim_index * CLAIM_MASK_DIGIT_COUNT + digit_index;
+        debug_assert!(claim_index < self.claim_mask_digit_counts.len());
+        debug_assert!(digit_index < self.claim_mask_digit_count(claim_index));
+        let slot = self.claim_mask_slot_offsets[claim_index] + digit_index;
         let logical_column = slot / self.ring_degree;
         let position = slot % self.ring_degree;
         let half = position / self.trace_size;

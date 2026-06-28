@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import type { PackageManagerRunner } from '#tools/ci/package-manager-runner';
 import {
+    buildParallelLanes,
     parseCheckArguments,
     redrawEnabledForProgressMode,
 } from '#tools/ci/run-check';
+
+const packageManagerRunner = {
+    command: 'node',
+    commandArgumentsPrefix: ['pnpm'],
+    kind: 'pnpm',
+} as const satisfies PackageManagerRunner;
 
 describe('check runner arguments', () => {
     it('uses automatic progress rendering by default', () => {
@@ -35,5 +43,21 @@ describe('check runner arguments', () => {
         expect(redrawEnabledForProgressMode('always', false)).toBe(false);
         expect(redrawEnabledForProgressMode('auto', false)).toBeUndefined();
         expect(redrawEnabledForProgressMode('never', true)).toBe(false);
+    });
+
+    it('checks compact VSS parameter review as a standard lane', () => {
+        const lane = buildParallelLanes(packageManagerRunner).find(
+            (candidateLane) =>
+                candidateLane.name === 'Review compact VSS parameters',
+        );
+
+        expect(lane?.commands).toEqual([
+            expect.objectContaining({
+                args: ['pnpm', 'run', 'review:compact-vss-parameters'],
+                command: 'node',
+                description: 'Review compact VSS parameters',
+                logFileSlug: 'compact-vss-parameter-review',
+            }),
+        ]);
     });
 });

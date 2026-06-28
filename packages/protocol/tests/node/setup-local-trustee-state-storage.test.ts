@@ -10,11 +10,13 @@ import {
     createCompactVssCoefficientCommitmentSet,
     createCompactVssRecipientShareCommitmentBundle,
     createCompactVssShareLinkageStatement,
+} from '#packages/protocol/src/setup/compact-vss-commitments';
+import {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     decryptLocalTrusteeSetupState,
     encryptLocalTrusteeSetupState,
     type LocalTrusteeSetupStateEncryptionInput,
-} from '#packages/protocol/src/index';
+} from '#packages/protocol/src/setup/local-trustee-setup-state';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -407,6 +409,10 @@ describe('local trustee setup state storage', () => {
         });
         const decryptedState = await decryptLocalTrusteeSetupState({
             encryptedLocalState: encryptedState.encryptedLocalState,
+            sealedAggregateThresholdShare:
+                plaintext.sealedAggregateThresholdShare,
+            sealedTargetDecryptionProofWitness:
+                plaintext.sealedTargetDecryptionProofWitness,
             expectedLocalStateRoot:
                 encryptedState.localStateCommitment.localStateRoot,
             setupContext,
@@ -447,6 +453,10 @@ describe('local trustee setup state storage', () => {
         await expect(
             decryptLocalTrusteeSetupState({
                 encryptedLocalState: encryptedState.encryptedLocalState,
+                sealedAggregateThresholdShare:
+                    plaintext.sealedAggregateThresholdShare,
+                sealedTargetDecryptionProofWitness:
+                    plaintext.sealedTargetDecryptionProofWitness,
                 expectedLocalStateRoot:
                     encryptedState.localStateCommitment.localStateRoot,
                 setupContext: {
@@ -483,17 +493,15 @@ describe('local trustee setup state storage', () => {
             baselineState.localStateCommitment.targetDecryptionProofWitnessRoot,
         );
         expect(
-            compactState.localStatePlaintext.sealedTargetDecryptionProofWitness
-                .encryptedMaterial.plaintextByteLength,
+            compactState.sealedTargetDecryptionProofWitness.encryptedMaterial
+                .plaintextByteLength,
         ).toBeGreaterThan(
-            baselineState.localStatePlaintext.sealedTargetDecryptionProofWitness
-                .encryptedMaterial.plaintextByteLength,
+            baselineState.sealedTargetDecryptionProofWitness.encryptedMaterial
+                .plaintextByteLength,
         );
         const restoredCompactWitness =
             await decryptLocalTrusteeSetupSealedMaterial({
-                sealedMaterial:
-                    compactState.localStatePlaintext
-                        .sealedTargetDecryptionProofWitness,
+                sealedMaterial: compactState.sealedTargetDecryptionProofWitness,
                 expectedMaterialClass: 'target-decryption-proof-witness-sealed',
                 expectedMaterialRoot:
                     compactState.localStateCommitment
@@ -559,9 +567,7 @@ describe('local trustee setup state storage', () => {
         ).rejects.toThrow(/targetDecryptionRnsLimbCount/u);
         await expect(
             decryptLocalTrusteeSetupSealedMaterial({
-                sealedMaterial:
-                    compactState.localStatePlaintext
-                        .sealedTargetDecryptionProofWitness,
+                sealedMaterial: compactState.sealedTargetDecryptionProofWitness,
                 expectedMaterialClass: 'target-decryption-proof-witness-sealed',
                 expectedMaterialRoot:
                     compactState.localStateCommitment
@@ -664,8 +670,7 @@ describe('local trustee setup state storage', () => {
             });
 
         expect(
-            deliveredState.localStatePlaintext
-                .sealedTargetDecryptionProofWitness.encryptedMaterial
+            deliveredState.sealedTargetDecryptionProofWitness.encryptedMaterial
                 .plaintextByteLength,
         ).toBeGreaterThan(1_000);
 

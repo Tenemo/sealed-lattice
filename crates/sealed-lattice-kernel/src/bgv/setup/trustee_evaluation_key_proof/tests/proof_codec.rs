@@ -1,4 +1,8 @@
 use super::*;
+use crate::bgv::setup::trustee_evaluation_key_proof::merkle_commitment::MERKLE_DIGEST_BYTES;
+
+const COMMITTED_LOW_DEGREE_LAYER_RING_DEGREE: usize = SMALL_RING_DEGREE * 64;
+const COMMITTED_RESIDUAL_LOW_DEGREE_LAYER_RING_DEGREE: usize = SMALL_RING_DEGREE * 128;
 
 #[test]
 fn proof_codec_round_trips_and_rejects_malformed_bytes() {
@@ -40,11 +44,170 @@ fn proof_codec_round_trips_and_rejects_malformed_bytes() {
 }
 
 #[test]
+fn proof_codec_rejects_nonzero_field_residue_padding() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "facecafe",
+        &[round_one(2), rotation(3, 1)],
+        SMALL_RING_DEGREE,
+        Some(3),
+    )
+    .expect("development instance");
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    let mut bytes = encode_trustee_evaluation_key_proof(&proof);
+    let (padding_byte, first_padding_bit) = first_field_residue_padding_bit(&statement, &proof)
+        .expect("test proof must contain at least one padded field-residue slice");
+    bytes[padding_byte] |= 1_u8 << first_padding_bit;
+
+    let error = match decode_trustee_evaluation_key_proof(&statement, &bytes) {
+        Ok(_) => panic!("nonzero field-residue padding must reject"),
+        Err(error) => error,
+    };
+    assert!(
+        error.message.contains("noncanonical field-residue padding"),
+        "unexpected padding error: {}",
+        error.message
+    );
+}
+
+fn first_field_residue_padding_bit(
+    statement: &TrusteeEvaluationKeyStatement,
+    proof: &super::prover::SuccinctEvaluationKeyProof,
+) -> Option<(usize, usize)> {
+    let mut cursor = 8 + 8;
+    for (limb_index, limb_proof) in statement
+        .proof_limb_indices()
+        .into_iter()
+        .zip(&proof.limb_proofs)
+    {
+        let layout = LimbColumnLayout::new(statement, limb_index).expect("limb layout");
+        let total_columns = layout.phase_one_physical_count() + PHASE_TWO_COLUMN_COUNT;
+        cursor += 2 * MERKLE_DIGEST_BYTES;
+        if let Some(padding) = field_residue_padding_bit(cursor, layout.claim_count()) {
+            return Some(padding);
+        }
+        cursor += field_residue_slice_byte_count(layout.claim_count());
+        for _ in &limb_proof.deep_evaluations {
+            if let Some(padding) =
+                field_residue_padding_bit(cursor, total_columns * CHALLENGE_EXTENSION_DEGREE)
+            {
+                return Some(padding);
+            }
+            cursor += extension_slice_byte_count(total_columns);
+        }
+        cursor += low_degree_proof_byte_count(&limb_proof.low_degree);
+        cursor += low_degree_proof_byte_count(&limb_proof.sumcheck_residual_low_degree);
+        for opening in &limb_proof.query_openings {
+            for slot in 0..2 {
+                if let Some(padding) =
+                    field_residue_padding_bit(cursor, opening.phase_one_rows[slot].len())
+                {
+                    return Some(padding);
+                }
+                cursor += field_residue_slice_byte_count(opening.phase_one_rows[slot].len());
+            }
+            cursor += LEAF_SALT_BYTES;
+            for slot in 0..2 {
+                if let Some(padding) =
+                    field_residue_padding_bit(cursor, opening.phase_two_rows[slot].len())
+                {
+                    return Some(padding);
+                }
+                cursor += field_residue_slice_byte_count(opening.phase_two_rows[slot].len());
+            }
+            cursor += LEAF_SALT_BYTES;
+        }
+        cursor += batched_opening_byte_count(&limb_proof.witness_batch_opening);
+        cursor += batched_opening_byte_count(&limb_proof.quotient_batch_opening);
+    }
+
+    None
+}
+
+fn field_residue_padding_bit(start: usize, residue_count: usize) -> Option<(usize, usize)> {
+    let bit_count = residue_count * FIELD_RESIDUE_BIT_WIDTH;
+    let used_bits_in_final_byte = bit_count % 8;
+    (used_bits_in_final_byte != 0).then(|| {
+        (
+            start + field_residue_slice_byte_count(residue_count) - 1,
+            used_bits_in_final_byte,
+        )
+    })
+}
+
+fn field_residue_slice_byte_count(residue_count: usize) -> usize {
+    (residue_count * FIELD_RESIDUE_BIT_WIDTH).div_ceil(8)
+}
+
+fn extension_slice_byte_count(element_count: usize) -> usize {
+    field_residue_slice_byte_count(element_count * CHALLENGE_EXTENSION_DEGREE)
+}
+
+fn low_degree_proof_byte_count(proof: &super::super::low_degree_proof::LowDegreeProof) -> usize {
+    let mut byte_count = 8;
+    byte_count += proof.folded_layer_roots.len() * MERKLE_DIGEST_BYTES;
+    byte_count += extension_slice_byte_count(proof.final_coefficients.len());
+    for fold_index in 0..proof.folded_layer_roots.len() {
+        byte_count += low_degree_sibling_table_byte_count(proof, fold_index);
+    }
+    for layer_opening in &proof.layer_batch_openings {
+        byte_count += batched_opening_byte_count(layer_opening);
+    }
+
+    byte_count
+}
+
+fn low_degree_sibling_table_byte_count(
+    proof: &super::super::low_degree_proof::LowDegreeProof,
+    fold_index: usize,
+) -> usize {
+    let mut table = Vec::new();
+    for query_opening in &proof.query_openings {
+        let sibling = query_opening.folded_layer_siblings[fold_index].sibling;
+        if !table.contains(&sibling) {
+            table.push(sibling);
+        }
+    }
+    let compressed_sibling_bytes = extension_slice_byte_count(table.len())
+        + low_degree_sibling_reference_byte_count(table.len());
+    let raw_sibling_bytes = extension_slice_byte_count(LOW_DEGREE_QUERY_COUNT);
+    let sibling_payload_bytes =
+        if table.len() < LOW_DEGREE_QUERY_COUNT && compressed_sibling_bytes < raw_sibling_bytes {
+            compressed_sibling_bytes
+        } else {
+            raw_sibling_bytes
+        };
+
+    8 + sibling_payload_bytes
+}
+
+fn low_degree_sibling_reference_byte_count(table_count: usize) -> usize {
+    LOW_DEGREE_QUERY_COUNT
+        .checked_mul(low_degree_sibling_reference_bit_width(table_count))
+        .expect("low-degree sibling reference bit count must fit usize")
+        .div_ceil(8)
+}
+
+fn low_degree_sibling_reference_bit_width(table_count: usize) -> usize {
+    if table_count <= 1 {
+        0
+    } else {
+        usize::BITS as usize - (table_count - 1).leading_zeros() as usize
+    }
+}
+
+fn batched_opening_byte_count(
+    opening: &super::super::merkle_commitment::BatchedMerkleOpening,
+) -> usize {
+    8 + opening.authentication_nodes.len() * MERKLE_DIGEST_BYTES
+}
+
+#[test]
 fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "c0dec0de",
         &[round_one(2), rotation(3, 1)],
-        SMALL_RING_DEGREE,
+        COMMITTED_LOW_DEGREE_LAYER_RING_DEGREE,
         Some(3),
     )
     .expect("development instance");
@@ -71,7 +234,7 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "cafe0dd0",
         &[round_one(2), rotation(3, 1)],
-        SMALL_RING_DEGREE,
+        COMMITTED_RESIDUAL_LOW_DEGREE_LAYER_RING_DEGREE,
         Some(3),
     )
     .expect("development instance");
@@ -98,7 +261,7 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "dec0ded0",
         &[round_one(2), rotation(3, 1)],
-        SMALL_RING_DEGREE,
+        COMMITTED_LOW_DEGREE_LAYER_RING_DEGREE,
         Some(3),
     )
     .expect("development instance");
@@ -114,7 +277,7 @@ fn proof_codec_rejects_low_degree_shape_mismatches_before_verification() {
         LOW_DEGREE_QUERY_COUNT * folded_layer_path_length(extension_size, 0);
     proof.limb_proofs[0].low_degree.layer_batch_openings[0]
         .authentication_nodes
-        .resize(maximum_layer_zero_nodes + 1, [0_u8; 64]);
+        .resize(maximum_layer_zero_nodes + 1, [0_u8; MERKLE_DIGEST_BYTES]);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
     let error = match decode_trustee_evaluation_key_proof(&statement, &encoded) {
         Ok(_) => panic!("an oversized batched opening must reject at decode"),
@@ -133,16 +296,24 @@ fn assert_noncanonical_encoded_proof_rejects(
     label: &str,
     mutate_proof: impl FnOnce(&mut super::prover::SuccinctEvaluationKeyProof, u64),
 ) {
+    assert_noncanonical_encoded_proof_rejects_for_ring(label, SMALL_RING_DEGREE, mutate_proof);
+}
+
+fn assert_noncanonical_encoded_proof_rejects_for_ring(
+    label: &str,
+    ring_degree: usize,
+    mutate_proof: impl FnOnce(&mut super::prover::SuccinctEvaluationKeyProof, u64),
+) {
     let (statement, witness) = generate_development_trustee_instance_with_linkage(
         "c0decafe",
         &[round_one(2), rotation(3, 1)],
-        SMALL_RING_DEGREE,
+        ring_degree,
         Some(3),
     )
     .expect("development instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let modulus = statement.limb_moduli()[0];
+    let modulus = DATA_PRIMES[0];
     mutate_proof(&mut proof, modulus);
     let encoded = encode_trustee_evaluation_key_proof(&proof);
 
@@ -169,10 +340,14 @@ fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
     assert_noncanonical_encoded_proof_rejects("low-degree final coefficient", |proof, modulus| {
         proof.limb_proofs[0].low_degree.final_coefficients[0][0] = modulus;
     });
-    assert_noncanonical_encoded_proof_rejects("low-degree folded opening", |proof, modulus| {
-        proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_pairs[0].pair[0][0] =
-            modulus;
-    });
+    assert_noncanonical_encoded_proof_rejects_for_ring(
+        "low-degree folded opening",
+        COMMITTED_LOW_DEGREE_LAYER_RING_DEGREE,
+        |proof, modulus| {
+            proof.limb_proofs[0].low_degree.query_openings[0].folded_layer_siblings[0].sibling[0] =
+                modulus;
+        },
+    );
     assert_noncanonical_encoded_proof_rejects(
         "residual low-degree final coefficient",
         |proof, modulus| {
@@ -181,9 +356,6 @@ fn proof_codec_rejects_noncanonical_values_in_every_encoded_area() {
                 .final_coefficients[0][0] = modulus;
         },
     );
-    assert_noncanonical_encoded_proof_rejects("residual phase-two query row", |proof, modulus| {
-        proof.limb_proofs[0].sumcheck_residual_query_openings[0].phase_two_rows[0][0] = modulus;
-    });
 }
 
 #[test]
@@ -210,7 +382,7 @@ fn proof_codec_rejects_noncanonical_values_for_each_succinct_family_shape() {
     for (statement, witness) in family_cases {
         let mut proof =
             prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-        proof.limb_proofs[0].masked_consistency_claims[0] = statement.limb_moduli()[0];
+        proof.limb_proofs[0].masked_consistency_claims[0] = DATA_PRIMES[0];
         let encoded = encode_trustee_evaluation_key_proof(&proof);
         assert!(
             decode_trustee_evaluation_key_proof(&statement, &encoded).is_err(),

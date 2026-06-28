@@ -5,6 +5,10 @@ import {
     prepareLocalTargetDecryptionShareWitness,
 } from '#packages/protocol/src/target-decryption/local-target-share-witness';
 import {
+    encodeBgvTargetDecryptionShareProofMaterialBinary,
+    type BgvTargetDecryptionShareProofMaterial,
+} from '#packages/protocol/src/target-decryption/proof-material-transport';
+import {
     loadTranscriptCoreKernel,
     TranscriptCoreKernelCommandError,
     type BgvTargetDecryptionShareProofStatement,
@@ -83,7 +87,7 @@ const rebindProofStatementRoot = (
 describe('BGV target-decryption kernel commands', () => {
     it('generates target share proof statements and checks their bindings from restored compact local state through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const fixture = kernel.generateBgvTargetDecryptionFixture();
+        const fixture = kernel.generateBgvTargetDecryptionDevelopmentFixture();
         const setupPublicMatrixSeedHash = (
             fixture.setupPackage as unknown as SetupPackageWithCommonRandomness
         ).commonRandomness.publicMatrixSeedHash;
@@ -369,8 +373,7 @@ describe('BGV target-decryption kernel commands', () => {
                     trusteeIdentity: fixture.trusteeIdentity,
                     targetDecryptionShare: localShare,
                     proofStatement,
-                    proofRandomnessSource: 'invalid-fixture-source',
-                    proofRandomnessSeedHex: '11'.repeat(64),
+                    proofRandomnessSeedHex: '11'.repeat(63),
                     proofRandomnessNonceHex: '22'.repeat(64),
                 },
             );
@@ -389,12 +392,12 @@ describe('BGV target-decryption kernel commands', () => {
             (
                 invalidProofMaterialGenerationError as TranscriptCoreKernelCommandError
             ).message,
-        ).toContain('proofRandomnessSource');
+        ).toContain('proofRandomnessSeedHex');
 
         let missingProofMaterialRootError: unknown;
         const malformedProofMaterial = {
             objectType: 'BgvTargetDecryptionShareProofMaterial',
-            objectVersion: 1,
+            objectVersion: 8,
         } as unknown as Parameters<
             TranscriptCoreKernel['verifyBgvTargetDecryptionShareProofMaterial']
         >[0]['proofMaterial'];
@@ -424,34 +427,101 @@ describe('BGV target-decryption kernel commands', () => {
                 .message,
         ).toContain('proofMaterialRoot');
 
-        let missingRecombinationQuorumError: unknown;
+        const fakeProofMaterialWithoutRoot = {
+            objectType: 'BgvTargetDecryptionShareProofMaterial',
+            objectVersion: 8,
+            proofRecords: [
+                {
+                    objectType: 'BgvTargetDecryptionShareProofRecord',
+                    objectVersion: 7,
+                    proofBytesBase64: 'AQIDBAU=',
+                },
+            ],
+        } as const;
+        const fakeProofMaterial = {
+            ...fakeProofMaterialWithoutRoot,
+            proofMaterialRoot: kernel.deriveProtocolHash({
+                namespace: 'TargetDecryptionShareProofMaterialRoot',
+                value: fakeProofMaterialWithoutRoot,
+            }),
+        } satisfies BgvTargetDecryptionShareProofMaterial;
+        const transportedFakeProofMaterial =
+            encodeBgvTargetDecryptionShareProofMaterialBinary(
+                fakeProofMaterial,
+            );
+        const tamperedChunk = Uint8Array.from(
+            transportedFakeProofMaterial.chunks[0] ?? new Uint8Array(),
+        );
+        tamperedChunk[tamperedChunk.length - 1] ^= 1;
+        let tamperedBinaryProofMaterialError: unknown;
         try {
-            kernel.verifyAndRecombineBgvTargetDecryptionShares({
+            kernel.verifyBgvTargetDecryptionShareBinaryProofMaterial({
                 setupPackage: fixture.setupPackage,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetCiphertextBinding: fixture.targetCiphertextBinding,
                 targetCiphertexts: fixture.targetCiphertexts,
                 targetShareProfile: fixture.targetShareProfile,
-                targetDecryptionShares: [],
-                proofStatements: [],
-                proofMaterials: [],
+                targetDecryptionShare: localShare,
+                proofStatement,
+                transportedProofMaterial: {
+                    ...transportedFakeProofMaterial,
+                    chunks: [tamperedChunk],
+                },
             });
         } catch (error: unknown) {
-            missingRecombinationQuorumError = error;
+            tamperedBinaryProofMaterialError = error;
         }
-        expect(missingRecombinationQuorumError).toBeInstanceOf(
+        expect(tamperedBinaryProofMaterialError).toBeInstanceOf(
             TranscriptCoreKernelCommandError,
         );
         expect(
             (
-                missingRecombinationQuorumError as TranscriptCoreKernelCommandError
+                tamperedBinaryProofMaterialError as TranscriptCoreKernelCommandError
+            ).code,
+        ).toBe('ProfileComponentMismatch');
+        expect(
+            (
+                tamperedBinaryProofMaterialError as TranscriptCoreKernelCommandError
+            ).message,
+        ).toContain('fullObjectHash');
+
+        let wrongChunkCountBinaryProofMaterialError: unknown;
+        try {
+            kernel.verifyBgvTargetDecryptionShareBinaryProofMaterial({
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                targetDecryptionShare: localShare,
+                proofStatement,
+                transportedProofMaterial: {
+                    ...transportedFakeProofMaterial,
+                    chunkCount: transportedFakeProofMaterial.chunkCount + 1,
+                },
+            });
+        } catch (error: unknown) {
+            wrongChunkCountBinaryProofMaterialError = error;
+        }
+        expect(wrongChunkCountBinaryProofMaterialError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (
+                wrongChunkCountBinaryProofMaterialError as TranscriptCoreKernelCommandError
             ).code,
         ).toBe('MalformedLength');
         expect(
             (
-                missingRecombinationQuorumError as TranscriptCoreKernelCommandError
+                wrongChunkCountBinaryProofMaterialError as TranscriptCoreKernelCommandError
             ).message,
-        ).toContain('interpolation quorum');
+        ).toContain('chunkCount');
+
+        expect(kernel.verifyTargetDecryptionResult()).toEqual({
+            ok: false,
+            operation: 'verifyTargetDecryptionResult',
+            refusalReason: 'CompactVssPublicMaterialNotBinding',
+        });
 
         const reboundWrongShareRoot = rebindProofStatementRoot(kernel, {
             ...proofStatement,

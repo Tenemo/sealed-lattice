@@ -1,8 +1,12 @@
+use num_bigint::BigUint;
 use serde_json::{Value, json};
 
 use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
+use super::merkle_commitment::MERKLE_DIGEST_BYTES;
 use super::*;
+use crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL;
 use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+use crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
 use crate::hashing::derive_protocol_hash;
 
 // Repo-owned accounting for the trustee-batched succinct evaluation-key
@@ -20,9 +24,10 @@ use crate::hashing::derive_protocol_hash;
 // the up-to-capacity proximity-gap radius 1 - rho of BCI+23 Conjecture 8.4,
 // which Crites-Stewart (CS25) and BCHKS26 DISPROVED in 2025. The repaired
 // entropy-capacity radius costs about 1/log2(q) of distance over the base limb
-// field, lowering per-query soundness from one bit to about 0.938 bit, so the
-// fixed 168-query count now records about 140 effective bits after the union
-// allowance rather than 144. The proven BCIKS20 Johnson fallback is unchanged.
+// field, lowering per-query soundness from one bit to about 0.938 bit. The
+// selected 156-query count now records about 129 effective bits after the union
+// allowance instead of the one-bit-per-query 140-bit figure. The proven
+// BCIKS20 Johnson fallback is unchanged.
 //
 // This conjecture is an admissible soundness foundation under the
 // project's proximity-gap policy: a repaired below-capacity conjecture may carry
@@ -35,12 +40,37 @@ use crate::hashing::derive_protocol_hash;
 //
 // The QROM row now carries the computed CMS19 reduction loss (state-restoration
 // framework): the achieved quantum soundness is the Grover square-root of the
-// classical round-by-round soundness, about seventy bits after the instance
-// union, recorded with the present-time-threat scope and kept below the
-// conventional 128-bit-quantum bar. The smudging row is a bounded-leakage
-// statement rather than a 128-bit zero-knowledge claim.
+// classical round-by-round soundness, about 72 bits before the instance union
+// and about 64 bits after it, recorded with the present-time-threat scope and
+// kept below the
+// conventional 128-bit-quantum bar. The Merkle digest row records the BHT hash
+// term from the implemented internal commitment width rather than treating the
+// transported proof-byte hash length as the Merkle binding length. The smudging
+// row is a bounded-leakage statement rather than a 128-bit zero-knowledge claim.
 // The accounting hash is bound into the generate and verify command responses,
 // and package integration binds it into the setup proof accounting certificate.
+const MERKLE_DIGEST_BITS: i64 = (MERKLE_DIGEST_BYTES as i64) * 8;
+
+fn claim_mask_bound_biguint(mask_digit_count: usize) -> CanonicalResult<BigUint> {
+    let exponent = u32::try_from(mask_digit_count)
+        .map_err(|_| invalid_succinct_setup_proof("claim mask digit count overflowed"))?;
+
+    Ok(BigUint::from(CLAIM_MASK_RADIX).pow(exponent))
+}
+
+fn claim_mask_entropy_bits_floor(mask_digit_count: usize) -> CanonicalResult<i64> {
+    let mask_bound = claim_mask_bound_biguint(mask_digit_count)?;
+    let bits = mask_bound.bits();
+    if bits == 0 {
+        return Err(invalid_succinct_setup_proof(
+            "claim mask bound must be positive",
+        ));
+    }
+
+    i64::try_from(bits - 1)
+        .map_err(|_| invalid_succinct_setup_proof("claim mask entropy bit count overflowed"))
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(super) struct SuccinctProofSoundnessReport {
     pub(super) trace_size: usize,
@@ -116,7 +146,7 @@ pub(super) fn succinct_proof_soundness_report(
     let effective_soundness_bits = weakest_round_bits - union_budget_bits;
     let achieved_quantum_soundness_bits = weakest_round_bits / 2;
     let achieved_quantum_soundness_after_union_bits = effective_soundness_bits / 2;
-    let digest_bits = 512_i64;
+    let digest_bits = MERKLE_DIGEST_BITS;
     let quantum_collision_resistance_bits = digest_bits / 3;
 
     Ok(SuccinctProofSoundnessReport {
@@ -164,11 +194,14 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     let soundness_report = succinct_proof_soundness_report(trace_size)?;
     let extension_size = soundness_report.extension_size;
     let commitment_bound = soundness_report.commitment_bound;
+    let main_final_coefficient_count = low_degree_final_coefficient_count(commitment_bound)?;
+    let residual_final_coefficient_count =
+        low_degree_final_coefficient_count(soundness_report.sumcheck_residual_degree_bound)?;
     let mask_degree = column_mask_degree(trace_size);
     let opened_evaluations_per_column = soundness_report.opened_masked_evaluations_per_column;
     // Clear consistency sums are bounded by max witness magnitude (two for
     // centered-binomial errors) times the ring degree times the coefficient
-    // bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT binary digits.
+    // bound; the smudging mask spans CLAIM_MASK_DIGIT_COUNT base-3 digits.
     let consistency_coefficient_bound = (1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1;
     // Witness magnitude two is the centered-binomial error bound, exact for the
     // three magnitude-two families (trustee-evaluation-key,
@@ -180,6 +213,8 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         2_u128 * POLYNOMIAL_DEGREE as u128 * u128::from(consistency_coefficient_bound);
     // Ceiling of the clear bound's bit length, again the conservative side.
     let clear_claim_bound_bits = i64::from(clear_claim_bound.ilog2()) + 1;
+    let claim_mask_bound = claim_mask_bound_biguint(CLAIM_MASK_DIGIT_COUNT)?;
+    let claim_mask_entropy_bits_floor = claim_mask_entropy_bits_floor(CLAIM_MASK_DIGIT_COUNT)?;
     // Union budget over the first profile: limb fields, schedule keys,
     // trustees, and accepted ceremony objects. Stated as a power-of-two
     // allowance the per-round bounds are discounted by.
@@ -193,7 +228,7 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     // probability rho + 1/base_field_bits ~ 0.522 rather than rho = 1/2, and
     // per-query soundness is -log2(0.522) ~ 0.938 bit, not one bit. We floor
     // that to 930/1000 bit per query, a conservative understatement, to stay in
-    // integer arithmetic; at 168 queries this records 156 bits, 140 after the
+    // integer arithmetic; at 156 queries this records 145 bits, 129 after the
     // union allowance, still clearing 128.
     let query_round_bits = soundness_report.query_round_bits;
     // The proven, unconditional fallback is the BCIKS20 Johnson radius
@@ -218,16 +253,16 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
     // square-root (half in bits) of the classical round-by-round soundness; it
     // is derived from the same classical variables so the two can never drift.
     // The t^3 / 2^lambda hash term is BHT quantum collision search on the
-    // SHAKE256 512-bit digest, about a third of the digest in bits.
+    // internal Merkle commitment digest, about a third of the digest in bits.
     let achieved_quantum_soundness_bits = soundness_report.achieved_quantum_soundness_bits;
     let achieved_quantum_soundness_after_union_bits =
         soundness_report.achieved_quantum_soundness_after_union_bits;
-    let digest_bits = 512_i64;
+    let digest_bits = MERKLE_DIGEST_BITS;
     let quantum_collision_resistance_bits = soundness_report.quantum_collision_resistance_bits;
 
     Ok(json!({
         "objectType": "SuccinctEvaluationKeyProofAccounting",
-        "objectVersion": 3,
+        "objectVersion": 6,
         "proofFamily": "trustee-evaluation-key",
         "argumentShape": {
             "model": "per-limb-field univariate polynomial IOP with batched low-degree commitment",
@@ -248,10 +283,13 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
         },
         "lowDegreeSoundness": {
             "queryCount": LOW_DEGREE_QUERY_COUNT,
-            "foldedFinalCoefficientCount": LOW_DEGREE_FINAL_COEFFICIENT_COUNT,
+            "minimumFoldedFinalCoefficientCount": LOW_DEGREE_MIN_FINAL_COEFFICIENT_COUNT,
+            "maximumFoldedFinalCoefficientCount": LOW_DEGREE_MAX_FINAL_COEFFICIENT_COUNT,
+            "mainBatchedFinalCoefficientCount": main_final_coefficient_count,
+            "sumcheckResidualFinalCoefficientCount": residual_final_coefficient_count,
             "mainBatchedDegreeBound": commitment_bound,
             "sumcheckResidualDegreeBound": soundness_report.sumcheck_residual_degree_bound,
-            "sumcheckResidualProof": "a second low-degree proof over the same quotient tree proves the sumcheck residual column has degree below the trace size; the deterministic zero DEEP anchor binds its constant term",
+            "sumcheckResidualProof": "a second low-degree proof over the same quotient tree proves the sumcheck residual column has degree below the trace size; both low-degree commitments are bound before one shared query set is sampled, and the deterministic zero DEEP anchor binds its constant term",
             "conjecturedQueryBoundLog2": -query_round_bits,
             "provenBoundReference": "Ben-Sasson, Carmon, Ishai, Kopparty, Saraf, Proximity gaps for Reed-Solomon codes (BCIKS20)",
             "provenFallbackQueryBoundLog2": -proven_fallback_query_bits,
@@ -285,22 +323,23 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_value() -> CanonicalResul
             "preUnionCollisionBoundLog2": -consistency_round_bits,
             "integerBinding": {
                 "clearClaimBound": clear_claim_bound.to_string(),
-                "maskBound": (1_u128 << CLAIM_MASK_DIGIT_COUNT).to_string(),
-                "twoPrimeWindowRule": "the product of the two smallest data primes exceeds twice the mask-plus-clear claim bound, so the lifted integer is unique and a claim present in fewer than two limb fields is refused",
+                "maskBound": claim_mask_bound.to_string(),
+                "crtWindowRule": "the product of the active proof fields must exceed twice the mask-plus-clear claim bound; statements that carry too few fields for the selected base-3 mask range are refused before proving",
             },
         },
         "zeroKnowledge": {
             "columnMaskDegree": mask_degree,
             "openedEvaluationsPerColumn": opened_evaluations_per_column,
             "openedMaskedEvaluationsPerColumn": opened_evaluations_per_column,
-            "extraPhaseTwoResidualOpeningsPerColumn": 2 * LOW_DEGREE_QUERY_COUNT,
+            "extraPhaseTwoResidualOpeningsPerColumn": 0,
+            "residualOpeningReuse": "the residual low-degree proof reuses the main phase-two query leaves after both low-degree commitments are bound, so it does not disclose an additional quotient-tree row set",
             "saltedCommitmentLeaves": true,
             "phaseTwoColumnsDeterministicFromMaskedMaterial": true,
             "simulatorMarginEvaluations": mask_degree as i64 - opened_evaluations_per_column as i64,
             "smudgingBudget": {
-                "perClaimStatisticalDistanceLog2": clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64,
+                "perClaimStatisticalDistanceLog2": clear_claim_bound_bits - claim_mask_entropy_bits_floor,
                 "claimBudgetLog2Approximate": 17,
-                "totalLeakageLog2Approximate": clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64 + 17,
+                "totalLeakageLog2Approximate": clear_claim_bound_bits - claim_mask_entropy_bits_floor + 17,
             },
         },
         "fiatShamir": {
@@ -354,7 +393,9 @@ pub(crate) fn succinct_evaluation_key_proof_accounting_hash() -> CanonicalResult
 // One migrated family's accounting: the closed evaluation-key accounting with
 // the object type, proof family, family relation rows, and per-family mobile
 // measurement row overridden. The argument machinery, parameters, and theorem
-// rows stay the shared closed accounting; only the family-specific rows change.
+// rows stay the shared accounting; families whose witness bounds differ from
+// centered-binomial columns override the inherited smudging and integer-binding
+// rows.
 fn migrated_family_accounting(
     object_type: &str,
     proof_family: &str,
@@ -365,7 +406,7 @@ fn migrated_family_accounting(
     // (perClaimStatisticalDistanceLog2 about -68, clear claim bound about 2^24)
     // into every migrated family. That figure is exact for the magnitude-two
     // centered-binomial families; the recipient-private VSS family overrides
-    // both blocks with a family-aware full-range-message bound in
+    // both blocks with a family-aware carry-driven bound in
     // succinct_private_vss_share_accounting_value.
     let mut accounting = succinct_evaluation_key_proof_accounting_value()?;
     let accounting_fields = accounting
@@ -388,12 +429,11 @@ fn migrated_family_accounting(
     Ok(accounting)
 }
 
-// A measurement row whose desktop browser lane has not yet recorded its
-// numbers; the family does not close until the lane runs and the row flips to
-// the recorded shape.
+// A measurement row whose desktop browser lane still needs numbers. The row
+// names the required evidence without carrying a self-attested status label.
 fn pending_desktop_browser_measurement() -> Value {
     json!({
-        "status": "wasm-browser-measurement-pending",
+        "requiredLane": "manual desktop Chromium WASM measurement over the published WASM kernel artifact",
         "requiredRows": [
             "maximum per-trustee prove time",
             "full setup-package verify time",
@@ -407,11 +447,10 @@ fn pending_desktop_browser_measurement() -> Value {
 
 // A measurement row recorded on a desktop browser lane with every
 // supported-phone row left open. The canonical object never carries
-// machine-specific numbers, so the recorded lane is described by what it
-// measures, not by one machine's results.
+// machine-specific numbers or self-attested status labels, so the recorded lane
+// is described by what it measures, not by one machine's results.
 fn recorded_desktop_browser_measurement(family_label: &str) -> Value {
     json!({
-        "status": "desktop-browser-wasm-measurement-recorded-supported-phone-rows-open",
         "recordedLane": format!("manual desktop Chromium vitest lane over the published WASM kernel artifact: one first-profile {family_label} prove and verify per run, logging per-trustee prove time, verify time, proof byte length, peak WASM linear memory, largest copied buffer, persistent storage footprint, and resume behavior"),
         "recordedRows": [
             "per-trustee prove time in desktop browser WASM",
@@ -485,14 +524,14 @@ pub(crate) fn succinct_public_key_share_accounting_hash() -> CanonicalResult<Str
 pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<Value> {
     // Family-aware leakage accounting. The migrated base blocks are computed for
     // magnitude-two centered-binomial witnesses (clear claim bound about 2^24,
-    // per-claim statistical distance about 2^-68). The recipient-private VSS
+    // per-claim statistical distance about 2^-67). The recipient-private VSS
     // family masks only the carry and the ternary opening-randomness columns: its
     // message (Shamir coefficient) columns carry no consistency claim because the
     // per-field opening rows plus the opening-randomness consistency already pin
     // them across the commitment fields (see consistency_vector_count in
     // relation.rs), so masking them would add leakage with no soundness gain. Its
     // clear claim bound is therefore carry-driven (about 2^34) and its real
-    // per-claim leakage about 2^-58 (about 2^-41 across the first profile's ~2^17
+    // per-claim leakage about 2^-57 (about 2^-39 across the first profile's ~2^17
     // claims) -- still the leakage-dominating family of the four, but only mildly,
     // not by the ~46 bits the message-masking variant cost. The smudging and
     // integer-binding rows are recomputed from that carry bound below, sourced
@@ -506,7 +545,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
             "commitmentOpeningRows": "for every hidden Shamir coefficient polynomial F_k and every setup commitment row, the proof checks the published BDLOP commitment row against F_k and its ternary opening randomness over each commitment field",
             "liftedShareRelation": "for recipient trustee point alpha_j, the proof checks sum_k alpha_j^k F_k - q_l * carry = share_j over the commitment fields; the term q_l * carry is not dropped except in fields where q_l is the field modulus, and the other commitment fields bind the integer carry",
             "privacyBoundary": "coefficient messages, opening randomness, and carry vectors stay witness-private; the envelope publishes only share values, commitment roots, statement and proof hashes, proof bytes or chunk roots, and verification status",
-            "integerBinding": "full-size message residues use the shared masked-claim two-prime lift with a statement-specific bound based on the source limb modulus; carry columns use the explicit first-profile carry bound",
+            "integerBinding": "the masked consistency claims use the shared CRT lift window with a statement-specific bound; carry columns use the explicit first-profile carry bound",
         }),
         pending_desktop_browser_measurement(),
     )?;
@@ -542,7 +581,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // decryption threshold (four). Sourcing the carry bound from the same helper
     // masked_claim_bounds uses keeps the relation bound and the disclosed figure
     // from diverging. This yields a clear bound about 2^34, so per-claim leakage
-    // about 2^-58.
+    // about 2^-57 with the current base-3 mask range.
     const FIRST_PROFILE_LARGEST_RECIPIENT_ROSTER_POSITION: u64 = 9;
     const FIRST_PROFILE_SHAMIR_COEFFICIENT_COUNT: usize = 4;
     let worst_case_carry_bound =
@@ -555,7 +594,9 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     let private_vss_clear_claim_bound =
         worst_case_carry_bound * POLYNOMIAL_DEGREE as u128 * consistency_coefficient_bound;
     let private_vss_clear_claim_bound_bits = i64::from(private_vss_clear_claim_bound.ilog2()) + 1;
-    let per_claim_leakage_log2 = private_vss_clear_claim_bound_bits - CLAIM_MASK_DIGIT_COUNT as i64;
+    let claim_mask_bound = claim_mask_bound_biguint(CLAIM_MASK_DIGIT_COUNT)?;
+    let claim_mask_entropy_bits_floor = claim_mask_entropy_bits_floor(CLAIM_MASK_DIGIT_COUNT)?;
+    let per_claim_leakage_log2 = private_vss_clear_claim_bound_bits - claim_mask_entropy_bits_floor;
     // Union budget: the masked claims a c_priv-bounded adversary actually
     // observes in the first profile. A corrupted recipient receives, from each of
     // the n sources, one envelope of DATA_PRIMES.len() limb proofs, each
@@ -564,7 +605,7 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
     // this family). With c_priv corrupted recipients the adversary view is
     // c_priv * n * DATA_PRIMES.len() * 420 ~ 2^17.7 claims, whose ceil-log gives a
     // conservative 18-bit budget, so the total statistical distance over the
-    // adversary's view is about 2^-40. The earlier flat 2^17 budget under-counted
+    // adversary's view is about 2^-39. The earlier flat 2^17 budget under-counted
     // the bounded adversary's view (~2^17.7).
     const FIRST_PROFILE_CORRUPTED_RECIPIENTS: u128 = 3;
     const FIRST_PROFILE_ROSTER_SIZE: u128 = 10;
@@ -604,9 +645,13 @@ pub(crate) fn succinct_private_vss_share_accounting_value() -> CanonicalResult<V
             Value::String(private_vss_clear_claim_bound.to_string()),
         );
         integer_binding.insert(
-            "twoPrimeWindowRule".to_string(),
+            "maskBound".to_string(),
+            Value::String(claim_mask_bound.to_string()),
+        );
+        integer_binding.insert(
+            "crtWindowRule".to_string(),
             Value::String(
-                "the product of the two smallest data primes (about two to the ninety-four) exceeds twice the mask-plus-clear claim bound (about two to the ninety-three, dominated by the ninety-two-bit mask now that the clear bound is the carry-driven about two to the thirty-four rather than the full-range message bound) by only about one bit, so the centered two-prime lift is unique but with a thin margin set by the mask; widening the mask would not fit this window and would require a wider lift"
+                "the product of the active proof fields exceeds twice the base-3 mask-plus-clear claim bound, so the centered CRT lift is unique; the clear bound is carry-driven rather than full-message-driven"
                     .to_string(),
             ),
         );
@@ -619,5 +664,264 @@ pub(crate) fn succinct_private_vss_share_accounting_hash() -> CanonicalResult<St
     derive_protocol_hash(
         "SuccinctPrivateVssShareAccountingHash",
         &succinct_private_vss_share_accounting_value()?,
+    )
+}
+
+pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalResult<Value> {
+    let mut accounting = migrated_family_accounting(
+        "SuccinctTargetDecryptionShareAccounting",
+        super::TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
+        json!({
+            "statementShape": "one proof statement spans every active target RNS limb for both target roles: lifted compact aggregate-threshold-share openings, target-bound smudging commitment openings, the released-partial equations, and masked cross-field consistency claims",
+            "aggregateOpeningRows": "aggregate share messages are lifted compact-opening coefficients below the active-limb aggregate bound, committed over the setup commitment fields, and reduced modulo each target prime inside the released-partial equation",
+            "smudgingRows": "target-bound smudging messages use the signed coefficient offset from the target smudging commitment set; every smudging commitment opening is bound to the same target ciphertext, target context, target-share profile, and public matrix seed",
+            "coverage": "the all-active-limb proof material carries one lower-level proof for one target share; target-result release remains fail-closed until the compact commitment and quorum-result verifier are ready",
+            "privacyBoundary": "target-share masked consistency uses a wider smudging mask and a wider CRT lift so the first-profile interpolation view keeps a 128-bit-class hiding margin",
+        }),
+        pending_desktop_browser_measurement(),
+    )?;
+    let accounting_fields = accounting
+        .as_object_mut()
+        .expect("succinct accounting is an object");
+    if let Some(argument_shape) = accounting_fields
+        .get_mut("argumentShape")
+        .and_then(Value::as_object_mut)
+    {
+        argument_shape.insert(
+            "limbFields".to_string(),
+            Value::String(
+                "one statement covers every canonical target active limb plus the setup commitment fields; commitment fields carry every compact-opening relation, lifted aggregate-message consistency claims use a five-field CRT lift, and target smudging-message plus opening-randomness consistency claims use a four-field lift with shorter masks"
+                    .to_string(),
+            ),
+        );
+    }
+
+    const FIRST_PROFILE_TARGET_SHARE_COUNT: u128 = 7;
+    const FIRST_PROFILE_PARTICIPANT_COUNT: u64 = 10;
+    const FIRST_PROFILE_TARGET_SMUDGING_COEFFICIENT_BOUND: u128 = 16;
+    let active_target_limb_count = CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1;
+    let first_profile_target_smudging_polynomial_degree =
+        usize::try_from(FIRST_PROFILE_TARGET_SHARE_COUNT - 1)
+            .expect("first-profile target share count fits usize");
+    let target_messages_per_limb = 1 + 2 * first_profile_target_smudging_polynomial_degree;
+    let target_message_vector_count = active_target_limb_count
+        .checked_mul(target_messages_per_limb)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting message count overflowed")
+        })?;
+    let target_randomness_vector_count = target_message_vector_count
+        .checked_mul(COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting randomness count overflowed")
+        })?;
+    let target_aggregate_message_vector_count = active_target_limb_count;
+    let target_smudging_message_vector_count = target_message_vector_count
+        .checked_sub(target_aggregate_message_vector_count)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting smudging message count overflowed")
+        })?;
+    let target_aggregate_message_claims_per_share = target_aggregate_message_vector_count
+        .checked_mul(
+            TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT,
+        )
+        .and_then(|count| count.checked_mul(CONSISTENCY_REPETITIONS))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target accounting aggregate message claim count overflowed",
+            )
+        })?;
+    let target_smudging_message_claims_per_share = target_smudging_message_vector_count
+        .checked_mul(
+            TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT,
+        )
+        .and_then(|count| count.checked_mul(CONSISTENCY_REPETITIONS))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target accounting smudging message claim count overflowed",
+            )
+        })?;
+    let target_randomness_claims_per_share = target_randomness_vector_count
+        .checked_mul(
+            TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT,
+        )
+        .and_then(|count| count.checked_mul(CONSISTENCY_REPETITIONS))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting randomness claim count overflowed")
+        })?;
+    let claims_per_target_share = target_aggregate_message_claims_per_share
+        .checked_add(target_smudging_message_claims_per_share)
+        .and_then(|count| count.checked_add(target_randomness_claims_per_share))
+        .ok_or_else(|| invalid_succinct_setup_proof("target accounting claim count overflowed"))?;
+    let adversary_view_claim_count = FIRST_PROFILE_TARGET_SHARE_COUNT
+        .checked_mul(claims_per_target_share as u128)
+        .ok_or_else(|| invalid_succinct_setup_proof("target accounting claim budget overflowed"))?;
+    let claim_budget_log2 = i64::from(adversary_view_claim_count.ilog2()) + 1;
+    let aggregate_message_adversary_view_claim_count = FIRST_PROFILE_TARGET_SHARE_COUNT
+        .checked_mul(target_aggregate_message_claims_per_share as u128)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target accounting aggregate message claim budget overflowed",
+            )
+        })?;
+    let aggregate_message_claim_budget_log2 =
+        i64::from(aggregate_message_adversary_view_claim_count.ilog2()) + 1;
+    let smudging_message_adversary_view_claim_count = FIRST_PROFILE_TARGET_SHARE_COUNT
+        .checked_mul(target_smudging_message_claims_per_share as u128)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target accounting smudging message claim budget overflowed",
+            )
+        })?;
+    let smudging_message_claim_budget_log2 =
+        i64::from(smudging_message_adversary_view_claim_count.ilog2()) + 1;
+    let randomness_adversary_view_claim_count = FIRST_PROFILE_TARGET_SHARE_COUNT
+        .checked_mul(target_randomness_claims_per_share as u128)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting randomness claim budget overflowed")
+        })?;
+    let randomness_claim_budget_log2 = i64::from(randomness_adversary_view_claim_count.ilog2()) + 1;
+
+    let maximum_active_target_prime = DATA_PRIMES
+        .iter()
+        .take(active_target_limb_count)
+        .copied()
+        .max()
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting active limb set is empty")
+        })?;
+    let aggregate_message_coefficient_bound =
+        u128::from(maximum_active_target_prime) * u128::from(FIRST_PROFILE_PARTICIPANT_COUNT);
+    let consistency_coefficient_bound = u128::from((1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1);
+    let aggregate_message_clear_claim_bound = aggregate_message_coefficient_bound
+        .checked_mul(POLYNOMIAL_DEGREE as u128)
+        .and_then(|bound| bound.checked_mul(consistency_coefficient_bound))
+        .ok_or_else(|| invalid_succinct_setup_proof("target accounting clear bound overflowed"))?;
+    let aggregate_message_clear_claim_bound_bits =
+        i64::from(aggregate_message_clear_claim_bound.ilog2()) + 1;
+    let aggregate_message_mask_bound =
+        claim_mask_bound_biguint(TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT)?;
+    let aggregate_message_mask_entropy_bits_floor =
+        claim_mask_entropy_bits_floor(TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT)?;
+    let aggregate_message_per_claim_leakage_log2 =
+        aggregate_message_clear_claim_bound_bits - aggregate_message_mask_entropy_bits_floor;
+    let aggregate_message_total_leakage_log2 =
+        aggregate_message_per_claim_leakage_log2 + aggregate_message_claim_budget_log2;
+    let smudging_message_coefficient_bound = FIRST_PROFILE_TARGET_SMUDGING_COEFFICIENT_BOUND
+        .checked_mul(2)
+        .and_then(|bound| bound.checked_add(1))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting smudging bound overflowed")
+        })?;
+    let smudging_message_clear_claim_bound = smudging_message_coefficient_bound
+        .checked_mul(POLYNOMIAL_DEGREE as u128)
+        .and_then(|bound| bound.checked_mul(consistency_coefficient_bound))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "target accounting smudging message clear bound overflowed",
+            )
+        })?;
+    let smudging_message_clear_claim_bound_bits =
+        i64::from(smudging_message_clear_claim_bound.ilog2()) + 1;
+    let smudging_message_mask_bound =
+        claim_mask_bound_biguint(TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT)?;
+    let smudging_message_mask_entropy_bits_floor =
+        claim_mask_entropy_bits_floor(TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT)?;
+    let smudging_message_per_claim_leakage_log2 =
+        smudging_message_clear_claim_bound_bits - smudging_message_mask_entropy_bits_floor;
+    let smudging_message_total_leakage_log2 =
+        smudging_message_per_claim_leakage_log2 + smudging_message_claim_budget_log2;
+    let randomness_clear_claim_bound = (POLYNOMIAL_DEGREE as u128)
+        .checked_mul(consistency_coefficient_bound)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("target accounting randomness clear bound overflowed")
+        })?;
+    let randomness_clear_claim_bound_bits = i64::from(randomness_clear_claim_bound.ilog2()) + 1;
+    let randomness_mask_bound =
+        claim_mask_bound_biguint(TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT)?;
+    let randomness_mask_entropy_bits_floor =
+        claim_mask_entropy_bits_floor(TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT)?;
+    let randomness_per_claim_leakage_log2 =
+        randomness_clear_claim_bound_bits - randomness_mask_entropy_bits_floor;
+    let randomness_total_leakage_log2 =
+        randomness_per_claim_leakage_log2 + randomness_claim_budget_log2;
+    let total_leakage_log2 = aggregate_message_total_leakage_log2
+        .max(smudging_message_total_leakage_log2)
+        .max(randomness_total_leakage_log2)
+        + 2;
+
+    if let Some(zero_knowledge) = accounting_fields
+        .get_mut("zeroKnowledge")
+        .and_then(Value::as_object_mut)
+    {
+        zero_knowledge.insert(
+            "smudgingBudget".to_string(),
+            json!({
+                "perClaimStatisticalDistanceLog2": aggregate_message_per_claim_leakage_log2,
+                "clearClaimBoundBits": aggregate_message_clear_claim_bound_bits,
+                "maskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+                "aggregateMessagePerClaimStatisticalDistanceLog2": aggregate_message_per_claim_leakage_log2,
+                "aggregateMessageClearClaimBoundBits": aggregate_message_clear_claim_bound_bits,
+                "aggregateMessageMaskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+                "aggregateMessageClaimsPerTargetShare": target_aggregate_message_claims_per_share,
+                "aggregateMessageClaimBudgetLog2Approximate": aggregate_message_claim_budget_log2,
+                "aggregateMessageTotalLeakageLog2Approximate": aggregate_message_total_leakage_log2,
+                "smudgingMessagePerClaimStatisticalDistanceLog2": smudging_message_per_claim_leakage_log2,
+                "smudgingMessageClearClaimBoundBits": smudging_message_clear_claim_bound_bits,
+                "smudgingMessageMaskDigitCount": TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+                "smudgingMessageClaimsPerTargetShare": target_smudging_message_claims_per_share,
+                "smudgingMessageClaimBudgetLog2Approximate": smudging_message_claim_budget_log2,
+                "smudgingMessageTotalLeakageLog2Approximate": smudging_message_total_leakage_log2,
+                "randomnessPerClaimStatisticalDistanceLog2": randomness_per_claim_leakage_log2,
+                "randomnessClearClaimBoundBits": randomness_clear_claim_bound_bits,
+                "randomnessMaskDigitCount": TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
+                "randomnessClaimsPerTargetShare": target_randomness_claims_per_share,
+                "randomnessClaimBudgetLog2Approximate": randomness_claim_budget_log2,
+                "randomnessTotalLeakageLog2Approximate": randomness_total_leakage_log2,
+                "claimsPerTargetShare": claims_per_target_share,
+                "firstProfileTargetShareCount": FIRST_PROFILE_TARGET_SHARE_COUNT,
+                "claimBudgetLog2Approximate": claim_budget_log2,
+                "totalLeakageLog2Approximate": total_leakage_log2,
+            }),
+        );
+    }
+
+    if let Some(integer_binding) = accounting_fields
+        .get_mut("crossLimbConsistency")
+        .and_then(Value::as_object_mut)
+        .and_then(|cross_limb| cross_limb.get_mut("integerBinding"))
+        .and_then(Value::as_object_mut)
+    {
+        integer_binding.insert(
+            "clearClaimBound".to_string(),
+            Value::String(aggregate_message_clear_claim_bound.to_string()),
+        );
+        integer_binding.insert(
+            "maskBound".to_string(),
+            Value::String(aggregate_message_mask_bound.to_string()),
+        );
+        integer_binding.insert(
+            "smudgingMessageMaskBound".to_string(),
+            Value::String(smudging_message_mask_bound.to_string()),
+        );
+        integer_binding.insert(
+            "randomnessMaskBound".to_string(),
+            Value::String(randomness_mask_bound.to_string()),
+        );
+        integer_binding.insert(
+            "crtWindowRule".to_string(),
+            Value::String(
+                "the target-share proof's lifted aggregate opening messages may be as large as the active target prime times the participant count, so the aggregate-message clear claim bound is about two to the seventy-four; each aggregate-message consistency claim is carried by five proof fields whose product exceeds twice the 142-digit base-3 mask-plus-clear window, while smudging-message and ternary opening-randomness consistency claims use a 114-digit base-3 mask and four proof fields; statements with too few active fields are refused before proving"
+                    .to_string(),
+            ),
+        );
+    }
+
+    Ok(accounting)
+}
+
+pub(crate) fn succinct_target_decryption_share_accounting_hash() -> CanonicalResult<String> {
+    derive_protocol_hash(
+        "SuccinctTargetDecryptionShareAccountingHash",
+        &succinct_target_decryption_share_accounting_value()?,
     )
 }

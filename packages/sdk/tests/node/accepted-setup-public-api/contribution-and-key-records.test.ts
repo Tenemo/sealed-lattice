@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 
 import {
     contextFields,
@@ -584,6 +584,74 @@ describe('accepted setup public package API in Node', () => {
         >;
         const heEstimatorBinding =
             heSecurityCertificate.estimatorBinding as Record<string, unknown>;
+        const compactVssParameterCertificateInputBinding =
+            setupCommitmentSecurityCertificate.compactVssParameterCertificateInputBinding as Record<
+                string,
+                unknown
+            >;
+
+        expect(
+            setupCommitmentSecurityCertificate.compactVssParameterCertificateInputBindingHash,
+        ).toBe(
+            compactVssParameterCertificateInputBinding.compactVssParameterCertificateInputBindingHash,
+        );
+        expect(compactVssParameterCertificateInputBinding).toMatchObject({
+            objectType: 'CompactVssParameterCertificateInputBinding',
+            objectVersion: 2,
+            profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
+            participantCount: setupProfile.participantCount,
+            thresholdDegree: setupProfile.qDec,
+            commitmentRelation: {
+                projectionWeight: 32,
+                coordinateCountPerCommitment: 48,
+            },
+            commonCommitmentKey: {
+                sparseProjectionShape: {
+                    sampledMatrixResiduesPerCommitment: 6_144,
+                    sampledProjectionIndicesPerCommitment: 6_144,
+                },
+            },
+            sameSecretBridgeInput: {
+                targetBasisHash: setupProfile.canonicalTargetBasisHash,
+            },
+            parameterReviewInputs: {
+                openingWitnessRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-fresh-opening-witness',
+                        witnessCoefficientCount: 131_072,
+                    }),
+                    expect.objectContaining({
+                        rowId: 'compact-vss-aggregate-opening-witness',
+                        randomnessDifferenceInfinityBound: 20,
+                    }),
+                ],
+                linearRelationRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-recipient-share-shamir-evaluation',
+                        combinedRelationTermL1: 1_112,
+                    }),
+                    expect.objectContaining({
+                        rowId: 'compact-vss-aggregate-threshold-public-sum',
+                        combinedRelationTermL1: 11,
+                    }),
+                    expect.objectContaining({
+                        rowId: 'compact-vss-one-recipient-aggregate-from-source-coefficients',
+                        oneRecipientAggregateShamirScalarL1: 11_110,
+                    }),
+                ],
+            },
+        });
+        expect(
+            (
+                compactVssParameterCertificateInputBinding.estimatorInputRows as readonly Record<
+                    string,
+                    unknown
+                >[]
+            ).map((row) => row.rowId),
+        ).toEqual([
+            'compact-vss-module-sis-binding-input',
+            'compact-vss-module-lwe-hiding-input',
+        ]);
 
         expect(heAssessedRing.largestExposedBasisClass).toBe('Q_data');
         expect(heAssessedRing.largestExposedModulusBits).toBe(
@@ -659,7 +727,7 @@ describe('accepted setup public package API in Node', () => {
                         ),
                         encryptedEnvelope: {
                             objectType: 'EncryptedPrivateVssShareEnvelope',
-                            ciphertextBytesHex: '00',
+                            ciphertextBytesBase64: 'AA==',
                         },
                         transportedPrivateVssShareProofMaterial: {
                             objectType:
@@ -807,7 +875,7 @@ describe('accepted setup public package API in Node', () => {
                 setupPackage,
             }),
         ).not.toMatch(
-            /secretCoefficients|openingRandomness|roundOneAggregateSourceCoefficients|proofGeneration/u,
+            /"(?:secretCoefficients|openingRandomness|roundOneAggregateSourceCoefficients|proofGeneration)"\s*:/u,
         );
         expect(() =>
             publicSetupApi.createSetupPackage({

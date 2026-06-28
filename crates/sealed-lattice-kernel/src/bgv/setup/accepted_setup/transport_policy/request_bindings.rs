@@ -93,6 +93,35 @@ pub(super) fn verify_setup_transport_request_bindings(
             expected_object_roots,
         ));
     }
+    if let Some(material) = request.get("transportedCompactVssShareLinkageProofMaterial") {
+        let Some(proof_material_set_root) = setup_package
+            .get("compactVssShareLinkageProofMaterialSet")
+            .and_then(|proof_material_set| proof_material_set.get("proofMaterialSetRoot"))
+            .and_then(Value::as_str)
+        else {
+            return Ok(Err(Refusal::new(
+                "transportedObjectBindingMissing",
+                "transportedCompactVssShareLinkageProofMaterial requires setupPackage.compactVssShareLinkageProofMaterialSet.proofMaterialSetRoot",
+                "setupPackage.compactVssShareLinkageProofMaterialSet.proofMaterialSetRoot",
+            )));
+        };
+        validate_hash_string(
+            proof_material_set_root,
+            "setupPackage.compactVssShareLinkageProofMaterialSet.proofMaterialSetRoot",
+        )?;
+        transport_try!(require_setup_transport_entry(
+            transported_objects,
+            &setup_transport_expected_direct_material(
+                material,
+                proof_material_set_root.to_string(),
+                SETUP_TRANSPORTED_COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_NAME,
+                SETUP_TRANSPORTED_COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_ROLE,
+                SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
+                "transportedCompactVssShareLinkageProofMaterial",
+            )?,
+            expected_object_roots,
+        ));
+    }
     if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
         let referenced_material_roots = setup_transport_referenced_proof_material_roots(
             setup_package,

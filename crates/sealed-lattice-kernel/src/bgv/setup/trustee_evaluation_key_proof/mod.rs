@@ -20,7 +20,7 @@
 // and the accepted same-secret commitments. The accounting object in this
 // module is closed: every post-commitment challenge is drawn from the
 // degree-four challenge extension of the limb field, the masked claims are
-// integer-bound across limb fields by a two-prime lift, and every theorem row
+// integer-bound across the active proof fields, and every theorem row
 // carries its closure argument with one explicitly named conjecture (the CS25
 // entropy-capacity FRI proximity-gap bound; see accounting.rs for the 2026
 // Option B re-basing off the disproved up-to-capacity conjecture), classical
@@ -35,7 +35,7 @@
 //   of Z_H, and committed in a salted Merkle tree over the DOMAIN_BLOWUP coset
 //   low-degree extension;
 // - vanishing row checks (ternary secret, centered-binomial error support,
-//   square well-formedness, binary mask digits) batched into a split quotient;
+//   square well-formedness, base-3 mask digits) batched into a split quotient;
 // - one univariate sumcheck batching every key's digit-batched linear
 //   key-switch check and the masked cross-limb consistency claims;
 // - DEEP out-of-domain points binding the identities to the committed columns
@@ -56,14 +56,19 @@ mod verifier;
 pub(crate) use commands::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
-    generate_target_decryption_share_proof_from_request,
     generate_trustee_evaluation_key_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
     verify_compact_vss_share_linkage_proof_from_request,
-    verify_target_decryption_share_proof_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use commands::{
+    generate_target_decryption_share_proof_bytes_from_request,
+    verify_target_decryption_share_proof_bytes_from_request,
+};
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use accounting::succinct_target_decryption_share_accounting_hash;
 pub(in crate::bgv::setup) use accounting::{
     succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
     succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
@@ -71,6 +76,8 @@ pub(in crate::bgv::setup) use accounting::{
     succinct_same_secret_linkage_anchor_accounting_hash,
     succinct_same_secret_linkage_anchor_accounting_value,
 };
+#[cfg(test)]
+pub(in crate::bgv::setup) use proof_codec::FIELD_RESIDUE_BIT_WIDTH;
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
@@ -171,37 +178,71 @@ pub(super) const DEEP_EVALUATION_POINT_COUNT: usize =
 // each contributes about (trace size / challenge field size), around 2^-174.
 pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // Cross-limb witness-consistency repetitions and the bit width of the public
-// integer coefficients. Narrow eight-bit coefficients keep the clear sums
-// small (at most 2 * N * 255, about 2^24) so the ninety-two-bit smudging
-// masks dominate them only as a bounded-leakage row; twenty repetitions put
-// the per-difference collision bound at 2^-160 before union and Fiat-Shamir
-// losses, the pre-union margin the accounting certificate requires.
+// integer coefficients. Narrow eight-bit coefficients keep the clear sums small
+// (at most 2 * N * 255, about 2^24) so the base-3 smudging masks dominate them
+// only as a bounded-leakage row; twenty repetitions put the per-difference
+// collision bound at 2^-160 before union and Fiat-Shamir losses, the pre-union
+// margin the accounting certificate requires. Compact share-linkage uses fewer,
+// wider carry-only combinations: four 40-bit repetitions preserve the same
+// 160-bit pre-union collision budget while avoiding mask columns for
+// repetitions that carry no additional collision margin.
 pub(super) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
-// Each consistency claim is one shared integer (clear bounded combination
-// plus a ninety-two-bit mask committed digit-wise in binary mask columns)
-// published as its residue in every limb field. The product of the two
-// smallest profile primes exceeds twice the claim bound, so the verifier's
-// centered two-prime lift is unique and per-claim leakage is the clear bound
-// over the mask bound, about 2^-68. This is not a 128-bit zero-knowledge row.
-pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 92;
+pub(super) const COMPACT_VSS_CONSISTENCY_REPETITIONS: usize = 4;
+pub(super) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
+// Each consistency claim is one shared integer (clear bounded combination plus
+// a family-selected mask committed digit-wise in base-3 mask columns) published
+// as its residue in every proof field carrying that claim. Setup proof families
+// use 58 base-3 digits, which preserves the existing two-field lift window
+// while cutting mask columns. Target-decryption message claims need wider masks
+// because lifted aggregate messages have a much larger clear range. Target
+// smudging-message claims and opening-randomness claims have smaller witness
+// ranges and use the shorter target-specific masks below.
+pub(super) const CLAIM_MASK_RADIX: u64 = 3;
+pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
+pub(super) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
+pub(super) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
+pub(super) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize = 142;
+pub(super) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize = 114;
+pub(super) const TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT: usize = 114;
 // FRI query count at rate 1/2. CHANGE (2026, Option B): the per-query
 // soundness is no longer the disproved one-bit (1 - rho) up-to-capacity bound
 // but the CS25 entropy-capacity bound (about 0.938 bit per query for the prime
-// base field), so 168 queries record about 156 bits before the union allowance
-// and about 140 after it, still clearing 128. The proven BCIKS20 Johnson
+// base field). The selected 156 queries record 145 bits before the union
+// allowance and 129 after it, still clearing 128. The proven BCIKS20 Johnson
 // fallback (half a bit per query) would need roughly 288 queries. See
 // accounting.rs for the full re-basing. No grinding is applied.
-pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
+pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 156;
 pub(super) const MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS: i64 = 128;
 pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree-v1";
 pub(super) const SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] =
     b"sumcheck-residual-degree-v1";
-// The FRI recursion stops once the claimed degree bound reaches this size and
-// the final polynomial is sent in coefficient form.
-pub(super) const LOW_DEGREE_FINAL_COEFFICIENT_COUNT: usize = 8;
+// The FRI recursion stops at a statement-derived final coefficient layer. The
+// minimum keeps tiny development traces usable; the cap removes committed
+// folded Merkle layers from production-size proofs while keeping final
+// polynomial evaluation small relative to the opened row and hash work.
+pub(super) const LOW_DEGREE_MIN_FINAL_COEFFICIENT_COUNT: usize = 32;
+pub(super) const LOW_DEGREE_MAX_FINAL_COEFFICIENT_COUNT: usize = 1024;
 // Smallest supported trace size keeps every domain a usable power of two.
 pub(super) const MINIMUM_TRACE_SIZE: usize = 64;
+
+pub(super) fn low_degree_final_coefficient_count(
+    initial_degree_bound: usize,
+) -> CanonicalResult<usize> {
+    if initial_degree_bound == 0 || !initial_degree_bound.is_power_of_two() {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree statement bound must be a power of two",
+        ));
+    }
+    let largest_strictly_smaller_bound = initial_degree_bound / 2;
+    if largest_strictly_smaller_bound < LOW_DEGREE_MIN_FINAL_COEFFICIENT_COUNT {
+        return Err(invalid_succinct_setup_proof(
+            "low-degree statement bound does not reach the final coefficient layer",
+        ));
+    }
+
+    Ok(LOW_DEGREE_MAX_FINAL_COEFFICIENT_COUNT.min(largest_strictly_smaller_bound))
+}
 
 fn invalid_succinct_setup_proof(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidProtocolObject, message)

@@ -213,6 +213,40 @@ const transportedPublicCompanions = (): Readonly<{
     };
 };
 
+const compactShareLinkageProofMaterialTransport = (): JsonRecord => ({
+    objectType: 'CompactVssShareLinkageBinaryProofMaterialTransport',
+    objectVersion: 1,
+    setupProfileId: 'CollectiveBgvSetup-v1',
+    profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
+    proofFamily: 'compact-vss-share-linkage',
+    binaryFormat: 'compact-vss-share-linkage-proof-material-binary-v1',
+    proofMaterialSetRoot: hash512Hex(
+        'sealed-lattice/test/sdk-compact-share-linkage-proof-material-set',
+        [new Uint8Array([25, 26, 27, 28])],
+    ),
+    shareLinkageStatementRoot: hash512Hex(
+        'sealed-lattice/test/sdk-compact-share-linkage-statement',
+        [new Uint8Array([29, 30, 31, 32])],
+    ),
+    chunkSizeBytes: 1_048_576,
+    chunkCount: 1,
+    totalByteLength: 4,
+    fullObjectHash: hash512Hex(
+        'sealed-lattice/test/sdk-compact-share-linkage-full-object',
+        [new Uint8Array([33, 34, 35, 36])],
+    ),
+    chunkRoot: hash512Hex(
+        'sealed-lattice/test/sdk-compact-share-linkage-chunk-root',
+        [new Uint8Array([37, 38, 39, 40])],
+    ),
+    chunkHashes: [
+        hash512Hex('sealed-lattice/test/sdk-compact-share-linkage-chunk', [
+            new Uint8Array([41, 42, 43, 44]),
+        ]),
+    ],
+    chunks: [Uint8Array.from([1, 2, 3, 4])],
+});
+
 describe('accepted setup public package API in Node', () => {
     it('exposes setup package verification without accepting passive setup packages', async () => {
         const transportHash = hash512Hex(
@@ -353,6 +387,39 @@ describe('accepted setup public package API in Node', () => {
             });
             expect(materialSet?.proofMaterials[0]).toHaveProperty('chunks');
         }
+    });
+
+    it('keeps compact share-linkage proof material chunks out of public verification input', () => {
+        const setupPackage = {
+            objectType: 'SetupPackage',
+            objectVersion: 1,
+            setupPackageHash: hash512Hex(
+                'sealed-lattice/test/setup-package-hash-with-compact-share-linkage',
+                [new Uint8Array([45, 46, 47, 48])],
+            ),
+        };
+        const transportedCompactVssShareLinkageProofMaterial =
+            compactShareLinkageProofMaterialTransport();
+        const verificationInput =
+            publicSetupApi.createSetupPackageVerificationInput({
+                setupPackage,
+                transportedCompactVssShareLinkageProofMaterial,
+            });
+
+        expect(
+            verificationInput.transportedCompactVssShareLinkageProofMaterial,
+        ).toMatchObject({
+            objectType: 'CompactVssShareLinkageBinaryProofMaterialTransport',
+            proofFamily: 'compact-vss-share-linkage',
+            proofMaterialSetRoot:
+                transportedCompactVssShareLinkageProofMaterial.proofMaterialSetRoot,
+            fullObjectHash:
+                transportedCompactVssShareLinkageProofMaterial.fullObjectHash,
+            chunkRoot: transportedCompactVssShareLinkageProofMaterial.chunkRoot,
+        });
+        expect(
+            verificationInput.transportedCompactVssShareLinkageProofMaterial,
+        ).not.toHaveProperty('chunks');
     });
 
     it('ignores caller-supplied setup proof handles in public verification input', () => {

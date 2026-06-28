@@ -1,19 +1,19 @@
-import { deriveProtocolHash } from "@sealed-lattice/crypto";
-import type { ProtocolHash } from "@sealed-lattice/types";
+import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
-import type { LocalTrusteeSetupStateCommitment } from "./local-trustee-setup-state.js";
+import type { LocalTrusteeSetupStateCommitment } from './local-trustee-setup-state.js';
 import type {
     PublicKeyShareProofRecord,
     PublicKeyShareRecord,
-} from "./public-key-share-records.js";
-import type { SetupPhaseParticipantObject } from "./setup-phase-records.js";
-import type { VssSourceTrusteeCoefficientCommitmentRecord } from "./vss-coefficient-commitments.js";
+} from './public-key-share-records.js';
+import type { SetupPhaseParticipantObject } from './setup-phase-records.js';
+import type { VssSourceTrusteeCoefficientCommitmentRecord } from './vss-coefficient-commitments.js';
 import type {
     CollectiveBgvSetupContext,
     PrivateVssEnvelopeVerificationReference,
     VssShareAcceptanceRecord,
     VssShareComplaintRecord,
-} from "./vss-share-verification-records.js";
+} from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -35,9 +35,9 @@ export type SetupContributionAssemblyInput = Readonly<{
 
 export type SetupContributionAssembly = Readonly<
     JsonRecord & {
-        readonly objectType: "SetupContributionAssembly";
+        readonly objectType: 'SetupContributionAssembly';
         readonly objectVersion: 1;
-        readonly setupProfileId: "CollectiveBgvSetup-v1";
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
@@ -76,14 +76,14 @@ export type SetupContributionAssembly = Readonly<
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
 const contextFieldNames = [
-    "ceremonyId",
-    "manifestHash",
-    "rosterHash",
-    "setupProfileHash",
-    "qShareHash",
-    "carryAwareVssShareRelationProfileHash",
-    "commitmentProfileHash",
-    "setupEpoch",
+    'ceremonyId',
+    'manifestHash',
+    'rosterHash',
+    'setupProfileHash',
+    'qShareHash',
+    'carryAwareVssShareRelationProfileHash',
+    'commitmentProfileHash',
+    'setupEpoch',
 ] as const;
 
 const assertProtocolHash = (value: string, fieldName: string): void => {
@@ -140,7 +140,7 @@ const assertContextMatches = (
 const assertTrusteeMatches = (
     input: Pick<
         SetupContributionAssemblyInput,
-        "trusteeIdentity" | "trusteeRosterPosition"
+        'trusteeIdentity' | 'trusteeRosterPosition'
     >,
     value: Readonly<Record<string, unknown>>,
     identityFieldName: string,
@@ -191,7 +191,7 @@ const phaseObjectRoots = (
 
 const privateVssEnvelopeRootReferences = (
     input: SetupContributionAssemblyInput,
-): SetupContributionAssembly["privateVssEnvelopeReferences"] =>
+): SetupContributionAssembly['privateVssEnvelopeReferences'] =>
     [...(input.privateVssEnvelopeReferences ?? [])]
         .sort(
             (left, right) =>
@@ -203,8 +203,8 @@ const privateVssEnvelopeRootReferences = (
             assertTrusteeMatches(
                 input,
                 reference,
-                "sourceTrusteeIdentity",
-                "sourceTrusteeRosterPosition",
+                'sourceTrusteeIdentity',
+                'sourceTrusteeRosterPosition',
                 objectPath,
             );
             assertProtocolHash(
@@ -250,8 +250,8 @@ const issuedAcceptanceRoots = (
             assertTrusteeMatches(
                 input,
                 acceptance,
-                "recipientIdentity",
-                "recipientRosterPosition",
+                'recipientIdentity',
+                'recipientRosterPosition',
                 objectPath,
             );
             assertProtocolHash(
@@ -277,8 +277,8 @@ const issuedComplaintRoots = (
             assertTrusteeMatches(
                 input,
                 complaint,
-                "recipientIdentity",
-                "recipientRosterPosition",
+                'recipientIdentity',
+                'recipientRosterPosition',
                 objectPath,
             );
             assertProtocolHash(
@@ -292,27 +292,27 @@ const issuedComplaintRoots = (
 export const createSetupContributionAssembly = (
     input: SetupContributionAssemblyInput,
 ): SetupContributionAssembly => {
-    assertNonEmptyString(input.trusteeIdentity, "trusteeIdentity");
+    assertNonEmptyString(input.trusteeIdentity, 'trusteeIdentity');
     assertNonNegativeSafeInteger(
         input.trusteeRosterPosition,
-        "trusteeRosterPosition",
+        'trusteeRosterPosition',
     );
     for (const fieldName of contextFieldNames) {
         const value = input.setupContext[fieldName];
-        if (typeof value !== "string" || value.length === 0) {
+        if (typeof value !== 'string' || value.length === 0) {
             throw new TypeError(`setupContext.${fieldName} must be non-empty.`);
         }
     }
     if (input.commonRandomnessCommitRoot !== undefined) {
         assertProtocolHash(
             input.commonRandomnessCommitRoot,
-            "commonRandomnessCommitRoot",
+            'commonRandomnessCommitRoot',
         );
     }
     if (input.commonRandomnessRevealRoot !== undefined) {
         assertProtocolHash(
             input.commonRandomnessRevealRoot,
-            "commonRandomnessRevealRoot",
+            'commonRandomnessRevealRoot',
         );
     }
     const vssSourceTrusteeCommitmentRoot =
@@ -323,67 +323,67 @@ export const createSetupContributionAssembly = (
         assertContextMatches(
             input.setupContext,
             input.vssSourceTrusteeRecord,
-            "vssSourceTrusteeRecord",
+            'vssSourceTrusteeRecord',
         );
         assertTrusteeMatches(
             input,
             input.vssSourceTrusteeRecord,
-            "sourceTrusteeIdentity",
-            "sourceTrusteeRosterPosition",
-            "vssSourceTrusteeRecord",
+            'sourceTrusteeIdentity',
+            'sourceTrusteeRosterPosition',
+            'vssSourceTrusteeRecord',
         );
         assertProtocolHash(
             input.vssSourceTrusteeRecord.sourceTrusteeCommitmentRoot,
-            "vssSourceTrusteeCommitmentRoot",
+            'vssSourceTrusteeCommitmentRoot',
         );
     }
     if (input.localStateCommitment !== undefined) {
         assertContextMatches(
             input.setupContext,
             input.localStateCommitment,
-            "localStateCommitment",
+            'localStateCommitment',
         );
         assertTrusteeMatches(
             input,
             input.localStateCommitment,
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "localStateCommitment",
+            'trusteeIdentity',
+            'trusteeRosterPosition',
+            'localStateCommitment',
         );
     }
     if (input.publicKeyShareRecord !== undefined) {
         assertContextMatches(
             input.setupContext,
             input.publicKeyShareRecord,
-            "publicKeyShareRecord",
+            'publicKeyShareRecord',
         );
         assertTrusteeMatches(
             input,
             input.publicKeyShareRecord,
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "publicKeyShareRecord",
+            'trusteeIdentity',
+            'trusteeRosterPosition',
+            'publicKeyShareRecord',
         );
     }
     if (input.publicKeyShareProofRecord !== undefined) {
         assertContextMatches(
             input.setupContext,
             input.publicKeyShareProofRecord,
-            "publicKeyShareProofRecord",
+            'publicKeyShareProofRecord',
         );
         assertTrusteeMatches(
             input,
             input.publicKeyShareProofRecord,
-            "trusteeIdentity",
-            "trusteeRosterPosition",
-            "publicKeyShareProofRecord",
+            'trusteeIdentity',
+            'trusteeRosterPosition',
+            'publicKeyShareProofRecord',
         );
     }
 
     const assemblyWithoutRoot = {
-        objectType: "SetupContributionAssembly",
+        objectType: 'SetupContributionAssembly',
         objectVersion: 1,
-        setupProfileId: "CollectiveBgvSetup-v1",
+        setupProfileId: 'CollectiveBgvSetup-v1',
         ...setupContextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
@@ -411,13 +411,13 @@ export const createSetupContributionAssembly = (
             input.publicKeyShareProofRecord?.publicKeyShareProofRoot ?? null,
     } as const satisfies Omit<
         SetupContributionAssembly,
-        "setupContributionRoot"
+        'setupContributionRoot'
     >;
 
     return {
         ...assemblyWithoutRoot,
         setupContributionRoot: deriveProtocolHash(
-            "ParticipantBgvSetupRecordHash",
+            'ParticipantBgvSetupRecordHash',
             assemblyWithoutRoot,
         ),
     } satisfies SetupContributionAssembly;

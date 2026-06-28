@@ -1,6 +1,8 @@
 use super::super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
-use super::super::low_degree_proof::{LowDegreeParameters, prove_low_degree};
+use super::super::low_degree_proof::{
+    LowDegreeParameters, commit_low_degree, open_low_degree_at_positions,
+};
 use super::super::merkle_commitment::sorted_unique_indices;
 use super::super::relation::{
     BaseColumnDomain, PHASE_TWO_COLUMN_COUNT, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL,
@@ -14,13 +16,16 @@ use super::polynomial::{
     divide_by_trace_vanishing, extend_logical_vector, extend_logical_vector_extension,
     extension_powers, sample_deep_identity_points, trim_trailing_zeros,
 };
-use super::salted_tree::commit_salted_extension_rows;
+use super::salted_tree::commit_salted_extension_row_pairs;
 use super::witness::{
     LimbWitnessCommitment, build_limb_witness_commitment, validate_witness_support,
 };
 use super::*;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::modular_arithmetic::inverse_mod;
+use crate::bgv::profile::DATA_PRIMES;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -52,7 +57,7 @@ fn prove_limb(
     limb_index: usize,
     commitment: &LimbWitnessCommitment,
     consistency_vectors: &[Vec<u64>],
-    global_claim_integers: &[i128],
+    global_claim_integers: &[BigInt],
     proof_randomness_seed_hex: &str,
     global_transcript: &FiatShamirTranscript,
 ) -> CanonicalResult<LimbProof> {
@@ -70,8 +75,8 @@ fn prove_limb(
     let mut masked_claims = Vec::with_capacity(layout.claim_count());
     for local_claim in 0..layout.claim_count() {
         let global_id = global_claim_id(statement, layout, local_claim);
-        let claim_integer = global_claim_integers[global_id as usize];
-        masked_claims.push(claim_integer.rem_euclid(modulus as i128) as u64);
+        let claim_integer = &global_claim_integers[global_id as usize];
+        masked_claims.push(bigint_residue(claim_integer, modulus)?);
     }
 
     let publics = build_limb_public_vectors(
@@ -263,7 +268,7 @@ fn prove_limb(
             &(limb_index as u64).to_le_bytes(),
         ],
     );
-    let phase_two_salted = commit_salted_extension_rows(
+    let phase_two_salted = commit_salted_extension_row_pairs(
         &phase_two_columns,
         extension_size,
         &mut phase_two_salt_sampler,
@@ -414,8 +419,8 @@ fn prove_limb(
         initial_degree_bound: commitment_bound,
     };
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
-    let (low_degree, query_positions) =
-        prove_low_degree(&mut transcript, &low_degree_parameters, &batch_codeword)?;
+    let low_degree_state =
+        commit_low_degree(&mut transcript, &low_degree_parameters, &batch_codeword)?;
 
     let sumcheck_residual_codeword = (0..extension_size)
         .map(|position| phase_two_logical_value(position, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL))
@@ -431,11 +436,19 @@ fn prove_limb(
         "low-degree-purpose",
         SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
     );
-    let (sumcheck_residual_low_degree, sumcheck_residual_query_positions) = prove_low_degree(
+    let sumcheck_residual_low_degree_state = commit_low_degree(
         &mut transcript,
         &sumcheck_residual_low_degree_parameters,
         &sumcheck_residual_codeword,
     )?;
+    let query_positions = transcript.challenge_positions(
+        "shared-query-position",
+        extension_size / 2,
+        LOW_DEGREE_QUERY_COUNT,
+    );
+    let low_degree = open_low_degree_at_positions(low_degree_state, &query_positions)?;
+    let sumcheck_residual_low_degree =
+        open_low_degree_at_positions(sumcheck_residual_low_degree_state, &query_positions)?;
 
     let collect_row = |columns: &[Vec<u64>], position: usize| -> Vec<u64> {
         columns.iter().map(|column| column[position]).collect()
@@ -448,50 +461,19 @@ fn prove_limb(
                 collect_row(&commitment.extension_columns, *position),
                 collect_row(&commitment.extension_columns, *position + half),
             ],
-            phase_one_salts: [
-                commitment.salted.salt(*position).to_vec(),
-                commitment.salted.salt(*position + half).to_vec(),
-            ],
+            phase_one_pair_salt: commitment.salted.pair_salt(*position).to_vec(),
             phase_two_rows: [
                 collect_row(&phase_two_columns, *position),
                 collect_row(&phase_two_columns, *position + half),
             ],
-            phase_two_salts: [
-                phase_two_salted.salt(*position).to_vec(),
-                phase_two_salted.salt(*position + half).to_vec(),
-            ],
+            phase_two_pair_salt: phase_two_salted.pair_salt(*position).to_vec(),
         })
         .collect::<Vec<_>>();
-    let sumcheck_residual_query_openings = sumcheck_residual_query_positions
-        .iter()
-        .map(|position| PhaseTwoQueryOpening {
-            phase_two_rows: [
-                collect_row(&phase_two_columns, *position),
-                collect_row(&phase_two_columns, *position + half),
-            ],
-            phase_two_salts: [
-                phase_two_salted.salt(*position).to_vec(),
-                phase_two_salted.salt(*position + half).to_vec(),
-            ],
-        })
-        .collect::<Vec<_>>();
-    // Both phase trees are opened at the same queried positions and their coset
-    // partners, so one batched opening per tree authenticates every query slot.
-    let phase_opened_indices = sorted_unique_indices(
-        query_positions
-            .iter()
-            .flat_map(|position| [*position, *position + half]),
-    );
+    // The witness and phase-two pair trees are opened at the one shared query
+    // set used by both the main and residual low-degree proofs.
+    let phase_opened_indices = sorted_unique_indices(query_positions.iter().copied());
     let witness_batch_opening = commitment.salted.tree.open_batch(&phase_opened_indices);
     let quotient_batch_opening = phase_two_salted.tree.open_batch(&phase_opened_indices);
-    let sumcheck_residual_opened_indices = sorted_unique_indices(
-        sumcheck_residual_query_positions
-            .iter()
-            .flat_map(|position| [*position, *position + half]),
-    );
-    let sumcheck_residual_batch_opening = phase_two_salted
-        .tree
-        .open_batch(&sumcheck_residual_opened_indices);
 
     Ok(LimbProof {
         witness_tree_root: commitment.salted.tree.root(),
@@ -501,11 +483,17 @@ fn prove_limb(
         low_degree,
         sumcheck_residual_low_degree,
         query_openings,
-        sumcheck_residual_query_openings,
         witness_batch_opening,
         quotient_batch_opening,
-        sumcheck_residual_batch_opening,
     })
+}
+
+fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+    let modulus_integer = BigInt::from(modulus);
+    let residue = ((value % &modulus_integer) + &modulus_integer) % &modulus_integer;
+    residue
+        .to_u64()
+        .ok_or_else(|| invalid_succinct_setup_proof("masked consistency residue does not fit u64"))
 }
 
 pub(crate) fn prove_evaluation_key_share(
@@ -517,7 +505,7 @@ pub(crate) fn prove_evaluation_key_share(
         statement,
         witness,
         proof_randomness_seed_hex,
-        configured_limb_batch_size(statement.limb_moduli().len()),
+        configured_limb_batch_size(statement.proof_limb_count()),
     )
 }
 
@@ -544,42 +532,39 @@ fn prove_evaluation_key_share_with_limb_batch_size(
 ) -> CanonicalResult<SuccinctEvaluationKeyProof> {
     statement.validate_shape()?;
     validate_witness_support(statement, witness)?;
-    let limb_moduli = statement.limb_moduli();
-    let limb_batch_size = normalize_limb_batch_size(requested_limb_batch_size, limb_moduli.len());
+    let proof_limb_indices = statement.proof_limb_indices();
+    let limb_batch_size =
+        normalize_limb_batch_size(requested_limb_batch_size, proof_limb_indices.len());
     let mut transcript = FiatShamirTranscript::new("trustee-evaluation-key-share");
     transcript.absorb("statement", &statement.statement_hash());
 
-    let mut witness_tree_roots = Vec::with_capacity(limb_moduli.len());
-    for (batch_index, modulus_batch) in limb_moduli.chunks(limb_batch_size).enumerate() {
-        let batch_start = batch_index * limb_batch_size;
-
+    let mut witness_tree_roots = Vec::with_capacity(proof_limb_indices.len());
+    for limb_index_batch in proof_limb_indices.chunks(limb_batch_size) {
         #[cfg(not(target_arch = "wasm32"))]
-        let batch_roots = modulus_batch
+        let batch_roots = limb_index_batch
             .par_iter()
-            .enumerate()
-            .map(|(batch_offset, modulus)| {
-                let limb_index = batch_start + batch_offset;
+            .map(|limb_index| {
+                let modulus = DATA_PRIMES[*limb_index];
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
-                    limb_index,
-                    *modulus,
+                    *limb_index,
+                    modulus,
                     proof_randomness_seed_hex,
                 )?;
                 Ok(commitment.salted.tree.root())
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         #[cfg(target_arch = "wasm32")]
-        let batch_roots = modulus_batch
+        let batch_roots = limb_index_batch
             .iter()
-            .enumerate()
-            .map(|(batch_offset, modulus)| {
-                let limb_index = batch_start + batch_offset;
+            .map(|limb_index| {
+                let modulus = DATA_PRIMES[*limb_index];
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
-                    limb_index,
-                    *modulus,
+                    *limb_index,
+                    modulus,
                     proof_randomness_seed_hex,
                 )?;
                 Ok(commitment.salted.tree.root())
@@ -592,11 +577,12 @@ fn prove_evaluation_key_share_with_limb_batch_size(
     for witness_tree_root in &witness_tree_roots {
         transcript.absorb("witness-tree-root", witness_tree_root);
     }
-    let consistency_vectors = (0..CONSISTENCY_REPETITIONS)
+    let family_shape = statement.family_shape()?;
+    let consistency_vectors = (0..family_shape.consistency_repetitions())
         .map(|_| {
             transcript.challenge_bounded_integers(
                 "consistency-vector",
-                CONSISTENCY_COEFFICIENT_BITS,
+                family_shape.consistency_coefficient_bits(),
                 statement.ring_degree,
             )
         })
@@ -608,31 +594,32 @@ fn prove_evaluation_key_share_with_limb_batch_size(
         proof_randomness_seed_hex,
     );
 
-    let mut limb_proofs = Vec::with_capacity(limb_moduli.len());
-    for (batch_index, modulus_batch) in limb_moduli.chunks(limb_batch_size).enumerate() {
+    let mut limb_proofs = Vec::with_capacity(proof_limb_indices.len());
+    for (batch_index, limb_index_batch) in proof_limb_indices.chunks(limb_batch_size).enumerate() {
         let batch_start = batch_index * limb_batch_size;
 
         #[cfg(not(target_arch = "wasm32"))]
-        let proof_batch = modulus_batch
+        let proof_batch = limb_index_batch
             .par_iter()
             .enumerate()
-            .map(|(batch_offset, modulus)| {
-                let limb_index = batch_start + batch_offset;
+            .map(|(batch_offset, limb_index)| {
+                let proof_position = batch_start + batch_offset;
+                let modulus = DATA_PRIMES[*limb_index];
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
-                    limb_index,
-                    *modulus,
+                    *limb_index,
+                    modulus,
                     proof_randomness_seed_hex,
                 )?;
-                if commitment.salted.tree.root() != witness_tree_roots[limb_index] {
+                if commitment.salted.tree.root() != witness_tree_roots[proof_position] {
                     return Err(invalid_succinct_setup_proof(
                         "regenerated witness-tree root changed before limb proving",
                     ));
                 }
                 prove_limb(
                     statement,
-                    limb_index,
+                    *limb_index,
                     &commitment,
                     &consistency_vectors,
                     &claim_integers,
@@ -642,26 +629,27 @@ fn prove_evaluation_key_share_with_limb_batch_size(
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         #[cfg(target_arch = "wasm32")]
-        let proof_batch = modulus_batch
+        let proof_batch = limb_index_batch
             .iter()
             .enumerate()
-            .map(|(batch_offset, modulus)| {
-                let limb_index = batch_start + batch_offset;
+            .map(|(batch_offset, limb_index)| {
+                let proof_position = batch_start + batch_offset;
+                let modulus = DATA_PRIMES[*limb_index];
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
-                    limb_index,
-                    *modulus,
+                    *limb_index,
+                    modulus,
                     proof_randomness_seed_hex,
                 )?;
-                if commitment.salted.tree.root() != witness_tree_roots[limb_index] {
+                if commitment.salted.tree.root() != witness_tree_roots[proof_position] {
                     return Err(invalid_succinct_setup_proof(
                         "regenerated witness-tree root changed before limb proving",
                     ));
                 }
                 prove_limb(
                     statement,
-                    limb_index,
+                    *limb_index,
                     &commitment,
                     &consistency_vectors,
                     &claim_integers,

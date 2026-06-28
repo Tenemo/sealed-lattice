@@ -218,8 +218,6 @@ export function sameSecretProofsWithGeneratedProofs(
                                 secretCoefficient < 0 ? 1 : 0,
                         ),
                         openingRandomnessByLimb,
-                        proofRandomnessSource:
-                            'development-deterministic-fixture',
                         proofRandomnessSeedHex: hash512Hex(
                             'sealed-lattice-test/same-secret-proof-seed-v1',
                             [textEncoder.encode(proofRandomnessLabel)],

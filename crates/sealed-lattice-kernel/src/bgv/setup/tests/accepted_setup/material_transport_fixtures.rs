@@ -475,7 +475,7 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
                 .enumerate()
                 .map(|(chunk_index, chunk)| serde_json::json!({
                     "chunkIndex": chunk_index,
-                    "bytesHex": to_hex(&chunk),
+                    "bytesBase64": crate::transcript_core::encode_standard_base64(&chunk),
                 }))
                 .collect::<Vec<_>>(),
         }));

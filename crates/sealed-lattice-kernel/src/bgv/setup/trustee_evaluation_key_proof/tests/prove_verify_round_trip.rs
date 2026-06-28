@@ -122,7 +122,7 @@ fn multi_trustee_ceremony_slice_round_trips_with_recomputed_aggregate() {
             .into_iter()
             .next()
             .expect("first trustee");
-    let modulus = tampered_statement.limb_moduli()[0];
+    let modulus = DATA_PRIMES[0];
     tampered_statement.keys[1].round_one_aggregate_diagonal[0][0] =
         (tampered_statement.keys[1].round_one_aggregate_diagonal[0][0] + 1) % modulus;
     assert!(

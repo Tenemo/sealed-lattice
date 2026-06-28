@@ -3,6 +3,7 @@ import { sha384 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { bytesToBase64, decodeCanonicalBase64 } from './canonical-base64.js';
 import { canonicalJson, hash512Hex } from './canonical-json.js';
 import { deriveProtocolHash } from './hashes.js';
 
@@ -37,7 +38,7 @@ export type EncryptedLocalTrusteeSetupMaterial = Readonly<
         readonly materialAadHash: ProtocolHash;
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
-        readonly ciphertextBytesHex: string;
+        readonly ciphertextBytesBase64: string;
         readonly ciphertextBytesHash: ProtocolHash;
         readonly ciphertextByteLength: number;
         readonly plaintextByteLength: number;
@@ -133,6 +134,8 @@ export type LocalTrusteeStateStorageEncryptionInput = {
 
 export type LocalTrusteeStateStorageDecryptionInput = {
     readonly encryptedLocalState: EncryptedLocalTrusteeSetupState;
+    readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
+    readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
     readonly expectedLocalStateRoot: ProtocolHash;
     readonly setupContext: unknown;
     readonly storageKeyBytesHex: string;
@@ -148,8 +151,8 @@ export type EncryptedLocalTrusteeSetupState = Readonly<
         readonly localStateCommitmentHash: ProtocolHash;
         readonly storageAad: Readonly<Record<string, unknown>>;
         readonly storageAadHash: ProtocolHash;
-        readonly sealedAggregateThresholdShare: LocalTrusteeSetupStateSealedMaterial;
-        readonly sealedTargetDecryptionProofWitness: LocalTrusteeSetupStateSealedMaterial;
+        readonly sealedAggregateThresholdShareReference: LocalTrusteeSetupStateSealedMaterialReference;
+        readonly sealedTargetDecryptionProofWitnessReference: LocalTrusteeSetupStateSealedMaterialReference;
         readonly keyCommitmentHash: ProtocolHash;
         readonly aeadNonceHex: string;
         readonly ciphertextBytesHex: string;
@@ -207,7 +210,6 @@ export type LocalTrusteeSetupSealedMaterialDecryptionResult = {
 };
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
 const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
@@ -279,7 +281,7 @@ const encryptedSealedMaterialFieldNames = [
     'materialAadHash',
     'keyCommitmentHash',
     'aeadNonceHex',
-    'ciphertextBytesHex',
+    'ciphertextBytesBase64',
     'ciphertextBytesHash',
     'ciphertextByteLength',
     'plaintextByteLength',
@@ -737,13 +739,13 @@ function validateEncryptedSealedMaterialEnvelope(
         aesGcmNonceByteLength,
         `${objectPath}.aeadNonceHex`,
     );
-    const ciphertextBytes = decodeCanonicalHex(
+    const ciphertextBytes = decodeCanonicalBase64(
         stringField(
             encryptedMaterial,
-            'ciphertextBytesHex',
-            `${objectPath}.ciphertextBytesHex`,
+            'ciphertextBytesBase64',
+            `${objectPath}.ciphertextBytesBase64`,
         ),
-        `${objectPath}.ciphertextBytesHex`,
+        `${objectPath}.ciphertextBytesBase64`,
     );
     const ciphertextByteLength = numberField(
         encryptedMaterial,
@@ -755,7 +757,7 @@ function validateEncryptedSealedMaterialEnvelope(
     );
     if (ciphertextBytes.byteLength !== ciphertextByteLength) {
         throw new Error(
-            `${objectPath}.ciphertextByteLength must match ciphertextBytesHex.`,
+            `${objectPath}.ciphertextByteLength must match ciphertextBytesBase64.`,
         );
     }
     assertNonNegativeSafeInteger(
@@ -773,7 +775,7 @@ function validateEncryptedSealedMaterialEnvelope(
     );
     if (encryptedMaterial.ciphertextBytesHash !== expectedCiphertextHash) {
         throw new Error(
-            `${objectPath}.ciphertextBytesHash does not match ciphertextBytesHex.`,
+            `${objectPath}.ciphertextBytesHash does not match ciphertextBytesBase64.`,
         );
     }
     const envelopeWithoutHash = {
@@ -1250,7 +1252,7 @@ export const encryptLocalTrusteeSetupSealedMaterial = async (
             storageKeyBytes,
         ),
         aeadNonceHex: bytesToHex(nonceBytes),
-        ciphertextBytesHex: bytesToHex(ciphertextBytes),
+        ciphertextBytesBase64: bytesToBase64(ciphertextBytes),
         ciphertextBytesHash: hashBytes(
             'sealed-lattice-local-trustee-state/sealed-material-ciphertext-bytes-v1',
             ciphertextBytes,
@@ -1321,8 +1323,9 @@ export const decryptLocalTrusteeSetupSealedMaterial = async (
     const associatedDataBytes = textEncoder.encode(
         canonicalJson(sealedMaterial.encryptedMaterial.materialAad),
     );
-    const ciphertextBytes = hexToBytes(
-        sealedMaterial.encryptedMaterial.ciphertextBytesHex,
+    const ciphertextBytes = decodeCanonicalBase64(
+        sealedMaterial.encryptedMaterial.ciphertextBytesBase64,
+        'sealedMaterial.encryptedMaterial.ciphertextBytesBase64',
     );
     const plaintextBytes = new Uint8Array(
         await subtleCrypto().decrypt(
@@ -1438,10 +1441,10 @@ export const encryptLocalTrusteeState = async (
         localStateCommitmentHash,
         storageAad: associatedData,
         storageAadHash,
-        sealedAggregateThresholdShare:
-            localStatePlaintext.sealedAggregateThresholdShare,
-        sealedTargetDecryptionProofWitness:
-            localStatePlaintext.sealedTargetDecryptionProofWitness,
+        sealedAggregateThresholdShareReference:
+            manifestPlaintext.sealedAggregateThresholdShareReference,
+        sealedTargetDecryptionProofWitnessReference:
+            manifestPlaintext.sealedTargetDecryptionProofWitnessReference,
         keyCommitmentHash: hashBytes(
             'sealed-lattice-local-trustee-state/storage-key-commitment-v1',
             storageKeyBytes,
@@ -1545,20 +1548,30 @@ export const decryptLocalTrusteeState = async (
         );
     }
     const sealedAggregateThresholdShare = validateSealedMaterial(
-        input.encryptedLocalState.sealedAggregateThresholdShare,
+        input.sealedAggregateThresholdShare,
         'aggregate-threshold-share-sealed',
         localStateCommitment.aggregateThresholdShareRoot,
         input.setupContext,
         localStateCommitment,
-        'encryptedLocalState.sealedAggregateThresholdShare',
+        'sealedAggregateThresholdShare',
     );
     const sealedTargetDecryptionProofWitness = validateSealedMaterial(
-        input.encryptedLocalState.sealedTargetDecryptionProofWitness,
+        input.sealedTargetDecryptionProofWitness,
         'target-decryption-proof-witness-sealed',
         localStateCommitment.targetDecryptionProofWitnessRoot,
         input.setupContext,
         localStateCommitment,
-        'encryptedLocalState.sealedTargetDecryptionProofWitness',
+        'sealedTargetDecryptionProofWitness',
+    );
+    validateSealedMaterialReference(
+        input.encryptedLocalState.sealedAggregateThresholdShareReference,
+        sealedAggregateThresholdShare,
+        'encryptedLocalState.sealedAggregateThresholdShareReference',
+    );
+    validateSealedMaterialReference(
+        input.encryptedLocalState.sealedTargetDecryptionProofWitnessReference,
+        sealedTargetDecryptionProofWitness,
+        'encryptedLocalState.sealedTargetDecryptionProofWitnessReference',
     );
     const storageKeyBytes = decodeFixedHex(
         input.storageKeyBytesHex,
@@ -1576,8 +1589,9 @@ export const decryptLocalTrusteeState = async (
         aesGcmNonceByteLength,
         'encryptedLocalState.aeadNonceHex',
     );
-    const ciphertextBytes = hexToBytes(
+    const ciphertextBytes = decodeCanonicalHex(
         input.encryptedLocalState.ciphertextBytesHex,
+        'encryptedLocalState.ciphertextBytesHex',
     );
     const expectedCiphertextHash = hashBytes(
         'sealed-lattice-local-trustee-state/ciphertext-bytes-v1',

@@ -109,9 +109,35 @@ pub(crate) struct CompactVssShareLinkageStatement {
     pub(crate) source_rns_limb_index: usize,
     pub(crate) source_message_modulus: u64,
     pub(crate) coefficient_commitment_roots: Vec<String>,
+    pub(crate) coefficient_opening_roots: Vec<String>,
     pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
     pub(crate) recipient_share_commitment_root: String,
+    pub(crate) recipient_share_opening_root: String,
     pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
+    pub(crate) additional_linkage_items: Vec<CompactVssShareLinkageItem>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompactVssShareLinkageItem {
+    pub(crate) recipient_identity: String,
+    pub(crate) recipient_roster_position: u64,
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) coefficient_commitment_roots: Vec<String>,
+    pub(crate) coefficient_opening_roots: Vec<String>,
+    pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) recipient_share_commitment_root: String,
+    pub(crate) recipient_share_opening_root: String,
+    pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct CompactVssCoefficientWitnessSlot {
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) shamir_coefficient_index: usize,
+    pub(crate) commitment_root: String,
+    pub(crate) opening_root: String,
 }
 
 pub(crate) struct CompactSameSecretBridgeStatement {
@@ -124,23 +150,33 @@ pub(crate) struct CompactSameSecretBridgeStatement {
     pub(crate) target_constant_commitments: Vec<CompactVssShareLinkageCommitment>,
 }
 
+pub(crate) struct TargetDecryptionShareRoleStatement {
+    pub(crate) target_role: String,
+    pub(crate) target_ciphertext_component_one: Vec<u64>,
+    pub(crate) released_partial_decryption: Vec<u64>,
+    pub(crate) smudging_commitment_roots: Vec<String>,
+    pub(crate) smudging_commitments: Vec<CompactVssShareLinkageCommitment>,
+}
+
+pub(crate) struct TargetDecryptionShareLimbStatement {
+    pub(crate) target_rns_limb_index: usize,
+    pub(crate) target_rns_prime: u64,
+    pub(crate) aggregate_commitment_root: String,
+    pub(crate) aggregate_opening_root: String,
+    pub(crate) aggregate_commitment: CompactVssShareLinkageCommitment,
+    pub(crate) role_statements: Vec<TargetDecryptionShareRoleStatement>,
+}
+
 pub(crate) struct TargetDecryptionShareStatement {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) target_basis_hash: String,
     pub(crate) trustee_identity: String,
     pub(crate) trustee_roster_position: u64,
-    pub(crate) target_role: String,
-    pub(crate) target_rns_limb_index: usize,
-    pub(crate) target_rns_prime: u64,
+    pub(crate) active_credential_binding_root: String,
     pub(crate) interpolation_point: u64,
-    pub(crate) target_ciphertext_component_one: Vec<u64>,
-    pub(crate) released_partial_decryption: Vec<u64>,
-    pub(crate) aggregate_commitment_root: String,
-    pub(crate) aggregate_commitment: CompactVssShareLinkageCommitment,
     pub(crate) aggregate_message_coefficient_bound: u64,
     pub(crate) smudging_commitment_set_root: String,
-    pub(crate) smudging_commitment_roots: Vec<String>,
-    pub(crate) smudging_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) limb_statements: Vec<TargetDecryptionShareLimbStatement>,
     pub(crate) smudging_polynomial_degree: usize,
     pub(crate) smudging_coefficient_bound: i64,
     pub(crate) smudging_signed_coefficient_offset: i64,
@@ -203,8 +239,17 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     pub(crate) compact_vss_coefficient_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
     pub(crate) compact_vss_recipient_share_opening_randomness: Vec<Vec<i64>>,
     pub(crate) compact_vss_carry_witnesses: Vec<i64>,
+    pub(crate) compact_vss_recipient_share_messages_by_item: Vec<Vec<i64>>,
+    pub(crate) compact_vss_recipient_share_opening_randomness_by_item: Vec<Vec<Vec<i64>>>,
+    pub(crate) compact_vss_carry_witnesses_by_item: Vec<Vec<i64>>,
     pub(crate) target_decryption_message_vectors: Vec<Vec<i64>>,
     pub(crate) target_decryption_opening_randomness_by_commitment: Vec<Vec<Vec<i64>>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TargetDecryptionMessageClaimKind {
+    AggregateOpening,
+    SmudgingOpening,
 }
 
 impl EvaluationKeyShareDescriptor {
@@ -398,7 +443,132 @@ impl EvaluationKeyShareDescriptor {
     }
 }
 
+impl CompactVssShareLinkageStatement {
+    pub(crate) fn item_count(&self) -> usize {
+        1 + self.additional_linkage_items.len()
+    }
+
+    fn append_coefficient_witness_slots(
+        slots: &mut Vec<CompactVssCoefficientWitnessSlot>,
+        slot_indices_by_item: &mut Vec<Vec<usize>>,
+        source_rns_limb_index: usize,
+        source_message_modulus: u64,
+        coefficient_commitment_roots: &[String],
+        coefficient_opening_roots: &[String],
+    ) {
+        let mut item_slot_indices = Vec::with_capacity(coefficient_commitment_roots.len());
+        for (shamir_coefficient_index, (commitment_root, opening_root)) in
+            coefficient_commitment_roots
+                .iter()
+                .zip(coefficient_opening_roots.iter())
+                .enumerate()
+        {
+            let slot = CompactVssCoefficientWitnessSlot {
+                source_rns_limb_index,
+                source_message_modulus,
+                shamir_coefficient_index,
+                commitment_root: commitment_root.clone(),
+                opening_root: opening_root.clone(),
+            };
+            let slot_index = if let Some(existing_index) = slots
+                .iter()
+                .position(|existing_slot| existing_slot == &slot)
+            {
+                existing_index
+            } else {
+                slots.push(slot);
+                slots.len() - 1
+            };
+            item_slot_indices.push(slot_index);
+        }
+        slot_indices_by_item.push(item_slot_indices);
+    }
+
+    fn coefficient_witness_slot_layout(
+        &self,
+    ) -> (Vec<CompactVssCoefficientWitnessSlot>, Vec<Vec<usize>>) {
+        let mut slots = Vec::new();
+        let mut slot_indices_by_item = Vec::with_capacity(self.item_count());
+        Self::append_coefficient_witness_slots(
+            &mut slots,
+            &mut slot_indices_by_item,
+            self.source_rns_limb_index,
+            self.source_message_modulus,
+            &self.coefficient_commitment_roots,
+            &self.coefficient_opening_roots,
+        );
+        for item in &self.additional_linkage_items {
+            Self::append_coefficient_witness_slots(
+                &mut slots,
+                &mut slot_indices_by_item,
+                item.source_rns_limb_index,
+                item.source_message_modulus,
+                &item.coefficient_commitment_roots,
+                &item.coefficient_opening_roots,
+            );
+        }
+
+        (slots, slot_indices_by_item)
+    }
+
+    pub(crate) fn coefficient_witness_slots(&self) -> Vec<CompactVssCoefficientWitnessSlot> {
+        self.coefficient_witness_slot_layout().0
+    }
+
+    pub(crate) fn message_bounds(&self) -> Vec<u64> {
+        let mut bounds = self
+            .coefficient_witness_slots()
+            .into_iter()
+            .map(|slot| slot.source_message_modulus)
+            .collect::<Vec<_>>();
+        bounds.push(self.source_message_modulus);
+        bounds.extend(
+            self.additional_linkage_items
+                .iter()
+                .map(|item| item.source_message_modulus),
+        );
+
+        bounds
+    }
+
+    pub(crate) fn recipient_message_bounds(&self) -> Vec<u64> {
+        std::iter::once(self.source_message_modulus)
+            .chain(
+                self.additional_linkage_items
+                    .iter()
+                    .map(|item| item.source_message_modulus),
+            )
+            .collect()
+    }
+
+    pub(crate) fn coefficient_witness_slot_indices_by_item(&self) -> Vec<Vec<usize>> {
+        self.coefficient_witness_slot_layout().1
+    }
+
+    pub(crate) fn unique_coefficient_witness_slot_count(&self) -> usize {
+        self.coefficient_witness_slot_layout().0.len()
+    }
+
+    pub(crate) fn total_coefficient_commitment_count(&self) -> usize {
+        self.coefficient_commitments.len()
+            + self
+                .additional_linkage_items
+                .iter()
+                .map(|item| item.coefficient_commitments.len())
+                .sum::<usize>()
+    }
+
+    pub(crate) fn total_opening_randomness_column_count(&self) -> usize {
+        (self.unique_coefficient_witness_slot_count() + self.item_count())
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+    }
+}
+
 impl TrusteeEvaluationKeyStatement {
+    pub(crate) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 5;
+    pub(crate) const TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
+    pub(crate) const TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT: usize = 4;
+
     // The number of active limb fields: one past the highest key level. The
     // keyless same-secret linkage anchor statement is active exactly on the
     // commitment fields, where its opening relations live.
@@ -410,9 +580,13 @@ impl TrusteeEvaluationKeyStatement {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
         }
         if let Some(target_decryption_share) = &self.target_decryption_share {
-            return SETUP_COMMITMENT_MODULUS_LIMB_INDICES
-                .len()
-                .max(target_decryption_share.target_rns_limb_index + 1);
+            return target_decryption_share
+                .limb_statements
+                .iter()
+                .map(|statement| statement.target_rns_limb_index + 1)
+                .chain(std::iter::once(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()))
+                .max()
+                .unwrap_or(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
         }
         self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
             if self.same_secret_linkage.is_some() {
@@ -423,8 +597,23 @@ impl TrusteeEvaluationKeyStatement {
         )
     }
 
-    pub(crate) fn limb_moduli(&self) -> &'static [u64] {
-        &DATA_PRIMES[..self.limb_count()]
+    pub(crate) fn proof_limb_indices(&self) -> Vec<usize> {
+        if let Some(target_decryption_share) = &self.target_decryption_share {
+            let mut limb_indices =
+                (0..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()).collect::<Vec<_>>();
+            for limb_statement in &target_decryption_share.limb_statements {
+                if !limb_indices.contains(&limb_statement.target_rns_limb_index) {
+                    limb_indices.push(limb_statement.target_rns_limb_index);
+                }
+            }
+            return limb_indices;
+        }
+
+        (0..self.limb_count()).collect()
+    }
+
+    pub(crate) fn proof_limb_count(&self) -> usize {
+        self.proof_limb_indices().len()
     }
 
     // Indices of the keys whose level reaches the given limb.
@@ -467,7 +656,25 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn compact_vss_coefficient_count(&self, limb_index: usize) -> usize {
         match &self.compact_vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.coefficient_commitments.len()
+                statement.unique_coefficient_witness_slot_count()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_coefficient_relation_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.total_coefficient_commitment_count()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_item_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.item_count()
             }
             _ => 0,
         }
@@ -476,25 +683,241 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn compact_vss_randomness_count(&self, limb_index: usize) -> usize {
         match &self.compact_vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                (statement.coefficient_commitments.len() + 1)
-                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+                statement.total_opening_randomness_column_count()
             }
             _ => 0,
         }
     }
 
-    pub(crate) fn target_decryption_message_count(&self) -> usize {
-        self.target_decryption_share
-            .as_ref()
-            .map(|statement| 1 + statement.smudging_commitments.len())
-            .unwrap_or(0)
+    pub(crate) fn compact_vss_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.message_bounds()
+            }
+            _ => Vec::new(),
+        }
     }
 
-    pub(crate) fn target_decryption_randomness_count(&self) -> usize {
+    pub(crate) fn compact_same_secret_bridge_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        match &self.compact_same_secret_bridge {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.target_rns_primes.clone()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    fn target_decryption_limb_message_count(
+        limb_statement: &TargetDecryptionShareLimbStatement,
+    ) -> usize {
+        1 + limb_statement
+            .role_statements
+            .iter()
+            .map(|role_statement| role_statement.smudging_commitments.len())
+            .sum::<usize>()
+    }
+
+    pub(crate) fn target_decryption_total_message_count(&self) -> usize {
         self.target_decryption_share
             .as_ref()
             .map(|statement| {
-                (1 + statement.smudging_commitments.len())
+                statement
+                    .limb_statements
+                    .iter()
+                    .map(Self::target_decryption_limb_message_count)
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
+
+    fn target_decryption_limb_message_range(
+        &self,
+        target_rns_limb_index: usize,
+    ) -> Option<std::ops::Range<usize>> {
+        let statement = self.target_decryption_share.as_ref()?;
+        let mut offset = 0_usize;
+        for limb_statement in &statement.limb_statements {
+            let message_count = Self::target_decryption_limb_message_count(limb_statement);
+            if limb_statement.target_rns_limb_index == target_rns_limb_index {
+                return Some(offset..offset + message_count);
+            }
+            offset += message_count;
+        }
+
+        None
+    }
+
+    pub(crate) fn target_decryption_message_claim_kind(
+        &self,
+        global_message_index: usize,
+    ) -> Option<TargetDecryptionMessageClaimKind> {
+        let statement = self.target_decryption_share.as_ref()?;
+        let mut offset = 0_usize;
+        for limb_statement in &statement.limb_statements {
+            let limb_message_count = Self::target_decryption_limb_message_count(limb_statement);
+            if global_message_index < offset + limb_message_count {
+                return Some(if global_message_index == offset {
+                    TargetDecryptionMessageClaimKind::AggregateOpening
+                } else {
+                    TargetDecryptionMessageClaimKind::SmudgingOpening
+                });
+            }
+            offset += limb_message_count;
+        }
+
+        None
+    }
+
+    pub(crate) fn target_decryption_message_bound(
+        &self,
+        global_message_index: usize,
+    ) -> Option<u64> {
+        let statement = self.target_decryption_share.as_ref()?;
+        match self.target_decryption_message_claim_kind(global_message_index)? {
+            TargetDecryptionMessageClaimKind::AggregateOpening => {
+                Some(statement.aggregate_message_coefficient_bound)
+            }
+            TargetDecryptionMessageClaimKind::SmudgingOpening => {
+                Some(statement.smudging_message_coefficient_bound)
+            }
+        }
+    }
+
+    pub(crate) fn target_decryption_smudging_message_global_index(&self) -> Option<usize> {
+        let statement = self.target_decryption_share.as_ref()?;
+        let mut offset = 0_usize;
+        for limb_statement in &statement.limb_statements {
+            let limb_message_count = Self::target_decryption_limb_message_count(limb_statement);
+            if limb_message_count > 1 {
+                return Some(offset + 1);
+            }
+            offset += limb_message_count;
+        }
+
+        None
+    }
+
+    pub(crate) fn target_decryption_message_claim_limb_indices(
+        &self,
+        global_message_index: usize,
+    ) -> Vec<usize> {
+        let Some(statement) = self.target_decryption_share.as_ref() else {
+            return Vec::new();
+        };
+        let mut target_rns_limb_index = None;
+        let mut offset = 0_usize;
+        for limb_statement in &statement.limb_statements {
+            let limb_message_count = Self::target_decryption_limb_message_count(limb_statement);
+            if global_message_index < offset + limb_message_count {
+                target_rns_limb_index = Some(limb_statement.target_rns_limb_index);
+                break;
+            }
+            offset += limb_message_count;
+        }
+        let Some(target_rns_limb_index) = target_rns_limb_index else {
+            return Vec::new();
+        };
+        let field_count = match self.target_decryption_message_claim_kind(global_message_index) {
+            Some(TargetDecryptionMessageClaimKind::AggregateOpening) => {
+                Self::TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT
+            }
+            Some(TargetDecryptionMessageClaimKind::SmudgingOpening) => {
+                Self::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT
+            }
+            None => return Vec::new(),
+        };
+        let proof_limb_indices = self.proof_limb_indices();
+        let mut selected = proof_limb_indices
+            .iter()
+            .copied()
+            .filter(|limb_index| *limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
+            .collect::<Vec<_>>();
+        if !selected.contains(&target_rns_limb_index)
+            && proof_limb_indices.contains(&target_rns_limb_index)
+        {
+            selected.push(target_rns_limb_index);
+        }
+        for candidate in proof_limb_indices {
+            if selected.len() >= field_count {
+                break;
+            }
+            if !selected.contains(&candidate) {
+                selected.push(candidate);
+            }
+        }
+
+        selected
+    }
+
+    fn target_decryption_randomness_claim_limb_indices(&self) -> Vec<usize> {
+        self.proof_limb_indices()
+            .into_iter()
+            .take(Self::TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT)
+            .collect()
+    }
+
+    fn target_decryption_message_indices(&self, proof_limb_index: usize) -> Vec<usize> {
+        let Some(statement) = self.target_decryption_share.as_ref() else {
+            return Vec::new();
+        };
+        let mut indices = Vec::new();
+        for limb_statement in &statement.limb_statements {
+            if let Some(range) =
+                self.target_decryption_limb_message_range(limb_statement.target_rns_limb_index)
+            {
+                indices.extend(range.filter(|global_message_index| {
+                    self.target_decryption_message_claim_limb_indices(*global_message_index)
+                        .contains(&proof_limb_index)
+                }));
+            }
+        }
+
+        indices
+    }
+
+    pub(crate) fn target_decryption_local_message_offset(
+        &self,
+        proof_limb_index: usize,
+        target_rns_limb_index: usize,
+    ) -> Option<usize> {
+        let target_range = self.target_decryption_limb_message_range(target_rns_limb_index)?;
+        self.target_decryption_message_indices(proof_limb_index)
+            .into_iter()
+            .position(|global_message_index| global_message_index == target_range.start)
+    }
+
+    pub(crate) fn target_decryption_message_global_index(
+        &self,
+        proof_limb_index: usize,
+        local_message_index: usize,
+    ) -> Option<usize> {
+        self.target_decryption_message_indices(proof_limb_index)
+            .get(local_message_index)
+            .copied()
+    }
+
+    pub(crate) fn target_decryption_message_count(&self, limb_index: usize) -> usize {
+        self.target_decryption_message_indices(limb_index).len()
+    }
+
+    pub(crate) fn target_decryption_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        self.target_decryption_message_indices(limb_index)
+            .into_iter()
+            .filter_map(|global_message_index| {
+                self.target_decryption_message_bound(global_message_index)
+            })
+            .collect()
+    }
+
+    pub(crate) fn target_decryption_randomness_count(&self, limb_index: usize) -> usize {
+        self.target_decryption_share
+            .as_ref()
+            .filter(|_| {
+                self.target_decryption_randomness_claim_limb_indices()
+                    .contains(&limb_index)
+            })
+            .map(|_| {
+                self.target_decryption_total_message_count()
                     * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
             })
             .unwrap_or(0)
@@ -506,17 +929,27 @@ impl TrusteeEvaluationKeyStatement {
                 let commitment_relation_count = if limb_index
                     < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
                 {
-                    (1 + statement.smudging_commitments.len())
+                    statement
+                        .limb_statements
+                        .iter()
+                        .map(Self::target_decryption_limb_message_count)
+                        .sum::<usize>()
                         * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
                 } else {
                     0
                 };
-                let target_relation_count = if limb_index == statement.target_rns_limb_index {
-                    LINCHECK_REPETITIONS
-                } else {
-                    0
-                };
-                commitment_relation_count + target_relation_count
+                let target_relation_count = statement
+                    .limb_statements
+                    .iter()
+                    .find(|limb_statement| limb_statement.target_rns_limb_index == limb_index)
+                    .map(|limb_statement| {
+                        limb_statement.role_statements.len() * LINCHECK_REPETITIONS
+                    })
+                    .unwrap_or(0);
+                let decoder_relation_count = self.target_decryption_message_count(limb_index)
+                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                    * LINCHECK_REPETITIONS;
+                commitment_relation_count + decoder_relation_count + target_relation_count
             }
             None => 0,
         }

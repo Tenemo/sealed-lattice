@@ -49,7 +49,6 @@ const statementContext = (bindingRoots: JsonRecord): TrusteeStatementContext =>
     }) as TrusteeStatementContext;
 
 const proofRandomnessFields = {
-    proofRandomnessSource: 'development-deterministic-fixture',
     proofRandomnessSeedHex,
     proofRandomnessNonceHex,
 } as const;
@@ -322,14 +321,16 @@ describe('succinct setup statement hash vectors', () => {
             keys: [
                 {
                     proofFamily: 'relinearization-round-one',
-                    level: 0,
+                    level: 1,
                     keySwitchDomain: 'relinearization-round-one',
                     keySwitchSeedHex: repeatedHash('42'),
-                    componentBByDigit: [[zeroU64Vector()]],
+                    componentBByDigit: Array.from({ length: 2 }, () =>
+                        qSharePrimes.slice(0, 2).map(() => zeroU64Vector()),
+                    ),
                 },
             ],
             secretCoefficients: zeroI64Vector(),
-            errorCoefficientsByKey: [[zeroI64Vector()]],
+            errorCoefficientsByKey: [[zeroI64Vector(), zeroI64Vector()]],
             ...proofRandomnessFields,
         });
         expect(trusteeEvaluationKey.proofFamily).toBe('trustee-evaluation-key');

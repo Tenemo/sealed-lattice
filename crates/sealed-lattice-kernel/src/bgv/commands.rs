@@ -39,7 +39,6 @@ use crate::{
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
-            generate_target_decryption_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             release_verified_transported_vss_material_request,
             verify_collective_bgv_setup_package_from_request,
@@ -50,13 +49,13 @@ use crate::{
             verify_compact_vss_recipient_share_commitment_set_request,
             verify_compact_vss_same_secret_bridge_proof_material_set_request,
             verify_compact_vss_same_secret_bridge_statement_set_request,
+            verify_compact_vss_share_linkage_binary_proof_material_request,
             verify_compact_vss_share_linkage_proof_from_request,
             verify_compact_vss_share_linkage_proof_material_set_request,
             verify_compact_vss_share_linkage_statement_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
-            verify_target_decryption_share_proof_from_request,
             verify_trustee_evaluation_key_proof_from_request,
         },
         validation::{bgv_profile_rejection, validate_ciphertext_hex, validate_plaintext_hex},
@@ -198,14 +197,6 @@ pub(crate) fn verify_compact_same_secret_bridge_proof(request: &Value) -> Canoni
     verify_compact_same_secret_bridge_proof_from_request(request)
 }
 
-pub(crate) fn generate_target_decryption_share_proof(request: &Value) -> CanonicalResult<Value> {
-    generate_target_decryption_share_proof_from_request(request)
-}
-
-pub(crate) fn verify_target_decryption_share_proof(request: &Value) -> CanonicalResult<Value> {
-    verify_target_decryption_share_proof_from_request(request)
-}
-
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
     compute_setup_commitment_from_opening_request(request)
 }
@@ -256,6 +247,12 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set(
     request: &Value,
 ) -> CanonicalResult<Value> {
     verify_compact_vss_share_linkage_proof_material_set_request(request)
+}
+
+pub(crate) fn verify_compact_vss_share_linkage_binary_proof_material(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    verify_compact_vss_share_linkage_binary_proof_material_request(request)
 }
 
 pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set(

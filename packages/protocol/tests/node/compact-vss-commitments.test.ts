@@ -24,6 +24,7 @@ import {
     decodeCompactVssTernaryRandomnessColumnsHex,
     encodeCompactVssTernaryRandomnessColumnsHex,
     encodeCompactVssCommitmentBody,
+    encodeCompactVssShareLinkageProofMaterialSetBinary,
     verifyCompactVssAggregateThresholdCommitmentSet,
     verifyCompactVssRecipientShareCommitmentSet,
     verifyCompactVssShareLinkageStatement,
@@ -44,7 +45,7 @@ import type { VssSourceTrusteeCoefficientOpeningState } from '#packages/protocol
 type MutableCompactVssProofMaterialSetBytes = {
     readonly proofMaterials: {
         readonly proofRecords: {
-            proofBytesHex: string;
+            proofBytesBase64: string;
         }[];
     }[];
 };
@@ -528,13 +529,18 @@ describe('compact VSS development commitments', () => {
             outputCoordinateCount: 16,
             projectionWeight: 32,
             randomnessColumnCount: 2,
-            inputColumnLabels: ['message', 'randomness:0', 'randomness:1'],
+            inputColumnLabels: [
+                'message:0',
+                'message:1',
+                'randomness:0',
+                'randomness:1',
+            ],
             coordinateCountPerCommitment: 48,
-            sampledMatrixResiduesPerCoordinate: 96,
-            sampledProjectionIndicesPerCoordinate: 96,
-            sampledMatrixResiduesPerCommitment: 4_608,
-            sampledProjectionIndicesPerCommitment: 4_608,
-            residueMultiplyAddsPerCommitment: 4_608,
+            sampledMatrixResiduesPerCoordinate: 128,
+            sampledProjectionIndicesPerCoordinate: 128,
+            sampledMatrixResiduesPerCommitment: 6_144,
+            sampledProjectionIndicesPerCommitment: 6_144,
+            residueMultiplyAddsPerCommitment: 6_144,
         });
         expect(
             deriveProtocolHash('CompactVssMatrixExpansionProfileHash', profile),
@@ -663,7 +669,7 @@ describe('compact VSS development commitments', () => {
 
         expect(binding).toMatchObject({
             objectType: 'CompactVssParameterCertificateInputBinding',
-            objectVersion: 1,
+            objectVersion: 2,
             setupProfileId: 'CollectiveBgvSetup-v1',
             profileId: compactVssCommitmentProfileId,
             participantCount: 10,
@@ -672,23 +678,29 @@ describe('compact VSS development commitments', () => {
             thresholdDegree: 4,
             ringDegree: 32_768,
             commitmentRelation: {
-                relation: 'C = A0 * m + A1 * r mod q_c',
+                relation:
+                    'C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c',
                 outputCoordinateCount: 16,
-                messageWidth: 1,
+                messageWidth: 2,
                 randomnessWidth: 2,
                 projectionWeight: 32,
                 coordinateCountPerCommitment: 48,
-                inputColumnLabels: ['message', 'randomness:0', 'randomness:1'],
+                inputColumnLabels: [
+                    'message:0',
+                    'message:1',
+                    'randomness:0',
+                    'randomness:1',
+                ],
             },
             commonCommitmentKey: {
                 sparseProjectionShape: {
-                    inputColumnCount: 3,
+                    inputColumnCount: 4,
                     projectionWeight: 32,
                     coordinateCountPerCommitment: 48,
-                    sampledMatrixResiduesPerCoordinate: 96,
-                    sampledProjectionIndicesPerCoordinate: 96,
-                    sampledMatrixResiduesPerCommitment: 4_608,
-                    sampledProjectionIndicesPerCommitment: 4_608,
+                    sampledMatrixResiduesPerCoordinate: 128,
+                    sampledProjectionIndicesPerCoordinate: 128,
+                    sampledMatrixResiduesPerCommitment: 6_144,
+                    sampledProjectionIndicesPerCommitment: 6_144,
                 },
             },
             sameSecretBridgeInput: {
@@ -726,22 +738,84 @@ describe('compact VSS development commitments', () => {
             recipientShareCoefficientUpperBoundMultiplier: 1,
             aggregateCoefficientUpperBoundMultiplier: 10,
         });
+        expect(binding.parameterReviewInputs).toMatchObject({
+            inputVersion: 1,
+            coefficientRing: {
+                ringPolynomial: 'X^N+1',
+                ringDegree: 32_768,
+                commitmentModulusLimbs: [
+                    { commitmentModulusIndex: 0, modulus: 65_537 },
+                    { commitmentModulusIndex: 1, modulus: 65_539 },
+                    { commitmentModulusIndex: 2, modulus: 65_543 },
+                ],
+            },
+            openingWitnessRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-fresh-opening-witness',
+                    messageCoefficientUpperBoundMultiplier: 1,
+                    randomnessDifferenceInfinityBound: 2,
+                    witnessCoefficientCount: 131_072,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-aggregate-opening-witness',
+                    messageCoefficientUpperBoundMultiplier: 10,
+                    randomnessCoefficientInfinityBound: 10,
+                    randomnessDifferenceInfinityBound: 20,
+                    witnessCoefficientCount: 131_072,
+                }),
+            ],
+            linearRelationRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-recipient-share-shamir-evaluation',
+                    sourceShamirScalarL1: 1_111,
+                    combinedRelationTermL1: 1_112,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-aggregate-threshold-public-sum',
+                    combinedRelationTermL1: 11,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-one-recipient-aggregate-from-source-coefficients',
+                    oneRecipientAggregateShamirScalarL1: 11_110,
+                }),
+            ],
+            targetBasisReductionRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-same-secret-bridge-target-reduction',
+                    sourceSignedRepresentativeInfinityBound: 1,
+                    targetRnsLimbCount: 2,
+                    targetBasisHash,
+                    sameSecretProofFamilyBindingRoot,
+                }),
+            ],
+            reviewReductionRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-module-sis-binding-review-input',
+                    problem: 'Module-SIS',
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-module-lwe-hiding-review-input',
+                    problem: 'Module-LWE',
+                    sampledProjectionIndicesPerCommitment: 6_144,
+                }),
+            ],
+        });
         expect(binding.estimatorInputRows).toEqual([
             expect.objectContaining({
                 rowId: 'compact-vss-module-sis-binding-input',
                 problem: 'Module-SIS',
                 outputCoordinateCount: 16,
                 projectionWeight: 32,
-                sampledMatrixResiduesPerCommitment: 4_608,
-                sampledProjectionIndicesPerCommitment: 4_608,
+                sampledMatrixResiduesPerCommitment: 6_144,
+                sampledProjectionIndicesPerCommitment: 6_144,
             }),
             expect.objectContaining({
                 rowId: 'compact-vss-module-lwe-hiding-input',
                 problem: 'Module-LWE',
                 outputCoordinateCount: 16,
                 projectionWeight: 32,
-                sampledMatrixResiduesPerCommitment: 4_608,
-                sampledProjectionIndicesPerCommitment: 4_608,
+                sampledMatrixResiduesPerCommitment: 6_144,
+                sampledProjectionIndicesPerCommitment: 6_144,
             }),
         ]);
 
@@ -800,11 +874,11 @@ describe('compact VSS development commitments', () => {
             largestWasmBoundaryCopyBytes: 384,
             projectionWeight: compactVssProjectionWeight,
             cpuWorkModel: {
-                residueMultiplyAddsPerCommitment: 4_608,
+                residueMultiplyAddsPerCommitment: 6_144,
                 totalCommitments: 1_450,
-                totalResidueMultiplyAdds: 6_681_600,
+                totalResidueMultiplyAdds: 8_908_800,
                 aggregatePublicSumResidueAdditions: 33_600,
-                totalResidueArithmeticOperations: 6_715_200,
+                totalResidueArithmeticOperations: 8_942_400,
             },
             budgetComparison: {
                 publicSetupDownloadBudgetBytes: 67_108_864,
@@ -816,7 +890,7 @@ describe('compact VSS development commitments', () => {
         });
         expect(
             measurement.cpuWorkModel.aggregatePublicSumFractionOfCommitmentWork,
-        ).toBeCloseTo(33_600 / 6_681_600);
+        ).toBeCloseTo(33_600 / 8_908_800);
         expect(
             measurement.budgetComparison
                 .totalCompactPublicCommitmentFractionOfDownloadBudget,
@@ -1051,28 +1125,121 @@ describe('compact VSS development commitments', () => {
         });
         const proofMaterialInputs: CompactVssShareLinkageProofMaterialInput[] =
             linkageStatement.sourceStatementRecords.map((sourceStatement) => {
-                const proofStatementHash = deriveProtocolHash(
-                    'SetupProofRecordBindingHash',
-                    {
-                        fixture: 'compact-vss',
-                        label: 'restricted-share-linkage-proof-statement',
-                        sourceTrusteeIdentity:
-                            sourceStatement.sourceTrusteeIdentity,
+                const sourceRnsLimbIndex = 0;
+                const proofItems = Array.from(
+                    { length: linkageStatement.participantCount },
+                    (_unusedRecipient, recipientRosterPosition) => {
+                        const recipientShareOpeningRoot =
+                            sourceStatement.recipientShareOpeningRoots[
+                                recipientRosterPosition *
+                                    linkageStatement.targetRnsLimbCount +
+                                    sourceRnsLimbIndex
+                            ];
+                        if (recipientShareOpeningRoot === undefined) {
+                            throw new Error(
+                                'compact VSS fixture did not create recipient-share opening roots.',
+                            );
+                        }
+
+                        return {
+                            recipientIdentity: `recipient-${recipientRosterPosition}`,
+                            recipientRosterPosition,
+                            sourceRnsLimbIndex,
+                            sourceMessageModulus:
+                                acceptedBgvSetupQSharePrimes[0] ?? 65_537,
+                            coefficientCommitmentRoots:
+                                sourceStatement.coefficientOpeningRoots
+                                    .slice(0, sourceStatement.thresholdDegree)
+                                    .map(
+                                        (
+                                            _unusedOpeningRoot,
+                                            coefficientIndex,
+                                        ) =>
+                                            deriveProtocolHash(
+                                                'SetupCommitmentRoot',
+                                                {
+                                                    fixture: 'compact-vss',
+                                                    label: 'restricted-coefficient-commitment',
+                                                    sourceTrusteeIdentity:
+                                                        sourceStatement.sourceTrusteeIdentity,
+                                                    coefficientIndex,
+                                                },
+                                            ),
+                                    ),
+                            coefficientOpeningRoots:
+                                sourceStatement.coefficientOpeningRoots.slice(
+                                    0,
+                                    sourceStatement.thresholdDegree,
+                                ),
+                            recipientShareCommitmentRoot: deriveProtocolHash(
+                                'SetupCommitmentRoot',
+                                {
+                                    fixture: 'compact-vss',
+                                    label: 'restricted-recipient-share',
+                                    sourceTrusteeIdentity:
+                                        sourceStatement.sourceTrusteeIdentity,
+                                    recipientRosterPosition,
+                                },
+                            ),
+                            recipientShareOpeningRoot,
+                        };
                     },
                 );
-
+                const [primaryProofItem, ...additionalLinkageItems] =
+                    proofItems;
+                if (primaryProofItem === undefined) {
+                    throw new Error(
+                        'compact VSS fixture did not create proof statement items.',
+                    );
+                }
                 return {
                     sourceStatementRoot: sourceStatement.sourceStatementRoot,
                     proofRecords: [
                         {
-                            proofStatementHash,
-                            proofStatement: { proofStatementHash },
+                            proofStatementHash: deriveProtocolHash(
+                                'SetupProofRecordBindingHash',
+                                {
+                                    fixture: 'compact-vss',
+                                    label: 'batched-share-linkage-proof-statement',
+                                    sourceTrusteeIdentity:
+                                        sourceStatement.sourceTrusteeIdentity,
+                                },
+                            ),
                             proofBytesHex: 'ab'.repeat(
                                 32 +
                                     sourceStatement.sourceTrusteeRosterPosition,
                             ),
                         },
-                    ],
+                    ].map((proofRecord) => ({
+                        ...proofRecord,
+                        proofStatement: {
+                            proofStatementHash: proofRecord.proofStatementHash,
+                            context: {
+                                ceremonyId: linkageStatement.ceremonyId,
+                                manifestHash: linkageStatement.manifestHash,
+                                rosterHash: linkageStatement.rosterHash,
+                                trusteeIdentity:
+                                    sourceStatement.sourceTrusteeIdentity,
+                                trusteeRosterPosition:
+                                    sourceStatement.sourceTrusteeRosterPosition,
+                                setupEpoch: linkageStatement.setupEpoch,
+                            },
+                            compactVssShareLinkage: {
+                                publicMatrixSeedHash:
+                                    linkageStatement.publicMatrixSeedHash,
+                                sourceTrusteeIdentity:
+                                    sourceStatement.sourceTrusteeIdentity,
+                                sourceTrusteeRosterPosition:
+                                    sourceStatement.sourceTrusteeRosterPosition,
+                                sourceCoefficientCommitmentRoot:
+                                    sourceStatement.sourceCoefficientCommitmentRoot,
+                                sourceRecipientShareCommitmentRoot:
+                                    sourceStatement.sourceRecipientShareCommitmentRoot,
+                                ...primaryProofItem,
+                                additionalLinkageItems,
+                            },
+                        },
+                    })),
                 };
             });
         const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
@@ -1083,6 +1250,9 @@ describe('compact VSS development commitments', () => {
             verifyCompactVssShareLinkageProofMaterialSet({
                 statement: linkageStatement,
                 proofMaterialSet,
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareBundle.recipientShareCommitmentSet,
             }),
         ).toBe(proofMaterialSet);
         expect(proofMaterialSet).toMatchObject({
@@ -1097,13 +1267,53 @@ describe('compact VSS development commitments', () => {
             sourceTrusteeRosterPosition: 0,
             sourceStatementRoot:
                 linkageStatement.sourceStatementRecords[0]?.sourceStatementRoot,
-            proofRecords: [
-                {
-                    objectType: 'CompactVssShareLinkageProofRecord',
-                    proofByteLength: 32,
-                },
-            ],
         });
+        expect(
+            proofMaterialSet.proofMaterials[0]?.proofRecords.map(
+                (proofRecord) => proofRecord.objectType,
+            ),
+        ).toEqual(['CompactVssShareLinkageProofRecord']);
+        expect(
+            proofMaterialSet.proofMaterials[0]?.proofRecords[0]?.linkageItems,
+        ).toEqual([
+            {
+                recipientRosterPosition: 0,
+                sourceRnsLimbIndex: 0,
+            },
+            {
+                recipientRosterPosition: 1,
+                sourceRnsLimbIndex: 0,
+            },
+        ]);
+        const binaryProofMaterialTransport =
+            encodeCompactVssShareLinkageProofMaterialSetBinary(
+                proofMaterialSet,
+            );
+        expect(binaryProofMaterialTransport).toMatchObject({
+            objectType: 'CompactVssShareLinkageBinaryProofMaterialTransport',
+            objectVersion: 1,
+            proofFamily: compactVssShareLinkageProofFamily,
+            proofMaterialSetRoot: proofMaterialSet.proofMaterialSetRoot,
+            shareLinkageStatementRoot: linkageStatement.statementRoot,
+        });
+        expect(binaryProofMaterialTransport.chunkHashes).toHaveLength(
+            binaryProofMaterialTransport.chunkCount,
+        );
+        expect(
+            binaryProofMaterialTransport.chunks.reduce(
+                (totalByteLength, chunk) => totalByteLength + chunk.byteLength,
+                0,
+            ),
+        ).toBe(binaryProofMaterialTransport.totalByteLength);
+        expect(binaryProofMaterialTransport.totalByteLength).toBeLessThan(
+            Buffer.byteLength(JSON.stringify(proofMaterialSet), 'utf8'),
+        );
+        expect(() =>
+            encodeCompactVssShareLinkageProofMaterialSetBinary({
+                ...proofMaterialSet,
+                proofMaterialSetRoot: '00'.repeat(64),
+            }),
+        ).toThrow(/root/u);
         const repeatedProofInputRoot =
             proofMaterialInputs[0]?.sourceStatementRoot;
         if (repeatedProofInputRoot === undefined) {
@@ -1136,13 +1346,14 @@ describe('compact VSS development commitments', () => {
                 'compact VSS proof material fixture did not create a proof record.',
             );
         }
-        tamperedProofRecord.proofBytesHex = `00${tamperedProofRecord.proofBytesHex.slice(
-            2,
-        )}`;
+        tamperedProofRecord.proofBytesBase64 = '/w==';
         expect(() =>
             verifyCompactVssShareLinkageProofMaterialSet({
                 statement: linkageStatement,
                 proofMaterialSet: proofMaterialSetWithTamperedRecordBytes,
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareBundle.recipientShareCommitmentSet,
             }),
         ).toThrow(/proofBytesHash/u);
         const rebindLinkageStatementRoot = (
@@ -1209,6 +1420,44 @@ describe('compact VSS development commitments', () => {
                     aggregateBundle.aggregateThresholdCommitmentSet,
             }),
         ).toThrow(/evidence source roots/u);
+        const forgedOpeningRootStatement = rebindLinkageStatementRoot({
+            ...linkageStatement,
+            sourceStatementRecords: linkageStatement.sourceStatementRecords.map(
+                (sourceStatement, sourceStatementIndex) =>
+                    sourceStatementIndex === 0
+                        ? rebindSourceStatementRoot({
+                              ...sourceStatement,
+                              coefficientOpeningRoots: [
+                                  deriveProtocolHash(
+                                      'SetupProofRecordBindingHash',
+                                      {
+                                          fixture: 'compact-vss',
+                                          label: 'forged-coefficient-opening-root',
+                                      },
+                                  ),
+                                  ...sourceStatement.coefficientOpeningRoots.slice(
+                                      1,
+                                  ),
+                              ],
+                          })
+                        : sourceStatement,
+            ),
+        });
+        expect(
+            verifyCompactVssShareLinkageStatement({
+                statement: forgedOpeningRootStatement,
+            }),
+        ).toBe(forgedOpeningRootStatement);
+        expect(() =>
+            verifyCompactVssShareLinkageStatement({
+                statement: forgedOpeningRootStatement,
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareBundle.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    aggregateBundle.aggregateThresholdCommitmentSet,
+            }),
+        ).toThrow(/evidence opening roots/u);
         expect(() =>
             verifyCompactVssShareLinkageStatement({
                 statement: {

@@ -7,7 +7,6 @@ use super::setup_proof::{
     verified_setup_proof_material_chunks_from_request,
 };
 use super::*;
-use std::collections::BTreeSet;
 
 const SETUP_PROOF_PROFILE_ID: &str = "SealedLattice-SetupProof-v1";
 const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
@@ -81,7 +80,17 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set_request(
         hash_at_path(statement_set, &["carryAwareVssShareRelationProfileHash"])?;
     let commitment_profile_hash = hash_at_path(statement_set, &["commitmentProfileHash"])?;
     let target_basis_hash = hash_at_path(statement_set, &["targetBasisHash"])?;
+    compare_required_string(
+        target_basis_hash,
+        &crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
+        "compact VSS same-secret bridge statement set targetBasisHash",
+    )?;
     let public_matrix_seed_hash = hash_at_path(statement_set, &["publicMatrixSeedHash"])?;
+    let ring_degree = read_positive_usize_at_path(
+        statement_set,
+        &["ringDegree"],
+        "compact VSS same-secret bridge statement set ringDegree",
+    )?;
     let compact_coefficient_commitment_root =
         hash_at_path(statement_set, &["compactCoefficientCommitmentRoot"])?;
     let same_secret_consistency_root = hash_at_path(statement_set, &["sameSecretConsistencyRoot"])?;
@@ -139,6 +148,7 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set_request(
                 statement_record,
                 expected_position,
                 target_rns_limb_count,
+                ring_degree,
                 statement_set: StatementSetBinding {
                     ceremony_id,
                     manifest_hash,
@@ -175,6 +185,7 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set_request(
             "setupEpoch": setup_epoch,
             "targetBasisHash": target_basis_hash,
             "publicMatrixSeedHash": public_matrix_seed_hash,
+            "ringDegree": ring_degree,
             "participantCount": participant_count,
             "targetRnsLimbCount": target_rns_limb_count,
             "thresholdDegree": threshold_degree,
@@ -229,6 +240,7 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set_request(
         "thresholdDegree": threshold_degree,
         "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
+        "ringDegree": ring_degree,
         "compactCoefficientCommitmentRoot": compact_coefficient_commitment_root,
         "sameSecretConsistencyRoot": same_secret_consistency_root,
         "sameSecretProofSetRoot": same_secret_proof_set_root,
@@ -259,6 +271,11 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
         &statement_verification,
         &["targetRnsLimbCount"],
         "compact same-secret bridge proof material statement targetRnsLimbCount",
+    )?;
+    let ring_degree = read_positive_usize_at_path(
+        &statement_verification,
+        &["ringDegree"],
+        "compact same-secret bridge proof material statement ringDegree",
     )?;
     let threshold_degree = read_positive_usize_at_path(
         &statement_verification,
@@ -356,6 +373,11 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
         "compact same-secret bridge proof material set targetRnsLimbCount",
     )?;
     compare_required_u64(
+        unsigned_at_path(proof_material_set, &["ringDegree"])?,
+        ring_degree as u64,
+        "compact same-secret bridge proof material set ringDegree",
+    )?;
+    compare_required_u64(
         unsigned_at_path(proof_material_set, &["thresholdDegree"])?,
         threshold_degree as u64,
         "compact same-secret bridge proof material set thresholdDegree",
@@ -369,31 +391,9 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
             "compact same-secret bridge proof material set must contain one proof record per bridge statement",
         ));
     }
-    let proof_statements_value = value_at_path(proof_material_set, &["proofStatements"])?;
-    let restricted_proof_statements = array_at_path(proof_material_set, &["proofStatements"])?
-        .iter()
-        .collect::<Vec<_>>();
-    if restricted_proof_statements.len() != proof_records.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact same-secret bridge proof material set must contain one proof statement per proof record",
-        ));
-    }
-    let mut restricted_proof_statement_hashes = BTreeSet::new();
-    for restricted_statement in &restricted_proof_statements {
-        let proof_statement_hash = hash_at_path(restricted_statement, &["proofStatementHash"])?;
-        if !restricted_proof_statement_hashes.insert(proof_statement_hash.to_string()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "compact same-secret bridge proof material statements must not repeat proofStatementHash",
-            ));
-        }
-    }
 
-    let mut proof_statement_hashes = BTreeSet::new();
     let mut total_proof_byte_length = 0usize;
-    let mut verified_restricted_proof_count = 0usize;
-    let mut used_restricted_proof_statements = vec![false; restricted_proof_statements.len()];
+    let mut verified_proof_count = 0usize;
     let mut verified_proof_records = Vec::with_capacity(proof_records.len());
     for (expected_position, proof_record) in proof_records.iter().enumerate() {
         let bridge_statement = bridge_statement_records
@@ -426,27 +426,13 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
             bridge_statement_root,
             "compact same-secret bridge proof record statement root",
         )?;
-        let proof_statement_hash = hash_at_path(proof_record, &["proofStatementHash"])?;
-        if !proof_statement_hashes.insert(proof_statement_hash.to_string()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "compact same-secret bridge proof records must not repeat proofStatementHash",
-            ));
-        }
-        let proof_byte_length = read_positive_usize_at_path(
-            proof_record,
-            &["proofByteLength"],
-            "compact same-secret bridge proof record proofByteLength",
-        )?;
         let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
-        let proof_bytes_hex = string_at_path(proof_record, &["proofBytesHex"])?;
-        let proof_bytes = crate::transcript_core::decode_hex(proof_bytes_hex)?;
-        if proof_byte_length != proof_bytes.len() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact same-secret bridge proof record proofByteLength must match proofBytesHex",
-            ));
-        }
+        let proof_bytes_base64 = string_at_path(proof_record, &["proofBytesBase64"])?;
+        let proof_bytes = crate::transcript_core::decode_standard_base64(
+            proof_bytes_base64,
+            "compact same-secret bridge proofBytesBase64",
+        )?;
+        let proof_byte_length = proof_bytes.len();
         let expected_proof_bytes_hash = hash512_hex(
             COMPACT_SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
             &[&proof_bytes],
@@ -470,10 +456,8 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
             "objectVersion": 1,
             "proofFamily": COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
             "compactSameSecretBridgeStatementRoot": bridge_statement_root,
-            "proofStatementHash": proof_statement_hash,
-            "proofByteLength": proof_byte_length,
             "proofBytesHash": proof_bytes_hash,
-            "proofBytesHex": proof_bytes_hex,
+            "proofBytesBase64": proof_bytes_base64,
         });
         let proof_record_root = hash_at_path(proof_record, &["proofRecordRoot"])?;
         let expected_proof_record_root =
@@ -485,15 +469,8 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
             ));
         }
 
-        let restricted_statement_index = matching_restricted_proof_statement_index(
-            &restricted_proof_statements,
-            &used_restricted_proof_statements,
-            proof_statement_hash,
-        )?;
-        let restricted_statement = restricted_proof_statements[restricted_statement_index];
-        verify_restricted_compact_same_secret_bridge_proof_statement(
-            RestrictedCompactSameSecretBridgeProofStatementVerification {
-                restricted_statement,
+        verify_reconstructed_compact_same_secret_bridge_proof(
+            ReconstructedCompactSameSecretBridgeProofVerification {
                 bridge_statement,
                 statement_set: StatementSetBinding {
                     ceremony_id,
@@ -509,28 +486,16 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
                     same_secret_proof_family_binding_root,
                 },
                 expected_position,
-                proof_statement_hash,
                 proof_byte_length,
-                proof_bytes_hex,
+                proof_bytes: &proof_bytes,
             },
         )?;
-        used_restricted_proof_statements[restricted_statement_index] = true;
-        verified_restricted_proof_count += 1;
+        verified_proof_count += 1;
 
         let mut verified_proof_record = proof_record_without_root;
         verified_proof_record["proofRecordRoot"] = json!(proof_record_root);
         verified_proof_records.push(verified_proof_record);
     }
-    if used_restricted_proof_statements
-        .iter()
-        .any(|statement_was_used| !statement_was_used)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "every compact same-secret bridge proof material statement must match a proof record",
-        ));
-    }
-
     let proof_material_set_without_root = json!({
         "objectType": "CompactVssSameSecretBridgeProofMaterialSet",
         "objectVersion": 1,
@@ -548,6 +513,7 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
         "setupEpoch": setup_epoch,
         "targetBasisHash": target_basis_hash,
         "publicMatrixSeedHash": public_matrix_seed_hash,
+        "ringDegree": ring_degree,
         "participantCount": participant_count,
         "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": threshold_degree,
@@ -557,7 +523,6 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
         "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
         "compactSameSecretBridgeStatementSetRoot": statement_set_root,
         "proofRecords": verified_proof_records,
-        "proofStatements": proof_statements_value,
     });
     let proof_material_set_root = hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?;
     let expected_proof_material_set_root = derive_protocol_hash(
@@ -581,7 +546,7 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
         "participantCount": participant_count,
         "proofRecordCount": proof_records.len(),
         "totalProofByteLength": total_proof_byte_length,
-        "restrictedProofVerificationCount": verified_restricted_proof_count,
+        "proofVerificationCount": verified_proof_count,
     }))
 }
 
@@ -604,17 +569,16 @@ struct StatementRecordVerificationInput<'a> {
     statement_record: &'a Value,
     expected_position: usize,
     target_rns_limb_count: usize,
+    ring_degree: usize,
     statement_set: StatementSetBinding<'a>,
 }
 
-struct RestrictedCompactSameSecretBridgeProofStatementVerification<'a> {
-    restricted_statement: &'a Value,
+struct ReconstructedCompactSameSecretBridgeProofVerification<'a> {
     bridge_statement: &'a Value,
     statement_set: StatementSetBinding<'a>,
     expected_position: usize,
-    proof_statement_hash: &'a str,
     proof_byte_length: usize,
-    proof_bytes_hex: &'a str,
+    proof_bytes: &'a [u8],
 }
 
 struct EvidenceSetVerificationInput<'a> {
@@ -627,191 +591,141 @@ struct EvidenceSetVerificationInput<'a> {
     bridge_statement_records: &'a [Value],
 }
 
-fn matching_restricted_proof_statement_index(
-    restricted_proof_statements: &[&Value],
-    used_restricted_proof_statements: &[bool],
-    proof_statement_hash: &str,
-) -> CanonicalResult<usize> {
-    for (restricted_statement_index, restricted_statement) in
-        restricted_proof_statements.iter().enumerate()
-    {
-        if used_restricted_proof_statements[restricted_statement_index] {
-            continue;
-        }
-        if hash_at_path(restricted_statement, &["proofStatementHash"])? == proof_statement_hash {
-            return Ok(restricted_statement_index);
-        }
-    }
-
-    Err(CanonicalError::new(
-        CanonicalErrorCode::ProfileComponentMismatch,
-        "compact same-secret bridge proof record has no matching restricted proof statement",
-    ))
-}
-
-fn verify_restricted_compact_same_secret_bridge_proof_statement(
-    input: RestrictedCompactSameSecretBridgeProofStatementVerification<'_>,
+fn verify_reconstructed_compact_same_secret_bridge_proof(
+    input: ReconstructedCompactSameSecretBridgeProofVerification<'_>,
 ) -> CanonicalResult<()> {
-    let restricted_context = value_at_path(input.restricted_statement, &["context"])?;
-    compare_required_string(
-        string_at_path(restricted_context, &["ceremonyId"])?,
-        input.statement_set.ceremony_id,
-        "restricted compact same-secret bridge proof context ceremonyId",
-    )?;
-    compare_required_string(
-        hash_at_path(restricted_context, &["manifestHash"])?,
-        input.statement_set.manifest_hash,
-        "restricted compact same-secret bridge proof context manifestHash",
-    )?;
-    compare_required_string(
-        hash_at_path(restricted_context, &["rosterHash"])?,
-        input.statement_set.roster_hash,
-        "restricted compact same-secret bridge proof context rosterHash",
-    )?;
-    compare_required_string(
-        string_at_path(restricted_context, &["setupEpoch"])?,
-        input.statement_set.setup_epoch,
-        "restricted compact same-secret bridge proof context setupEpoch",
-    )?;
-
     let trustee_identity = string_at_path(input.bridge_statement, &["trusteeIdentity"])?;
-    compare_required_string(
-        string_at_path(restricted_context, &["trusteeIdentity"])?,
-        trustee_identity,
-        "restricted compact same-secret bridge proof context trusteeIdentity",
-    )?;
     compare_required_u64(
-        unsigned_at_path(restricted_context, &["trusteeRosterPosition"])?,
+        unsigned_at_path(input.bridge_statement, &["trusteeRosterPosition"])?,
         input.expected_position as u64,
-        "restricted compact same-secret bridge proof context trusteeRosterPosition",
+        "compact same-secret bridge statement trusteeRosterPosition",
     )?;
 
-    let restricted_compact_statement =
-        value_at_path(input.restricted_statement, &["compactSameSecretBridge"])?;
-    compare_required_string(
-        hash_at_path(
-            restricted_compact_statement,
-            &["compactSameSecretBridgeStatementRoot"],
-        )?,
-        hash_at_path(
-            input.bridge_statement,
-            &["compactSameSecretBridgeStatementRoot"],
-        )?,
-        "restricted compact same-secret bridge proof statement root",
-    )?;
-    compare_required_string(
-        hash_at_path(restricted_compact_statement, &["sameSecretStatementRoot"])?,
-        hash_at_path(input.bridge_statement, &["sameSecretStatementRoot"])?,
-        "restricted compact same-secret bridge proof statement sameSecretStatementRoot",
-    )?;
-    compare_required_string(
-        hash_at_path(restricted_compact_statement, &["sameSecretProofRoot"])?,
-        hash_at_path(input.bridge_statement, &["sameSecretProofRoot"])?,
-        "restricted compact same-secret bridge proof statement sameSecretProofRoot",
-    )?;
-    compare_required_string(
-        hash_at_path(
-            restricted_compact_statement,
-            &["sameSecretProofFamilyBindingRoot"],
-        )?,
-        input.statement_set.same_secret_proof_family_binding_root,
-        "restricted compact same-secret bridge proof statement sameSecretProofFamilyBindingRoot",
-    )?;
-    compare_required_string(
-        string_at_path(restricted_compact_statement, &["sourceTrusteeIdentity"])?,
-        trustee_identity,
-        "restricted compact same-secret bridge proof statement sourceTrusteeIdentity",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(
-            restricted_compact_statement,
-            &["sourceTrusteeRosterPosition"],
-        )?,
-        input.expected_position as u64,
-        "restricted compact same-secret bridge proof statement sourceTrusteeRosterPosition",
-    )?;
-    compare_required_string(
-        hash_at_path(restricted_compact_statement, &["publicMatrixSeedHash"])?,
-        input.statement_set.public_matrix_seed_hash,
-        "restricted compact same-secret bridge proof statement publicMatrixSeedHash",
-    )?;
-    compare_required_string(
-        hash_at_path(restricted_compact_statement, &["targetBasisHash"])?,
-        input.statement_set.target_basis_hash,
-        "restricted compact same-secret bridge proof statement targetBasisHash",
-    )?;
-
-    let target_rns_primes = array_at_path(restricted_compact_statement, &["targetRnsPrimes"])?;
-    let target_constant_roots = array_at_path(
-        restricted_compact_statement,
-        &["targetConstantCommitmentRoots"],
-    )?;
     let bridge_target_constant_roots = array_at_path(
         input.bridge_statement,
         &["targetConstantCoefficientCommitmentRoots"],
     )?;
-    if target_rns_primes.len() != bridge_target_constant_roots.len()
-        || target_constant_roots.len() != bridge_target_constant_roots.len()
-    {
+    let bridge_target_constant_commitments = array_at_path(
+        input.bridge_statement,
+        &["targetConstantCoefficientCommitments"],
+    )?;
+    if bridge_target_constant_commitments.len() != bridge_target_constant_roots.len() {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "restricted compact same-secret bridge proof target roots must match the bridge statement target basis",
+            "compact same-secret bridge proof target commitments must match the bridge statement target roots",
         ));
     }
+    let mut target_rns_primes = Vec::with_capacity(bridge_target_constant_roots.len());
+    let mut target_constant_commitment_roots =
+        Vec::with_capacity(bridge_target_constant_roots.len());
+    let mut target_constant_commitments = Vec::with_capacity(bridge_target_constant_roots.len());
     for (target_rns_limb_index, bridge_target_root) in
         bridge_target_constant_roots.iter().enumerate()
     {
+        let bridge_target_commitment = bridge_target_constant_commitments
+            .get(target_rns_limb_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact same-secret bridge proof target commitment is missing",
+                )
+            })?;
         compare_required_u64(
             unsigned_at_path(bridge_target_root, &["rnsLimbIndex"])?,
             target_rns_limb_index as u64,
             "compact same-secret bridge target root rnsLimbIndex",
         )?;
         compare_required_u64(
-            unsigned_at_path(&target_rns_primes[target_rns_limb_index], &[])?,
-            unsigned_at_path(bridge_target_root, &["rnsPrime"])?,
-            "restricted compact same-secret bridge proof target prime",
+            unsigned_at_path(bridge_target_commitment, &["rnsLimbIndex"])?,
+            target_rns_limb_index as u64,
+            "compact same-secret bridge target commitment rnsLimbIndex",
+        )?;
+        let target_rns_prime = unsigned_at_path(bridge_target_root, &["rnsPrime"])?;
+        compare_required_u64(
+            target_rns_prime,
+            unsigned_at_path(bridge_target_commitment, &["rnsPrime"])?,
+            "compact same-secret bridge target commitment rnsPrime",
         )?;
         compare_required_u64(
-            unsigned_at_path(bridge_target_root, &["rnsPrime"])?,
+            target_rns_prime,
             DATA_PRIMES[target_rns_limb_index],
-            "restricted compact same-secret bridge proof canonical target prime",
+            "compact same-secret bridge proof canonical target prime",
         )?;
+        compare_required_u64(
+            unsigned_at_path(bridge_target_root, &["shamirCoefficientIndex"])?,
+            0,
+            "compact same-secret bridge target root shamirCoefficientIndex",
+        )?;
+        compare_required_u64(
+            unsigned_at_path(bridge_target_commitment, &["shamirCoefficientIndex"])?,
+            0,
+            "compact same-secret bridge target commitment shamirCoefficientIndex",
+        )?;
+        let coefficient_commitment_root =
+            hash_at_path(bridge_target_root, &["coefficientCommitmentRoot"])?;
+        let target_commitment_body = value_at_path(bridge_target_commitment, &["commitment"])?;
         compare_required_string(
-            string_at_path(&target_constant_roots[target_rns_limb_index], &[])?,
-            hash_at_path(bridge_target_root, &["coefficientCommitmentRoot"])?,
-            "restricted compact same-secret bridge proof target commitment root",
+            &derive_protocol_hash("SetupCommitmentRoot", target_commitment_body)?,
+            coefficient_commitment_root,
+            "compact same-secret bridge target commitment body root",
         )?;
+        target_rns_primes.push(target_rns_prime);
+        target_constant_commitment_roots.push(coefficient_commitment_root.to_string());
+        target_constant_commitments.push(target_commitment_body.clone());
     }
 
-    let mut proof_verification_request = input.restricted_statement.clone();
-    let proof_verification_request_object =
-        proof_verification_request.as_object_mut().ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "restricted compact same-secret bridge proof statement must be an object",
-            )
-        })?;
-    proof_verification_request_object.remove("proofStatementHash");
-    proof_verification_request_object.insert(
-        "proofBytesHex".to_string(),
-        Value::String(input.proof_bytes_hex.to_string()),
-    );
+    let compact_same_secret_bridge_statement_root = hash_at_path(
+        input.bridge_statement,
+        &["compactSameSecretBridgeStatementRoot"],
+    )?;
+    let same_secret_statement_root =
+        hash_at_path(input.bridge_statement, &["sameSecretStatementRoot"])?;
+    let same_secret_proof_root = hash_at_path(input.bridge_statement, &["sameSecretProofRoot"])?;
+    let same_secret_proof_family_binding_root = hash_at_path(
+        input.bridge_statement,
+        &["sameSecretProofFamilyBindingRoot"],
+    )?;
+    let proof_verification_request = json!({
+        "context": {
+            "ceremonyId": input.statement_set.ceremony_id,
+            "manifestHash": input.statement_set.manifest_hash,
+            "rosterHash": input.statement_set.roster_hash,
+            "trusteeIdentity": trustee_identity,
+            "trusteeRosterPosition": input.expected_position,
+            "setupEpoch": input.statement_set.setup_epoch,
+            "compactSameSecretBridgeStatementRoot": compact_same_secret_bridge_statement_root,
+            "sameSecretStatementRoot": same_secret_statement_root,
+            "sameSecretProofRoot": same_secret_proof_root,
+            "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
+        },
+        "ringDegree": unsigned_at_path(input.bridge_statement, &["ringDegree"])?,
+        "compactSameSecretBridge": {
+            "compactSameSecretBridgeStatementRoot": compact_same_secret_bridge_statement_root,
+            "sameSecretStatementRoot": same_secret_statement_root,
+            "sameSecretProofRoot": same_secret_proof_root,
+            "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
+            "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
+            "sourceTrusteeIdentity": trustee_identity,
+            "sourceTrusteeRosterPosition": input.expected_position,
+            "targetBasisHash": input.statement_set.target_basis_hash,
+            "targetRnsPrimes": target_rns_primes,
+            "targetConstantCommitmentRoots": target_constant_commitment_roots,
+            "targetConstantCommitments": target_constant_commitments,
+        },
+        "proofBytesHex": crate::transcript_core::encode_hex(input.proof_bytes),
+    });
     let proof_verification =
         super::verify_compact_same_secret_bridge_proof_from_request(&proof_verification_request)?;
     compare_required_string(
         string_at_path(&proof_verification, &["proofFamily"])?,
         COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
-        "restricted compact same-secret bridge proof verification proofFamily",
+        "reconstructed compact same-secret bridge proof verification proofFamily",
     )?;
-    compare_required_string(
-        hash_at_path(&proof_verification, &["statementHash"])?,
-        input.proof_statement_hash,
-        "restricted compact same-secret bridge proof verification statementHash",
-    )?;
+    hash_at_path(&proof_verification, &["statementHash"])?;
     compare_required_u64(
         unsigned_at_path(&proof_verification, &["proofByteLength"])?,
         input.proof_byte_length as u64,
-        "restricted compact same-secret bridge proof verification proofByteLength",
+        "reconstructed compact same-secret bridge proof verification proofByteLength",
     )?;
 
     Ok(())
@@ -1406,10 +1320,10 @@ fn transported_same_secret_proof_chunks(
                 "transportedSameSecretProofMaterial.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex"
             ),
         )?;
-        chunks.push(crate::transcript_core::decode_hex(string_at_path(
-            chunk_value,
-            &["bytesHex"],
-        )?)?);
+        chunks.push(crate::transcript_core::decode_standard_base64(
+            string_at_path(chunk_value, &["bytesBase64"])?,
+            "transported same-secret proof material bytesBase64",
+        )?);
     }
 
     Ok(chunks)
@@ -1607,6 +1521,11 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
         input.statement_set.public_matrix_seed_hash,
         "compact VSS same-secret bridge statement publicMatrixSeedHash",
     )?;
+    compare_required_u64(
+        unsigned_at_path(input.statement_record, &["ringDegree"])?,
+        input.ring_degree as u64,
+        "compact VSS same-secret bridge statement ringDegree",
+    )?;
 
     let trustee_identity = read_non_empty_string(input.statement_record, "trusteeIdentity")?;
     compare_required_u64(
@@ -1663,16 +1582,31 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
         input.statement_record,
         &["targetConstantCoefficientCommitmentRoots"],
     )?;
-    if target_constant_roots.len() != input.target_rns_limb_count {
+    let target_constant_commitments = array_at_path(
+        input.statement_record,
+        &["targetConstantCoefficientCommitments"],
+    )?;
+    if target_constant_roots.len() != input.target_rns_limb_count
+        || target_constant_commitments.len() != input.target_rns_limb_count
+    {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "compact VSS same-secret bridge statement must bind one target constant root per target RNS limb",
+            "compact VSS same-secret bridge statement must bind one target constant root and commitment per target RNS limb",
         ));
     }
+    let mut verified_target_constant_commitments = Vec::with_capacity(input.target_rns_limb_count);
     let verified_target_constant_roots = target_constant_roots
         .iter()
         .enumerate()
         .map(|(expected_rns_limb_index, root_record)| {
+            let commitment_record = target_constant_commitments
+                .get(expected_rns_limb_index)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact VSS same-secret bridge target constant commitment is missing",
+                    )
+                })?;
             let rns_limb_index = unsigned_at_path(root_record, &["rnsLimbIndex"])?;
             compare_required_u64(
                 rns_limb_index,
@@ -1694,8 +1628,75 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
                 0,
                 "compact VSS same-secret bridge target constant shamirCoefficientIndex",
             )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_record, &["rnsLimbIndex"])?,
+                expected_rns_limb_index as u64,
+                "compact VSS same-secret bridge target constant commitment rnsLimbIndex",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_record, &["rnsPrime"])?,
+                rns_prime,
+                "compact VSS same-secret bridge target constant commitment rnsPrime",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_record, &["shamirCoefficientIndex"])?,
+                0,
+                "compact VSS same-secret bridge target constant commitment shamirCoefficientIndex",
+            )?;
             let coefficient_commitment_root =
                 hash_at_path(root_record, &["coefficientCommitmentRoot"])?;
+            let commitment_body = value_at_path(commitment_record, &["commitment"])?;
+            compare_required_string(
+                string_at_path(commitment_body, &["objectType"])?,
+                "CompactVssCommitment",
+                "compact VSS same-secret bridge target constant commitment objectType",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["objectVersion"])?,
+                1,
+                "compact VSS same-secret bridge target constant commitment objectVersion",
+            )?;
+            compare_required_string(
+                string_at_path(commitment_body, &["profileId"])?,
+                COMPACT_VSS_COMMITMENT_PROFILE_ID,
+                "compact VSS same-secret bridge target constant commitment profileId",
+            )?;
+            compare_required_string(
+                string_at_path(commitment_body, &["commitmentRole"])?,
+                "coefficient",
+                "compact VSS same-secret bridge target constant commitment role",
+            )?;
+            compare_required_string(
+                hash_at_path(commitment_body, &["publicMatrixSeedHash"])?,
+                input.statement_set.public_matrix_seed_hash,
+                "compact VSS same-secret bridge target constant commitment publicMatrixSeedHash",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["rnsLimbIndex"])?,
+                expected_rns_limb_index as u64,
+                "compact VSS same-secret bridge target constant commitment body rnsLimbIndex",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["rnsPrime"])?,
+                rns_prime,
+                "compact VSS same-secret bridge target constant commitment body rnsPrime",
+            )?;
+            compare_required_u64(
+                unsigned_at_path(commitment_body, &["ringDegree"])?,
+                input.ring_degree as u64,
+                "compact VSS same-secret bridge target constant commitment ringDegree",
+            )?;
+            compare_required_string(
+                &derive_protocol_hash("SetupCommitmentRoot", commitment_body)?,
+                coefficient_commitment_root,
+                "compact VSS same-secret bridge target constant commitment body root",
+            )?;
+            verified_target_constant_commitments.push(json!({
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": rns_prime,
+                "shamirCoefficientIndex": 0,
+                "commitment": commitment_body,
+            }));
 
             Ok(json!({
                 "rnsLimbIndex": rns_limb_index,
@@ -1726,6 +1727,7 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
             "setupEpoch": input.statement_set.setup_epoch,
             "targetBasisHash": input.statement_set.target_basis_hash,
             "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
+            "ringDegree": input.ring_degree,
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": input.expected_position,
             "sameSecretStatementRoot": same_secret_statement_root,
@@ -1738,6 +1740,7 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
             "compactCommitmentEncoding": COMPACT_VSS_COMMITMENT_BINARY_FORMAT,
             "targetBasisLimbOrder": COMPACT_VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
             "targetConstantCoefficientCommitmentRoots": verified_target_constant_roots,
+            "targetConstantCoefficientCommitments": verified_target_constant_commitments,
             "relation": COMPACT_VSS_SAME_SECRET_BRIDGE_RELATION,
         }),
     )?;
@@ -1748,7 +1751,9 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
     if expected_statement_root != statement_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
-            "compact VSS same-secret bridge statement root does not match its bound roots",
+            format!(
+                "compact VSS same-secret bridge statement root does not match its bound roots: expected {expected_statement_root}, got {statement_root}",
+            ),
         ));
     }
 
@@ -1771,6 +1776,7 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
         "setupEpoch": input.statement_set.setup_epoch,
         "targetBasisHash": input.statement_set.target_basis_hash,
         "publicMatrixSeedHash": input.statement_set.public_matrix_seed_hash,
+        "ringDegree": input.ring_degree,
         "trusteeIdentity": trustee_identity,
         "trusteeRosterPosition": input.expected_position,
         "sameSecretStatementRoot": same_secret_statement_root,
@@ -1783,6 +1789,7 @@ fn verify_statement_record(input: StatementRecordVerificationInput<'_>) -> Canon
         "compactCommitmentEncoding": COMPACT_VSS_COMMITMENT_BINARY_FORMAT,
         "targetBasisLimbOrder": COMPACT_VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER,
         "targetConstantCoefficientCommitmentRoots": verified_target_constant_roots,
+        "targetConstantCoefficientCommitments": verified_target_constant_commitments,
         "relation": COMPACT_VSS_SAME_SECRET_BRIDGE_RELATION,
         "compactSameSecretBridgeStatementRoot": statement_root,
     }))
@@ -1928,9 +1935,9 @@ mod tests {
         verify_compact_vss_same_secret_bridge_statement_set_request,
     };
     use crate::{
-        bgv::profile::DATA_PRIMES,
+        bgv::{evaluator::top_k::canonical_target_basis_hash, profile::DATA_PRIMES},
         encoding::CanonicalResult,
-        hashing::{derive_protocol_hash, to_hex},
+        hashing::derive_protocol_hash,
     };
 
     #[test]
@@ -1954,6 +1961,17 @@ mod tests {
         assert_eq!(
             verification["compactCommitmentEncoding"],
             "sealed-lattice-compact-vss-commitment-binary-v1"
+        );
+
+        let mut wrong_target_basis_statement_set = compact_same_secret_bridge_statement_set()?;
+        wrong_target_basis_statement_set["targetBasisHash"] = json!("7".repeat(128));
+        assert!(
+            verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
+                "command": "VerifyCompactVssSameSecretBridgeStatementSet",
+                "statementSet": wrong_target_basis_statement_set,
+            }))
+            .is_err(),
+            "compact same-secret bridge statement sets must bind the canonical target basis hash"
         );
 
         let mut tampered_statement_set = statement_set;
@@ -2056,7 +2074,7 @@ mod tests {
         );
 
         let mut tampered_material = transported_same_secret_proof_material;
-        tampered_material["proofMaterials"][0]["chunks"][0]["bytesHex"] = json!("ff");
+        tampered_material["proofMaterials"][0]["chunks"][0]["bytesBase64"] = json!("/w==");
         assert!(
             verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeStatementSet",
@@ -2086,20 +2104,10 @@ mod tests {
                 "proofMaterialSet": proof_material_set.clone(),
             }))
             .is_err(),
-            "proof material must include root-bound proof statements"
+            "proof material must reject proof bytes that do not verify against reconstructed statements"
         );
 
-        let proof_statements = json!([
-            {
-                "proofStatementHash": "1".repeat(128),
-            },
-            {
-                "proofStatementHash": "2".repeat(128),
-            },
-        ]);
-
         let mut tampered_proof_material_set = proof_material_set.clone();
-        tampered_proof_material_set["proofStatements"] = proof_statements.clone();
         tampered_proof_material_set["proofRecords"][0]["proofBytesHash"] = json!("0".repeat(128));
         assert!(
             verify_compact_vss_same_secret_bridge_proof_material_set_request(&json!({
@@ -2108,11 +2116,10 @@ mod tests {
                 "proofMaterialSet": tampered_proof_material_set,
             }))
             .is_err(),
-            "proof material must reject a proofBytesHash that no longer matches proofBytesHex"
+            "proof material must reject a proofBytesHash that no longer matches proofBytesBase64"
         );
 
         let mut wrong_statement_root_material_set = proof_material_set;
-        wrong_statement_root_material_set["proofStatements"] = proof_statements;
         wrong_statement_root_material_set["proofRecords"][1]["compactSameSecretBridgeStatementRoot"] =
             json!("0".repeat(128));
         assert!(
@@ -2129,6 +2136,7 @@ mod tests {
     }
 
     fn compact_same_secret_bridge_statement_set() -> CanonicalResult<Value> {
+        let target_basis_hash = canonical_target_basis_hash()?;
         let mut statement_records = Vec::new();
         for trustee_roster_position in 0..2_usize {
             statement_records.push(compact_same_secret_bridge_statement_record(
@@ -2139,7 +2147,7 @@ mod tests {
             "objectType": "CompactVssSameSecretBridgeStatementSet",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+            "compactCommitmentProfileId": "sealed-lattice-compact-vss-sparse-linear-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -2150,8 +2158,9 @@ mod tests {
             "carryAwareVssShareRelationProfileHash": "5".repeat(128),
             "commitmentProfileHash": "6".repeat(128),
             "setupEpoch": "setup-epoch",
-            "targetBasisHash": "7".repeat(128),
+            "targetBasisHash": target_basis_hash,
             "publicMatrixSeedHash": "8".repeat(128),
+            "ringDegree": 8,
             "participantCount": 2,
             "targetRnsLimbCount": 2,
             "thresholdDegree": 4,
@@ -2184,26 +2193,19 @@ mod tests {
         let proof_records = statement_records
             .iter()
             .zip(proof_bytes_hex_values)
-            .enumerate()
             .map(
-                |(proof_record_index, (statement_record, proof_bytes_hex))| {
+                |(statement_record, proof_bytes_hex)| {
                     let proof_bytes = crate::transcript_core::decode_hex(proof_bytes_hex)?;
                     let proof_record_without_root = json!({
                         "objectType": "CompactVssSameSecretBridgeProofRecord",
                         "objectVersion": 1,
                         "proofFamily": super::COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
                         "compactSameSecretBridgeStatementRoot": statement_record["compactSameSecretBridgeStatementRoot"],
-                        "proofStatementHash": if proof_record_index == 0 {
-                            "1".repeat(128)
-                        } else {
-                            "2".repeat(128)
-                        },
-                        "proofByteLength": proof_bytes.len(),
                         "proofBytesHash": crate::hashing::hash512_hex(
                             super::COMPACT_SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
                             &[&proof_bytes],
                         ),
-                        "proofBytesHex": proof_bytes_hex,
+                        "proofBytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
                     });
                     let mut proof_record = proof_record_without_root;
                     proof_record["proofRecordRoot"] = json!(derive_protocol_hash(
@@ -2218,7 +2220,7 @@ mod tests {
             "objectType": "CompactVssSameSecretBridgeProofMaterialSet",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+            "compactCommitmentProfileId": "sealed-lattice-compact-vss-sparse-linear-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": super::COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
             "ceremonyId": statement_set["ceremonyId"],
@@ -2231,6 +2233,7 @@ mod tests {
             "setupEpoch": statement_set["setupEpoch"],
             "targetBasisHash": statement_set["targetBasisHash"],
             "publicMatrixSeedHash": statement_set["publicMatrixSeedHash"],
+            "ringDegree": statement_set["ringDegree"],
             "participantCount": statement_set["participantCount"],
             "targetRnsLimbCount": statement_set["targetRnsLimbCount"],
             "thresholdDegree": statement_set["thresholdDegree"],
@@ -2253,29 +2256,46 @@ mod tests {
     fn compact_same_secret_bridge_statement_record(
         trustee_roster_position: usize,
     ) -> CanonicalResult<Value> {
-        let target_constant_coefficient_commitment_roots = (0..2_usize)
+        let target_basis_hash = canonical_target_basis_hash()?;
+        let target_constant_records = (0..2_usize)
             .map(|rns_limb_index| {
-                json!({
-                    "rnsLimbIndex": rns_limb_index,
-                    "rnsPrime": DATA_PRIMES[rns_limb_index],
-                    "shamirCoefficientIndex": 0,
-                    "coefficientCommitmentRoot": if trustee_roster_position == 0 && rns_limb_index == 0 {
-                        "d".repeat(128)
-                    } else if trustee_roster_position == 0 {
-                        "e".repeat(128)
-                    } else if rns_limb_index == 0 {
-                        "f".repeat(128)
-                    } else {
-                        "0".repeat(128)
-                    },
-                })
+                let rns_prime = DATA_PRIMES[rns_limb_index];
+                let commitment_body = compact_same_secret_bridge_target_commitment_body(
+                    trustee_roster_position,
+                    rns_limb_index,
+                    rns_prime,
+                )?;
+                let coefficient_commitment_root =
+                    derive_protocol_hash("SetupCommitmentRoot", &commitment_body)?;
+                Ok((
+                    json!({
+                        "rnsLimbIndex": rns_limb_index,
+                        "rnsPrime": rns_prime,
+                        "shamirCoefficientIndex": 0,
+                        "coefficientCommitmentRoot": coefficient_commitment_root,
+                    }),
+                    json!({
+                        "rnsLimbIndex": rns_limb_index,
+                        "rnsPrime": rns_prime,
+                        "shamirCoefficientIndex": 0,
+                        "commitment": commitment_body,
+                    }),
+                ))
             })
+            .collect::<CanonicalResult<Vec<_>>>()?;
+        let target_constant_coefficient_commitment_roots = target_constant_records
+            .iter()
+            .map(|(root, _commitment)| root.clone())
+            .collect::<Vec<_>>();
+        let target_constant_coefficient_commitments = target_constant_records
+            .iter()
+            .map(|(_root, commitment)| commitment.clone())
             .collect::<Vec<_>>();
         let statement_without_root = json!({
             "objectType": "CompactVssSameSecretBridgeStatement",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+            "compactCommitmentProfileId": "sealed-lattice-compact-vss-sparse-linear-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -2286,8 +2306,9 @@ mod tests {
             "carryAwareVssShareRelationProfileHash": "5".repeat(128),
             "commitmentProfileHash": "6".repeat(128),
             "setupEpoch": "setup-epoch",
-            "targetBasisHash": "7".repeat(128),
+            "targetBasisHash": target_basis_hash,
             "publicMatrixSeedHash": "8".repeat(128),
+            "ringDegree": 8,
             "trusteeIdentity": format!("trustee-{trustee_roster_position}"),
             "trusteeRosterPosition": trustee_roster_position,
             "sameSecretStatementRoot": if trustee_roster_position == 0 {
@@ -2312,6 +2333,7 @@ mod tests {
             "compactCommitmentEncoding": "sealed-lattice-compact-vss-commitment-binary-v1",
             "targetBasisLimbOrder": "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime",
             "targetConstantCoefficientCommitmentRoots": target_constant_coefficient_commitment_roots,
+            "targetConstantCoefficientCommitments": target_constant_coefficient_commitments,
             "relation": "target-basis compact constant coefficient commitments bind to the same signed ternary trustee secret as the data-basis same-secret proof",
         });
         let mut statement = statement_without_root;
@@ -2323,8 +2345,52 @@ mod tests {
         Ok(statement)
     }
 
+    fn compact_same_secret_bridge_target_commitment_body(
+        trustee_roster_position: usize,
+        rns_limb_index: usize,
+        rns_prime: u64,
+    ) -> CanonicalResult<Value> {
+        let coordinate_count =
+            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT;
+        let commitment_limbs = (0..3_usize)
+            .map(|commitment_modulus_index| {
+                let modulus = DATA_PRIMES[commitment_modulus_index];
+                let coordinates = (0..coordinate_count)
+                    .map(|coordinate_index| {
+                        ((trustee_roster_position as u64 + 1) * 17
+                            + (rns_limb_index as u64 + 1) * 19
+                            + (commitment_modulus_index as u64 + 1) * 23
+                            + coordinate_index as u64)
+                            % modulus
+                    })
+                    .collect::<Vec<_>>();
+                json!({
+                    "commitmentModulusIndex": commitment_modulus_index,
+                    "modulus": modulus,
+                    "coordinates": coordinates,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Ok(json!({
+            "objectType": "CompactVssCommitment",
+            "objectVersion": 1,
+            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+            "commitmentRole": "coefficient",
+            "commitmentContextHash": "7".repeat(128),
+            "publicMatrixSeedHash": "8".repeat(128),
+            "rnsLimbIndex": rns_limb_index,
+            "rnsPrime": rns_prime,
+            "ringDegree": 8,
+            "outputCoordinateCount": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+            "randomnessColumnCount": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+            "commitmentLimbs": commitment_limbs,
+        }))
+    }
+
     fn compact_same_secret_bridge_statement_set_with_evidence()
     -> CanonicalResult<(Value, Value, Value)> {
+        let target_basis_hash = canonical_target_basis_hash()?;
         let same_secret_consistency = same_secret_consistency_statement_set()?;
         let same_secret_proofs = same_secret_proof_set(&same_secret_consistency)?;
         let mut statement_records = Vec::new();
@@ -2339,7 +2405,7 @@ mod tests {
             "objectType": "CompactVssSameSecretBridgeStatementSet",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "compactCommitmentProfileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+            "compactCommitmentProfileId": "sealed-lattice-compact-vss-sparse-linear-v1",
             "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "same-secret-linkage-anchor",
             "ceremonyId": "compact-vss-test",
@@ -2350,8 +2416,9 @@ mod tests {
             "carryAwareVssShareRelationProfileHash": "5".repeat(128),
             "commitmentProfileHash": "6".repeat(128),
             "setupEpoch": "setup-epoch",
-            "targetBasisHash": "7".repeat(128),
+            "targetBasisHash": target_basis_hash,
             "publicMatrixSeedHash": "8".repeat(128),
+            "ringDegree": 8,
             "participantCount": 2,
             "targetRnsLimbCount": 2,
             "thresholdDegree": 4,
@@ -2667,7 +2734,7 @@ mod tests {
                 "chunkRoot": transport_hashes.chunk_root,
                 "chunks": [{
                     "chunkIndex": 0,
-                    "bytesHex": to_hex(&proof_bytes),
+                    "bytesBase64": crate::transcript_core::encode_standard_base64(&proof_bytes),
                 }],
             }));
         }

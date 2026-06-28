@@ -209,6 +209,8 @@ fn read_compact_aggregate_threshold_commitment_set_binding(
                 rns_prime,
                 aggregate_commitment_root: hash_at_path(record, &["aggregateCommitmentRoot"])?
                     .to_string(),
+                aggregate_opening_root: hash_at_path(record, &["aggregateOpeningRoot"])?
+                    .to_string(),
                 aggregate_commitment: value_at_path(record, &["commitment"])?.clone(),
             });
         }

@@ -17,8 +17,6 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] =
-        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
@@ -121,8 +119,6 @@ fn anchor_proof_commands_round_trip_with_family_label() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] =
-        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
@@ -164,8 +160,6 @@ fn public_key_share_commands_round_trip_with_family_label() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] =
-        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 
@@ -215,8 +209,6 @@ fn proof_command_binds_randomness_seed_to_nonce_and_statement() {
         serde_json::json!(witness.negative_indicator_coefficients);
     generate_request["openingRandomnessByLimb"] =
         serde_json::json!(witness.opening_randomness_by_limb);
-    generate_request["proofRandomnessSource"] =
-        serde_json::json!("development-deterministic-fixture");
     generate_request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     generate_request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
 

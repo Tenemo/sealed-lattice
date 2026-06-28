@@ -4,9 +4,12 @@ use super::extension_field::{
     CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
 };
 use super::fiat_shamir_transcript::FiatShamirTranscript;
-use super::low_degree_proof::{LowDegreeParameters, verify_low_degree};
+use super::low_degree_proof::{
+    LowDegreeParameters, bind_low_degree_commitment, verify_low_degree_openings,
+};
 use super::merkle_commitment::{
-    LEAF_SALT_BYTES, consistent_sorted_leaves, leaf_hash, verify_merkle_batch,
+    LEAF_SALT_BYTES, MerkleDigest, consistent_sorted_leaves, phase_pair_leaf_hash,
+    verify_merkle_batch,
 };
 use super::prover::{
     LimbProof, SuccinctEvaluationKeyProof, barycentric_weights, build_limb_public_vectors,
@@ -18,10 +21,14 @@ use super::relation::{
     QUOTIENT_COLUMN_ROW_CHECK_HIGH, QUOTIENT_COLUMN_ROW_CHECK_LOW,
     QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, QUOTIENT_COLUMN_SUMCHECK_VANISHING,
     SumcheckPublicEvaluations, TrusteeEvaluationKeyStatement, batched_row_check_value,
-    batched_sumcheck_value, masked_claim_bounds,
+    batched_sumcheck_value, masked_claim_bounds_for_global_claim,
+    masked_claim_lift_residue_count_for_moduli,
 };
 use super::*;
 use crate::bgv::modular_arithmetic::inverse_mod;
+use crate::bgv::profile::DATA_PRIMES;
+use num_bigint::BigInt;
+use num_traits::ToPrimitive;
 
 // Each logical length-N vector is committed as TRACE_SPLIT half-columns over a
 // half-size trace domain (2-adicity headroom), so it is interpolated as two
@@ -93,7 +100,6 @@ fn verify_limb(
             .iter()
             .any(|evaluations| evaluations.len() != total_columns)
         || limb_proof.query_openings.len() != LOW_DEGREE_QUERY_COUNT
-        || limb_proof.sumcheck_residual_query_openings.len() != LOW_DEGREE_QUERY_COUNT
     {
         return Err(invalid_succinct_setup_proof(
             "limb proof shape does not match the statement",
@@ -276,49 +282,73 @@ fn verify_limb(
         Ok(accumulated)
     };
 
-    let mut witness_leaves: Vec<(usize, [u8; 64])> = Vec::new();
-    let mut quotient_leaves: Vec<(usize, [u8; 64])> = Vec::new();
+    let mut witness_leaves: Vec<(usize, MerkleDigest)> = Vec::new();
+    let mut quotient_leaves: Vec<(usize, MerkleDigest)> = Vec::new();
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
-    verify_low_degree(
+    let low_degree_verification_state = bind_low_degree_commitment(
         &mut transcript,
         &low_degree_parameters,
         &limb_proof.low_degree,
+    )?;
+    let sumcheck_residual_low_degree_parameters = LowDegreeParameters {
+        modulus,
+        initial_domain_size: extension_size,
+        initial_offset: plan.coset_offset,
+        initial_root: plan.extension_root,
+        initial_degree_bound: trace_size,
+    };
+    transcript.absorb(
+        "low-degree-purpose",
+        SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
+    );
+    let sumcheck_residual_low_degree_verification_state = bind_low_degree_commitment(
+        &mut transcript,
+        &sumcheck_residual_low_degree_parameters,
+        &limb_proof.sumcheck_residual_low_degree,
+    )?;
+    let query_positions = transcript.challenge_positions(
+        "shared-query-position",
+        extension_size / 2,
+        LOW_DEGREE_QUERY_COUNT,
+    );
+    verify_low_degree_openings(
+        &low_degree_verification_state,
+        &limb_proof.low_degree,
+        &query_positions,
         |query_ordinal, pair_index| {
             let opening = &query_openings[query_ordinal];
             if opening.phase_one_rows[0].len() != phase_one_columns
                 || opening.phase_one_rows[1].len() != phase_one_columns
                 || opening.phase_two_rows[0].len() != phase_two_physical_columns
                 || opening.phase_two_rows[1].len() != phase_two_physical_columns
-                || opening
-                    .phase_one_salts
-                    .iter()
-                    .chain(opening.phase_two_salts.iter())
-                    .any(|salt| salt.len() != LEAF_SALT_BYTES)
+                || opening.phase_one_pair_salt.len() != LEAF_SALT_BYTES
+                || opening.phase_two_pair_salt.len() != LEAF_SALT_BYTES
             {
                 return Err(invalid_succinct_setup_proof(
                     "query opening shape does not match the column layout",
                 ));
             }
-            // Record both phase leaves at each queried position; the trees are
-            // authenticated in one batched opening each after the fold checks.
-            for (slot, position) in [pair_index, pair_index + half].into_iter().enumerate() {
-                witness_leaves.push((
-                    position,
-                    leaf_hash(
-                        position,
-                        &opening.phase_one_salts[slot],
-                        &opening.phase_one_rows[slot],
-                    ),
-                ));
-                quotient_leaves.push((
-                    position,
-                    leaf_hash(
-                        position,
-                        &opening.phase_two_salts[slot],
-                        &opening.phase_two_rows[slot],
-                    ),
-                ));
-            }
+            // Record one ordered pair leaf for each queried phase pair; the
+            // trees are authenticated in one batched opening each after the
+            // fold checks.
+            witness_leaves.push((
+                pair_index,
+                phase_pair_leaf_hash(
+                    pair_index,
+                    &opening.phase_one_pair_salt,
+                    &opening.phase_one_rows[0],
+                    &opening.phase_one_rows[1],
+                ),
+            ));
+            quotient_leaves.push((
+                pair_index,
+                phase_pair_leaf_hash(
+                    pair_index,
+                    &opening.phase_two_pair_salt,
+                    &opening.phase_two_rows[0],
+                    &opening.phase_two_rows[1],
+                ),
+            ));
             Ok([
                 reconstruct_batch_value(
                     &opening.phase_one_rows[0],
@@ -333,45 +363,12 @@ fn verify_limb(
             ])
         },
     )?;
-    let sumcheck_residual_low_degree_parameters = LowDegreeParameters {
-        modulus,
-        initial_domain_size: extension_size,
-        initial_offset: plan.coset_offset,
-        initial_root: plan.extension_root,
-        initial_degree_bound: trace_size,
-    };
-    let mut sumcheck_residual_leaves: Vec<(usize, [u8; 64])> = Vec::new();
-    transcript.absorb(
-        "low-degree-purpose",
-        SUMCHECK_RESIDUAL_LOW_DEGREE_TRANSCRIPT_PURPOSE,
-    );
-    verify_low_degree(
-        &mut transcript,
-        &sumcheck_residual_low_degree_parameters,
+    verify_low_degree_openings(
+        &sumcheck_residual_low_degree_verification_state,
         &limb_proof.sumcheck_residual_low_degree,
-        |query_ordinal, pair_index| {
-            let opening = &limb_proof.sumcheck_residual_query_openings[query_ordinal];
-            if opening.phase_two_rows[0].len() != phase_two_physical_columns
-                || opening.phase_two_rows[1].len() != phase_two_physical_columns
-                || opening
-                    .phase_two_salts
-                    .iter()
-                    .any(|salt| salt.len() != LEAF_SALT_BYTES)
-            {
-                return Err(invalid_succinct_setup_proof(
-                    "sumcheck residual query opening shape does not match the column layout",
-                ));
-            }
-            for (slot, position) in [pair_index, pair_index + half].into_iter().enumerate() {
-                sumcheck_residual_leaves.push((
-                    position,
-                    leaf_hash(
-                        position,
-                        &opening.phase_two_salts[slot],
-                        &opening.phase_two_rows[slot],
-                    ),
-                ));
-            }
+        &query_positions,
+        |query_ordinal, _pair_index| {
+            let opening = &query_openings[query_ordinal];
             let mut first = ChallengeExtensionTower::zero();
             let mut second = ChallengeExtensionTower::zero();
             for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
@@ -385,14 +382,15 @@ fn verify_limb(
         },
     )?;
 
-    // Authenticate both phase trees against their roots with one batched opening
-    // each. A position opened to two different rows across queries is rejected
-    // here, so binding is exactly as strong as an independent path per slot.
-    let phase_tree_depth = extension_size.trailing_zeros() as usize;
-    // Batched verification is only as strong as per-slot paths because
-    // consistent_sorted_leaves first rejects a position opened to two different
-    // leaves; without that dedup a prover could fold one value while the tree
-    // binds another.
+    // Authenticate both phase-pair trees against their roots with one batched
+    // opening each. A pair index opened to two different row pairs across
+    // queries is rejected here, so binding is exactly as strong as an
+    // independent path per pair leaf.
+    let phase_tree_depth = half.trailing_zeros() as usize;
+    // Batched verification is only as strong as per-pair paths because
+    // consistent_sorted_leaves first rejects a pair index opened to two
+    // different leaves; without that dedup a prover could fold one value while
+    // the tree binds another.
     let Some(witness_sorted_leaves) = consistent_sorted_leaves(witness_leaves) else {
         return Err(invalid_succinct_setup_proof(
             "witness tree opens one position to two values",
@@ -423,22 +421,6 @@ fn verify_limb(
             "quotient tree query openings failed batched Merkle verification",
         ));
     }
-    let Some(sumcheck_residual_sorted_leaves) = consistent_sorted_leaves(sumcheck_residual_leaves)
-    else {
-        return Err(invalid_succinct_setup_proof(
-            "sumcheck residual tree opens one position to two values",
-        ));
-    };
-    if !verify_merkle_batch(
-        &limb_proof.quotient_tree_root,
-        phase_tree_depth,
-        &sumcheck_residual_sorted_leaves,
-        &limb_proof.sumcheck_residual_batch_opening,
-    ) {
-        return Err(invalid_succinct_setup_proof(
-            "sumcheck residual query openings failed batched Merkle verification",
-        ));
-    }
 
     Ok(())
 }
@@ -446,26 +428,26 @@ fn verify_limb(
 // Cross-limb integer consistency on the masked claims: every limb publishes
 // the residue of the same global claim integer (clear combination plus the
 // shared smudging mask). The integer is recovered by a centered lift from the
-// first two limb fields carrying the claim — the two-prime window is wider
-// than twice the claim bound, so the lift is unique — and every other limb's
+// statement-selected fields carrying the claim; the product of those fields
+// must exceed twice the claim bound, so the lift is unique. Every other limb's
 // residue must match that integer, which forces integer witness equality
 // through the bounded random combinations.
 fn verify_cross_limb_consistency(
     statement: &TrusteeEvaluationKeyStatement,
     proof: &SuccinctEvaluationKeyProof,
 ) -> CanonicalResult<()> {
-    let limb_moduli = statement.limb_moduli();
-    let (lower_bound, upper_bound) = masked_claim_bounds(statement)?;
+    let proof_limb_indices = statement.proof_limb_indices();
     let mut residues_by_global_id: std::collections::BTreeMap<u64, Vec<(u64, u64)>> =
         std::collections::BTreeMap::new();
-    for (limb_index, modulus) in limb_moduli.iter().enumerate() {
-        let layout = LimbColumnLayout::new(statement, limb_index)?;
-        for (local_claim, claim) in proof.limb_proofs[limb_index]
+    for (proof_position, limb_index) in proof_limb_indices.iter().enumerate() {
+        let modulus = DATA_PRIMES[*limb_index];
+        let layout = LimbColumnLayout::new(statement, *limb_index)?;
+        for (local_claim, claim) in proof.limb_proofs[proof_position]
             .masked_consistency_claims
             .iter()
             .enumerate()
         {
-            if *claim >= *modulus {
+            if *claim >= modulus {
                 return Err(invalid_succinct_setup_proof(
                     "masked consistency claim is not a reduced limb residue",
                 ));
@@ -474,50 +456,30 @@ fn verify_cross_limb_consistency(
             residues_by_global_id
                 .entry(global_id)
                 .or_default()
-                .push((*modulus, *claim));
+                .push((modulus, *claim));
         }
     }
-    for residues in residues_by_global_id.values() {
-        // The first two residues are the two smallest profile limbs by
-        // construction, so their product exceeds twice the claim bound and the
-        // centered lift is the unique integer; the range guard below enforces
-        // this rather than assuming it.
-        let [
-            (first_modulus, first_residue),
-            (second_modulus, second_residue),
-        ] = residues[..2]
-        else {
+    for (global_claim_id, residues) in &residues_by_global_id {
+        let (lower_bound, upper_bound) =
+            masked_claim_bounds_for_global_claim(statement, *global_claim_id)?;
+        let lift_count = masked_claim_lift_residue_count_for_moduli(
+            residues.iter().map(|(modulus, _)| *modulus),
+            &lower_bound,
+            &upper_bound,
+        );
+        if lift_count > residues.len() {
             return Err(invalid_succinct_setup_proof(
-                "masked consistency claim needs at least two limb fields for integer binding",
-            ));
-        };
-        // Centered two-prime lift of the claim integer.
-        let product = i128::from(first_modulus) * i128::from(second_modulus);
-        if product <= 2 * lower_bound.abs().max(upper_bound) {
-            return Err(invalid_succinct_setup_proof(
-                "masked consistency claim range is too wide for two-prime lifting",
+                "masked consistency claim needs enough limb fields for integer binding",
             ));
         }
-        // Garner's step (second_residue - first_residue) * inverse(first_modulus)
-        // mod second_modulus, kept non-negative by adding second_modulus before
-        // the subtraction.
-        let step = i128::from(mul_mod_fast(
-            (second_residue + second_modulus - (first_residue % second_modulus) % second_modulus)
-                % second_modulus,
-            inverse_mod(first_modulus % second_modulus, second_modulus)?,
-            second_modulus,
-        ));
-        let mut claim_integer = i128::from(first_residue) + i128::from(first_modulus) * step;
-        if claim_integer > product / 2 {
-            claim_integer -= product;
-        }
+        let claim_integer = centered_crt_lift(&residues[..lift_count])?;
         if claim_integer < lower_bound || claim_integer > upper_bound {
             return Err(invalid_succinct_setup_proof(
                 "masked consistency claim exceeds the accepted range",
             ));
         }
-        for (modulus, residue) in &residues[2..] {
-            if claim_integer.rem_euclid(i128::from(*modulus)) != i128::from(*residue) {
+        for (modulus, residue) in &residues[lift_count..] {
+            if bigint_residue(&claim_integer, *modulus)? != *residue {
                 return Err(invalid_succinct_setup_proof(
                     "masked consistency claim disagrees across limb fields",
                 ));
@@ -528,6 +490,38 @@ fn verify_cross_limb_consistency(
     Ok(())
 }
 
+fn centered_crt_lift(residues: &[(u64, u64)]) -> CanonicalResult<BigInt> {
+    let Some((first_modulus, first_residue)) = residues.first().copied() else {
+        return Err(invalid_succinct_setup_proof(
+            "masked consistency claim needs at least one limb field",
+        ));
+    };
+    let mut value = BigInt::from(first_residue);
+    let mut product = BigInt::from(first_modulus);
+    for (modulus, residue) in &residues[1..] {
+        let current_residue = bigint_residue(&value, *modulus)?;
+        let delta = (residue + modulus - current_residue) % modulus;
+        let product_residue = bigint_residue(&product, *modulus)?;
+        let step = mul_mod_fast(delta, inverse_mod(product_residue, *modulus)?, *modulus);
+        value += &product * BigInt::from(step);
+        product *= BigInt::from(*modulus);
+    }
+
+    if value > &product / BigInt::from(2_u8) {
+        value -= product;
+    }
+
+    Ok(value)
+}
+
+fn bigint_residue(value: &BigInt, modulus: u64) -> CanonicalResult<u64> {
+    let modulus_integer = BigInt::from(modulus);
+    let residue = ((value % &modulus_integer) + &modulus_integer) % &modulus_integer;
+    residue
+        .to_u64()
+        .ok_or_else(|| invalid_succinct_setup_proof("masked consistency residue does not fit u64"))
+}
+
 pub(crate) fn verify_evaluation_key_share(
     statement: &TrusteeEvaluationKeyStatement,
     proof: &SuccinctEvaluationKeyProof,
@@ -536,8 +530,8 @@ pub(crate) fn verify_evaluation_key_share(
     accounting::enforce_current_succinct_proof_soundness_policy(
         statement.ring_degree / TRACE_SPLIT,
     )?;
-    let limb_moduli = statement.limb_moduli();
-    if proof.limb_proofs.len() != limb_moduli.len() {
+    let proof_limb_indices = statement.proof_limb_indices();
+    if proof.limb_proofs.len() != proof_limb_indices.len() {
         return Err(invalid_succinct_setup_proof(
             "proof limb count does not match the statement",
         ));
@@ -551,23 +545,24 @@ pub(crate) fn verify_evaluation_key_share(
     for limb_proof in &proof.limb_proofs {
         transcript.absorb("witness-tree-root", &limb_proof.witness_tree_root);
     }
-    let consistency_vectors = (0..CONSISTENCY_REPETITIONS)
+    let family_shape = statement.family_shape()?;
+    let consistency_vectors = (0..family_shape.consistency_repetitions())
         .map(|_| {
             transcript.challenge_bounded_integers(
                 "consistency-vector",
-                CONSISTENCY_COEFFICIENT_BITS,
+                family_shape.consistency_coefficient_bits(),
                 statement.ring_degree,
             )
         })
         .collect::<Vec<_>>();
 
     verify_cross_limb_consistency(statement, proof)?;
-    for (limb_index, modulus) in limb_moduli.iter().enumerate() {
+    for (proof_position, limb_index) in proof_limb_indices.iter().enumerate() {
         verify_limb(
             statement,
-            limb_index,
-            *modulus,
-            &proof.limb_proofs[limb_index],
+            *limb_index,
+            DATA_PRIMES[*limb_index],
+            &proof.limb_proofs[proof_position],
             &consistency_vectors,
             &transcript,
         )?;

@@ -5,10 +5,8 @@ import {
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
-import {
-    createCompactVssRecipientShareCommitmentBundle,
-    createPrivateVssMailboxDeliverySet,
-} from '#packages/protocol/src/index';
+import { createCompactVssRecipientShareCommitmentBundle } from '#packages/protocol/src/setup/compact-vss-commitments';
+import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 import {
     makeSetupContext,
     makeSetupFixtureHash,

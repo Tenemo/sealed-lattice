@@ -259,7 +259,7 @@ export type CapabilityContext = {
     readonly ballotValidityProofProfileFrozen?: boolean;
     readonly evaluatorReplayProfileFrozen?: boolean;
     readonly targetOutputLayoutFrozen?: boolean;
-    readonly targetDecryptionProfileReferencePresent?: boolean;
+    readonly targetDecryptionProfileReferenceHash?: ProtocolHash;
     readonly localRosterAccepted?: boolean;
     readonly rosterExternalAcceptanceHash?: ProtocolHash;
     readonly actionContextRosterExternalAcceptanceHash?: ProtocolHash | null;
@@ -268,16 +268,14 @@ export type CapabilityContext = {
     readonly decryptionShareCount?: number;
     readonly ballotProofsVerified?: boolean;
     readonly encryptedBallotAggregateComputed?: boolean;
-    readonly evaluatorReplaySucceeded?: boolean;
-    readonly targetFinalityAccepted?: boolean;
-    readonly targetAccepted?: boolean;
-    readonly targetDecryptionProfileVerified?: boolean;
-    readonly runtimeProfileSupported?: boolean;
-    readonly directProofTransportPresent?: boolean;
-    readonly mobileReplayEvidencePresent?: boolean;
-    readonly targetDecryptionCertificatePresent?: boolean;
-    readonly targetDecryptionClosureApplied?: boolean;
-    readonly activeMaliciousClosureApplied?: boolean;
+    readonly evaluatorReplayRecordHash?: ProtocolHash;
+    readonly targetFinalityRecordHash?: ProtocolHash;
+    readonly targetAcceptedRecordHash?: ProtocolHash;
+    readonly targetDecryptionProofProfileEvidenceRoot?: ProtocolHash;
+    readonly directProofTransportRoot?: ProtocolHash;
+    readonly mobileReplayEvidenceRoot?: ProtocolHash;
+    readonly targetDecryptionCertificateHash?: ProtocolHash;
+    readonly targetDecryptionShareEvidenceRoot?: ProtocolHash;
     readonly recoveryState?: RecoveryState;
 };
 
@@ -298,12 +296,11 @@ export type RefusalReason =
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
     | 'TargetDecryptionProfileNotCertified'
-    | 'OutsideMeasuredRuntimeProfile'
     | 'MissingDirectProofTransport'
     | 'MissingMobileReplayEvidence'
     | 'MissingTargetDecryptionCertificate'
     | 'FrozenStateIncomplete'
-    | 'TargetDecryptionClosureMissing'
+    | 'TargetDecryptionShareEvidenceMissing'
     | 'AmbiguousRecoveryState'
     | 'StaleRecoveryEpoch'
     | 'ClonedDeviceState'

@@ -211,6 +211,10 @@ fn setup_commitment_security_certificate_value_for_roster(
         ));
     }
     let commitment_modulus_product_bits = setup_commitment_modulus_product_ceil_bits();
+    let compact_vss_parameter_certificate_input_binding =
+        compact_vss_parameter_certificate_input_binding_value_for_roster(roster)?;
+    let compact_vss_parameter_certificate_input_binding_hash =
+        compact_vss_parameter_certificate_input_binding_hash_for_roster(roster)?;
 
     Ok(json!({
         "objectType": SETUP_COMMITMENT_SECURITY_CERTIFICATE_OBJECT_TYPE,
@@ -221,6 +225,8 @@ fn setup_commitment_security_certificate_value_for_roster(
         "commitmentProfileHash": setup_commitment_profile_hash()?,
         "qShareHash": q_share_hash()?,
         "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash()?,
+        "compactVssParameterCertificateInputBindingHash": compact_vss_parameter_certificate_input_binding_hash,
+        "compactVssParameterCertificateInputBinding": compact_vss_parameter_certificate_input_binding,
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,

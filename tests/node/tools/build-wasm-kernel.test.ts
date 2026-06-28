@@ -3,8 +3,10 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+    cargoFeatureArgumentsForCommandSurface,
     pinKernelHashInLoaderSource,
     resolveOutputFilePath,
+    resolveWasmCommandSurface,
 } from '#tools/ci/build-wasm-kernel';
 
 const repoRoot = path.resolve('C:\\repo\\sealed-lattice');
@@ -32,6 +34,58 @@ describe('WASM kernel build helpers', () => {
         expect(() =>
             resolveOutputFilePath(['--out', '..\\outside.wasm'], repoRoot),
         ).toThrow('--out must resolve inside the repository');
+    });
+
+    it('resolves the command surface and Cargo feature arguments', () => {
+        expect(
+            resolveWasmCommandSurface(
+                [],
+                path.resolve(
+                    repoRoot,
+                    'packages',
+                    'wasm',
+                    'dist',
+                    'sealed-lattice-kernel.wasm',
+                ),
+                repoRoot,
+            ),
+        ).toBe('internal-development');
+        expect(
+            resolveWasmCommandSurface(
+                [],
+                path.resolve(
+                    repoRoot,
+                    'packages',
+                    'sdk',
+                    'dist',
+                    'sealed-lattice-kernel.wasm',
+                ),
+                repoRoot,
+            ),
+        ).toBe('public-sdk');
+        expect(
+            resolveWasmCommandSurface(
+                ['--command-surface', 'public-sdk'],
+                path.resolve(repoRoot, 'custom.wasm'),
+                repoRoot,
+            ),
+        ).toBe('public-sdk');
+        expect(() =>
+            resolveWasmCommandSurface(
+                ['--command-surface', 'unknown'],
+                path.resolve(repoRoot, 'custom.wasm'),
+                repoRoot,
+            ),
+        ).toThrow(
+            '--command-surface must be internal-development or public-sdk',
+        );
+
+        expect(
+            cargoFeatureArgumentsForCommandSurface('internal-development'),
+        ).toEqual(['--features', 'target-decryption-development-commands']);
+        expect(cargoFeatureArgumentsForCommandSurface('public-sdk')).toEqual(
+            [],
+        );
     });
 
     it('pins the built SDK loader hash from a generated build artifact', () => {

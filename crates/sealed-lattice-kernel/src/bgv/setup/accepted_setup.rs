@@ -1,4 +1,4 @@
-mod accepted_certificates;
+﻿mod accepted_certificates;
 mod common_randomness;
 mod compact_same_secret_bridge_verification;
 mod compact_vss_public_material_verification;
@@ -174,7 +174,8 @@ use super::{
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_PROFILE_ID,
         SETUP_PROOF_SERIALIZATION, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        setup_proof_material_transport_hashes, verified_setup_proof_material_chunks_from_request,
+        setup_proof_material_chunk_manifest_root, setup_proof_material_transport_hashes,
+        verified_setup_proof_material_chunks_from_request,
     },
     threshold_share_commitments::{
         derive_threshold_share_commitment_set_from_parts,
@@ -365,6 +366,10 @@ const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_NAME: &str = "publicKeyShareMa
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_MATERIAL_ROLE: &str = "public-key-share-material";
 const SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_NAME: &str = "sameSecretProofMaterial";
 const SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_ROLE: &str = "same-secret-proof-material";
+const SETUP_TRANSPORTED_COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_NAME: &str =
+    "compactVssShareLinkageProofMaterial";
+const SETUP_TRANSPORTED_COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_ROLE: &str =
+    "compact-vss-share-linkage-proof-material";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME: &str = "publicKeyShareProofMaterial";
 const SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE: &str =
     "public-key-share-proof-material";
@@ -1011,7 +1016,8 @@ fn compact_vss_matrix_expansion_profile_value() -> Value {
     let output_coordinate_count = 16_u64;
     let projection_weight = 32_u64;
     let randomness_column_count = 2_u64;
-    let input_column_count = 1 + randomness_column_count;
+    let message_column_count = 2_u64;
+    let input_column_count = message_column_count + randomness_column_count;
     let coordinate_count_per_commitment = commitment_modulus_limb_count * output_coordinate_count;
     let sampled_matrix_residues_per_coordinate = input_column_count * projection_weight;
     let sampled_projection_indices_per_coordinate = sampled_matrix_residues_per_coordinate;
@@ -1024,7 +1030,7 @@ fn compact_vss_matrix_expansion_profile_value() -> Value {
         "objectType": "CompactVssMatrixExpansionProfile",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
         "matrixKind": "compact-vss-commitment-key",
         "ringDegree": POLYNOMIAL_DEGREE,
         "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
@@ -1032,7 +1038,8 @@ fn compact_vss_matrix_expansion_profile_value() -> Value {
         "projectionWeight": projection_weight,
         "randomnessColumnCount": randomness_column_count,
         "inputColumnLabels": [
-            "message",
+            "message:0",
+            "message:1",
             "randomness:0",
             "randomness:1"
         ],
@@ -1071,15 +1078,30 @@ fn compact_vss_matrix_expansion_profile_value() -> Value {
 }
 
 fn compact_vss_parameter_certificate_input_binding_hash() -> CanonicalResult<String> {
+    let roster = first_closure_roster_parameters();
+    compact_vss_parameter_certificate_input_binding_hash_for_roster(&roster)
+}
+
+fn compact_vss_parameter_certificate_input_binding_hash_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<String> {
     derive_protocol_hash(
         "CompactVssParameterCertificateInputBindingHash",
-        &compact_vss_parameter_certificate_input_binding_body_value()?,
+        &compact_vss_parameter_certificate_input_binding_body_value_for_roster(roster)?,
     )
 }
 
 fn compact_vss_parameter_certificate_input_binding_value() -> CanonicalResult<Value> {
-    let mut binding = compact_vss_parameter_certificate_input_binding_body_value()?;
-    let binding_hash = compact_vss_parameter_certificate_input_binding_hash()?;
+    let roster = first_closure_roster_parameters();
+    compact_vss_parameter_certificate_input_binding_value_for_roster(&roster)
+}
+
+fn compact_vss_parameter_certificate_input_binding_value_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
+    let mut binding =
+        compact_vss_parameter_certificate_input_binding_body_value_for_roster(roster)?;
+    let binding_hash = compact_vss_parameter_certificate_input_binding_hash_for_roster(roster)?;
     let binding_object = binding.as_object_mut().ok_or_else(|| {
         static_accounting_error("compact VSS parameter certificate input binding is not an object")
     })?;
@@ -1091,8 +1113,9 @@ fn compact_vss_parameter_certificate_input_binding_value() -> CanonicalResult<Va
     Ok(binding)
 }
 
-fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResult<Value> {
-    let roster = first_closure_roster_parameters();
+fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
     let source_rns_limb_count = DATA_PRIMES.len() as u64;
     let target_rns_limb_count =
         (crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL + 1) as u64;
@@ -1101,9 +1124,11 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
         crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64;
     let randomness_column_count =
         crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64;
+    let message_column_count =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT as u64;
     let projection_weight =
         crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_PROJECTION_WEIGHT as u64;
-    let input_column_count = 1_u64
+    let input_column_count = message_column_count
         .checked_add(randomness_column_count)
         .ok_or_else(|| static_accounting_error("compact VSS input column count overflowed"))?;
     let coordinate_count_per_commitment = commitment_modulus_limb_count
@@ -1139,6 +1164,24 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
         .ok_or_else(|| {
             static_accounting_error("aggregate Shamir scalar L1 amplification overflowed")
         })?;
+    let ring_degree = POLYNOMIAL_DEGREE as u64;
+    let fresh_opening_witness_coefficient_count =
+        input_column_count.checked_mul(ring_degree).ok_or_else(|| {
+            static_accounting_error(
+                "fresh compact VSS opening witness coefficient count overflowed",
+            )
+        })?;
+    let aggregate_randomness_difference_infinity_bound =
+        roster.participant_count.checked_mul(2).ok_or_else(|| {
+            static_accounting_error("aggregate compact VSS randomness difference bound overflowed")
+        })?;
+    let recipient_shamir_relation_l1 = maximum_one_source_shamir_scalar_l1
+        .checked_add(1)
+        .ok_or_else(|| static_accounting_error("recipient Shamir relation L1 overflowed"))?;
+    let aggregate_sum_relation_l1 = roster
+        .participant_count
+        .checked_add(1)
+        .ok_or_else(|| static_accounting_error("aggregate sum relation L1 overflowed"))?;
     let commitment_modulus_limbs = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
         .iter()
         .map(|commitment_modulus_index| {
@@ -1156,26 +1199,27 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
 
     Ok(json!({
         "objectType": "CompactVssParameterCertificateInputBinding",
-        "objectVersion": 1,
+        "objectVersion": 2,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
         "participantCount": roster.participant_count,
         "sourceRnsLimbCount": source_rns_limb_count,
         "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": roster.decryption_threshold,
         "ringDegree": POLYNOMIAL_DEGREE,
         "commitmentRelation": {
-            "relation": "C = A0 * m + A1 * r mod q_c",
+            "relation": "C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c",
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
             "commitmentModulusLimbs": commitment_modulus_limbs,
             "outputCoordinateCount": output_coordinate_count,
-            "messageWidth": 1_u64,
+            "messageWidth": message_column_count,
             "randomnessWidth": randomness_column_count,
             "projectionWeight": projection_weight,
             "coordinateCountPerCommitment": coordinate_count_per_commitment,
             "inputColumnLabels": [
-                "message",
+                "message:0",
+                "message:1",
                 "randomness:0",
                 "randomness:1"
             ],
@@ -1222,12 +1266,12 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
             "sourceCoefficientRepresentation": "canonical residue modulo the selected source RNS prime",
             "targetCoefficientRepresentation": "canonical residue modulo the selected target RNS prime",
             "signedRepresentativeConvention": "same-secret bridge witnesses use the setup proof signed representative convention before reduction into each RNS prime",
-            "digitBase": "none",
-            "digitCount": 1_u64,
-            "paddingAndBlockOrder": "one coefficient-domain residue vector per commitment, ordered by coefficient index",
-            "freshEncodingRule": "exact canonical residue encoding",
-            "linearDecoder": "identity over the selected RNS limb",
-            "derivedEncodingRule": "Shamir recipient-share encodings are exact residues; aggregate threshold openings bind the carried public-sum message together with the reduced share and non-negative carry witness",
+            "digitBase": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE,
+            "digitCount": message_column_count,
+            "paddingAndBlockOrder": "two base-3^17 little-endian digit coefficients per message ring position",
+            "freshEncodingRule": "exact canonical residue encoding into two message digit columns",
+            "linearDecoder": "little-endian base-3^17 decoder over the selected RNS limb",
+            "derivedEncodingRule": "Shamir recipient-share and aggregate threshold openings bind carried public-sum messages through decoded message digit columns and non-negative carry witnesses",
         },
         "normInputClasses": [
             {
@@ -1252,6 +1296,132 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
                 "sourceTrusteeCount": roster.participant_count,
             },
         ],
+        "parameterReviewInputs": {
+            "inputVersion": 1,
+            "coefficientRing": {
+                "ringPolynomial": "X^N+1",
+                "ringDegree": POLYNOMIAL_DEGREE,
+                "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+                "commitmentModulusLimbs": commitment_modulus_limbs,
+            },
+            "openingWitnessRows": [
+                {
+                    "rowId": "compact-vss-fresh-opening-witness",
+                    "commitmentRoles": [
+                        "coefficient",
+                        "recipient-share"
+                    ],
+                    "messageCoefficientBound": "selectedRnsPrime",
+                    "messageCoefficientUpperBoundMultiplier": 1_u64,
+                    "messageDifferenceUpperBoundMultiplier": 1_u64,
+                    "randomnessDistribution": "balanced-ternary-per-column-coefficient",
+                    "randomnessCoefficientInfinityBound": 1_u64,
+                    "randomnessDifferenceInfinityBound": 2_u64,
+                    "messageColumnCount": message_column_count,
+                    "randomnessColumnCount": randomness_column_count,
+                    "witnessColumnCount": input_column_count,
+                    "witnessCoefficientCount": fresh_opening_witness_coefficient_count,
+                },
+                {
+                    "rowId": "compact-vss-aggregate-opening-witness",
+                    "commitmentRoles": [
+                        "aggregate-threshold-share"
+                    ],
+                    "messageCoefficientBound": "participantCount * selectedRnsPrime",
+                    "messageCoefficientUpperBoundMultiplier": roster.participant_count,
+                    "messageDifferenceUpperBoundMultiplier": roster.participant_count,
+                    "randomnessDistribution": "sum-of-source-balanced-ternary-openings",
+                    "randomnessCoefficientInfinityBound": roster.participant_count,
+                    "randomnessDifferenceInfinityBound": aggregate_randomness_difference_infinity_bound,
+                    "messageColumnCount": message_column_count,
+                    "randomnessColumnCount": randomness_column_count,
+                    "witnessColumnCount": input_column_count,
+                    "witnessCoefficientCount": fresh_opening_witness_coefficient_count,
+                },
+            ],
+            "linearRelationRows": [
+                {
+                    "rowId": "compact-vss-recipient-share-shamir-evaluation",
+                    "relation": "recipient share opening equals Shamir evaluation of source coefficient openings",
+                    "sourceOpeningCount": roster.decryption_threshold,
+                    "recipientOpeningTermCount": 1_u64,
+                    "maximumRecipientTrusteePoint": maximum_recipient_trustee_point,
+                    "sourceShamirScalarL1": maximum_one_source_shamir_scalar_l1,
+                    "combinedRelationTermL1": recipient_shamir_relation_l1,
+                    "appliesToColumns": [
+                        "message:0",
+                        "message:1",
+                        "randomness:0",
+                        "randomness:1"
+                    ],
+                },
+                {
+                    "rowId": "compact-vss-aggregate-threshold-public-sum",
+                    "relation": "aggregate threshold opening equals public sum of source-recipient openings",
+                    "sourceTrusteeCount": roster.participant_count,
+                    "aggregateOpeningTermCount": 1_u64,
+                    "sourceOpeningScalarL1": roster.participant_count,
+                    "combinedRelationTermL1": aggregate_sum_relation_l1,
+                    "appliesToColumns": [
+                        "message:0",
+                        "message:1",
+                        "randomness:0",
+                        "randomness:1"
+                    ],
+                },
+                {
+                    "rowId": "compact-vss-one-recipient-aggregate-from-source-coefficients",
+                    "relation": "one recipient aggregate opening as a sum of all source Shamir evaluations",
+                    "sourceTrusteeCount": roster.participant_count,
+                    "sourceCoefficientCountPerTrustee": roster.decryption_threshold,
+                    "oneRecipientAggregateShamirScalarL1": one_recipient_aggregate_shamir_scalar_l1,
+                    "appliesToColumns": [
+                        "message:0",
+                        "message:1",
+                        "randomness:0",
+                        "randomness:1"
+                    ],
+                },
+            ],
+            "targetBasisReductionRows": [
+                {
+                    "rowId": "compact-vss-same-secret-bridge-target-reduction",
+                    "sourceSecretDistribution": "standard-ternary",
+                    "sourceSignedRepresentativeInfinityBound": 1_u64,
+                    "targetRnsLimbCount": target_rns_limb_count,
+                    "targetRnsPrimes": target_rns_primes,
+                    "targetBasisHash": canonical_target_basis_hash()?,
+                    "targetBasisLimbOrder": "profile-order-prefix",
+                    "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root()?,
+                },
+            ],
+            "reviewReductionRows": [
+                {
+                    "rowId": "compact-vss-module-sis-binding-review-input",
+                    "problem": "Module-SIS",
+                    "openingWitnessRows": [
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness"
+                    ],
+                    "linearRelationRows": [
+                        "compact-vss-recipient-share-shamir-evaluation",
+                        "compact-vss-aggregate-threshold-public-sum",
+                        "compact-vss-one-recipient-aggregate-from-source-coefficients"
+                    ],
+                    "collisionDifferenceRule": "subtract two accepted openings over the integers before reducing to the commitment modulus",
+                },
+                {
+                    "rowId": "compact-vss-module-lwe-hiding-review-input",
+                    "problem": "Module-LWE",
+                    "openingWitnessRows": [
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness"
+                    ],
+                    "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
+                    "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+                },
+            ],
+        },
         "estimatorInputRows": [
             {
                 "rowId": "compact-vss-module-sis-binding-input",
@@ -1261,7 +1431,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
                 "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
                 "commitmentModulusLimbs": commitment_modulus_limbs,
                 "outputCoordinateCount": output_coordinate_count,
-                "messageWidth": 1_u64,
+                "messageWidth": message_column_count,
                 "randomnessWidth": randomness_column_count,
                 "projectionWeight": projection_weight,
                 "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
@@ -1275,7 +1445,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value() -> CanonicalResu
                 "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
                 "commitmentModulusLimbs": commitment_modulus_limbs,
                 "outputCoordinateCount": output_coordinate_count,
-                "messageWidth": 1_u64,
+                "messageWidth": message_column_count,
                 "randomnessWidth": randomness_column_count,
                 "projectionWeight": projection_weight,
                 "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
@@ -1902,15 +2072,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
             "setupContext was required before accepted setup handoff construction",
         )
     })?;
-    let target_decryption_profile_binding = setup_package
-        .get("heSecurityCertificate")
-        .and_then(|certificate| certificate.get("targetDecryptionProfileBinding"))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "heSecurityCertificate.targetDecryptionProfileBinding was required before accepted setup handoff construction",
-            )
-        })?;
     let mut handoff = json!({
         "objectType": "CollectiveBgvAcceptedSetupHandoff",
         "objectVersion": 1,
@@ -1972,12 +2133,6 @@ fn accepted_setup_handoff_value(setup_package: &Value) -> CanonicalResult<Value>
                 setup_package,
                 "evaluationKeys",
                 "publicEvaluationKeyMaterialRoot",
-            )?,
-        },
-        "futureTargetDecryptionHandoff": {
-            "targetDecryptionProfileId": value_string(
-                target_decryption_profile_binding,
-                "targetDecryptionProfileId",
             )?,
         },
         "certificateRoots": {

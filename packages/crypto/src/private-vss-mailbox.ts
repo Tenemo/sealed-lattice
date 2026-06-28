@@ -4,6 +4,7 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { bytesToBase64, decodeCanonicalBase64 } from './canonical-base64.js';
 import { canonicalJson, hash512Hex } from './canonical-json.js';
 import { deriveProtocolHash } from './hashes.js';
 
@@ -74,7 +75,7 @@ export type PrivateVssEncryptedEnvelope = Readonly<
         readonly kemCiphertextBytesHex: string;
         readonly kemCiphertextHash: ProtocolHash;
         readonly aeadNonceHex: string;
-        readonly ciphertextBytesHex: string;
+        readonly ciphertextBytesBase64: string;
         readonly ciphertextBytesHash: ProtocolHash;
         readonly ciphertextByteLength: number;
         readonly plaintextByteLength: number;
@@ -327,7 +328,7 @@ export const encryptPrivateVssMailboxEnvelope = async (
         kemCiphertextBytesHex: bytesToHex(kemResult.cipherText),
         kemCiphertextHash,
         aeadNonceHex: bytesToHex(aeadNonce),
-        ciphertextBytesHex: bytesToHex(ciphertextBytes),
+        ciphertextBytesBase64: bytesToBase64(ciphertextBytes),
         ciphertextBytesHash,
         ciphertextByteLength: ciphertextBytes.byteLength,
         plaintextByteLength: plaintextBytes.byteLength,
@@ -367,13 +368,9 @@ export const decryptPrivateVssMailboxEnvelope = async (
         aesGcmNonceByteLength,
         'encryptedEnvelope.aeadNonceHex',
     );
-    if (!isLowercaseHex(input.encryptedEnvelope.ciphertextBytesHex)) {
-        throw new TypeError(
-            'encryptedEnvelope.ciphertextBytesHex must be lowercase canonical hex.',
-        );
-    }
-    const ciphertextBytes = hexToBytes(
-        input.encryptedEnvelope.ciphertextBytesHex,
+    const ciphertextBytes = decodeCanonicalBase64(
+        input.encryptedEnvelope.ciphertextBytesBase64,
+        'encryptedEnvelope.ciphertextBytesBase64',
     );
     const expectedKemCiphertextHash = hashBytes(
         'sealed-lattice-private-vss-mailbox/ml-kem-768-ciphertext-v1',
@@ -395,7 +392,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
         input.encryptedEnvelope.ciphertextBytesHash
     ) {
         throw new Error(
-            'encryptedEnvelope.ciphertextBytesHash does not match ciphertextBytesHex.',
+            'encryptedEnvelope.ciphertextBytesHash does not match ciphertextBytesBase64.',
         );
     }
     if (
@@ -403,7 +400,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
         input.encryptedEnvelope.ciphertextByteLength
     ) {
         throw new Error(
-            'encryptedEnvelope.ciphertextByteLength does not match ciphertextBytesHex.',
+            'encryptedEnvelope.ciphertextByteLength does not match ciphertextBytesBase64.',
         );
     }
     const privateEnvelopeAadHash = deriveProtocolHash(

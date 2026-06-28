@@ -37,9 +37,9 @@ pub(super) struct CompactAggregateOpeningComputation {
 
 pub(super) struct VerifiedCompactAggregateOpeningCredential {
     pub(super) commitment_root: String,
+    pub(super) opening_root: String,
     pub(super) aggregate_share_values: Vec<u64>,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) message_coefficient_bound: u64,
     pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
 }
 
@@ -91,9 +91,9 @@ pub(super) fn verify_compact_aggregate_opening_credential(
 
     Ok(VerifiedCompactAggregateOpeningCredential {
         commitment_root,
+        opening_root,
         aggregate_share_values,
         aggregate_commitment_message_values,
-        message_coefficient_bound,
         aggregate_randomness_by_column,
     })
 }

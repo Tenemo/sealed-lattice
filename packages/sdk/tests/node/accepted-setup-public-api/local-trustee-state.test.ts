@@ -36,6 +36,10 @@ describe('accepted setup public package API in Node', () => {
         const restoredState =
             await publicSetupApi.restoreLocalTrusteeSetupState({
                 encryptedLocalState: exportedState.encryptedLocalState,
+                sealedAggregateThresholdShare:
+                    exportedState.sealedAggregateThresholdShare,
+                sealedTargetDecryptionProofWitness:
+                    exportedState.sealedTargetDecryptionProofWitness,
                 localStateCommitment: exportedState.localStateCommitment,
                 setupContext,
                 storageKeyBytesHex: '41'.repeat(32),
@@ -120,6 +124,10 @@ describe('accepted setup public package API in Node', () => {
         await expect(
             publicSetupApi.restoreLocalTrusteeSetupState({
                 encryptedLocalState: exportedState.encryptedLocalState,
+                sealedAggregateThresholdShare:
+                    exportedState.sealedAggregateThresholdShare,
+                sealedTargetDecryptionProofWitness:
+                    exportedState.sealedTargetDecryptionProofWitness,
                 localStateCommitment: exportedState.localStateCommitment,
                 setupContext,
                 storageKeyBytesHex: '41'.repeat(32),

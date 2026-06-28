@@ -18,6 +18,7 @@ import {
 } from 'typescript';
 
 import {
+    sdkVendoredBridgeRemovedMembers,
     vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports,
     vendoredProtocolRuntimeModules,
@@ -125,15 +126,6 @@ const sdkProtocolRuntimeIndexSource =
                 `export { ${entry.exports.join(', ')} } from './${entry.source}';`,
         )
         .join('\n') + '\n';
-const sdkVendoredBridgeDevelopmentTargetDecryptionMembers = [
-    'generateBgvTargetDecryptionFixture',
-    'generateBgvTargetDecryptionShareFromLocalShare',
-    'deriveBgvTargetDecryptionShareProofStatement',
-    'generateBgvTargetDecryptionShareProofMaterialFromLocalWitness',
-    'verifyBgvTargetDecryptionShareProofMaterial',
-    'verifyBgvTargetDecryptionShareProofStatementBinding',
-    'verifyAndRecombineBgvTargetDecryptionShares',
-] as const;
 
 export const stripSdkVendoredBridgeMembers = (
     sourceText: string,
@@ -247,7 +239,7 @@ export const buildSdkBridge = async (): Promise<void> => {
                 relativeSourcePath === 'kernel-loader.ts'
                     ? stripSdkVendoredBridgeMembers(
                           rawBridgePartSourceText,
-                          sdkVendoredBridgeDevelopmentTargetDecryptionMembers,
+                          sdkVendoredBridgeRemovedMembers,
                       )
                     : rawBridgePartSourceText;
             const bridgePartOutputText = transpileSdkInternalSource(

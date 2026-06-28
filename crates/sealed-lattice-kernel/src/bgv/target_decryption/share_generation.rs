@@ -19,8 +19,8 @@ pub(super) struct CompactAggregateOpeningCredentialBinding {
     pub(super) limb_index: usize,
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_root: String,
+    pub(super) aggregate_opening_root: String,
     pub(super) aggregate_commitment_message_values: Vec<u64>,
-    pub(super) aggregate_message_coefficient_bound: u64,
     pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
 }
 
@@ -468,13 +468,19 @@ pub(super) fn read_local_target_decryption_share_witness(
                 "local target-decryption compact aggregate opening commitment root does not match the accepted aggregate commitment record",
             ));
         }
+        if accepted_record.aggregate_opening_root != verified_credential.opening_root {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "local target-decryption compact aggregate opening root does not match the accepted aggregate commitment record",
+            ));
+        }
         active_credential_bindings[limb_index] = Some(CompactAggregateOpeningCredentialBinding {
             limb_index,
             rns_prime: expected_modulus,
             aggregate_commitment_root: verified_credential.commitment_root,
+            aggregate_opening_root: verified_credential.opening_root,
             aggregate_commitment_message_values: verified_credential
                 .aggregate_commitment_message_values,
-            aggregate_message_coefficient_bound: verified_credential.message_coefficient_bound,
             aggregate_randomness_by_column: verified_credential.aggregate_randomness_by_column,
         });
     }
@@ -944,8 +950,7 @@ pub(super) fn target_decryption_smudging_polynomial_openings(
                 .saturating_sub(1),
     );
     for role in TARGET_DECRYPTION_SMUDGING_ROLES {
-        for rns_limb_index in 0..active_limb_count {
-            let rns_prime = DATA_PRIMES[rns_limb_index];
+        for (rns_limb_index, &rns_prime) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
             let coefficients_by_degree = target_decryption_smudging_polynomial_coefficients(
                 setup_binding,
                 target_accepted,
@@ -1048,8 +1053,7 @@ pub(super) fn target_decryption_smudging_commitment_set_from_polynomial_openings
     let mut records = Vec::with_capacity(expected_record_count);
     let mut opening_index = 0;
     for role in TARGET_DECRYPTION_SMUDGING_ROLES {
-        for rns_limb_index in 0..active_limb_count {
-            let rns_prime = DATA_PRIMES[rns_limb_index];
+        for (rns_limb_index, &rns_prime) in DATA_PRIMES.iter().enumerate().take(active_limb_count) {
             for polynomial_degree in 1..=smudging_polynomial_degree {
                 let opening = &smudging_polynomial_openings[opening_index];
                 if opening.role != role

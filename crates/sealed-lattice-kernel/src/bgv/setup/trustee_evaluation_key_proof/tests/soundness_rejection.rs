@@ -19,7 +19,7 @@ fn tampered_deep_evaluation_is_rejected() {
             .expect("development instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let modulus = statement.limb_moduli()[0];
+    let modulus = DATA_PRIMES[0];
     proof.limb_proofs[0].deep_evaluations[0][0][0] =
         (proof.limb_proofs[0].deep_evaluations[0][0][0] + 1) % modulus;
     let result = verify_evaluation_key_share(&statement, &proof);
@@ -45,7 +45,7 @@ fn tampered_sumcheck_residual_zero_anchor_is_rejected() {
             .expect("development instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let modulus = statement.limb_moduli()[0];
+    let modulus = DATA_PRIMES[0];
     let layout = LimbColumnLayout::new(&statement, 0).expect("limb layout");
     let residual_column = layout.phase_one_physical_count() + QUOTIENT_COLUMN_SUMCHECK_RESIDUAL;
     let anchor_point_index = DEEP_EVALUATION_POINT_COUNT - 1;
@@ -66,7 +66,7 @@ fn tampered_sumcheck_residual_low_degree_proof_is_rejected() {
             .expect("development instance");
     let mut proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
-    let modulus = statement.limb_moduli()[0];
+    let modulus = DATA_PRIMES[0];
     proof.limb_proofs[0]
         .sumcheck_residual_low_degree
         .final_coefficients[0][0] = (proof.limb_proofs[0]

@@ -1,7 +1,9 @@
 use super::*;
 use crate::bgv::modular_arithmetic::pow_mod;
 use crate::bgv::setup::compact_vss_commitment::{
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    COMPACT_VSS_MESSAGE_DIGIT_COUNT, CompactVssCommitmentOpeningInput,
+    compact_vss_message_digit_trits_for_count, compact_vss_message_digits,
+    compact_vss_message_encoding_layout, compute_compact_vss_commitment_from_opening,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::signed_value_residue;
 use serde_json::json;
@@ -194,10 +196,23 @@ fn compact_vss_share_linkage_vectors_match_carried_share_openings() {
             .expect("challenge tower");
     let relation_count = (coefficient_count + 1)
         * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-        + 1;
+        + LINCHECK_REPETITIONS
+        + (coefficient_count + 1) * COMPACT_VSS_MESSAGE_DIGIT_COUNT * LINCHECK_REPETITIONS;
     let relation_alpha = (0..relation_count)
         .map(|relation_index| {
             tower.embed_base(((relation_index as u64 + 1) * 37) % commitment_modulus)
+        })
+        .collect::<Vec<_>>();
+    let u_power_vectors = (0..LINCHECK_REPETITIONS)
+        .map(|repetition| {
+            let challenge = tower.embed_base(5 + 7 * repetition as u64);
+            let mut powers = Vec::with_capacity(ring_degree);
+            let mut power = super::super::extension_field::ChallengeExtensionTower::one();
+            for _ in 0..ring_degree {
+                powers.push(power);
+                power = tower.mul(&power, &challenge);
+            }
+            powers
         })
         .collect::<Vec<_>>();
     let coefficient_commitments = coefficient_coordinates
@@ -266,16 +281,25 @@ fn compact_vss_share_linkage_vectors_match_carried_share_openings() {
             coefficient_commitments: &coefficient_commitments,
             recipient_share_commitment: &recipient_share_commitment,
             relation_alpha: &relation_alpha,
+            u_power_vectors: &u_power_vectors,
         },
         &tower,
     )
     .expect("compact share-linkage vectors");
 
-    let mut witness_columns = coefficient_messages
-        .iter()
-        .map(|messages| residue_column(messages, commitment_modulus))
-        .collect::<Vec<_>>();
-    witness_columns.push(residue_column(&recipient_share_values, commitment_modulus));
+    let mut witness_columns = Vec::new();
+    for messages in &coefficient_messages {
+        witness_columns.extend(compact_message_encoding_columns_for_test(
+            messages,
+            source_message_modulus,
+            commitment_modulus,
+        ));
+    }
+    witness_columns.extend(compact_message_encoding_columns_for_test(
+        &recipient_share_values,
+        source_message_modulus,
+        commitment_modulus,
+    ));
     witness_columns.push(residue_column(
         &recipient_share_carry_values,
         commitment_modulus,
@@ -297,14 +321,37 @@ fn compact_vss_share_linkage_vectors_match_carried_share_openings() {
         "compact share-linkage vectors must reproduce the compact commitments and carried Shamir share relation"
     );
 
-    let carry_column_index = coefficient_count + 1;
-    witness_columns[carry_column_index][0] =
-        (witness_columns[carry_column_index][0] + 1) % commitment_modulus;
-    let tampered_relation =
-        evaluate_extension_vector_dot_products(&public_vectors, &witness_columns, &tower);
+    let carry_column_index = (coefficient_count + 1)
+        * compact_vss_message_encoding_layout(source_message_modulus)
+            .expect("compact message layout")
+            .encoding_column_count();
+    let mut single_tamper_witness_columns = witness_columns.clone();
+    single_tamper_witness_columns[carry_column_index][0] =
+        (single_tamper_witness_columns[carry_column_index][0] + 1) % commitment_modulus;
+    let tampered_relation = evaluate_extension_vector_dot_products(
+        &public_vectors,
+        &single_tamper_witness_columns,
+        &tower,
+    );
     assert_ne!(
         tampered_relation, relation_claim,
         "changing a carried share witness must break the compact share-linkage relation"
+    );
+
+    let mut offsetting_witness_columns = witness_columns;
+    offsetting_witness_columns[carry_column_index][0] =
+        (offsetting_witness_columns[carry_column_index][0] + 1) % commitment_modulus;
+    offsetting_witness_columns[carry_column_index][1] =
+        (offsetting_witness_columns[carry_column_index][1] + commitment_modulus - 1)
+            % commitment_modulus;
+    let offsetting_relation = evaluate_extension_vector_dot_products(
+        &public_vectors,
+        &offsetting_witness_columns,
+        &tower,
+    );
+    assert_ne!(
+        offsetting_relation, relation_claim,
+        "offsetting carried-share tampering must break the randomized compact share-linkage relation"
     );
 }
 
@@ -367,6 +414,37 @@ fn compact_commitment_coordinates_for_test(
 
 fn residue_column(values: &[u64], modulus: u64) -> Vec<u64> {
     values.iter().map(|value| *value % modulus).collect()
+}
+
+fn compact_message_encoding_columns_for_test(
+    values: &[u64],
+    message_bound: u64,
+    modulus: u64,
+) -> Vec<Vec<u64>> {
+    let layout = compact_vss_message_encoding_layout(message_bound).expect("compact layout");
+    let mut columns = vec![vec![0_u64; values.len()]; layout.encoding_column_count()];
+    for (value_index, value) in values.iter().enumerate() {
+        let digits = compact_vss_message_digits(*value).expect("compact message digits");
+        for (digit_index, digit) in digits.iter().enumerate() {
+            let digit_column = layout
+                .digit_encoding_column(digit_index)
+                .expect("compact message digit column");
+            columns[digit_column][value_index] = *digit % modulus;
+            let trit_count = layout
+                .digit_trit_count(digit_index)
+                .expect("compact message trit count");
+            let trits = compact_vss_message_digit_trits_for_count(*digit, trit_count)
+                .expect("compact message trits");
+            for (trit_index, trit) in trits.iter().enumerate() {
+                let trit_column = layout
+                    .trit_encoding_column(digit_index, trit_index)
+                    .expect("compact message trit column");
+                columns[trit_column][value_index] = *trit % modulus;
+            }
+        }
+    }
+
+    columns
 }
 
 fn signed_residue_column(values: &[i64], modulus: u64) -> Vec<u64> {

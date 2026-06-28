@@ -16,6 +16,7 @@ mod namespaces;
 pub use chunk_tree::chunk_root;
 pub use namespaces::*;
 
+const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";
 pub const HASH512_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash512";
 
 pub fn to_hex(bytes: &[u8]) -> String {
@@ -28,6 +29,36 @@ pub fn to_hex(bytes: &[u8]) -> String {
 
     output
 }
+fn shake256_framed_hash<const OUTPUT_BYTES: usize>(
+    preimage_prefix: &[u8],
+    domain: &str,
+    parts: &[&[u8]],
+) -> [u8; OUTPUT_BYTES] {
+    // Length-framed, domain-separated preimage: fixed prefix, then the length-
+    // framed domain, then a varuint part count, then each part length-prefixed.
+    // This unambiguous framing is security-critical because it prevents
+    // concatenation collisions between differently shaped inputs.
+    let mut preimage = Vec::new();
+    preimage.extend_from_slice(preimage_prefix);
+    append_bytes(&mut preimage, domain.as_bytes());
+    append_varuint(&mut preimage, parts.len() as u64);
+    for part in parts {
+        append_bytes(&mut preimage, part);
+    }
+
+    let mut hasher = Shake256::default();
+    hasher.update(&preimage);
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; OUTPUT_BYTES];
+    reader.read(&mut output);
+
+    output
+}
+
+pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
+    shake256_framed_hash(HASH256_PREIMAGE_PREFIX, domain, parts)
+}
+
 /// Computes the protocol's domain-separated 64-byte SHAKE256 hash output.
 ///
 /// The `Hash512` name describes the output length. Security is bounded by
@@ -38,26 +69,7 @@ pub fn to_hex(bytes: &[u8]) -> String {
 /// must pass the frozen ceremony, statement, and encoded object material as
 /// explicit framed parts rather than using an informal parallel convention.
 pub fn hash512(domain: &str, parts: &[&[u8]]) -> [u8; 64] {
-    // Length-framed, domain-separated preimage: fixed prefix, then the length-
-    // framed domain, then a varuint part count, then each part length-prefixed.
-    // This unambiguous framing is security-critical (no concatenation
-    // collisions) and MUST byte-match the TypeScript reference, or every
-    // protocol hash forks across the two implementations.
-    let mut preimage = Vec::new();
-    preimage.extend(HASH512_PREIMAGE_PREFIX);
-    append_bytes(&mut preimage, domain.as_bytes());
-    append_varuint(&mut preimage, parts.len() as u64);
-    for part in parts {
-        append_bytes(&mut preimage, part);
-    }
-
-    let mut hasher = Shake256::default();
-    hasher.update(&preimage);
-    let mut reader = hasher.finalize_xof();
-    let mut output = [0_u8; 64];
-    reader.read(&mut output);
-
-    output
+    shake256_framed_hash(HASH512_PREIMAGE_PREFIX, domain, parts)
 }
 
 pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
@@ -619,6 +631,24 @@ mod tests {
     #[test]
     fn hash512_outputs_sixty_four_bytes() {
         assert_eq!(hash512("transcript-core/test", &[b"input"]).len(), 64);
+    }
+
+    #[test]
+    fn hash256_outputs_thirty_two_bytes() {
+        assert_eq!(
+            super::hash256("transcript-core/test", &[b"input"]).len(),
+            32
+        );
+    }
+
+    #[test]
+    fn hash256_uses_its_own_prefix_and_domain() {
+        let left = super::hash256("transcript-core/a", &[b"same"]);
+        let right = super::hash256("transcript-core/b", &[b"same"]);
+        let hash512_output = hash512("transcript-core/a", &[b"same"]);
+
+        assert_ne!(left, right);
+        assert_ne!(left.as_slice(), &hash512_output[..32]);
     }
 
     #[test]

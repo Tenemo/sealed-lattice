@@ -1,10 +1,10 @@
 use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::relation::{
-    CompactSameSecretBridgePublicVectorInput, CompactVssShareLinkagePublicVectorInput,
-    LimbColumnLayout, SumcheckErrorWeights, TargetDecryptionSharePublicVectorInput,
-    TrusteeEvaluationKeyStatement, build_compact_same_secret_bridge_public_vectors,
-    build_compact_vss_share_linkage_public_vectors, build_linkage_public_vectors,
+    CompactSameSecretBridgePublicVectorInput, LimbColumnLayout, SumcheckErrorWeights,
+    TargetDecryptionSharePublicVectorInput, TrusteeEvaluationKeyStatement,
+    build_compact_same_secret_bridge_public_vectors,
+    build_compact_vss_share_linkage_batch_public_vectors, build_linkage_public_vectors,
     build_private_vss_public_vectors, build_target_decryption_share_public_vectors,
 };
 use super::super::*;
@@ -36,6 +36,17 @@ pub(in super::super) struct LimbChallenges {
     pub(in super::super) linkage_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) consistency_alpha: Vec<ChallengeExtensionElement>,
     pub(in super::super) beta: Vec<ChallengeExtensionElement>,
+}
+
+fn mask_digit_weight(
+    tower: &ChallengeExtensionTower,
+    alpha_value: &ChallengeExtensionElement,
+    digit_index: usize,
+) -> CanonicalResult<ChallengeExtensionElement> {
+    Ok(tower.scale_base(
+        alpha_value,
+        pow_mod(CLAIM_MASK_RADIX, digit_index as u64, tower.modulus)?,
+    ))
 }
 
 pub(in super::super) fn draw_limb_challenges(
@@ -70,13 +81,15 @@ pub(in super::super) fn draw_limb_challenges(
             layout.compact_vss_relation_count(),
         )
     } else if layout.compact_same_secret_bridge_active() {
-        let target_commitment_count = layout.linkage_randomness_columns
-            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
+        let target_commitment_count = layout.compact_same_secret_bridge_target_count();
         transcript.challenge_extension_elements(
             "compact-same-secret-bridge-alpha",
             modulus,
             target_commitment_count
-                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+                * (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                    + LINCHECK_REPETITIONS
+                    + crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                        * LINCHECK_REPETITIONS),
         )
     } else if layout.target_decryption_active() {
         transcript.challenge_extension_elements(
@@ -140,11 +153,10 @@ pub(in super::super) fn build_limb_public_vectors(
                 &combined_claim,
                 &tower.scale_base(alpha_value, masked_claims[local_claim]),
             );
-            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
                 let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
                 let position = half * layout.trace_size + half_position;
-                let digit_weight =
-                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
                 mask_selectors[column][position] =
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
@@ -186,30 +198,24 @@ pub(in super::super) fn build_limb_public_vectors(
                 &combined_claim,
                 &tower.scale_base(alpha_value, masked_claims[local_claim]),
             );
-            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
                 let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
                 let position = half * layout.trace_size + half_position;
-                let digit_weight =
-                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
                 mask_selectors[column][position] =
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
         }
-        let (compact_vss_claim, relation_vectors) = build_compact_vss_share_linkage_public_vectors(
-            CompactVssShareLinkagePublicVectorInput {
-                public_matrix_seed_hash: &compact_vss_share_linkage.public_matrix_seed_hash,
-                rns_limb_index: compact_vss_share_linkage.source_rns_limb_index,
-                commitment_modulus_index: limb_index,
+        let (compact_vss_claim, relation_vectors) =
+            build_compact_vss_share_linkage_batch_public_vectors(
+                compact_vss_share_linkage,
+                limb_index,
                 modulus,
-                source_message_modulus: compact_vss_share_linkage.source_message_modulus,
-                recipient_roster_position: compact_vss_share_linkage.recipient_roster_position,
                 ring_degree,
-                coefficient_commitments: &compact_vss_share_linkage.coefficient_commitments,
-                recipient_share_commitment: &compact_vss_share_linkage.recipient_share_commitment,
-                relation_alpha: &challenges.linkage_alpha,
-            },
-            &tower,
-        )?;
+                &challenges.linkage_alpha,
+                &u_powers,
+                &tower,
+            )?;
         combined_claim = tower.add(&combined_claim, &compact_vss_claim);
 
         return Ok(LimbPublicVectors {
@@ -240,11 +246,10 @@ pub(in super::super) fn build_limb_public_vectors(
                 &combined_claim,
                 &tower.scale_base(alpha_value, masked_claims[local_claim]),
             );
-            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
                 let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
                 let position = half * layout.trace_size + half_position;
-                let digit_weight =
-                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
                 mask_selectors[column][position] =
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
@@ -260,6 +265,7 @@ pub(in super::super) fn build_limb_public_vectors(
                     target_constant_commitments: &compact_same_secret_bridge
                         .target_constant_commitments,
                     relation_alpha: &challenges.linkage_alpha,
+                    u_power_vectors: &u_powers,
                 },
                 &tower,
             )?;
@@ -290,17 +296,17 @@ pub(in super::super) fn build_limb_public_vectors(
                 &combined_claim,
                 &tower.scale_base(alpha_value, masked_claims[local_claim]),
             );
-            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
                 let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
                 let position = half * layout.trace_size + half_position;
-                let digit_weight =
-                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
                 mask_selectors[column][position] =
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
         }
         let (target_claim, relation_vectors) = build_target_decryption_share_public_vectors(
             TargetDecryptionSharePublicVectorInput {
+                proof_statement: statement,
                 statement: target_decryption_share,
                 limb_index,
                 modulus,
@@ -396,7 +402,7 @@ pub(in super::super) fn build_limb_public_vectors(
         }
         error_cursor += digit_count;
     }
-    // Mask selector combinations: each claim contributes alpha' * 2^digit at
+    // Mask selector combinations: each claim contributes alpha' * radix^digit at
     // its mask slots, and alpha' * masked claim to the combined sum.
     let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
     let mut combined_claim = lincheck_claim;
@@ -405,11 +411,10 @@ pub(in super::super) fn build_limb_public_vectors(
             &combined_claim,
             &tower.scale_base(alpha_value, masked_claims[local_claim]),
         );
-        for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+        for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
             let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
             let position = half * layout.trace_size + half_position;
-            let digit_weight =
-                tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+            let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
             mask_selectors[column][position] =
                 tower.add(&mask_selectors[column][position], &digit_weight);
         }

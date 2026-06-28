@@ -394,7 +394,6 @@ export type TrusteeEvaluationKeyProofGenerator = (
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
         readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSource: string;
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }>,

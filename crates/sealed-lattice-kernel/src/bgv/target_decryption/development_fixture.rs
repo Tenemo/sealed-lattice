@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 use crate::bgv::{
     evaluator::{
@@ -19,7 +19,7 @@ const DEVELOPMENT_TARGET_DECRYPTION_SETUP_SEED: &str = "target-decryption-develo
 const DEVELOPMENT_TARGET_DECRYPTION_SETUP_EPOCH: &str = "target-decryption-development-fixture";
 const DEVELOPMENT_TARGET_DECRYPTION_TRUSTEE_IDENTITY: &str = "trustee-1";
 
-pub(crate) fn generate_bgv_target_decryption_fixture_from_request(
+pub(crate) fn generate_bgv_target_decryption_development_fixture_from_request(
     _request: &Value,
 ) -> CanonicalResult<Value> {
     let mut setup_package = development_setup_package()?;
@@ -152,18 +152,23 @@ fn development_compact_aggregate_threshold_commitment_set(
             let source_share_commitment_roots = (0..setup_binding.participants.len())
                 .map(|_| Value::String("9".repeat(128)))
                 .collect::<Vec<_>>();
+            let source_share_opening_roots = (0..setup_binding.participants.len())
+                .map(|_| Value::String("8".repeat(128)))
+                .collect::<Vec<_>>();
             recipient_records.push(json!({
                 "objectType": "CompactVssAggregateThresholdCommitment",
                 "objectVersion": 1,
-                "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+                "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
                 "rnsLimbIndex": rns_limb_index,
                 "rnsPrime": rns_prime,
                 "aggregateCommitmentRoot": computation.commitment_root,
+                "aggregateOpeningRoot": computation.opening_root,
                 "commitment": computation.commitment,
                 "sourceShareCommitmentRoots": source_share_commitment_roots,
+                "sourceShareOpeningRoots": source_share_opening_roots,
             }));
         }
     }
@@ -172,7 +177,7 @@ fn development_compact_aggregate_threshold_commitment_set(
         "objectType": "CompactVssAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": rns_limb_count,
@@ -464,7 +469,7 @@ fn development_local_target_share_witness(
         "compactAggregateOpening": {
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,
-            "profileId": "SealedLattice-CompactLinearCommitment-Development-v1",
+            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash()?,
             "shareLinkageStatementRoot": share_linkage_statement_root,

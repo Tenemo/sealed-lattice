@@ -63,6 +63,7 @@ type PublicFoundationTypes = [
     publicTypes.TargetFinalityRecord,
     publicTypes.TargetFinalityVerificationInput,
     publicTypes.TargetProposal,
+    publicTypes.TargetDecryptionResultVerification,
     publicTypes.ThresholdProfile,
     publicTypes.TrusteeSetupEntry,
 ];
@@ -184,6 +185,7 @@ const publicFoundationTypeNames = [
     'TargetFinalityRecord',
     'TargetFinalityVerificationInput',
     'TargetProposal',
+    'TargetDecryptionResultVerification',
     'ThresholdProfile',
     'TrusteeSetupEntry',
 ] as const satisfies PublicFoundationTypeNames;
@@ -213,7 +215,7 @@ const publicSetupTypeNames = [
 
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
-        expect(publicFoundationTypeNames).toHaveLength(16);
+        expect(publicFoundationTypeNames).toHaveLength(17);
     });
 
     it('keeps the verifier-only accepted setup type surface available', () => {

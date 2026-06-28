@@ -31,6 +31,8 @@ const sdkKernelLoaderFilePath = path.resolve(
 const kernelHashAssignmentPattern =
     /const packagedTranscriptCoreKernelNormalizedSha256Hex(?:\s*:\s*string\s*\|\s*undefined)?\s*=\s*(?:undefined|'[a-f0-9]{64}');/u;
 const sha256HexPattern = /^[a-f0-9]{64}$/u;
+const internalTargetDecryptionCommandFeature =
+    'target-decryption-development-commands';
 const wasmOptimizerScriptFilePath = path.resolve(
     repoRoot,
     'node_modules',
@@ -38,6 +40,8 @@ const wasmOptimizerScriptFilePath = path.resolve(
     'bin',
     'wasm-opt',
 );
+
+export type WasmCommandSurface = 'internal-development' | 'public-sdk';
 
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
@@ -69,7 +73,47 @@ export const resolveOutputFilePath = (
     return resolvedOutputPath;
 };
 
-const runCargoBuild = (): void => {
+export const resolveWasmCommandSurface = (
+    commandLineArguments: readonly string[],
+    outputFilePath: string,
+    projectRoot: string = repoRoot,
+): WasmCommandSurface => {
+    const commandSurfaceIndex =
+        commandLineArguments.indexOf('--command-surface');
+    if (commandSurfaceIndex !== -1) {
+        const commandSurface = commandLineArguments[commandSurfaceIndex + 1];
+        if (
+            commandSurface === 'internal-development' ||
+            commandSurface === 'public-sdk'
+        ) {
+            return commandSurface;
+        }
+
+        throw new Error(
+            '--command-surface must be internal-development or public-sdk',
+        );
+    }
+
+    return path.resolve(outputFilePath) ===
+        path.resolve(
+            projectRoot,
+            'packages',
+            'sdk',
+            'dist',
+            'sealed-lattice-kernel.wasm',
+        )
+        ? 'public-sdk'
+        : 'internal-development';
+};
+
+export const cargoFeatureArgumentsForCommandSurface = (
+    commandSurface: WasmCommandSurface,
+): readonly string[] =>
+    commandSurface === 'internal-development'
+        ? ['--features', internalTargetDecryptionCommandFeature]
+        : [];
+
+const runCargoBuild = (commandSurface: WasmCommandSurface): void => {
     const cargoHome = path.resolve(
         process.env.CARGO_HOME ?? path.join(os.homedir(), '.cargo'),
     );
@@ -94,6 +138,7 @@ const runCargoBuild = (): void => {
             '--target',
             'wasm32-unknown-unknown',
             '--release',
+            ...cargoFeatureArgumentsForCommandSurface(commandSurface),
         ],
         {
             cwd: repoRoot,
@@ -244,14 +289,19 @@ const pinSdkKernelHashIfNeeded = async (
 };
 
 export const buildWasmKernel = async (): Promise<void> => {
-    const outputFilePath = resolveOutputFilePath(process.argv.slice(2));
+    const commandLineArguments = process.argv.slice(2);
+    const outputFilePath = resolveOutputFilePath(commandLineArguments);
+    const commandSurface = resolveWasmCommandSurface(
+        commandLineArguments,
+        outputFilePath,
+    );
     const outputDirectory = path.dirname(outputFilePath);
     const unoptimizedOutputFilePath = path.join(
         outputDirectory,
         `${path.basename(outputFilePath)}.unoptimized`,
     );
 
-    runCargoBuild();
+    runCargoBuild(commandSurface);
     await mkdir(outputDirectory, { recursive: true });
     await copyFile(resolveSourceFilePath(), unoptimizedOutputFilePath);
     try {

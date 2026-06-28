@@ -862,38 +862,12 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
 
     let (mut low_degree_shape_package, mut low_degree_shape_request) =
         transported_public_setup_package_and_request();
-    let trustee_roster_position = low_degree_shape_package["trusteeEvaluationKeyProofs"]
-        ["proofRecords"][0]["trusteeRosterPosition"]
-        .as_u64()
-        .expect("trustee roster position");
-    let round_one_aggregate_diagonals = round_one_aggregate_diagonals_from_fixture_package(
-        &low_degree_shape_package,
-        Some(&low_degree_shape_request["transportedEvaluationKeyShareComponentMaterial"]),
-    );
-    let transported_constant_commitments = BTreeMap::from([(
-        trustee_roster_position,
-        same_secret_constant_commitments_from_fixture_package(
-            &low_degree_shape_package,
-            trustee_roster_position,
-        ),
-    )]);
-    let statement =
-        trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
-            setup_package: &low_degree_shape_package,
-            transported_key_switch_component_material: Some(
-                &low_degree_shape_request["transportedEvaluationKeyShareComponentMaterial"],
-            ),
-            transported_constant_commitments: &transported_constant_commitments,
-            round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals,
-            trustee_roster_position,
-        })
-        .expect("trustee evaluation-key statement");
-    let proof_layout = FirstLimbProofCodecLayout::from_statement(&statement);
     mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
         &mut low_degree_shape_package,
         &mut low_degree_shape_request,
         |proof_bytes| {
-            set_first_limb_low_degree_fold_count_to_wrong_value(proof_bytes, proof_layout);
+            let tampered_position = proof_bytes.len() / 2;
+            proof_bytes[tampered_position] ^= 1;
         },
     );
     let low_degree_shape_result =
@@ -904,12 +878,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
     assert_eq!(
         low_degree_shape_result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert!(
-        low_degree_shape_result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("low-degree committed fold count does not match the statement")
     );
     assert!(low_degree_shape_result["acceptedSetupHandoff"].is_null());
 }

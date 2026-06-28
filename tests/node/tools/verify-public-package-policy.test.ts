@@ -8,13 +8,17 @@ import {
     collectEntryPointTypeExportNames,
     validateGeneratedInternalBridgeArtifactTexts,
     validatePublicPackagePolicy,
+    validateSdkKernelCommandStrings,
 } from '#tools/ci/verify-public-package-policy';
 
 const emptyPackagePolicy = {
     forbiddenGeneratedInternalBridgeMembers: [],
+    forbiddenProtocolRootExports: [],
+    forbiddenSdkKernelCommandStrings: [],
     forbiddenSdkVendoredInternalBridgeMembers: [],
     forbiddenRuntimeExports: [],
     forbiddenTypeExports: [],
+    sdkVendoredBridgeRemovedMembers: [],
     vendoredCryptoRuntimeModules:
         publicPackagePolicy.vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports: [],
@@ -157,13 +161,52 @@ describe('public package policy', () => {
         );
     });
 
+    it('requires stripped SDK bridge members to stay forbidden from the vendored artifact', () => {
+        const failures = validateGeneratedInternalBridgeArtifactTexts(
+            {
+                ...emptyPackagePolicy,
+                sdkVendoredBridgeRemovedMembers: [
+                    'generateBgvTargetDecryptionShareFromLocalShare',
+                ],
+            },
+            [],
+        );
+
+        expect(failures).toEqual([
+            'sdkVendoredBridgeRemovedMembers member "generateBgvTargetDecryptionShareFromLocalShare" is not listed in forbiddenSdkVendoredInternalBridgeMembers',
+        ]);
+    });
+
+    it('rejects target-decryption development commands in the SDK kernel artifact', () => {
+        const failures = validateSdkKernelCommandStrings(
+            {
+                ...emptyPackagePolicy,
+                forbiddenSdkKernelCommandStrings: [
+                    'GenerateBgvTargetDecryptionShareFromLocalShare',
+                ],
+            },
+            Buffer.from(
+                '...GenerateBgvTargetDecryptionShareFromLocalShare...',
+                'utf8',
+            ),
+            'packages/sdk/dist/sealed-lattice-kernel.wasm',
+        );
+
+        expect(failures).toEqual([
+            'SDK kernel WASM contains forbidden command string "GenerateBgvTargetDecryptionShareFromLocalShare": packages/sdk/dist/sealed-lattice-kernel.wasm',
+        ]);
+    });
+
     it('rejects target-decryption implementation exports if they reach the SDK facade', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
                 runtimeFacadeExportNamesForPolicyEntry,
             );
         const failures = await validatePublicPackagePolicy(
-            publicPackagePolicy,
+            {
+                ...publicPackagePolicy,
+                forbiddenSdkKernelCommandStrings: [],
+            },
             [
                 ...requiredRuntimeExports,
                 'verifyTargetAcceptedRecord',
@@ -178,6 +221,25 @@ describe('public package policy', () => {
         ]);
     });
 
+    it('rejects forbidden protocol root exports', async () => {
+        const failures = await validatePublicPackagePolicy(
+            {
+                ...emptyPackagePolicy,
+                forbiddenProtocolRootExports: [
+                    'validatePollSpec',
+                    'verifyFoundationTranscript',
+                ],
+            },
+            [],
+            [],
+        );
+
+        expect(failures).toEqual([
+            'Forbidden protocol root export is public: validatePollSpec',
+            'Forbidden protocol root export is public: verifyFoundationTranscript',
+        ]);
+    });
+
     it('rejects missing transitive crypto runtime modules', async () => {
         const failures = await validatePublicPackagePolicy(
             {
@@ -189,6 +251,7 @@ describe('public package policy', () => {
         );
 
         expect(failures).toEqual([
+            'vendoredCryptoRuntimeModules is missing reachable source "canonical-base64.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "canonical-json.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "hashes.ts"',
             'vendoredCryptoRuntimeModules is missing reachable source "local-trustee-state-storage.ts"',

@@ -342,7 +342,10 @@ fn transported_same_secret_proof_chunks(value: &Value) -> CanonicalResult<Vec<Ve
                 "transported same-secret proof chunks must be supplied in ascending chunk-index order",
             ));
         }
-        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
+        chunks.push(crate::transcript_core::decode_standard_base64(
+            value_string(chunk_value, "bytesBase64")?,
+            "transported same-secret proof material bytesBase64",
+        )?);
     }
 
     Ok(chunks)

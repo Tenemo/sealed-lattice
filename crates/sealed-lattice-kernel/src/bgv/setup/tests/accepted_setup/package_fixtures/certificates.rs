@@ -1,4 +1,4 @@
-use super::*;
+﻿use super::*;
 
 pub(super) fn setup_commitment_security_certificate_fixture(
     profile: &serde_json::Value,
@@ -26,6 +26,16 @@ pub(super) fn setup_commitment_security_certificate_fixture(
     let max_threshold_lifted_coefficient =
         u128::from(max_source_message_modulus - 1) * threshold_scalar_sum;
     let commitment_modulus_product_bits = ceil_log2_fixture(&commitment_modulus_product);
+    let compact_vss_parameter_certificate_input_binding =
+        compact_vss_parameter_certificate_input_binding_fixture(
+            profile,
+            participant_count,
+            decryption_threshold,
+        );
+    let compact_vss_parameter_certificate_input_binding_hash =
+        compact_vss_parameter_certificate_input_binding
+            ["compactVssParameterCertificateInputBindingHash"]
+            .clone();
     let certificate = serde_json::json!({
         "objectType": "SetupCommitmentSecurityCertificate",
         "objectVersion": 1,
@@ -35,6 +45,8 @@ pub(super) fn setup_commitment_security_certificate_fixture(
         "commitmentProfileHash": profile["commitmentProfileHash"],
         "qShareHash": profile["qShareHash"],
         "carryAwareVssShareRelationProfileHash": profile["carryAwareVssShareRelationProfileHash"],
+        "compactVssParameterCertificateInputBindingHash": compact_vss_parameter_certificate_input_binding_hash,
+        "compactVssParameterCertificateInputBinding": compact_vss_parameter_certificate_input_binding,
         "ringAndMatrixParameters": {
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "ringDegree": POLYNOMIAL_DEGREE,
@@ -102,6 +114,343 @@ pub(super) fn setup_commitment_security_certificate_fixture(
         serde_json::json!(certificate_hash);
 
     certificate_with_hash
+}
+
+fn compact_vss_parameter_certificate_input_binding_fixture(
+    profile: &serde_json::Value,
+    participant_count: u64,
+    decryption_threshold: u64,
+) -> serde_json::Value {
+    let commitment_modulus_limb_count = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() as u64;
+    let output_coordinate_count = crate::bgv::setup::COMPACT_VSS_OUTPUT_COORDINATE_COUNT as u64;
+    let randomness_column_count = crate::bgv::setup::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64;
+    let message_column_count =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT as u64;
+    let projection_weight =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_PROJECTION_WEIGHT as u64;
+    let input_column_count = message_column_count + randomness_column_count;
+    let coordinate_count_per_commitment = commitment_modulus_limb_count * output_coordinate_count;
+    let sampled_matrix_residues_per_coordinate = input_column_count * projection_weight;
+    let sampled_projection_indices_per_coordinate = sampled_matrix_residues_per_coordinate;
+    let sampled_matrix_residues_per_commitment =
+        coordinate_count_per_commitment * sampled_matrix_residues_per_coordinate;
+    let sampled_projection_indices_per_commitment =
+        coordinate_count_per_commitment * sampled_projection_indices_per_coordinate;
+    let maximum_one_source_shamir_scalar_l1 =
+        scalar_power_sum_fixture(decryption_threshold, participant_count);
+    let one_recipient_aggregate_shamir_scalar_l1 =
+        maximum_one_source_shamir_scalar_l1 * u128::from(participant_count);
+    let fresh_opening_witness_coefficient_count = input_column_count * POLYNOMIAL_DEGREE as u64;
+    let aggregate_randomness_difference_infinity_bound = participant_count * 2;
+    let recipient_shamir_relation_l1 = maximum_one_source_shamir_scalar_l1 + 1;
+    let aggregate_sum_relation_l1 = participant_count + 1;
+    let commitment_modulus_limbs = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .map(|commitment_modulus_index| {
+            serde_json::json!({
+                "commitmentModulusIndex": commitment_modulus_index,
+                "modulus": DATA_PRIMES[*commitment_modulus_index],
+            })
+        })
+        .collect::<Vec<_>>();
+    let target_rns_primes = profile["canonicalTargetBasis"]["targetPrimes"]
+        .as_array()
+        .expect("canonical target basis target primes")
+        .clone();
+
+    let binding_body = serde_json::json!({
+        "objectType": "CompactVssParameterCertificateInputBinding",
+        "objectVersion": 2,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+        "participantCount": participant_count,
+        "sourceRnsLimbCount": DATA_PRIMES.len(),
+        "targetRnsLimbCount": target_rns_primes.len(),
+        "thresholdDegree": decryption_threshold,
+        "ringDegree": POLYNOMIAL_DEGREE,
+        "commitmentRelation": {
+            "relation": "C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c",
+            "coefficientRing": "Z_q[X]/(X^N+1)",
+            "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+            "commitmentModulusLimbs": commitment_modulus_limbs,
+            "outputCoordinateCount": output_coordinate_count,
+            "messageWidth": message_column_count,
+            "randomnessWidth": randomness_column_count,
+            "projectionWeight": projection_weight,
+            "coordinateCountPerCommitment": coordinate_count_per_commitment,
+            "inputColumnLabels": [
+                "message:0",
+                "message:1",
+                "randomness:0",
+                "randomness:1"
+            ],
+            "homomorphicAdditionRule": "commitments combine linearly only when profile, public matrix seed, source limb, and commitment modulus order match",
+            "homomorphicScalarRule": "public Shamir and aggregation scalars multiply both message and randomness columns over the same commitment key",
+        },
+        "commonCommitmentKey": {
+            "matrixResidueHashDomain": "sealed-lattice-compact-vss-commitment/matrix-residue-v1",
+            "projectionIndexHashDomain": "sealed-lattice-compact-vss-commitment/projection-index-v1",
+            "rejectionSamplingRule": "sample little-endian 64-bit chunks and reject values at or above 2^64 - (2^64 mod modulus or ringDegree)",
+            "matrixResiduePreimageFields": [
+                "publicMatrixSeedHash",
+                "profileId",
+                "rnsLimbIndex",
+                "commitmentModulusIndex",
+                "outputCoordinateIndex",
+                "inputColumn",
+                "projectionTermIndex",
+                "modulus",
+                "blockIndex"
+            ],
+            "projectionIndexPreimageFields": [
+                "publicMatrixSeedHash",
+                "profileId",
+                "rnsLimbIndex",
+                "commitmentModulusIndex",
+                "outputCoordinateIndex",
+                "inputColumn",
+                "projectionTermIndex",
+                "ringDegree",
+                "blockIndex"
+            ],
+            "sparseProjectionShape": {
+                "inputColumnCount": input_column_count,
+                "projectionWeight": projection_weight,
+                "coordinateCountPerCommitment": coordinate_count_per_commitment,
+                "sampledMatrixResiduesPerCoordinate": sampled_matrix_residues_per_coordinate,
+                "sampledProjectionIndicesPerCoordinate": sampled_projection_indices_per_coordinate,
+                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+            },
+        },
+        "messageEncoding": {
+            "sourceCoefficientRepresentation": "canonical residue modulo the selected source RNS prime",
+            "targetCoefficientRepresentation": "canonical residue modulo the selected target RNS prime",
+            "signedRepresentativeConvention": "same-secret bridge witnesses use the setup proof signed representative convention before reduction into each RNS prime",
+            "digitBase": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE,
+            "digitCount": message_column_count,
+            "paddingAndBlockOrder": "two base-3^17 little-endian digit coefficients per message ring position",
+            "freshEncodingRule": "exact canonical residue encoding into two message digit columns",
+            "linearDecoder": "little-endian base-3^17 decoder over the selected RNS limb",
+            "derivedEncodingRule": "Shamir recipient-share and aggregate threshold openings bind carried public-sum messages through decoded message digit columns and non-negative carry witnesses",
+        },
+        "normInputClasses": [
+            {
+                "className": "shamirScalarL1Amplification",
+                "maximumRecipientTrusteePoint": participant_count,
+                "shamirCoefficientCount": decryption_threshold,
+                "maximumOneSourceShamirScalarL1": maximum_one_source_shamir_scalar_l1,
+                "oneRecipientAggregateShamirScalarL1": one_recipient_aggregate_shamir_scalar_l1,
+            },
+            {
+                "className": "messageEncodingNorm",
+                "sourceCoefficientUpperBoundMultiplier": 1_u64,
+                "recipientShareCoefficientUpperBoundMultiplier": 1_u64,
+                "aggregateCoefficientUpperBoundMultiplier": participant_count,
+            },
+            {
+                "className": "openingRandomnessNorm",
+                "randomnessColumnCount": randomness_column_count,
+            },
+            {
+                "className": "aggregateDealerCount",
+                "sourceTrusteeCount": participant_count,
+            },
+        ],
+        "parameterReviewInputs": {
+            "inputVersion": 1,
+            "coefficientRing": {
+                "ringPolynomial": "X^N+1",
+                "ringDegree": POLYNOMIAL_DEGREE,
+                "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+                "commitmentModulusLimbs": commitment_modulus_limbs,
+            },
+            "openingWitnessRows": [
+                {
+                    "rowId": "compact-vss-fresh-opening-witness",
+                    "commitmentRoles": [
+                        "coefficient",
+                        "recipient-share"
+                    ],
+                    "messageCoefficientBound": "selectedRnsPrime",
+                    "messageCoefficientUpperBoundMultiplier": 1_u64,
+                    "messageDifferenceUpperBoundMultiplier": 1_u64,
+                    "randomnessDistribution": "balanced-ternary-per-column-coefficient",
+                    "randomnessCoefficientInfinityBound": 1_u64,
+                    "randomnessDifferenceInfinityBound": 2_u64,
+                    "messageColumnCount": message_column_count,
+                    "randomnessColumnCount": randomness_column_count,
+                    "witnessColumnCount": input_column_count,
+                    "witnessCoefficientCount": fresh_opening_witness_coefficient_count,
+                },
+                {
+                    "rowId": "compact-vss-aggregate-opening-witness",
+                    "commitmentRoles": [
+                        "aggregate-threshold-share"
+                    ],
+                    "messageCoefficientBound": "participantCount * selectedRnsPrime",
+                    "messageCoefficientUpperBoundMultiplier": participant_count,
+                    "messageDifferenceUpperBoundMultiplier": participant_count,
+                    "randomnessDistribution": "sum-of-source-balanced-ternary-openings",
+                    "randomnessCoefficientInfinityBound": participant_count,
+                    "randomnessDifferenceInfinityBound": aggregate_randomness_difference_infinity_bound,
+                    "messageColumnCount": message_column_count,
+                    "randomnessColumnCount": randomness_column_count,
+                    "witnessColumnCount": input_column_count,
+                    "witnessCoefficientCount": fresh_opening_witness_coefficient_count,
+                },
+            ],
+            "linearRelationRows": [
+                {
+                    "rowId": "compact-vss-recipient-share-shamir-evaluation",
+                    "relation": "recipient share opening equals Shamir evaluation of source coefficient openings",
+                    "sourceOpeningCount": decryption_threshold,
+                    "recipientOpeningTermCount": 1_u64,
+                    "maximumRecipientTrusteePoint": participant_count,
+                    "sourceShamirScalarL1": maximum_one_source_shamir_scalar_l1,
+                    "combinedRelationTermL1": recipient_shamir_relation_l1,
+                    "appliesToColumns": [
+                        "message:0",
+                        "message:1",
+                        "randomness:0",
+                        "randomness:1"
+                    ],
+                },
+                {
+                    "rowId": "compact-vss-aggregate-threshold-public-sum",
+                    "relation": "aggregate threshold opening equals public sum of source-recipient openings",
+                    "sourceTrusteeCount": participant_count,
+                    "aggregateOpeningTermCount": 1_u64,
+                    "sourceOpeningScalarL1": participant_count,
+                    "combinedRelationTermL1": aggregate_sum_relation_l1,
+                    "appliesToColumns": [
+                        "message:0",
+                        "message:1",
+                        "randomness:0",
+                        "randomness:1"
+                    ],
+                },
+                {
+                    "rowId": "compact-vss-one-recipient-aggregate-from-source-coefficients",
+                    "relation": "one recipient aggregate opening as a sum of all source Shamir evaluations",
+                    "sourceTrusteeCount": participant_count,
+                    "sourceCoefficientCountPerTrustee": decryption_threshold,
+                    "oneRecipientAggregateShamirScalarL1": one_recipient_aggregate_shamir_scalar_l1,
+                    "appliesToColumns": [
+                        "message:0",
+                        "message:1",
+                        "randomness:0",
+                        "randomness:1"
+                    ],
+                },
+            ],
+            "targetBasisReductionRows": [
+                {
+                    "rowId": "compact-vss-same-secret-bridge-target-reduction",
+                    "sourceSecretDistribution": "standard-ternary",
+                    "sourceSignedRepresentativeInfinityBound": 1_u64,
+                    "targetRnsLimbCount": target_rns_primes.len(),
+                    "targetRnsPrimes": target_rns_primes,
+                    "targetBasisHash": profile["canonicalTargetBasisHash"],
+                    "targetBasisLimbOrder": "profile-order-prefix",
+                    "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root_fixture(),
+                },
+            ],
+            "reviewReductionRows": [
+                {
+                    "rowId": "compact-vss-module-sis-binding-review-input",
+                    "problem": "Module-SIS",
+                    "openingWitnessRows": [
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness"
+                    ],
+                    "linearRelationRows": [
+                        "compact-vss-recipient-share-shamir-evaluation",
+                        "compact-vss-aggregate-threshold-public-sum",
+                        "compact-vss-one-recipient-aggregate-from-source-coefficients"
+                    ],
+                    "collisionDifferenceRule": "subtract two accepted openings over the integers before reducing to the commitment modulus",
+                },
+                {
+                    "rowId": "compact-vss-module-lwe-hiding-review-input",
+                    "problem": "Module-LWE",
+                    "openingWitnessRows": [
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness"
+                    ],
+                    "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
+                    "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+                },
+            ],
+        },
+        "estimatorInputRows": [
+            {
+                "rowId": "compact-vss-module-sis-binding-input",
+                "problem": "Module-SIS",
+                "targetSecurityBits": 128_u64,
+                "ringDegree": POLYNOMIAL_DEGREE,
+                "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+                "commitmentModulusLimbs": commitment_modulus_limbs,
+                "outputCoordinateCount": output_coordinate_count,
+                "messageWidth": message_column_count,
+                "randomnessWidth": randomness_column_count,
+                "projectionWeight": projection_weight,
+                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+            },
+            {
+                "rowId": "compact-vss-module-lwe-hiding-input",
+                "problem": "Module-LWE",
+                "targetSecurityBits": 128_u64,
+                "ringDegree": POLYNOMIAL_DEGREE,
+                "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
+                "commitmentModulusLimbs": commitment_modulus_limbs,
+                "outputCoordinateCount": output_coordinate_count,
+                "messageWidth": message_column_count,
+                "randomnessWidth": randomness_column_count,
+                "projectionWeight": projection_weight,
+                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+            },
+        ],
+        "sameSecretBridgeInput": {
+            "targetBasisHash": profile["canonicalTargetBasisHash"],
+            "targetRnsPrimes": target_rns_primes,
+            "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root_fixture(),
+            "targetBasisLimbOrder": "profile-order-prefix",
+        },
+    });
+    let binding_hash = derive_protocol_hash(
+        "CompactVssParameterCertificateInputBindingHash",
+        &binding_body,
+    )
+    .expect("compact VSS parameter certificate input binding hash");
+    let mut binding = binding_body;
+    binding["compactVssParameterCertificateInputBindingHash"] = serde_json::json!(binding_hash);
+
+    binding
+}
+
+fn same_secret_proof_family_binding_root_fixture() -> String {
+    derive_protocol_hash(
+        "SameSecretProofFamilyBindingRoot",
+        &serde_json::json!({
+            "objectType": "SameSecretProofFamilyBinding",
+            "objectVersion": 1,
+            "setupProfileId": "CollectiveBgvSetup-v1",
+            "setupProofProfileId": "SealedLattice-SetupProof-v1",
+            "proofFamily": "same-secret-linkage-anchor",
+            "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
+            "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
+            "boundSecretDependentProofFamilies": [
+                "vss-constant-relation",
+                "public-key-share",
+                "relinearization-key-share",
+                "galois-key-share",
+            ],
+        }),
+    )
+    .expect("same-secret proof family binding root")
 }
 
 pub(super) fn scalar_power_sum_fixture(coefficient_count: u64, trustee_point: u64) -> u128 {

@@ -951,7 +951,7 @@ fn usize_field_at(value: &Value, field_name: &str, object_path: &str) -> Canonic
 // Chunks are streamed unframed; the bound total length plus the enforced
 // uniform chunk size make this concatenation unambiguous, so no per-chunk length
 // prefix is needed.
-fn setup_proof_material_full_object_hash(
+pub(crate) fn setup_proof_material_full_object_hash(
     proof_family: &str,
     total_byte_length: u64,
     chunks: &[Vec<u8>],
@@ -975,7 +975,7 @@ fn setup_proof_material_full_object_hash(
     Ok(to_hex(&output))
 }
 
-fn setup_proof_material_chunk_hash(
+pub(crate) fn setup_proof_material_chunk_hash(
     proof_family: &str,
     full_object_hash: &str,
     chunk_index: usize,
@@ -1004,7 +1004,7 @@ fn setup_proof_material_chunk_hash(
     ))
 }
 
-fn setup_proof_material_chunk_manifest_root(
+pub(crate) fn setup_proof_material_chunk_manifest_root(
     proof_family: &str,
     chunk_size_bytes: u64,
     chunk_count: u64,

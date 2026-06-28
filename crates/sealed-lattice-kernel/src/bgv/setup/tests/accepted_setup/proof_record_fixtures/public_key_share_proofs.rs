@@ -477,6 +477,9 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
             compact_vss_recipient_share_opening_randomness: Vec::new(),
             compact_vss_carry_witnesses: Vec::new(),
+            compact_vss_recipient_share_messages_by_item: Vec::new(),
+            compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+            compact_vss_carry_witnesses_by_item: Vec::new(),
             target_decryption_message_vectors: Vec::new(),
             target_decryption_opening_randomness_by_commitment: Vec::new(),
         };
