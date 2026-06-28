@@ -185,9 +185,8 @@ export type VerifyPrivateVssShareInput = Readonly<{
 }>;
 
 export type PrivateVssShareVerification = Readonly<{
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyPrivateVssShareEnvelope';
-    readonly verifierStatus: 'accepted' | 'refused';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
@@ -287,15 +286,8 @@ export type AcceptedSetupHandoff = Readonly<{
 }>;
 
 export type SetupPackageVerification = Readonly<{
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyCollectiveBgvSetupPackage';
-    readonly verifierStatus:
-        | 'accepted'
-        | 'pending'
-        | 'refused'
-        | 'aborted'
-        | 'forkDetected'
-        | 'outsideAcceptedParameters';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
@@ -651,7 +643,7 @@ export const verifyTranscriptCoreFixture = async (
 
     if ('expectedErrorCode' in verification) {
         return {
-            ok: false,
+            isValid: false,
             caseName: verification.caseName,
             rejection: {
                 code: verification.expectedErrorCode,
@@ -660,7 +652,7 @@ export const verifyTranscriptCoreFixture = async (
     }
 
     return {
-        ok: true,
+        isValid: true,
         caseName: verification.caseName,
         objectHash512: verification.objectHash512,
         chunkRoot: verification.chunkRoot,

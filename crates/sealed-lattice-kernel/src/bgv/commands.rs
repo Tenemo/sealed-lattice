@@ -76,7 +76,7 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
         .any(|operation| operation.as_str() == Some(operation_name))
     {
         return Ok(json!({
-            "ok": true,
+            "isValid": true,
             "operation": "validateBgvEvaluatorOperation",
             "acceptedOperation": operation_name,
             "bgvParametersHash": bgv_parameters_hash()?,
@@ -465,7 +465,7 @@ mod tests {
             "includeCanonicalBytesHex": true
         }))
         .expect("encode command");
-        assert_eq!(encoded["validation"]["ok"], true);
+        assert_eq!(encoded["validation"]["isValid"], true);
         assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
                 "slots": [1, 2, 3],

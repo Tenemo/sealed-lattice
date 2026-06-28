@@ -72,7 +72,7 @@ describe('first-valid ordering shells', () => {
         };
 
         expect(deriveValidatedFirstValidOrder(input)).toMatchObject({
-            ok: true,
+            isValid: true,
             orderedObjects: [
                 expect.objectContaining({ objectHash: 'object-a' }),
                 expect.objectContaining({ objectHash: 'object-b' }),
@@ -218,7 +218,7 @@ describe('first-valid ordering shells', () => {
             ],
         });
 
-        expect(result.ok).toBe(false);
+        expect(result.isValid).toBe(false);
         expect(result.orderedObjects).toEqual([]);
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([

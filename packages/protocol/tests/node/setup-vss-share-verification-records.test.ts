@@ -178,7 +178,7 @@ describe('VSS share verification record builders', () => {
                 byteLength: firstRecord.acceptanceByteLength,
                 recoveryEpoch: 2,
                 deviceEpoch: 3,
-            }).ok,
+            }).isValid,
         ).toBe(true);
 
         const acceptanceSet = createVssShareAcceptanceSet({
@@ -305,7 +305,7 @@ describe('VSS share verification record builders', () => {
                 byteLength: complaintRecord.complaintByteLength,
                 recoveryEpoch: 4,
                 deviceEpoch: 5,
-            }).ok,
+            }).isValid,
         ).toBe(true);
 
         const complaintSet = createVssComplaintSet({
@@ -354,7 +354,7 @@ describe('VSS share verification record builders', () => {
         );
         const failedEnvelopeReference = envelopeReference(1, 2);
         const localVerification = {
-            ok: false,
+            isValid: false,
             privateEnvelopeHash: failedEnvelopeReference.privateEnvelopeHash,
             localVerificationRoot: null,
             refusedObjects: [

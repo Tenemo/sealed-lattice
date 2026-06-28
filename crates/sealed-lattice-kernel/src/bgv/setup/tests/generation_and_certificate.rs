@@ -38,7 +38,7 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
         "expectedRosterHash": request()["rosterHash"],
     }))
     .expect("verify setup package");
-    assert_eq!(verification["ok"], true);
+    assert_eq!(verification["isValid"], true);
 }
 
 #[test]

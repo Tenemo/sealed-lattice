@@ -355,7 +355,7 @@ export type TrusteeEvaluationKeyStatementContext = Readonly<{
 }>;
 
 export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;

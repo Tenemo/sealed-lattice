@@ -9,7 +9,6 @@ pub(in super::super) fn verify_public_key_shares(
 ) -> CanonicalResult<Option<Value>> {
     let Some(share_set) = setup_package.get("publicKeyShares") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares".to_string()],
             Vec::new(),
@@ -102,7 +101,6 @@ pub(in super::super) fn verify_public_key_shares(
     let same_secret_bindings = same_secret_statement_bindings_from_package(setup_package)?;
     let Some(share_records) = share_set.get("shareRecords").and_then(Value::as_array) else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords".to_string()],
             Vec::new(),
@@ -148,7 +146,6 @@ pub(in super::super) fn verify_public_key_shares(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.publicKeyShareSetRoot".to_string()],
             Vec::new(),
@@ -303,7 +300,6 @@ fn verify_public_key_share_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords.publicKeyShareRoot".to_string()],
             Vec::new(),

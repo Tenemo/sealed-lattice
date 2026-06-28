@@ -34,7 +34,7 @@ describe('target finality', () => {
                 witnessPublicKeyHashes,
             }),
         ).toMatchObject({
-            ok: true,
+            isValid: true,
             validWitnessIdentities: witnessIdentities.slice(0, 5),
         });
 
@@ -166,7 +166,7 @@ describe('target finality', () => {
             conflictingRecords: [forkRecord],
         });
 
-        expect(forkedVerification.ok).toBe(false);
+        expect(forkedVerification.isValid).toBe(false);
         expect(forkedVerification.acceptedHashes).toEqual([]);
         expect(forkedVerification.targetFinalityRecordHash).toBeUndefined();
         expect(forkedVerification.equivocatingWitnessIdentities).toEqual(
@@ -293,7 +293,7 @@ describe('target finality', () => {
             conflictingRecords: [secondRecord],
         });
 
-        expect(verification.ok).toBe(false);
+        expect(verification.isValid).toBe(false);
         expect(verification.acceptedHashes).toEqual([]);
         expect(verification.targetFinalityRecordHash).toBeUndefined();
         expect(verification.equivocatingWitnessIdentities).toEqual(

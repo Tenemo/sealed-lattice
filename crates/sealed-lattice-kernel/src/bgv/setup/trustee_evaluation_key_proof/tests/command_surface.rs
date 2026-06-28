@@ -24,7 +24,7 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate command");
-    assert_eq!(generated["ok"], true);
+    assert_eq!(generated["isValid"], true);
     assert_eq!(generated["sameSecretLinkageIncluded"], true);
     let proof_bytes_hex = generated["proofBytesHex"].as_str().expect("proof bytes");
 
@@ -32,7 +32,7 @@ fn trustee_proof_commands_round_trip_and_reject_tampered_bytes() {
     verify_request["proofBytesHex"] = serde_json::json!(proof_bytes_hex);
     let verified = super::verify_trustee_evaluation_key_proof_from_request(&verify_request)
         .expect("verify command");
-    assert_eq!(verified["ok"], true);
+    assert_eq!(verified["isValid"], true);
     assert_eq!(verified["statementHash"], generated["statementHash"]);
 
     let mut tampered_request = statement_request_value(&statement);
@@ -128,7 +128,7 @@ fn anchor_proof_commands_round_trip_with_family_label() {
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate anchor command");
-    assert_eq!(generated["ok"], true);
+    assert_eq!(generated["isValid"], true);
     assert_eq!(generated["proofFamily"], "same-secret-linkage-anchor");
     assert_eq!(generated["keyCount"], 0);
 
@@ -136,7 +136,7 @@ fn anchor_proof_commands_round_trip_with_family_label() {
     verify_request["proofBytesHex"] = generated["proofBytesHex"].clone();
     let verified = super::verify_trustee_evaluation_key_proof_from_request(&verify_request)
         .expect("verify anchor command");
-    assert_eq!(verified["ok"], true);
+    assert_eq!(verified["isValid"], true);
     assert_eq!(verified["proofFamily"], "same-secret-linkage-anchor");
     assert_eq!(verified["statementHash"], generated["statementHash"]);
 
@@ -171,7 +171,7 @@ fn public_key_share_commands_round_trip_with_family_label() {
 
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate public-key share command");
-    assert_eq!(generated["ok"], true);
+    assert_eq!(generated["isValid"], true);
     assert_eq!(generated["proofFamily"], "public-key-share");
     assert_eq!(generated["keyCount"], 1);
     assert_eq!(generated["sameSecretLinkageIncluded"], true);
@@ -180,7 +180,7 @@ fn public_key_share_commands_round_trip_with_family_label() {
     verify_request["proofBytesHex"] = generated["proofBytesHex"].clone();
     let verified = super::verify_trustee_evaluation_key_proof_from_request(&verify_request)
         .expect("verify public-key share command");
-    assert_eq!(verified["ok"], true);
+    assert_eq!(verified["isValid"], true);
     assert_eq!(verified["proofFamily"], "public-key-share");
     assert_eq!(verified["statementHash"], generated["statementHash"]);
 

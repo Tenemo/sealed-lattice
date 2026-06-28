@@ -7,7 +7,6 @@ pub(super) fn verify_vss_coefficient_commitments(
 ) -> CanonicalResult<Option<Value>> {
     let Some(commitment_set) = setup_package.get("vssCoefficientCommitments") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitments".to_string()],
             Vec::new(),
@@ -78,7 +77,6 @@ pub(super) fn verify_vss_coefficient_commitments(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitments.sourceTrusteeRecords".to_string()],
             Vec::new(),
@@ -112,7 +110,6 @@ pub(super) fn verify_vss_coefficient_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitments.vssCoefficientCommitmentRoot".to_string()],
             Vec::new(),
@@ -167,7 +164,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
 ) -> CanonicalResult<Option<Value>> {
     let Some(material_set) = setup_package.get("vssCoefficientCommitmentMaterial") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitmentMaterial".to_string()],
             Vec::new(),
@@ -319,7 +315,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             .and_then(Value::as_array)
         else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("vssCoefficientCommitments"),
                 vec!["vssCoefficientCommitmentMaterial.coefficientCommitments".to_string()],
                 Vec::new(),
@@ -349,7 +344,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec![
                 "vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot".to_string(),
@@ -385,7 +379,6 @@ fn vss_material_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssCoefficientCommitments"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -554,7 +547,6 @@ fn verify_vss_source_trustee_commitment_record(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec![
                 "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments".to_string(),
@@ -591,7 +583,6 @@ fn verify_vss_source_trustee_commitment_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec![
                 "vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeCommitmentRoot"
@@ -755,7 +746,6 @@ fn verify_vss_coefficient_commitment_record(
     ] {
         let Some(hash) = coefficient_record.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("vssCoefficientCommitments"),
                 vec![format!(
                     "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
@@ -830,7 +820,6 @@ fn vss_commitment_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssCoefficientCommitments"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

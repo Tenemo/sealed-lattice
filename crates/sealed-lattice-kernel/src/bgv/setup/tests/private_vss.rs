@@ -14,9 +14,9 @@ fn private_vss_share_envelope_verifier_accepts_succinct_private_share_proofs() {
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], true);
+    assert_eq!(result["isValid"], true);
     assert_eq!(result["operation"], "verifyPrivateVssShareEnvelope");
-    assert_eq!(result["verifierStatus"], "accepted");
+    assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
         result["verifiedPrivateVssShareProofCount"],
@@ -59,7 +59,7 @@ fn private_vss_share_envelope_verifier_accepts_first_roster_succinct_private_sha
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("first-roster private VSS envelope verification");
 
-    assert_eq!(result["verifierStatus"], "accepted");
+    assert_eq!(result["isValid"], true);
     assert_eq!(result["refusedObjects"], serde_json::json!([]));
     assert_eq!(
         result["verifiedPrivateVssShareProofCount"],
@@ -100,8 +100,7 @@ fn private_vss_share_envelope_verifier_refuses_noncanonical_succinct_context() {
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssContextMismatch"
@@ -525,8 +524,7 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], true);
-    assert_eq!(result["verifierStatus"], "accepted");
+    assert_eq!(result["isValid"], true);
     assert_eq!(
         result["verifiedPrivateVssShareProofCount"],
         serde_json::json!(DATA_PRIMES.len())
@@ -560,8 +558,7 @@ fn private_vss_share_envelope_verifier_refuses_missing_transported_succinct_priv
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"
@@ -601,8 +598,7 @@ fn private_vss_share_envelope_verifier_refuses_tampered_transported_succinct_pri
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"
@@ -750,8 +746,7 @@ fn private_vss_share_envelope_verifier_refuses_tampered_succinct_private_share_p
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"
@@ -774,8 +769,7 @@ fn private_vss_share_envelope_verifier_refuses_share_value_drift_after_proof_gen
     let result = verify_private_vss_share_envelope_from_request(&request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"
@@ -809,8 +803,7 @@ fn assert_private_vss_share_proof_refusal_contains(
     let result = verify_private_vss_share_envelope_from_request(request)
         .expect("private VSS envelope verification");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "privateVssShareProofVerificationFailed"

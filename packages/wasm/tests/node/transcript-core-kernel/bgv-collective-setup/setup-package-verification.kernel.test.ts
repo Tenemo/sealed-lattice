@@ -31,9 +31,8 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
+            isValid: false,
             operation: 'verifyCollectiveBgvSetupPackage',
-            verifierStatus: 'outsideAcceptedParameters',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'outsideCollectiveBgvSetupParameters',
@@ -83,8 +82,7 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
-            verifierStatus: 'pending',
+            isValid: false,
             currentPhase: 'setupPackageVerification',
             missingObjects: [
                 'sameSecretProofs',
@@ -122,7 +120,7 @@ describe('collective BGV setup kernel commands', () => {
                 ),
             });
 
-            expect(result.verifierStatus).toBe('refused');
+            expect(result.isValid).toBe(false);
             expect(result.refusedObjects[0]).toMatchObject({
                 reasonCode: 'setupContextTokenMalformed',
                 objectPath: `setupPackage.setupContext.${fieldName}`,
@@ -154,7 +152,7 @@ describe('collective BGV setup kernel commands', () => {
             ),
         });
 
-        expect(result.verifierStatus).toBe('refused');
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects[0]).toMatchObject({
             reasonCode: 'sameSecretProofVerificationFailed',
         });
@@ -208,7 +206,7 @@ describe('collective BGV setup kernel commands', () => {
             ),
         });
 
-        expect(result.verifierStatus).toBe('refused');
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects[0]).toMatchObject({
             reasonCode: 'publicKeyShareSuccinctProofVerificationFailed',
         });
@@ -241,8 +239,7 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
-            verifierStatus: 'aborted',
+            isValid: false,
             currentPhase: 'vssAcceptanceOrComplaint',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(

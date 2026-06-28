@@ -42,7 +42,7 @@ const emptySignatureVerificationResult = (
     message: string,
     objectHash?: ProtocolHash,
 ): SignatureVerificationResult => ({
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects: [
         {
@@ -56,7 +56,7 @@ const emptySignatureVerificationResult = (
 const successfulSignatureVerification = (
     signatureHash: ProtocolHash,
 ): SignatureVerificationResult => ({
-    ok: true,
+    isValid: true,
     acceptedHashes: [signatureHash],
     refusedObjects: [],
 });

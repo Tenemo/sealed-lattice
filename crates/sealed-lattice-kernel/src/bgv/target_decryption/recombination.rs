@@ -67,7 +67,7 @@ pub(super) fn recombine_target_decryption_shares(
     }))?;
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "operation": "recombineBgvTargetDecryptionShares",
         "targetDecryptionResultHash": target_result_root,
         "setupPackageHash": setup_binding.setup_package_hash,

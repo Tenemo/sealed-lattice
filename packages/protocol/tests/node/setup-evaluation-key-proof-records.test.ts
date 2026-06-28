@@ -381,7 +381,7 @@ const stubGenerator = (
         );
 
         return {
-            ok: true,
+            isValid: true,
             operation: 'generateTrusteeEvaluationKeyProof',
             statementHash: fixtureHash(
                 `statement-${String(input.context.trusteeRosterPosition)}`,

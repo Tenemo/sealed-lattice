@@ -33,14 +33,14 @@ const nextFoundationEvidence = [
 ] as const;
 
 const emptyFirstValidOrdering: FirstValidOrderingVerification = {
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects: [],
     orderedObjects: [],
 };
 
 const emptyTargetFinality: TargetFinalityVerification = {
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects: [],
     validWitnessIdentities: [],
@@ -51,21 +51,21 @@ const buildFailure = (
     refusedObjects: readonly RefusalRecord[],
     componentResults?: Partial<FoundationTranscriptComponentResults>,
 ): FoundationTranscriptVerification => ({
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects,
     validWitnessIdentities: [],
     nextRequiredEvidence: nextFoundationEvidence,
     componentResults: {
         rosterManifest: componentResults?.rosterManifest ?? {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [],
             participantIdentities: [],
         },
         rosterExternalAcceptance:
             componentResults?.rosterExternalAcceptance ?? {
-                ok: false,
+                isValid: false,
                 acceptedHashes: [],
                 refusedObjects: [],
             },
@@ -278,11 +278,11 @@ const verifyFoundationTranscriptUnchecked = (
     ];
     const accepted =
         refusedObjects.length === 0 &&
-        rosterManifest.ok &&
-        rosterExternalAcceptance.ok &&
-        recoveryEpochUpdates.every((result) => result.ok) &&
-        firstValidOrdering.ok &&
-        targetFinality.ok;
+        rosterManifest.isValid &&
+        rosterExternalAcceptance.isValid &&
+        recoveryEpochUpdates.every((result) => result.isValid) &&
+        firstValidOrdering.isValid &&
+        targetFinality.isValid;
 
     if (!accepted) {
         return {
@@ -293,7 +293,7 @@ const verifyFoundationTranscriptUnchecked = (
     }
 
     return {
-        ok: true,
+        isValid: true,
         acceptedHashes: uniqueStrings([
             ...rosterManifest.acceptedHashes,
             ...rosterExternalAcceptance.acceptedHashes,

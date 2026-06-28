@@ -94,7 +94,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
 ) -> CanonicalResult<Option<Value>> {
     let Some(commitment_set) = setup_package.get("privateVssEnvelopeCommitments") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitments".to_string()],
             Vec::new(),
@@ -150,7 +149,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitmentRoot".to_string()],
             Vec::new(),
@@ -163,7 +161,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot".to_string()],
             Vec::new(),
@@ -1143,7 +1140,6 @@ fn private_vss_envelope_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("privateVssEnvelopeDelivery"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

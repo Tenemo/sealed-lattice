@@ -60,7 +60,7 @@ export type VssShareComplaintRecordInput = {
 };
 
 export type PrivateVssLocalVerificationFailure = Readonly<{
-    readonly ok: false;
+    readonly isValid: false;
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly refusedObjects: readonly Readonly<{
@@ -230,7 +230,7 @@ const verifyGeneratedSignatureEnvelope = (
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
-    if (!result.ok) {
+    if (!result.isValid) {
         const refusedObject = result.refusedObjects[0];
         throw new Error(
             refusedObject === undefined

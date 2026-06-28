@@ -76,9 +76,6 @@ export type SetupCertificatesInput = Readonly<{
     readonly bgvParameters: BgvRnsParametersForCertificates | JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
-    readonly sameSecretLinkageAnchorProofAccounting?: JsonRecord;
-    readonly publicKeyShareProofAccounting?: JsonRecord;
-    readonly trusteeEvaluationKeyProofAccounting?: JsonRecord;
 }>;
 
 export type SetupTransportCertificate = Readonly<

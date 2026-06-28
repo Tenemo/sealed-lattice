@@ -275,9 +275,8 @@ export type PrivateVssEnvelopeVerificationReference = Readonly<
 >;
 
 export type PrivateVssShareVerification = Readonly<{
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyPrivateVssShareEnvelope';
-    readonly verifierStatus: 'accepted' | 'refused';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly limbVerifications: readonly JsonRecord[];
@@ -652,7 +651,7 @@ export type RestoreLocalTrusteeSetupStateInput = Readonly<{
 }>;
 
 export type LocalTrusteeSetupStateVerification = Readonly<{
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'verifyLocalTrusteeSetupState';
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
@@ -665,7 +664,7 @@ export type LocalTrusteeSetupStateVerification = Readonly<{
 }>;
 
 export type RestoredLocalTrusteeSetupState = Readonly<{
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'restoreLocalTrusteeSetupState';
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload;
@@ -746,10 +745,7 @@ const assertAcceptedPrivateVssVerification = (
     localVerification: PrivateVssShareVerification,
     envelopeReference: PrivateVssEnvelopeVerificationReference,
 ): void => {
-    if (
-        !localVerification.ok ||
-        localVerification.verifierStatus !== 'accepted'
-    ) {
+    if (!localVerification.isValid) {
         throw new Error(
             'localVerification must be accepted before creating a VSS share acceptance.',
         );
@@ -775,10 +771,7 @@ const assertAcceptedPrivateVssVerification = (
 const assertRefusedPrivateVssVerification = (
     localVerification: PrivateVssShareVerification,
 ): void => {
-    if (
-        localVerification.ok ||
-        localVerification.verifierStatus !== 'refused'
-    ) {
+    if (localVerification.isValid) {
         throw new Error(
             'localVerification must be refused before creating a VSS complaint.',
         );
@@ -815,7 +808,7 @@ export const createVssComplaint = async (
     return createVssComplaintInternal({
         ...input,
         localVerification: {
-            ok: false,
+            isValid: false,
             privateEnvelopeHash: input.localVerification.privateEnvelopeHash,
             localVerificationRoot:
                 input.localVerification.localVerificationRoot,
@@ -1097,7 +1090,7 @@ export const restoreLocalTrusteeSetupState = async (
     assertRestoredLocalStateBindings(input, sealedLocalStatePayload);
 
     return {
-        ok: true,
+        isValid: true,
         operation: 'restoreLocalTrusteeSetupState',
         localStateCommitment: input.localStateCommitment,
         sealedLocalStatePayload,

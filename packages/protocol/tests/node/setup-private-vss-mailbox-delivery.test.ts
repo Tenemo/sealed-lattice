@@ -101,7 +101,7 @@ describe('private VSS mailbox delivery', () => {
                             | undefined;
 
                     return {
-                        ok: true,
+                        isValid: true,
                         privateEnvelopeHash: deriveCanonicalObjectHash(
                             input.privateEnvelope,
                         ),
@@ -215,7 +215,7 @@ describe('private VSS mailbox delivery', () => {
                     deriveCanonicalObjectHash: ({ value }) =>
                         deriveCanonicalObjectHash(value),
                     verifyPrivateVssShareEnvelope: (input) => ({
-                        ok: true,
+                        isValid: true,
                         privateEnvelopeHash: deriveCanonicalObjectHash(
                             input.privateEnvelope,
                         ),

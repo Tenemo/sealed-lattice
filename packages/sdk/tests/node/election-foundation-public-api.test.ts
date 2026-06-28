@@ -115,7 +115,7 @@ describe('election foundation public package API in Node', () => {
         const fixture = createFoundationTranscriptFixture();
         const verification = verifyFoundationTranscript(fixture.input);
 
-        expect(verification.ok).toBe(true);
+        expect(verification.isValid).toBe(true);
         expect(verification.electionManifestHash).toBe(
             fixture.expectedHashes.electionManifestHash,
         );
@@ -161,7 +161,7 @@ describe('election foundation public package API in Node', () => {
         );
 
         expect(transcriptCoreVerification).toMatchObject({
-            ok: true,
+            isValid: true,
             caseName: 'foundation-transcript-roots',
             objectHash512: transcriptCoreFixture.expectedObjectHash512,
             chunkRoot: transcriptCoreFixture.expectedChunkRoot,

@@ -170,7 +170,8 @@ const verifyBoardConsistencyUnchecked = (
         refusedObjects.length === 0 && discoveredForkEvidence === undefined;
 
     return {
-        ok: refusedObjects.length === 0 && discoveredForkEvidence === undefined,
+        isValid:
+            refusedObjects.length === 0 && discoveredForkEvidence === undefined,
         acceptedHashes: boardAccepted
             ? uniqueStrings([
                   ...input.signedBoardHeads.map((head) => head.headHash),
@@ -204,7 +205,7 @@ export const verifyBoardConsistency = (
         return verifyBoardConsistencyUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

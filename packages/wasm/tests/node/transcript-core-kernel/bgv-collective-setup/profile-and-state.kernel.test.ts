@@ -79,14 +79,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(
             parameters.evaluatorKeySchedule.requiredGaloisSetHash,
         ).toHaveLength(128);
-        expect(parameters.verifierStatuses).toEqual([
-            'accepted',
-            'pending',
-            'refused',
-            'aborted',
-            'forkDetected',
-            'outsideAcceptedParameters',
-        ]);
         expect(parameters.phaseOrder).toHaveLength(15);
         expect(parameters.requiredFinalObjects).toContain(
             'setupTransportCertificate',
@@ -119,7 +111,7 @@ describe('collective BGV setup kernel commands', () => {
                 localStateCommitment,
             }),
         ).toMatchObject({
-            ok: true,
+            isValid: true,
             operation: 'verifyLocalTrusteeSetupState',
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,

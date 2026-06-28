@@ -85,7 +85,7 @@ describe('transcript-core kernel in browsers', () => {
         });
 
         expect(parameters.bgvParametersHash).toMatch(hash512Pattern);
-        expect(encodedResult).not.toMatchObject({ ok: false });
+        expect(encodedResult).not.toMatchObject({ isValid: false });
         const encoded = encodedResult as {
             readonly canonicalBytesHex: string;
             readonly canonicalBytesHash512: string;
@@ -102,7 +102,7 @@ describe('transcript-core kernel in browsers', () => {
                 expectedPlaintextRoot: encoded.plaintextRoot,
             }),
         ).toMatchObject({
-            ok: true,
+            isValid: true,
             objectKind: 'plaintext',
             plaintextRoot: encoded.plaintextRoot,
         });

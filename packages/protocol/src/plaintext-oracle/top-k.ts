@@ -44,7 +44,7 @@ const toPlaintextScore = (score: unknown): PlaintextScore => {
 
 const assertPollSpecShape = (pollSpec: PollSpec): void => {
     const validation = validatePollSpec(pollSpec);
-    if (!validation.ok) {
+    if (!validation.isValid) {
         throw new RangeError(
             'Plaintext oracle poll specification must pass lifecycle validation.',
         );

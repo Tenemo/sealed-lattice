@@ -21,7 +21,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             return Ok(None);
         }
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["evaluationKeys".to_string()],
             Vec::new(),
@@ -43,7 +42,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             return Ok(None);
         }
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["evaluationKeys".to_string()],
             Vec::new(),

@@ -15,8 +15,8 @@ describe('plaintext oracle in browsers', () => {
             topOptionCount: 2,
         });
 
-        expect(pollSpec.ok).toBe(true);
-        if (!pollSpec.ok) {
+        expect(pollSpec.isValid).toBe(true);
+        if (!pollSpec.isValid) {
             throw new Error('Poll spec should validate.');
         }
 
@@ -37,7 +37,7 @@ describe('plaintext oracle in browsers', () => {
         expect(oracle.ranking.map((entry) => entry.optionOrdinal)).toEqual([
             1, 2, 3,
         ]);
-        expect(decoding.ok).toBe(true);
+        expect(decoding.isValid).toBe(true);
         expect(decoding.selectedOptionOrdinals).toEqual([1, 2]);
     });
 });

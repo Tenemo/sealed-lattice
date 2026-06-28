@@ -25,7 +25,7 @@ describe('roster and manifest shells', () => {
 
         const result = verifyRosterManifestTranscript(input);
 
-        expect(result.ok).toBe(true);
+        expect(result.isValid).toBe(true);
         expect(result.participantIdentities).toEqual([
             'participant-1',
             'participant-2',
@@ -46,7 +46,7 @@ describe('roster and manifest shells', () => {
         const input = createRosterManifestTranscriptInput(registrations);
         const result = verifyRosterManifestTranscript(input);
 
-        expect(result.ok).toBe(false);
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'DuplicateRegistration' }),
@@ -77,7 +77,7 @@ describe('roster and manifest shells', () => {
             electionManifest: manifestWithTransportOnlySignature,
         });
 
-        expect(result.ok).toBe(false);
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'WrongSignerRole' }),
@@ -164,7 +164,7 @@ describe('roster and manifest shells', () => {
 
         const result = verifyRosterManifestTranscript(input);
 
-        expect(result.ok).toBe(false);
+        expect(result.isValid).toBe(false);
         expect(result.acceptedHashes).toEqual([]);
         expect(result.electionManifestHash).toBeUndefined();
         expect(result.rosterHash).toBeUndefined();

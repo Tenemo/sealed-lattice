@@ -19,8 +19,8 @@ const expectErrorCodes = (
 ): void => {
     const validation = validatePollSpec(input);
 
-    expect(validation.ok).toBe(false);
-    if (!validation.ok) {
+    expect(validation.isValid).toBe(false);
+    if (!validation.isValid) {
         expect(validation.errors.map((error) => error.code)).toEqual(
             expectedCodes,
         );
@@ -40,7 +40,7 @@ describe('election foundation poll-spec validation', () => {
         );
 
         expect(validation).toEqual({
-            ok: true,
+            isValid: true,
             normalized: createValidPollSpecInput({
                 scoreDomain: {
                     min: 1,
@@ -63,7 +63,7 @@ describe('election foundation poll-spec validation', () => {
         );
 
         expect(validation).toMatchObject({
-            ok: true,
+            isValid: true,
             normalized: {
                 scoreDomain: {
                     min: 1,
@@ -87,7 +87,7 @@ describe('election foundation poll-spec validation', () => {
         );
 
         expect(validation).toMatchObject({
-            ok: true,
+            isValid: true,
             normalized: {
                 maxRosterSize: 20,
                 minRosterSize: 11,
@@ -203,6 +203,6 @@ describe('election foundation poll-spec validation', () => {
             }),
         );
 
-        expect(validation.ok).toBe(true);
+        expect(validation.isValid).toBe(true);
     });
 });

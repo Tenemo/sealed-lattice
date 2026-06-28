@@ -220,7 +220,7 @@ const createSparseTargetDecodingFailure = (
 ): SparseTopKTargetDecoding => ({
     acceptedHashes: [],
     decodedSelections: [],
-    ok: false,
+    isValid: false,
     refusedObjects: [
         createRefusal(
             'SparseTargetInvalid',
@@ -426,7 +426,7 @@ const decodeSparseTopKTargetUnchecked = (input: {
                 ? uniqueStrings([target.targetHash, target.layoutHash])
                 : [],
         decodedSelections: refusedObjects.length === 0 ? sortedSelections : [],
-        ok: refusedObjects.length === 0,
+        isValid: refusedObjects.length === 0,
         refusedObjects,
         selectedOptionOrdinals:
             refusedObjects.length === 0

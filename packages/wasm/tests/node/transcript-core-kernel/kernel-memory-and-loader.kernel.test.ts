@@ -141,9 +141,8 @@ describe('transcript-core kernel in Node', () => {
         const commandResponse = {
             success: true,
             value: {
-                ok: false,
+                isValid: false,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                verifierStatus: 'refused',
                 currentPhase: 'setupPackageVerification',
                 acceptedHashes: [],
                 refusedObjects: [],
@@ -264,7 +263,7 @@ describe('transcript-core kernel in Node', () => {
             verifiedSetupProofMaterials,
         });
 
-        expect(result.verifierStatus).toBe('refused');
+        expect(result.isValid).toBe(false);
         expect(decodedCommands).toEqual([
             {
                 command: 'VerifyCollectiveBgvSetup',
@@ -290,7 +289,7 @@ describe('transcript-core kernel in Node', () => {
         const commandResponse = {
             success: true,
             value: {
-                ok: true,
+                isValid: true,
                 operation: 'beginSetupProofMaterialTransportStream',
                 verificationId: 'same-secret-proof-0',
                 proofFamily: 'same-secret-linkage-anchor',

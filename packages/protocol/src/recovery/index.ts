@@ -150,7 +150,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
             input.recoveryEpochState.currentDeviceEpoch
     ) {
         return {
-            ok: refusedObjects.length === 0,
+            isValid: refusedObjects.length === 0,
             acceptedHashes: [input.actionContext.actionContextHash],
             refusedObjects,
         };
@@ -165,7 +165,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
             input.recoveryEpochState.currentDeviceEpoch
     ) {
         return {
-            ok: refusedObjects.length === 0,
+            isValid: refusedObjects.length === 0,
             acceptedHashes: [input.actionContext.actionContextHash],
             refusedObjects,
         };
@@ -181,7 +181,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
     );
 
     return {
-        ok: false,
+        isValid: false,
         acceptedHashes: [],
         refusedObjects,
     };
@@ -194,7 +194,7 @@ export const isActionCurrentForRecoveryEpoch = (
         return isActionCurrentForRecoveryEpochUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -431,7 +431,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
     refusedObjects.push(...signatureResult.refusedObjects);
 
     return {
-        ok: refusedObjects.length === 0,
+        isValid: refusedObjects.length === 0,
         acceptedHashes:
             refusedObjects.length === 0
                 ? [
@@ -462,7 +462,7 @@ export const verifyRecoveryEpochUpdate = (
         return verifyRecoveryEpochUpdateUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

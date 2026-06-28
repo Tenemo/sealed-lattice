@@ -597,7 +597,7 @@ const verifyTargetFinalityUnchecked = (
         refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
-        ok: finalityAccepted,
+        isValid: finalityAccepted,
         acceptedHashes: finalityAccepted ? acceptedHashes : [],
         refusedObjects:
             forkEvidence === undefined
@@ -636,7 +636,7 @@ export const verifyTargetFinality = (
         return verifyTargetFinalityUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

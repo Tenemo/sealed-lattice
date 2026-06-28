@@ -24,7 +24,7 @@ pub(crate) fn bgv_operation_rejection(
     }
 
     json!({
-        "ok": false,
+        "isValid": false,
         "operation": operation,
         "acceptedHashes": [],
         "refusedObjects": [refused_object],
@@ -55,7 +55,7 @@ pub(crate) fn validate_plaintext_hex(
     }
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "objectKind": "plaintext",
         "componentCount": object.components.len(),
         "bgvParametersHash": object.components[0].bgv_parameters_hash,
@@ -103,7 +103,7 @@ pub(crate) fn validate_ciphertext_hex(
     }
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "objectKind": "ciphertext",
         "componentCount": object.components.len(),
         "bgvParametersHash": first.bgv_parameters_hash,
@@ -132,7 +132,7 @@ mod tests {
         let root = plaintext_root(&canonical_bytes);
 
         assert!(
-            validate_plaintext_hex(&canonical_bytes_hex, Some(&root)).expect("validate")["ok"]
+            validate_plaintext_hex(&canonical_bytes_hex, Some(&root)).expect("validate")["isValid"]
                 .as_bool()
                 .expect("ok")
         );

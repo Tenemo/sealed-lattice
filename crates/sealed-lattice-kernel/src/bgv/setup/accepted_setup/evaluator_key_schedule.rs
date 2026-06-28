@@ -7,7 +7,6 @@ pub(super) fn verify_evaluator_key_schedule(
 ) -> CanonicalResult<Option<Value>> {
     let Some(schedule) = setup_package.get("evaluatorKeySchedule") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("relinearizationRoundOne"),
             vec!["evaluatorKeySchedule".to_string()],
             Vec::new(),
@@ -189,7 +188,6 @@ pub(super) fn verify_evaluator_key_schedule(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("relinearizationRoundOne"),
             vec!["evaluatorKeySchedule.evaluatorKeyScheduleRoot".to_string()],
             Vec::new(),
@@ -246,7 +244,6 @@ fn evaluator_key_schedule_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("relinearizationRoundOne"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -286,7 +283,6 @@ pub(super) fn verify_generic_key_switch_policy(
     // genericKeySwitchKeys object, so this is the sole coverage for its absence.
     if setup_package.get("genericKeySwitchKeys").is_some() {
         return Ok(Some(verification_response(
-            VerifierStatus::Refused,
             Some("setupPackageVerification"),
             Vec::new(),
             vec![Refusal::new(

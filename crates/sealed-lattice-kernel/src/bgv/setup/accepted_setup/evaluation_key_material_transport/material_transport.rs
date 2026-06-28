@@ -77,7 +77,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
     let Some(transported_material_set) = request.get("transportedPublicEvaluationKeyMaterial")
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["transportedPublicEvaluationKeyMaterial".to_string()],
             Vec::new(),

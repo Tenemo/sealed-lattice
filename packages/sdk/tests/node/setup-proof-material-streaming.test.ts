@@ -166,13 +166,13 @@ describe('setup proof material streaming in the public package', () => {
                     );
 
                     return {
-                        ok: true,
+                        isValid: true,
                         operation: 'beginSetupProofMaterialTransportStream',
                     };
                 },
             ),
             absorbSetupProofMaterialTransportStreamChunk: vi.fn(() => ({
-                ok: true,
+                isValid: true,
                 operation: 'absorbSetupProofMaterialTransportStreamChunk',
             })),
             finishSetupProofMaterialTransportStream: vi.fn(
@@ -184,7 +184,7 @@ describe('setup proof material streaming in the public package', () => {
                             );
 
                         return {
-                            ok: true,
+                            isValid: true,
                             operation:
                                 'finishSetupProofMaterialTransportStream',
                             verifiedSetupProofMaterial: {
@@ -211,9 +211,8 @@ describe('setup proof material streaming in the public package', () => {
                 }),
             ),
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                ok: false,
+                isValid: false,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                verifierStatus: 'outsideAcceptedParameters',
                 observedInput: input,
             })),
         };
@@ -244,9 +243,8 @@ describe('setup proof material streaming in the public package', () => {
         mockKernel = {
             ...mockKernel,
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                ok: true,
+                isValid: true,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                verifierStatus: 'accepted',
                 currentPhase: 'setupPackageVerification',
                 acceptedHashes: [acceptedSetupHandoffRoot],
                 missingObjects: [],
@@ -264,9 +262,8 @@ describe('setup proof material streaming in the public package', () => {
         });
 
         expect(result).toMatchObject({
-            ok: true,
+            isValid: true,
             operation: 'verifyCollectiveBgvSetupPackage',
-            verifierStatus: 'accepted',
             acceptedSetupHandoff,
         });
         expect(result.acceptedSetupHandoff?.acceptedSetupHandoffRoot).toBe(

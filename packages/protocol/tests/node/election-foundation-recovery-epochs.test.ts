@@ -139,7 +139,7 @@ describe('recovery epoch shells', () => {
             updateInclusionProof: recoveryUpdateInclusionProof,
         });
 
-        expect(verification.ok).toBe(true);
+        expect(verification.isValid).toBe(true);
         expect(verification.updatedEntry).toMatchObject({
             currentRecoveryEpoch: 1,
             currentDeviceEpoch: 1,
@@ -172,7 +172,7 @@ describe('recovery epoch shells', () => {
             updateInclusionProof: delayedRecoveryUpdateProofs[0],
         });
 
-        expect(delayedRecoveryUpdateResult.ok).toBe(false);
+        expect(delayedRecoveryUpdateResult.isValid).toBe(false);
         expect(delayedRecoveryUpdateResult.acceptedHashes).toEqual([]);
         expect(delayedRecoveryUpdateResult.refusedObjects).toEqual(
             expect.arrayContaining([

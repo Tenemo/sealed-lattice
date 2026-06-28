@@ -6,7 +6,6 @@ pub(super) fn verify_threshold_share_commitments(
 ) -> CanonicalResult<Option<Value>> {
     let Some(threshold_share_commitments) = setup_package.get("thresholdShareCommitments") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("thresholdShareCommitments"),
             vec!["thresholdShareCommitments".to_string()],
             Vec::new(),
@@ -47,7 +46,6 @@ pub(super) fn verify_threshold_share_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("thresholdShareCommitments"),
             vec!["thresholdShareCommitments.thresholdShareCommitmentRoot".to_string()],
             Vec::new(),
@@ -142,7 +140,6 @@ pub(super) fn verify_threshold_share_commitments(
                 request.get("transportedVssCoefficientCommitmentMaterial")
             else {
                 return Ok(Some(verification_response(
-                    VerifierStatus::Pending,
                     Some("thresholdShareCommitments"),
                     vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
                     Vec::new(),
@@ -151,7 +148,6 @@ pub(super) fn verify_threshold_share_commitments(
             };
             if transported_material.get("chunks").is_none() {
                 return Ok(Some(verification_response(
-                    VerifierStatus::Pending,
                     Some("thresholdShareCommitments"),
                     vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
                     Vec::new(),
@@ -334,7 +330,6 @@ fn threshold_share_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("thresholdShareCommitments"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

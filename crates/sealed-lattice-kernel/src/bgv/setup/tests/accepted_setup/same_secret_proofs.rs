@@ -109,7 +109,7 @@ fn assert_same_secret_anchor_commitment_set_mismatch(
     let result = verify_collective_setup_package(&package);
 
     assert_eq!(
-        result["verifierStatus"], "refused",
+        result["isValid"], false,
         "{case_label}: unexpected verifier result: {result}"
     );
     assert_eq!(
@@ -134,8 +134,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_befo
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!([
@@ -168,7 +167,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_same_secret_
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
         assert_eq!(
             result["refusedObjects"][0]["objectPath"],
@@ -223,9 +222,9 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
     )
     .expect("verification response");
 
-    assert_eq!(result["ok"], false);
+    assert_eq!(result["isValid"], false);
     assert_eq!(
-        result["verifierStatus"], "refused",
+        result["isValid"], false,
         "unexpected verifier result: {result}"
     );
     // The fixture transport certificate (setup_transport_certificate_fixture)
@@ -271,9 +270,9 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
     )
     .expect("verification response");
 
-    assert_eq!(result["ok"], false);
+    assert_eq!(result["isValid"], false);
     assert_eq!(
-        result["verifierStatus"], "pending",
+        result["isValid"], false,
         "unexpected verifier result: {result}"
     );
     assert_eq!(
@@ -315,8 +314,8 @@ fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_same_secret_
     .expect("verification response");
 
     assert_eq!(
-        result["verifierStatus"],
-        "refused",
+        result["isValid"],
+        false,
         "terminal setup verification result: {}",
         serde_json::to_string_pretty(&result).expect("verification result JSON")
     );
@@ -414,7 +413,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_s
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
@@ -434,7 +433,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_same_secret_p
 
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
@@ -455,7 +454,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_same_secret_s
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
@@ -480,7 +479,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
         verify_collective_bgv_setup_package(&noncanonical_claim_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(noncanonical_claim_result["verifierStatus"], "refused");
+    assert_eq!(noncanonical_claim_result["isValid"], false);
     assert_eq!(
         noncanonical_claim_result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
@@ -504,7 +503,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_byte
         verify_collective_bgv_setup_package(&low_degree_shape_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(low_degree_shape_result["verifierStatus"], "refused");
+    assert_eq!(low_degree_shape_result["isValid"], false);
     assert_eq!(
         low_degree_shape_result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
@@ -558,7 +557,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_fami
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofConsistencyRootMismatch"
@@ -580,7 +579,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_fami
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"
@@ -602,7 +601,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_same_secret_proof_fami
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofVerificationFailed"

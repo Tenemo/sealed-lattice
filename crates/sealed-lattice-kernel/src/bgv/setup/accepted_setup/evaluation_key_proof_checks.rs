@@ -65,7 +65,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         }
 
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("trusteeEvaluationKeyProofs"),
             vec!["trusteeEvaluationKeyProofs".to_string()],
             Vec::new(),

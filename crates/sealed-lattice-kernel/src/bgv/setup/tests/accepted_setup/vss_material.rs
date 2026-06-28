@@ -100,7 +100,7 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
     let missing_transport_result =
         verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("missing transported material result");
-    assert_eq!(missing_transport_result["verifierStatus"], "pending");
+    assert_eq!(missing_transport_result["isValid"], false);
     assert_eq!(
         missing_transport_result["currentPhase"],
         "thresholdShareCommitments"
@@ -117,7 +117,7 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
         }),
     )
     .expect("transported material result");
-    assert_eq!(transported_result["verifierStatus"], "refused");
+    assert_eq!(transported_result["isValid"], false);
     assert_eq!(
         transported_result["currentPhase"],
         "setupPackageVerification"
@@ -217,7 +217,7 @@ fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "thresholdShareCommitmentVerifiedMaterialMismatch"
@@ -428,8 +428,7 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
 
     let result = verify_collective_setup_package(&package);
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "aborted");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "vssAcceptanceOrComplaint");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],

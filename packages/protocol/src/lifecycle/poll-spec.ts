@@ -181,13 +181,13 @@ export const validatePollSpec = (input: unknown): PollSpecValidation => {
 
     if (errors.length > 0) {
         return {
-            ok: false,
+            isValid: false,
             errors,
         };
     }
 
     return {
-        ok: true,
+        isValid: true,
         normalized: {
             pollId: pollId ?? '',
             question: question ?? '',

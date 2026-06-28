@@ -27,7 +27,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("rosterFreeze"),
             vec!["phaseTranscript".to_string()],
             Vec::new(),
@@ -45,7 +44,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
     for phase_value in phase_transcript {
         let Some(phase_identifier) = phase_value.get("phaseId").and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 None,
                 Vec::new(),
                 vec![Refusal::new(
@@ -58,7 +56,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
         };
         let Some(phase_number) = phase_value.get("phaseNumber").and_then(Value::as_u64) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some(phase_identifier),
                 Vec::new(),
                 vec![Refusal::new(
@@ -84,7 +81,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
                 continue;
             }
             return Ok(Some(verification_response(
-                VerifierStatus::ForkDetected,
                 Some(phase_identifier),
                 Vec::new(),
                 vec![Refusal::new(
@@ -100,7 +96,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
             REQUIRED_PHASES.get(required_phase_index)
         else {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some(phase_identifier),
                 Vec::new(),
                 vec![Refusal::new(
@@ -114,7 +109,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
         if phase_identifier != *expected_phase_identifier || phase_number != *expected_phase_number
         {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some(*expected_phase_identifier),
                 Vec::new(),
                 vec![Refusal::new(
@@ -129,7 +123,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
         }
         if !seen_phase_numbers.insert(phase_number) {
             return Ok(Some(verification_response(
-                VerifierStatus::ForkDetected,
                 Some(phase_identifier),
                 Vec::new(),
                 vec![Refusal::new(
@@ -167,7 +160,6 @@ pub(super) fn verify_phase_transcript(setup_package: &Value) -> CanonicalResult<
     if required_phase_index < REQUIRED_PHASES.len() {
         let (next_phase_identifier, _) = REQUIRED_PHASES[required_phase_index];
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some(next_phase_identifier),
             vec![format!("phaseTranscript.{next_phase_identifier}")],
             Vec::new(),
@@ -848,7 +840,6 @@ pub(super) fn verify_setup_intent_roster_hash(
     let expected_roster_hash = setup_intent_roster_hash_from_registrations(&registrations)?;
     if roster_hash != expected_roster_hash {
         return Ok(Some(verification_response(
-            VerifierStatus::Refused,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
@@ -953,7 +944,6 @@ pub(super) fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Opt
         .is_some_and(|complaints| !complaints.is_empty())
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Aborted,
             Some("vssAcceptanceOrComplaint"),
             Vec::new(),
             vec![Refusal::new(
@@ -970,7 +960,6 @@ pub(super) fn verify_abort_absence(setup_package: &Value) -> CanonicalResult<Opt
         .is_some_and(|abort_records| !abort_records.is_empty())
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Aborted,
             None,
             Vec::new(),
             vec![Refusal::new(
@@ -992,7 +981,6 @@ fn phase_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some(phase_identifier),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

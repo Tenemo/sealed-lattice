@@ -42,7 +42,6 @@ pub(super) fn verify_context(
 ) -> CanonicalResult<Option<Value>> {
     let Some(setup_context) = setup_package.get("setupContext") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupIntent"),
             vec!["setupContext".to_string()],
             Vec::new(),
@@ -51,7 +50,6 @@ pub(super) fn verify_context(
     };
     if !setup_context.is_object() {
         return Ok(Some(verification_response(
-            VerifierStatus::Refused,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
@@ -71,7 +69,6 @@ pub(super) fn verify_context(
     ] {
         if setup_context.get(field_name).is_none() {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("setupIntent"),
                 vec![format!("setupContext.{field_name}")],
                 Vec::new(),
@@ -82,7 +79,6 @@ pub(super) fn verify_context(
     for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some("setupIntent"),
                 Vec::new(),
                 vec![Refusal::new(
@@ -98,7 +94,6 @@ pub(super) fn verify_context(
     for field_name in ["ceremonyId", "setupEpoch"] {
         let Some(field_value) = setup_context.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some("setupIntent"),
                 Vec::new(),
                 vec![Refusal::new(
@@ -111,7 +106,6 @@ pub(super) fn verify_context(
         };
         if let Some(refusal) = validate_setup_context_token(field_name, field_value) {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some("setupIntent"),
                 Vec::new(),
                 vec![refusal],
@@ -130,7 +124,6 @@ pub(super) fn verify_context(
         .and_then(Value::as_u64)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupIntent"),
             vec!["setupContext.participantCount".to_string()],
             Vec::new(),
@@ -139,7 +132,6 @@ pub(super) fn verify_context(
     };
     if !participant_count_is_supported(participant_count) {
         return Ok(Some(verification_response(
-            VerifierStatus::OutsideAcceptedParameters,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
@@ -161,7 +153,6 @@ pub(super) fn verify_context(
             Some(actual_value) if actual_value == expected_value => {}
             Some(_) => {
                 return Ok(Some(verification_response(
-                    VerifierStatus::OutsideAcceptedParameters,
                     Some("setupIntent"),
                     Vec::new(),
                     vec![Refusal::new(
@@ -176,7 +167,6 @@ pub(super) fn verify_context(
             }
             None => {
                 return Ok(Some(verification_response(
-                    VerifierStatus::Pending,
                     Some("setupIntent"),
                     vec![format!("setupContext.{field_name}")],
                     Vec::new(),
@@ -197,7 +187,6 @@ pub(super) fn verify_context(
         != Some(expected_setup_parameters_hash.as_str())
     {
         return Ok(Some(verification_response(
-            VerifierStatus::OutsideAcceptedParameters,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(
@@ -223,7 +212,6 @@ pub(super) fn verify_context(
 pub(super) fn verify_q_share(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(q_share) = setup_package.get("qShare") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupIntent"),
             vec!["qShare".to_string()],
             Vec::new(),
@@ -232,7 +220,6 @@ pub(super) fn verify_q_share(setup_package: &Value) -> CanonicalResult<Option<Va
     };
     if q_share != &q_share_value() {
         return Ok(Some(verification_response(
-            VerifierStatus::OutsideAcceptedParameters,
             Some("setupIntent"),
             Vec::new(),
             vec![Refusal::new(

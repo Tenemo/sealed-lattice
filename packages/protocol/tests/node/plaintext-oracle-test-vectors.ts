@@ -159,12 +159,12 @@ export const comparatorPolynomialVectors =
 export const assertValidPollSpec = (
     input: PollSpecInput,
 ): ReturnType<typeof validatePollSpec> & {
-    readonly ok: true;
+    readonly isValid: true;
 } => {
     const validation = validatePollSpec(input);
 
-    expect(validation.ok).toBe(true);
-    if (!validation.ok) {
+    expect(validation.isValid).toBe(true);
+    if (!validation.isValid) {
         throw new Error('Expected poll spec fixture to validate.');
     }
 

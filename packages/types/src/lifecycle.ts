@@ -150,11 +150,11 @@ export type PollSpecValidationError = {
 /** Poll specification validation result with normalized output or errors. */
 export type PollSpecValidation =
     | {
-          readonly ok: true;
+          readonly isValid: true;
           readonly normalized: PollSpec;
       }
     | {
-          readonly ok: false;
+          readonly isValid: false;
           readonly errors: readonly PollSpecValidationError[];
       };
 

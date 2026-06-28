@@ -272,9 +272,8 @@ describe('accepted setup public package API in Node', () => {
         });
 
         expect(verification).toMatchObject({
-            ok: false,
+            isValid: false,
             operation: 'verifyCollectiveBgvSetupPackage',
-            verifierStatus: 'outsideAcceptedParameters',
         });
         expect(verification.acceptedSetupHandoff).toBeUndefined();
     });

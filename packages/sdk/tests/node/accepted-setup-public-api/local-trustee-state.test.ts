@@ -64,10 +64,10 @@ describe('accepted setup public package API in Node', () => {
             });
 
         expect(restoredState).toMatchObject({
-            ok: true,
+            isValid: true,
             operation: 'restoreLocalTrusteeSetupState',
             localStateVerification: {
-                ok: true,
+                isValid: true,
                 operation: 'verifyLocalTrusteeSetupState',
                 localStateRoot: (
                     exportedState.localStateCommitment as Record<

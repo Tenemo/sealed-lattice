@@ -462,21 +462,6 @@ describe('accepted setup public package API in Node', () => {
             bgvParameters: bgvParameters,
             vssCoefficientCommitmentMaterial,
             transport: setupTransport,
-            sameSecretLinkageAnchorProofAccounting: {
-                objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
-                objectVersion: 1,
-                fixture: 'sdk-same-secret-linkage-anchor-accounting',
-            },
-            publicKeyShareProofAccounting: {
-                objectType: 'SuccinctPublicKeyShareAccounting',
-                objectVersion: 1,
-                fixture: 'sdk-public-key-share-accounting',
-            },
-            trusteeEvaluationKeyProofAccounting: {
-                objectType: 'SuccinctEvaluationKeyProofAccounting',
-                objectVersion: 1,
-                fixture: 'sdk-trustee-evaluation-key-accounting',
-            },
         });
         expect(() =>
             publicSetupApi.createSetupCertificates({
@@ -494,24 +479,6 @@ describe('accepted setup public package API in Node', () => {
                         },
                     ],
                 },
-                sameSecretLinkageAnchorProofAccounting: {
-                    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
-                    objectVersion: 1,
-                    fixture:
-                        'sdk-duplicate-transport-root-same-secret-accounting',
-                },
-                publicKeyShareProofAccounting: {
-                    objectType: 'SuccinctPublicKeyShareAccounting',
-                    objectVersion: 1,
-                    fixture:
-                        'sdk-duplicate-transport-root-public-key-accounting',
-                },
-                trusteeEvaluationKeyProofAccounting: {
-                    objectType: 'SuccinctEvaluationKeyProofAccounting',
-                    objectVersion: 1,
-                    fixture:
-                        'sdk-duplicate-transport-root-evaluation-key-accounting',
-                },
             }),
         ).toThrow(/duplicate object roots/u);
         expect(() =>
@@ -527,24 +494,6 @@ describe('accepted setup public package API in Node', () => {
                             byteLength: setupTransportChunkSizeBytes + 1,
                         },
                     ],
-                },
-                sameSecretLinkageAnchorProofAccounting: {
-                    objectType: 'SuccinctSameSecretLinkageAnchorAccounting',
-                    objectVersion: 1,
-                    fixture:
-                        'sdk-mismatched-transport-chunks-same-secret-accounting',
-                },
-                publicKeyShareProofAccounting: {
-                    objectType: 'SuccinctPublicKeyShareAccounting',
-                    objectVersion: 1,
-                    fixture:
-                        'sdk-mismatched-transport-chunks-public-key-accounting',
-                },
-                trusteeEvaluationKeyProofAccounting: {
-                    objectType: 'SuccinctEvaluationKeyProofAccounting',
-                    objectVersion: 1,
-                    fixture:
-                        'sdk-mismatched-transport-chunks-evaluation-key-accounting',
                 },
             }),
         ).toThrow(/chunkHashes length/u);

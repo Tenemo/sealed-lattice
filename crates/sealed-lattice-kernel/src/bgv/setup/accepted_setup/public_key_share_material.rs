@@ -137,7 +137,6 @@ pub(super) fn verify_collective_public_key_material(
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["transportedPublicKeyShareMaterial".to_string()],
             Vec::new(),

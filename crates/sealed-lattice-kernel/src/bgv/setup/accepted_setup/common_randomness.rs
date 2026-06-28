@@ -6,7 +6,6 @@ use crate::hashing::derive_canonical_object_hash;
 pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(common_randomness) = setup_package.get("commonRandomness") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("commonRandomnessCommit"),
             vec!["commonRandomness".to_string()],
             Vec::new(),
@@ -60,7 +59,6 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("commonRandomnessCommit"),
             vec!["commonRandomness.commitRecords".to_string()],
             Vec::new(),
@@ -72,7 +70,6 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("commonRandomnessReveal"),
             vec!["commonRandomness.revealRecords".to_string()],
             Vec::new(),
@@ -193,7 +190,6 @@ pub(super) fn verify_common_randomness(setup_package: &Value) -> CanonicalResult
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("commonRandomnessReveal"),
             vec!["commonRandomness.commonRandomnessRoot".to_string()],
             Vec::new(),
@@ -229,7 +225,6 @@ fn verify_public_derivations(
 ) -> CanonicalResult<Option<Value>> {
     let Some(public_derivations) = common_randomness.get("publicDerivations") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("commonRandomnessReveal"),
             vec!["commonRandomness.publicDerivations".to_string()],
             Vec::new(),
@@ -800,7 +795,6 @@ fn common_randomness_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("commonRandomnessReveal"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

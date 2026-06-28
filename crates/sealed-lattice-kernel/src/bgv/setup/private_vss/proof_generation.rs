@@ -290,7 +290,7 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         })?;
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "operation": "generatePrivateVssShareProof",
         "sourceTrusteeIdentity": source_trustee_binding.source_trustee_identity,
         "sourceTrusteeRosterPosition": source_trustee_binding.source_trustee_roster_position,

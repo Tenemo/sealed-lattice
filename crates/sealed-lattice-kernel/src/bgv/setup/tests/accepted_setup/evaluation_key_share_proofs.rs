@@ -88,7 +88,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "accepted");
+    assert_eq!(result["isValid"], true);
     for expected_hash in [
         relinearization_root.as_str().expect("relinearization root"),
         first_galois_batch_root.as_str().expect("Galois batch root"),
@@ -201,8 +201,8 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
     assert_eq!(
-        result["verifierStatus"],
-        "accepted",
+        result["isValid"],
+        true,
         "terminal setup verification result: {}",
         serde_json::to_string_pretty(&result).expect("verification result JSON")
     );
@@ -242,8 +242,8 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     };
 
     assert_eq!(
-        verify(&package)["verifierStatus"],
-        "accepted",
+        verify(&package)["isValid"],
+        true,
         "baseline terminal package must accept before the recomputed-root matrix",
     );
 
@@ -270,7 +270,7 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
             "accepted root {root} was not located in the terminal package graph",
         );
         rebind_collective_setup_package_hash(&mut drifted);
-        if verify(&drifted)["verifierStatus"] != "refused" {
+        if verify(&drifted)["isValid"] != false {
             unbound_roots.push(root.clone());
         }
         covered_root_count += 1;
@@ -289,8 +289,8 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     let mut drifted_package_hash = package.clone();
     drifted_package_hash["setupPackageHash"] = serde_json::json!(drift_hash(&package_hash));
     assert_eq!(
-        verify(&drifted_package_hash)["verifierStatus"],
-        "refused",
+        verify(&drifted_package_hash)["isValid"],
+        false,
         "drifting the outer setup package hash must be refused",
     );
 }
@@ -326,8 +326,8 @@ fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proo
     .expect("verification response");
 
     assert_eq!(
-        result["verifierStatus"],
-        "refused",
+        result["isValid"],
+        false,
         "terminal setup verification result: {}",
         serde_json::to_string_pretty(&result).expect("verification result JSON")
     );
@@ -371,7 +371,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
         .expect("public evaluation-key material verification")
         .expect("tampered public evaluation-key material refusal");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicEvaluationKeyMaterialManifestMismatch"
@@ -444,7 +444,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_t
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -518,7 +518,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "relinearizationRoundTwoAggregateRootMismatch"
@@ -540,7 +540,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
@@ -568,7 +568,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specifi
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
@@ -595,7 +595,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
@@ -623,7 +623,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_se
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "relinearizationKeyShareRoundsBindingMismatch"
@@ -646,7 +646,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evalua
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofsMissing"
@@ -677,7 +677,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_eval
         let result =
             verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(
             result["refusedObjects"][0]["reasonCode"],
             "trusteeEvaluationKeyProofVerificationFailed"
@@ -742,7 +742,7 @@ fn assert_refuses_trustee_evaluation_key_proof_variant(
     let result =
         verify_collective_bgv_setup_package(&package, request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -792,7 +792,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statemen
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -826,7 +826,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
     )
     .expect("verification response");
 
-    assert_eq!(noncanonical_claim_result["verifierStatus"], "refused");
+    assert_eq!(noncanonical_claim_result["isValid"], false);
     assert_eq!(
         noncanonical_claim_result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -872,7 +872,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
         verify_collective_bgv_setup_package(&low_degree_shape_package, &low_degree_shape_request)
             .expect("verification response");
 
-    assert_eq!(low_degree_shape_result["verifierStatus"], "refused");
+    assert_eq!(low_degree_shape_result["isValid"], false);
     assert_eq!(
         low_degree_shape_result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"

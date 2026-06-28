@@ -17,6 +17,14 @@ const resolveFromRepoRoot = (...segments: string[]): string =>
     path.resolve(repoRoot, ...segments);
 
 const browserServerHost = '127.0.0.1';
+// Without an explicit port, vitest's browser server auto-selects one that, on
+// Windows hosts running Hyper-V or WSL, can land in a reserved excluded range
+// (for example 62744-65187 or 50000-50059) where bind fails with EACCES.
+// strictPort: false only falls through on EADDRINUSE, not EACCES, so the run
+// dies instead of retrying. Pin a base port in the registered range, below the
+// 49152+ dynamic range Windows reserves; strictPort: false still increments it
+// for concurrent browser lanes and clones.
+const browserServerBasePort = 41000;
 
 const browserOptimizedDependencies = [
     '@noble/hashes/hkdf.js',
@@ -176,6 +184,7 @@ const makeBrowserProject = ({
             enabled: true,
             api: {
                 host: browserServerHost,
+                port: browserServerBasePort,
                 strictPort: false,
             },
             provider,

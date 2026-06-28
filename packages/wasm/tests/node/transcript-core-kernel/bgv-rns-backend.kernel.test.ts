@@ -6,7 +6,7 @@ import {
 } from '#packages/wasm/src/index';
 
 type BgvParametersRejected = {
-    readonly ok: false;
+    readonly isValid: false;
     readonly unresolvedReason: 'BgvOperationRejected';
     readonly refusedObjects: readonly {
         readonly code: 'BgvOperationRejected';
@@ -20,7 +20,7 @@ const expectBgvParametersRejected = (
     reasonCode?: string,
 ): BgvParametersRejected => {
     expect(value).toMatchObject({
-        ok: false,
+        isValid: false,
         unresolvedReason: 'BgvOperationRejected',
     });
     const rejection = value as BgvParametersRejected;
@@ -108,12 +108,12 @@ describe('BGV-RNS backend kernel commands', () => {
             includeCanonicalBytesHex: true,
         });
 
-        expect(encodedResult).not.toMatchObject({ ok: false });
+        expect(encodedResult).not.toMatchObject({ isValid: false });
         const encoded = encodedResult as Exclude<
             typeof encodedResult,
             BgvParametersRejected
         >;
-        expect(encoded.validation.ok).toBe(true);
+        expect(encoded.validation.isValid).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expectProtocolHash(encoded.plaintextRoot, 'encoded plaintext root');
         expectProtocolHash(
@@ -142,7 +142,7 @@ describe('BGV-RNS backend kernel commands', () => {
         };
 
         expect(validated).toMatchObject({
-            ok: true,
+            isValid: true,
             objectKind: 'plaintext',
             plaintextRoot: encoded.plaintextRoot,
             canonicalBytesHash512: encoded.canonicalBytesHash512,
@@ -209,7 +209,7 @@ describe('BGV-RNS backend kernel commands', () => {
                 operation: 'homomorphicEncryptedBallotAggregation',
             }),
         ).toMatchObject({
-            ok: true,
+            isValid: true,
             acceptedOperation: 'homomorphicEncryptedBallotAggregation',
         });
         expectBgvParametersRejected(
@@ -239,7 +239,7 @@ describe('BGV-RNS backend kernel commands', () => {
             rightSlots: [4, 5, 6],
             includeCanonicalBytesHex: true,
         });
-        expect(fixtureResult).not.toMatchObject({ ok: false });
+        expect(fixtureResult).not.toMatchObject({ isValid: false });
         const fixture = fixtureResult as Exclude<
             typeof fixtureResult,
             BgvParametersRejected
@@ -252,7 +252,7 @@ describe('BGV-RNS backend kernel commands', () => {
         );
         expect(fixture.canonicalByteLength).toBe(180_521);
         expect(fixture.validation).toMatchObject({
-            ok: true,
+            isValid: true,
             objectKind: 'ciphertext',
             ciphertextRoot: fixture.ciphertextRoot,
         });
@@ -262,7 +262,7 @@ describe('BGV-RNS backend kernel commands', () => {
                 expectedCiphertextRoot: fixture.ciphertextRoot,
             }),
         ).toMatchObject({
-            ok: true,
+            isValid: true,
             objectKind: 'ciphertext',
             ciphertextRoot: fixture.ciphertextRoot,
         });
@@ -273,7 +273,7 @@ describe('BGV-RNS backend kernel commands', () => {
         const baseConversionResult = kernel.generateBgvBaseConversionFixture({
             slots: [7, 8, 9, 65_536],
         });
-        expect(baseConversionResult).not.toMatchObject({ ok: false });
+        expect(baseConversionResult).not.toMatchObject({ isValid: false });
         const baseConversion = baseConversionResult as Exclude<
             typeof baseConversionResult,
             BgvParametersRejected

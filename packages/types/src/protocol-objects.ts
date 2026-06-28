@@ -180,7 +180,7 @@ export type ConflictingHeadEvidence = {
 
 /** Shared structured result shape for protocol verification helpers. */
 export type StructuredProtocolVerificationResult = {
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;

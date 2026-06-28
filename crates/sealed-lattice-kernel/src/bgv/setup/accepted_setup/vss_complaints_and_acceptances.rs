@@ -139,7 +139,6 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
 
     // A single valid complaint aborts the ceremony because any provable dealer equivocation is disqualifying, whereas acceptance must be unanimous over all source-by-recipient pairs.
     Ok(Some(verification_response(
-        VerifierStatus::Aborted,
         Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(
@@ -641,7 +640,6 @@ fn vss_complaint_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -654,7 +652,6 @@ pub(super) fn verify_vss_share_acceptances(
 ) -> CanonicalResult<Option<Value>> {
     let Some(acceptance_set) = setup_package.get("vssShareAcceptances") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances".to_string()],
             Vec::new(),
@@ -743,7 +740,6 @@ pub(super) fn verify_vss_share_acceptances(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords".to_string()],
             Vec::new(),
@@ -776,7 +772,6 @@ pub(super) fn verify_vss_share_acceptances(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.vssShareAcceptanceRoot".to_string()],
             Vec::new(),
@@ -1049,7 +1044,6 @@ fn verify_vss_share_acceptance_record(
     for field_name in ["privateEnvelopeHash", "localVerificationRoot"] {
         let Some(hash) = acceptance_record.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("vssAcceptanceOrComplaint"),
                 vec![format!(
                     "vssShareAcceptances.acceptanceRecords.{field_name}"
@@ -1147,7 +1141,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceRoot".to_string()],
             Vec::new(),
@@ -1178,7 +1171,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_u64)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceByteLength".to_string()],
             Vec::new(),
@@ -1200,7 +1192,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceContextHash".to_string()],
             Vec::new(),
@@ -1224,7 +1215,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.signatureEnvelopeHash".to_string()],
             Vec::new(),
@@ -1338,7 +1328,6 @@ fn vss_share_acceptance_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

@@ -15,7 +15,6 @@ pub(super) fn verify_relinearization_key_share_rounds(
 ) -> CanonicalResult<Option<Value>> {
     let Some(rounds) = setup_package.get("relinearizationKeyShareRounds") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("relinearizationRoundOne"),
             vec!["relinearizationKeyShareRounds".to_string()],
             Vec::new(),
@@ -349,7 +348,6 @@ pub(super) fn verify_galois_key_share_batches(
     let roster = super::accepted_roster_from_package(setup_package);
     let Some(batches) = setup_package.get("galoisKeyShareBatches") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("galoisKeyShareBatches"),
             vec!["galoisKeyShareBatches".to_string()],
             Vec::new(),

@@ -53,7 +53,7 @@ export const createRosterPollSpec = (): PollSpec => {
         topOptionCount: 10,
     });
 
-    if (!validation.ok) {
+    if (!validation.isValid) {
         throw new Error('Roster poll spec fixture must be valid.');
     }
 

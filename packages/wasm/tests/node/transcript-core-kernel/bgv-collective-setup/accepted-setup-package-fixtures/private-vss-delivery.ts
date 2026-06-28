@@ -479,7 +479,7 @@ export async function acceptedVssComplaintSet(
             envelopeReference:
                 envelopeReference as PrivateVssEnvelopeVerificationReference,
             localVerification: {
-                ok: false,
+                isValid: false,
                 privateEnvelopeHash: String(
                     envelopeReference.privateEnvelopeHash,
                 ),

@@ -78,7 +78,7 @@ describe('board consistency', () => {
             ],
         });
 
-        expect(result.ok).toBe(true);
+        expect(result.isValid).toBe(true);
         expect(inclusionProof.boardEntryHashes).toBeUndefined();
         expect(inclusionProof.boardEntryCount).toBe(3);
         expect(inclusionProof.boardEntryMerklePath).toHaveLength(1);
@@ -569,7 +569,7 @@ describe('board consistency', () => {
 
         const expectFailClosed = (
             verifier: () => {
-                readonly ok: boolean;
+                readonly isValid: boolean;
                 readonly refusedObjects: readonly {
                     readonly code: string;
                     readonly message?: string;
@@ -577,7 +577,7 @@ describe('board consistency', () => {
             },
             expectedCode: string,
         ): {
-            readonly ok: boolean;
+            readonly isValid: boolean;
             readonly refusedObjects: readonly {
                 readonly code: string;
                 readonly message?: string;
@@ -585,7 +585,7 @@ describe('board consistency', () => {
         } => {
             let result:
                 | {
-                      readonly ok: boolean;
+                      readonly isValid: boolean;
                       readonly refusedObjects: readonly {
                           readonly code: string;
                           readonly message?: string;
@@ -596,7 +596,7 @@ describe('board consistency', () => {
             expect(() => {
                 result = verifier();
             }).not.toThrow();
-            expect(result?.ok).toBe(false);
+            expect(result?.isValid).toBe(false);
             expect(result?.refusedObjects).toEqual(
                 expect.arrayContaining([
                     expect.objectContaining({ code: expectedCode }),

@@ -198,7 +198,7 @@ const verifyCastReceiptShellUnchecked = (
 
     return {
         ...verificationBase,
-        castReceiptHash: verificationBase.ok
+        castReceiptHash: verificationBase.isValid
             ? input.receipt.castReceiptHash
             : undefined,
     };
@@ -211,7 +211,7 @@ export const verifyCastReceiptShell = (
         return verifyCastReceiptShellUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -428,10 +428,10 @@ const verifyCloseRecordShellUnchecked = (
 
     return {
         ...verificationBase,
-        closeRecordHash: verificationBase.ok
+        closeRecordHash: verificationBase.isValid
             ? input.closeRecord.closeRecordHash
             : undefined,
-        postVotingClosedContextHash: verificationBase.ok
+        postVotingClosedContextHash: verificationBase.isValid
             ? (input.closeRecord.postVotingClosedContextHash ?? undefined)
             : undefined,
     };
@@ -444,7 +444,7 @@ export const verifyCloseRecordShell = (
         return verifyCloseRecordShellUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

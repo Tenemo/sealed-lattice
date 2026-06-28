@@ -697,7 +697,7 @@ export const createTrusteeEvaluationKeyProofs = (
             proofRandomnessNonceHex,
         });
         if (
-            generatedProof.ok !== true ||
+            generatedProof.isValid !== true ||
             generatedProof.operation !== 'generateTrusteeEvaluationKeyProof'
         ) {
             throw new Error(

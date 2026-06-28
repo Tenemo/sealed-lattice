@@ -82,17 +82,15 @@ pub(super) fn limb_verification_value(verification: LimbVerification) -> Value {
 }
 
 pub(super) fn verification_response(
-    ok: bool,
-    verifier_status: &str,
+    is_valid: bool,
     private_envelope_hash: Option<String>,
     local_verification_root: Option<String>,
     limb_verifications: Vec<Value>,
     refused_objects: Vec<PrivateVssRefusal>,
 ) -> Value {
     json!({
-        "ok": ok,
+        "isValid": is_valid,
         "operation": "verifyPrivateVssShareEnvelope",
-        "verifierStatus": verifier_status,
         "privateEnvelopeHash": private_envelope_hash,
         "localVerificationRoot": local_verification_root,
         "limbVerifications": limb_verifications,

@@ -9,7 +9,7 @@ fn threshold_share_commitment_derivation_recomputes_all_recipient_limb_commitmen
     let result = derive_threshold_share_commitments_from_request(&request)
         .expect("threshold share commitment derivation");
 
-    assert_eq!(result["ok"], true);
+    assert_eq!(result["isValid"], true);
     assert_eq!(result["operation"], "deriveThresholdShareCommitments");
     assert_eq!(result["ringDegree"], 8);
     assert_eq!(result["ringDegreeStatus"], "development-reduced-ring");
@@ -114,7 +114,7 @@ fn threshold_share_commitment_derivation_consumes_transported_binary_material() 
         derive_threshold_share_commitments_from_transport_request(&transport_request)
             .expect("transport threshold share commitment derivation");
 
-    assert_eq!(transport_result["ok"], true);
+    assert_eq!(transport_result["isValid"], true);
     assert_eq!(
         transport_result["operation"],
         "deriveThresholdShareCommitmentsFromTransport"

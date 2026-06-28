@@ -21,7 +21,7 @@ fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
         .expect("full-ring verification")
         .expect("reduced public-key material refusal");
 
-    assert_eq!(response["verifierStatus"], "outsideAcceptedParameters");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
@@ -76,7 +76,7 @@ fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
         .expect("full-ring verification")
         .expect("reduced evaluation-key proof refusal");
 
-    assert_eq!(response["verifierStatus"], "outsideAcceptedParameters");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
@@ -100,7 +100,7 @@ fn terminal_transport_policy_refuses_embedded_setup_material() {
         .expect("terminal transport policy")
         .expect("embedded VSS material refusal");
 
-    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "terminalVssMaterialTransportRequired"
@@ -177,7 +177,7 @@ fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
         .expect("terminal transport policy")
         .expect("raw VSS chunk sidecar refusal");
 
-    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "terminalVssMaterialHandleRequired"
@@ -210,7 +210,7 @@ fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
         .expect("terminal transport policy")
         .expect("missing stream-verified VSS handle response");
 
-    assert_eq!(response["verifierStatus"], "pending");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["missingObjects"],
         serde_json::json!(["verifiedVssCoefficientCommitmentMaterial"])
@@ -359,7 +359,7 @@ fn collective_setup_verifier_refuses_public_key_share_transport_missing_certific
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "setupPackageVerification");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -378,7 +378,7 @@ fn collective_setup_verifier_refuses_unrequested_setup_transport_object() {
 
     let result = verify_collective_setup_package(&package);
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "setupPackageVerification");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -404,7 +404,7 @@ fn collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar() {
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "setupPackageVerification");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -430,7 +430,7 @@ fn collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidec
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "setupPackageVerification");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -453,8 +453,7 @@ fn terminal_full_ring_gate_refuses_reduced_vss_material() {
         .expect("full-ring verification")
         .expect("reduced VSS material refusal");
 
-    assert_eq!(response["ok"], false);
-    assert_eq!(response["verifierStatus"], "outsideAcceptedParameters");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideAcceptedRing"

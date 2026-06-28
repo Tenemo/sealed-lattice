@@ -166,7 +166,7 @@ export type BgvRnsParametersDescription = {
 };
 
 export type BgvObjectValidation = {
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly objectKind: 'plaintext' | 'ciphertext';
     readonly componentCount: number;
     readonly bgvParametersHash: ProtocolHash;
@@ -188,7 +188,7 @@ export type BgvCanonicalObjectAnalysis = {
 };
 
 export type BgvOperationRejection = {
-    readonly ok: false;
+    readonly isValid: false;
     readonly operation: string;
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly {
@@ -202,7 +202,7 @@ export type BgvOperationRejection = {
 
 export type BgvEvaluatorOperationValidation =
     | {
-          readonly ok: true;
+          readonly isValid: true;
           readonly operation: 'validateBgvEvaluatorOperation';
           readonly acceptedOperation: string;
           readonly bgvParametersHash: ProtocolHash;
@@ -307,7 +307,7 @@ export type BgvPassiveSetupPackage = {
 };
 
 export type BgvPassiveSetupVerification = {
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyBgvPassiveSetupPackage';
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly unknown[];
@@ -420,14 +420,6 @@ export type BgvCollectiveSetupParametersDescription = {
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly genericKeySwitchPolicy: 'refused-unless-explicitly-required';
     };
-    readonly verifierStatuses: readonly [
-        'accepted',
-        'pending',
-        'refused',
-        'aborted',
-        'forkDetected',
-        'outsideAcceptedParameters',
-    ];
     readonly phaseOrder: readonly {
         readonly phaseId: string;
         readonly phaseNumber: number;
@@ -539,15 +531,8 @@ export type BgvAcceptedSetupHandoff = {
 };
 
 export type BgvCollectiveSetupVerification = {
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyCollectiveBgvSetupPackage';
-    readonly verifierStatus:
-        | 'accepted'
-        | 'pending'
-        | 'refused'
-        | 'aborted'
-        | 'forkDetected'
-        | 'outsideAcceptedParameters';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
@@ -561,9 +546,8 @@ export type BgvCollectiveSetupVerification = {
 };
 
 export type BgvPrivateVssShareEnvelopeVerification = {
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyPrivateVssShareEnvelope';
-    readonly verifierStatus: 'accepted' | 'refused';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
@@ -589,7 +573,7 @@ export type BgvPrivateVssShareEnvelopeVerification = {
 };
 
 export type BgvPrivateVssShareProofGeneration = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'generatePrivateVssShareProof';
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -663,7 +647,7 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
 };
 
 export type BgvTrusteeEvaluationKeyProofGeneration = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly proofFamily:
         | 'trustee-evaluation-key'
@@ -684,7 +668,7 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
 };
 
 export type BgvTrusteeEvaluationKeyProofVerification = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'verifyTrusteeEvaluationKeyProof';
     readonly proofFamily:
         | 'trustee-evaluation-key'
@@ -698,7 +682,7 @@ export type BgvTrusteeEvaluationKeyProofVerification = {
 };
 
 export type BgvThresholdShareCommitmentDerivation = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'deriveThresholdShareCommitments';
     readonly ringDegree: number;
     readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
@@ -711,7 +695,7 @@ export type BgvThresholdShareCommitmentDerivation = {
 };
 
 export type BgvSetupCommitmentOpeningComputation = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
@@ -732,7 +716,7 @@ export type BgvThresholdShareCommitmentTransportDerivation = Omit<
 };
 
 export type BgvThresholdShareCommitmentTransportStreamBegin = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'beginThresholdShareCommitmentsFromTransportStream';
     readonly derivationId: string;
     readonly materialBinaryFormat: string;
@@ -740,14 +724,14 @@ export type BgvThresholdShareCommitmentTransportStreamBegin = {
 };
 
 export type BgvThresholdShareCommitmentTransportStreamAbort = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'abortThresholdShareCommitmentsFromTransportStream';
     readonly derivationId: string;
     readonly aborted: boolean;
 };
 
 export type BgvThresholdShareCommitmentTransportStreamChunkAbsorption = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'absorbThresholdShareCommitmentsFromTransportStreamChunk';
     readonly absorbedChunkIndex: number;
     readonly absorbedByteLength: number;
@@ -765,7 +749,7 @@ export type BgvThresholdShareCommitmentTransportStreamDerivation = Omit<
 };
 
 export type BgvSetupProofMaterialTransportStreamBegin = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'beginSetupProofMaterialTransportStream';
     readonly verificationId: string;
     readonly proofFamily: string;
@@ -775,7 +759,7 @@ export type BgvSetupProofMaterialTransportStreamBegin = {
 };
 
 export type BgvSetupProofMaterialTransportStreamChunkAbsorption = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'absorbSetupProofMaterialTransportStreamChunk';
     readonly absorbedChunkIndex: number;
     readonly nextChunkIndex: number;
@@ -783,7 +767,7 @@ export type BgvSetupProofMaterialTransportStreamChunkAbsorption = {
 };
 
 export type BgvSetupProofMaterialTransportStreamVerification = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'finishSetupProofMaterialTransportStream';
     readonly verificationId: string;
     readonly proofFamily: string;
@@ -794,14 +778,14 @@ export type BgvSetupProofMaterialTransportStreamVerification = {
 };
 
 export type BgvVerifiedTransportedVssMaterialRelease = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'releaseVerifiedTransportedVssMaterial';
     readonly verificationId: string;
     readonly released: boolean;
 };
 
 export type BgvLocalTrusteeSetupStateVerification = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'verifyLocalTrusteeSetupState';
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
@@ -837,7 +821,7 @@ export type BgvTargetDecryptionShare = Readonly<
 >;
 
 export type BgvTargetDecryptionResult = {
-    readonly ok: true;
+    readonly isValid: true;
     readonly operation: 'recombineBgvTargetDecryptionShares';
     readonly targetDecryptionResultHash: ProtocolHash;
     readonly setupPackageHash: ProtocolHash;

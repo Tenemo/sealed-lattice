@@ -51,7 +51,6 @@ pub(crate) fn verify_private_vss_share_envelope_from_request(
         Ok(response) => Ok(response),
         Err(refusal) => Ok(verification_response(
             false,
-            "refused",
             None,
             None,
             Vec::new(),
@@ -212,7 +211,6 @@ fn verify_private_vss_share_envelope_inner(
 
     let mut response = verification_response(
         true,
-        "accepted",
         Some(envelope_binding.private_envelope_hash),
         Some(local_verification_root),
         limb_verifications

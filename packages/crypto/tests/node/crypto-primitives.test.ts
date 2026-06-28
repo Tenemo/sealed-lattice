@@ -160,7 +160,7 @@ describe('crypto primitive boundary', () => {
                 boardHeadHash: null,
                 manifestHash: null,
                 contextHash,
-            }).ok,
+            }).isValid,
         ).toBe(true);
         expect(
             verifySignedObjectSignature(signature, {
@@ -568,7 +568,7 @@ describe('crypto primitive boundary', () => {
         });
 
         expect(verifySignedObjectSignature(signature)).toMatchObject({
-            ok: false,
+            isValid: false,
             refusedObjects: [
                 expect.objectContaining({ code: 'InvalidSignedRoot' }),
             ],
@@ -578,7 +578,7 @@ describe('crypto primitive boundary', () => {
                 allowUnboundVerification: true,
             }),
         ).toMatchObject({
-            ok: true,
+            isValid: true,
         });
     });
 
@@ -672,7 +672,7 @@ describe('crypto primitive boundary', () => {
             });
 
             expect(verifySignedObjectSignature(signature)).toMatchObject({
-                ok: false,
+                isValid: false,
                 refusedObjects: [
                     expect.objectContaining({ code: 'InvalidSignedRoot' }),
                 ],

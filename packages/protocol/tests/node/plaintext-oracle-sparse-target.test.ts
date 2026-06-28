@@ -42,7 +42,7 @@ describe('sparse target decoder oracle', () => {
             target: sparseTargetVectors.target,
         });
 
-        expect(decoding.ok).toBe(true);
+        expect(decoding.isValid).toBe(true);
         expect(decoding.targetHash).toBe(sparseTargetVectors.targetHash);
         expect(decoding.selectedOptionOrdinals).toEqual(
             sparseTargetVectors.expectedSelectedOptionOrdinals,
@@ -163,7 +163,7 @@ describe('sparse target decoder oracle', () => {
             target: mutatedTarget,
         });
 
-        expect(decoding.ok).toBe(false);
+        expect(decoding.isValid).toBe(false);
         expect(decoding.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'SparseTargetInvalid' }),
@@ -177,7 +177,7 @@ describe('sparse target decoder oracle', () => {
             target: sparseTargetVectors.target,
         });
 
-        expect(decoding.ok).toBe(false);
+        expect(decoding.isValid).toBe(false);
         expect(decoding.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'SparseTargetInvalid' }),
@@ -195,7 +195,7 @@ describe('sparse target decoder oracle', () => {
             target: malformedTarget,
         });
 
-        expect(decoding.ok).toBe(false);
+        expect(decoding.isValid).toBe(false);
         expect(decoding.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'SparseTargetInvalid' }),

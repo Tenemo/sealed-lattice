@@ -587,7 +587,7 @@ describe('VSS coefficient commitment builders', () => {
                         .totalByteLength,
                 );
 
-                return { ok: true };
+                return { isValid: true };
             },
             absorbThresholdShareCommitmentsFromTransportStreamChunk: (input: {
                 readonly chunkIndex: number;
@@ -598,7 +598,7 @@ describe('VSS coefficient commitment builders', () => {
                     bytesHex: input.bytesHex,
                 });
 
-                return { ok: true };
+                return { isValid: true };
             },
             finishThresholdShareCommitmentsFromTransportStream: () => {
                 expect(capturedChunks).toEqual(

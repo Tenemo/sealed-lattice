@@ -215,7 +215,7 @@ pub(super) fn absorb_threshold_share_commitment_transport_chunk(
     session.next_chunk_index += 1;
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "operation": "absorbThresholdShareCommitmentsFromTransportStreamChunk",
         "absorbedChunkIndex": chunk_index,
         "absorbedByteLength": chunk.len(),
@@ -397,7 +397,7 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
     );
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "operation": "finishThresholdShareCommitmentsFromTransportStream",
         "derivationId": derivation_id,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,

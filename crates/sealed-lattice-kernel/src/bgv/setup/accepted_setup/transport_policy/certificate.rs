@@ -11,7 +11,6 @@ pub(in super::super) fn verify_transport_certificate(
 ) -> CanonicalResult<Option<Value>> {
     let Some(transport_certificate) = setup_package.get("setupTransportCertificate") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageVerification"),
             vec!["setupTransportCertificate".to_string()],
             Vec::new(),

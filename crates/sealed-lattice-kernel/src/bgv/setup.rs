@@ -223,7 +223,7 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
     Ok(json!({
-        "ok": true,
+        "isValid": true,
         "operation": "verifyBgvPassiveSetupPackage",
         "acceptedHashes": [
             setup_package_hash,

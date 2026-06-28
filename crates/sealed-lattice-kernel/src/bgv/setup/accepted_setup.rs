@@ -399,29 +399,6 @@ const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "setupTransportCertificateHash",
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum VerifierStatus {
-    Accepted,
-    Pending,
-    Refused,
-    Aborted,
-    ForkDetected,
-    OutsideAcceptedParameters,
-}
-
-impl VerifierStatus {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Accepted => "accepted",
-            Self::Pending => "pending",
-            Self::Refused => "refused",
-            Self::Aborted => "aborted",
-            Self::ForkDetected => "forkDetected",
-            Self::OutsideAcceptedParameters => "outsideAcceptedParameters",
-        }
-    }
-}
-
 struct Refusal {
     reason_code: &'static str,
     message: String,
@@ -480,14 +457,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Valu
         "setupProof": setup_proof_parameters_value()?,
         "setupTransport": setup_transport_parameters_value_for_roster(&first_closure_roster_parameters())?,
         "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(&first_closure_roster_parameters())?,
-        "verifierStatuses": [
-            "accepted",
-            "pending",
-            "refused",
-            "aborted",
-            "forkDetected",
-            "outsideAcceptedParameters"
-        ],
         "phaseOrder": phase_order_value(),
         "phaseOrderHash": phase_order_hash()?,
         "requiredFinalObjects": REQUIRED_FINAL_OBJECTS,
@@ -514,7 +483,6 @@ pub(crate) fn verify_collective_bgv_setup_package(
 ) -> CanonicalResult<Value> {
     if !setup_package.is_object() {
         return verification_response(
-            VerifierStatus::OutsideAcceptedParameters,
             None,
             Vec::new(),
             vec![Refusal::new(
@@ -700,7 +668,6 @@ fn verify_setup_package_hash(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["setupPackageHash".to_string()],
             Vec::new(),
@@ -713,7 +680,6 @@ fn verify_setup_package_hash(
     let expected_hash = derive_canonical_object_hash(&hash_input)?;
     if setup_package_hash != expected_hash {
         return Ok(Some(verification_response(
-            VerifierStatus::Refused,
             Some("setupPackageAssembly"),
             Vec::new(),
             vec![Refusal::new(
@@ -731,7 +697,6 @@ fn verify_setup_package_hash(
         validate_hash_string(expected_hash_from_request, "expectedSetupPackageHash")?;
         if expected_hash_from_request != setup_package_hash {
             return Ok(Some(verification_response(
-                VerifierStatus::Refused,
                 Some("setupPackageAssembly"),
                 Vec::new(),
                 vec![Refusal::new(
@@ -1086,7 +1051,6 @@ fn verify_required_final_objects(setup_package: &Value) -> CanonicalResult<Optio
     }
 
     Ok(Some(verification_response(
-        VerifierStatus::Pending,
         Some("setupPackageVerification"),
         missing_objects,
         Vec::new(),
@@ -1280,7 +1244,6 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
 
 fn accepted_setup_verification_response(setup_package: &Value) -> CanonicalResult<Value> {
     let mut response = verification_response(
-        VerifierStatus::Accepted,
         Some("setupPackageVerification"),
         Vec::new(),
         Vec::new(),
@@ -1385,7 +1348,6 @@ fn outside_accepted_parameters(
     object_path: impl Into<String>,
 ) -> CanonicalResult<VerificationFlow> {
     Ok(VerificationFlow::Stop(verification_response(
-        VerifierStatus::OutsideAcceptedParameters,
         None,
         Vec::new(),
         vec![Refusal::new(
@@ -1398,22 +1360,21 @@ fn outside_accepted_parameters(
 }
 
 fn verification_response(
-    verifier_status: VerifierStatus,
     current_phase: Option<&str>,
     missing_objects: Vec<String>,
     refused_objects: Vec<Refusal>,
     accepted_hashes: Vec<String>,
 ) -> CanonicalResult<Value> {
-    let accepted_hashes = if verifier_status == VerifierStatus::Accepted {
+    let accepted = refused_objects.is_empty() && missing_objects.is_empty();
+    let accepted_hashes = if accepted {
         accepted_hashes
     } else {
         Vec::new()
     };
 
     Ok(json!({
-        "ok": verifier_status == VerifierStatus::Accepted,
+        "isValid": accepted,
         "operation": "verifyCollectiveBgvSetupPackage",
-        "verifierStatus": verifier_status.as_str(),
         "currentPhase": current_phase,
         "phaseOrderHash": phase_order_hash()?,
         "acceptedHashes": accepted_hashes,

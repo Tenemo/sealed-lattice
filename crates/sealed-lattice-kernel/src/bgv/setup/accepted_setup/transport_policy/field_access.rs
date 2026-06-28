@@ -201,7 +201,6 @@ pub(super) fn setup_transport_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("setupPackageVerification"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

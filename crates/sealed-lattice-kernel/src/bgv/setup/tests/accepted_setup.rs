@@ -354,7 +354,7 @@ fn assert_collective_setup_package_refused(
 ) {
     let result = verify_collective_setup_package(&package);
     assert_eq!(
-        result["verifierStatus"], "refused",
+        result["isValid"], false,
         "{case_label}: unexpected verifier result: {result}"
     );
     assert_eq!(
@@ -373,7 +373,7 @@ fn assert_collective_setup_package_refused_without_handoff(
 ) {
     let result = verify_collective_setup_package(&package);
     assert_eq!(
-        result["verifierStatus"], "refused",
+        result["isValid"], false,
         "{case_label}: unexpected verifier result: {result}"
     );
     assert_eq!(

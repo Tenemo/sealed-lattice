@@ -191,7 +191,7 @@ const verifyGeneratedSignatureEnvelope = (
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
-    if (!result.ok) {
+    if (!result.isValid) {
         const refusedObject = result.refusedObjects[0];
         throw new Error(
             refusedObject === undefined

@@ -537,7 +537,7 @@ export const verifyRosterExternalAcceptance = (
         refusedObjects.push(...signatureResult.refusedObjects);
 
         return {
-            ok: refusedObjects.length === 0,
+            isValid: refusedObjects.length === 0,
             acceptedHashes:
                 refusedObjects.length === 0
                     ? [acceptance.rosterExternalAcceptanceHash]
@@ -550,7 +550,7 @@ export const verifyRosterExternalAcceptance = (
         };
     } catch {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

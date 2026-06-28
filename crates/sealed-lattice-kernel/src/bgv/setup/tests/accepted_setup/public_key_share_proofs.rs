@@ -38,8 +38,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
@@ -67,7 +66,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
     )
     .expect("verification response");
 
-    assert_eq!(missing_statement_proofs_result["verifierStatus"], "refused");
+    assert_eq!(missing_statement_proofs_result["isValid"], false);
     assert_eq!(
         missing_statement_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareProofsMissing"
@@ -88,7 +87,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
     )
     .expect("verification response");
 
-    assert_eq!(missing_succinct_proofs_result["verifierStatus"], "refused");
+    assert_eq!(missing_succinct_proofs_result["isValid"], false);
     assert_eq!(
         missing_succinct_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofsMissing"
@@ -135,7 +134,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
         assert_eq!(
             result["refusedObjects"][0]["objectPath"],
@@ -263,7 +262,7 @@ fn assert_refuses_proof_object_variant(
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
     assert_eq!(result["refusedObjects"][0]["objectPath"], object_path);
     if let Some(message_fragment) = message_fragment {
@@ -306,8 +305,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     )
     .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
@@ -336,7 +334,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -357,8 +355,7 @@ fn heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_pu
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["transportedPublicKeyShareMaterial"])
@@ -420,8 +417,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
     )
     .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
@@ -449,7 +445,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareMaterialVerificationFailed"
@@ -481,7 +477,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareMaterialVerificationFailed"
@@ -503,7 +499,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -525,7 +521,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -555,7 +551,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofsMissing"
@@ -583,7 +579,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofSetBindingMismatch"
@@ -606,7 +602,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofSetBindingMismatch"
@@ -629,7 +625,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -652,7 +648,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_sa
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -688,7 +684,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -725,7 +721,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_lo
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -751,8 +747,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideAcceptedParameters");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
@@ -788,7 +783,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "collectivePublicKeyVerificationFailed"
@@ -848,7 +843,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         verify_collective_bgv_setup_package(&missing_object_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(missing_object_result["verifierStatus"], "refused");
+    assert_eq!(missing_object_result["isValid"], false);
     assert_eq!(
         missing_object_result["refusedObjects"][0]["reasonCode"],
         "publicKeyMaterialBeforeProofVerification"
@@ -869,7 +864,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         verify_collective_bgv_setup_package(&missing_root_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(missing_root_result["verifierStatus"], "refused");
+    assert_eq!(missing_root_result["isValid"], false);
     assert_eq!(
         missing_root_result["refusedObjects"][0]["reasonCode"],
         "publicKeyMaterialBeforeProofVerification"

@@ -120,7 +120,6 @@ fn vss_material_outside_full_ring(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::OutsideAcceptedParameters,
         Some("vssCoefficientCommitments"),
         Vec::new(),
         vec![Refusal::new(

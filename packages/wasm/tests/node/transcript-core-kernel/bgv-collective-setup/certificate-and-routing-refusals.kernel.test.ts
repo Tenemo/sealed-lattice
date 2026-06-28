@@ -43,7 +43,7 @@ describe('collective BGV setup kernel commands', () => {
             setupPackage: genericKeySwitchPackage,
         });
 
-        expect(genericKeySwitchResult.verifierStatus).toBe('refused');
+        expect(genericKeySwitchResult.isValid).toBe(false);
         expect(genericKeySwitchResult.refusedObjects[0]?.reasonCode).toBe(
             'genericKeySwitchOutsideParameters',
         );
@@ -66,7 +66,7 @@ describe('collective BGV setup kernel commands', () => {
             setupPackage: jsonTransportPackage,
         });
 
-        expect(jsonTransportResult.verifierStatus).toBe('refused');
+        expect(jsonTransportResult.isValid).toBe(false);
         expect(jsonTransportResult.refusedObjects[0]?.reasonCode).toBe(
             'transportEncodingMismatch',
         );
@@ -89,7 +89,7 @@ describe('collective BGV setup kernel commands', () => {
             setupPackage: malformedTransportPackage,
         });
 
-        expect(malformedTransportResult.verifierStatus).toBe('refused');
+        expect(malformedTransportResult.isValid).toBe(false);
         expect(malformedTransportResult.refusedObjects[0]?.reasonCode).toBe(
             'transportChunkHashCountMismatch',
         );
@@ -107,9 +107,8 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
+            isValid: false,
             operation: 'verifyPrivateVssShareEnvelope',
-            verifierStatus: 'refused',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(
             'setupContextFieldMissing',

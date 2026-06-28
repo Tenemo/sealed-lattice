@@ -133,17 +133,6 @@ fn collective_setup_parameters_expose_first_closure_state_machine() {
             .is_some()
     );
     assert_eq!(
-        setup_parameters["verifierStatuses"],
-        serde_json::json!([
-            "accepted",
-            "pending",
-            "refused",
-            "aborted",
-            "forkDetected",
-            "outsideAcceptedParameters"
-        ])
-    );
-    assert_eq!(
         setup_parameters["phaseOrder"]
             .as_array()
             .expect("phase order")
@@ -169,8 +158,7 @@ fn collective_setup_verifier_refuses_passive_setup_packages() {
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideAcceptedParameters");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "outsideCollectiveBgvSetupParameters"
@@ -191,8 +179,7 @@ fn collective_setup_verifier_reports_missing_phase_as_pending() {
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "rosterFreeze");
     assert_eq!(
         result["missingObjects"],
@@ -229,7 +216,7 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(
             result["refusedObjects"][0]["reasonCode"],
             "setupContextTokenMalformed"
@@ -261,7 +248,7 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
         verify_collective_bgv_setup_package(&forked_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(forked_result["verifierStatus"], "forkDetected");
+    assert_eq!(forked_result["isValid"], false);
     assert_eq!(
         forked_result["refusedObjects"][0]["reasonCode"],
         "phaseForkDetected"
@@ -276,7 +263,7 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
         verify_collective_bgv_setup_package(&wrong_order_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_order_result["verifierStatus"], "refused");
+    assert_eq!(wrong_order_result["isValid"], false);
     assert_eq!(
         wrong_order_result["refusedObjects"][0]["reasonCode"],
         "phaseOrderMismatch"
@@ -296,7 +283,7 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
         verify_collective_bgv_setup_package(&stale_epoch_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(stale_epoch_result["verifierStatus"], "refused");
+    assert_eq!(stale_epoch_result["isValid"], false);
     assert_eq!(
         stale_epoch_result["refusedObjects"][0]["reasonCode"],
         "phaseContextMismatch"
@@ -310,7 +297,7 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
         verify_collective_bgv_setup_package(&bad_root_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(bad_root_result["verifierStatus"], "refused");
+    assert_eq!(bad_root_result["isValid"], false);
     assert_eq!(
         bad_root_result["refusedObjects"][0]["reasonCode"],
         "phaseRootMismatch"
@@ -355,7 +342,7 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
 
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "InvalidSignature"
@@ -377,7 +364,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&missing_reveal_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(missing_reveal_result["verifierStatus"], "refused");
+    assert_eq!(missing_reveal_result["isValid"], false);
     assert_eq!(
         missing_reveal_result["refusedObjects"][0]["reasonCode"],
         "commonRandomnessRevealCountMismatch"
@@ -392,7 +379,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&wrong_seed_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_seed_result["verifierStatus"], "refused");
+    assert_eq!(wrong_seed_result["isValid"], false);
     assert_eq!(
         wrong_seed_result["refusedObjects"][0]["reasonCode"],
         "commonRandomnessPublicMatrixSeedMismatch"
@@ -407,7 +394,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&wrong_derivation_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_derivation_result["verifierStatus"], "refused");
+    assert_eq!(wrong_derivation_result["isValid"], false);
     assert_eq!(
         wrong_derivation_result["refusedObjects"][0]["reasonCode"],
         "setupPublicDerivationsMismatch"
@@ -422,7 +409,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&wrong_matrix_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_matrix_result["verifierStatus"], "refused");
+    assert_eq!(wrong_matrix_result["isValid"], false);
     assert_eq!(
         wrong_matrix_result["refusedObjects"][0]["reasonCode"],
         "setupPublicDerivationsMismatch"

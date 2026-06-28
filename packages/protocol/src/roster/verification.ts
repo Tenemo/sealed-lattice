@@ -374,7 +374,7 @@ const verifyRosterManifestTranscriptUnchecked = (
         refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
-        ok: transcriptAccepted,
+        isValid: transcriptAccepted,
         acceptedHashes: transcriptAccepted
             ? uniqueStrings([
                   ...boardResult.acceptedHashes,
@@ -407,7 +407,7 @@ export const verifyRosterManifestTranscript = (
         return verifyRosterManifestTranscriptUnchecked(input);
     } catch {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

@@ -17,7 +17,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
         }
 
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareProofs".to_string()],
             Vec::new(),
@@ -332,7 +331,6 @@ fn verify_public_key_share_proof_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareProofs.proofRecords.publicKeyShareProofRoot".to_string()],
             Vec::new(),
@@ -365,7 +363,6 @@ pub(super) fn verify_public_key_share_limb_hashes(
 ) -> CanonicalResult<Option<Value>> {
     let Some(limb_values) = limb_values else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb".to_string()],
             Vec::new(),
@@ -396,7 +393,6 @@ pub(super) fn verify_public_key_share_limb_hashes(
             .and_then(Value::as_str)
         else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("publicKeyShareProofs"),
                 vec![
                     "publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb.coefficientVectorHash512"

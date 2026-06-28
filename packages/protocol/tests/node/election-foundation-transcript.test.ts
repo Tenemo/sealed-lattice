@@ -35,7 +35,7 @@ const expectRefusalCode = (
 ): void => {
     const verification = verifyFoundationTranscript(input);
 
-    expect(verification.ok).toBe(false);
+    expect(verification.isValid).toBe(false);
     expect(verification.acceptedHashes).toEqual([]);
     expect(verification.refusedObjects).toEqual(
         expect.arrayContaining([expect.objectContaining({ code })]),
@@ -86,7 +86,7 @@ describe('integrated election foundation transcript', () => {
         ).toMatchObject({
             rosterSize: foundationParticipantCount,
         });
-        expect(verification.ok).toBe(true);
+        expect(verification.isValid).toBe(true);
         expect(verification.refusedObjects).toEqual([]);
         expect(verification.electionManifestHash).toBe(
             fixture.expectedHashes.electionManifestHash,
@@ -108,10 +108,10 @@ describe('integrated election foundation transcript', () => {
             fixture.expectedHashes.targetFinalityRecordHash,
         );
         expect(verification.componentResults).toMatchObject({
-            firstValidOrdering: { ok: true },
-            rosterExternalAcceptance: { ok: true },
-            rosterManifest: { ok: true },
-            targetFinality: { ok: true },
+            firstValidOrdering: { isValid: true },
+            rosterExternalAcceptance: { isValid: true },
+            rosterManifest: { isValid: true },
+            targetFinality: { isValid: true },
         });
         expect(
             verification.componentResults.firstValidOrdering.orderedObjects,

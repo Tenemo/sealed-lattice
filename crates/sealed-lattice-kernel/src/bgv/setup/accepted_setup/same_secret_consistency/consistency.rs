@@ -10,7 +10,6 @@ pub(in super::super) fn verify_same_secret_consistency(
 ) -> CanonicalResult<Option<Value>> {
     let Some(statement_set) = setup_package.get("sameSecretConsistency") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency".to_string()],
             Vec::new(),
@@ -120,7 +119,6 @@ pub(in super::super) fn verify_same_secret_consistency(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.statementRecords".to_string()],
             Vec::new(),
@@ -173,7 +171,6 @@ pub(in super::super) fn verify_same_secret_consistency(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.sameSecretConsistencyRoot".to_string()],
             Vec::new(),
@@ -321,7 +318,6 @@ fn verify_same_secret_statement_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.statementRecords.trusteeSecretCommitmentRoot".to_string()],
             Vec::new(),
@@ -348,7 +344,6 @@ fn verify_same_secret_statement_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.statementRecords.sameSecretStatementRoot".to_string()],
             Vec::new(),

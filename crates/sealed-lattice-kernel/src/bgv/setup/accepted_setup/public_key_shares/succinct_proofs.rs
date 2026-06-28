@@ -40,7 +40,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     }
     let Some(material_set) = material_set else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareMaterial".to_string()],
             Vec::new(),
@@ -57,7 +56,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         }
 
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareSuccinctProofs".to_string()],
             Vec::new(),
@@ -121,7 +119,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["transportedPublicKeyShareMaterial".to_string()],
             Vec::new(),

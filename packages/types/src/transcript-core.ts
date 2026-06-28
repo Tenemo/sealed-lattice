@@ -93,13 +93,13 @@ export type TranscriptCoreFixtureVerification =
 /** Public transcript-core fixture verifier result. */
 export type TranscriptCoreVerificationResult =
     | {
-          readonly ok: true;
+          readonly isValid: true;
           readonly caseName: string;
           readonly objectHash512: string;
           readonly chunkRoot: string;
       }
     | {
-          readonly ok: false;
+          readonly isValid: false;
           readonly caseName: string;
           readonly rejection: {
               readonly code: CanonicalErrorCode;

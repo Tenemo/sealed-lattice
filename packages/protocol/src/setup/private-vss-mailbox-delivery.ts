@@ -145,7 +145,7 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly expectedPrivateEnvelopeHash?: ProtocolHash;
         readonly expectedLocalVerificationRoot?: ProtocolHash;
     }) => {
-        readonly ok: boolean;
+        readonly isValid: boolean;
         readonly privateEnvelopeHash: ProtocolHash | null;
         readonly localVerificationRoot: ProtocolHash | null;
         readonly verifiedPrivateVssShareProofCount?: number;
@@ -1051,7 +1051,7 @@ const createEnvelopeCommitment = async (
               }),
     });
     if (
-        !localVerification.ok ||
+        !localVerification.isValid ||
         localVerification.privateEnvelopeHash === null ||
         localVerification.localVerificationRoot === null
     ) {
