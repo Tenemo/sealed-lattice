@@ -31,9 +31,6 @@ import type {
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
     BgvCompactVssShareLinkageProofGeneration,
-    BgvCompactVssShareLinkageBinaryProofMaterialTransport,
-    BgvCompactVssShareLinkageBinaryProofMaterialVerification,
-    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofStatement,
     BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
@@ -59,7 +56,6 @@ import type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
-    BgvTargetDecryptionResultVerification,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
@@ -102,9 +98,6 @@ export type {
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
     BgvCompactVssShareLinkageProofGeneration,
-    BgvCompactVssShareLinkageBinaryProofMaterialTransport,
-    BgvCompactVssShareLinkageBinaryProofMaterialVerification,
-    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofStatement,
     BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
@@ -129,7 +122,6 @@ export type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
-    BgvTargetDecryptionResultVerification,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
@@ -276,7 +268,6 @@ export type TranscriptCoreKernel = {
         readonly targetDecryptionShare: BgvTargetDecryptionShare;
         readonly proofStatement: BgvTargetDecryptionShareProofStatement;
     }): BgvTargetDecryptionShareProofStatementBindingVerification;
-    verifyTargetDecryptionResult(): BgvTargetDecryptionResultVerification;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -416,30 +407,16 @@ export type TranscriptCoreKernel = {
     }): BgvCompactVssAggregateThresholdCommitmentSetVerification;
     verifyCompactVssShareLinkageStatement(input: {
         readonly statement: Readonly<Record<string, unknown>>;
-        readonly coefficientCommitmentSet?: Readonly<Record<string, unknown>>;
-        readonly recipientShareCommitmentSet?: Readonly<
-            Record<string, unknown>
-        >;
-        readonly aggregateThresholdCommitmentSet?: Readonly<
+        readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
+        readonly recipientShareCommitmentSet: Readonly<Record<string, unknown>>;
+        readonly aggregateThresholdCommitmentSet: Readonly<
             Record<string, unknown>
         >;
     }): BgvCompactVssShareLinkageStatementVerification;
-    verifyCompactVssShareLinkageProofMaterialSet(input: {
-        readonly statement: Readonly<Record<string, unknown>>;
-        readonly proofMaterialSet: Readonly<Record<string, unknown>>;
-        readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
-        readonly recipientShareCommitmentSet: Readonly<Record<string, unknown>>;
-    }): BgvCompactVssShareLinkageProofMaterialSetVerification;
-    verifyCompactVssShareLinkageBinaryProofMaterial(input: {
-        readonly statement: Readonly<Record<string, unknown>>;
-        readonly transportedProofMaterial: BgvCompactVssShareLinkageBinaryProofMaterialTransport;
-        readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
-        readonly recipientShareCommitmentSet: Readonly<Record<string, unknown>>;
-    }): BgvCompactVssShareLinkageBinaryProofMaterialVerification;
     verifyCompactVssSameSecretBridgeStatementSet(input: {
         readonly statementSet: Readonly<Record<string, unknown>>;
-        readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
-        readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+        readonly sameSecretConsistency: Readonly<Record<string, unknown>>;
+        readonly sameSecretProofs: Readonly<Record<string, unknown>>;
         readonly transportedSameSecretProofMaterial?: Readonly<
             Record<string, unknown>
         >;
@@ -447,8 +424,8 @@ export type TranscriptCoreKernel = {
     verifyCompactVssSameSecretBridgeProofMaterialSet(input: {
         readonly statementSet: Readonly<Record<string, unknown>>;
         readonly proofMaterialSet: Readonly<Record<string, unknown>>;
-        readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
-        readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+        readonly sameSecretConsistency: Readonly<Record<string, unknown>>;
+        readonly sameSecretProofs: Readonly<Record<string, unknown>>;
         readonly transportedSameSecretProofMaterial?: Readonly<
             Record<string, unknown>
         >;
@@ -688,9 +665,6 @@ type TranscriptCoreKernelCommand =
           readonly proofStatement: BgvTargetDecryptionShareProofStatement;
       }
     | {
-          readonly command: 'VerifyTargetDecryptionResult';
-      }
-    | {
           readonly command: 'VerifyBgvPassiveSetup';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly expectedSetupPackageHash?: ProtocolHash;
@@ -847,39 +821,19 @@ type TranscriptCoreKernelCommand =
     | {
           readonly command: 'VerifyCompactVssShareLinkageStatement';
           readonly statement: Readonly<Record<string, unknown>>;
-          readonly coefficientCommitmentSet?: Readonly<Record<string, unknown>>;
-          readonly recipientShareCommitmentSet?: Readonly<
-              Record<string, unknown>
-          >;
-          readonly aggregateThresholdCommitmentSet?: Readonly<
-              Record<string, unknown>
-          >;
-      }
-    | {
-          readonly command: 'VerifyCompactVssShareLinkageProofMaterialSet';
-          readonly statement: Readonly<Record<string, unknown>>;
-          readonly proofMaterialSet: Readonly<Record<string, unknown>>;
           readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
           readonly recipientShareCommitmentSet: Readonly<
               Record<string, unknown>
           >;
-      }
-    | {
-          readonly command: 'VerifyCompactVssShareLinkageBinaryProofMaterial';
-          readonly statement: Readonly<Record<string, unknown>>;
-          readonly transportedCompactVssShareLinkageProofMaterial: Readonly<
-              Record<string, unknown>
-          >;
-          readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
-          readonly recipientShareCommitmentSet: Readonly<
+          readonly aggregateThresholdCommitmentSet: Readonly<
               Record<string, unknown>
           >;
       }
     | {
           readonly command: 'VerifyCompactVssSameSecretBridgeStatementSet';
           readonly statementSet: Readonly<Record<string, unknown>>;
-          readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
-          readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+          readonly sameSecretConsistency: Readonly<Record<string, unknown>>;
+          readonly sameSecretProofs: Readonly<Record<string, unknown>>;
           readonly transportedSameSecretProofMaterial?: Readonly<
               Record<string, unknown>
           >;
@@ -888,8 +842,8 @@ type TranscriptCoreKernelCommand =
           readonly command: 'VerifyCompactVssSameSecretBridgeProofMaterialSet';
           readonly statementSet: Readonly<Record<string, unknown>>;
           readonly proofMaterialSet: Readonly<Record<string, unknown>>;
-          readonly sameSecretConsistency?: Readonly<Record<string, unknown>>;
-          readonly sameSecretProofs?: Readonly<Record<string, unknown>>;
+          readonly sameSecretConsistency: Readonly<Record<string, unknown>>;
+          readonly sameSecretProofs: Readonly<Record<string, unknown>>;
           readonly transportedSameSecretProofMaterial?: Readonly<
               Record<string, unknown>
           >;

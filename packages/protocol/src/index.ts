@@ -80,9 +80,6 @@ export {
     compactVssMatrixExpansionProfile,
     compactVssParameterCertificateInputBinding,
     type CompactVssParameterCertificateInputBinding,
-    type CompactVssShareLinkageBinaryProofMaterialTransport,
-    type CompactVssShareLinkageBinaryProofMaterialTransportLike,
-    type CompactVssShareLinkageBinaryProofMaterialTransportReference,
 } from './setup/compact-vss-commitments.js';
 export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,

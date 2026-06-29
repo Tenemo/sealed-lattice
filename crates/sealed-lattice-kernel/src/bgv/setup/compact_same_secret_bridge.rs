@@ -208,7 +208,7 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_statement_set_request(
             "compact VSS same-secret bridge statement set root does not match its bound statements",
         ));
     }
-    verify_optional_same_secret_evidence_sets(EvidenceSetVerificationInput {
+    verify_same_secret_evidence_sets(EvidenceSetVerificationInput {
         request,
         statement_set: StatementSetBinding {
             ceremony_id,
@@ -731,28 +731,21 @@ fn verify_reconstructed_compact_same_secret_bridge_proof(
     Ok(())
 }
 
-fn verify_optional_same_secret_evidence_sets(
+fn verify_same_secret_evidence_sets(
     input: EvidenceSetVerificationInput<'_>,
 ) -> CanonicalResult<()> {
-    match (
+    let (Some(same_secret_consistency), Some(same_secret_proofs)) = (
         input.request.get("sameSecretConsistency"),
         input.request.get("sameSecretProofs"),
-    ) {
-        (None, None) => Ok(()),
-        (Some(same_secret_consistency), Some(same_secret_proofs)) => {
-            let same_secret_statement_records =
-                verify_same_secret_consistency_evidence(same_secret_consistency, &input)?;
-            verify_same_secret_proof_evidence(
-                same_secret_proofs,
-                &input,
-                &same_secret_statement_records,
-            )
-        }
-        _ => Err(CanonicalError::new(
+    ) else {
+        return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "compact VSS same-secret bridge evidence verification requires both sameSecretConsistency and sameSecretProofs",
-        )),
-    }
+        ));
+    };
+    let same_secret_statement_records =
+        verify_same_secret_consistency_evidence(same_secret_consistency, &input)?;
+    verify_same_secret_proof_evidence(same_secret_proofs, &input, &same_secret_statement_records)
 }
 
 fn verify_same_secret_consistency_evidence(
@@ -1942,10 +1935,13 @@ mod tests {
 
     #[test]
     fn compact_same_secret_bridge_statement_set_verifies_bound_roots() -> CanonicalResult<()> {
-        let statement_set = compact_same_secret_bridge_statement_set()?;
+        let (statement_set, same_secret_consistency, same_secret_proofs) =
+            compact_same_secret_bridge_statement_set_with_evidence()?;
         let verification = verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
             "command": "VerifyCompactVssSameSecretBridgeStatementSet",
             "statementSet": statement_set,
+            "sameSecretConsistency": same_secret_consistency,
+            "sameSecretProofs": same_secret_proofs,
         }))?;
 
         assert_eq!(
@@ -1963,30 +1959,37 @@ mod tests {
             "sealed-lattice-compact-vss-commitment-binary-v1"
         );
 
-        let mut wrong_target_basis_statement_set = compact_same_secret_bridge_statement_set()?;
+        let (mut wrong_target_basis_statement_set, same_secret_consistency, same_secret_proofs) =
+            compact_same_secret_bridge_statement_set_with_evidence()?;
         wrong_target_basis_statement_set["targetBasisHash"] = json!("7".repeat(128));
         assert!(
             verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeStatementSet",
                 "statementSet": wrong_target_basis_statement_set,
+                "sameSecretConsistency": same_secret_consistency,
+                "sameSecretProofs": same_secret_proofs,
             }))
             .is_err(),
             "compact same-secret bridge statement sets must bind the canonical target basis hash"
         );
 
-        let mut tampered_statement_set = statement_set;
+        let (mut tampered_statement_set, same_secret_consistency, same_secret_proofs) =
+            compact_same_secret_bridge_statement_set_with_evidence()?;
         tampered_statement_set["statementRecords"][1]["targetConstantCoefficientCommitmentRoots"]
             [0]["coefficientCommitmentRoot"] = json!("c".repeat(128));
         assert!(
             verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeStatementSet",
                 "statementSet": tampered_statement_set,
+                "sameSecretConsistency": same_secret_consistency,
+                "sameSecretProofs": same_secret_proofs,
             }))
             .is_err(),
             "tampered compact same-secret bridge target constant root must reject"
         );
 
-        let mut unsupported_convention_statement_set = compact_same_secret_bridge_statement_set()?;
+        let (mut unsupported_convention_statement_set, same_secret_consistency, same_secret_proofs) =
+            compact_same_secret_bridge_statement_set_with_evidence()?;
         unsupported_convention_statement_set["signedRepresentativeConvention"] =
             json!("unsupported compact bridge signed representative convention");
         unsupported_convention_statement_set["compactSameSecretBridgeStatementSetRoot"] =
@@ -1998,6 +2001,8 @@ mod tests {
             verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeStatementSet",
                 "statementSet": unsupported_convention_statement_set,
+                "sameSecretConsistency": same_secret_consistency,
+                "sameSecretProofs": same_secret_proofs,
             }))
             .is_err(),
             "unsupported signed-representative convention must reject"
@@ -2022,13 +2027,17 @@ mod tests {
         forged_statement_set["statementRecords"][0]["sameSecretProofRoot"] = json!("0".repeat(128));
         rebind_bridge_statement_root(&mut forged_statement_set["statementRecords"][0])?;
         rebind_bridge_statement_set_root(&mut forged_statement_set)?;
-        assert!(
+        let missing_evidence_error =
             verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
-                "command": "VerifyCompactVssSameSecretBridgeStatementSet",
-                "statementSet": forged_statement_set.clone(),
+                    "command": "VerifyCompactVssSameSecretBridgeStatementSet",
+                    "statementSet": forged_statement_set.clone(),
             }))
-            .is_ok(),
-            "statement-only verification remains a root-binding check"
+            .expect_err("compact same-secret bridge statement verification must require evidence");
+        assert!(
+            missing_evidence_error
+                .to_string()
+                .contains("requires both sameSecretConsistency and sameSecretProofs"),
+            "missing same-secret bridge evidence should report the required evidence sets: {missing_evidence_error}"
         );
         assert!(
             verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
@@ -2093,7 +2102,8 @@ mod tests {
     #[test]
     fn compact_same_secret_bridge_proof_material_set_rejects_unbound_material()
     -> CanonicalResult<()> {
-        let statement_set = compact_same_secret_bridge_statement_set()?;
+        let (statement_set, same_secret_consistency, same_secret_proofs) =
+            compact_same_secret_bridge_statement_set_with_evidence()?;
         let proof_material_set =
             compact_same_secret_bridge_proof_material_set(&statement_set, ["aa", "bb"])?;
 
@@ -2101,6 +2111,8 @@ mod tests {
             verify_compact_vss_same_secret_bridge_proof_material_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeProofMaterialSet",
                 "statementSet": statement_set.clone(),
+                "sameSecretConsistency": same_secret_consistency.clone(),
+                "sameSecretProofs": same_secret_proofs.clone(),
                 "proofMaterialSet": proof_material_set.clone(),
             }))
             .is_err(),
@@ -2113,6 +2125,8 @@ mod tests {
             verify_compact_vss_same_secret_bridge_proof_material_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeProofMaterialSet",
                 "statementSet": statement_set.clone(),
+                "sameSecretConsistency": same_secret_consistency.clone(),
+                "sameSecretProofs": same_secret_proofs.clone(),
                 "proofMaterialSet": tampered_proof_material_set,
             }))
             .is_err(),
@@ -2126,6 +2140,8 @@ mod tests {
             verify_compact_vss_same_secret_bridge_proof_material_set_request(&json!({
                 "command": "VerifyCompactVssSameSecretBridgeProofMaterialSet",
                 "statementSet": statement_set,
+                "sameSecretConsistency": same_secret_consistency,
+                "sameSecretProofs": same_secret_proofs,
                 "proofMaterialSet": wrong_statement_root_material_set,
             }))
             .is_err(),
@@ -2133,54 +2149,6 @@ mod tests {
         );
 
         Ok(())
-    }
-
-    fn compact_same_secret_bridge_statement_set() -> CanonicalResult<Value> {
-        let target_basis_hash = canonical_target_basis_hash()?;
-        let mut statement_records = Vec::new();
-        for trustee_roster_position in 0..2_usize {
-            statement_records.push(compact_same_secret_bridge_statement_record(
-                trustee_roster_position,
-            )?);
-        }
-        let statement_set_without_root = json!({
-            "objectType": "CompactVssSameSecretBridgeStatementSet",
-            "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "compactCommitmentProfileId": "sealed-lattice-compact-vss-sparse-linear-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
-            "proofFamily": "same-secret-linkage-anchor",
-            "ceremonyId": "compact-vss-test",
-            "manifestHash": "1".repeat(128),
-            "rosterHash": "2".repeat(128),
-            "setupProfileHash": "3".repeat(128),
-            "qShareHash": "4".repeat(128),
-            "carryAwareVssShareRelationProfileHash": "5".repeat(128),
-            "commitmentProfileHash": "6".repeat(128),
-            "setupEpoch": "setup-epoch",
-            "targetBasisHash": target_basis_hash,
-            "publicMatrixSeedHash": "8".repeat(128),
-            "ringDegree": 8,
-            "participantCount": 2,
-            "targetRnsLimbCount": 2,
-            "thresholdDegree": 4,
-            "compactCoefficientCommitmentRoot": "9".repeat(128),
-            "sameSecretConsistencyRoot": "a".repeat(128),
-            "sameSecretProofSetRoot": "b".repeat(128),
-            "sameSecretProofFamilyBindingRoot": "c".repeat(128),
-            "integerSupport": "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb",
-            "signedRepresentativeConvention": "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime",
-            "compactCommitmentEncoding": "sealed-lattice-compact-vss-commitment-binary-v1",
-            "targetBasisLimbOrder": "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime",
-            "statementRecords": statement_records,
-        });
-        let mut statement_set = statement_set_without_root;
-        statement_set["compactSameSecretBridgeStatementSetRoot"] = json!(derive_protocol_hash(
-            "SetupProofRecordBindingHash",
-            &statement_set,
-        )?);
-
-        Ok(statement_set)
     }
 
     fn compact_same_secret_bridge_proof_material_set(

@@ -237,50 +237,6 @@ const transportedPublicKeyShareMaterialObject = (
     ];
 };
 
-const transportedCompactVssShareLinkageProofMaterialObject = (
-    input: SetupPackageInput,
-): readonly SetupCertificateTransportedObjectInput[] => {
-    if (input.transportedCompactVssShareLinkageProofMaterial === undefined) {
-        return [];
-    }
-    const transportedMaterial = assertObjectRecord(
-        input.transportedCompactVssShareLinkageProofMaterial,
-        'transportedCompactVssShareLinkageProofMaterial',
-    );
-
-    return [
-        {
-            objectName: 'compactVssShareLinkageProofMaterial',
-            objectRole: 'compact-vss-share-linkage-proof-material',
-            objectRoot: hashField(
-                transportedMaterial,
-                'proofMaterialSetRoot',
-                'transportedCompactVssShareLinkageProofMaterial',
-            ),
-            byteLength: positiveSafeIntegerField(
-                transportedMaterial,
-                'totalByteLength',
-                'transportedCompactVssShareLinkageProofMaterial',
-            ),
-            fullObjectHash: hashField(
-                transportedMaterial,
-                'fullObjectHash',
-                'transportedCompactVssShareLinkageProofMaterial',
-            ),
-            chunkRoot: hashField(
-                transportedMaterial,
-                'chunkRoot',
-                'transportedCompactVssShareLinkageProofMaterial',
-            ),
-            chunkHashes: protocolHashArrayField(
-                transportedMaterial,
-                'chunkHashes',
-                'transportedCompactVssShareLinkageProofMaterial',
-            ),
-        },
-    ];
-};
-
 export const setupCertificateTransportedObjectsFromPackageInput = (
     input: SetupPackageInput,
 ): readonly SetupCertificateTransportedObjectInput[] => [
@@ -292,7 +248,6 @@ export const setupCertificateTransportedObjectsFromPackageInput = (
         'same-secret-proof-material',
         plainTransportedProofMaterialFields,
     ),
-    ...transportedCompactVssShareLinkageProofMaterialObject(input),
     ...transportedProofMaterialObjects(
         input.transportedPublicKeyShareProofMaterial,
         'transportedPublicKeyShareProofMaterial',

@@ -25,8 +25,6 @@ type VerifyTranscript = () => {
         readonly code: string;
     }[];
 };
-type VerifyTargetDecryptionResult =
-    () => Promise<publicApiRuntime.TargetDecryptionResultVerification>;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const verifyFoundationTranscript =
@@ -35,8 +33,6 @@ const verifyTranscriptCoreFixture =
     publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
 const verifyTranscript =
     publicApiRuntimeRecord.verifyTranscript as VerifyTranscript;
-const verifyTargetDecryptionResult =
-    publicApiRuntimeRecord.verifyTargetDecryptionResult as VerifyTargetDecryptionResult;
 
 const requiredPublicFunctions = [
     [
@@ -94,10 +90,6 @@ const requiredPublicFunctions = [
     ],
     ['verifySetupPackage', publicApiRuntimeRecord.verifySetupPackage],
     ['verifyPrivateVssShare', publicApiRuntimeRecord.verifyPrivateVssShare],
-    [
-        'verifyTargetDecryptionResult',
-        publicApiRuntimeRecord.verifyTargetDecryptionResult,
-    ],
 ] as const;
 
 const requiredPublicFunctionNames = requiredPublicFunctions
@@ -131,14 +123,6 @@ describe('election foundation public package API in Node', () => {
             refusedObjects: [
                 expect.objectContaining({ code: 'OperationUnavailable' }),
             ],
-        });
-    });
-
-    it('keeps public target-result verification fail closed', async () => {
-        await expect(verifyTargetDecryptionResult()).resolves.toEqual({
-            ok: false,
-            operation: 'verifyTargetDecryptionResult',
-            refusalReason: 'CompactVssPublicMaterialNotBinding',
         });
     });
 

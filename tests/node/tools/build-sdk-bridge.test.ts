@@ -147,7 +147,7 @@ describe('SDK bridge build helpers', () => {
         for (const memberName of sdkVendoredBridgeRemovedMembers) {
             expect(outputText).not.toContain(memberName);
         }
-        expect(outputText).toContain('verifyTargetDecryptionResult');
-        expect(outputText).toContain('VerifyTargetDecryptionResult');
+        expect(outputText).not.toContain('verifyTargetDecryptionResult');
+        expect(outputText).not.toContain('VerifyTargetDecryptionResult');
     });
 });

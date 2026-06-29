@@ -4,51 +4,39 @@ import { describe, expect, it } from 'vitest';
 import {
     aggregateCompactVssThresholdShareCommitments,
     compactVssCommitmentMeasurement,
+    compactVssMessageDigitBase,
     compactVssMatrixExpansionProfile,
     compactVssParameterCertificateInputBinding,
     compactVssCommitmentProfileId,
     compactVssShareLinkageAggregateThresholdRule,
     compactVssShareLinkageCommonKeyRule,
-    compactVssShareLinkageProofFamily,
     compactVssShareLinkageProofBatchingRule,
     compactVssShareLinkageShamirEvaluationRule,
     compactVssProjectionWeight,
     compactVssEncodedCommitmentByteLength,
     combineCompactVssCommitments,
     createCompactVssCoefficientCommitmentSet,
+    createCompactVssDerivedRecipientShareCommitmentBundle,
     createCompactVssRecipientShareCommitmentBundle,
     createCompactVssShareLinkageStatement,
-    createCompactVssShareLinkageProofMaterialSet,
     computeCompactVssCommitmentFromOpening,
     decodeCompactVssCommitmentBody,
     decodeCompactVssTernaryRandomnessColumnsHex,
     encodeCompactVssTernaryRandomnessColumnsHex,
     encodeCompactVssCommitmentBody,
-    encodeCompactVssShareLinkageProofMaterialSetBinary,
     verifyCompactVssAggregateThresholdCommitmentSet,
+    verifyCompactVssDerivedRecipientShareCommitmentSet,
     verifyCompactVssRecipientShareCommitmentSet,
     verifyCompactVssShareLinkageStatement,
-    verifyCompactVssShareLinkageProofMaterialSet,
     verifyCompactVssCommitmentOpening,
-    verifyCompactVssAggregateOpeningCredential,
     type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssCommitmentBodyMetadata,
     type CompactVssCommitmentValue,
     type CompactVssCommitmentOpeningInput,
-    type CompactVssAggregateThresholdOpeningCredential,
     type CompactVssRecipientShareOpeningCredential,
-    type CompactVssShareLinkageProofMaterialInput,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import { acceptedBgvSetupQSharePrimes } from '#packages/protocol/src/setup/vss-coefficient-commitments.js';
 import type { VssSourceTrusteeCoefficientOpeningState } from '#packages/protocol/src/setup/vss-coefficient-commitments.js';
-
-type MutableCompactVssProofMaterialSetBytes = {
-    readonly proofMaterials: {
-        readonly proofRecords: {
-            proofBytesBase64: string;
-        }[];
-    }[];
-};
 
 const publicMatrixSeedHash = deriveProtocolHash('SetupPublicMatrixSeedHash', {
     fixture: 'compact-vss-commitments',
@@ -86,6 +74,15 @@ const setupContext = {
     }),
     setupEpoch: 'compact-vss-epoch',
 };
+
+function residue(value: bigint, modulus: number): number {
+    const modulusWide = BigInt(modulus);
+    const residueValue = value % modulusWide;
+
+    return Number(
+        residueValue < 0n ? residueValue + modulusWide : residueValue,
+    );
+}
 
 const opening = (
     label: string,
@@ -130,10 +127,16 @@ const aggregateOpening = (
     },
     messageCoefficients: leftOpening.messageCoefficients.map(
         (leftCoefficient, coefficientIndex) =>
-            (leftCoefficient +
-                rightScalar *
-                    (rightOpening.messageCoefficients[coefficientIndex] ?? 0)) %
-            leftOpening.rnsPrime,
+            residue(
+                BigInt(leftCoefficient) +
+                    BigInt(rightScalar) *
+                        BigInt(
+                            rightOpening.messageCoefficients[
+                                coefficientIndex
+                            ] ?? 0,
+                        ),
+                leftOpening.rnsPrime,
+            ),
     ),
     randomnessByColumn: leftOpening.randomnessByColumn.map(
         (leftColumn, columnIndex) =>
@@ -148,15 +151,6 @@ const aggregateOpening = (
     ),
 });
 
-const residue = (value: bigint, modulus: number): number => {
-    const modulusWide = BigInt(modulus);
-    const residueValue = value % modulusWide;
-
-    return Number(
-        residueValue < 0n ? residueValue + modulusWide : residueValue,
-    );
-};
-
 const writeTestLittleEndianU64 = (
     bytes: Uint8Array,
     offset: number,
@@ -169,14 +163,14 @@ const writeTestLittleEndianU64 = (
     }
 };
 
-const expectedPrivateVssShareValues = (input: {
+function expectedPrivateVssShareMessageValues(input: {
     readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly ringDegree: number;
     readonly thresholdDegree: number;
-}): readonly number[] => {
+}): readonly bigint[] {
     const coefficientOpeningsByShamirIndex = new Map(
         input.sourceTrusteeOpeningState.coefficientOpenings
             .filter(
@@ -221,50 +215,22 @@ const expectedPrivateVssShareValues = (input: {
                 recipientPointPower *= recipientTrusteePoint;
             }
 
-            return residue(unreducedShareValue, input.rnsPrime);
+            return unreducedShareValue;
         },
     );
-};
+}
 
-const expectedAggregateVssShareSum = (input: {
-    readonly sourceTrusteeOpeningStates: readonly VssSourceTrusteeCoefficientOpeningState[];
+const expectedPrivateVssShareValues = (input: {
+    readonly sourceTrusteeOpeningState: VssSourceTrusteeCoefficientOpeningState;
     readonly recipientRosterPosition: number;
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly ringDegree: number;
     readonly thresholdDegree: number;
-}): Readonly<{
-    readonly aggregateShareValues: readonly number[];
-    readonly aggregateCommitmentMessageValues: readonly number[];
-}> => {
-    const aggregateCommitmentMessageValues = Array.from(
-        { length: input.ringDegree },
-        () => 0n,
+}): readonly number[] =>
+    expectedPrivateVssShareMessageValues(input).map((shareValue) =>
+        residue(shareValue, input.rnsPrime),
     );
-    input.sourceTrusteeOpeningStates.forEach((sourceTrusteeOpeningState) => {
-        const sourceShareValues = expectedPrivateVssShareValues({
-            sourceTrusteeOpeningState,
-            recipientRosterPosition: input.recipientRosterPosition,
-            rnsLimbIndex: input.rnsLimbIndex,
-            rnsPrime: input.rnsPrime,
-            ringDegree: input.ringDegree,
-            thresholdDegree: input.thresholdDegree,
-        });
-        sourceShareValues.forEach((sourceShareValue, coefficientPosition) => {
-            aggregateCommitmentMessageValues[coefficientPosition] =
-                (aggregateCommitmentMessageValues[coefficientPosition] ?? 0n) +
-                BigInt(sourceShareValue);
-        });
-    });
-    return {
-        aggregateShareValues: aggregateCommitmentMessageValues.map(
-            (shareValue) => residue(shareValue, input.rnsPrime),
-        ),
-        aggregateCommitmentMessageValues: aggregateCommitmentMessageValues.map(
-            (shareValue) => Number(shareValue),
-        ),
-    };
-};
 
 const compactVssShadowCoefficientMessage = (input: {
     readonly sourceTrusteeRosterPosition: number;
@@ -347,28 +313,6 @@ const findRecipientShareCredential = (
     if (credential === undefined) {
         throw new Error(
             'compact VSS test fixture is missing a recipient share credential.',
-        );
-    }
-
-    return credential;
-};
-
-const findAggregateThresholdCredential = (
-    credentials: readonly CompactVssAggregateThresholdOpeningCredential[],
-    input: {
-        readonly recipientRosterPosition: number;
-        readonly rnsLimbIndex: number;
-    },
-): CompactVssAggregateThresholdOpeningCredential => {
-    const credential = credentials.find(
-        (candidateCredential) =>
-            candidateCredential.recipientRosterPosition ===
-                input.recipientRosterPosition &&
-            candidateCredential.rnsLimbIndex === input.rnsLimbIndex,
-    );
-    if (credential === undefined) {
-        throw new Error(
-            'compact VSS test fixture is missing an aggregate threshold credential.',
         );
     }
 
@@ -678,8 +622,7 @@ describe('compact VSS development commitments', () => {
             thresholdDegree: 4,
             ringDegree: 32_768,
             commitmentRelation: {
-                relation:
-                    'C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c',
+                relation: 'C = A_message * m + A_randomness * r mod q_c',
                 outputCoordinateCount: 16,
                 messageWidth: 2,
                 randomnessWidth: 2,
@@ -735,8 +678,8 @@ describe('compact VSS development commitments', () => {
         });
         expect(binding.normInputClasses[1]).toMatchObject({
             sourceCoefficientUpperBoundMultiplier: 1,
-            recipientShareCoefficientUpperBoundMultiplier: 1,
-            aggregateCoefficientUpperBoundMultiplier: 10,
+            recipientShareCoefficientUpperBoundMultiplier: 1_111,
+            aggregateCoefficientUpperBoundMultiplier: 11_110,
         });
         expect(binding.parameterReviewInputs).toMatchObject({
             inputVersion: 1,
@@ -752,13 +695,13 @@ describe('compact VSS development commitments', () => {
             openingWitnessRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-fresh-opening-witness',
-                    messageCoefficientUpperBoundMultiplier: 1,
+                    messageCoefficientUpperBoundMultiplier: 1_111,
                     randomnessDifferenceInfinityBound: 2,
                     witnessCoefficientCount: 131_072,
                 }),
                 expect.objectContaining({
                     rowId: 'compact-vss-aggregate-opening-witness',
-                    messageCoefficientUpperBoundMultiplier: 10,
+                    messageCoefficientUpperBoundMultiplier: 11_110,
                     randomnessCoefficientInfinityBound: 10,
                     randomnessDifferenceInfinityBound: 20,
                     witnessCoefficientCount: 131_072,
@@ -960,6 +903,35 @@ describe('compact VSS development commitments', () => {
                 trusteeRosterPosition: 1,
             },
         ];
+        const coefficientOpeningRandomness = ({
+            trusteeRosterPosition,
+            shamirCoefficientIndex,
+            ringDegree,
+        }: {
+            readonly trusteeRosterPosition: number;
+            readonly shamirCoefficientIndex: number;
+            readonly ringDegree: number;
+        }): readonly (readonly number[])[] => [
+            Array.from(
+                { length: ringDegree },
+                (_unused, coefficientIndex) =>
+                    ((trusteeRosterPosition +
+                        shamirCoefficientIndex +
+                        coefficientIndex) %
+                        3) -
+                    1,
+            ),
+            Array.from(
+                { length: ringDegree },
+                (_unused, coefficientIndex) =>
+                    ((trusteeRosterPosition +
+                        shamirCoefficientIndex +
+                        coefficientIndex +
+                        1) %
+                        3) -
+                    1,
+            ),
+        ];
         const coefficientCommitmentSet =
             createCompactVssCoefficientCommitmentSet({
                 setupContext,
@@ -969,31 +941,7 @@ describe('compact VSS development commitments', () => {
                 ringDegree: 4,
                 thresholdDegree: 2,
                 sourceTrusteeOpeningStates,
-                coefficientOpeningRandomness: ({
-                    trusteeRosterPosition,
-                    shamirCoefficientIndex,
-                    ringDegree,
-                }) => [
-                    Array.from(
-                        { length: ringDegree },
-                        (_unused, coefficientIndex) =>
-                            ((trusteeRosterPosition +
-                                shamirCoefficientIndex +
-                                coefficientIndex) %
-                                3) -
-                            1,
-                    ),
-                    Array.from(
-                        { length: ringDegree },
-                        (_unused, coefficientIndex) =>
-                            ((trusteeRosterPosition +
-                                shamirCoefficientIndex +
-                                coefficientIndex +
-                                1) %
-                                3) -
-                            1,
-                    ),
-                ],
+                coefficientOpeningRandomness,
             });
         const recipientShareBundle =
             createCompactVssRecipientShareCommitmentBundle({
@@ -1003,33 +951,10 @@ describe('compact VSS development commitments', () => {
                 qSharePrimes: [65_537],
                 ringDegree: 4,
                 thresholdDegree: 2,
+                coefficientCommitmentSet,
                 sourceTrusteeOpeningStates,
                 recipientTrustees,
-                shareOpeningRandomness: ({
-                    trusteeRosterPosition,
-                    recipientRosterPosition,
-                    ringDegree,
-                }) => [
-                    Array.from(
-                        { length: ringDegree },
-                        (_unused, coefficientIndex) =>
-                            ((trusteeRosterPosition +
-                                recipientRosterPosition +
-                                coefficientIndex) %
-                                3) -
-                            1,
-                    ),
-                    Array.from(
-                        { length: ringDegree },
-                        (_unused, coefficientIndex) =>
-                            ((trusteeRosterPosition +
-                                recipientRosterPosition +
-                                coefficientIndex +
-                                1) %
-                                3) -
-                            1,
-                    ),
-                ],
+                coefficientOpeningRandomness,
             });
 
         expect(coefficientCommitmentSet.sourceTrusteeRecords).toHaveLength(2);
@@ -1085,9 +1010,6 @@ describe('compact VSS development commitments', () => {
             aggregateBundle.aggregateThresholdCommitmentSet.recipientRecords,
         ).toHaveLength(2);
         expect(
-            aggregateBundle.aggregateThresholdOpeningCredentials,
-        ).toHaveLength(2);
-        expect(
             verifyCompactVssShareLinkageStatement({
                 statement: linkageStatement,
                 coefficientCommitmentSet,
@@ -1123,239 +1045,6 @@ describe('compact VSS development commitments', () => {
                 aggregateBundle.aggregateThresholdCommitmentSet
                     .aggregateThresholdCommitmentRoot,
         });
-        const proofMaterialInputs: CompactVssShareLinkageProofMaterialInput[] =
-            linkageStatement.sourceStatementRecords.map((sourceStatement) => {
-                const sourceRnsLimbIndex = 0;
-                const proofItems = Array.from(
-                    { length: linkageStatement.participantCount },
-                    (_unusedRecipient, recipientRosterPosition) => {
-                        const recipientShareOpeningRoot =
-                            sourceStatement.recipientShareOpeningRoots[
-                                recipientRosterPosition *
-                                    linkageStatement.targetRnsLimbCount +
-                                    sourceRnsLimbIndex
-                            ];
-                        if (recipientShareOpeningRoot === undefined) {
-                            throw new Error(
-                                'compact VSS fixture did not create recipient-share opening roots.',
-                            );
-                        }
-
-                        return {
-                            recipientIdentity: `recipient-${recipientRosterPosition}`,
-                            recipientRosterPosition,
-                            sourceRnsLimbIndex,
-                            sourceMessageModulus:
-                                acceptedBgvSetupQSharePrimes[0] ?? 65_537,
-                            coefficientCommitmentRoots:
-                                sourceStatement.coefficientOpeningRoots
-                                    .slice(0, sourceStatement.thresholdDegree)
-                                    .map(
-                                        (
-                                            _unusedOpeningRoot,
-                                            coefficientIndex,
-                                        ) =>
-                                            deriveProtocolHash(
-                                                'SetupCommitmentRoot',
-                                                {
-                                                    fixture: 'compact-vss',
-                                                    label: 'restricted-coefficient-commitment',
-                                                    sourceTrusteeIdentity:
-                                                        sourceStatement.sourceTrusteeIdentity,
-                                                    coefficientIndex,
-                                                },
-                                            ),
-                                    ),
-                            coefficientOpeningRoots:
-                                sourceStatement.coefficientOpeningRoots.slice(
-                                    0,
-                                    sourceStatement.thresholdDegree,
-                                ),
-                            recipientShareCommitmentRoot: deriveProtocolHash(
-                                'SetupCommitmentRoot',
-                                {
-                                    fixture: 'compact-vss',
-                                    label: 'restricted-recipient-share',
-                                    sourceTrusteeIdentity:
-                                        sourceStatement.sourceTrusteeIdentity,
-                                    recipientRosterPosition,
-                                },
-                            ),
-                            recipientShareOpeningRoot,
-                        };
-                    },
-                );
-                const [primaryProofItem, ...additionalLinkageItems] =
-                    proofItems;
-                if (primaryProofItem === undefined) {
-                    throw new Error(
-                        'compact VSS fixture did not create proof statement items.',
-                    );
-                }
-                return {
-                    sourceStatementRoot: sourceStatement.sourceStatementRoot,
-                    proofRecords: [
-                        {
-                            proofStatementHash: deriveProtocolHash(
-                                'SetupProofRecordBindingHash',
-                                {
-                                    fixture: 'compact-vss',
-                                    label: 'batched-share-linkage-proof-statement',
-                                    sourceTrusteeIdentity:
-                                        sourceStatement.sourceTrusteeIdentity,
-                                },
-                            ),
-                            proofBytesHex: 'ab'.repeat(
-                                32 +
-                                    sourceStatement.sourceTrusteeRosterPosition,
-                            ),
-                        },
-                    ].map((proofRecord) => ({
-                        ...proofRecord,
-                        proofStatement: {
-                            proofStatementHash: proofRecord.proofStatementHash,
-                            context: {
-                                ceremonyId: linkageStatement.ceremonyId,
-                                manifestHash: linkageStatement.manifestHash,
-                                rosterHash: linkageStatement.rosterHash,
-                                trusteeIdentity:
-                                    sourceStatement.sourceTrusteeIdentity,
-                                trusteeRosterPosition:
-                                    sourceStatement.sourceTrusteeRosterPosition,
-                                setupEpoch: linkageStatement.setupEpoch,
-                            },
-                            compactVssShareLinkage: {
-                                publicMatrixSeedHash:
-                                    linkageStatement.publicMatrixSeedHash,
-                                sourceTrusteeIdentity:
-                                    sourceStatement.sourceTrusteeIdentity,
-                                sourceTrusteeRosterPosition:
-                                    sourceStatement.sourceTrusteeRosterPosition,
-                                sourceCoefficientCommitmentRoot:
-                                    sourceStatement.sourceCoefficientCommitmentRoot,
-                                sourceRecipientShareCommitmentRoot:
-                                    sourceStatement.sourceRecipientShareCommitmentRoot,
-                                ...primaryProofItem,
-                                additionalLinkageItems,
-                            },
-                        },
-                    })),
-                };
-            });
-        const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
-            statement: linkageStatement,
-            proofMaterialInputs,
-        });
-        expect(
-            verifyCompactVssShareLinkageProofMaterialSet({
-                statement: linkageStatement,
-                proofMaterialSet,
-                coefficientCommitmentSet,
-                recipientShareCommitmentSet:
-                    recipientShareBundle.recipientShareCommitmentSet,
-            }),
-        ).toBe(proofMaterialSet);
-        expect(proofMaterialSet).toMatchObject({
-            objectType: 'CompactVssShareLinkageProofMaterialSet',
-            proofFamily: compactVssShareLinkageProofFamily,
-            participantCount: 2,
-            shareLinkageStatementRoot: linkageStatement.statementRoot,
-        });
-        expect(proofMaterialSet.proofMaterials[0]).toMatchObject({
-            objectType: 'CompactVssShareLinkageProofMaterial',
-            sourceTrusteeIdentity: 'source-0',
-            sourceTrusteeRosterPosition: 0,
-            sourceStatementRoot:
-                linkageStatement.sourceStatementRecords[0]?.sourceStatementRoot,
-        });
-        expect(
-            proofMaterialSet.proofMaterials[0]?.proofRecords.map(
-                (proofRecord) => proofRecord.objectType,
-            ),
-        ).toEqual(['CompactVssShareLinkageProofRecord']);
-        expect(
-            proofMaterialSet.proofMaterials[0]?.proofRecords[0]?.linkageItems,
-        ).toEqual([
-            {
-                recipientRosterPosition: 0,
-                sourceRnsLimbIndex: 0,
-            },
-            {
-                recipientRosterPosition: 1,
-                sourceRnsLimbIndex: 0,
-            },
-        ]);
-        const binaryProofMaterialTransport =
-            encodeCompactVssShareLinkageProofMaterialSetBinary(
-                proofMaterialSet,
-            );
-        expect(binaryProofMaterialTransport).toMatchObject({
-            objectType: 'CompactVssShareLinkageBinaryProofMaterialTransport',
-            objectVersion: 1,
-            proofFamily: compactVssShareLinkageProofFamily,
-            proofMaterialSetRoot: proofMaterialSet.proofMaterialSetRoot,
-            shareLinkageStatementRoot: linkageStatement.statementRoot,
-        });
-        expect(binaryProofMaterialTransport.chunkHashes).toHaveLength(
-            binaryProofMaterialTransport.chunkCount,
-        );
-        expect(
-            binaryProofMaterialTransport.chunks.reduce(
-                (totalByteLength, chunk) => totalByteLength + chunk.byteLength,
-                0,
-            ),
-        ).toBe(binaryProofMaterialTransport.totalByteLength);
-        expect(binaryProofMaterialTransport.totalByteLength).toBeLessThan(
-            Buffer.byteLength(JSON.stringify(proofMaterialSet), 'utf8'),
-        );
-        expect(() =>
-            encodeCompactVssShareLinkageProofMaterialSetBinary({
-                ...proofMaterialSet,
-                proofMaterialSetRoot: '00'.repeat(64),
-            }),
-        ).toThrow(/root/u);
-        const repeatedProofInputRoot =
-            proofMaterialInputs[0]?.sourceStatementRoot;
-        if (repeatedProofInputRoot === undefined) {
-            throw new Error(
-                'compact VSS fixture did not create proof material inputs.',
-            );
-        }
-        expect(() =>
-            createCompactVssShareLinkageProofMaterialSet({
-                statement: linkageStatement,
-                proofMaterialInputs: proofMaterialInputs.map(
-                    (proofMaterialInput, proofMaterialIndex) =>
-                        proofMaterialIndex === 1
-                            ? {
-                                  ...proofMaterialInput,
-                                  sourceStatementRoot: repeatedProofInputRoot,
-                              }
-                            : proofMaterialInput,
-                ),
-            }),
-        ).toThrow(/must not repeat/u);
-        const proofMaterialSetWithTamperedRecordBytes =
-            structuredClone(proofMaterialSet);
-        const tamperedProofMaterialSetBytes =
-            proofMaterialSetWithTamperedRecordBytes as unknown as MutableCompactVssProofMaterialSetBytes;
-        const tamperedProofRecord =
-            tamperedProofMaterialSetBytes.proofMaterials[0]?.proofRecords[0];
-        if (tamperedProofRecord === undefined) {
-            throw new Error(
-                'compact VSS proof material fixture did not create a proof record.',
-            );
-        }
-        tamperedProofRecord.proofBytesBase64 = '/w==';
-        expect(() =>
-            verifyCompactVssShareLinkageProofMaterialSet({
-                statement: linkageStatement,
-                proofMaterialSet: proofMaterialSetWithTamperedRecordBytes,
-                coefficientCommitmentSet,
-                recipientShareCommitmentSet:
-                    recipientShareBundle.recipientShareCommitmentSet,
-            }),
-        ).toThrow(/proofBytesHash/u);
         const rebindLinkageStatementRoot = (
             statement: typeof linkageStatement,
         ): typeof linkageStatement => {
@@ -1405,11 +1094,13 @@ describe('compact VSS development commitments', () => {
                         : sourceStatement,
             ),
         });
-        expect(
+        expect(() =>
             verifyCompactVssShareLinkageStatement({
                 statement: forgedSourceRecipientRootStatement,
-            }),
-        ).toBe(forgedSourceRecipientRootStatement);
+            } as unknown as Parameters<
+                typeof verifyCompactVssShareLinkageStatement
+            >[0]),
+        ).toThrow(/requires coefficient, recipient-share, and aggregate/u);
         expect(() =>
             verifyCompactVssShareLinkageStatement({
                 statement: forgedSourceRecipientRootStatement,
@@ -1443,11 +1134,13 @@ describe('compact VSS development commitments', () => {
                         : sourceStatement,
             ),
         });
-        expect(
+        expect(() =>
             verifyCompactVssShareLinkageStatement({
                 statement: forgedOpeningRootStatement,
-            }),
-        ).toBe(forgedOpeningRootStatement);
+            } as unknown as Parameters<
+                typeof verifyCompactVssShareLinkageStatement
+            >[0]),
+        ).toThrow(/requires coefficient, recipient-share, and aggregate/u);
         expect(() =>
             verifyCompactVssShareLinkageStatement({
                 statement: forgedOpeningRootStatement,
@@ -1470,6 +1163,11 @@ describe('compact VSS development commitments', () => {
                         },
                     ),
                 },
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareBundle.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    aggregateBundle.aggregateThresholdCommitmentSet,
             }),
         ).toThrow(/linkage statement root/u);
         expect(() =>
@@ -1682,6 +1380,11 @@ describe('compact VSS development commitments', () => {
                                     : sourceStatement,
                         ),
                 }),
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareBundle.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    aggregateBundle.aggregateThresholdCommitmentSet,
             }),
         ).toThrow(/source statement root/u);
         expect(() =>
@@ -1690,19 +1393,13 @@ describe('compact VSS development commitments', () => {
                     ...linkageStatement,
                     objectType: 'UnsupportedCompactVssStatement',
                 } as unknown as typeof linkageStatement),
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    recipientShareBundle.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    aggregateBundle.aggregateThresholdCommitmentSet,
             }),
         ).toThrow(/objectType/u);
-        expect(
-            aggregateBundle.aggregateThresholdOpeningCredentials.find(
-                (credential) => credential.recipientIdentity === 'recipient-0',
-            )?.aggregateShareValues,
-        ).toEqual([66, 88, 110, 132]);
-        expect(
-            aggregateBundle.aggregateThresholdOpeningCredentials.find(
-                (credential) => credential.recipientIdentity === 'recipient-1',
-            )?.aggregateShareValues,
-        ).toEqual([126, 168, 210, 252]);
-
         const firstCredential =
             recipientShareBundle.recipientShareOpeningCredentials[0];
         if (firstCredential === undefined) {
@@ -1749,6 +1446,48 @@ describe('compact VSS development commitments', () => {
                 trusteeRosterPosition,
             }),
         );
+        const coefficientOpeningRandomness = ({
+            trusteeRosterPosition,
+            shamirCoefficientIndex,
+            rnsLimbIndex,
+            ringDegree: randomnessRingDegree,
+        }: {
+            readonly trusteeRosterPosition: number;
+            readonly shamirCoefficientIndex: number;
+            readonly rnsLimbIndex: number;
+            readonly ringDegree: number;
+        }): readonly (readonly number[])[] => [
+            Array.from(
+                { length: randomnessRingDegree },
+                (_unused, coefficientPosition) =>
+                    ((trusteeRosterPosition * 2 +
+                        shamirCoefficientIndex * 3 +
+                        rnsLimbIndex +
+                        coefficientPosition) %
+                        5) -
+                    2,
+            ),
+            Array.from(
+                { length: randomnessRingDegree },
+                (_unused, coefficientPosition) =>
+                    (((trusteeRosterPosition + 1) * (coefficientPosition + 1) +
+                        shamirCoefficientIndex +
+                        rnsLimbIndex * 2) %
+                        7) -
+                    3,
+            ),
+        ];
+        const coefficientCommitmentSet =
+            createCompactVssCoefficientCommitmentSet({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                sourceTrusteeOpeningStates,
+                coefficientOpeningRandomness,
+            });
 
         const recipientShareBundle =
             createCompactVssRecipientShareCommitmentBundle({
@@ -1758,35 +1497,10 @@ describe('compact VSS development commitments', () => {
                 qSharePrimes,
                 ringDegree,
                 thresholdDegree,
+                coefficientCommitmentSet,
                 sourceTrusteeOpeningStates,
                 recipientTrustees,
-                shareOpeningRandomness: ({
-                    trusteeRosterPosition,
-                    recipientRosterPosition,
-                    rnsLimbIndex,
-                    ringDegree: randomnessRingDegree,
-                }) => [
-                    Array.from(
-                        { length: randomnessRingDegree },
-                        (_unused, coefficientPosition) =>
-                            ((trusteeRosterPosition * 2 +
-                                recipientRosterPosition * 3 +
-                                rnsLimbIndex +
-                                coefficientPosition) %
-                                5) -
-                            2,
-                    ),
-                    Array.from(
-                        { length: randomnessRingDegree },
-                        (_unused, coefficientPosition) =>
-                            (((trusteeRosterPosition + 1) *
-                                (coefficientPosition + 1) +
-                                recipientRosterPosition +
-                                rnsLimbIndex * 2) %
-                                7) -
-                            3,
-                    ),
-                ],
+                coefficientOpeningRandomness,
             });
         expect(
             recipientShareBundle.recipientShareOpeningCredentials,
@@ -1847,60 +1561,364 @@ describe('compact VSS development commitments', () => {
                 recipientShareBundle.recipientShareOpeningCredentials,
         });
         expect(
-            aggregateBundle.aggregateThresholdOpeningCredentials,
+            aggregateBundle.aggregateThresholdCommitmentSet.recipientRecords,
         ).toHaveLength(participantCount * qSharePrimes.length);
         recipientTrustees.forEach((recipientTrustee) => {
             qSharePrimes.forEach((rnsPrime, rnsLimbIndex) => {
-                const aggregateCredential = findAggregateThresholdCredential(
-                    aggregateBundle.aggregateThresholdOpeningCredentials,
-                    {
-                        recipientRosterPosition:
-                            recipientTrustee.trusteeRosterPosition,
-                        rnsLimbIndex,
-                    },
-                );
-                expect(aggregateCredential.recipientTrusteePoint).toBe(
+                const aggregateRecord =
+                    aggregateBundle.aggregateThresholdCommitmentSet.recipientRecords.find(
+                        (record) =>
+                            record.recipientRosterPosition ===
+                                recipientTrustee.trusteeRosterPosition &&
+                            record.rnsLimbIndex === rnsLimbIndex,
+                    );
+                if (aggregateRecord === undefined) {
+                    throw new Error(
+                        'compact VSS test fixture is missing an aggregate threshold record.',
+                    );
+                }
+                expect(aggregateRecord.recipientTrusteePoint).toBe(
                     recipientTrustee.trusteeRosterPosition + 1,
                 );
-                expect(aggregateCredential.rnsPrime).toBe(rnsPrime);
-                const expectedAggregateShareSum = expectedAggregateVssShareSum({
-                    sourceTrusteeOpeningStates,
-                    recipientRosterPosition:
-                        recipientTrustee.trusteeRosterPosition,
-                    rnsLimbIndex,
-                    rnsPrime,
-                    ringDegree,
-                    thresholdDegree,
-                });
-                expect(aggregateCredential.aggregateShareValues).toEqual(
-                    expectedAggregateShareSum.aggregateShareValues,
-                );
-                expect(
-                    aggregateCredential.aggregateCommitmentMessageValues,
-                ).toEqual(
-                    expectedAggregateShareSum.aggregateCommitmentMessageValues,
-                );
-                expect(
-                    verifyCompactVssAggregateOpeningCredential({
-                        credential: aggregateCredential,
-                        participantCount,
-                        ringDegree,
-                    }),
-                ).toBe(aggregateCredential);
+                expect(aggregateRecord.rnsPrime).toBe(rnsPrime);
             });
         });
-        const selectedAggregateCredential = findAggregateThresholdCredential(
-            aggregateBundle.aggregateThresholdOpeningCredentials,
+    });
+
+    it('derives recipient-share commitments from coefficient commitments with carried digit columns', () => {
+        const participantCount = 3;
+        const qSharePrimes = [1_000_000_007, 1_000_000_009];
+        const derivedRnsLimbCount = 1;
+        const targetQSharePrimes = qSharePrimes.slice(0, derivedRnsLimbCount);
+        const ringDegree = 3;
+        const thresholdDegree = 3;
+        const sourceTrusteeOpeningStates = Array.from(
+            { length: participantCount },
+            (_unusedSource, sourceTrusteeRosterPosition) => ({
+                sourceTrusteeIdentity: `source-${String(sourceTrusteeRosterPosition)}`,
+                sourceTrusteeRosterPosition,
+                coefficientOpenings: qSharePrimes.flatMap(
+                    (rnsPrime, rnsLimbIndex) =>
+                        Array.from(
+                            { length: thresholdDegree },
+                            (_unusedCoefficient, shamirCoefficientIndex) => ({
+                                rnsLimbIndex,
+                                rnsPrime,
+                                shamirCoefficientIndex,
+                                coefficientMessage: Array.from(
+                                    { length: ringDegree },
+                                    (_unused, coefficientPosition) =>
+                                        residue(
+                                            BigInt(880_000_000) +
+                                                BigInt(
+                                                    sourceTrusteeRosterPosition *
+                                                        37_000_000 +
+                                                        shamirCoefficientIndex *
+                                                            41_000_000 +
+                                                        coefficientPosition *
+                                                            17_000_000,
+                                                ),
+                                            rnsPrime,
+                                        ),
+                                ),
+                                randomnessByColumn: [],
+                            }),
+                        ),
+                ),
+            }),
+        );
+        const recipientTrustees = Array.from(
+            { length: participantCount },
+            (_unused, trusteeRosterPosition) => ({
+                trusteeIdentity: `recipient-${String(trusteeRosterPosition)}`,
+                trusteeRosterPosition,
+            }),
+        );
+        const coefficientOpeningRandomness = ({
+            trusteeRosterPosition,
+            shamirCoefficientIndex,
+            ringDegree: randomnessRingDegree,
+        }: {
+            readonly trusteeRosterPosition: number;
+            readonly shamirCoefficientIndex: number;
+            readonly ringDegree: number;
+        }): readonly (readonly number[])[] => [
+            Array.from(
+                { length: randomnessRingDegree },
+                (_unused, coefficientPosition) =>
+                    ((trusteeRosterPosition +
+                        shamirCoefficientIndex +
+                        coefficientPosition) %
+                        3) -
+                    1,
+            ),
+            Array.from(
+                { length: randomnessRingDegree },
+                (_unused, coefficientPosition) =>
+                    ((trusteeRosterPosition * 2 +
+                        shamirCoefficientIndex +
+                        coefficientPosition) %
+                        3) -
+                    1,
+            ),
+        ];
+        const coefficientCommitmentSet =
+            createCompactVssCoefficientCommitmentSet({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                sourceTrusteeOpeningStates,
+                coefficientOpeningRandomness,
+            });
+        const derivedRecipientShareBundle =
+            createCompactVssDerivedRecipientShareCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                derivedRnsLimbCount,
+                ringDegree,
+                thresholdDegree,
+                coefficientCommitmentSet,
+                sourceTrusteeOpeningStates,
+                recipientTrustees,
+                coefficientOpeningRandomness,
+            });
+
+        expect(
+            verifyCompactVssRecipientShareCommitmentSet({
+                recipientShareCommitmentSet:
+                    derivedRecipientShareBundle.recipientShareCommitmentSet,
+            }),
+        ).toBe(derivedRecipientShareBundle.recipientShareCommitmentSet);
+        expect(
+            verifyCompactVssDerivedRecipientShareCommitmentSet({
+                setupContext,
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    derivedRecipientShareBundle.recipientShareCommitmentSet,
+                derivedRnsLimbCount,
+            }),
+        ).toBe(derivedRecipientShareBundle.recipientShareCommitmentSet);
+        expect(
+            derivedRecipientShareBundle.recipientShareCommitmentSet
+                .rnsLimbCount,
+        ).toBe(derivedRnsLimbCount);
+        const freshRecipientShareBundle =
+            createCompactVssRecipientShareCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes,
+                ringDegree,
+                thresholdDegree,
+                coefficientCommitmentSet,
+                sourceTrusteeOpeningStates,
+                recipientTrustees,
+                coefficientOpeningRandomness,
+            });
+        expect(() =>
+            verifyCompactVssDerivedRecipientShareCommitmentSet({
+                setupContext,
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    freshRecipientShareBundle.recipientShareCommitmentSet,
+            }),
+        ).toThrow(/derived recipient-share commitment/u);
+        const selectedSourceTrusteeOpeningState = sourceTrusteeOpeningStates[2];
+        if (selectedSourceTrusteeOpeningState === undefined) {
+            throw new Error('compact VSS test fixture is missing source 2.');
+        }
+        const selectedCredential = findRecipientShareCredential(
+            derivedRecipientShareBundle.recipientShareOpeningCredentials,
             {
+                sourceTrusteeRosterPosition: 2,
                 recipientRosterPosition: 2,
-                rnsLimbIndex: 1,
+                rnsLimbIndex: 0,
             },
         );
-        expect(selectedAggregateCredential.aggregateShareValues).toEqual([
-            78, 0, 25, 50, 75,
-        ]);
+        const selectedMessageValues = expectedPrivateVssShareMessageValues({
+            sourceTrusteeOpeningState: selectedSourceTrusteeOpeningState,
+            recipientRosterPosition: 2,
+            rnsLimbIndex: 0,
+            rnsPrime: qSharePrimes[0] ?? 1_000_000_007,
+            ringDegree,
+            thresholdDegree,
+        });
+        expect(selectedCredential.shareValues).toEqual(
+            selectedMessageValues.map((value) =>
+                residue(value, qSharePrimes[0] ?? 1_000_000_007),
+            ),
+        );
+        expect(selectedCredential.shareCommitmentMessageCarryValues).toEqual(
+            selectedMessageValues.map((value, valueIndex) =>
+                Number(
+                    (value -
+                        BigInt(
+                            selectedCredential.shareValues[valueIndex] ?? 0,
+                        )) /
+                        BigInt(qSharePrimes[0] ?? 1_000_000_007),
+                ),
+            ),
+        );
         expect(
-            selectedAggregateCredential.aggregateCommitmentMessageValues,
-        ).toEqual([181, 103, 128, 153, 75]);
+            selectedCredential.shareCommitmentMessageDigitColumns?.[0]?.some(
+                (value) => BigInt(value) > compactVssMessageDigitBase,
+            ),
+        ).toBe(true);
+
+        const selectedCommitmentRecord =
+            derivedRecipientShareBundle.recipientShareCommitmentSet
+                .sourceTrusteeRecords[2]?.recipientShareCommitments[2];
+        if (selectedCommitmentRecord === undefined) {
+            throw new Error(
+                'compact VSS test fixture is missing the selected derived commitment.',
+            );
+        }
+        const derivedRecipientShareContext = {
+            objectType: 'CompactVssDerivedRecipientShareCommitmentContext',
+            objectVersion: 1,
+            ...setupContext,
+            sourceTrusteeIdentity: 'source-2',
+            sourceTrusteeRosterPosition: 2,
+            recipientIdentity: 'recipient-2',
+            recipientRosterPosition: 2,
+            rnsLimbIndex: 0,
+            rnsPrime: qSharePrimes[0] ?? 1_000_000_007,
+        };
+        const selectedOpening = {
+            commitmentRole: 'recipient-share',
+            commitmentContext: derivedRecipientShareContext,
+            publicMatrixSeedHash,
+            rnsLimbIndex: 0,
+            rnsPrime: qSharePrimes[0] ?? 1_000_000_007,
+            ringDegree,
+            messageCoefficients: selectedMessageValues,
+            messageDigitColumns:
+                selectedCredential.shareCommitmentMessageDigitColumns,
+            messageCoefficientBound:
+                compactVssMessageDigitBase * compactVssMessageDigitBase,
+            randomnessByColumn: selectedCredential.randomnessByColumn,
+        } satisfies CompactVssCommitmentOpeningInput;
+        expect(
+            verifyCompactVssCommitmentOpening({
+                opening: selectedOpening,
+                expectedCommitmentRoot: selectedCredential.shareCommitmentRoot,
+            }).commitmentRoot,
+        ).toBe(selectedCredential.shareCommitmentRoot);
+
+        const coefficientCommitments =
+            coefficientCommitmentSet.sourceTrusteeRecords[2]?.coefficientCommitments.filter(
+                (record) => record.rnsLimbIndex === 0,
+            ) ?? [];
+        const combinedDerivedCommitment = combineCompactVssCommitments({
+            commitmentRole: 'recipient-share',
+            commitmentContext: derivedRecipientShareContext,
+            terms: coefficientCommitments.map(
+                (coefficientCommitment, coefficientIndex) => ({
+                    commitment: coefficientCommitment.commitment,
+                    scalar: 3 ** coefficientIndex,
+                }),
+            ),
+        });
+        expect(combinedDerivedCommitment.commitmentRoot).toBe(
+            selectedCredential.shareCommitmentRoot,
+        );
+        expect(selectedCommitmentRecord.shareCommitmentRoot).toBe(
+            selectedCredential.shareCommitmentRoot,
+        );
+
+        const aggregateBundle = aggregateCompactVssThresholdShareCommitments({
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount,
+            qSharePrimes: targetQSharePrimes,
+            ringDegree,
+            recipientTrustees,
+            recipientShareOpeningCredentials:
+                derivedRecipientShareBundle.recipientShareOpeningCredentials,
+        });
+        expect(
+            verifyCompactVssAggregateThresholdCommitmentSet({
+                aggregateThresholdCommitmentSet:
+                    aggregateBundle.aggregateThresholdCommitmentSet,
+            }),
+        ).toBe(aggregateBundle.aggregateThresholdCommitmentSet);
+        expect(
+            aggregateBundle.aggregateThresholdCommitmentSet.recipientRecords,
+        ).toHaveLength(participantCount * derivedRnsLimbCount);
+
+        const targetBasisHash = deriveProtocolHash('TargetBasisHash', {
+            fixture: 'compact-vss',
+            label: 'target-prefix-derived-recipient-shares',
+        });
+        const linkageStatement = createCompactVssShareLinkageStatement({
+            setupContext,
+            publicMatrixSeedHash,
+            targetBasisHash,
+            coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                derivedRecipientShareBundle.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                aggregateBundle.aggregateThresholdCommitmentSet,
+        });
+        expect(linkageStatement.targetRnsLimbCount).toBe(derivedRnsLimbCount);
+        linkageStatement.sourceStatementRecords.forEach(
+            (sourceStatementRecord) => {
+                expect(
+                    sourceStatementRecord.coefficientOpeningRoots,
+                ).toHaveLength(thresholdDegree * derivedRnsLimbCount);
+                expect(
+                    sourceStatementRecord.recipientShareOpeningRoots,
+                ).toHaveLength(participantCount * derivedRnsLimbCount);
+            },
+        );
+        expect(
+            verifyCompactVssShareLinkageStatement({
+                statement: linkageStatement,
+                coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    derivedRecipientShareBundle.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    aggregateBundle.aggregateThresholdCommitmentSet,
+            }),
+        ).toBe(linkageStatement);
+
+        const tamperedDigitColumns =
+            selectedCredential.shareCommitmentMessageDigitColumns?.map(
+                (column, digitIndex) =>
+                    digitIndex === 0
+                        ? [BigInt(column[0] ?? 0) + 1n, ...column.slice(1)]
+                        : column,
+            );
+        if (tamperedDigitColumns === undefined) {
+            throw new Error(
+                'compact VSS test fixture did not produce derived digit columns.',
+            );
+        }
+        expect(() =>
+            aggregateCompactVssThresholdShareCommitments({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount,
+                qSharePrimes: targetQSharePrimes,
+                ringDegree,
+                recipientTrustees,
+                recipientShareOpeningCredentials:
+                    derivedRecipientShareBundle.recipientShareOpeningCredentials.map(
+                        (credential) =>
+                            credential === selectedCredential
+                                ? {
+                                      ...credential,
+                                      shareCommitmentMessageDigitColumns:
+                                          tamperedDigitColumns,
+                                  }
+                                : credential,
+                    ),
+            }),
+        ).toThrow(/message digit columns/u);
     });
 });

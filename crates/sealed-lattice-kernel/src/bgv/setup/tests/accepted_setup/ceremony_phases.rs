@@ -136,7 +136,7 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["relation"],
-        "C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c"
+        "C = A_message * m + A_randomness * r mod q_c"
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["projectionWeight"],
@@ -193,12 +193,22 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["normInputClasses"][1]["aggregateCoefficientUpperBoundMultiplier"],
-        serde_json::json!(10_u64)
+        serde_json::json!(11_110_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["openingWitnessRows"]
+            [0]["messageCoefficientUpperBoundMultiplier"],
+        serde_json::json!(1_111_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["openingWitnessRows"]
             [0]["witnessCoefficientCount"],
         serde_json::json!(131_072_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["openingWitnessRows"]
+            [1]["messageCoefficientUpperBoundMultiplier"],
+        serde_json::json!(11_110_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["openingWitnessRows"]

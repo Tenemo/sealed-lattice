@@ -282,6 +282,8 @@ fn compact_vss_share_linkage_vectors_match_carried_share_openings() {
             recipient_share_commitment: &recipient_share_commitment,
             relation_alpha: &relation_alpha,
             u_power_vectors: &u_power_vectors,
+            coefficient_message_range_evidence: crate::bgv::setup::compact_vss_commitment::CompactVssMessageRangeEvidence::DigitAndTritColumns,
+            recipient_message_range_evidence: crate::bgv::setup::compact_vss_commitment::CompactVssMessageRangeEvidence::DigitAndTritColumns,
         },
         &tower,
     )

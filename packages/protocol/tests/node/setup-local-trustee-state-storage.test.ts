@@ -8,8 +8,11 @@ import { describe, expect, it } from 'vitest';
 import {
     aggregateCompactVssThresholdShareCommitments,
     createCompactVssCoefficientCommitmentSet,
+    createCompactVssDerivedRecipientShareCommitmentBundle,
     createCompactVssRecipientShareCommitmentBundle,
     createCompactVssShareLinkageStatement,
+    encodeCompactVssTernaryRandomnessColumnsHex,
+    type CompactVssRecipientShareOpeningCredential,
 } from '#packages/protocol/src/setup/compact-vss-commitments';
 import {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
@@ -74,6 +77,190 @@ const shareValuesToLittleEndian48Hex = (
     return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join(
         '',
     );
+};
+
+const unsignedIntegerVectorToLittleEndianBitPackedBytes = (
+    values: readonly number[],
+    bitWidth: number,
+    fieldName: string,
+): Uint8Array => {
+    const valueBound = 1 << bitWidth;
+    const bytes = new Uint8Array(Math.ceil((values.length * bitWidth) / 8));
+    values.forEach((value, valueIndex) => {
+        if (!Number.isSafeInteger(value) || value < 0 || value >= valueBound) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must fit unsigned ${String(bitWidth)}-bit encoding.`,
+            );
+        }
+        let remainingValue = value;
+        let bitOffset = valueIndex * bitWidth;
+        for (let consumedBits = 0; consumedBits < bitWidth; ) {
+            const byteIndex = Math.floor(bitOffset / 8);
+            const bitIndexInByte = bitOffset % 8;
+            const chunkBitCount = Math.min(
+                8 - bitIndexInByte,
+                bitWidth - consumedBits,
+            );
+            const chunkMask = (1 << chunkBitCount) - 1;
+            bytes[byteIndex] =
+                (bytes[byteIndex] ?? 0) |
+                ((remainingValue & chunkMask) << bitIndexInByte);
+            remainingValue = Math.floor(remainingValue / (1 << chunkBitCount));
+            bitOffset += chunkBitCount;
+            consumedBits += chunkBitCount;
+        }
+    });
+
+    return bytes;
+};
+
+const unsignedIntegerVectorToLittleEndianBitPackedBase64 = (
+    values: readonly number[],
+    bitWidth: number,
+    fieldName: string,
+): string =>
+    Buffer.from(
+        unsignedIntegerVectorToLittleEndianBitPackedBytes(
+            values,
+            bitWidth,
+            fieldName,
+        ),
+    ).toString('base64');
+
+const unsignedIntegerVectorToLittleEndianBitPackedBigIntBytes = (
+    values: readonly (number | bigint)[],
+    bitWidth: number,
+    fieldName: string,
+): Uint8Array => {
+    const maximumValueExclusive = 1n << BigInt(bitWidth);
+    const bytes = new Uint8Array(Math.ceil((values.length * bitWidth) / 8));
+    values.forEach((value, valueIndex) => {
+        const valueWide =
+            typeof value === 'bigint'
+                ? value
+                : Number.isSafeInteger(value)
+                  ? BigInt(value)
+                  : undefined;
+        if (
+            valueWide === undefined ||
+            valueWide < 0n ||
+            valueWide >= maximumValueExclusive
+        ) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must fit unsigned ${String(bitWidth)}-bit encoding.`,
+            );
+        }
+        let bitOffset = valueIndex * bitWidth;
+        for (let consumedBits = 0; consumedBits < bitWidth; ) {
+            const byteIndex = Math.floor(bitOffset / 8);
+            const bitIndexInByte = bitOffset % 8;
+            const chunkBitCount = Math.min(
+                8 - bitIndexInByte,
+                bitWidth - consumedBits,
+            );
+            const chunkMask = (1n << BigInt(chunkBitCount)) - 1n;
+            bytes[byteIndex] =
+                (bytes[byteIndex] ?? 0) |
+                (Number((valueWide >> BigInt(consumedBits)) & chunkMask) <<
+                    bitIndexInByte);
+            bitOffset += chunkBitCount;
+            consumedBits += chunkBitCount;
+        }
+    });
+
+    return bytes;
+};
+
+const unsignedIntegerVectorToLittleEndianBitPackedBigIntBase64 = (
+    values: readonly (number | bigint)[],
+    bitWidth: number,
+    fieldName: string,
+): string =>
+    Buffer.from(
+        unsignedIntegerVectorToLittleEndianBitPackedBigIntBytes(
+            values,
+            bitWidth,
+            fieldName,
+        ),
+    ).toString('base64');
+
+const unsignedIntegerBitWidth = (
+    values: readonly (number | bigint)[],
+    fieldName: string,
+): number => {
+    let maximumValue = 0n;
+    values.forEach((value, valueIndex) => {
+        const valueWide =
+            typeof value === 'bigint'
+                ? value
+                : Number.isSafeInteger(value)
+                  ? BigInt(value)
+                  : undefined;
+        if (valueWide === undefined || valueWide < 0n) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must be a non-negative integer.`,
+            );
+        }
+        maximumValue = maximumValue > valueWide ? maximumValue : valueWide;
+    });
+    let bitWidth = 1;
+    while (1n << BigInt(bitWidth) <= maximumValue) {
+        bitWidth += 1;
+        if (bitWidth > 64) {
+            throw new TypeError(`${fieldName} must fit unsigned 64-bit words.`);
+        }
+    }
+
+    return bitWidth;
+};
+
+const compactRecipientCredentialForPrivateEnvelope = (
+    credential: CompactVssRecipientShareOpeningCredential,
+): Record<string, unknown> => {
+    const {
+        shareValues: _shareValues,
+        shareCommitmentMessageCarryValues,
+        shareCommitmentMessageDigitColumns,
+        randomnessByColumn,
+        ...credentialWithoutPrivateVectors
+    } = credential;
+    void _shareValues;
+    if (shareCommitmentMessageDigitColumns === undefined) {
+        throw new Error(
+            'compact VSS test fixture must use a derived recipient credential.',
+        );
+    }
+    const digitColumnBitWidths = shareCommitmentMessageDigitColumns.map(
+        (digitColumn, digitIndex) =>
+            unsignedIntegerBitWidth(
+                digitColumn,
+                `shareCommitmentMessageDigitColumns.${String(digitIndex)}`,
+            ),
+    );
+
+    return {
+        ...credentialWithoutPrivateVectors,
+        shareCommitmentMessageCarryValuesPacked11Base64:
+            unsignedIntegerVectorToLittleEndianBitPackedBase64(
+                shareCommitmentMessageCarryValues,
+                11,
+                'shareCommitmentMessageCarryValues',
+            ),
+        shareCommitmentMessageDigitColumnBitWidths: digitColumnBitWidths,
+        shareCommitmentMessageDigitColumnsPackedBase64:
+            shareCommitmentMessageDigitColumns.map((digitColumn, digitIndex) =>
+                unsignedIntegerVectorToLittleEndianBitPackedBigIntBase64(
+                    digitColumn,
+                    digitColumnBitWidths[digitIndex] ?? 1,
+                    `shareCommitmentMessageDigitColumns.${String(digitIndex)}`,
+                ),
+            ),
+        randomnessByColumnPackedTernaryHex:
+            encodeCompactVssTernaryRandomnessColumnsHex(
+                randomnessByColumn,
+                credential.shareValues.length,
+            ),
+    };
 };
 
 const localStatePlaintext = async (): Promise<LocalStatePlaintextFixture> => {
@@ -295,6 +482,18 @@ const compactTargetProofWitness = (): CompactTargetProofWitnessFixture => {
             trusteeRosterPosition: 0,
         },
     ];
+    const coefficientOpeningRandomness = ({
+        ringDegree,
+    }: {
+        readonly ringDegree: number;
+    }): readonly (readonly number[])[] => [
+        Array.from({ length: ringDegree }, (_unused, index) =>
+            index % 2 === 0 ? 1 : 0,
+        ),
+        Array.from({ length: ringDegree }, (_unused, index) =>
+            index % 2 === 0 ? -1 : 1,
+        ),
+    ];
     const coefficientCommitmentSet = createCompactVssCoefficientCommitmentSet({
         setupContext,
         publicMatrixSeedHash,
@@ -303,14 +502,7 @@ const compactTargetProofWitness = (): CompactTargetProofWitnessFixture => {
         ringDegree: 4,
         thresholdDegree: 1,
         sourceTrusteeOpeningStates,
-        coefficientOpeningRandomness: ({ ringDegree }) => [
-            Array.from({ length: ringDegree }, (_unused, index) =>
-                index % 2 === 0 ? 1 : 0,
-            ),
-            Array.from({ length: ringDegree }, (_unused, index) =>
-                index % 2 === 0 ? -1 : 1,
-            ),
-        ],
+        coefficientOpeningRandomness,
     });
     const recipientShareBundle = createCompactVssRecipientShareCommitmentBundle(
         {
@@ -320,16 +512,10 @@ const compactTargetProofWitness = (): CompactTargetProofWitnessFixture => {
             qSharePrimes: [65_537],
             ringDegree: 4,
             thresholdDegree: 1,
+            coefficientCommitmentSet,
             sourceTrusteeOpeningStates,
             recipientTrustees,
-            shareOpeningRandomness: ({ ringDegree }) => [
-                Array.from({ length: ringDegree }, (_unused, index) =>
-                    index % 2 === 0 ? 1 : -1,
-                ),
-                Array.from({ length: ringDegree }, (_unused, index) =>
-                    index % 2 === 0 ? 0 : 1,
-                ),
-            ],
+            coefficientOpeningRandomness,
         },
     );
     const aggregateBundle = aggregateCompactVssThresholdShareCommitments({
@@ -359,13 +545,104 @@ const compactTargetProofWitness = (): CompactTargetProofWitnessFixture => {
             recipientShareBundle.recipientShareCommitmentSet,
         aggregateThresholdCommitmentSet:
             aggregateBundle.aggregateThresholdCommitmentSet,
-        aggregateThresholdOpeningCredentials:
-            aggregateBundle.aggregateThresholdOpeningCredentials,
         recipientShareOpeningCredentials:
             recipientShareBundle.recipientShareOpeningCredentials,
         shareLinkageStatement,
     } as const;
 };
+
+const compactTargetProofWitnessWithDerivedRecipientShares =
+    (): CompactTargetProofWitnessFixture => {
+        const publicMatrixSeedHash = fixtureHash('compact-public-matrix-seed');
+        const sourceTrusteeOpeningStates = [
+            {
+                sourceTrusteeIdentity: 'trustee-0',
+                sourceTrusteeRosterPosition: 0,
+                coefficientOpenings: [
+                    {
+                        rnsLimbIndex: 0,
+                        rnsPrime: 65_537,
+                        shamirCoefficientIndex: 0,
+                        coefficientMessage: [7, 11, 13, 17],
+                        randomnessByColumn: [],
+                    },
+                ],
+            },
+        ];
+        const recipientTrustees = [
+            {
+                trusteeIdentity: 'trustee-0',
+                trusteeRosterPosition: 0,
+            },
+        ];
+        const coefficientOpeningRandomness = ({
+            ringDegree,
+        }: {
+            readonly ringDegree: number;
+        }): readonly (readonly number[])[] => [
+            Array.from({ length: ringDegree }, (_unused, index) =>
+                index % 2 === 0 ? 1 : 0,
+            ),
+            Array.from({ length: ringDegree }, (_unused, index) =>
+                index % 2 === 0 ? -1 : 1,
+            ),
+        ];
+        const coefficientCommitmentSet =
+            createCompactVssCoefficientCommitmentSet({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount: 1,
+                qSharePrimes: [65_537],
+                ringDegree: 4,
+                thresholdDegree: 1,
+                sourceTrusteeOpeningStates,
+                coefficientOpeningRandomness,
+            });
+        const recipientShareBundle =
+            createCompactVssDerivedRecipientShareCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount: 1,
+                qSharePrimes: [65_537],
+                ringDegree: 4,
+                thresholdDegree: 1,
+                coefficientCommitmentSet,
+                sourceTrusteeOpeningStates,
+                recipientTrustees,
+                coefficientOpeningRandomness,
+            });
+        const aggregateBundle = aggregateCompactVssThresholdShareCommitments({
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount: 1,
+            qSharePrimes: [65_537],
+            ringDegree: 4,
+            recipientTrustees,
+            recipientShareOpeningCredentials:
+                recipientShareBundle.recipientShareOpeningCredentials,
+        });
+        const shareLinkageStatement = createCompactVssShareLinkageStatement({
+            setupContext,
+            publicMatrixSeedHash,
+            targetBasisHash: fixtureHash('compact-target-basis'),
+            coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                recipientShareBundle.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                aggregateBundle.aggregateThresholdCommitmentSet,
+        });
+
+        return {
+            coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                recipientShareBundle.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                aggregateBundle.aggregateThresholdCommitmentSet,
+            recipientShareOpeningCredentials:
+                recipientShareBundle.recipientShareOpeningCredentials,
+            shareLinkageStatement,
+        } as const;
+    };
 
 const rebindCompactVssShareLinkageStatementRoot = (
     statement: CompactTargetProofWitnessFixture['shareLinkageStatement'],
@@ -578,30 +855,29 @@ describe('local trustee setup state storage', () => {
             }),
         ).rejects.toThrow(/materialRoot/u);
 
-        const aggregateThresholdOpeningCredentials =
-            compactWitness.aggregateThresholdOpeningCredentials;
-        if (aggregateThresholdOpeningCredentials?.[0] === undefined) {
+        const recipientShareOpeningCredentials =
+            compactWitness.recipientShareOpeningCredentials;
+        if (recipientShareOpeningCredentials?.[0] === undefined) {
             throw new Error(
                 'compact VSS test fixture did not create a credential.',
             );
         }
-        const firstCredential = aggregateThresholdOpeningCredentials[0];
+        const firstCredential = recipientShareOpeningCredentials[0];
 
         await expect(
             createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
                 ...generatedLocalStateInput(),
                 compactVssTargetProofWitness: {
                     ...compactWitness,
-                    aggregateThresholdOpeningCredentials: [
+                    recipientShareOpeningCredentials: [
                         {
                             ...firstCredential,
-                            aggregateShareValues: [8, 11, 13, 17],
-                            aggregateCommitmentMessageValues: [8, 11, 13, 17],
+                            shareValues: [8, 11, 13, 17],
                         },
                     ],
                 },
             }),
-        ).rejects.toThrow(/aggregate threshold share material/u);
+        ).rejects.toThrow(/recipient share opening credential does not open/u);
 
         const firstAggregateRecord =
             compactWitness.aggregateThresholdCommitmentSet.recipientRecords[0];
@@ -663,6 +939,10 @@ describe('local trustee setup state storage', () => {
             await createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
                 ...generatedLocalStateInput(firstRecipientCredential),
                 compactVssTargetProofWitness: {
+                    coefficientCommitmentSet:
+                        compactWitness.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        compactWitness.recipientShareCommitmentSet,
                     aggregateThresholdCommitmentSet:
                         compactWitness.aggregateThresholdCommitmentSet,
                     shareLinkageStatement: compactWitness.shareLinkageStatement,
@@ -681,12 +961,133 @@ describe('local trustee setup state storage', () => {
                     [8, 11, 13, 17],
                 ),
                 compactVssTargetProofWitness: {
+                    coefficientCommitmentSet:
+                        compactWitness.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        compactWitness.recipientShareCommitmentSet,
                     aggregateThresholdCommitmentSet:
                         compactWitness.aggregateThresholdCommitmentSet,
                     shareLinkageStatement: compactWitness.shareLinkageStatement,
                 },
             }),
         ).rejects.toThrow(/recipient share opening credential does not open/u);
+    });
+
+    it('derives sealed compact aggregate openings from packed derived credentials delivered in private envelopes', async () => {
+        const compactWitness =
+            compactTargetProofWitnessWithDerivedRecipientShares();
+        const recipientShareOpeningCredentials =
+            compactWitness.recipientShareOpeningCredentials;
+        if (recipientShareOpeningCredentials?.[0] === undefined) {
+            throw new Error(
+                'compact VSS test fixture did not create a recipient credential.',
+            );
+        }
+        const firstRecipientCredential = recipientShareOpeningCredentials[0];
+        const packedCredential = compactRecipientCredentialForPrivateEnvelope(
+            firstRecipientCredential,
+        );
+
+        expect(
+            packedCredential.shareCommitmentMessageDigitColumns,
+        ).toBeUndefined();
+        expect(
+            packedCredential.shareCommitmentMessageDigitColumnBitWidth,
+        ).toBeUndefined();
+        expect(
+            packedCredential.shareCommitmentMessageDigitColumnsPackedHex,
+        ).toBeUndefined();
+        expect(
+            packedCredential.shareCommitmentMessageDigitColumnBitWidths,
+        ).toEqual(expect.arrayContaining([expect.any(Number)]));
+        expect(
+            packedCredential.shareCommitmentMessageDigitColumnsPackedBase64,
+        ).toEqual(expect.arrayContaining([expect.any(String)]));
+
+        await expect(
+            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+                ...generatedLocalStateInput(packedCredential),
+                compactVssTargetProofWitness: {
+                    aggregateThresholdCommitmentSet:
+                        compactWitness.aggregateThresholdCommitmentSet,
+                    shareLinkageStatement: compactWitness.shareLinkageStatement,
+                } as unknown as CompactTargetProofWitnessFixture,
+            }),
+        ).rejects.toThrow(
+            /target proof witness must include coefficient and recipient-share commitment evidence/u,
+        );
+
+        const deliveredState =
+            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+                ...generatedLocalStateInput(packedCredential),
+                compactVssTargetProofWitness: {
+                    coefficientCommitmentSet:
+                        compactWitness.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        compactWitness.recipientShareCommitmentSet,
+                    aggregateThresholdCommitmentSet:
+                        compactWitness.aggregateThresholdCommitmentSet,
+                    shareLinkageStatement: compactWitness.shareLinkageStatement,
+                },
+            });
+
+        expect(
+            deliveredState.sealedTargetDecryptionProofWitness.encryptedMaterial
+                .plaintextByteLength,
+        ).toBeGreaterThan(1_000);
+
+        const packedDigitColumns =
+            packedCredential.shareCommitmentMessageDigitColumnsPackedBase64;
+        if (
+            !Array.isArray(packedDigitColumns) ||
+            typeof packedDigitColumns[0] !== 'string'
+        ) {
+            throw new Error('packed digit column fixture is missing.');
+        }
+        const packedDigitColumnBase64Values =
+            packedDigitColumns as readonly string[];
+        const zeroedFirstPackedColumn = Buffer.alloc(
+            Buffer.from(packedDigitColumnBase64Values[0], 'base64').byteLength,
+        ).toString('base64');
+        const freshRecipientShareWitness = compactTargetProofWitness();
+        await expect(
+            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+                ...generatedLocalStateInput(packedCredential),
+                compactVssTargetProofWitness: {
+                    coefficientCommitmentSet:
+                        compactWitness.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        freshRecipientShareWitness.recipientShareCommitmentSet,
+                    aggregateThresholdCommitmentSet:
+                        compactWitness.aggregateThresholdCommitmentSet,
+                    shareLinkageStatement: compactWitness.shareLinkageStatement,
+                },
+            }),
+        ).rejects.toThrow(/derived recipient-share commitment/u);
+
+        await expect(
+            createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
+                ...generatedLocalStateInput({
+                    ...packedCredential,
+                    shareCommitmentMessageDigitColumnsPackedBase64:
+                        packedDigitColumnBase64Values.map(
+                            (packedColumn, digitIndex) =>
+                                digitIndex === 0
+                                    ? zeroedFirstPackedColumn
+                                    : packedColumn,
+                        ),
+                }),
+                compactVssTargetProofWitness: {
+                    coefficientCommitmentSet:
+                        compactWitness.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        compactWitness.recipientShareCommitmentSet,
+                    aggregateThresholdCommitmentSet:
+                        compactWitness.aggregateThresholdCommitmentSet,
+                    shareLinkageStatement: compactWitness.shareLinkageStatement,
+                },
+            }),
+        ).rejects.toThrow(/message digit columns do not decode/u);
     });
 
     it('rejects public compact linkage material without recipient-owned openings', async () => {
@@ -696,6 +1097,10 @@ describe('local trustee setup state storage', () => {
             createEncryptedLocalTrusteeSetupStateFromVerifiedShares({
                 ...generatedLocalStateInput(),
                 compactVssTargetProofWitness: {
+                    coefficientCommitmentSet:
+                        compactWitness.coefficientCommitmentSet,
+                    recipientShareCommitmentSet:
+                        compactWitness.recipientShareCommitmentSet,
                     aggregateThresholdCommitmentSet:
                         compactWitness.aggregateThresholdCommitmentSet,
                     shareLinkageStatement: compactWitness.shareLinkageStatement,

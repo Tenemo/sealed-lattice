@@ -67,8 +67,6 @@ pub(crate) use compact_vss_commitment::{
     verify_compact_vss_coefficient_commitment_set_request,
     verify_compact_vss_commitment_opening_request,
     verify_compact_vss_recipient_share_commitment_set_request,
-    verify_compact_vss_share_linkage_binary_proof_material_request,
-    verify_compact_vss_share_linkage_proof_material_set_request,
     verify_compact_vss_share_linkage_statement_request,
 };
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;

@@ -23,6 +23,18 @@ fn compact_vss_message_encoding_vectors(
     message_bound: u64,
     modulus: u64,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
+    let layout = crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+        message_bound,
+    )?;
+    compact_vss_message_encoding_vectors_with_layout(coefficients, message_bound, modulus, layout)
+}
+
+fn compact_vss_message_encoding_vectors_with_layout(
+    coefficients: &[i64],
+    message_bound: u64,
+    modulus: u64,
+    layout: crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout,
+) -> CanonicalResult<Vec<Vec<u64>>> {
     let unsigned_coefficients = coefficients
         .iter()
         .map(|coefficient| {
@@ -36,6 +48,7 @@ fn compact_vss_message_encoding_vectors(
         &unsigned_coefficients,
         message_bound,
         modulus,
+        layout,
     )
 }
 
@@ -43,10 +56,8 @@ fn compact_vss_message_encoding_vectors_from_unsigned(
     coefficients: &[u64],
     message_bound: u64,
     modulus: u64,
+    layout: crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    let layout = crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
-        message_bound,
-    )?;
     let mut columns = vec![vec![0_u64; coefficients.len()]; layout.encoding_column_count()];
     for (coefficient_index, coefficient) in coefficients.iter().enumerate() {
         if *coefficient >= message_bound {
@@ -60,6 +71,9 @@ fn compact_vss_message_encoding_vectors_from_unsigned(
             let digit_column = layout.digit_encoding_column(digit_index)?;
             columns[digit_column][coefficient_index] = *digit % modulus;
             let trit_count = layout.digit_trit_count(digit_index)?;
+            if trit_count == 0 {
+                continue;
+            }
             let trits =
                 crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_trits_for_count(
                     *digit,
@@ -201,15 +215,17 @@ pub(super) fn build_limb_witness_commitment(
                 "compact VSS coefficient witness count does not match the statement",
             ));
         }
-        for (coefficient_messages, slot) in witness
+        for (message_position, (coefficient_messages, slot)) in witness
             .compact_vss_coefficient_messages_by_shamir_index
             .iter()
             .zip(coefficient_slots.iter())
+            .enumerate()
         {
-            for logical_vector in compact_vss_message_encoding_vectors(
+            for logical_vector in compact_vss_message_encoding_vectors_with_layout(
                 coefficient_messages,
                 slot.source_message_modulus,
                 modulus,
+                layout.compact_vss_message_encoding_layout(message_position),
             )? {
                 append_logical_vector(&logical_vector);
             }
@@ -221,13 +237,18 @@ pub(super) fn build_limb_witness_commitment(
                 "compact VSS recipient message witness count does not match the statement",
             ));
         }
-        for (recipient_messages, message_bound) in recipient_messages_by_item
+        for (item_index, (recipient_messages, message_bound)) in recipient_messages_by_item
             .into_iter()
             .zip(recipient_message_bounds.iter())
+            .enumerate()
         {
-            for logical_vector in
-                compact_vss_message_encoding_vectors(recipient_messages, *message_bound, modulus)?
-            {
+            let message_position = layout.compact_vss_coefficient_columns + item_index;
+            for logical_vector in compact_vss_message_encoding_vectors_with_layout(
+                recipient_messages,
+                *message_bound,
+                modulus,
+                layout.compact_vss_message_encoding_layout(message_position),
+            )? {
                 append_logical_vector(&logical_vector);
             }
         }
@@ -282,6 +303,10 @@ pub(super) fn build_limb_witness_commitment(
                 &target_message_coefficients,
                 *target_rns_prime,
                 modulus,
+                crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                    *target_rns_prime,
+                )?
+                .with_digit_columns_only(),
             )? {
                 append_logical_vector(&logical_vector);
             }

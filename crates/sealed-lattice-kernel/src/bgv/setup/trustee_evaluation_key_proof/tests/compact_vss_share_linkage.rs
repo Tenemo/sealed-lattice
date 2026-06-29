@@ -211,12 +211,56 @@ fn compact_vss_share_linkage_instance() -> (
     );
     assert_eq!(
         layout.consistency_vector_count(),
-        layout.compact_vss_item_columns,
-        "compact share-linkage consistency claims must stay carry-only"
+        layout.compact_vss_item_columns
+            + layout.compact_vss_message_vector_count()
+                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "compact share-linkage consistency claims must bind carries and message digits"
     );
     assert_eq!(
         layout.claim_count(),
-        layout.compact_vss_item_columns * layout.consistency_repetitions
+        layout.consistency_vector_count() * layout.consistency_repetitions
+    );
+    let later_commitment_limb_layout =
+        LimbColumnLayout::new(&statement, 1).expect("compact share-linkage second limb layout");
+    assert_eq!(
+        layout.compact_vss_coefficient_decoder_digit_count(),
+        0,
+        "compact share-linkage coefficient digits are bounded by masked digit claims"
+    );
+    assert_eq!(
+        layout.compact_vss_recipient_decoder_digit_count(),
+        0,
+        "compact share-linkage recipient digits are bounded by masked digit claims"
+    );
+    assert_eq!(
+        layout.compact_vss_message_encoding_column_count(0),
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "compact share-linkage coefficient messages should carry only digit columns"
+    );
+    assert_eq!(
+        layout.compact_vss_message_encoding_column_count(layout.compact_vss_coefficient_columns),
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "compact share-linkage recipient messages should carry only digit columns"
+    );
+    assert_eq!(
+        layout.compact_vss_message_trit_count(layout.compact_vss_coefficient_columns, 0),
+        0,
+        "compact share-linkage recipient digits should not carry trit decoder columns"
+    );
+    assert!(
+        later_commitment_limb_layout.compact_vss_coefficient_decoder_digit_count() == 0
+            && later_commitment_limb_layout.compact_vss_recipient_decoder_digit_count() == 0,
+        "later compact share-linkage limbs also carry digit-only encodings"
+    );
+    assert_eq!(
+        later_commitment_limb_layout.consistency_vector_count(),
+        layout.consistency_vector_count(),
+        "digit-only limbs must keep the same cross-field claim set"
+    );
+    assert_eq!(
+        later_commitment_limb_layout.compact_vss_message_encoding_columns(),
+        layout.compact_vss_message_encoding_columns(),
+        "all compact share-linkage limbs should use the same digit-only message width"
     );
 
     let witness = super::super::relation::TrusteeEvaluationKeyWitness {

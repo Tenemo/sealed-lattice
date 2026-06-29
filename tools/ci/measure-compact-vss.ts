@@ -11,30 +11,23 @@ import {
     compactVssCommitmentRandomnessColumnCount,
     compactVssCommitmentProfileId,
     compactVssCommitmentMeasurement,
-    compactVssCommitmentPrivateOpeningRoot,
     compactVssMessageDigitCount,
     compactVssMessageDigitBase,
     compactVssMessageDigitTritCount,
-    compactVssShareLinkageAggregateThresholdRule,
-    compactVssShareLinkageCommonKeyRule,
-    compactVssShareLinkageProofBatchingRule,
-    compactVssShareLinkageShamirEvaluationRule,
     computeCompactVssCommitmentFromOpening,
     createCompactVssCoefficientCommitmentSet,
-    createCompactVssRecipientShareCommitmentBundle,
-    createCompactVssShareLinkageProofMaterialSet,
+    createCompactVssDerivedRecipientShareCommitmentBundle,
     createCompactVssShareLinkageStatement,
     decodeCompactVssCommitmentBody,
-    encodeCompactVssShareLinkageProofMaterialSetBinary,
     encodeCompactVssCommitmentBody,
     verifyCompactVssCommitmentOpening,
+    verifyCompactVssDerivedRecipientShareCommitmentSet,
+    verifyCompactVssShareLinkageStatement,
     type CompactVssAggregateThresholdCommitmentSet,
-    type CompactVssCoefficientCommitmentSet,
     type CompactVssCommitmentBodyMetadata,
     type CompactVssCommitmentOpeningInput,
     type CompactVssCommitmentValue,
     type CompactVssRecipientShareCommitmentSet,
-    type CompactVssShareLinkageProofMaterialInput,
     type CompactVssShareLinkageStatement,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import {
@@ -58,6 +51,8 @@ import {
     sameSecretRelation,
     setupProofProfileId,
     type CompactVssSameSecretBridgeStatementSet,
+    type SameSecretConsistencyStatementSet,
+    type SameSecretProofSet,
 } from '#packages/protocol/src/setup/same-secret-consistency-records.js';
 import {
     acceptedBgvProfileRingDegree,
@@ -71,7 +66,6 @@ import type {
     BgvCompactVssCommitmentBodyMetadata,
     BgvCompactVssCommitmentOpeningInput,
     BgvCompactSameSecretBridgeProofStatement,
-    BgvCompactVssShareLinkageProofStatement,
     BgvTrusteeEvaluationKeyStatementContext,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/transcript-core-bridge.js';
@@ -84,17 +78,7 @@ const targetRnsLimbCount = 7;
 const canonicalTargetCiphertextLevel = targetRnsLimbCount - 1;
 const selectedEvaluatorWorkingLevel = 15;
 const restrictedProofRingDegree = 128;
-const restrictedProofSourceMessageModulus = 140_737_487_306_753;
-const compactVssShareLinkageStatementRelation =
-    'recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments';
-const restrictedProofSourceMessageModulusForLimb = (
-    sourceRnsLimbIndex: number,
-): number =>
-    acceptedBgvSetupQSharePrimes[sourceRnsLimbIndex] ??
-    restrictedProofSourceMessageModulus;
-const restrictedProofCoefficientCount = 3;
 const minimumPublicCommitmentReductionFactor = 2_800;
-const publicSetupDownloadBudgetBytes = 64 * 1024 * 1024;
 const maximumRecipientPrivateMailboxDownloadBytes = 128 * 1024 * 1024;
 const maximumSourceTrusteePrivateMailboxUploadBytes = 256 * 1024 * 1024;
 const maximumPersistentLocalStateBytes = 16 * 1024 * 1024;
@@ -124,14 +108,15 @@ const proofLowDegreeQueryCount = 156;
 const proofLowDegreeMinimumFinalCoefficientCount = 32;
 const proofLowDegreeMaximumFinalCoefficientCount = 1024;
 const proofConsistencyRepetitions = 20;
-const compactShareLinkageConsistencyRepetitions = 4;
 const proofSetupCommitmentLimbCount = 3;
-const compactShareLinkageCarryClaimMaskDigitCount = 75;
+const maximumCompactShareLinkagePublicVerificationSeconds = 10;
 const targetDecryptionAggregateMessageClaimMaskDigitCount = 142;
 const targetDecryptionSmudgingMessageClaimMaskDigitCount = 114;
 const targetDecryptionRandomnessClaimMaskDigitCount = 114;
 const targetProofMaterialMeasurementRequested =
     process.env.SEALED_LATTICE_MEASURE_TARGET_PROOF_MATERIAL === '1';
+const fullShareLinkageBatchMeasurementRequested =
+    process.env.SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH === '1';
 
 const isPowerOfTwo = (value: number): boolean =>
     Number.isSafeInteger(value) &&
@@ -144,19 +129,22 @@ type CompactVssMessageEncodingLayout = Readonly<{
     readonly totalTritCount: number;
 }>;
 
-const compactVssTritCountForBound = (boundExclusive: number): number => {
-    if (!Number.isSafeInteger(boundExclusive) || boundExclusive <= 0) {
+const compactVssTritCountForBound = (
+    boundExclusive: number | bigint,
+): number => {
+    const boundExclusiveWide =
+        typeof boundExclusive === 'bigint'
+            ? boundExclusive
+            : Number.isSafeInteger(boundExclusive)
+              ? BigInt(boundExclusive)
+              : 0n;
+    if (boundExclusiveWide <= 0n) {
         throw new Error('compact VSS message bound must be positive.');
     }
-    let representedBound = 1;
+    let representedBound = 1n;
     let tritCount = 0;
-    while (representedBound < boundExclusive) {
-        representedBound *= 3;
-        if (!Number.isSafeInteger(representedBound)) {
-            throw new Error(
-                'compact VSS trit bound exceeds safe integer range.',
-            );
-        }
+    while (representedBound < boundExclusiveWide) {
+        representedBound *= 3n;
         tritCount += 1;
     }
 
@@ -165,6 +153,9 @@ const compactVssTritCountForBound = (boundExclusive: number): number => {
 
 const compactVssMessageEncodingLayoutForBound = (
     messageBoundExclusive: number,
+    rangeEvidence:
+        | 'digit-and-trit-columns'
+        | 'digit-columns-only' = 'digit-and-trit-columns',
 ): CompactVssMessageEncodingLayout => {
     if (
         !Number.isSafeInteger(messageBoundExclusive) ||
@@ -172,12 +163,20 @@ const compactVssMessageEncodingLayoutForBound = (
     ) {
         throw new Error('compact VSS message bound must be positive.');
     }
-    const highDigitBoundExclusive = Math.ceil(
-        messageBoundExclusive / compactVssMessageDigitBase,
-    );
+    const messageBoundExclusiveWide = BigInt(messageBoundExclusive);
+    const highDigitBoundExclusive =
+        (messageBoundExclusiveWide + compactVssMessageDigitBase - 1n) /
+        compactVssMessageDigitBase;
     const highDigitTritCount = compactVssTritCountForBound(
         highDigitBoundExclusive,
     );
+    if (rangeEvidence === 'digit-columns-only') {
+        return {
+            highDigitTritCount,
+            totalTritCount: 0,
+            encodingColumnCount: compactVssMessageDigitCount,
+        };
+    }
     const totalTritCount = compactVssMessageDigitTritCount + highDigitTritCount;
 
     return {
@@ -251,119 +250,19 @@ type WasmPathMeasurement = Readonly<{
     >;
 }>;
 
-type RestrictedCompactShareLinkageProofFixture = Readonly<{
-    readonly context: BgvTrusteeEvaluationKeyStatementContext;
-    readonly compactVssShareLinkage: BgvCompactVssShareLinkageProofStatement;
-    readonly fullSourceBatch: boolean;
-    readonly proofItemCount: number;
-    readonly coefficientWitnessColumnCount: number;
-    readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-    readonly recipientShareMessages: readonly number[];
-    readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-    readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
-    readonly carryWitnesses: readonly number[];
-    readonly recipientShareMessagesByItem: readonly (readonly number[])[];
-    readonly recipientShareOpeningRandomnessByItem: readonly (readonly (readonly number[])[])[];
-    readonly carryWitnessesByItem: readonly (readonly number[])[];
-}>;
-
-type RestrictedShareLinkageProofItem =
-    | BgvCompactVssShareLinkageProofStatement
-    | NonNullable<
-          BgvCompactVssShareLinkageProofStatement['additionalLinkageItems']
-      >[number];
-
-type RestrictedShareLinkageProofFixtureItem = RestrictedShareLinkageProofItem &
-    Readonly<{
-        readonly sourceMessageModulus: number;
-        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-        readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly recipientShareMessages: readonly number[];
-        readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
-        readonly carryWitnesses: readonly number[];
-    }>;
-
-type CompactVssCommitmentWithOpeningRoot = ReturnType<
-    typeof computeCompactVssCommitmentFromOpening
-> &
-    Readonly<{
-        readonly openingRoot: ProtocolHash;
-    }>;
-
-type RestrictedSourceLimbFixture = Readonly<{
-    readonly sourceRnsLimbIndex: number;
-    readonly sourceMessageModulus: number;
-    readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
-    readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-    readonly coefficientComputations: readonly CompactVssCommitmentWithOpeningRoot[];
-}>;
-
-type RestrictedCompactShareLinkageProofMeasurement = Readonly<{
-    readonly generation: MeasuredOperation<
-        ReturnType<TranscriptCoreKernel['generateCompactVssShareLinkageProof']>
-    >;
+type CompactShareLinkagePublicVerificationMeasurement = Readonly<{
+    readonly proofByteLength: 0;
+    readonly proofMaterialTransportBytes: 0;
     readonly verification: MeasuredOperation<
-        ReturnType<TranscriptCoreKernel['verifyCompactVssShareLinkageProof']>
+        ReturnType<typeof verifyCompactVssShareLinkageStatement>
     >;
-    readonly proofByteBreakdown: EncodedTargetProofByteBreakdown;
-}>;
-
-type RestrictedCompactShareLinkageProofMaterialMeasured = Readonly<{
-    readonly measurementMode: 'full-source-material-set';
-    readonly proofMaterialSetJsonBytes: number;
-    readonly binaryProofMaterialTransportBytes: number;
-    readonly binaryProofMaterialTransportChunkCount: number;
-    readonly binaryProofMaterialTransportChunkRoot: ProtocolHash;
-    readonly binaryProofMaterialTransportFullObjectHash: ProtocolHash;
-    readonly binaryProofMaterialTransportSavingsBytes: number;
-    readonly binaryProofMaterialTransportPublicSetupDownloadHeadroomBytes: number;
-    readonly generatedSourceProofCount: number;
-    readonly additionalGeneratedSourceProofCount: number;
-    readonly sourceZeroWarmGenerationMilliseconds: number;
-    readonly additionalProofGenerationMilliseconds: number;
-    readonly estimatedAllSourceProofGenerationMilliseconds: number;
-    readonly verificationMilliseconds: number;
-    readonly verification: ReturnType<
-        TranscriptCoreKernel['verifyCompactVssShareLinkageProofMaterialSet']
-    >;
-}>;
-
-type RestrictedCompactShareLinkageProofMaterialNotMeasured = Readonly<{
-    readonly measurementMode: 'not-measured';
-    readonly reason: string;
-}>;
-
-type RestrictedCompactShareLinkageProofMaterialMeasurement =
-    | RestrictedCompactShareLinkageProofMaterialMeasured
-    | RestrictedCompactShareLinkageProofMaterialNotMeasured;
-
-const restrictedShareLinkageProofMaterialWasMeasured = (
-    measurement: RestrictedCompactShareLinkageProofMaterialMeasurement,
-): measurement is RestrictedCompactShareLinkageProofMaterialMeasured =>
-    measurement.measurementMode === 'full-source-material-set';
-
-type FirstProfileRestrictedProofCoverageEstimate = Readonly<{
-    readonly participantCount: number;
-    readonly targetRnsLimbCount: number;
-    readonly shareLinkageProofItemsPerSource: number;
-    readonly measuredShareLinkageProofItemsPerRecord: number;
-    readonly measuredShareLinkageCoefficientWitnessColumnsPerRecord: number;
-    readonly sourceBatchMeasurementMode: string;
-    readonly proofPayloadConclusion: string;
-    readonly setupTransportConclusion: string;
-    readonly shareLinkageProofRecordsPerSource: number;
-    readonly shareLinkageProofRecordCount: number;
-    readonly shareLinkageRepeatedProofPayloadBytes: number;
-    readonly sameSecretBridgeProofRecordCount: number;
-    readonly sameSecretBridgeRepeatedProofPayloadBytes: number;
-    readonly sameSecretBridgeRepeatedProofMaterialJsonBytes: number;
-    readonly combinedRepeatedProofPayloadBytes: number;
-    readonly activationBoundary: string;
 }>;
 
 type RestrictedCompactSameSecretBridgeProofFixture = Readonly<{
     readonly context: BgvTrusteeEvaluationKeyStatementContext;
     readonly compactSameSecretBridge: BgvCompactSameSecretBridgeProofStatement;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
     readonly secretCoefficients: readonly number[];
     readonly negativeIndicatorCoefficients: readonly number[];
     readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
@@ -386,6 +285,55 @@ type RestrictedCompactSameSecretBridgeProofMaterialMeasurement = Readonly<{
         >
     >;
 }>;
+
+type FullShareLinkageBatchMeasurementNotMeasured = Readonly<{
+    readonly measurementMode: string;
+}>;
+
+type FullShareLinkageBatchDerivedFixture = Readonly<{
+    readonly coefficientCommitmentSet: ReturnType<
+        typeof createCompactVssCoefficientCommitmentSet
+    >;
+    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
+    readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
+    readonly shareLinkageStatement: CompactVssShareLinkageStatement;
+    readonly recipientShareOpeningCredentialCount: number;
+}>;
+
+type FullShareLinkageBatchDerivedMeasurement = Readonly<{
+    readonly measurementMode: string;
+    readonly participantCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly sourceRecipientRecordCount: number;
+    readonly aggregateThresholdRecordCount: number;
+    readonly ringDegree: number;
+    readonly oneSourceShareLinkageProofByteLength: number;
+    readonly oneSourcePayloadWithBridgeProofBytes: number;
+    readonly repeatedAllSourceShareLinkageProofBytes: number;
+    readonly repeatedAllSourcePayloadWithBridgeProofBytes: number;
+    readonly coefficientCommitmentCount: number;
+    readonly coefficientWitnessColumnCount: number;
+    readonly recipientShareOpeningCredentialCount: number;
+    readonly verification: Readonly<{
+        readonly derivedRecipientShareCommitments: MeasuredOperation<
+            ReturnType<
+                typeof verifyCompactVssDerivedRecipientShareCommitmentSet
+            >
+        >;
+        readonly shareLinkageStatement: MeasuredOperation<
+            ReturnType<typeof verifyCompactVssShareLinkageStatement>
+        >;
+    }>;
+}>;
+
+type FullShareLinkageBatchMeasurement =
+    | FullShareLinkageBatchDerivedMeasurement
+    | FullShareLinkageBatchMeasurementNotMeasured;
+
+const fullShareLinkageBatchWasMeasured = (
+    measurement: FullShareLinkageBatchMeasurement,
+): measurement is FullShareLinkageBatchDerivedMeasurement =>
+    'oneSourceShareLinkageProofByteLength' in measurement;
 
 type TargetDecryptionDevelopmentArtifactMeasurement = Readonly<{
     readonly localTargetShareWitnessJsonBytes: number;
@@ -535,7 +483,7 @@ type FullRingPrivateStateFixture = Readonly<{
     }[];
     readonly mailboxPublicKeyBytesHex: string;
     readonly compactRecipientShareOpeningCredentials: ReturnType<
-        typeof createCompactVssRecipientShareCommitmentBundle
+        typeof createCompactVssDerivedRecipientShareCommitmentBundle
     >['recipientShareOpeningCredentials'];
     readonly compactRecipientShareOpeningCredentialsJsonBytes: number;
     readonly coefficientCommitmentSet: ReturnType<
@@ -635,452 +583,6 @@ const restrictedProofTernaryRandomness = (
             ),
     );
 
-const compactShareLinkageSourceCoefficientRecordFromProofItems = (input: {
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly publicMatrixSeedHash: ProtocolHash;
-    readonly targetRnsLimbCountForStatement: number;
-    readonly proofItems: readonly RestrictedShareLinkageProofItem[];
-}): CompactVssCoefficientCommitmentSet['sourceTrusteeRecords'][number] => {
-    const proofItemsBySourceLimb = new Map(
-        input.proofItems.map((proofItem) => [
-            proofItem.sourceRnsLimbIndex,
-            proofItem,
-        ]),
-    );
-    const coefficientCommitments = Array.from(
-        { length: input.targetRnsLimbCountForStatement },
-        (_unusedLimb, sourceRnsLimbIndex) => {
-            const proofItem = proofItemsBySourceLimb.get(sourceRnsLimbIndex);
-            if (proofItem === undefined) {
-                throw new Error(
-                    'compact share-linkage public coefficient set is missing a source limb.',
-                );
-            }
-
-            return Array.from(
-                { length: restrictedProofCoefficientCount },
-                (_unusedCoefficient, shamirCoefficientIndex) =>
-                    ({
-                        objectType: 'CompactVssCoefficientCommitment',
-                        objectVersion: 1,
-                        profileId: compactVssCommitmentProfileId,
-                        sourceTrusteeIdentity: input.sourceTrusteeIdentity,
-                        sourceTrusteeRosterPosition:
-                            input.sourceTrusteeRosterPosition,
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        rnsLimbIndex: sourceRnsLimbIndex,
-                        rnsPrime: proofItem.sourceMessageModulus,
-                        shamirCoefficientIndex,
-                        coefficientCommitmentRoot:
-                            proofItem.coefficientCommitmentRoots[
-                                shamirCoefficientIndex
-                            ],
-                        coefficientOpeningRoot:
-                            proofItem.coefficientOpeningRoots[
-                                shamirCoefficientIndex
-                            ],
-                        commitment: proofItem.coefficientCommitments[
-                            shamirCoefficientIndex
-                        ] as CompactVssCommitmentValue,
-                    }) as const,
-            );
-        },
-    ).flat();
-    const sourceRecordWithoutRoot = {
-        objectType: 'CompactVssSourceCoefficientCommitments',
-        objectVersion: 1,
-        profileId: compactVssCommitmentProfileId,
-        sourceTrusteeIdentity: input.sourceTrusteeIdentity,
-        sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
-        publicMatrixSeedHash: input.publicMatrixSeedHash,
-        coefficientCommitments,
-    } as const;
-
-    return {
-        ...sourceRecordWithoutRoot,
-        sourceCoefficientCommitmentRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentRoot',
-            sourceRecordWithoutRoot,
-        ),
-    };
-};
-
-const compactShareLinkageSourceRecipientShareRecordFromProofItems = (input: {
-    readonly sourceTrusteeIdentity: string;
-    readonly sourceTrusteeRosterPosition: number;
-    readonly participantCount: number;
-    readonly targetRnsLimbCountForStatement: number;
-    readonly proofItems: readonly RestrictedShareLinkageProofItem[];
-}): CompactVssRecipientShareCommitmentSet['sourceTrusteeRecords'][number] => {
-    const proofItemsByCoverage = new Map(
-        input.proofItems.map((proofItem) => [
-            `${String(proofItem.recipientRosterPosition)}:${String(proofItem.sourceRnsLimbIndex)}`,
-            proofItem,
-        ]),
-    );
-    const recipientShareCommitments = Array.from(
-        { length: input.participantCount },
-        (_unusedRecipient, recipientRosterPosition) =>
-            Array.from(
-                { length: input.targetRnsLimbCountForStatement },
-                (_unusedLimb, sourceRnsLimbIndex) => {
-                    const proofItem = proofItemsByCoverage.get(
-                        `${String(recipientRosterPosition)}:${String(sourceRnsLimbIndex)}`,
-                    );
-                    if (proofItem === undefined) {
-                        throw new Error(
-                            'compact share-linkage public recipient-share set is missing a recipient target-limb item.',
-                        );
-                    }
-
-                    return {
-                        objectType: 'CompactVssRecipientShareCommitment',
-                        objectVersion: 1,
-                        profileId: compactVssCommitmentProfileId,
-                        sourceTrusteeIdentity: input.sourceTrusteeIdentity,
-                        sourceTrusteeRosterPosition:
-                            input.sourceTrusteeRosterPosition,
-                        recipientIdentity: proofItem.recipientIdentity,
-                        recipientRosterPosition,
-                        recipientTrusteePoint: recipientRosterPosition + 1,
-                        rnsLimbIndex: sourceRnsLimbIndex,
-                        rnsPrime: proofItem.sourceMessageModulus,
-                        shareCommitmentRoot:
-                            proofItem.recipientShareCommitmentRoot,
-                        shareOpeningRoot: proofItem.recipientShareOpeningRoot,
-                        commitment:
-                            proofItem.recipientShareCommitment as CompactVssCommitmentValue,
-                    } as const;
-                },
-            ),
-    ).flat();
-    const sourceRecordWithoutRoot = {
-        objectType: 'CompactVssSourceRecipientShareCommitments',
-        objectVersion: 1,
-        profileId: compactVssCommitmentProfileId,
-        sourceTrusteeIdentity: input.sourceTrusteeIdentity,
-        sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
-        recipientShareCommitments,
-    } as const;
-
-    return {
-        ...sourceRecordWithoutRoot,
-        sourceRecipientShareCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
-            sourceRecordWithoutRoot,
-        ),
-    };
-};
-
-const restrictedCompactShareLinkageProofFixture = (
-    input: {
-        readonly fullSourceBatch?: boolean;
-        readonly sourceTrusteeRosterPosition?: number;
-    } = {},
-): RestrictedCompactShareLinkageProofFixture => {
-    const fullSourceBatch = input.fullSourceBatch === true;
-    const sourceTrusteeRosterPosition = input.sourceTrusteeRosterPosition ?? 0;
-    const publicMatrixSeedHash = repeatedProtocolHash('7');
-    const coefficientComputationsForSourceLimb = (
-        sourceRnsLimbIndex: number,
-        sourceMessageModulus: number,
-        coefficientMessagesByShamirIndex: readonly (readonly number[])[],
-        coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[],
-    ): readonly CompactVssCommitmentWithOpeningRoot[] =>
-        coefficientMessagesByShamirIndex.map(
-            (messages, shamirCoefficientIndex) => {
-                const opening = {
-                    commitmentRole: 'coefficient',
-                    commitmentContext: {
-                        objectType:
-                            'CompactVssMeasurementCoefficientCommitmentContext',
-                        objectVersion: 1,
-                        sourceTrusteeRosterPosition,
-                        shamirCoefficientIndex,
-                    },
-                    publicMatrixSeedHash,
-                    rnsLimbIndex: sourceRnsLimbIndex,
-                    rnsPrime: sourceMessageModulus,
-                    ringDegree: restrictedProofRingDegree,
-                    messageCoefficients: messages,
-                    messageCoefficientBound: sourceMessageModulus,
-                    randomnessByColumn:
-                        coefficientOpeningRandomnessByShamirIndex[
-                            shamirCoefficientIndex
-                        ],
-                } as const;
-
-                return {
-                    ...computeCompactVssCommitmentFromOpening(opening),
-                    openingRoot:
-                        compactVssCommitmentPrivateOpeningRoot(opening),
-                };
-            },
-        );
-    const sourceForLimb = (
-        sourceRnsLimbIndex: number,
-    ): RestrictedSourceLimbFixture => {
-        const sourceMessageModulus =
-            restrictedProofSourceMessageModulusForLimb(sourceRnsLimbIndex);
-        const coefficientMessagesByShamirIndex = Array.from(
-            { length: restrictedProofCoefficientCount },
-            (_unused, shamirCoefficientIndex) =>
-                Array.from(
-                    { length: restrictedProofRingDegree },
-                    (_unusedCoefficient, coefficientIndex) =>
-                        coefficientIndex % 11 === shamirCoefficientIndex
-                            ? sourceMessageModulus - 4 - shamirCoefficientIndex
-                            : (17 +
-                                  sourceRnsLimbIndex * 29 +
-                                  19 * shamirCoefficientIndex +
-                                  23 * coefficientIndex) %
-                              sourceMessageModulus,
-                ),
-        );
-        const coefficientOpeningRandomnessByShamirIndex =
-            coefficientMessagesByShamirIndex.map(
-                (_messages, shamirCoefficientIndex) =>
-                    restrictedProofTernaryRandomness(
-                        10 + sourceRnsLimbIndex * 23 + shamirCoefficientIndex,
-                    ),
-            );
-        const coefficientComputations = coefficientComputationsForSourceLimb(
-            sourceRnsLimbIndex,
-            sourceMessageModulus,
-            coefficientMessagesByShamirIndex,
-            coefficientOpeningRandomnessByShamirIndex,
-        );
-
-        return {
-            sourceRnsLimbIndex,
-            sourceMessageModulus,
-            coefficientMessagesByShamirIndex,
-            coefficientOpeningRandomnessByShamirIndex,
-            coefficientComputations,
-        };
-    };
-    const proofItemForSourceAndRecipient = (
-        source: RestrictedSourceLimbFixture,
-        recipientRosterPosition: number,
-    ): RestrictedShareLinkageProofFixtureItem => {
-        const trusteePoint = recipientRosterPosition + 1;
-        const trusteePointPowers = Array.from(
-            { length: restrictedProofCoefficientCount },
-            (_unusedPower, shamirCoefficientIndex) =>
-                BigInt(trusteePoint) ** BigInt(shamirCoefficientIndex),
-        );
-        const recipientShareMessages: number[] = [];
-        const carryWitnesses: number[] = [];
-        for (
-            let coefficientIndex = 0;
-            coefficientIndex < restrictedProofRingDegree;
-            coefficientIndex += 1
-        ) {
-            const liftedShare = source.coefficientMessagesByShamirIndex.reduce(
-                (sum, messages, shamirCoefficientIndex): bigint => {
-                    const trusteePointPower =
-                        trusteePointPowers[shamirCoefficientIndex];
-                    if (trusteePointPower === undefined) {
-                        throw new Error(
-                            'restricted proof fixture is missing a trustee-point power.',
-                        );
-                    }
-
-                    const message = messages[coefficientIndex];
-                    if (message === undefined) {
-                        throw new Error(
-                            'restricted proof fixture is missing a coefficient message.',
-                        );
-                    }
-
-                    return sum + BigInt(message) * trusteePointPower;
-                },
-                0n,
-            );
-            recipientShareMessages.push(
-                Number(liftedShare % BigInt(source.sourceMessageModulus)),
-            );
-            carryWitnesses.push(
-                Number(liftedShare / BigInt(source.sourceMessageModulus)),
-            );
-        }
-        const recipientShareOpeningRandomness =
-            restrictedProofTernaryRandomness(
-                41 +
-                    source.sourceRnsLimbIndex * 17 +
-                    recipientRosterPosition * 31,
-            );
-        const recipientShareOpening = {
-            commitmentRole: 'recipient-share',
-            commitmentContext: {
-                objectType:
-                    'CompactVssMeasurementRecipientShareCommitmentContext',
-                objectVersion: 1,
-                sourceTrusteeRosterPosition,
-                recipientRosterPosition,
-                sourceRnsLimbIndex: source.sourceRnsLimbIndex,
-            },
-            publicMatrixSeedHash,
-            rnsLimbIndex: source.sourceRnsLimbIndex,
-            rnsPrime: source.sourceMessageModulus,
-            ringDegree: restrictedProofRingDegree,
-            messageCoefficients: recipientShareMessages,
-            messageCoefficientBound: source.sourceMessageModulus,
-            randomnessByColumn: recipientShareOpeningRandomness,
-        } as const;
-        const recipientShareComputation = {
-            ...computeCompactVssCommitmentFromOpening(recipientShareOpening),
-            openingRoot: compactVssCommitmentPrivateOpeningRoot(
-                recipientShareOpening,
-            ),
-        };
-
-        return {
-            recipientIdentity: `trustee-${recipientRosterPosition}`,
-            recipientRosterPosition,
-            sourceRnsLimbIndex: source.sourceRnsLimbIndex,
-            sourceMessageModulus: source.sourceMessageModulus,
-            coefficientCommitmentRoots: source.coefficientComputations.map(
-                (computation) => computation.commitmentRoot,
-            ),
-            coefficientOpeningRoots: source.coefficientComputations.map(
-                (computation) => computation.openingRoot,
-            ),
-            coefficientCommitments: source.coefficientComputations.map(
-                (computation) => computation.commitment,
-            ),
-            recipientShareCommitmentRoot:
-                recipientShareComputation.commitmentRoot,
-            recipientShareOpeningRoot: recipientShareComputation.openingRoot,
-            recipientShareCommitment: recipientShareComputation.commitment,
-            recipientShareMessages,
-            recipientShareOpeningRandomness,
-            carryWitnesses,
-            coefficientMessagesByShamirIndex:
-                source.coefficientMessagesByShamirIndex,
-            coefficientOpeningRandomnessByShamirIndex:
-                source.coefficientOpeningRandomnessByShamirIndex,
-        };
-    };
-    const measuredSourceLimbCount = fullSourceBatch ? targetRnsLimbCount : 2;
-    const sourceFixtures = Array.from(
-        { length: measuredSourceLimbCount },
-        (_unused, sourceRnsLimbIndex) => sourceForLimb(sourceRnsLimbIndex),
-    );
-    const firstSourceFixture = sourceFixtures[0];
-    const secondSourceFixture = sourceFixtures[1];
-    if (firstSourceFixture === undefined || secondSourceFixture === undefined) {
-        throw new Error(
-            'restricted compact share-linkage proof fixture requires at least two source limbs.',
-        );
-    }
-    const proofItems: readonly RestrictedShareLinkageProofFixtureItem[] =
-        fullSourceBatch
-            ? sourceFixtures.flatMap((source) =>
-                  Array.from(
-                      { length: firstProfileParticipantCount },
-                      (_unusedRecipient, recipientRosterPosition) =>
-                          proofItemForSourceAndRecipient(
-                              source,
-                              recipientRosterPosition,
-                          ),
-                  ),
-              )
-            : [
-                  proofItemForSourceAndRecipient(firstSourceFixture, 0),
-                  proofItemForSourceAndRecipient(firstSourceFixture, 1),
-                  proofItemForSourceAndRecipient(secondSourceFixture, 0),
-              ];
-    const primaryProofItem = proofItems[0];
-    if (primaryProofItem === undefined) {
-        throw new Error(
-            'restricted compact share-linkage proof fixture did not create a primary item.',
-        );
-    }
-    const additionalProofItems = proofItems.slice(1);
-    let sourceCoefficientCommitmentRoot = deriveProtocolHash(
-        'SetupProofRecordBindingHash',
-        {
-            fixture: 'compact-vss-proof-measurement',
-            rootKind: 'sourceCoefficientCommitmentRoot',
-            sourceTrusteeRosterPosition,
-        },
-    );
-    let sourceRecipientShareCommitmentRoot = deriveProtocolHash(
-        'SetupProofRecordBindingHash',
-        {
-            fixture: 'compact-vss-proof-measurement',
-            rootKind: 'sourceRecipientShareCommitmentRoot',
-            sourceTrusteeRosterPosition,
-        },
-    );
-    const sourceTrusteeIdentity = `trustee-${sourceTrusteeRosterPosition}`;
-    if (fullSourceBatch) {
-        sourceCoefficientCommitmentRoot =
-            compactShareLinkageSourceCoefficientRecordFromProofItems({
-                sourceTrusteeIdentity,
-                sourceTrusteeRosterPosition,
-                publicMatrixSeedHash,
-                targetRnsLimbCountForStatement: targetRnsLimbCount,
-                proofItems,
-            }).sourceCoefficientCommitmentRoot;
-        sourceRecipientShareCommitmentRoot =
-            compactShareLinkageSourceRecipientShareRecordFromProofItems({
-                sourceTrusteeIdentity,
-                sourceTrusteeRosterPosition,
-                participantCount: firstProfileParticipantCount,
-                targetRnsLimbCountForStatement: targetRnsLimbCount,
-                proofItems,
-            }).sourceRecipientShareCommitmentRoot;
-    }
-
-    return {
-        context: {
-            ceremonyId: 'compact-vss-proof-measurement',
-            manifestHash: repeatedProtocolHash('1'),
-            rosterHash: repeatedProtocolHash('2'),
-            trusteeIdentity: sourceTrusteeIdentity,
-            trusteeRosterPosition: sourceTrusteeRosterPosition,
-            setupEpoch: 'setup-epoch-1',
-            sourceCoefficientCommitmentRoot,
-            sourceRecipientShareCommitmentRoot,
-        },
-        fullSourceBatch,
-        proofItemCount: proofItems.length,
-        coefficientWitnessColumnCount:
-            measuredSourceLimbCount * restrictedProofCoefficientCount,
-        compactVssShareLinkage: {
-            publicMatrixSeedHash,
-            sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition,
-            sourceCoefficientCommitmentRoot,
-            sourceRecipientShareCommitmentRoot,
-            ...primaryProofItem,
-            additionalLinkageItems: additionalProofItems,
-        },
-        coefficientMessagesByShamirIndex: sourceFixtures.flatMap(
-            (source) => source.coefficientMessagesByShamirIndex,
-        ),
-        recipientShareMessages: primaryProofItem.recipientShareMessages,
-        coefficientOpeningRandomnessByShamirIndex: sourceFixtures.flatMap(
-            (source) => source.coefficientOpeningRandomnessByShamirIndex,
-        ),
-        recipientShareOpeningRandomness:
-            primaryProofItem.recipientShareOpeningRandomness,
-        carryWitnesses: primaryProofItem.carryWitnesses,
-        recipientShareMessagesByItem: proofItems.map(
-            (proofItem) => proofItem.recipientShareMessages,
-        ),
-        recipientShareOpeningRandomnessByItem: proofItems.map(
-            (proofItem) => proofItem.recipientShareOpeningRandomness,
-        ),
-        carryWitnessesByItem: proofItems.map(
-            (proofItem) => proofItem.carryWitnesses,
-        ),
-    };
-};
-
 const restrictedCompactSameSecretBridgeProofFixture =
     (): RestrictedCompactSameSecretBridgeProofFixture => {
         const publicMatrixSeedHash = repeatedProtocolHash('8');
@@ -1131,9 +633,8 @@ const restrictedCompactSameSecretBridgeProofFixture =
                 });
             },
         );
-        const sameSecretStatementRoot = repeatedProtocolHash('d');
-        const sameSecretProofRoot = repeatedProtocolHash('e');
         const sameSecretProofFamilyBindingRoot = repeatedProtocolHash('f');
+        const trusteeSecretCommitmentRoot = repeatedProtocolHash('7');
         const targetBasisHash = canonicalTargetBasisHash;
         const targetConstantCoefficientCommitmentRoots = targetRnsPrimes.map(
             (rnsPrime, rnsLimbIndex) => {
@@ -1172,6 +673,149 @@ const restrictedCompactSameSecretBridgeProofFixture =
                 };
             },
         );
+        const sameSecretContext = {
+            ceremonyId: 'compact-same-secret-bridge-proof-measurement',
+            manifestHash: repeatedProtocolHash('1'),
+            rosterHash: repeatedProtocolHash('2'),
+            setupProfileHash: repeatedProtocolHash('3'),
+            qShareHash: repeatedProtocolHash('4'),
+            carryAwareVssShareRelationProfileHash: repeatedProtocolHash('5'),
+            commitmentProfileHash: repeatedProtocolHash('6'),
+            setupEpoch: 'setup-epoch-1',
+        } as const;
+        const sameSecretStatementWithoutRoot = {
+            objectType: 'SameSecretConsistencyStatement',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+            setupProofProfileId,
+            proofFamily: sameSecretProofFamily,
+            ...sameSecretContext,
+            trusteeIdentity: 'trustee-0',
+            trusteeRosterPosition: 0,
+            vssSourceTrusteeCommitmentRoot: repeatedProtocolHash('9'),
+            constantCoefficientCommitmentRoots:
+                targetConstantCoefficientCommitmentRoots.map(
+                    (targetConstantRoot) => ({
+                        rnsLimbIndex: targetConstantRoot.rnsLimbIndex,
+                        rnsPrime: targetConstantRoot.rnsPrime,
+                        shamirCoefficientIndex: 0 as const,
+                        commitmentRoot:
+                            targetConstantRoot.coefficientCommitmentRoot,
+                    }),
+                ),
+            trusteeSecretCommitmentRoot,
+            boundSecretDependentProofFamilies: [
+                'vss-constant-relation',
+                'public-key-share',
+                'relinearization-key-share',
+                'galois-key-share',
+            ],
+            sameSecretProofFamilyBindingRoot,
+            sameSecretRelation,
+        } as const;
+        const sameSecretStatementRoot = deriveProtocolHash(
+            'SameSecretConsistencyRoot',
+            sameSecretStatementWithoutRoot,
+        );
+        const sameSecretStatementRecord = {
+            ...sameSecretStatementWithoutRoot,
+            sameSecretStatementRoot,
+        } as const;
+        const sameSecretProofRecordWithoutRoot = {
+            objectType: 'SameSecretProof',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+            setupProofProfileId,
+            proofFamily: sameSecretProofFamily,
+            ...sameSecretContext,
+            trusteeIdentity: 'trustee-0',
+            trusteeRosterPosition: 0,
+            ringDegree: restrictedProofRingDegree,
+            sameSecretStatementRoot,
+            trusteeSecretCommitmentRoot,
+            sameSecretProofFamilyBindingRoot,
+            statementHash: deriveProtocolHash('SameSecretProofRoot', {
+                fixture: 'same-secret-proof-statement',
+            }),
+            proofSizeBytes: 1,
+            proofBytesHash: hash512Hex(
+                'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1',
+                [Buffer.from('ab', 'hex')],
+            ),
+            proofBytesHex: 'ab',
+        } as const;
+        const sameSecretProofRoot = deriveProtocolHash(
+            'SameSecretProofRoot',
+            sameSecretProofRecordWithoutRoot,
+        );
+        const sameSecretProofRecord = {
+            ...sameSecretProofRecordWithoutRoot,
+            sameSecretProofRoot,
+        } as const;
+        const sameSecretConsistencyWithoutRoot = {
+            objectType: 'SameSecretConsistencyStatementSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+            setupProofProfileId,
+            proofFamily: sameSecretProofFamily,
+            ...sameSecretContext,
+            participantCount: 1,
+            rnsLimbCount: targetRnsPrimes.length,
+            thresholdDegree: 1,
+            vssCoefficientCommitmentRoot: repeatedProtocolHash('9'),
+            sameSecretProofFamilyBindingRoot,
+            trusteeSecretCommitmentRoots: [
+                {
+                    trusteeIdentity: 'trustee-0',
+                    trusteeRosterPosition: 0,
+                    trusteeSecretCommitmentRoot,
+                },
+            ],
+            statementRecords: [sameSecretStatementRecord],
+        } as const;
+        const sameSecretConsistency = {
+            ...sameSecretConsistencyWithoutRoot,
+            sameSecretConsistencyRoot: deriveProtocolHash(
+                'SameSecretConsistencyRoot',
+                sameSecretConsistencyWithoutRoot,
+            ),
+        } as SameSecretConsistencyStatementSet;
+        const sameSecretProofsWithoutRoot = {
+            objectType: 'SameSecretProofSet',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+            setupProofProfileId,
+            proofFamily: sameSecretProofFamily,
+            proofAccountingHash: deriveProtocolHash('SameSecretProofRoot', {
+                fixture: 'same-secret-proof-accounting',
+            }),
+            ...sameSecretContext,
+            participantCount: 1,
+            rnsLimbCount: targetRnsPrimes.length,
+            sameSecretConsistencyRoot:
+                sameSecretConsistency.sameSecretConsistencyRoot,
+            sameSecretProofFamilyBindingRoot,
+            vssCoefficientCommitmentMaterialRoot: repeatedProtocolHash('9'),
+            sameSecretProofRoots: [
+                {
+                    trusteeIdentity: 'trustee-0',
+                    trusteeRosterPosition: 0,
+                    sameSecretProofRoot,
+                },
+            ],
+            proofRecords: [sameSecretProofRecord],
+        } as const;
+        const sameSecretProofs = {
+            ...sameSecretProofsWithoutRoot,
+            sameSecretProofSetRoot: deriveProtocolHash(
+                'SameSecretProofRoot',
+                sameSecretProofsWithoutRoot,
+            ),
+        } as SameSecretProofSet;
         const compactSameSecretBridgeStatementRoot = deriveProtocolHash(
             'SetupProofRecordBindingHash',
             {
@@ -1197,7 +841,7 @@ const restrictedCompactSameSecretBridgeProofFixture =
                 trusteeRosterPosition: 0,
                 sameSecretStatementRoot,
                 sameSecretProofRoot,
-                trusteeSecretCommitmentRoot: repeatedProtocolHash('7'),
+                trusteeSecretCommitmentRoot,
                 sameSecretProofFamilyBindingRoot,
                 dataBasisRelation:
                     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs',
@@ -1245,6 +889,8 @@ const restrictedCompactSameSecretBridgeProofFixture =
                     (computation) => computation.commitment,
                 ),
             },
+            sameSecretConsistency,
+            sameSecretProofs,
             secretCoefficients,
             negativeIndicatorCoefficients,
             openingRandomnessByLimb,
@@ -1341,442 +987,40 @@ const measureWasmPath = (
     return { generation, bodyEncoding, bodyDecoding, verification };
 };
 
-const restrictedShareLinkageProofItems = (
-    fixture: RestrictedCompactShareLinkageProofFixture,
-): readonly RestrictedShareLinkageProofItem[] => [
-    fixture.compactVssShareLinkage,
-    ...(fixture.compactVssShareLinkage.additionalLinkageItems ?? []),
-];
-
-const compactShareLinkageCommitmentSetsFromRestrictedProofFixtures = (
-    fixtures: readonly RestrictedCompactShareLinkageProofFixture[],
-    targetRnsLimbCountForStatement: number,
-): {
-    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
-} => {
-    const participantCount = fixtures.length;
-    const firstFixture = fixtures[0];
-    if (firstFixture === undefined) {
-        throw new Error(
-            'compact share-linkage public commitment set measurement requires at least one source fixture.',
-        );
-    }
-    const coefficientSourceRecords = fixtures.map((fixture, sourceIndex) => {
-        if (
-            fixture.compactVssShareLinkage.sourceTrusteeRosterPosition !==
-            sourceIndex
-        ) {
-            throw new Error(
-                'compact share-linkage public commitment source fixtures must be ordered by source roster position.',
-            );
-        }
-
-        return compactShareLinkageSourceCoefficientRecordFromProofItems({
-            sourceTrusteeIdentity:
-                fixture.compactVssShareLinkage.sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition: sourceIndex,
-            publicMatrixSeedHash:
-                fixture.compactVssShareLinkage.publicMatrixSeedHash,
-            targetRnsLimbCountForStatement,
-            proofItems: restrictedShareLinkageProofItems(fixture),
+const measureCompactShareLinkagePublicVerification = (
+    fixture: FullRingPrivateStateFixture,
+): CompactShareLinkagePublicVerificationMeasurement => {
+    const verification = measureSyncOperation(() => {
+        const statement = verifyCompactVssShareLinkageStatement({
+            statement: fixture.shareLinkageStatement,
+            coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+            recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                fixture.aggregateThresholdCommitmentSet,
         });
+        verifyCompactVssDerivedRecipientShareCommitmentSet({
+            setupContext: fixture.setupContext,
+            coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+            recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
+            derivedRnsLimbCount: targetRnsLimbCount,
+        });
+
+        return statement;
     });
-    const recipientShareSourceRecords = fixtures.map((fixture, sourceIndex) =>
-        compactShareLinkageSourceRecipientShareRecordFromProofItems({
-            sourceTrusteeIdentity:
-                fixture.compactVssShareLinkage.sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition: sourceIndex,
-            participantCount,
-            targetRnsLimbCountForStatement,
-            proofItems: restrictedShareLinkageProofItems(fixture),
-        }),
-    );
-    const coefficientSetWithoutRoot = {
-        objectType: 'CompactVssCoefficientCommitmentSet',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        profileId: compactVssCommitmentProfileId,
-        publicMatrixSeedHash:
-            firstFixture.compactVssShareLinkage.publicMatrixSeedHash,
-        participantCount,
-        rnsLimbCount: targetRnsLimbCountForStatement,
-        thresholdDegree: restrictedProofCoefficientCount,
-        ringDegree: restrictedProofRingDegree,
-        sourceTrusteeRecords: coefficientSourceRecords,
-    } as const;
-    const recipientSetWithoutRoot = {
-        objectType: 'CompactVssRecipientShareCommitmentSet',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        profileId: compactVssCommitmentProfileId,
-        publicMatrixSeedHash:
-            firstFixture.compactVssShareLinkage.publicMatrixSeedHash,
-        participantCount,
-        rnsLimbCount: targetRnsLimbCountForStatement,
-        ringDegree: restrictedProofRingDegree,
-        sourceTrusteeRecords: recipientShareSourceRecords,
-    } as const;
-
-    return {
-        coefficientCommitmentSet: {
-            ...coefficientSetWithoutRoot,
-            coefficientCommitmentRoot: deriveProtocolHash(
-                'VssCoefficientCommitmentRoot',
-                coefficientSetWithoutRoot,
-            ),
-        },
-        recipientShareCommitmentSet: {
-            ...recipientSetWithoutRoot,
-            recipientShareCommitmentRoot: deriveProtocolHash(
-                'ThresholdShareCommitmentRoot',
-                recipientSetWithoutRoot,
-            ),
-        },
-    };
-};
-
-const compactShareLinkageStatementFromRestrictedProofFixtures = (
-    fixtures: readonly RestrictedCompactShareLinkageProofFixture[],
-): CompactVssShareLinkageStatement => {
-    if (fixtures.length === 0) {
-        throw new Error(
-            'compact share-linkage proof material measurement requires at least one source fixture.',
-        );
-    }
-    const participantCount = fixtures.length;
-    const firstFixture = fixtures[0];
-    if (firstFixture === undefined) {
-        throw new Error(
-            'compact share-linkage proof material measurement fixture is missing.',
-        );
-    }
-    const targetRnsLimbCountForStatement = firstFixture.fullSourceBatch
-        ? targetRnsLimbCount
-        : Math.max(
-              ...restrictedShareLinkageProofItems(firstFixture).map(
-                  (proofItem) => proofItem.sourceRnsLimbIndex,
-              ),
-          ) + 1;
-    const { coefficientCommitmentSet, recipientShareCommitmentSet } =
-        compactShareLinkageCommitmentSetsFromRestrictedProofFixtures(
-            fixtures,
-            targetRnsLimbCountForStatement,
-        );
-    const aggregateThresholdCommitmentRoot = deriveProtocolHash(
-        'SetupProofRecordBindingHash',
-        {
-            fixture: 'compact-vss-proof-measurement',
-            rootKind: 'aggregateThresholdCommitmentRoot',
-            participantCount,
-            targetRnsLimbCount: targetRnsLimbCountForStatement,
-        },
-    );
-    const sourceStatementRecords = fixtures.map((fixture, sourceIndex) => {
-        if (
-            fixture.context.trusteeRosterPosition !== sourceIndex ||
-            fixture.compactVssShareLinkage.sourceTrusteeRosterPosition !==
-                sourceIndex
-        ) {
-            throw new Error(
-                'compact share-linkage proof material fixtures must be ordered by source trustee roster position.',
-            );
-        }
-        const proofItems = restrictedShareLinkageProofItems(fixture);
-        const coefficientSourceRecord =
-            coefficientCommitmentSet.sourceTrusteeRecords[sourceIndex];
-        const recipientSourceRecord =
-            recipientShareCommitmentSet.sourceTrusteeRecords[sourceIndex];
-        if (
-            coefficientSourceRecord === undefined ||
-            recipientSourceRecord === undefined
-        ) {
-            throw new Error(
-                'compact share-linkage public commitment set is missing a source record.',
-            );
-        }
-        const proofItemsByCoverage = new Map(
-            proofItems.map((proofItem) => [
-                `${String(proofItem.recipientRosterPosition)}:${String(proofItem.sourceRnsLimbIndex)}`,
-                proofItem,
-            ]),
-        );
-        const proofItemsBySourceLimb = new Map(
-            proofItems.map((proofItem) => [
-                proofItem.sourceRnsLimbIndex,
-                proofItem,
-            ]),
-        );
-        const coefficientOpeningRoots = Array.from(
-            { length: targetRnsLimbCountForStatement },
-            (_unusedLimb, sourceRnsLimbIndex) => {
-                const proofItem =
-                    proofItemsBySourceLimb.get(sourceRnsLimbIndex);
-                if (proofItem === undefined) {
-                    throw new Error(
-                        'compact share-linkage source proof material is missing a target-limb coefficient opening root batch.',
-                    );
-                }
-
-                return [...proofItem.coefficientOpeningRoots];
-            },
-        ).flat();
-        const recipientShareOpeningRoots = Array.from(
-            { length: participantCount },
-            (_unusedRecipient, recipientRosterPosition) =>
-                Array.from(
-                    { length: targetRnsLimbCountForStatement },
-                    (_unusedLimb, sourceRnsLimbIndex) => {
-                        const proofItem = proofItemsByCoverage.get(
-                            `${String(recipientRosterPosition)}:${String(sourceRnsLimbIndex)}`,
-                        );
-                        if (proofItem === undefined) {
-                            throw new Error(
-                                'compact share-linkage source proof material is missing a recipient target-limb opening root.',
-                            );
-                        }
-
-                        return proofItem.recipientShareOpeningRoot;
-                    },
-                ),
-        ).flat();
-        const sourceStatementWithoutRoot = {
-            objectType: 'CompactVssShareLinkageSourceStatement',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            profileId: compactVssCommitmentProfileId,
-            ceremonyId: fixture.context.ceremonyId,
-            manifestHash: fixture.context.manifestHash,
-            rosterHash: fixture.context.rosterHash,
-            setupProfileHash: repeatedProtocolHash('3'),
-            qShareHash: repeatedProtocolHash('4'),
-            carryAwareVssShareRelationProfileHash: repeatedProtocolHash('5'),
-            commitmentProfileHash: repeatedProtocolHash('6'),
-            setupEpoch: fixture.context.setupEpoch,
-            publicMatrixSeedHash:
-                fixture.compactVssShareLinkage.publicMatrixSeedHash,
-            targetBasisHash: canonicalTargetBasisHash,
-            sourceTrusteeIdentity:
-                fixture.compactVssShareLinkage.sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition:
-                fixture.compactVssShareLinkage.sourceTrusteeRosterPosition,
-            participantCount,
-            targetRnsLimbCount: targetRnsLimbCountForStatement,
-            thresholdDegree: restrictedProofCoefficientCount,
-            coefficientCommitmentRoot:
-                coefficientCommitmentSet.coefficientCommitmentRoot,
-            sourceCoefficientCommitmentRoot:
-                coefficientSourceRecord.sourceCoefficientCommitmentRoot,
-            sourceRecipientShareCommitmentRoot:
-                recipientSourceRecord.sourceRecipientShareCommitmentRoot,
-            coefficientOpeningRoots,
-            recipientShareOpeningRoots,
-            aggregateThresholdCommitmentRoot,
-            relation: compactVssShareLinkageStatementRelation,
-            proofBatchingRule: compactVssShareLinkageProofBatchingRule,
-            shamirEvaluationRule: compactVssShareLinkageShamirEvaluationRule,
-            aggregateThresholdRule:
-                compactVssShareLinkageAggregateThresholdRule,
-            commonKeyRule: compactVssShareLinkageCommonKeyRule,
-        } as const;
-
-        return {
-            ...sourceStatementWithoutRoot,
-            sourceStatementRoot: deriveProtocolHash(
-                'SetupProofRecordBindingHash',
-                sourceStatementWithoutRoot,
-            ),
-        };
-    });
-    const statementWithoutRoot = {
-        objectType: 'CompactVssShareLinkageStatement',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        profileId: compactVssCommitmentProfileId,
-        ceremonyId: firstFixture.context.ceremonyId,
-        manifestHash: firstFixture.context.manifestHash,
-        rosterHash: firstFixture.context.rosterHash,
-        setupProfileHash: repeatedProtocolHash('3'),
-        qShareHash: repeatedProtocolHash('4'),
-        carryAwareVssShareRelationProfileHash: repeatedProtocolHash('5'),
-        commitmentProfileHash: repeatedProtocolHash('6'),
-        setupEpoch: firstFixture.context.setupEpoch,
-        publicMatrixSeedHash:
-            firstFixture.compactVssShareLinkage.publicMatrixSeedHash,
-        targetBasisHash: canonicalTargetBasisHash,
-        participantCount,
-        targetRnsLimbCount: targetRnsLimbCountForStatement,
-        thresholdDegree: restrictedProofCoefficientCount,
-        coefficientCommitmentRoot:
-            coefficientCommitmentSet.coefficientCommitmentRoot,
-        recipientShareCommitmentRoot:
-            recipientShareCommitmentSet.recipientShareCommitmentRoot,
-        aggregateThresholdCommitmentRoot,
-        relation: compactVssShareLinkageStatementRelation,
-        proofBatchingRule: compactVssShareLinkageProofBatchingRule,
-        shamirEvaluationRule: compactVssShareLinkageShamirEvaluationRule,
-        aggregateThresholdRule: compactVssShareLinkageAggregateThresholdRule,
-        commonKeyRule: compactVssShareLinkageCommonKeyRule,
-        sourceStatementRecords,
-    } as const;
-
-    return {
-        ...statementWithoutRoot,
-        statementRoot: deriveProtocolHash(
-            'SetupProofRecordBindingHash',
-            statementWithoutRoot,
-        ),
-    };
-};
-
-const compactShareLinkageProofMaterialInputs = (
-    statement: CompactVssShareLinkageStatement,
-    fixtures: readonly RestrictedCompactShareLinkageProofFixture[],
-    proofGenerations: readonly ReturnType<
-        TranscriptCoreKernel['generateCompactVssShareLinkageProof']
-    >[],
-): readonly CompactVssShareLinkageProofMaterialInput[] =>
-    statement.sourceStatementRecords.map((sourceStatement, sourceIndex) => {
-        const fixture = fixtures[sourceIndex];
-        const generation = proofGenerations[sourceIndex];
-        if (fixture === undefined || generation === undefined) {
-            throw new Error(
-                'compact share-linkage proof material inputs are missing a source proof generation.',
-            );
-        }
-        const proofStatement = {
-            proofStatementHash: generation.statementHash,
-            context: fixture.context,
-            ringDegree: restrictedProofRingDegree,
-            compactVssShareLinkage: fixture.compactVssShareLinkage,
-        } as const;
-
-        return {
-            sourceStatementRoot: sourceStatement.sourceStatementRoot,
-            proofRecords: [
-                {
-                    proofStatementHash: generation.statementHash,
-                    proofStatement,
-                    proofBytesHex: generation.proofBytesHex,
-                },
-            ],
-        };
-    });
-
-const measureRestrictedCompactShareLinkageProofMaterialSet = (
-    kernel: TranscriptCoreKernel,
-    sourceZeroFixture: RestrictedCompactShareLinkageProofFixture,
-    sourceZeroGeneration: RestrictedCompactShareLinkageProofMeasurement['generation'],
-): RestrictedCompactShareLinkageProofMaterialMeasurement => {
-    if (!sourceZeroFixture.fullSourceBatch) {
-        return {
-            measurementMode: 'not-measured',
-            reason: 'Full source-batch material assembly is measured only when SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH=1 selects the complete recipient and target-limb source batch.',
-        };
-    }
-    const additionalSourceFixtures = Array.from(
-        { length: firstProfileParticipantCount - 1 },
-        (_unused, sourceOffset) =>
-            restrictedCompactShareLinkageProofFixture({
-                fullSourceBatch: true,
-                sourceTrusteeRosterPosition: sourceOffset + 1,
-            }),
-    );
-    const additionalProofGeneration = timed(() =>
-        additionalSourceFixtures.map((fixture, sourceOffset) =>
-            kernel.generateCompactVssShareLinkageProof({
-                ...fixture,
-                ringDegree: restrictedProofRingDegree,
-                proofRandomnessSeedHex: 'ab'.repeat(64),
-                proofRandomnessNonceHex: (sourceOffset + 1)
-                    .toString(16)
-                    .padStart(2, '0')
-                    .repeat(64),
-            }),
-        ),
-    );
-    const fixtures = [sourceZeroFixture, ...additionalSourceFixtures];
-    const proofGenerations = [
-        sourceZeroGeneration.lastResult,
-        ...additionalProofGeneration.result,
-    ];
-    const statement =
-        compactShareLinkageStatementFromRestrictedProofFixtures(fixtures);
-    const { coefficientCommitmentSet, recipientShareCommitmentSet } =
-        compactShareLinkageCommitmentSetsFromRestrictedProofFixtures(
-            fixtures,
-            statement.targetRnsLimbCount,
-        );
-    const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
-        statement,
-        proofMaterialInputs: compactShareLinkageProofMaterialInputs(
-            statement,
-            fixtures,
-            proofGenerations,
-        ),
-    });
-    const proofMaterialSetJsonBytes = Buffer.byteLength(
-        JSON.stringify(proofMaterialSet),
-        'utf8',
-    );
-    const binaryProofMaterialTransport =
-        encodeCompactVssShareLinkageProofMaterialSetBinary(proofMaterialSet);
-    const verification = timed(() =>
-        kernel.verifyCompactVssShareLinkageProofMaterialSet({
-            statement,
-            proofMaterialSet,
-            coefficientCommitmentSet,
-            recipientShareCommitmentSet,
-        }),
-    );
 
     if (
-        verification.result.proofRecordCount !== firstProfileParticipantCount ||
-        verification.result.proofMaterialCount !== firstProfileParticipantCount
+        verification.lastResult.statementRoot !==
+        fixture.shareLinkageStatement.statementRoot
     ) {
         throw new Error(
-            'compact share-linkage proof material set did not verify one proof per source trustee.',
-        );
-    }
-    const expectedProofByteLength = proofGenerations.reduce(
-        (totalBytes, generation) => totalBytes + generation.proofByteLength,
-        0,
-    );
-    if (verification.result.totalProofByteLength !== expectedProofByteLength) {
-        throw new Error(
-            'compact share-linkage proof material set proof-byte accounting differs from generated proofs.',
+            'compact share-linkage public verification returned a different statement root.',
         );
     }
 
     return {
-        measurementMode: 'full-source-material-set',
-        proofMaterialSetJsonBytes,
-        binaryProofMaterialTransportBytes:
-            binaryProofMaterialTransport.totalByteLength,
-        binaryProofMaterialTransportChunkCount:
-            binaryProofMaterialTransport.chunkCount,
-        binaryProofMaterialTransportChunkRoot:
-            binaryProofMaterialTransport.chunkRoot,
-        binaryProofMaterialTransportFullObjectHash:
-            binaryProofMaterialTransport.fullObjectHash,
-        binaryProofMaterialTransportSavingsBytes:
-            proofMaterialSetJsonBytes -
-            binaryProofMaterialTransport.totalByteLength,
-        binaryProofMaterialTransportPublicSetupDownloadHeadroomBytes:
-            publicSetupDownloadBudgetBytes -
-            binaryProofMaterialTransport.totalByteLength,
-        generatedSourceProofCount: proofGenerations.length,
-        additionalGeneratedSourceProofCount:
-            additionalProofGeneration.result.length,
-        sourceZeroWarmGenerationMilliseconds:
-            sourceZeroGeneration.samples.warmMedianMilliseconds,
-        additionalProofGenerationMilliseconds:
-            additionalProofGeneration.milliseconds,
-        estimatedAllSourceProofGenerationMilliseconds:
-            sourceZeroGeneration.samples.warmMedianMilliseconds +
-            additionalProofGeneration.milliseconds,
-        verificationMilliseconds: verification.milliseconds,
-        verification: verification.result,
+        proofByteLength: 0,
+        proofMaterialTransportBytes: 0,
+        verification,
     };
 };
 
@@ -1876,8 +1120,10 @@ const restrictedCompactSameSecretBridgeStatementSet = (
     const commitmentProfileHash = repeatedProtocolHash('6');
     const trusteeSecretCommitmentRoot = repeatedProtocolHash('7');
     const compactCoefficientCommitmentRoot = repeatedProtocolHash('9');
-    const sameSecretConsistencyRoot = repeatedProtocolHash('a');
-    const sameSecretProofSetRoot = repeatedProtocolHash('b');
+    const sameSecretConsistencyRoot =
+        fixture.sameSecretConsistency.sameSecretConsistencyRoot;
+    const sameSecretProofSetRoot =
+        fixture.sameSecretProofs.sameSecretProofSetRoot;
     const statementRecordWithoutRoot = {
         objectType: 'CompactVssSameSecretBridgeStatement',
         objectVersion: 1,
@@ -1976,6 +1222,8 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
     const statementSet = restrictedCompactSameSecretBridgeStatementSet(fixture);
     const proofMaterialSet = createCompactVssSameSecretBridgeProofMaterialSet({
         statementSet,
+        sameSecretConsistency: fixture.sameSecretConsistency,
+        sameSecretProofs: fixture.sameSecretProofs,
         proofRecordInputs: [
             {
                 compactSameSecretBridgeStatementRoot:
@@ -1992,6 +1240,8 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
     const verification = measureSyncOperation(() =>
         kernel.verifyCompactVssSameSecretBridgeProofMaterialSet({
             statementSet,
+            sameSecretConsistency: fixture.sameSecretConsistency,
+            sameSecretProofs: fixture.sameSecretProofs,
             proofMaterialSet,
         }),
     );
@@ -2018,71 +1268,299 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
     return { proofMaterialSetJsonBytes, verification };
 };
 
-const firstProfileRestrictedProofCoverageEstimate = (
-    restrictedProofMeasurement: RestrictedCompactShareLinkageProofMeasurement,
-    restrictedBridgeProofMeasurement: RestrictedCompactSameSecretBridgeProofMeasurement,
-    restrictedBridgeProofMaterialMeasurement: RestrictedCompactSameSecretBridgeProofMaterialMeasurement,
-): FirstProfileRestrictedProofCoverageEstimate => {
-    const shareLinkageProofItemsPerSource =
-        firstProfileParticipantCount * targetRnsLimbCount;
-    const measuredShareLinkageProofItemsPerRecord =
-        restrictedProofMeasurement.generation.lastResult
-            .coefficientCommitmentCount / restrictedProofCoefficientCount;
-    const measuredShareLinkageCoefficientWitnessColumnsPerRecord =
-        restrictedProofMeasurement.generation.lastResult
-            .coefficientWitnessColumnCount;
-    const shareLinkageProofRecordsPerSource = 1;
-    const shareLinkageProofRecordCount =
-        firstProfileParticipantCount * shareLinkageProofRecordsPerSource;
-    const shareLinkageRepeatedProofPayloadBytes =
-        shareLinkageProofRecordCount *
-        restrictedProofMeasurement.generation.lastResult.proofByteLength;
-    const sameSecretBridgeProofRecordCount = firstProfileParticipantCount;
-    const sameSecretBridgeRepeatedProofPayloadBytes =
-        sameSecretBridgeProofRecordCount *
-        restrictedBridgeProofMeasurement.generation.lastResult.proofByteLength;
-    const sameSecretBridgeRepeatedProofMaterialJsonBytes =
-        sameSecretBridgeProofRecordCount *
-        restrictedBridgeProofMaterialMeasurement.proofMaterialSetJsonBytes;
-    const sourceBatchMeasurementMode =
-        measuredShareLinkageProofItemsPerRecord ===
-        shareLinkageProofItemsPerSource
-            ? 'Measured one full restricted-ring source batch in this run.'
-            : 'Measured a three-item restricted-ring dedupe sample in this run. Set SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH=1 to run one full source batch.';
-    const oneSourceProofPayloadBytes =
-        restrictedProofMeasurement.generation.lastResult.proofByteLength +
-        restrictedBridgeProofMeasurement.generation.lastResult.proofByteLength;
-    const proofPayloadConclusion =
-        measuredShareLinkageProofItemsPerRecord ===
-        shareLinkageProofItemsPerSource
-            ? `This run measured one full source-batch share-linkage proof; the combined one-source share-linkage and bridge proof payload is ${oneSourceProofPayloadBytes} bytes, so it ${oneSourceProofPayloadBytes <= maximumRestrictedProofPayloadBytes ? 'fits' : 'exceeds'} the 8 MiB proof-payload guard.`
-            : 'This run measured only a three-item share-linkage proof sample; it must not be used as evidence that first-profile share-linkage proof material fits the 8 MiB proof-payload guard.';
-    const setupTransportConclusion =
-        measuredShareLinkageProofItemsPerRecord ===
-        shareLinkageProofItemsPerSource
-            ? 'This source-batch proof measurement still is not the all-source setup-transport measurement; use the full source material-set lane for the 64 MiB setup download budget.'
-            : 'This restricted sample is not setup-transport evidence; it does not measure the all-source share-linkage proof-material set against the 64 MiB setup download budget.';
+const restrictedFirstProfileSourceTrusteeState = (
+    setupContext: CollectiveBgvSetupContext,
+    publicMatrixSeedHash: ProtocolHash,
+    sourceTrusteeRosterPosition: number,
+    ringDegree: number,
+): PrivateVssSourceTrusteeContributionState => {
+    const sourceTrusteeIdentity = `trustee-${String(
+        sourceTrusteeRosterPosition,
+    )}`;
+    const coefficientOpenings = acceptedBgvSetupQSharePrimes.flatMap(
+        (rnsPrime, rnsLimbIndex) =>
+            Array.from(
+                { length: firstProfileThresholdDegree },
+                (_unused, shamirCoefficientIndex) => {
+                    const commitmentRoot = measurementHash(
+                        `derived-source-coefficient-${String(
+                            sourceTrusteeRosterPosition,
+                        )}-${String(rnsLimbIndex)}-${String(
+                            shamirCoefficientIndex,
+                        )}`,
+                    );
+
+                    return {
+                        rnsLimbIndex,
+                        rnsPrime,
+                        shamirCoefficientIndex,
+                        commitmentRoot,
+                        coefficientMessage:
+                            deterministicResidueVectorForRingDegree(
+                                rnsPrime,
+                                rnsLimbIndex,
+                                shamirCoefficientIndex +
+                                    sourceTrusteeRosterPosition *
+                                        firstProfileThresholdDegree,
+                                ringDegree,
+                            ),
+                        randomnessByColumn: [],
+                    };
+                },
+            ),
+    );
+    const coefficientCommitments = coefficientOpenings.map((opening) => ({
+        objectType: 'VssCoefficientCommitment',
+        objectVersion: 1,
+        ...setupContext,
+        sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        publicMatrixSeedHash,
+        rnsLimbIndex: opening.rnsLimbIndex,
+        rnsPrime: opening.rnsPrime,
+        shamirCoefficientIndex: opening.shamirCoefficientIndex,
+        commitmentRoot: opening.commitmentRoot,
+    }));
+    const sourceTrusteeRecordWithoutRoot = {
+        objectType: 'VssSourceTrusteeCoefficientCommitments',
+        objectVersion: 1,
+        ...setupContext,
+        sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        publicMatrixSeedHash,
+        coefficientCommitments,
+    };
+    const sourceTrusteeCommitmentRoot = deriveProtocolHash(
+        'VssCoefficientCommitmentRoot',
+        sourceTrusteeRecordWithoutRoot,
+    );
 
     return {
+        sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        sourceTrusteeCommitmentRoot,
+        sourceTrusteeCoefficientCommitmentRecord: {
+            ...sourceTrusteeRecordWithoutRoot,
+            sourceTrusteeCommitmentRoot,
+        },
+        sourceTrusteeCoefficientCommitmentMaterialRecords: [],
+        coefficientOpenings,
+    };
+};
+
+const fullShareLinkageBatchDerivedFixture =
+    (): FullShareLinkageBatchDerivedFixture => {
+        const setupContext = measurementSetupContext();
+        const publicMatrixSeedHash = measurementHash(
+            'full-share-linkage-derived-public-matrix-seed',
+        );
+        const recipientTrustees = Array.from(
+            { length: firstProfileParticipantCount },
+            (_unused, trusteeRosterPosition) => ({
+                trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
+                trusteeRosterPosition,
+            }),
+        );
+        const sourceTrusteeOpeningStates = recipientTrustees.map((trustee) =>
+            restrictedFirstProfileSourceTrusteeState(
+                setupContext,
+                publicMatrixSeedHash,
+                trustee.trusteeRosterPosition,
+                restrictedProofRingDegree,
+            ),
+        );
+        const coefficientOpeningRandomness = ({
+            trusteeRosterPosition,
+            rnsLimbIndex,
+            shamirCoefficientIndex,
+            ringDegree,
+        }: {
+            readonly trusteeRosterPosition: number;
+            readonly rnsLimbIndex: number;
+            readonly shamirCoefficientIndex: number;
+            readonly ringDegree: number;
+        }): readonly (readonly number[])[] =>
+            deterministicRandomnessColumns(
+                3 +
+                    trusteeRosterPosition * 10_007 +
+                    rnsLimbIndex * 43 +
+                    shamirCoefficientIndex * 271,
+                ringDegree,
+            );
+        const coefficientCommitmentSet =
+            createCompactVssCoefficientCommitmentSet({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount: firstProfileParticipantCount,
+                qSharePrimes: acceptedBgvSetupQSharePrimes,
+                ringDegree: restrictedProofRingDegree,
+                thresholdDegree: firstProfileThresholdDegree,
+                sourceTrusteeOpeningStates,
+                coefficientOpeningRandomness,
+            });
+        const recipientShareBundle =
+            createCompactVssDerivedRecipientShareCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash,
+                participantCount: firstProfileParticipantCount,
+                qSharePrimes: acceptedBgvSetupQSharePrimes,
+                ringDegree: restrictedProofRingDegree,
+                thresholdDegree: firstProfileThresholdDegree,
+                derivedRnsLimbCount: targetRnsLimbCount,
+                coefficientCommitmentSet,
+                sourceTrusteeOpeningStates,
+                recipientTrustees,
+                coefficientOpeningRandomness,
+            });
+        const aggregateBundle = aggregateCompactVssThresholdShareCommitments({
+            setupContext,
+            publicMatrixSeedHash,
+            participantCount: firstProfileParticipantCount,
+            qSharePrimes: acceptedBgvSetupQSharePrimes.slice(
+                0,
+                targetRnsLimbCount,
+            ),
+            ringDegree: restrictedProofRingDegree,
+            recipientTrustees,
+            recipientShareOpeningCredentials:
+                recipientShareBundle.recipientShareOpeningCredentials,
+        });
+        const shareLinkageStatement = createCompactVssShareLinkageStatement({
+            setupContext,
+            publicMatrixSeedHash,
+            targetBasisHash: canonicalTargetBasisHash,
+            coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                recipientShareBundle.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                aggregateBundle.aggregateThresholdCommitmentSet,
+        });
+
+        return {
+            coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                recipientShareBundle.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                aggregateBundle.aggregateThresholdCommitmentSet,
+            shareLinkageStatement,
+            recipientShareOpeningCredentialCount:
+                recipientShareBundle.recipientShareOpeningCredentials.length,
+        };
+    };
+
+const measureFullShareLinkageBatchDerived = (
+    kernel: TranscriptCoreKernel,
+    bridgeProofByteLength: number,
+): FullShareLinkageBatchMeasurement => {
+    void kernel;
+    if (!fullShareLinkageBatchMeasurementRequested) {
+        return {
+            measurementMode:
+                'Set SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH=1 to run the restricted-ring derived compact linkage measurement.',
+        };
+    }
+
+    const fixture = fullShareLinkageBatchDerivedFixture();
+    const derivedRecipientShareCommitments = measureSyncOperation(() =>
+        verifyCompactVssDerivedRecipientShareCommitmentSet({
+            setupContext: measurementSetupContext(),
+            coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+            recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
+            derivedRnsLimbCount: targetRnsLimbCount,
+        }),
+    );
+    const shareLinkageStatement = measureSyncOperation(() =>
+        verifyCompactVssShareLinkageStatement({
+            statement: fixture.shareLinkageStatement,
+            coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+            recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                fixture.aggregateThresholdCommitmentSet,
+        }),
+    );
+    if (
+        shareLinkageStatement.lastResult.shareLinkageStatementRoot !==
+        fixture.shareLinkageStatement.shareLinkageStatementRoot
+    ) {
+        throw new Error(
+            'derived compact linkage statement root differs after verification.',
+        );
+    }
+    const oneSourceShareLinkageProofByteLength = 0;
+    const oneSourcePayloadWithBridgeProofBytes =
+        oneSourceShareLinkageProofByteLength + bridgeProofByteLength;
+    const sourceRecipientRecordCount =
+        firstProfileParticipantCount *
+        firstProfileParticipantCount *
+        targetRnsLimbCount;
+
+    return {
+        measurementMode: 'restricted-ring derived compact linkage measurement',
         participantCount: firstProfileParticipantCount,
         targetRnsLimbCount,
-        shareLinkageProofItemsPerSource,
-        measuredShareLinkageProofItemsPerRecord,
-        measuredShareLinkageCoefficientWitnessColumnsPerRecord,
-        sourceBatchMeasurementMode,
-        proofPayloadConclusion,
-        setupTransportConclusion,
-        shareLinkageProofRecordsPerSource,
-        shareLinkageProofRecordCount,
-        shareLinkageRepeatedProofPayloadBytes,
-        sameSecretBridgeProofRecordCount,
-        sameSecretBridgeRepeatedProofPayloadBytes,
-        sameSecretBridgeRepeatedProofMaterialJsonBytes,
-        combinedRepeatedProofPayloadBytes:
-            shareLinkageRepeatedProofPayloadBytes +
-            sameSecretBridgeRepeatedProofPayloadBytes,
-        activationBoundary:
-            'Share-linkage target coverage uses one proof record per source, with every recipient and target limb in the source batch. The public commitment-body ratio remains separate from proof payload accounting.',
+        sourceRecipientRecordCount,
+        aggregateThresholdRecordCount:
+            firstProfileParticipantCount * targetRnsLimbCount,
+        ringDegree: restrictedProofRingDegree,
+        oneSourceShareLinkageProofByteLength,
+        oneSourcePayloadWithBridgeProofBytes,
+        repeatedAllSourceShareLinkageProofBytes:
+            oneSourceShareLinkageProofByteLength * firstProfileParticipantCount,
+        repeatedAllSourcePayloadWithBridgeProofBytes:
+            oneSourcePayloadWithBridgeProofBytes * firstProfileParticipantCount,
+        coefficientCommitmentCount:
+            firstProfileParticipantCount *
+            acceptedBgvSetupQSharePrimes.length *
+            firstProfileThresholdDegree,
+        coefficientWitnessColumnCount:
+            acceptedBgvSetupQSharePrimes.length * firstProfileThresholdDegree,
+        recipientShareOpeningCredentialCount:
+            fixture.recipientShareOpeningCredentialCount,
+        verification: {
+            derivedRecipientShareCommitments,
+            shareLinkageStatement,
+        },
+    };
+};
+
+const fullShareLinkageBatchReport = (
+    measurement: FullShareLinkageBatchMeasurement,
+): JsonRecord => {
+    if (!fullShareLinkageBatchWasMeasured(measurement)) {
+        return measurement;
+    }
+
+    return {
+        measurementMode: measurement.measurementMode,
+        participantCount: measurement.participantCount,
+        targetRnsLimbCount: measurement.targetRnsLimbCount,
+        sourceRecipientRecordCount: measurement.sourceRecipientRecordCount,
+        aggregateThresholdRecordCount:
+            measurement.aggregateThresholdRecordCount,
+        ringDegree: measurement.ringDegree,
+        oneSourceShareLinkageProofByteLength:
+            measurement.oneSourceShareLinkageProofByteLength,
+        oneSourcePayloadWithBridgeProofBytes:
+            measurement.oneSourcePayloadWithBridgeProofBytes,
+        repeatedAllSourceShareLinkageProofBytes:
+            measurement.repeatedAllSourceShareLinkageProofBytes,
+        repeatedAllSourcePayloadWithBridgeProofBytes:
+            measurement.repeatedAllSourcePayloadWithBridgeProofBytes,
+        coefficientCommitmentCount: measurement.coefficientCommitmentCount,
+        coefficientWitnessColumnCount:
+            measurement.coefficientWitnessColumnCount,
+        recipientShareOpeningCredentialCount:
+            measurement.recipientShareOpeningCredentialCount,
+        statementRoot:
+            measurement.verification.shareLinkageStatement.lastResult
+                .shareLinkageStatementRoot,
+        verification: {
+            derivedRecipientShareCommitments:
+                measurement.verification.derivedRecipientShareCommitments
+                    .samples,
+            shareLinkageStatement:
+                measurement.verification.shareLinkageStatement.samples,
+        },
     };
 };
 
@@ -2120,7 +1598,12 @@ const equalBytes = (left: Uint8Array, right: Uint8Array): boolean =>
     left.every((leftByte, byteIndex) => leftByte === right[byteIndex]);
 
 const jsonByteLength = (value: unknown): number =>
-    Buffer.byteLength(JSON.stringify(value), 'utf8');
+    Buffer.byteLength(
+        JSON.stringify(value, (_key, entry: unknown) =>
+            typeof entry === 'bigint' ? entry.toString() : entry,
+        ),
+        'utf8',
+    );
 
 const objectField = (
     value: unknown,
@@ -2660,92 +2143,6 @@ const targetProofLimbLayout = (
     };
 };
 
-const compactShareLinkageProofLimbLayout = (
-    fixture: RestrictedCompactShareLinkageProofFixture,
-): EncodedSetupProofLimbLayout => {
-    const coefficientWitnessColumnCount = fixture.coefficientWitnessColumnCount;
-    const itemColumnCount = fixture.proofItemCount;
-    const randomnessColumnCount =
-        (coefficientWitnessColumnCount + itemColumnCount) *
-        compactVssCommitmentRandomnessColumnCount;
-    const coefficientSlotMessageBounds: number[] = [];
-    const coefficientSlotKeys = new Set<string>();
-    for (const item of restrictedShareLinkageProofItems(fixture)) {
-        for (
-            let shamirCoefficientIndex = 0;
-            shamirCoefficientIndex < item.coefficientCommitmentRoots.length;
-            shamirCoefficientIndex += 1
-        ) {
-            const commitmentRoot =
-                item.coefficientCommitmentRoots[shamirCoefficientIndex];
-            const openingRoot =
-                item.coefficientOpeningRoots[shamirCoefficientIndex];
-            if (commitmentRoot === undefined || openingRoot === undefined) {
-                throw new Error(
-                    'compact share-linkage proof item has incomplete coefficient roots.',
-                );
-            }
-            const slotKey = JSON.stringify([
-                item.sourceRnsLimbIndex,
-                item.sourceMessageModulus,
-                shamirCoefficientIndex,
-                commitmentRoot,
-                openingRoot,
-            ]);
-            if (!coefficientSlotKeys.has(slotKey)) {
-                coefficientSlotKeys.add(slotKey);
-                coefficientSlotMessageBounds.push(item.sourceMessageModulus);
-            }
-        }
-    }
-    if (coefficientSlotMessageBounds.length !== coefficientWitnessColumnCount) {
-        throw new Error(
-            'compact share-linkage proof fixture witness count disagrees with deduplicated slots.',
-        );
-    }
-    const coefficientMessageEncodingColumnCount =
-        coefficientSlotMessageBounds.reduce(
-            (totalColumns, messageBound) =>
-                totalColumns +
-                compactVssMessageEncodingLayoutForBound(messageBound)
-                    .encodingColumnCount,
-            0,
-        );
-    const recipientMessageEncodingColumnCount =
-        restrictedShareLinkageProofItems(fixture).reduce(
-            (totalColumns, item) =>
-                totalColumns +
-                compactVssMessageEncodingLayoutForBound(
-                    item.sourceMessageModulus,
-                ).encodingColumnCount,
-            0,
-        );
-    const messageEncodingColumnCount =
-        coefficientMessageEncodingColumnCount +
-        recipientMessageEncodingColumnCount;
-    const logicalColumnCount =
-        messageEncodingColumnCount + itemColumnCount + randomnessColumnCount;
-    const consistencyVectorCount = itemColumnCount;
-    const claimCount =
-        consistencyVectorCount * compactShareLinkageConsistencyRepetitions;
-    const maskSlotCount =
-        claimCount * compactShareLinkageCarryClaimMaskDigitCount;
-    const maskColumnCount = Math.ceil(
-        maskSlotCount / restrictedProofRingDegree,
-    );
-    const traceSize = restrictedProofRingDegree / proofTraceSplit;
-    if (!Number.isSafeInteger(traceSize)) {
-        throw new Error('compact share-linkage trace size must be an integer.');
-    }
-
-    return {
-        traceSize,
-        claimCount,
-        phaseOnePhysicalColumnCount:
-            proofTraceSplit * (logicalColumnCount + maskColumnCount),
-    };
-};
-
 const lowDegreeFinalCoefficientCount = (initialDegreeBound: number): number => {
     if (
         !Number.isSafeInteger(initialDegreeBound) ||
@@ -2877,20 +2274,6 @@ const decodeBase64ProofBytes = (
     }
 
     return proofBytes;
-};
-
-const decodeHexProofBytes = (
-    proofBytesHex: string,
-    fieldName: string,
-): Uint8Array => {
-    if (proofBytesHex.length % 2 !== 0) {
-        throw new Error(`${fieldName} must have an even hex length.`);
-    }
-    if (!/^[0-9a-f]*$/u.test(proofBytesHex)) {
-        throw new Error(`${fieldName} must be lowercase hexadecimal.`);
-    }
-
-    return Buffer.from(proofBytesHex, 'hex');
 };
 
 const encodedSetupProofByteBreakdownForProofBytes = (
@@ -3035,95 +2418,6 @@ const encodedSetupProofByteBreakdownForProofBytes = (
     return finalizeTargetProofByteBreakdown(parser.breakdown);
 };
 
-const compactShareLinkageProofByteBreakdown = (
-    fixture: RestrictedCompactShareLinkageProofFixture,
-    generation: ReturnType<
-        TranscriptCoreKernel['generateCompactVssShareLinkageProof']
-    >,
-): EncodedTargetProofByteBreakdown => {
-    const proofBytes = decodeHexProofBytes(
-        generation.proofBytesHex,
-        'restrictedCompactShareLinkageProof.proofBytesHex',
-    );
-    if (proofBytes.byteLength !== generation.proofByteLength) {
-        throw new Error(
-            'restricted compact share-linkage proof byte length differs from the decoded proof stream.',
-        );
-    }
-    const limbLayout = compactShareLinkageProofLimbLayout(fixture);
-    const limbLayouts = Array.from(
-        { length: proofSetupCommitmentLimbCount },
-        () => limbLayout,
-    );
-
-    return encodedSetupProofByteBreakdownForProofBytes(
-        proofBytes,
-        limbLayouts,
-        'compact share-linkage proof',
-    );
-};
-
-const measureRestrictedCompactShareLinkageProof = (
-    kernel: TranscriptCoreKernel,
-    fixture: RestrictedCompactShareLinkageProofFixture,
-): RestrictedCompactShareLinkageProofMeasurement => {
-    const generation = measureSyncOperation(() =>
-        kernel.generateCompactVssShareLinkageProof({
-            ...fixture,
-            ringDegree: restrictedProofRingDegree,
-            proofRandomnessSeedHex: 'ab'.repeat(64),
-            proofRandomnessNonceHex: 'cd'.repeat(64),
-        }),
-    );
-    const verification = measureSyncOperation(() =>
-        kernel.verifyCompactVssShareLinkageProof({
-            context: fixture.context,
-            ringDegree: restrictedProofRingDegree,
-            compactVssShareLinkage: fixture.compactVssShareLinkage,
-            proofBytesHex: generation.lastResult.proofBytesHex,
-        }),
-    );
-
-    if (
-        generation.lastResult.statementHash !==
-        verification.lastResult.statementHash
-    ) {
-        throw new Error(
-            'restricted compact share-linkage proof statement hashes differ.',
-        );
-    }
-    if (
-        generation.lastResult.proofByteLength !==
-        verification.lastResult.proofByteLength
-    ) {
-        throw new Error(
-            'restricted compact share-linkage proof byte lengths differ.',
-        );
-    }
-    if (
-        verification.lastResult.coefficientCommitmentCount !==
-        restrictedProofCoefficientCount * fixture.proofItemCount
-    ) {
-        throw new Error(
-            'restricted compact share-linkage proof coefficient count differs.',
-        );
-    }
-    if (
-        verification.lastResult.coefficientWitnessColumnCount !==
-        fixture.coefficientWitnessColumnCount
-    ) {
-        throw new Error(
-            'restricted compact share-linkage proof witness-column count differs.',
-        );
-    }
-    const proofByteBreakdown = compactShareLinkageProofByteBreakdown(
-        fixture,
-        generation.lastResult,
-    );
-
-    return { generation, verification, proofByteBreakdown };
-};
-
 const targetProofByteBreakdownForProofRecord = (
     proofRecord: unknown,
     statementLayout: TargetProofStatementLayout,
@@ -3260,28 +2554,38 @@ const measurementSetupContext = (): CollectiveBgvSetupContext => ({
     setupEpoch: 'compact-vss-measurement-epoch',
 });
 
-const deterministicResidueVector = (
+const deterministicResidueVectorForRingDegree = (
     rnsPrime: number,
     rnsLimbIndex: number,
     shamirCoefficientIndex: number,
+    ringDegree: number,
 ): readonly number[] => {
     const modulus = BigInt(rnsPrime);
     const limbOffset = BigInt(101 + rnsLimbIndex * 4_099);
     const coefficientOffset = BigInt(1_009 + shamirCoefficientIndex * 8_191);
 
-    return Array.from(
-        { length: acceptedBgvProfileRingDegree },
-        (_unused, coefficientIndex) => {
-            const residue =
-                (BigInt(coefficientIndex + 1) * 65_537n +
-                    limbOffset +
-                    coefficientOffset) %
-                modulus;
+    return Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
+        const residue =
+            (BigInt(coefficientIndex + 1) * 65_537n +
+                limbOffset +
+                coefficientOffset) %
+            modulus;
 
-            return Number((modulus - 1n - residue) % modulus);
-        },
-    );
+        return Number((modulus - 1n - residue) % modulus);
+    });
 };
+
+const deterministicResidueVector = (
+    rnsPrime: number,
+    rnsLimbIndex: number,
+    shamirCoefficientIndex: number,
+): readonly number[] =>
+    deterministicResidueVectorForRingDegree(
+        rnsPrime,
+        rnsLimbIndex,
+        shamirCoefficientIndex,
+        acceptedBgvProfileRingDegree,
+    );
 
 const deterministicRandomnessColumns = (
     seedOffset: number,
@@ -3384,6 +2688,19 @@ const fullRingPrivateStateFixture = (): FullRingPrivateStateFixture => {
             trusteeRosterPosition: 0,
         },
     ] as const;
+    const coefficientOpeningRandomness = ({
+        rnsLimbIndex,
+        shamirCoefficientIndex,
+        ringDegree,
+    }: {
+        readonly rnsLimbIndex: number;
+        readonly shamirCoefficientIndex: number;
+        readonly ringDegree: number;
+    }): readonly (readonly number[])[] =>
+        deterministicRandomnessColumns(
+            3 + rnsLimbIndex * 43 + shamirCoefficientIndex * 271,
+            ringDegree,
+        );
     const coefficientCommitmentSet = createCompactVssCoefficientCommitmentSet({
         setupContext,
         publicMatrixSeedHash,
@@ -3392,38 +2709,27 @@ const fullRingPrivateStateFixture = (): FullRingPrivateStateFixture => {
         ringDegree: acceptedBgvProfileRingDegree,
         thresholdDegree: firstProfileThresholdDegree,
         sourceTrusteeOpeningStates: [sourceState],
-        coefficientOpeningRandomness: ({
-            rnsLimbIndex,
-            shamirCoefficientIndex,
-            ringDegree,
-        }) =>
-            deterministicRandomnessColumns(
-                3 + rnsLimbIndex * 43 + shamirCoefficientIndex * 271,
-                ringDegree,
-            ),
+        coefficientOpeningRandomness,
     });
-    const recipientShareBundle = createCompactVssRecipientShareCommitmentBundle(
-        {
+    const recipientShareBundle =
+        createCompactVssDerivedRecipientShareCommitmentBundle({
             setupContext,
             publicMatrixSeedHash,
             participantCount: 1,
             qSharePrimes: acceptedBgvSetupQSharePrimes,
             ringDegree: acceptedBgvProfileRingDegree,
             thresholdDegree: firstProfileThresholdDegree,
+            derivedRnsLimbCount: targetRnsLimbCount,
+            coefficientCommitmentSet,
             sourceTrusteeOpeningStates: [sourceState],
             recipientTrustees,
-            shareOpeningRandomness: ({ rnsLimbIndex, ringDegree }) =>
-                deterministicRandomnessColumns(
-                    19 + rnsLimbIndex * 71,
-                    ringDegree,
-                ),
-        },
-    );
+            coefficientOpeningRandomness,
+        });
     const aggregateBundle = aggregateCompactVssThresholdShareCommitments({
         setupContext,
         publicMatrixSeedHash,
         participantCount: 1,
-        qSharePrimes: acceptedBgvSetupQSharePrimes,
+        qSharePrimes: acceptedBgvSetupQSharePrimes.slice(0, targetRnsLimbCount),
         ringDegree: acceptedBgvProfileRingDegree,
         recipientTrustees,
         recipientShareOpeningCredentials:
@@ -3442,6 +2748,10 @@ const fullRingPrivateStateFixture = (): FullRingPrivateStateFixture => {
     const mailboxKeyPair = createPrivateVssMailboxKeyPair(
         measurementHash('mailbox-key'),
     );
+    const compactRecipientShareOpeningCredentials =
+        recipientShareBundle.recipientShareOpeningCredentials.filter(
+            (credential) => credential.rnsLimbIndex < targetRnsLimbCount,
+        );
 
     return {
         setupContext,
@@ -3451,10 +2761,9 @@ const fullRingPrivateStateFixture = (): FullRingPrivateStateFixture => {
         sourceTrusteeContributionState: sourceState,
         recipientTrustees,
         mailboxPublicKeyBytesHex: mailboxKeyPair.publicKeyBytesHex,
-        compactRecipientShareOpeningCredentials:
-            recipientShareBundle.recipientShareOpeningCredentials,
+        compactRecipientShareOpeningCredentials,
         compactRecipientShareOpeningCredentialsJsonBytes: jsonByteLength(
-            recipientShareBundle.recipientShareOpeningCredentials,
+            compactRecipientShareOpeningCredentials,
         ),
         coefficientCommitmentSet,
         recipientShareCommitmentSet:
@@ -3620,6 +2929,8 @@ const localStateInputFromPrivateMailbox = (
         sealedAggregateThresholdShareAeadNonceBytesHex: '63'.repeat(12),
         sealedTargetDecryptionProofWitnessAeadNonceBytesHex: '64'.repeat(12),
         compactVssTargetProofWitness: {
+            coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+            recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
             aggregateThresholdCommitmentSet:
                 fixture.aggregateThresholdCommitmentSet,
             targetDecryptionRnsLimbCount: targetRnsLimbCount,
@@ -3677,140 +2988,140 @@ const encryptedLocalStateMeasurement = (
     };
 };
 
-const measurePrivateStateDevelopmentArtifacts =
-    async (): Promise<PrivateStateDevelopmentArtifactMeasurement> => {
-        const fixture = fullRingPrivateStateFixture();
-        const observedPrivateEnvelopes: JsonRecord[] = [];
-        const observedTransportedProofMaterials: JsonRecord[] = [];
-        const mailboxStartedAtMilliseconds = performance.now();
-        const deliverySet = await createPrivateVssMailboxDeliverySet({
-            kernel: privateMailboxMeasurementKernel(
-                observedPrivateEnvelopes,
-                observedTransportedProofMaterials,
-            ),
-            setupContext: fixture.setupContext,
-            phaseOrderHash: measurementHash('phase-order'),
-            publicMatrixSeedHash: fixture.publicMatrixSeedHash,
-            vssCoefficientCommitmentRoot: fixture.vssCoefficientCommitmentRoot,
-            qSharePrimes: acceptedBgvSetupQSharePrimes,
-            ringDegree: acceptedBgvProfileRingDegree,
-            participantCount: 1,
-            deliveryPhaseNumber: 6,
-            verificationPhaseNumber: 7,
-            privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
-            privateVssShareProofFactory: ({ rnsLimbIndex }) =>
-                privateVssShareProofFramingSample(rnsLimbIndex),
-            compactVssRecipientShareOpeningCredentials:
-                fixture.compactRecipientShareOpeningCredentials,
-            sourceTrusteeContributionStates: [
-                fixture.sourceTrusteeContributionState,
-            ],
-            recipients: [
-                {
-                    recipientIdentity: 'trustee-0',
-                    recipientRosterPosition: 0,
-                    mailboxPublicKeyBytesHex: fixture.mailboxPublicKeyBytesHex,
-                },
-            ],
-        });
-        const mailboxBuildMilliseconds =
-            performance.now() - mailboxStartedAtMilliseconds;
-        const envelopeReference = firstEnvelopeReference(deliverySet);
-        const privateEnvelope = observedPrivateEnvelopes[0];
-        if (privateEnvelope === undefined) {
-            throw new Error(
-                'private mailbox measurement did not observe the private envelope.',
-            );
-        }
-        const transportedPrivateVssShareProofMaterial =
-            observedTransportedProofMaterials[0];
-        if (transportedPrivateVssShareProofMaterial === undefined) {
-            throw new Error(
-                'private mailbox measurement did not observe transported proof material.',
-            );
-        }
-        const encryptedEnvelope = objectField(
-            envelopeReference,
-            'encryptedEnvelope',
+const measurePrivateStateDevelopmentArtifacts = async (
+    fixture: FullRingPrivateStateFixture,
+): Promise<PrivateStateDevelopmentArtifactMeasurement> => {
+    const observedPrivateEnvelopes: JsonRecord[] = [];
+    const observedTransportedProofMaterials: JsonRecord[] = [];
+    const mailboxStartedAtMilliseconds = performance.now();
+    const deliverySet = await createPrivateVssMailboxDeliverySet({
+        kernel: privateMailboxMeasurementKernel(
+            observedPrivateEnvelopes,
+            observedTransportedProofMaterials,
+        ),
+        setupContext: fixture.setupContext,
+        phaseOrderHash: measurementHash('phase-order'),
+        publicMatrixSeedHash: fixture.publicMatrixSeedHash,
+        vssCoefficientCommitmentRoot: fixture.vssCoefficientCommitmentRoot,
+        qSharePrimes: acceptedBgvSetupQSharePrimes,
+        ringDegree: acceptedBgvProfileRingDegree,
+        participantCount: 1,
+        deliveryPhaseNumber: 6,
+        verificationPhaseNumber: 7,
+        privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
+        privateVssShareProofFactory: ({ rnsLimbIndex }) =>
+            privateVssShareProofFramingSample(rnsLimbIndex),
+        compactVssRecipientShareOpeningCredentials:
+            fixture.compactRecipientShareOpeningCredentials,
+        sourceTrusteeContributionStates: [
+            fixture.sourceTrusteeContributionState,
+        ],
+        recipients: [
+            {
+                recipientIdentity: 'trustee-0',
+                recipientRosterPosition: 0,
+                mailboxPublicKeyBytesHex: fixture.mailboxPublicKeyBytesHex,
+            },
+        ],
+    });
+    const mailboxBuildMilliseconds =
+        performance.now() - mailboxStartedAtMilliseconds;
+    const envelopeReference = firstEnvelopeReference(deliverySet);
+    const privateEnvelope = observedPrivateEnvelopes[0];
+    if (privateEnvelope === undefined) {
+        throw new Error(
+            'private mailbox measurement did not observe the private envelope.',
         );
-        const privateEnvelopeAad = objectField(
-            envelopeReference,
-            'privateEnvelopeAad',
+    }
+    const transportedPrivateVssShareProofMaterial =
+        observedTransportedProofMaterials[0];
+    if (transportedPrivateVssShareProofMaterial === undefined) {
+        throw new Error(
+            'private mailbox measurement did not observe transported proof material.',
         );
-        const sourceRecipientEnvelopeCountInFirstProfile =
-            firstProfileParticipantCount * firstProfileParticipantCount;
-        const sourceRecipientEnvelopeCountPerSourceInFirstProfile =
-            firstProfileParticipantCount;
-        const envelopeReferenceJsonBytes = jsonByteLength(envelopeReference);
-        const sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile =
+    }
+    const encryptedEnvelope = objectField(
+        envelopeReference,
+        'encryptedEnvelope',
+    );
+    const privateEnvelopeAad = objectField(
+        envelopeReference,
+        'privateEnvelopeAad',
+    );
+    const sourceRecipientEnvelopeCountInFirstProfile =
+        firstProfileParticipantCount * firstProfileParticipantCount;
+    const sourceRecipientEnvelopeCountPerSourceInFirstProfile =
+        firstProfileParticipantCount;
+    const envelopeReferenceJsonBytes = jsonByteLength(envelopeReference);
+    const sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile =
+        envelopeReferenceJsonBytes *
+        sourceRecipientEnvelopeCountPerSourceInFirstProfile;
+    const privateMailbox: PrivateMailboxDevelopmentArtifactMeasurement = {
+        qShareLimbCount: acceptedBgvSetupQSharePrimes.length,
+        ringDegree: acceptedBgvProfileRingDegree,
+        thresholdDegree: firstProfileThresholdDegree,
+        sourceRecipientEnvelopeCountInFirstProfile,
+        sourceRecipientEnvelopeCountPerSourceInFirstProfile,
+        buildMilliseconds: mailboxBuildMilliseconds,
+        privateShareProofFramingSampleBytesPerLimb:
+            privateVssShareProofFramingSampleBytes,
+        privateShareProofFramingSampleBytesTotal:
+            privateVssShareProofFramingSampleBytes *
+            acceptedBgvSetupQSharePrimes.length,
+        compactRecipientShareOpeningCredentialCount:
+            fixture.compactRecipientShareOpeningCredentials.length,
+        compactRecipientShareOpeningCredentialsJsonBytes:
+            fixture.compactRecipientShareOpeningCredentialsJsonBytes,
+        privateEnvelopeJsonBytes: jsonByteLength(privateEnvelope),
+        transportedPrivateVssShareProofMaterialJsonBytes: jsonByteLength(
+            transportedPrivateVssShareProofMaterial,
+        ),
+        privateEnvelopeAadJsonBytes: jsonByteLength(privateEnvelopeAad),
+        encryptedEnvelopeJsonBytes: jsonByteLength(encryptedEnvelope),
+        envelopeReferenceJsonBytes,
+        deliverySetJsonBytes: jsonByteLength(deliverySet),
+        envelopeReferenceJsonBytesExtrapolatedToFirstProfile:
             envelopeReferenceJsonBytes *
-            sourceRecipientEnvelopeCountPerSourceInFirstProfile;
-        const privateMailbox: PrivateMailboxDevelopmentArtifactMeasurement = {
-            qShareLimbCount: acceptedBgvSetupQSharePrimes.length,
-            ringDegree: acceptedBgvProfileRingDegree,
-            thresholdDegree: firstProfileThresholdDegree,
             sourceRecipientEnvelopeCountInFirstProfile,
-            sourceRecipientEnvelopeCountPerSourceInFirstProfile,
-            buildMilliseconds: mailboxBuildMilliseconds,
-            privateShareProofFramingSampleBytesPerLimb:
-                privateVssShareProofFramingSampleBytes,
-            privateShareProofFramingSampleBytesTotal:
-                privateVssShareProofFramingSampleBytes *
-                acceptedBgvSetupQSharePrimes.length,
-            compactRecipientShareOpeningCredentialCount:
-                acceptedBgvSetupQSharePrimes.length,
-            compactRecipientShareOpeningCredentialsJsonBytes:
-                fixture.compactRecipientShareOpeningCredentialsJsonBytes,
-            privateEnvelopeJsonBytes: jsonByteLength(privateEnvelope),
-            transportedPrivateVssShareProofMaterialJsonBytes: jsonByteLength(
-                transportedPrivateVssShareProofMaterial,
-            ),
-            privateEnvelopeAadJsonBytes: jsonByteLength(privateEnvelopeAad),
-            encryptedEnvelopeJsonBytes: jsonByteLength(encryptedEnvelope),
-            envelopeReferenceJsonBytes,
-            deliverySetJsonBytes: jsonByteLength(deliverySet),
-            envelopeReferenceJsonBytesExtrapolatedToFirstProfile:
-                envelopeReferenceJsonBytes *
-                sourceRecipientEnvelopeCountInFirstProfile,
+        sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile,
+        sourceTrusteeUploadBudgetMarginBytes:
+            268_435_456 -
             sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile,
-            sourceTrusteeUploadBudgetMarginBytes:
-                268_435_456 -
-                sourceTrusteeEnvelopeReferenceJsonBytesExtrapolatedToFirstProfile,
-            largestSingleObjectJsonBytes: Math.max(
-                jsonByteLength(privateEnvelope),
-                jsonByteLength(transportedPrivateVssShareProofMaterial),
-                jsonByteLength(encryptedEnvelope),
-                envelopeReferenceJsonBytes,
-                jsonByteLength(deliverySet),
-            ),
-        };
-        const localStateInput = localStateInputFromPrivateMailbox(
-            fixture,
-            deliverySet,
-            privateEnvelope,
-        );
-        const localStateStartedAtMilliseconds = performance.now();
-        const localState =
-            await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
-                localStateInput,
-            );
-        const localStateBuildMilliseconds =
-            performance.now() - localStateStartedAtMilliseconds;
-        const encryptedLocalState = encryptedLocalStateMeasurement(
-            localState,
-            deliverySet.envelopeReferences.length,
-            localStateBuildMilliseconds,
-        );
-
-        return {
-            privateMailbox,
-            encryptedLocalState,
-            largestSingleObjectJsonBytes: Math.max(
-                privateMailbox.largestSingleObjectJsonBytes,
-                encryptedLocalState.largestSingleObjectJsonBytes,
-            ),
-        };
+        largestSingleObjectJsonBytes: Math.max(
+            jsonByteLength(privateEnvelope),
+            jsonByteLength(transportedPrivateVssShareProofMaterial),
+            jsonByteLength(encryptedEnvelope),
+            envelopeReferenceJsonBytes,
+            jsonByteLength(deliverySet),
+        ),
     };
+    const localStateInput = localStateInputFromPrivateMailbox(
+        fixture,
+        deliverySet,
+        privateEnvelope,
+    );
+    const localStateStartedAtMilliseconds = performance.now();
+    const localState =
+        await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+            localStateInput,
+        );
+    const localStateBuildMilliseconds =
+        performance.now() - localStateStartedAtMilliseconds;
+    const encryptedLocalState = encryptedLocalStateMeasurement(
+        localState,
+        deliverySet.envelopeReferences.length,
+        localStateBuildMilliseconds,
+    );
+
+    return {
+        privateMailbox,
+        encryptedLocalState,
+        largestSingleObjectJsonBytes: Math.max(
+            privateMailbox.largestSingleObjectJsonBytes,
+            encryptedLocalState.largestSingleObjectJsonBytes,
+        ),
+    };
+};
 
 const measureTargetDecryptionDevelopmentArtifacts = (
     kernel: TranscriptCoreKernel,
@@ -4139,47 +3450,42 @@ const measureTargetDecryptionDevelopmentArtifacts = (
 
 const implementedDevelopmentArtifactByteAccounting = (
     measurement: ReturnType<typeof compactVssCommitmentMeasurement>,
-    restrictedProofMeasurement: RestrictedCompactShareLinkageProofMeasurement,
-    restrictedShareLinkageProofMaterialMeasurement: RestrictedCompactShareLinkageProofMaterialMeasurement,
+    compactShareLinkagePublicVerification: CompactShareLinkagePublicVerificationMeasurement,
+    fullShareLinkageBatchMeasurement: FullShareLinkageBatchMeasurement,
     restrictedBridgeProofMeasurement: RestrictedCompactSameSecretBridgeProofMeasurement,
     restrictedBridgeProofMaterialMeasurement: RestrictedCompactSameSecretBridgeProofMaterialMeasurement,
     privateStateMeasurement: PrivateStateDevelopmentArtifactMeasurement,
     targetDecryptionMeasurement: TargetDecryptionDevelopmentMeasurements,
 ): Readonly<Record<string, unknown>> => {
-    const restrictedShareLinkageProofByteLength =
-        restrictedProofMeasurement.generation.lastResult.proofByteLength;
     const restrictedSameSecretBridgeProofByteLength =
         restrictedBridgeProofMeasurement.generation.lastResult.proofByteLength;
-    const restrictedProofPayloadBytes =
-        restrictedShareLinkageProofByteLength +
-        restrictedSameSecretBridgeProofByteLength;
-    const firstProfileCoverageEstimate =
-        firstProfileRestrictedProofCoverageEstimate(
-            restrictedProofMeasurement,
-            restrictedBridgeProofMeasurement,
-            restrictedBridgeProofMaterialMeasurement,
-        );
 
     return {
         compactPublicCommitmentBodies: {
             byteLength: measurement.totalCompactPublicCommitmentBytes,
             byteReduction: measurement.byteReduction,
         },
-        reducedRingProofSamples: {
+        compactShareLinkagePublicVerification: {
+            proofByteLength:
+                compactShareLinkagePublicVerification.proofByteLength,
+            proofMaterialTransportBytes:
+                compactShareLinkagePublicVerification.proofMaterialTransportBytes,
+            verification:
+                compactShareLinkagePublicVerification.verification.samples,
+            statementRoot:
+                compactShareLinkagePublicVerification.verification.lastResult
+                    .statementRoot,
+        },
+        compactShareLinkageSourceBatchProof: fullShareLinkageBatchReport(
+            fullShareLinkageBatchMeasurement,
+        ),
+        reducedRingBridgeProofSample: {
             ringDegree: restrictedProofRingDegree,
-            shareLinkageProofByteLength: restrictedShareLinkageProofByteLength,
-            shareLinkageProofByteBreakdown:
-                restrictedProofMeasurement.proofByteBreakdown,
-            shareLinkageProofMaterialSet:
-                restrictedShareLinkageProofMaterialMeasurement,
             sameSecretBridgeProofByteLength:
                 restrictedSameSecretBridgeProofByteLength,
-            combinedProofPayloadBytes: restrictedProofPayloadBytes,
             sameSecretBridgeProofMaterialJsonBytes:
                 restrictedBridgeProofMaterialMeasurement.proofMaterialSetJsonBytes,
         },
-        firstProfileRepeatedRestrictedProofCoverageEstimate:
-            firstProfileCoverageEstimate,
         privateStateDevelopmentArtifacts: privateStateMeasurement,
         targetDecryptionDevelopmentArtifacts:
             targetDecryptionMeasurement.artifacts,
@@ -4190,9 +3496,8 @@ const implementedDevelopmentArtifactByteAccounting = (
 
 const enforceManualMeasurementBudgets = (input: {
     readonly measurement: ReturnType<typeof compactVssCommitmentMeasurement>;
-    readonly restrictedProofFixture: RestrictedCompactShareLinkageProofFixture;
-    readonly restrictedProofMeasurement: RestrictedCompactShareLinkageProofMeasurement;
-    readonly restrictedShareLinkageProofMaterialMeasurement: RestrictedCompactShareLinkageProofMaterialMeasurement;
+    readonly compactShareLinkagePublicVerification: CompactShareLinkagePublicVerificationMeasurement;
+    readonly fullShareLinkageBatchMeasurement: FullShareLinkageBatchMeasurement;
     readonly restrictedBridgeProofMeasurement: RestrictedCompactSameSecretBridgeProofMeasurement;
     readonly restrictedBridgeProofMaterialMeasurement: RestrictedCompactSameSecretBridgeProofMaterialMeasurement;
     readonly privateStateDevelopmentArtifactMeasurement: PrivateStateDevelopmentArtifactMeasurement;
@@ -4204,8 +3509,7 @@ const enforceManualMeasurementBudgets = (input: {
         input.privateStateDevelopmentArtifactMeasurement.privateMailbox;
     const encryptedLocalState =
         input.privateStateDevelopmentArtifactMeasurement.encryptedLocalState;
-    const restrictedProofPayloadBytes =
-        input.restrictedProofMeasurement.generation.lastResult.proofByteLength +
+    const bridgeProofPayloadBytes =
         input.restrictedBridgeProofMeasurement.generation.lastResult
             .proofByteLength;
 
@@ -4245,6 +3549,12 @@ const enforceManualMeasurementBudgets = (input: {
         'WASM warm full-profile compact commitment verification extrapolation',
     );
     assertAtMost(
+        input.compactShareLinkagePublicVerification.verification.samples
+            .warmMedianMilliseconds / 1_000,
+        maximumCompactShareLinkagePublicVerificationSeconds,
+        'compact share-linkage public verification',
+    );
+    assertAtMost(
         input.targetDecryptionDevelopmentMeasurement.artifacts
             .largestSingleObjectJsonBytes,
         maximumMeasuredDevelopmentArtifactJsonBytes,
@@ -4282,24 +3592,10 @@ const enforceManualMeasurementBudgets = (input: {
         maximumPrivateStateBuildSeconds,
         'private-state construction sample',
     );
-    if (
-        restrictedShareLinkageProofMaterialWasMeasured(
-            input.restrictedShareLinkageProofMaterialMeasurement,
-        )
-    ) {
-        assertAtMost(
-            input.restrictedShareLinkageProofMaterialMeasurement
-                .binaryProofMaterialTransportBytes,
-            input.measurement.budgetComparison.publicSetupDownloadBudgetBytes,
-            'full source compact share-linkage proof-material binary frame',
-        );
-    }
     assertAtMost(
-        restrictedProofPayloadBytes,
+        bridgeProofPayloadBytes,
         maximumRestrictedProofPayloadBytes,
-        input.restrictedProofFixture.fullSourceBatch
-            ? 'combined full source-batch compact proof payload'
-            : 'combined reduced-ring compact proof sample payload',
+        'reduced-ring compact same-secret bridge proof sample payload',
     );
     assertAtMost(
         input.restrictedBridgeProofMaterialMeasurement
@@ -4307,6 +3603,22 @@ const enforceManualMeasurementBudgets = (input: {
         maximumMeasuredDevelopmentArtifactJsonBytes,
         'reduced-ring compact bridge proof-material JSON sample',
     );
+    if (
+        fullShareLinkageBatchWasMeasured(input.fullShareLinkageBatchMeasurement)
+    ) {
+        assertAtMost(
+            input.fullShareLinkageBatchMeasurement
+                .oneSourcePayloadWithBridgeProofBytes,
+            maximumRestrictedProofPayloadBytes,
+            'one-source derived compact linkage plus bridge proof payload',
+        );
+        assertAtMost(
+            input.fullShareLinkageBatchMeasurement
+                .repeatedAllSourcePayloadWithBridgeProofBytes,
+            input.measurement.budgetComparison.publicSetupDownloadBudgetBytes,
+            'repeated all-source derived compact linkage plus bridge proof payload',
+        );
+    }
     if (
         targetProofMaterialWasMeasured(
             input.targetDecryptionDevelopmentMeasurement.proofMaterial,
@@ -4361,22 +3673,32 @@ const main = async (): Promise<void> => {
     const metadata = compactCommitmentBodyMetadata(
         typeScriptMeasurement.generation.lastResult.commitment,
     );
-    const wasmMeasurement = measureWasmPath(kernel, opening, metadata);
-    const restrictedProofFixture = restrictedCompactShareLinkageProofFixture({
-        fullSourceBatch:
-            process.env.SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH === '1',
-    });
-    const restrictedProofMeasurement =
-        measureRestrictedCompactShareLinkageProof(
-            kernel,
-            restrictedProofFixture,
-        );
-    const restrictedShareLinkageProofMaterialMeasurement =
-        measureRestrictedCompactShareLinkageProofMaterialSet(
-            kernel,
-            restrictedProofFixture,
-            restrictedProofMeasurement.generation,
-        );
+    const wasmOpening = {
+        ...opening,
+        messageCoefficientBound:
+            typeof opening.messageCoefficientBound === 'bigint'
+                ? (() => {
+                      throw new Error(
+                          'WASM compact VSS measurement opening bound exceeds the bridge number representation.',
+                      );
+                  })()
+                : opening.messageCoefficientBound,
+        messageCoefficients: opening.messageCoefficients.map(
+            (coefficient, coefficientIndex) => {
+                if (typeof coefficient === 'bigint') {
+                    throw new Error(
+                        `WASM compact VSS measurement opening coefficient ${String(coefficientIndex)} exceeds the bridge number representation.`,
+                    );
+                }
+
+                return coefficient;
+            },
+        ),
+    } satisfies BgvCompactVssCommitmentOpeningInput;
+    const wasmMeasurement = measureWasmPath(kernel, wasmOpening, metadata);
+    const fullRingFixture = fullRingPrivateStateFixture();
+    const compactShareLinkagePublicVerification =
+        measureCompactShareLinkagePublicVerification(fullRingFixture);
     const restrictedBridgeProofFixture =
         restrictedCompactSameSecretBridgeProofFixture();
     const restrictedBridgeProofMeasurement =
@@ -4390,8 +3712,14 @@ const main = async (): Promise<void> => {
             restrictedBridgeProofFixture,
             restrictedBridgeProofMeasurement.generation,
         );
+    const fullShareLinkageBatchMeasurement =
+        measureFullShareLinkageBatchDerived(
+            kernel,
+            restrictedBridgeProofMeasurement.generation.lastResult
+                .proofByteLength,
+        );
     const privateStateDevelopmentArtifactMeasurement =
-        await measurePrivateStateDevelopmentArtifacts();
+        await measurePrivateStateDevelopmentArtifacts(fullRingFixture);
     const targetDecryptionDevelopmentArtifactMeasurement =
         measureTargetDecryptionDevelopmentArtifacts(kernel);
     if (
@@ -4454,9 +3782,8 @@ const main = async (): Promise<void> => {
     try {
         enforceManualMeasurementBudgets({
             measurement,
-            restrictedProofFixture,
-            restrictedProofMeasurement,
-            restrictedShareLinkageProofMaterialMeasurement,
+            compactShareLinkagePublicVerification,
+            fullShareLinkageBatchMeasurement,
             restrictedBridgeProofMeasurement,
             restrictedBridgeProofMaterialMeasurement,
             privateStateDevelopmentArtifactMeasurement,
@@ -4474,6 +3801,7 @@ const main = async (): Promise<void> => {
                     developmentMeasurementBudgets: {
                         maximumWarmWasmFullProfileGenerationSeconds,
                         maximumWarmWasmFullProfileVerificationSeconds,
+                        maximumCompactShareLinkagePublicVerificationSeconds,
                         maximumMeasuredDevelopmentArtifactJsonBytes,
                         maximumRecipientPrivateMailboxDownloadBytes,
                         maximumSourceTrusteePrivateMailboxUploadBytes,
@@ -4494,28 +3822,18 @@ const main = async (): Promise<void> => {
                         warmVerificationExtrapolatedSeconds:
                             wasmWarmVerificationExtrapolatedSeconds,
                     },
-                    restrictedCompactShareLinkageProof: {
-                        fullSourceBatch: restrictedProofFixture.fullSourceBatch,
-                        proofItemsPerRecord:
-                            restrictedProofFixture.proofItemCount,
-                        coefficientCommitmentCount:
-                            restrictedProofMeasurement.generation.lastResult
-                                .coefficientCommitmentCount,
-                        coefficientWitnessColumnCount:
-                            restrictedProofMeasurement.generation.lastResult
-                                .coefficientWitnessColumnCount,
+                    compactShareLinkagePublicVerification: {
                         proofByteLength:
-                            restrictedProofMeasurement.generation.lastResult
-                                .proofByteLength,
-                        proofByteBreakdown:
-                            restrictedProofMeasurement.proofByteBreakdown,
-                        generation:
-                            restrictedProofMeasurement.generation.samples,
+                            compactShareLinkagePublicVerification.proofByteLength,
+                        proofMaterialTransportBytes:
+                            compactShareLinkagePublicVerification.proofMaterialTransportBytes,
+                        statementRoot:
+                            compactShareLinkagePublicVerification.verification
+                                .lastResult.statementRoot,
                         verification:
-                            restrictedProofMeasurement.verification.samples,
+                            compactShareLinkagePublicVerification.verification
+                                .samples,
                     },
-                    restrictedCompactShareLinkageProofMaterialSet:
-                        restrictedShareLinkageProofMaterialMeasurement,
                     restrictedCompactSameSecretBridgeProof: {
                         proofByteLength:
                             restrictedBridgeProofMeasurement.generation
@@ -4526,6 +3844,10 @@ const main = async (): Promise<void> => {
                             restrictedBridgeProofMeasurement.verification
                                 .samples,
                     },
+                    compactShareLinkageSourceBatchProof:
+                        fullShareLinkageBatchReport(
+                            fullShareLinkageBatchMeasurement,
+                        ),
                     privateStateDevelopmentArtifactMeasurement,
                     targetDecryptionDevelopmentArtifactMeasurement,
                 },
@@ -4560,6 +3882,7 @@ const main = async (): Promise<void> => {
                             .largestWasmBoundaryCopyBudgetBytes,
                     maximumWarmWasmFullProfileGenerationSeconds,
                     maximumWarmWasmFullProfileVerificationSeconds,
+                    maximumCompactShareLinkagePublicVerificationSeconds,
                     maximumMeasuredDevelopmentArtifactJsonBytes,
                     maximumRecipientPrivateMailboxDownloadBytes,
                     maximumSourceTrusteePrivateMailboxUploadBytes,
@@ -4581,8 +3904,8 @@ const main = async (): Promise<void> => {
                 implementedDevelopmentArtifactByteAccounting:
                     implementedDevelopmentArtifactByteAccounting(
                         measurement,
-                        restrictedProofMeasurement,
-                        restrictedShareLinkageProofMaterialMeasurement,
+                        compactShareLinkagePublicVerification,
+                        fullShareLinkageBatchMeasurement,
                         restrictedBridgeProofMeasurement,
                         restrictedBridgeProofMaterialMeasurement,
                         privateStateDevelopmentArtifactMeasurement,
@@ -4608,84 +3931,31 @@ const main = async (): Promise<void> => {
                     warmVerificationExtrapolatedSeconds:
                         wasmWarmVerificationExtrapolatedSeconds,
                 },
-                restrictedCompactShareLinkageProof: {
-                    ringDegree: restrictedProofRingDegree,
-                    sourceMessageModulus: restrictedProofSourceMessageModulus,
-                    fullSourceBatch: restrictedProofFixture.fullSourceBatch,
-                    proofItemsPerRecord: restrictedProofFixture.proofItemCount,
-                    targetRnsLimbCount,
-                    coefficientCommitmentCount:
-                        restrictedProofMeasurement.generation.lastResult
-                            .coefficientCommitmentCount,
-                    coefficientWitnessColumnCount:
-                        restrictedProofMeasurement.generation.lastResult
-                            .coefficientWitnessColumnCount,
+                compactShareLinkagePublicVerification: {
                     proofByteLength:
-                        restrictedProofMeasurement.generation.lastResult
-                            .proofByteLength,
-                    proofByteBreakdown:
-                        restrictedProofMeasurement.proofByteBreakdown,
-                    statementHash:
-                        restrictedProofMeasurement.generation.lastResult
-                            .statementHash,
-                    generation: restrictedProofMeasurement.generation.samples,
+                        compactShareLinkagePublicVerification.proofByteLength,
+                    proofMaterialTransportBytes:
+                        compactShareLinkagePublicVerification.proofMaterialTransportBytes,
+                    participantCount:
+                        compactShareLinkagePublicVerification.verification
+                            .lastResult.participantCount,
+                    targetRnsLimbCount:
+                        compactShareLinkagePublicVerification.verification
+                            .lastResult.targetRnsLimbCount,
+                    thresholdDegree:
+                        compactShareLinkagePublicVerification.verification
+                            .lastResult.thresholdDegree,
+                    statementRoot:
+                        compactShareLinkagePublicVerification.verification
+                            .lastResult.statementRoot,
                     verification:
-                        restrictedProofMeasurement.verification.samples,
+                        compactShareLinkagePublicVerification.verification
+                            .samples,
                 },
-                restrictedCompactShareLinkageProofMaterialSet:
-                    restrictedShareLinkageProofMaterialWasMeasured(
-                        restrictedShareLinkageProofMaterialMeasurement,
-                    )
-                        ? {
-                              measurementMode:
-                                  restrictedShareLinkageProofMaterialMeasurement.measurementMode,
-                              proofMaterialSetJsonBytes:
-                                  restrictedShareLinkageProofMaterialMeasurement.proofMaterialSetJsonBytes,
-                              binaryProofMaterialTransportBytes:
-                                  restrictedShareLinkageProofMaterialMeasurement.binaryProofMaterialTransportBytes,
-                              binaryProofMaterialTransportChunkCount:
-                                  restrictedShareLinkageProofMaterialMeasurement.binaryProofMaterialTransportChunkCount,
-                              binaryProofMaterialTransportChunkRoot:
-                                  restrictedShareLinkageProofMaterialMeasurement.binaryProofMaterialTransportChunkRoot,
-                              binaryProofMaterialTransportFullObjectHash:
-                                  restrictedShareLinkageProofMaterialMeasurement.binaryProofMaterialTransportFullObjectHash,
-                              binaryProofMaterialTransportSavingsBytes:
-                                  restrictedShareLinkageProofMaterialMeasurement.binaryProofMaterialTransportSavingsBytes,
-                              binaryProofMaterialTransportPublicSetupDownloadHeadroomBytes:
-                                  restrictedShareLinkageProofMaterialMeasurement.binaryProofMaterialTransportPublicSetupDownloadHeadroomBytes,
-                              generatedSourceProofCount:
-                                  restrictedShareLinkageProofMaterialMeasurement.generatedSourceProofCount,
-                              additionalGeneratedSourceProofCount:
-                                  restrictedShareLinkageProofMaterialMeasurement.additionalGeneratedSourceProofCount,
-                              sourceZeroWarmGenerationMilliseconds:
-                                  restrictedShareLinkageProofMaterialMeasurement.sourceZeroWarmGenerationMilliseconds,
-                              additionalProofGenerationMilliseconds:
-                                  restrictedShareLinkageProofMaterialMeasurement.additionalProofGenerationMilliseconds,
-                              estimatedAllSourceProofGenerationMilliseconds:
-                                  restrictedShareLinkageProofMaterialMeasurement.estimatedAllSourceProofGenerationMilliseconds,
-                              verificationMilliseconds:
-                                  restrictedShareLinkageProofMaterialMeasurement.verificationMilliseconds,
-                              shareLinkageStatementRoot:
-                                  restrictedShareLinkageProofMaterialMeasurement
-                                      .verification.shareLinkageStatementRoot,
-                              proofMaterialSetRoot:
-                                  restrictedShareLinkageProofMaterialMeasurement
-                                      .verification.proofMaterialSetRoot,
-                              proofMaterialCount:
-                                  restrictedShareLinkageProofMaterialMeasurement
-                                      .verification.proofMaterialCount,
-                              proofRecordCount:
-                                  restrictedShareLinkageProofMaterialMeasurement
-                                      .verification.proofRecordCount,
-                              totalProofByteLength:
-                                  restrictedShareLinkageProofMaterialMeasurement
-                                      .verification.totalProofByteLength,
-                              restrictedProofVerificationCount:
-                                  restrictedShareLinkageProofMaterialMeasurement
-                                      .verification
-                                      .restrictedProofVerificationCount,
-                          }
-                        : restrictedShareLinkageProofMaterialMeasurement,
+                compactShareLinkageSourceBatchProof:
+                    fullShareLinkageBatchReport(
+                        fullShareLinkageBatchMeasurement,
+                    ),
                 restrictedCompactSameSecretBridgeProof: {
                     ringDegree: restrictedProofRingDegree,
                     targetRnsPrimes:

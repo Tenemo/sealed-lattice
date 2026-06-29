@@ -1733,20 +1733,13 @@ const assertSameSecretEvidenceMatchesBridge = (input: {
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
 }): void => {
     if (
-        (input.sameSecretConsistency === undefined) !==
-        (input.sameSecretProofs === undefined)
+        input.sameSecretConsistency === undefined ||
+        input.sameSecretProofs === undefined
     ) {
         throw new Error(
             'compact same-secret bridge evidence verification requires both sameSecretConsistency and sameSecretProofs.',
         );
     }
-    if (
-        input.sameSecretConsistency === undefined ||
-        input.sameSecretProofs === undefined
-    ) {
-        return;
-    }
-
     const { statementSet, sameSecretConsistency, sameSecretProofs } = input;
     assertEvidenceContextMatchesStatementSet(
         statementSet,
@@ -1938,8 +1931,8 @@ const assertSameSecretEvidenceMatchesBridge = (input: {
 
 export const verifyCompactVssSameSecretBridgeStatementSet = (input: {
     readonly statementSet: CompactVssSameSecretBridgeStatementSet;
-    readonly sameSecretConsistency?: SameSecretConsistencyStatementSet;
-    readonly sameSecretProofs?: SameSecretProofSet;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
 }): CompactVssSameSecretBridgeStatementSet => {
     const { statementSet } = input;
@@ -2303,10 +2296,17 @@ const compactVssSameSecretBridgeProofInputsByStatementRoot = (
 
 export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
     readonly statementSet: CompactVssSameSecretBridgeStatementSet;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
+    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly proofRecordInputs: readonly CompactVssSameSecretBridgeProofRecordInput[];
 }): CompactVssSameSecretBridgeProofMaterialSet => {
     const statementSet = verifyCompactVssSameSecretBridgeStatementSet({
         statementSet: input.statementSet,
+        sameSecretConsistency: input.sameSecretConsistency,
+        sameSecretProofs: input.sameSecretProofs,
+        transportedSameSecretProofMaterial:
+            input.transportedSameSecretProofMaterial,
     });
     const proofInputsByStatementRoot =
         compactVssSameSecretBridgeProofInputsByStatementRoot(
@@ -2395,10 +2395,17 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
 
 export const verifyCompactVssSameSecretBridgeProofMaterialSet = (input: {
     readonly statementSet: CompactVssSameSecretBridgeStatementSet;
+    readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
+    readonly sameSecretProofs: SameSecretProofSet;
+    readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly proofMaterialSet: CompactVssSameSecretBridgeProofMaterialSet;
 }): CompactVssSameSecretBridgeProofMaterialSet => {
     const statementSet = verifyCompactVssSameSecretBridgeStatementSet({
         statementSet: input.statementSet,
+        sameSecretConsistency: input.sameSecretConsistency,
+        sameSecretProofs: input.sameSecretProofs,
+        transportedSameSecretProofMaterial:
+            input.transportedSameSecretProofMaterial,
     });
     const proofMaterialSet = input.proofMaterialSet;
     assertExactString(

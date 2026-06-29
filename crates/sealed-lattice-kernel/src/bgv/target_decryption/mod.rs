@@ -15,7 +15,6 @@ mod proof_material;
 mod proof_relation;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 mod proof_slice;
-mod result_verification;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_generation;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
@@ -50,7 +49,6 @@ use proof_material::*;
 use proof_relation::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use proof_slice::*;
-pub(crate) use result_verification::verify_target_decryption_result_from_request;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_generation::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
@@ -58,7 +56,9 @@ use share_records::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_statement::*;
 
-use serde_json::{Value, json};
+use serde_json::json;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use serde_json::Value;
 
 use crate::{
     bgv::evaluator::top_k::TIE_POLICY, encoding::CanonicalResult, hashing::derive_protocol_hash,

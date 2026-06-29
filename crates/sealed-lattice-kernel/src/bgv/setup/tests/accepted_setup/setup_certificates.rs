@@ -96,7 +96,7 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
     );
     assert_eq!(
         compact_binding["parameterReviewInputs"]["openingWitnessRows"][1]["messageCoefficientUpperBoundMultiplier"],
-        serde_json::json!(10)
+        serde_json::json!(11_110)
     );
     assert_eq!(
         compact_binding["parameterReviewInputs"]["openingWitnessRows"][1]["randomnessDifferenceInfinityBound"],

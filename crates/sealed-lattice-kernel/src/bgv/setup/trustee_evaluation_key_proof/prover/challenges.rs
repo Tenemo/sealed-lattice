@@ -81,15 +81,10 @@ pub(in super::super) fn draw_limb_challenges(
             layout.compact_vss_relation_count(),
         )
     } else if layout.compact_same_secret_bridge_active() {
-        let target_commitment_count = layout.compact_same_secret_bridge_target_count();
         transcript.challenge_extension_elements(
             "compact-same-secret-bridge-alpha",
             modulus,
-            target_commitment_count
-                * (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-                    + LINCHECK_REPETITIONS
-                    + crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                        * LINCHECK_REPETITIONS),
+            layout.compact_same_secret_bridge_relation_count(),
         )
     } else if layout.target_decryption_active() {
         transcript.challenge_extension_elements(
@@ -214,6 +209,8 @@ pub(in super::super) fn build_limb_public_vectors(
                 ring_degree,
                 &challenges.linkage_alpha,
                 &u_powers,
+                layout.compact_vss_coefficient_message_range_evidence(),
+                layout.compact_vss_recipient_message_range_evidence(),
                 &tower,
             )?;
         combined_claim = tower.add(&combined_claim, &compact_vss_claim);

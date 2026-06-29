@@ -24,10 +24,7 @@ import type {
     BgvCompactSameSecretBridgeProofVerification,
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
-    BgvCompactVssShareLinkageBinaryProofMaterialTransport,
-    BgvCompactVssShareLinkageBinaryProofMaterialVerification,
     BgvCompactVssShareLinkageProofGeneration,
-    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -46,7 +43,6 @@ import type {
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetDecryptionDevelopmentFixture,
-    BgvTargetDecryptionResultVerification,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
@@ -96,41 +92,6 @@ const hexToBytes = (hex: string): Uint8Array => {
 
     return bytes;
 };
-
-const compactVssShareLinkageProofMaterialReference = <TransportValue>(
-    transportedMaterial: TransportValue,
-): TransportValue => {
-    if (
-        transportedMaterial === undefined ||
-        transportedMaterial === null ||
-        typeof transportedMaterial !== 'object' ||
-        !Object.prototype.hasOwnProperty.call(transportedMaterial, 'chunks')
-    ) {
-        return transportedMaterial;
-    }
-    const { chunks: omittedChunks, ...transportedMaterialReference } =
-        transportedMaterial as Record<string, unknown>;
-    void omittedChunks;
-
-    return transportedMaterialReference as TransportValue;
-};
-
-const compactVssShareLinkageProofMaterialForCommand = (
-    transportedMaterial: BgvCompactVssShareLinkageBinaryProofMaterialTransport,
-): Readonly<Record<string, unknown>> => ({
-    ...transportedMaterial,
-    chunks: transportedMaterial.chunks.map((chunk) => {
-        if (!(chunk instanceof Uint8Array)) {
-            throw new TypeError(
-                'compact VSS share-linkage proof material chunks must be Uint8Array values.',
-            );
-        }
-
-        return {
-            bytesHex: bytesToHex(Uint8Array.from(chunk)),
-        };
-    }),
-});
 
 const targetDecryptionShareProofMaterialForCommand = (
     transportedMaterial: BgvTargetDecryptionShareBinaryProofMaterialTransport,
@@ -514,11 +475,6 @@ export const createTranscriptCoreKernelLoader = (
                             proofStatement: input.proofStatement,
                         },
                     ),
-                verifyTargetDecryptionResult:
-                    (): BgvTargetDecryptionResultVerification =>
-                        executeCommand<BgvTargetDecryptionResultVerification>({
-                            command: 'VerifyTargetDecryptionResult',
-                        }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',
@@ -550,10 +506,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.verifiedVssCoefficientCommitmentMaterial,
                             transportedSameSecretProofMaterial:
                                 input.transportedSameSecretProofMaterial,
-                            transportedCompactVssShareLinkageProofMaterial:
-                                compactVssShareLinkageProofMaterialReference(
-                                    input.transportedCompactVssShareLinkageProofMaterial,
-                                ),
                             transportedPublicKeyShareMaterial:
                                 input.transportedPublicKeyShareMaterial,
                             transportedPublicKeyShareProofMaterial:
@@ -819,39 +771,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.recipientShareCommitmentSet,
                             aggregateThresholdCommitmentSet:
                                 input.aggregateThresholdCommitmentSet,
-                        },
-                    ),
-                verifyCompactVssShareLinkageProofMaterialSet: (
-                    input,
-                ): BgvCompactVssShareLinkageProofMaterialSetVerification =>
-                    executeCommand<BgvCompactVssShareLinkageProofMaterialSetVerification>(
-                        {
-                            command:
-                                'VerifyCompactVssShareLinkageProofMaterialSet',
-                            statement: input.statement,
-                            proofMaterialSet: input.proofMaterialSet,
-                            coefficientCommitmentSet:
-                                input.coefficientCommitmentSet,
-                            recipientShareCommitmentSet:
-                                input.recipientShareCommitmentSet,
-                        },
-                    ),
-                verifyCompactVssShareLinkageBinaryProofMaterial: (
-                    input,
-                ): BgvCompactVssShareLinkageBinaryProofMaterialVerification =>
-                    executeCommand<BgvCompactVssShareLinkageBinaryProofMaterialVerification>(
-                        {
-                            command:
-                                'VerifyCompactVssShareLinkageBinaryProofMaterial',
-                            statement: input.statement,
-                            transportedCompactVssShareLinkageProofMaterial:
-                                compactVssShareLinkageProofMaterialForCommand(
-                                    input.transportedProofMaterial,
-                                ),
-                            coefficientCommitmentSet:
-                                input.coefficientCommitmentSet,
-                            recipientShareCommitmentSet:
-                                input.recipientShareCommitmentSet,
                         },
                     ),
                 verifyCompactVssSameSecretBridgeStatementSet: (

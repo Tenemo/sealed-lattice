@@ -38,8 +38,6 @@ enum TranscriptCoreCommand {
     VerifyCompactVssRecipientShareCommitmentSet,
     VerifyCompactVssAggregateThresholdCommitmentSet,
     VerifyCompactVssShareLinkageStatement,
-    VerifyCompactVssShareLinkageProofMaterialSet,
-    VerifyCompactVssShareLinkageBinaryProofMaterial,
     VerifyCompactVssSameSecretBridgeStatementSet,
     VerifyCompactVssSameSecretBridgeProofMaterialSet,
     DeriveThresholdShareCommitments,
@@ -75,7 +73,6 @@ enum TranscriptCoreCommand {
     VerifyBgvTargetDecryptionShareBinaryProofMaterial,
     #[cfg(feature = "target-decryption-development-commands")]
     VerifyBgvTargetDecryptionShareProofStatementBinding,
-    VerifyTargetDecryptionResult,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -258,8 +255,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyCompactVssRecipientShareCommitmentSet
         | TranscriptCoreCommand::VerifyCompactVssAggregateThresholdCommitmentSet
         | TranscriptCoreCommand::VerifyCompactVssShareLinkageStatement
-        | TranscriptCoreCommand::VerifyCompactVssShareLinkageProofMaterialSet
-        | TranscriptCoreCommand::VerifyCompactVssShareLinkageBinaryProofMaterial
         | TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeStatementSet
         | TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeProofMaterialSet
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
@@ -280,8 +275,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateBgvCiphertextConventionFixture
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
-        | TranscriptCoreCommand::RunDirectEncryptedBallot
-        | TranscriptCoreCommand::VerifyTargetDecryptionResult => run_bgv_command(command, &request),
+        | TranscriptCoreCommand::RunDirectEncryptedBallot => run_bgv_command(command, &request),
         #[cfg(feature = "target-decryption-development-commands")]
         TranscriptCoreCommand::GenerateBgvTargetDecryptionDevelopmentFixture
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
@@ -374,12 +368,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::VerifyCompactVssShareLinkageStatement => {
             crate::bgv::commands::verify_compact_vss_share_linkage_statement(request)
-        }
-        TranscriptCoreCommand::VerifyCompactVssShareLinkageProofMaterialSet => {
-            crate::bgv::commands::verify_compact_vss_share_linkage_proof_material_set(request)
-        }
-        TranscriptCoreCommand::VerifyCompactVssShareLinkageBinaryProofMaterial => {
-            crate::bgv::commands::verify_compact_vss_share_linkage_binary_proof_material(request)
         }
         TranscriptCoreCommand::VerifyCompactVssSameSecretBridgeStatementSet => {
             crate::bgv::commands::verify_compact_vss_same_secret_bridge_statement_set(request)
@@ -485,9 +473,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_statement_binding_from_request(
                 request,
             )
-        }
-        TranscriptCoreCommand::VerifyTargetDecryptionResult => {
-            crate::bgv::target_decryption::verify_target_decryption_result_from_request(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

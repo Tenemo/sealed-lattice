@@ -459,8 +459,22 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 let alpha_value = &consistency_alpha[claim_alpha_index];
                 claim_alpha_index += 1;
                 for half in 0..TRACE_SPLIT {
-                    let witness_value = column_values
-                        [layout.physical_compact_vss_carry_at(consistency_vector, half)];
+                    let witness_value = if consistency_vector < layout.compact_vss_item_columns {
+                        column_values
+                            [layout.physical_compact_vss_carry_at(consistency_vector, half)]
+                    } else {
+                        let digit_claim_index =
+                            consistency_vector - layout.compact_vss_item_columns;
+                        let message_position = digit_claim_index
+                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_index = digit_claim_index
+                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        column_values[layout.physical_compact_vss_message_digit(
+                            message_position,
+                            digit_index,
+                            half,
+                        )]
+                    };
                     let consistency_product =
                         domain.value_mul(&publics.consistency[repetition][half], &witness_value);
                     accumulated = tower.add(
@@ -497,6 +511,8 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
     }
     if layout.compact_same_secret_bridge_active() {
         let mut claim_alpha_index = 0_usize;
+        let bridge_digit_vector_count = layout.compact_same_secret_bridge_target_count()
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
         for consistency_vector in 0..layout.consistency_vector_count() {
             for repetition in 0..layout.consistency_repetitions {
                 let alpha_value = &consistency_alpha[claim_alpha_index];
@@ -506,9 +522,22 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                         column_values[layout.physical_secret(half)]
                     } else if consistency_vector == 1 {
                         column_values[layout.physical_negative_indicator(half)]
+                    } else if consistency_vector < 2 + bridge_digit_vector_count {
+                        let digit_vector_index = consistency_vector - 2;
+                        let target_index = digit_vector_index
+                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_index = digit_vector_index
+                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        column_values[layout.physical_compact_same_secret_bridge_message_digit(
+                            target_index,
+                            digit_index,
+                            half,
+                        )]
                     } else {
-                        column_values
-                            [layout.physical_linkage_randomness(consistency_vector - 2, half)]
+                        column_values[layout.physical_linkage_randomness(
+                            consistency_vector - 2 - bridge_digit_vector_count,
+                            half,
+                        )]
                     };
                     let consistency_product =
                         domain.value_mul(&publics.consistency[repetition][half], &witness_value);

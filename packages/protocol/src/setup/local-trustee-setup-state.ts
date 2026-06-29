@@ -11,12 +11,14 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    compactVssAggregateMessageCoefficientBound,
     compactVssCommitmentPrivateOpeningRoot,
+    compactVssMessageDigitBase,
+    compactVssMessageDigitCount,
     computeCompactVssCommitmentFromOpening,
     decodeCompactVssTernaryRandomnessColumnsHex,
     verifyCompactVssAggregateThresholdCommitmentSet,
     verifyCompactVssAggregateOpeningCredential,
+    verifyCompactVssDerivedRecipientShareCommitmentSet,
     verifyCompactVssShareLinkageStatement,
     type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssAggregateThresholdOpeningCredential,
@@ -25,12 +27,16 @@ import {
     type CompactVssRecipientShareCommitmentSet,
     type CompactVssShareLinkageStatement,
 } from './compact-vss-commitments.js';
+import { bytesFromStandardBase64 } from './proof-byte-encoding.js';
 import type {
     CollectiveBgvSetupContext,
     PrivateVssEnvelopeVerificationReference,
 } from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
+
+const compactVssMessageCoordinateBound =
+    compactVssMessageDigitBase ** BigInt(compactVssMessageDigitCount);
 
 export type LocalTrusteeSetupStateCommitmentInput = {
     readonly setupContext: CollectiveBgvSetupContext;
@@ -58,11 +64,10 @@ export type LocalTrusteeSetupStateEncryptionResult = Readonly<{
 }>;
 
 export type GeneratedCompactVssTargetProofWitnessInput = Readonly<{
-    readonly coefficientCommitmentSet?: CompactVssCoefficientCommitmentSet;
-    readonly recipientShareCommitmentSet?: CompactVssRecipientShareCommitmentSet;
+    readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
+    readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
     readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
     readonly targetDecryptionRnsLimbCount?: number;
-    readonly aggregateThresholdOpeningCredentials?: readonly CompactVssAggregateThresholdOpeningCredential[];
     readonly recipientShareOpeningCredentials?: readonly CompactVssRecipientShareOpeningCredential[];
     readonly shareLinkageStatement: CompactVssShareLinkageStatement;
 }>;
@@ -186,21 +191,253 @@ const safeNumberFromBigInt = (value: bigint, fieldName: string): number => {
     return Number(value);
 };
 
+const nonNegativeIntegerToBigInt = (
+    value: number | bigint,
+    fieldName: string,
+): bigint => {
+    const valueWide =
+        typeof value === 'bigint'
+            ? value
+            : Number.isSafeInteger(value)
+              ? BigInt(value)
+              : undefined;
+    if (valueWide === undefined || valueWide < 0n) {
+        throw new TypeError(`${fieldName} must be a non-negative integer.`);
+    }
+
+    return valueWide;
+};
+
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 
+const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
+    if (hex.length === 0 || hex.length % 2 !== 0) {
+        throw new TypeError(`${fieldName} must be whole-byte lowercase hex.`);
+    }
+    if (!lowercaseHexPattern.test(hex)) {
+        throw new TypeError(`${fieldName} must be lowercase hex.`);
+    }
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let byteIndex = 0; byteIndex < bytes.length; byteIndex += 1) {
+        bytes[byteIndex] = Number.parseInt(
+            hex.slice(byteIndex * 2, byteIndex * 2 + 2),
+            16,
+        );
+    }
+
+    return bytes;
+};
+
+const compactVssShareCarryValueBitWidth = 11;
+
+const unsignedIntegerVectorFromLittleEndianBitPackedBytes = (
+    bytes: Uint8Array,
+    valueCount: number,
+    bitWidth: number,
+    fieldName: string,
+): readonly number[] => {
+    if (!Number.isSafeInteger(valueCount) || valueCount < 0) {
+        throw new TypeError('valueCount must be a non-negative safe integer.');
+    }
+    if (!Number.isSafeInteger(bitWidth) || bitWidth <= 0 || bitWidth > 30) {
+        throw new TypeError('bitWidth must be a positive safe integer.');
+    }
+    const expectedByteLength = Math.ceil((valueCount * bitWidth) / 8);
+    if (bytes.length !== expectedByteLength) {
+        throw new TypeError(
+            `${fieldName} length does not match the expected packed vector size.`,
+        );
+    }
+    const values: number[] = [];
+    for (let valueIndex = 0; valueIndex < valueCount; valueIndex += 1) {
+        let value = 0;
+        let bitOffset = valueIndex * bitWidth;
+        for (let consumedBits = 0; consumedBits < bitWidth; ) {
+            const byteIndex = Math.floor(bitOffset / 8);
+            const bitIndexInByte = bitOffset % 8;
+            const chunkBitCount = Math.min(
+                8 - bitIndexInByte,
+                bitWidth - consumedBits,
+            );
+            const chunkMask = (1 << chunkBitCount) - 1;
+            const chunkValue =
+                ((bytes[byteIndex] ?? 0) >> bitIndexInByte) & chunkMask;
+            value += chunkValue * 2 ** consumedBits;
+            bitOffset += chunkBitCount;
+            consumedBits += chunkBitCount;
+        }
+        values.push(value);
+    }
+    const usedBitsInLastByte = (valueCount * bitWidth) % 8;
+    if (usedBitsInLastByte !== 0 && bytes.length > 0) {
+        const unusedMask = (0xff << usedBitsInLastByte) & 0xff;
+        if (((bytes[bytes.length - 1] ?? 0) & unusedMask) !== 0) {
+            throw new TypeError(
+                `${fieldName} has nonzero padding bits after the packed vector.`,
+            );
+        }
+    }
+
+    return values;
+};
+
+const unsignedIntegerVectorFromLittleEndianBitPackedHex = (
+    hex: string,
+    valueCount: number,
+    bitWidth: number,
+    fieldName: string,
+): readonly number[] =>
+    unsignedIntegerVectorFromLittleEndianBitPackedBytes(
+        bytesFromHex(hex, fieldName),
+        valueCount,
+        bitWidth,
+        fieldName,
+    );
+
+const unsignedIntegerVectorFromLittleEndianBitPackedBase64 = (
+    base64Value: string,
+    valueCount: number,
+    bitWidth: number,
+    fieldName: string,
+): readonly number[] =>
+    unsignedIntegerVectorFromLittleEndianBitPackedBytes(
+        bytesFromStandardBase64(base64Value, fieldName),
+        valueCount,
+        bitWidth,
+        fieldName,
+    );
+
+const unsignedIntegerVectorFromLittleEndianBitPackedBigIntBytes = (
+    bytes: Uint8Array,
+    valueCount: number,
+    bitWidth: number,
+    fieldName: string,
+): readonly bigint[] => {
+    if (!Number.isSafeInteger(valueCount) || valueCount < 0) {
+        throw new TypeError('valueCount must be a non-negative safe integer.');
+    }
+    if (!Number.isSafeInteger(bitWidth) || bitWidth <= 0 || bitWidth > 64) {
+        throw new TypeError('bitWidth must be a positive safe integer.');
+    }
+    const expectedByteLength = Math.ceil((valueCount * bitWidth) / 8);
+    if (bytes.length !== expectedByteLength) {
+        throw new TypeError(
+            `${fieldName} length does not match the expected packed vector size.`,
+        );
+    }
+    const values: bigint[] = [];
+    for (let valueIndex = 0; valueIndex < valueCount; valueIndex += 1) {
+        let value = 0n;
+        let bitOffset = valueIndex * bitWidth;
+        for (let consumedBits = 0; consumedBits < bitWidth; ) {
+            const byteIndex = Math.floor(bitOffset / 8);
+            const bitIndexInByte = bitOffset % 8;
+            const chunkBitCount = Math.min(
+                8 - bitIndexInByte,
+                bitWidth - consumedBits,
+            );
+            const chunkMask = (1 << chunkBitCount) - 1;
+            const chunkValue =
+                ((bytes[byteIndex] ?? 0) >> bitIndexInByte) & chunkMask;
+            value += BigInt(chunkValue) << BigInt(consumedBits);
+            bitOffset += chunkBitCount;
+            consumedBits += chunkBitCount;
+        }
+        values.push(value);
+    }
+    const usedBitsInLastByte = (valueCount * bitWidth) % 8;
+    if (usedBitsInLastByte !== 0 && bytes.length > 0) {
+        const unusedMask = (0xff << usedBitsInLastByte) & 0xff;
+        if (((bytes[bytes.length - 1] ?? 0) & unusedMask) !== 0) {
+            throw new TypeError(
+                `${fieldName} has nonzero padding bits after the packed vector.`,
+            );
+        }
+    }
+
+    return values;
+};
+
+const unsignedIntegerVectorFromLittleEndianBitPackedBigIntHex = (
+    hex: string,
+    valueCount: number,
+    bitWidth: number,
+    fieldName: string,
+): readonly bigint[] =>
+    unsignedIntegerVectorFromLittleEndianBitPackedBigIntBytes(
+        bytesFromHex(hex, fieldName),
+        valueCount,
+        bitWidth,
+        fieldName,
+    );
+
+const unsignedIntegerVectorFromLittleEndianBitPackedBigIntBase64 = (
+    base64Value: string,
+    valueCount: number,
+    bitWidth: number,
+    fieldName: string,
+): readonly bigint[] =>
+    unsignedIntegerVectorFromLittleEndianBitPackedBigIntBytes(
+        bytesFromStandardBase64(base64Value, fieldName),
+        valueCount,
+        bitWidth,
+        fieldName,
+    );
+
+const u32VectorToLittleEndianHex = (
+    values: readonly (number | bigint)[],
+    fieldName: string,
+): string => {
+    const bytes = new Uint8Array(values.length * 4);
+    values.forEach((value, valueIndex) => {
+        const valueWide =
+            typeof value === 'bigint'
+                ? value
+                : Number.isSafeInteger(value)
+                  ? BigInt(value)
+                  : undefined;
+        if (
+            valueWide === undefined ||
+            valueWide < 0n ||
+            valueWide >= 1n << 32n
+        ) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must fit unsigned 32-bit encoding.`,
+            );
+        }
+        let remainingValue = valueWide;
+        for (let byteIndex = 0; byteIndex < 4; byteIndex += 1) {
+            bytes[valueIndex * 4 + byteIndex] = Number(remainingValue & 0xffn);
+            remainingValue >>= 8n;
+        }
+    });
+
+    return bytesToHex(bytes);
+};
+
 const u64VectorToLittleEndianHex = (
-    values: readonly number[],
+    values: readonly (number | bigint)[],
     fieldName: string,
 ): string => {
     const bytes = new Uint8Array(values.length * 8);
     values.forEach((value, valueIndex) => {
-        if (!Number.isSafeInteger(value) || value < 0) {
+        const valueWide =
+            typeof value === 'bigint'
+                ? value
+                : Number.isSafeInteger(value)
+                  ? BigInt(value)
+                  : undefined;
+        if (
+            valueWide === undefined ||
+            valueWide < 0n ||
+            valueWide >= 1n << 64n
+        ) {
             throw new TypeError(
-                `${fieldName}.${String(valueIndex)} must be a non-negative safe integer.`,
+                `${fieldName}.${String(valueIndex)} must fit unsigned 64-bit encoding.`,
             );
         }
-        let remainingValue = BigInt(value);
+        let remainingValue = valueWide;
         for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
             bytes[valueIndex * 8 + byteIndex] = Number(remainingValue & 0xffn);
             remainingValue >>= 8n;
@@ -208,6 +445,47 @@ const u64VectorToLittleEndianHex = (
     });
 
     return bytesToHex(bytes);
+};
+
+const compactVssAggregateDigitColumnStorage = (
+    columns: readonly (readonly (number | bigint)[])[],
+): JsonRecord => {
+    const fitsU32 = columns.every((column) =>
+        column.every((value) => {
+            const valueWide =
+                typeof value === 'bigint'
+                    ? value
+                    : Number.isSafeInteger(value)
+                      ? BigInt(value)
+                      : undefined;
+
+            return (
+                valueWide !== undefined &&
+                valueWide >= 0n &&
+                valueWide < 1n << 32n
+            );
+        }),
+    );
+
+    return fitsU32
+        ? {
+              aggregateCommitmentMessageDigitColumnsLe32Hex: columns.map(
+                  (digitColumn, digitIndex) =>
+                      u32VectorToLittleEndianHex(
+                          digitColumn,
+                          `aggregateCommitmentMessageDigitColumns.${String(digitIndex)}`,
+                      ),
+              ),
+          }
+        : {
+              aggregateCommitmentMessageDigitColumnsLe64Hex: columns.map(
+                  (digitColumn, digitIndex) =>
+                      u64VectorToLittleEndianHex(
+                          digitColumn,
+                          `aggregateCommitmentMessageDigitColumns.${String(digitIndex)}`,
+                      ),
+              ),
+          };
 };
 
 const signedByteVectorToHex = (
@@ -679,6 +957,25 @@ const numericVector = (
     });
 };
 
+const nonNegativeIntegerVector = (
+    value: unknown,
+    objectPath: string,
+): readonly bigint[] => {
+    if (!Array.isArray(value)) {
+        throw new TypeError(`${objectPath} must be an array.`);
+    }
+    const entries = value as readonly unknown[];
+
+    return entries.map((entry, entryIndex) => {
+        const entryPath = `${objectPath}.${String(entryIndex)}`;
+        if (typeof entry !== 'number' && typeof entry !== 'bigint') {
+            throw new TypeError(`${entryPath} must be a non-negative integer.`);
+        }
+
+        return nonNegativeIntegerToBigInt(entry, entryPath);
+    });
+};
+
 const aggregateShareValuesToLittleEndian48Hex = (
     values: readonly bigint[],
     rnsPrime: number,
@@ -850,6 +1147,171 @@ const compactCredentialRandomnessByColumn = (
     );
 };
 
+const compactCredentialShareCommitmentMessageCarryValues = (
+    compactCredential: JsonRecord,
+    ringDegree: number,
+): readonly number[] => {
+    if (Array.isArray(compactCredential.shareCommitmentMessageCarryValues)) {
+        const carryValues = numericVector(
+            compactCredential.shareCommitmentMessageCarryValues,
+            'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageCarryValues',
+        );
+        if (carryValues.length !== ringDegree) {
+            throw new Error(
+                'compact VSS recipient share opening credential carry vector length must match ringDegree.',
+            );
+        }
+
+        return carryValues;
+    }
+    if (
+        typeof compactCredential.shareCommitmentMessageCarryValuesPacked11Base64 ===
+        'string'
+    ) {
+        return unsignedIntegerVectorFromLittleEndianBitPackedBase64(
+            compactCredential.shareCommitmentMessageCarryValuesPacked11Base64,
+            ringDegree,
+            compactVssShareCarryValueBitWidth,
+            'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageCarryValuesPacked11Base64',
+        );
+    }
+    if (
+        typeof compactCredential.shareCommitmentMessageCarryValuesPacked11Hex ===
+        'string'
+    ) {
+        return unsignedIntegerVectorFromLittleEndianBitPackedHex(
+            compactCredential.shareCommitmentMessageCarryValuesPacked11Hex,
+            ringDegree,
+            compactVssShareCarryValueBitWidth,
+            'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageCarryValuesPacked11Hex',
+        );
+    }
+
+    throw new Error(
+        'compact VSS recipient share opening credential must include shareCommitmentMessageCarryValues, shareCommitmentMessageCarryValuesPacked11Base64, or shareCommitmentMessageCarryValuesPacked11Hex.',
+    );
+};
+
+const compactCredentialShareCommitmentMessageDigitColumns = (
+    compactCredential: JsonRecord,
+    ringDegree: number,
+): readonly (readonly bigint[])[] | undefined => {
+    if (Array.isArray(compactCredential.shareCommitmentMessageDigitColumns)) {
+        return compactCredential.shareCommitmentMessageDigitColumns.map(
+            (digitColumn, digitIndex) => {
+                const decodedColumn = nonNegativeIntegerVector(
+                    digitColumn,
+                    `privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumns.${String(digitIndex)}`,
+                );
+                if (decodedColumn.length !== ringDegree) {
+                    throw new Error(
+                        'compact VSS recipient share opening credential digit column length must match ringDegree.',
+                    );
+                }
+
+                return decodedColumn;
+            },
+        );
+    }
+
+    const packedDigitColumnsBase64 =
+        compactCredential.shareCommitmentMessageDigitColumnsPackedBase64;
+    const packedDigitColumnBitWidths =
+        compactCredential.shareCommitmentMessageDigitColumnBitWidths;
+    if (
+        packedDigitColumnsBase64 !== undefined ||
+        packedDigitColumnBitWidths !== undefined
+    ) {
+        if (!Array.isArray(packedDigitColumnsBase64)) {
+            throw new TypeError(
+                'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnsPackedBase64 must be an array.',
+            );
+        }
+        if (!Array.isArray(packedDigitColumnBitWidths)) {
+            throw new TypeError(
+                'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnBitWidths must be an array.',
+            );
+        }
+        if (
+            packedDigitColumnsBase64.length !==
+            packedDigitColumnBitWidths.length
+        ) {
+            throw new Error(
+                'compact VSS recipient share opening credential packed digit columns and bit widths must have the same length.',
+            );
+        }
+
+        return packedDigitColumnsBase64.map((packedColumn, digitIndex) => {
+            if (typeof packedColumn !== 'string') {
+                throw new TypeError(
+                    `privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnsPackedBase64.${String(digitIndex)} must be a string.`,
+                );
+            }
+            const bitWidthValue: unknown =
+                packedDigitColumnBitWidths[digitIndex];
+            if (
+                typeof bitWidthValue !== 'number' ||
+                !Number.isSafeInteger(bitWidthValue) ||
+                bitWidthValue <= 0 ||
+                bitWidthValue > 64
+            ) {
+                throw new TypeError(
+                    `privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnBitWidths.${String(digitIndex)} must be between 1 and 64.`,
+                );
+            }
+            const bitWidth = bitWidthValue;
+
+            return unsignedIntegerVectorFromLittleEndianBitPackedBigIntBase64(
+                packedColumn,
+                ringDegree,
+                bitWidth,
+                `privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnsPackedBase64.${String(digitIndex)}`,
+            );
+        });
+    }
+
+    const packedDigitColumns =
+        compactCredential.shareCommitmentMessageDigitColumnsPackedHex;
+    const packedDigitColumnBitWidth =
+        compactCredential.shareCommitmentMessageDigitColumnBitWidth;
+    if (
+        packedDigitColumns === undefined &&
+        packedDigitColumnBitWidth === undefined
+    ) {
+        return undefined;
+    }
+    if (!Array.isArray(packedDigitColumns)) {
+        throw new TypeError(
+            'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnsPackedHex must be an array.',
+        );
+    }
+    const bitWidth = nonNegativeIntegerField(
+        compactCredential,
+        'shareCommitmentMessageDigitColumnBitWidth',
+        'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential',
+    );
+    if (bitWidth <= 0 || bitWidth > 64) {
+        throw new TypeError(
+            'privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnBitWidth must be between 1 and 64.',
+        );
+    }
+
+    return packedDigitColumns.map((packedColumn, digitIndex) => {
+        if (typeof packedColumn !== 'string') {
+            throw new TypeError(
+                `privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnsPackedHex.${String(digitIndex)} must be a string.`,
+            );
+        }
+
+        return unsignedIntegerVectorFromLittleEndianBitPackedBigIntHex(
+            packedColumn,
+            ringDegree,
+            bitWidth,
+            `privateEnvelope.rnsShareOpenings.compactVssRecipientShareOpeningCredential.shareCommitmentMessageDigitColumnsPackedHex.${String(digitIndex)}`,
+        );
+    });
+};
+
 const aggregateVerifiedPrivateVssMaterial = (
     input: GeneratedLocalTrusteeSetupStateInput,
     thresholdShareCommitmentRecipientRootValue: ProtocolHash,
@@ -942,9 +1404,43 @@ const aggregateVerifiedPrivateVssMaterial = (
                         'compact VSS recipient share opening credential must match its private VSS envelope limb binding.',
                     );
                 }
+                const shareCommitmentMessageDigitColumns =
+                    compactCredentialShareCommitmentMessageDigitColumns(
+                        compactCredential,
+                        shareValues.length,
+                    );
+                const {
+                    shareCommitmentMessageCarryValuesPacked11Base64:
+                        _shareCommitmentMessageCarryValuesPacked11Base64,
+                    shareCommitmentMessageCarryValuesPacked11Hex:
+                        _shareCommitmentMessageCarryValuesPacked11Hex,
+                    shareCommitmentMessageDigitColumnBitWidth:
+                        _shareCommitmentMessageDigitColumnBitWidth,
+                    shareCommitmentMessageDigitColumnBitWidths:
+                        _shareCommitmentMessageDigitColumnBitWidths,
+                    shareCommitmentMessageDigitColumnsPackedBase64:
+                        _shareCommitmentMessageDigitColumnsPackedBase64,
+                    shareCommitmentMessageDigitColumnsPackedHex:
+                        _shareCommitmentMessageDigitColumnsPackedHex,
+                    ...compactCredentialWithoutPackedDigitColumns
+                } = compactCredential;
+                void _shareCommitmentMessageCarryValuesPacked11Base64;
+                void _shareCommitmentMessageCarryValuesPacked11Hex;
+                void _shareCommitmentMessageDigitColumnBitWidth;
+                void _shareCommitmentMessageDigitColumnBitWidths;
+                void _shareCommitmentMessageDigitColumnsPackedBase64;
+                void _shareCommitmentMessageDigitColumnsPackedHex;
                 compactVssRecipientShareOpeningCredentials.push({
-                    ...compactCredential,
+                    ...compactCredentialWithoutPackedDigitColumns,
                     shareValues,
+                    shareCommitmentMessageCarryValues:
+                        compactCredentialShareCommitmentMessageCarryValues(
+                            compactCredential,
+                            shareValues.length,
+                        ),
+                    ...(shareCommitmentMessageDigitColumns === undefined
+                        ? {}
+                        : { shareCommitmentMessageDigitColumns }),
                     randomnessByColumn: compactCredentialRandomnessByColumn(
                         compactCredential,
                         shareValues.length,
@@ -1068,11 +1564,92 @@ const compactVssCredentialKey = (
     rnsLimbIndex: number,
 ): string => `${String(recipientRosterPosition)}:${String(rnsLimbIndex)}`;
 
+const compactMessageValuesFromResiduesAndCarries = (input: {
+    readonly residues: readonly number[];
+    readonly carryValues: readonly number[];
+    readonly rnsPrime: number;
+    readonly ringDegree: number;
+    readonly fieldName: string;
+}): readonly bigint[] => {
+    if (input.residues.length !== input.ringDegree) {
+        throw new Error(`${input.fieldName}.residues length must match.`);
+    }
+    if (input.carryValues.length !== input.ringDegree) {
+        throw new Error(`${input.fieldName}.carryValues length must match.`);
+    }
+    const rnsPrimeWide = BigInt(input.rnsPrime);
+
+    return input.residues.map((residue, coefficientIndex) => {
+        assertNonNegativeSafeInteger(
+            residue,
+            `${input.fieldName}.residues.${String(coefficientIndex)}`,
+        );
+        if (residue >= input.rnsPrime) {
+            throw new TypeError(
+                `${input.fieldName}.residues.${String(coefficientIndex)} must be below rnsPrime.`,
+            );
+        }
+        const carryValue = input.carryValues[coefficientIndex];
+        if (carryValue === undefined) {
+            throw new Error(
+                `${input.fieldName}.carryValues length must match.`,
+            );
+        }
+        assertNonNegativeSafeInteger(
+            carryValue,
+            `${input.fieldName}.carryValues.${String(coefficientIndex)}`,
+        );
+
+        return BigInt(residue) + BigInt(carryValue) * rnsPrimeWide;
+    });
+};
+
+const compactVssCanonicalMessageDigitColumns = (
+    messageCoefficients: readonly number[],
+    ringDegree: number,
+): readonly (readonly bigint[])[] => {
+    if (messageCoefficients.length !== ringDegree) {
+        throw new Error('compact VSS message coefficients length must match.');
+    }
+    const columns = Array.from({ length: compactVssMessageDigitCount }, () =>
+        Array.from({ length: ringDegree }, () => 0n),
+    );
+    messageCoefficients.forEach((coefficient, coefficientIndex) => {
+        assertNonNegativeSafeInteger(
+            coefficient,
+            `messageCoefficients.${String(coefficientIndex)}`,
+        );
+        let remaining = BigInt(coefficient);
+        for (
+            let digitIndex = 0;
+            digitIndex < compactVssMessageDigitCount;
+            digitIndex += 1
+        ) {
+            const column = columns[digitIndex];
+            if (column === undefined) {
+                throw new Error(
+                    'compact VSS message digit column is outside the selected profile.',
+                );
+            }
+            column[coefficientIndex] = remaining % compactVssMessageDigitBase;
+            remaining /= compactVssMessageDigitBase;
+        }
+        if (remaining !== 0n) {
+            throw new Error(
+                `messageCoefficients.${String(coefficientIndex)} exceeds the compact VSS digit range.`,
+            );
+        }
+    });
+
+    return columns;
+};
+
 const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
     readonly setupContext: CollectiveBgvSetupContext;
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
+    readonly targetDecryptionRnsLimbCount: number;
     readonly recipientShareOpeningCredentials: readonly CompactVssRecipientShareOpeningCredential[];
 }): readonly CompactVssAggregateThresholdOpeningCredential[] => {
     const aggregateThresholdCommitmentSet =
@@ -1084,7 +1661,9 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
         .filter(
             (record) =>
                 record.recipientIdentity === input.trusteeIdentity &&
-                record.recipientRosterPosition === input.trusteeRosterPosition,
+                record.recipientRosterPosition ===
+                    input.trusteeRosterPosition &&
+                record.rnsLimbIndex < input.targetDecryptionRnsLimbCount,
         )
         .sort((left, right) => left.rnsLimbIndex - right.rnsLimbIndex);
     return recipientRecords.map((record) => {
@@ -1118,6 +1697,14 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
             { length: aggregateThresholdCommitmentSet.ringDegree },
             () => 0n,
         );
+        const aggregateCommitmentMessageDigitColumns = Array.from(
+            { length: compactVssMessageDigitCount },
+            () =>
+                Array.from(
+                    { length: aggregateThresholdCommitmentSet.ringDegree },
+                    () => 0n,
+                ),
+        );
         const aggregateRandomnessByColumn: number[][] | undefined =
             credentials[0]?.randomnessByColumn.map((randomnessColumn) =>
                 Array.from({ length: randomnessColumn.length }, () => 0),
@@ -1142,6 +1729,8 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                     record.recipientTrusteePoint ||
                 credential.shareValues.length !==
                     aggregateThresholdCommitmentSet.ringDegree ||
+                credential.shareCommitmentMessageCarryValues.length !==
+                    aggregateThresholdCommitmentSet.ringDegree ||
                 !sourceShareCommitmentRoots.has(
                     credential.shareCommitmentRoot,
                 ) ||
@@ -1151,10 +1740,26 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                     'compact VSS recipient share opening credential must match the public aggregate threshold commitment record.',
                 );
             }
+            const recipientShareMessageCoefficients =
+                credential.shareCommitmentMessageDigitColumns === undefined
+                    ? credential.shareValues
+                    : compactMessageValuesFromResiduesAndCarries({
+                          residues: credential.shareValues,
+                          carryValues:
+                              credential.shareCommitmentMessageCarryValues,
+                          rnsPrime: credential.rnsPrime,
+                          ringDegree:
+                              aggregateThresholdCommitmentSet.ringDegree,
+                          fieldName: 'recipientShareOpeningCredential',
+                      });
             const recipientShareOpening = {
                 commitmentRole: 'recipient-share',
                 commitmentContext: {
-                    objectType: 'CompactVssRecipientShareCommitmentContext',
+                    objectType:
+                        credential.shareCommitmentMessageDigitColumns ===
+                        undefined
+                            ? 'CompactVssRecipientShareCommitmentContext'
+                            : 'CompactVssDerivedRecipientShareCommitmentContext',
                     objectVersion: 1,
                     ...setupContextFields(input.setupContext),
                     sourceTrusteeIdentity: credential.sourceTrusteeIdentity,
@@ -1170,7 +1775,13 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                 rnsLimbIndex: credential.rnsLimbIndex,
                 rnsPrime: credential.rnsPrime,
                 ringDegree: aggregateThresholdCommitmentSet.ringDegree,
-                messageCoefficients: credential.shareValues,
+                messageCoefficients: recipientShareMessageCoefficients,
+                messageDigitColumns:
+                    credential.shareCommitmentMessageDigitColumns,
+                messageCoefficientBound:
+                    credential.shareCommitmentMessageDigitColumns === undefined
+                        ? credential.rnsPrime
+                        : compactVssMessageCoordinateBound,
                 randomnessByColumn: credential.randomnessByColumn,
             } as const;
             const recomputedCommitment = computeCompactVssCommitmentFromOpening(
@@ -1187,11 +1798,36 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                     'compact VSS recipient share opening credential does not open its public recipient-share commitment.',
                 );
             }
-            credential.shareValues.forEach((shareValue, shareValueIndex) => {
-                aggregateCommitmentMessageValues[shareValueIndex] =
-                    (aggregateCommitmentMessageValues[shareValueIndex] ?? 0n) +
-                    BigInt(shareValue);
+            const shareDigitColumns =
+                credential.shareCommitmentMessageDigitColumns ??
+                compactVssCanonicalMessageDigitColumns(
+                    credential.shareValues,
+                    aggregateThresholdCommitmentSet.ringDegree,
+                );
+            shareDigitColumns.forEach((column, digitIndex) => {
+                const aggregateColumn =
+                    aggregateCommitmentMessageDigitColumns[digitIndex];
+                if (aggregateColumn === undefined) {
+                    throw new Error(
+                        'compact VSS aggregate digit column is outside the selected profile.',
+                    );
+                }
+                column.forEach((digit, coefficientIndex) => {
+                    aggregateColumn[coefficientIndex] =
+                        (aggregateColumn[coefficientIndex] ?? 0n) +
+                        nonNegativeIntegerToBigInt(
+                            digit,
+                            `recipientShareOpeningCredential.shareCommitmentMessageDigitColumns.${String(digitIndex)}.${String(coefficientIndex)}`,
+                        );
+                });
             });
+            recipientShareMessageCoefficients.forEach(
+                (messageValue, coefficientIndex) => {
+                    aggregateCommitmentMessageValues[coefficientIndex] =
+                        (aggregateCommitmentMessageValues[coefficientIndex] ??
+                            0n) + BigInt(messageValue);
+                },
+            );
             credential.randomnessByColumn.forEach(
                 (randomnessColumn, columnIndex) => {
                     const aggregateRandomnessColumn =
@@ -1216,12 +1852,23 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
         });
 
         const rnsPrimeWide = BigInt(record.rnsPrime);
-        const aggregateCommitmentMessageNumbers =
+        const aggregateShareValues = aggregateCommitmentMessageValues.map(
+            (messageValue, coefficientIndex) =>
+                safeNumberFromBigInt(
+                    messageValue % rnsPrimeWide,
+                    `aggregateShareValues.${String(coefficientIndex)}`,
+                ),
+        );
+        const aggregateCommitmentMessageCarryValues =
             aggregateCommitmentMessageValues.map(
-                (shareValue, coefficientIndex) =>
+                (messageValue, coefficientIndex) =>
                     safeNumberFromBigInt(
-                        shareValue,
-                        `aggregateCommitmentMessageValues.${String(coefficientIndex)}`,
+                        (messageValue -
+                            BigInt(
+                                aggregateShareValues[coefficientIndex] ?? 0,
+                            )) /
+                            rnsPrimeWide,
+                        `aggregateCommitmentMessageCarryValues.${String(coefficientIndex)}`,
                     ),
             );
         const aggregateOpening = {
@@ -1241,14 +1888,9 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
             rnsLimbIndex: record.rnsLimbIndex,
             rnsPrime: record.rnsPrime,
             ringDegree: aggregateThresholdCommitmentSet.ringDegree,
-            messageCoefficients: aggregateCommitmentMessageNumbers,
-            messageCoefficientBound: compactVssAggregateMessageCoefficientBound(
-                {
-                    rnsPrime: record.rnsPrime,
-                    participantCount:
-                        aggregateThresholdCommitmentSet.participantCount,
-                },
-            ),
+            messageCoefficients: aggregateCommitmentMessageValues,
+            messageDigitColumns: aggregateCommitmentMessageDigitColumns,
+            messageCoefficientBound: compactVssMessageCoordinateBound,
             randomnessByColumn: aggregateRandomnessByColumn,
         } as const;
         const credential = {
@@ -1260,14 +1902,9 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
             recipientTrusteePoint: record.recipientTrusteePoint,
             rnsLimbIndex: record.rnsLimbIndex,
             rnsPrime: record.rnsPrime,
-            aggregateShareValues: aggregateCommitmentMessageValues.map(
-                (shareValue, coefficientIndex) =>
-                    safeNumberFromBigInt(
-                        shareValue % rnsPrimeWide,
-                        `aggregateShareValues.${String(coefficientIndex)}`,
-                    ),
-            ),
-            aggregateCommitmentMessageValues: aggregateCommitmentMessageNumbers,
+            aggregateShareValues,
+            aggregateCommitmentMessageCarryValues,
+            aggregateCommitmentMessageDigitColumns,
             aggregateRandomnessByColumn,
             aggregateCommitmentRoot: record.aggregateCommitmentRoot,
             aggregateOpeningRoot:
@@ -1332,32 +1969,44 @@ const buildTargetDecryptionProofWitnessMaterial = (
         );
     }
 
-    const hasShareLinkageEvidence =
-        compactWitness.coefficientCommitmentSet !== undefined ||
-        compactWitness.recipientShareCommitmentSet !== undefined;
     if (
-        hasShareLinkageEvidence &&
-        (compactWitness.coefficientCommitmentSet === undefined ||
-            compactWitness.recipientShareCommitmentSet === undefined)
+        compactWitness.coefficientCommitmentSet === undefined ||
+        compactWitness.recipientShareCommitmentSet === undefined
     ) {
         throw new Error(
-            'compact VSS target proof witness must include both coefficient and recipient-share commitment sets when linkage evidence is supplied.',
+            'compact VSS target proof witness must include coefficient and recipient-share commitment evidence.',
         );
     }
-    const shareLinkageStatement = verifyCompactVssShareLinkageStatement(
-        hasShareLinkageEvidence
-            ? {
-                  statement: compactWitness.shareLinkageStatement,
-                  coefficientCommitmentSet:
-                      compactWitness.coefficientCommitmentSet,
-                  recipientShareCommitmentSet:
-                      compactWitness.recipientShareCommitmentSet,
-                  aggregateThresholdCommitmentSet,
-              }
-            : {
-                  statement: compactWitness.shareLinkageStatement,
-              },
+    const activeRecipientShareOpeningCredentials = [
+        ...deliveredCompactVssRecipientShareOpeningCredentials,
+        ...(compactWitness.recipientShareOpeningCredentials ?? []),
+    ].filter(
+        (credential) =>
+            credential.recipientIdentity === input.trusteeIdentity &&
+            credential.recipientRosterPosition ===
+                input.trusteeRosterPosition &&
+            credential.rnsLimbIndex < targetDecryptionRnsLimbCount,
     );
+    const hasDerivedRecipientShareOpeningCredentials =
+        activeRecipientShareOpeningCredentials.some(
+            (credential) =>
+                credential.shareCommitmentMessageDigitColumns !== undefined,
+        );
+    if (hasDerivedRecipientShareOpeningCredentials) {
+        verifyCompactVssDerivedRecipientShareCommitmentSet({
+            setupContext: input.setupContext,
+            coefficientCommitmentSet: compactWitness.coefficientCommitmentSet,
+            recipientShareCommitmentSet:
+                compactWitness.recipientShareCommitmentSet,
+            derivedRnsLimbCount: targetDecryptionRnsLimbCount,
+        });
+    }
+    const shareLinkageStatement = verifyCompactVssShareLinkageStatement({
+        statement: compactWitness.shareLinkageStatement,
+        coefficientCommitmentSet: compactWitness.coefficientCommitmentSet,
+        recipientShareCommitmentSet: compactWitness.recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet,
+    });
     const shareLinkageStatementRecord =
         shareLinkageStatement as unknown as JsonRecord;
     assertSetupContextBinding(
@@ -1397,16 +2046,14 @@ const buildTargetDecryptionProofWitnessMaterial = (
         CompactVssAggregateThresholdOpeningCredential
     >();
     const aggregateThresholdOpeningCredentials =
-        compactWitness.aggregateThresholdOpeningCredentials ??
         aggregateCompactVssOpeningCredentialsFromRecipientCredentials({
             setupContext: input.setupContext,
             trusteeIdentity: input.trusteeIdentity,
             trusteeRosterPosition: input.trusteeRosterPosition,
             aggregateThresholdCommitmentSet,
-            recipientShareOpeningCredentials: [
-                ...deliveredCompactVssRecipientShareOpeningCredentials,
-                ...(compactWitness.recipientShareOpeningCredentials ?? []),
-            ],
+            targetDecryptionRnsLimbCount,
+            recipientShareOpeningCredentials:
+                activeRecipientShareOpeningCredentials,
         });
     aggregateThresholdOpeningCredentials
         .filter(
@@ -1496,7 +2143,7 @@ const buildTargetDecryptionProofWitnessMaterial = (
             assertSameShareValues(
                 credential.aggregateShareValues,
                 aggregateShareMaterial.shareValues,
-                'compactVssTargetProofWitness.aggregateThresholdOpeningCredentials.aggregateShareValues',
+                'compactVssTargetProofWitness.derivedAggregateOpeningCredentials.aggregateShareValues',
             );
             const aggregateOpening = {
                 commitmentRole: 'aggregate-threshold-share',
@@ -1515,14 +2162,19 @@ const buildTargetDecryptionProofWitnessMaterial = (
                 rnsLimbIndex: credential.rnsLimbIndex,
                 rnsPrime: credential.rnsPrime,
                 ringDegree: aggregateThresholdCommitmentSet.ringDegree,
-                messageCoefficients:
-                    credential.aggregateCommitmentMessageValues,
-                messageCoefficientBound:
-                    compactVssAggregateMessageCoefficientBound({
+                messageCoefficients: compactMessageValuesFromResiduesAndCarries(
+                    {
+                        residues: credential.aggregateShareValues,
+                        carryValues:
+                            credential.aggregateCommitmentMessageCarryValues,
                         rnsPrime: credential.rnsPrime,
-                        participantCount:
-                            aggregateThresholdCommitmentSet.participantCount,
-                    }),
+                        ringDegree: aggregateThresholdCommitmentSet.ringDegree,
+                        fieldName: 'aggregateOpeningCredential',
+                    },
+                ),
+                messageDigitColumns:
+                    credential.aggregateCommitmentMessageDigitColumns,
+                messageCoefficientBound: compactVssMessageCoordinateBound,
                 randomnessByColumn: credential.aggregateRandomnessByColumn,
             } as const;
             const recomputedCommitment =
@@ -1548,11 +2200,9 @@ const buildTargetDecryptionProofWitnessMaterial = (
                 rnsPrime: credential.rnsPrime,
                 aggregateCommitmentRoot: credential.aggregateCommitmentRoot,
                 aggregateOpeningRoot: credential.aggregateOpeningRoot,
-                aggregateCommitmentMessageValuesLeHex:
-                    u64VectorToLittleEndianHex(
-                        credential.aggregateCommitmentMessageValues,
-                        'aggregateCommitmentMessageValues',
-                    ),
+                ...compactVssAggregateDigitColumnStorage(
+                    credential.aggregateCommitmentMessageDigitColumns,
+                ),
                 aggregateRandomnessByColumnSignedByteHex:
                     credential.aggregateRandomnessByColumn.map(
                         (randomnessColumn, columnIndex) =>

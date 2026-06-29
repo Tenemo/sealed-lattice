@@ -517,12 +517,6 @@ describe('BGV target-decryption kernel commands', () => {
             ).message,
         ).toContain('chunkCount');
 
-        expect(kernel.verifyTargetDecryptionResult()).toEqual({
-            ok: false,
-            operation: 'verifyTargetDecryptionResult',
-            refusalReason: 'CompactVssPublicMaterialNotBinding',
-        });
-
         const reboundWrongShareRoot = rebindProofStatementRoot(kernel, {
             ...proofStatement,
             shareRoot: '0'.repeat(128),

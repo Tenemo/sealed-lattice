@@ -1,7 +1,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCommonRandomness } from '../common-randomness-records.js';
-import type { CompactVssShareLinkageBinaryProofMaterialTransportLike } from '../compact-vss-commitments.js';
 import type {
     GaloisKeyShareBatch,
     PublicEvaluationKeySet,
@@ -114,9 +113,6 @@ export type SetupPackageInput = Readonly<{
     readonly transportedSameSecretProofMaterial?:
         | TransportedSameSecretProofMaterialSet
         | JsonRecord;
-    readonly transportedCompactVssShareLinkageProofMaterial?:
-        | CompactVssShareLinkageBinaryProofMaterialTransportLike
-        | JsonRecord;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly publicKeyShareMaterial:
@@ -209,7 +205,6 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
     readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
-    readonly transportedCompactVssShareLinkageProofMaterial?: CompactVssShareLinkageBinaryProofMaterialTransportLike;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;

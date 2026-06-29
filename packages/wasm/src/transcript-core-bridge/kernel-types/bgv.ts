@@ -98,31 +98,6 @@ export type BgvVerifiedSetupProofMaterialSet = Readonly<
     }
 >;
 
-export type BgvCompactVssShareLinkageBinaryProofMaterialTransport =
-    BgvTransportedMaterialObject<'CompactVssShareLinkageBinaryProofMaterialTransport'> &
-        Readonly<{
-            readonly setupProfileId: 'CollectiveBgvSetup-v1';
-            readonly profileId: string;
-            readonly proofFamily: string;
-            readonly binaryFormat: string;
-            readonly proofMaterialSetRoot: ProtocolHash;
-            readonly shareLinkageStatementRoot: ProtocolHash;
-            readonly chunkSizeBytes: number;
-            readonly chunkCount: number;
-            readonly totalByteLength: number;
-            readonly fullObjectHash: ProtocolHash;
-            readonly chunkRoot: ProtocolHash;
-            readonly chunkHashes: readonly ProtocolHash[];
-            readonly chunks: readonly unknown[];
-        }>;
-
-export type BgvCompactVssShareLinkageBinaryProofMaterialTransportReference =
-    Omit<BgvCompactVssShareLinkageBinaryProofMaterialTransport, 'chunks'>;
-
-export type BgvCompactVssShareLinkageBinaryProofMaterialTransportLike =
-    | BgvCompactVssShareLinkageBinaryProofMaterialTransport
-    | BgvCompactVssShareLinkageBinaryProofMaterialTransportReference;
-
 export type BgvTransportedPublicKeyShareMaterial =
     BgvTransportedMaterialObject<'SetupTransportedPublicKeyShareMaterial'> &
         Readonly<{
@@ -160,7 +135,6 @@ export type BgvCollectiveSetupTransportCompanions = Readonly<{
         | BgvTransportedVssCoefficientCommitmentMaterialReference;
     readonly verifiedVssCoefficientCommitmentMaterial?: BgvVerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedSameSecretProofMaterialSet'>;
-    readonly transportedCompactVssShareLinkageProofMaterial?: BgvCompactVssShareLinkageBinaryProofMaterialTransportLike;
     readonly transportedPublicKeyShareMaterial?: BgvTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedPublicKeyShareProofMaterialSet'>;
     readonly transportedEvaluationKeyShareProofMaterial?: BgvTransportedSetupProofMaterialSet<'SetupTransportedEvaluationKeyShareProofMaterialSet'>;
@@ -996,39 +970,6 @@ export type BgvCompactVssShareLinkageStatementVerification = {
     readonly commonKeyRule: string;
 };
 
-export type BgvCompactVssShareLinkageProofMaterialSetVerification = {
-    readonly ok: true;
-    readonly operation: 'verifyCompactVssShareLinkageProofMaterialSet';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    readonly proofFamily: 'compact-vss-share-linkage';
-    readonly shareLinkageStatementRoot: ProtocolHash;
-    readonly proofMaterialSetRoot: ProtocolHash;
-    readonly participantCount: number;
-    readonly proofMaterialCount: number;
-    readonly proofRecordCount: number;
-    readonly totalProofByteLength: number;
-    readonly restrictedProofVerificationCount: number;
-};
-
-export type BgvCompactVssShareLinkageBinaryProofMaterialVerification = {
-    readonly ok: true;
-    readonly operation: 'verifyCompactVssShareLinkageBinaryProofMaterial';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    readonly proofFamily: 'compact-vss-share-linkage';
-    readonly shareLinkageStatementRoot: ProtocolHash;
-    readonly proofMaterialSetRoot: ProtocolHash;
-    readonly participantCount: number;
-    readonly proofMaterialCount: number;
-    readonly proofRecordCount: number;
-    readonly totalProofByteLength: number;
-    readonly restrictedProofVerificationCount: number;
-    readonly binaryFormat: string;
-    readonly binaryTotalByteLength: number;
-    readonly binaryChunkCount: number;
-    readonly binaryFullObjectHash: ProtocolHash;
-    readonly binaryChunkRoot: ProtocolHash;
-};
-
 export type BgvCompactVssShareLinkageProofStatementItem = {
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
@@ -1418,10 +1359,4 @@ export type BgvTargetDecryptionShareProofStatementBindingVerification = {
     readonly ok: false;
     readonly operation: 'verifyBgvTargetDecryptionShareProofStatementBinding';
     readonly refusalReason: 'TargetDecryptionProofUnavailable';
-};
-
-export type BgvTargetDecryptionResultVerification = {
-    readonly ok: false;
-    readonly operation: 'verifyTargetDecryptionResult';
-    readonly refusalReason: 'CompactVssPublicMaterialNotBinding';
 };

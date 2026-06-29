@@ -5,7 +5,10 @@ import {
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
-import { createCompactVssRecipientShareCommitmentBundle } from '#packages/protocol/src/setup/compact-vss-commitments';
+import {
+    createCompactVssCoefficientCommitmentSet,
+    createCompactVssDerivedRecipientShareCommitmentBundle,
+} from '#packages/protocol/src/setup/compact-vss-commitments';
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/setup/private-vss-mailbox-delivery';
 import {
     makeSetupContext,
@@ -86,8 +89,16 @@ describe('private VSS mailbox delivery', () => {
         const mailboxKeyPair = createPrivateVssMailboxKeyPair(
             fixtureHash('mailbox-key'),
         );
-        const compactRecipientShareBundle =
-            createCompactVssRecipientShareCommitmentBundle({
+        const coefficientOpeningRandomness = ({
+            ringDegree,
+        }: {
+            readonly ringDegree: number;
+        }): readonly (readonly number[])[] => [
+            Array.from({ length: ringDegree }, () => 1),
+            Array.from({ length: ringDegree }, () => 0),
+        ];
+        const coefficientCommitmentSet =
+            createCompactVssCoefficientCommitmentSet({
                 setupContext,
                 publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
                 participantCount: 1,
@@ -109,16 +120,39 @@ describe('private VSS mailbox delivery', () => {
                         ],
                     },
                 ],
+                coefficientOpeningRandomness,
+            });
+        const compactRecipientShareBundle =
+            createCompactVssDerivedRecipientShareCommitmentBundle({
+                setupContext,
+                publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+                participantCount: 1,
+                qSharePrimes: [65_537],
+                ringDegree: 2,
+                thresholdDegree: 1,
+                coefficientCommitmentSet,
+                sourceTrusteeOpeningStates: [
+                    {
+                        sourceTrusteeIdentity: 'trustee-0',
+                        sourceTrusteeRosterPosition: 0,
+                        coefficientOpenings: [
+                            {
+                                rnsLimbIndex: 0,
+                                rnsPrime: 65_537,
+                                shamirCoefficientIndex: 0,
+                                coefficientMessage: [1, 2],
+                                randomnessByColumn: [],
+                            },
+                        ],
+                    },
+                ],
                 recipientTrustees: [
                     {
                         trusteeIdentity: 'trustee-0',
                         trusteeRosterPosition: 0,
                     },
                 ],
-                shareOpeningRandomness: ({ ringDegree }) => [
-                    Array.from({ length: ringDegree }, () => 1),
-                    Array.from({ length: ringDegree }, () => 0),
-                ],
+                coefficientOpeningRandomness,
             });
 
         const deliverySet = await createPrivateVssMailboxDeliverySet({
@@ -235,6 +269,33 @@ describe('private VSS mailbox delivery', () => {
         expect(compactCredential.shareCommitmentRoot).toBe(
             deliveredCredential.shareCommitmentRoot,
         );
+        expect(
+            compactCredential.shareCommitmentMessageCarryValues,
+        ).toBeUndefined();
+        expect(
+            compactCredential.shareCommitmentMessageCarryValuesLittleEndian32Hex,
+        ).toBeUndefined();
+        expect(
+            compactCredential.shareCommitmentMessageCarryValuesPacked11Hex,
+        ).toBeUndefined();
+        expect(
+            compactCredential.shareCommitmentMessageCarryValuesPacked11Base64,
+        ).toBe('AAAA');
+        expect(
+            compactCredential.shareCommitmentMessageDigitColumns,
+        ).toBeUndefined();
+        expect(
+            compactCredential.shareCommitmentMessageDigitColumnBitWidth,
+        ).toBeUndefined();
+        expect(
+            compactCredential.shareCommitmentMessageDigitColumnsPackedHex,
+        ).toBeUndefined();
+        expect(
+            compactCredential.shareCommitmentMessageDigitColumnBitWidths,
+        ).toEqual([2, 1]);
+        expect(
+            compactCredential.shareCommitmentMessageDigitColumnsPackedBase64,
+        ).toEqual(['CQ==', 'AA==']);
         const packedRandomness =
             compactCredential.randomnessByColumnPackedTernaryHex;
         expect(packedRandomness).toEqual(['0a', '05']);

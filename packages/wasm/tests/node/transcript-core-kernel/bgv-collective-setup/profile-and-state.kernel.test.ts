@@ -145,8 +145,7 @@ describe('collective BGV setup kernel commands', () => {
             thresholdDegree: 4,
             ringDegree: 32_768,
             commitmentRelation: {
-                relation:
-                    'C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c',
+                relation: 'C = A_message * m + A_randomness * r mod q_c',
                 outputCoordinateCount: 16,
                 messageWidth: 2,
                 randomnessWidth: 2,
@@ -193,20 +192,21 @@ describe('collective BGV setup kernel commands', () => {
         });
         expect(certificateInputBinding.normInputClasses[1]).toMatchObject({
             sourceCoefficientUpperBoundMultiplier: 1,
-            recipientShareCoefficientUpperBoundMultiplier: 1,
-            aggregateCoefficientUpperBoundMultiplier: 10,
+            recipientShareCoefficientUpperBoundMultiplier: 1_111,
+            aggregateCoefficientUpperBoundMultiplier: 11_110,
         });
         expect(certificateInputBinding.parameterReviewInputs).toMatchObject({
             inputVersion: 1,
             openingWitnessRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-fresh-opening-witness',
+                    messageCoefficientUpperBoundMultiplier: 1_111,
                     witnessCoefficientCount: 131_072,
                     randomnessDifferenceInfinityBound: 2,
                 }),
                 expect.objectContaining({
                     rowId: 'compact-vss-aggregate-opening-witness',
-                    messageCoefficientUpperBoundMultiplier: 10,
+                    messageCoefficientUpperBoundMultiplier: 11_110,
                     randomnessDifferenceInfinityBound: 20,
                 }),
             ],

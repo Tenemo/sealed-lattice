@@ -869,6 +869,24 @@ fn validate_masked_claim_lift_window(
             "target-decryption masked consistency claims need more carried limb fields",
         ));
     }
+    if statement.compact_vss_share_linkage.is_some() {
+        let first_digit_global_claim_id =
+            (statement.compact_vss_item_count(0) * COMPACT_VSS_CONSISTENCY_REPETITIONS) as u64;
+        let (digit_lower_bound, digit_upper_bound) =
+            masked_claim_bounds_for_global_claim(statement, first_digit_global_claim_id)?;
+        let required_digit_residue_count = masked_claim_lift_residue_count_for_moduli(
+            proof_limb_indices
+                .iter()
+                .map(|limb_index| DATA_PRIMES[*limb_index]),
+            &digit_lower_bound,
+            &digit_upper_bound,
+        );
+        if required_digit_residue_count > proof_limb_indices.len() {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS digit masked consistency claims need more active limb fields",
+            ));
+        }
+    }
     if statement.target_decryption_share.is_some() {
         if let Some(first_smudging_global_message_index) =
             statement.target_decryption_smudging_message_global_index()

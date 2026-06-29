@@ -183,8 +183,8 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // only as a bounded-leakage row; twenty repetitions put the per-difference
 // collision bound at 2^-160 before union and Fiat-Shamir losses, the pre-union
 // margin the accounting certificate requires. Compact share-linkage uses fewer,
-// wider carry-only combinations: four 40-bit repetitions preserve the same
-// 160-bit pre-union collision budget while avoiding mask columns for
+// wider carry and message-digit combinations: four 40-bit repetitions preserve
+// the same 160-bit pre-union collision budget while avoiding mask columns for
 // repetitions that carry no additional collision margin.
 pub(super) const CONSISTENCY_REPETITIONS: usize = 20;
 pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
@@ -201,6 +201,10 @@ pub(super) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
 pub(super) const CLAIM_MASK_RADIX: u64 = 3;
 pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(super) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
+// Compact VSS digit consistency claims have a larger clear range than carries.
+// Eighty-seven base-3 mask digits stay inside the three setup-field CRT lift
+// window while keeping the digit-claim mask margin comparable to the carry
+// claim margin.
 pub(super) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
 pub(super) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize = 142;
 pub(super) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize = 114;

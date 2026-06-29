@@ -24,7 +24,6 @@ import type {
     VerifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
     VerifiedSetupProofMaterial as ProtocolVerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
-    CompactVssShareLinkageBinaryProofMaterialTransportLike as ProtocolCompactVssShareLinkageBinaryProofMaterialTransportLike,
     TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
     TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
@@ -241,8 +240,6 @@ export type TransportedEvaluationKeyShareComponentMaterialSet =
     ProtocolTransportedEvaluationKeyShareComponentMaterialSet;
 export type TransportedPublicEvaluationKeyMaterialSet =
     ProtocolTransportedPublicEvaluationKeyMaterialSet;
-export type CompactVssShareLinkageBinaryProofMaterialTransportLike =
-    ProtocolCompactVssShareLinkageBinaryProofMaterialTransportLike;
 
 export type VerifySetupPackageInput = Readonly<{
     readonly setupPackage: unknown;
@@ -252,7 +249,6 @@ export type VerifySetupPackageInput = Readonly<{
     readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
     readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
-    readonly transportedCompactVssShareLinkageProofMaterial?: CompactVssShareLinkageBinaryProofMaterialTransportLike;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
@@ -329,15 +325,6 @@ export type SetupPackageVerification = Readonly<{
         readonly objectPath?: string;
     }>[];
 }>;
-
-type TargetDecryptionResultRefusal = Readonly<{
-    readonly ok: false;
-    readonly operation: 'verifyTargetDecryptionResult';
-    readonly refusalReason: 'CompactVssPublicMaterialNotBinding';
-}>;
-
-/** Result of target-result verification, currently fail-closed until compact VSS public material has certificate-grade binding evidence. */
-export type TargetDecryptionResultVerification = TargetDecryptionResultRefusal;
 
 /** Derives threshold, quorum, and warning parameters for a roster profile. */
 export const deriveThresholdProfile = (
@@ -704,13 +691,6 @@ export const verifySetupPackage = async (
 
     return kernel.verifyCollectiveBgvSetup(verificationInput);
 };
-
-/** Refuses target-result verification until compact VSS public material is binding. */
-export const verifyTargetDecryptionResult =
-    async (): Promise<TargetDecryptionResultVerification> => {
-        const kernel = await loadTranscriptCoreKernel();
-        return kernel.verifyTargetDecryptionResult();
-    };
 
 /** Verifies a transcript-core fixture with the packaged WASM kernel. */
 export const verifyTranscriptCoreFixture = async (

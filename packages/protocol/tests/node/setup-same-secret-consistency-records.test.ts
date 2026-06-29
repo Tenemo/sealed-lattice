@@ -439,6 +439,8 @@ describe('same-secret consistency statement builders', () => {
         const bridgeProofMaterialSet =
             createCompactVssSameSecretBridgeProofMaterialSet({
                 statementSet: bridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs,
                 proofRecordInputs: bridgeStatementSet.statementRecords.map(
                     (statementRecord, statementIndex) => ({
                         compactSameSecretBridgeStatementRoot:
@@ -487,6 +489,8 @@ describe('same-secret consistency statement builders', () => {
         expect(
             verifyCompactVssSameSecretBridgeProofMaterialSet({
                 statementSet: bridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs,
                 proofMaterialSet: bridgeProofMaterialSet,
             }),
         ).toBe(bridgeProofMaterialSet);
@@ -506,6 +510,8 @@ describe('same-secret consistency statement builders', () => {
         expect(() =>
             verifyCompactVssSameSecretBridgeProofMaterialSet({
                 statementSet: bridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs,
                 proofMaterialSet: proofMaterialSetWithWrongHash,
             }),
         ).toThrow(/proofBytesHash/u);
@@ -527,6 +533,8 @@ describe('same-secret consistency statement builders', () => {
         expect(() =>
             verifyCompactVssSameSecretBridgeProofMaterialSet({
                 statementSet: bridgeStatementSet,
+                sameSecretConsistency,
+                sameSecretProofs,
                 proofMaterialSet: proofMaterialSetWithWrongStatementRoot,
             }),
         ).toThrow(/statement/u);
@@ -636,11 +644,13 @@ describe('same-secret consistency statement builders', () => {
                 forgedProofRootSetWithoutRoot,
             ),
         };
-        expect(
+        expect(() =>
             verifyCompactVssSameSecretBridgeStatementSet({
                 statementSet: reboundForgedProofRootSet,
-            }),
-        ).toBe(reboundForgedProofRootSet);
+            } as Parameters<
+                typeof verifyCompactVssSameSecretBridgeStatementSet
+            >[0]),
+        ).toThrow(/requires both sameSecretConsistency and sameSecretProofs/u);
         expect(() =>
             verifyCompactVssSameSecretBridgeStatementSet({
                 statementSet: reboundForgedProofRootSet,
@@ -761,6 +771,8 @@ describe('same-secret consistency statement builders', () => {
                         unsupportedSignedConventionSetWithoutRoot,
                     ),
                 },
+                sameSecretConsistency,
+                sameSecretProofs,
             }),
         ).toThrow(/signedRepresentativeConvention/u);
     });

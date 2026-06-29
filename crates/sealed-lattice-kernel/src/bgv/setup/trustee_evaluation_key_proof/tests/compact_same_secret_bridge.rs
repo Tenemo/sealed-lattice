@@ -18,6 +18,43 @@ fn compact_same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         7,
         "compact bridge fixture should exercise the current target-basis limb count"
     );
+    let layout = LimbColumnLayout::new(&statement, 0).expect("compact bridge layout");
+    let bridge_digit_count = layout.compact_same_secret_bridge_target_count()
+        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+    assert_eq!(
+        layout.compact_same_secret_bridge_decoder_digit_count(),
+        0,
+        "compact bridge target-message digits are bounded by masked digit claims"
+    );
+    assert_eq!(
+        layout.compact_same_secret_bridge_message_encoding_columns(),
+        bridge_digit_count,
+        "compact bridge target messages should carry only digit columns"
+    );
+    assert_eq!(
+        layout.consistency_vector_count(),
+        2 + bridge_digit_count + layout.linkage_randomness_columns,
+        "compact bridge consistency claims must bind the secret, indicator, target digits, and randomness"
+    );
+    assert_eq!(
+        layout.compact_same_secret_bridge_relation_count(),
+        layout.compact_same_secret_bridge_target_count()
+            * (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                + LINCHECK_REPETITIONS),
+        "compact bridge relation challenges should not include decoder rows"
+    );
+    assert_eq!(
+        layout.compact_same_secret_bridge_message_trit_count(0, 0),
+        0,
+        "compact bridge target messages should not carry trit decoder columns"
+    );
+    let later_commitment_limb_layout =
+        LimbColumnLayout::new(&statement, 1).expect("compact bridge second limb layout");
+    assert_eq!(
+        later_commitment_limb_layout.compact_same_secret_bridge_relation_count(),
+        layout.compact_same_secret_bridge_relation_count(),
+        "compact bridge commitment limbs should use the same digit-only relation"
+    );
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
 

@@ -26,7 +26,6 @@ export const forbiddenProtocolRootExports = [
     'GeneratedCompactVssTargetProofWitnessInput',
     'aggregateCompactVssThresholdShareCommitments',
     'combineCompactVssCommitments',
-    'compactVssAggregateMessageCoefficientBound',
     'compactVssCommitmentBinaryFormat',
     'compactVssCommitmentMeasurement',
     'compactVssCommitmentModulusLimbIndices',
@@ -166,6 +165,7 @@ export const forbiddenTypeExports = [
     'TopKEvaluatorDirectAggregateInput',
     'VerifiedSetupProofMaterial',
     'VerifiedSetupProofMaterialSet',
+    'TargetDecryptionResultVerification',
     'VerifyTargetDecryptionResultInput',
 ] as const;
 
@@ -192,6 +192,7 @@ export const forbiddenRuntimeExports = [
     'describeBgvOperationRegistry',
     'describeBgvRnsProfile',
     'deriveBgvTargetDecryptionShareProofStatement',
+    'verifyTargetDecryptionResult',
     'dockerOracle',
     'encodeBgvBatchPlaintext',
     'exportDirectBallotWitness',

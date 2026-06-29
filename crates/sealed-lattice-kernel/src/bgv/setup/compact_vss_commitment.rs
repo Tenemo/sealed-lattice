@@ -1,9 +1,6 @@
-use super::setup_proof::{
-    SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_chunk_hash,
-    setup_proof_material_chunk_manifest_root, setup_proof_material_full_object_hash,
-};
 use super::*;
-use std::collections::BTreeSet;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) const COMPACT_VSS_COMMITMENT_PROFILE_ID: &str =
     "sealed-lattice-compact-vss-sparse-linear-v1";
@@ -23,15 +20,6 @@ const COMPACT_VSS_PROJECTION_INDEX_HASH_DOMAIN: &str =
 const COMPACT_VSS_OPENING_PAYLOAD_HASH_DOMAIN: &str =
     "sealed-lattice-compact-vss-commitment/opening-payload-v1";
 const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_RELATION: &str = "recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments";
-const COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "compact-vss-share-linkage";
-const COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
-    "sealed-lattice-compact-vss-share-linkage-proof-bytes-v1";
-const COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_BINARY_MAGIC: &[u8] =
-    b"SEALED-LATTICE-COMPACT-VSS-SHARE-LINKAGE-PROOF-MATERIAL-BINARY-V1";
-const COMPACT_VSS_SHARE_LINKAGE_BINARY_TRANSPORT_OBJECT_TYPE: &str =
-    "CompactVssShareLinkageBinaryProofMaterialTransport";
-const COMPACT_VSS_SHARE_LINKAGE_BINARY_FORMAT: &str =
-    "compact-vss-share-linkage-proof-material-binary-v1";
 const COMPACT_VSS_SHARE_LINKAGE_PROOF_BATCHING_RULE: &str = "one public share-linkage statement record is bound per source trustee, batching every recipient and target-basis limb for that source";
 const COMPACT_VSS_SHARE_LINKAGE_SHAMIR_EVALUATION_RULE: &str = "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point";
 const COMPACT_VSS_SHARE_LINKAGE_AGGREGATE_THRESHOLD_RULE: &str = "aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb";
@@ -58,7 +46,7 @@ impl CompactVssMessageEncodingLayout {
     }
 
     pub(in crate::bgv::setup) fn has_digit_decoder_relations(self) -> bool {
-        self.range_evidence == CompactVssMessageRangeEvidence::DigitAndTritColumns
+        self.total_trit_count() > 0
     }
 
     pub(in crate::bgv::setup) fn digit_trit_count(
@@ -66,17 +54,23 @@ impl CompactVssMessageEncodingLayout {
         digit_index: usize,
     ) -> CanonicalResult<usize> {
         if self.range_evidence == CompactVssMessageRangeEvidence::DigitColumnsOnly {
-            return match digit_index {
-                0 | 1 => Ok(0),
-                _ => Err(CanonicalError::new(
+            return if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+                Ok(0)
+            } else {
+                Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "compact VSS message digit index is outside the selected profile",
-                )),
+                ))
             };
         }
         match digit_index {
             0 => Ok(COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT),
-            1 => Ok(self.high_digit_trit_count),
+            1 => match self.range_evidence {
+                CompactVssMessageRangeEvidence::DigitAndTritColumns => {
+                    Ok(self.high_digit_trit_count)
+                }
+                CompactVssMessageRangeEvidence::DigitColumnsOnly => unreachable!(),
+            },
             _ => Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "compact VSS message digit index is outside the selected profile",
@@ -85,10 +79,12 @@ impl CompactVssMessageEncodingLayout {
     }
 
     pub(in crate::bgv::setup) fn total_trit_count(self) -> usize {
-        if self.range_evidence == CompactVssMessageRangeEvidence::DigitColumnsOnly {
-            return 0;
+        match self.range_evidence {
+            CompactVssMessageRangeEvidence::DigitAndTritColumns => {
+                COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT + self.high_digit_trit_count
+            }
+            CompactVssMessageRangeEvidence::DigitColumnsOnly => 0,
         }
-        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT + self.high_digit_trit_count
     }
 
     pub(in crate::bgv::setup) fn encoding_column_count(self) -> usize {
@@ -100,22 +96,22 @@ impl CompactVssMessageEncodingLayout {
         digit_index: usize,
     ) -> CanonicalResult<usize> {
         if self.range_evidence == CompactVssMessageRangeEvidence::DigitColumnsOnly {
-            return match digit_index {
-                0 => Ok(0),
-                1 => Ok(1),
-                _ => Err(CanonicalError::new(
+            return if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+                Ok(digit_index)
+            } else {
+                Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
                     "compact VSS message digit index is outside the selected profile",
-                )),
+                ))
             };
         }
-        match digit_index {
-            0 => Ok(0),
-            1 => Ok(1 + COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT),
-            _ => Err(CanonicalError::new(
+        if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+            Ok(digit_index)
+        } else {
+            Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "compact VSS message digit index is outside the selected profile",
-            )),
+            ))
         }
     }
 
@@ -132,7 +128,18 @@ impl CompactVssMessageEncodingLayout {
             ));
         }
 
-        Ok(self.digit_encoding_column(digit_index)? + 1 + trit_index)
+        let previous_trit_count =
+            (0..digit_index).try_fold(0_usize, |sum, previous_digit_index| {
+                sum.checked_add(self.digit_trit_count(previous_digit_index)?)
+                    .ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::MalformedLength,
+                            "compact VSS message trit column offset overflowed",
+                        )
+                    })
+            })?;
+
+        Ok(COMPACT_VSS_MESSAGE_DIGIT_COUNT + previous_trit_count + trit_index)
     }
 }
 
@@ -177,6 +184,7 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
             "compact VSS message coefficient count must match ringDegree",
         ));
     }
+    let mut message_digits_by_coefficient = Vec::with_capacity(input.message_coefficients.len());
     for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
         if *coefficient >= input.message_coefficient_bound {
             return Err(CanonicalError::new(
@@ -186,7 +194,7 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
                 ),
             ));
         }
-        compact_vss_message_digits(*coefficient)?;
+        message_digits_by_coefficient.push(compact_vss_message_digits(*coefficient)?);
     }
     validate_compact_vss_randomness_columns(
         input.randomness_by_column,
@@ -218,6 +226,7 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
                         output_coordinate_index,
                         modulus,
                         message_coefficients: input.message_coefficients,
+                        message_digits_by_coefficient: &message_digits_by_coefficient,
                         randomness_by_column: input.randomness_by_column,
                     })
                 })
@@ -813,7 +822,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
             "compact VSS share linkage statement root does not match its bound public roots",
         ));
     }
-    verify_optional_compact_vss_share_linkage_evidence(CompactVssShareLinkageEvidenceInput {
+    verify_compact_vss_share_linkage_evidence(CompactVssShareLinkageEvidenceInput {
         request,
         statement: CompactVssShareLinkageStatementBinding {
             ceremony_id,
@@ -856,1427 +865,6 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
     }))
 }
 
-pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let statement = value_at_path(request, &["statement"])?;
-    let statement_verification =
-        verify_compact_vss_share_linkage_statement_request(&json!({ "statement": statement }))?;
-    let statement_root = hash_at_path(&statement_verification, &["statementRoot"])?;
-    let participant_count = read_positive_usize_at_path(
-        &statement_verification,
-        &["participantCount"],
-        "compact VSS share-linkage proof material statement participantCount",
-    )?;
-    let target_rns_limb_count = read_positive_usize_at_path(
-        &statement_verification,
-        &["targetRnsLimbCount"],
-        "compact VSS share-linkage proof material statement targetRnsLimbCount",
-    )?;
-    let threshold_degree = read_positive_usize_at_path(
-        &statement_verification,
-        &["thresholdDegree"],
-        "compact VSS share-linkage proof material statement thresholdDegree",
-    )?;
-    let coefficient_commitment_set = value_at_path(request, &["coefficientCommitmentSet"])?;
-    let recipient_share_commitment_set = value_at_path(request, &["recipientShareCommitmentSet"])?;
-    let coefficient_verification = verify_compact_vss_coefficient_commitment_set_request(&json!({
-        "coefficientCommitmentSet": coefficient_commitment_set,
-    }))?;
-    let recipient_verification =
-        verify_compact_vss_recipient_share_commitment_set_request(&json!({
-            "recipientShareCommitmentSet": recipient_share_commitment_set,
-        }))?;
-    compare_required_string(
-        hash_at_path(&coefficient_verification, &["coefficientCommitmentRoot"])?,
-        hash_at_path(statement, &["coefficientCommitmentRoot"])?,
-        "compact VSS share-linkage proof material coefficientCommitmentRoot",
-    )?;
-    compare_required_string(
-        hash_at_path(&recipient_verification, &["recipientShareCommitmentRoot"])?,
-        hash_at_path(statement, &["recipientShareCommitmentRoot"])?,
-        "compact VSS share-linkage proof material recipientShareCommitmentRoot",
-    )?;
-    for (verification, description) in [
-        (&coefficient_verification, "coefficient"),
-        (&recipient_verification, "recipient-share"),
-    ] {
-        compare_required_string(
-            hash_at_path(verification, &["publicMatrixSeedHash"])?,
-            hash_at_path(statement, &["publicMatrixSeedHash"])?,
-            &format!("compact VSS share-linkage proof material {description} publicMatrixSeedHash"),
-        )?;
-        compare_required_u64(
-            unsigned_at_path(verification, &["participantCount"])?,
-            participant_count as u64,
-            &format!("compact VSS share-linkage proof material {description} participantCount"),
-        )?;
-        compare_required_u64(
-            unsigned_at_path(verification, &["rnsLimbCount"])?,
-            target_rns_limb_count as u64,
-            &format!("compact VSS share-linkage proof material {description} rnsLimbCount"),
-        )?;
-    }
-    compare_required_u64(
-        unsigned_at_path(&coefficient_verification, &["thresholdDegree"])?,
-        threshold_degree as u64,
-        "compact VSS share-linkage proof material coefficient thresholdDegree",
-    )?;
-    let ring_degree = read_positive_usize_at_path(
-        &coefficient_verification,
-        &["ringDegree"],
-        "compact VSS share-linkage proof material coefficient ringDegree",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(&recipient_verification, &["ringDegree"])?,
-        ring_degree as u64,
-        "compact VSS share-linkage proof material recipient-share ringDegree",
-    )?;
-    let proof_material_set = value_at_path(request, &["proofMaterialSet"])?;
-    compare_required_string(
-        string_at_path(proof_material_set, &["objectType"])?,
-        "CompactVssShareLinkageProofMaterialSet",
-        "compact VSS share-linkage proof material set objectType",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(proof_material_set, &["objectVersion"])?,
-        1,
-        "compact VSS share-linkage proof material set objectVersion",
-    )?;
-    compare_required_string(
-        string_at_path(proof_material_set, &["setupProfileId"])?,
-        COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "compact VSS share-linkage proof material set setupProfileId",
-    )?;
-    compare_required_string(
-        string_at_path(proof_material_set, &["profileId"])?,
-        COMPACT_VSS_COMMITMENT_PROFILE_ID,
-        "compact VSS share-linkage proof material set profileId",
-    )?;
-    compare_required_string(
-        string_at_path(proof_material_set, &["proofFamily"])?,
-        COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "compact VSS share-linkage proof material set proofFamily",
-    )?;
-    let ceremony_id = string_at_path(statement, &["ceremonyId"])?;
-    let setup_epoch = string_at_path(statement, &["setupEpoch"])?;
-    let manifest_hash = hash_at_path(statement, &["manifestHash"])?;
-    let roster_hash = hash_at_path(statement, &["rosterHash"])?;
-    let setup_profile_hash = hash_at_path(statement, &["setupProfileHash"])?;
-    let q_share_hash = hash_at_path(statement, &["qShareHash"])?;
-    let carry_aware_vss_share_relation_profile_hash =
-        hash_at_path(statement, &["carryAwareVssShareRelationProfileHash"])?;
-    let commitment_profile_hash = hash_at_path(statement, &["commitmentProfileHash"])?;
-    let public_matrix_seed_hash = hash_at_path(statement, &["publicMatrixSeedHash"])?;
-    compare_required_string(
-        string_at_path(proof_material_set, &["ceremonyId"])?,
-        ceremony_id,
-        "compact VSS share-linkage proof material set ceremonyId",
-    )?;
-    compare_required_string(
-        hash_at_path(proof_material_set, &["manifestHash"])?,
-        manifest_hash,
-        "compact VSS share-linkage proof material set manifestHash",
-    )?;
-    compare_required_string(
-        hash_at_path(proof_material_set, &["rosterHash"])?,
-        roster_hash,
-        "compact VSS share-linkage proof material set rosterHash",
-    )?;
-    compare_required_string(
-        hash_at_path(proof_material_set, &["setupProfileHash"])?,
-        setup_profile_hash,
-        "compact VSS share-linkage proof material set setupProfileHash",
-    )?;
-    compare_required_string(
-        hash_at_path(proof_material_set, &["qShareHash"])?,
-        q_share_hash,
-        "compact VSS share-linkage proof material set qShareHash",
-    )?;
-    compare_required_string(
-        hash_at_path(
-            proof_material_set,
-            &["carryAwareVssShareRelationProfileHash"],
-        )?,
-        carry_aware_vss_share_relation_profile_hash,
-        "compact VSS share-linkage proof material set carryAwareVssShareRelationProfileHash",
-    )?;
-    compare_required_string(
-        hash_at_path(proof_material_set, &["commitmentProfileHash"])?,
-        commitment_profile_hash,
-        "compact VSS share-linkage proof material set commitmentProfileHash",
-    )?;
-    compare_required_string(
-        string_at_path(proof_material_set, &["setupEpoch"])?,
-        setup_epoch,
-        "compact VSS share-linkage proof material set setupEpoch",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(proof_material_set, &["participantCount"])?,
-        participant_count as u64,
-        "compact VSS share-linkage proof material set participantCount",
-    )?;
-    compare_required_string(
-        hash_at_path(proof_material_set, &["shareLinkageStatementRoot"])?,
-        statement_root,
-        "compact VSS share-linkage proof material set shareLinkageStatementRoot",
-    )?;
-
-    let source_statement_records = array_at_path(statement, &["sourceStatementRecords"])?;
-    let coefficient_source_records =
-        array_at_path(coefficient_commitment_set, &["sourceTrusteeRecords"])?;
-    let recipient_source_records =
-        array_at_path(recipient_share_commitment_set, &["sourceTrusteeRecords"])?;
-    if coefficient_source_records.len() != participant_count
-        || recipient_source_records.len() != participant_count
-        || source_statement_records.len() != participant_count
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage proof material public sets must cover every source statement",
-        ));
-    }
-    let proof_materials = array_at_path(proof_material_set, &["proofMaterials"])?;
-    if proof_materials.len() != participant_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage proof material set must contain one proof per source statement",
-        ));
-    }
-    let mut total_proof_byte_length = 0usize;
-    let mut proof_record_count = 0usize;
-    let mut verified_restricted_proof_count = 0usize;
-    let mut verified_proof_materials = Vec::with_capacity(proof_materials.len());
-    for (source_statement_index, proof_material) in proof_materials.iter().enumerate() {
-        let source_statement = source_statement_records
-            .get(source_statement_index)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage proof material set has no matching source statement",
-                )
-            })?;
-        let coefficient_source_record =
-            coefficient_source_records
-                .get(source_statement_index)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "compact VSS share-linkage proof material coefficient set is missing a source record",
-                    )
-                })?;
-        let recipient_source_record =
-            recipient_source_records
-                .get(source_statement_index)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "compact VSS share-linkage proof material recipient-share set is missing a source record",
-                    )
-                })?;
-        compare_required_string(
-            string_at_path(proof_material, &["objectType"])?,
-            "CompactVssShareLinkageProofMaterial",
-            "compact VSS share-linkage proof material objectType",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(proof_material, &["objectVersion"])?,
-            1,
-            "compact VSS share-linkage proof material objectVersion",
-        )?;
-        compare_required_string(
-            string_at_path(proof_material, &["setupProfileId"])?,
-            COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "compact VSS share-linkage proof material setupProfileId",
-        )?;
-        compare_required_string(
-            string_at_path(proof_material, &["profileId"])?,
-            COMPACT_VSS_COMMITMENT_PROFILE_ID,
-            "compact VSS share-linkage proof material profileId",
-        )?;
-        compare_required_string(
-            string_at_path(proof_material, &["proofFamily"])?,
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            "compact VSS share-linkage proof material proofFamily",
-        )?;
-        compare_required_string(
-            string_at_path(proof_material, &["ceremonyId"])?,
-            ceremony_id,
-            "compact VSS share-linkage proof material ceremonyId",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["manifestHash"])?,
-            manifest_hash,
-            "compact VSS share-linkage proof material manifestHash",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["rosterHash"])?,
-            roster_hash,
-            "compact VSS share-linkage proof material rosterHash",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["setupProfileHash"])?,
-            setup_profile_hash,
-            "compact VSS share-linkage proof material setupProfileHash",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["qShareHash"])?,
-            q_share_hash,
-            "compact VSS share-linkage proof material qShareHash",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["carryAwareVssShareRelationProfileHash"])?,
-            carry_aware_vss_share_relation_profile_hash,
-            "compact VSS share-linkage proof material carryAwareVssShareRelationProfileHash",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["commitmentProfileHash"])?,
-            commitment_profile_hash,
-            "compact VSS share-linkage proof material commitmentProfileHash",
-        )?;
-        compare_required_string(
-            string_at_path(proof_material, &["setupEpoch"])?,
-            setup_epoch,
-            "compact VSS share-linkage proof material setupEpoch",
-        )?;
-        let source_trustee_identity = string_at_path(source_statement, &["sourceTrusteeIdentity"])?;
-        compare_required_string(
-            string_at_path(coefficient_source_record, &["sourceTrusteeIdentity"])?,
-            source_trustee_identity,
-            "compact VSS share-linkage proof material coefficient sourceTrusteeIdentity",
-        )?;
-        compare_required_string(
-            string_at_path(recipient_source_record, &["sourceTrusteeIdentity"])?,
-            source_trustee_identity,
-            "compact VSS share-linkage proof material recipient sourceTrusteeIdentity",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(coefficient_source_record, &["sourceTrusteeRosterPosition"])?,
-            source_statement_index as u64,
-            "compact VSS share-linkage proof material coefficient sourceTrusteeRosterPosition",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(recipient_source_record, &["sourceTrusteeRosterPosition"])?,
-            source_statement_index as u64,
-            "compact VSS share-linkage proof material recipient sourceTrusteeRosterPosition",
-        )?;
-        compare_required_string(
-            hash_at_path(
-                coefficient_source_record,
-                &["sourceCoefficientCommitmentRoot"],
-            )?,
-            hash_at_path(source_statement, &["sourceCoefficientCommitmentRoot"])?,
-            "compact VSS share-linkage proof material sourceCoefficientCommitmentRoot",
-        )?;
-        compare_required_string(
-            hash_at_path(
-                recipient_source_record,
-                &["sourceRecipientShareCommitmentRoot"],
-            )?,
-            hash_at_path(source_statement, &["sourceRecipientShareCommitmentRoot"])?,
-            "compact VSS share-linkage proof material sourceRecipientShareCommitmentRoot",
-        )?;
-        compact_vss_share_linkage_compare_source_opening_roots(
-            source_statement,
-            coefficient_source_record,
-            recipient_source_record,
-        )?;
-        compare_required_string(
-            string_at_path(proof_material, &["sourceTrusteeIdentity"])?,
-            source_trustee_identity,
-            "compact VSS share-linkage proof material sourceTrusteeIdentity",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(proof_material, &["sourceTrusteeRosterPosition"])?,
-            source_statement_index as u64,
-            "compact VSS share-linkage proof material sourceTrusteeRosterPosition",
-        )?;
-        compare_required_string(
-            hash_at_path(proof_material, &["shareLinkageStatementRoot"])?,
-            statement_root,
-            "compact VSS share-linkage proof material shareLinkageStatementRoot",
-        )?;
-        let source_statement_root = hash_at_path(source_statement, &["sourceStatementRoot"])?;
-        compare_required_string(
-            hash_at_path(proof_material, &["sourceStatementRoot"])?,
-            source_statement_root,
-            "compact VSS share-linkage proof material sourceStatementRoot",
-        )?;
-        let proof_records = array_at_path(proof_material, &["proofRecords"])?;
-        if proof_records.is_empty() {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS share-linkage proof material proofRecords must be non-empty",
-            ));
-        }
-        let mut proof_statement_hashes_for_material = BTreeSet::new();
-        let mut restricted_coverage_for_material = BTreeSet::new();
-        let mut pending_proof_verifications = Vec::with_capacity(proof_records.len());
-        let mut verified_proof_records = Vec::with_capacity(proof_records.len());
-        for proof_record in proof_records {
-            compare_required_string(
-                string_at_path(proof_record, &["objectType"])?,
-                "CompactVssShareLinkageProofRecord",
-                "compact VSS share-linkage proof record objectType",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(proof_record, &["objectVersion"])?,
-                1,
-                "compact VSS share-linkage proof record objectVersion",
-            )?;
-            compare_required_string(
-                string_at_path(proof_record, &["proofFamily"])?,
-                COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                "compact VSS share-linkage proof record proofFamily",
-            )?;
-            compare_required_string(
-                hash_at_path(proof_record, &["sourceStatementRoot"])?,
-                source_statement_root,
-                "compact VSS share-linkage proof record sourceStatementRoot",
-            )?;
-            let proof_statement_hash = hash_at_path(proof_record, &["proofStatementHash"])?;
-            if !proof_statement_hashes_for_material.insert(proof_statement_hash.to_string()) {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "compact VSS share-linkage proof material proofRecords must not repeat a proof statement hash",
-                ));
-            }
-            let linkage_items = compact_vss_share_linkage_proof_record_linkage_items(
-                proof_record,
-                participant_count,
-                target_rns_limb_count,
-            )?;
-            if linkage_items.is_empty() {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage proof record linkageItems must be non-empty",
-                ));
-            }
-            for linkage_item in &linkage_items {
-                if !restricted_coverage_for_material.insert((
-                    linkage_item.recipient_roster_position,
-                    linkage_item.source_rns_limb_index,
-                )) {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::ProfileComponentMismatch,
-                        "compact VSS share-linkage proof record linkageItems must not repeat recipient and target-limb coverage for a source statement",
-                    ));
-                }
-            }
-            let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
-            let proof_bytes_base64 = string_at_path(proof_record, &["proofBytesBase64"])?;
-            let proof_bytes = crate::transcript_core::decode_standard_base64(
-                proof_bytes_base64,
-                "compact VSS share-linkage proofBytesBase64",
-            )?;
-            let proof_byte_length = proof_bytes.len();
-            let expected_proof_bytes_hash = hash512_hex(
-                COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-                &[&proof_bytes],
-            );
-            compare_required_string(
-                proof_bytes_hash,
-                &expected_proof_bytes_hash,
-                "compact VSS share-linkage proof record proofBytesHash",
-            )?;
-            total_proof_byte_length = total_proof_byte_length
-                .checked_add(proof_byte_length)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "compact VSS share-linkage proof material byte length overflowed",
-                    )
-                })?;
-            proof_record_count = proof_record_count.checked_add(1).ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage proof record count overflowed",
-                )
-            })?;
-            let proof_record_without_root = json!({
-                "objectType": "CompactVssShareLinkageProofRecord",
-                "objectVersion": 1,
-                "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                "sourceStatementRoot": source_statement_root,
-                "proofStatementHash": proof_statement_hash,
-                "linkageItems": linkage_items
-                    .iter()
-                    .map(|linkage_item| linkage_item.to_value())
-                    .collect::<Vec<_>>(),
-                "proofBytesHash": proof_bytes_hash,
-                "proofBytesBase64": proof_bytes_base64,
-            });
-            let proof_record_root = hash_at_path(proof_record, &["proofRecordRoot"])?;
-            let expected_proof_record_root =
-                derive_protocol_hash("SetupProofRecordBindingHash", &proof_record_without_root)?;
-            if expected_proof_record_root != proof_record_root {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    "compact VSS share-linkage proof record root does not match its bound proof bytes",
-                ));
-            }
-
-            let proof_verification_request = compact_vss_share_linkage_proof_request_from_material(
-                CompactVssShareLinkageProofRequestMaterialInput {
-                    source_statement,
-                    coefficient_source_record,
-                    recipient_source_record,
-                    linkage_items: &linkage_items,
-                    proof_bytes: &proof_bytes,
-                    ring_degree,
-                    ceremony_id,
-                    manifest_hash,
-                    roster_hash,
-                    setup_epoch,
-                    public_matrix_seed_hash,
-                    source_trustee_identity,
-                    source_statement_index,
-                    threshold_degree,
-                    target_rns_limb_count,
-                },
-            )?;
-            pending_proof_verifications.push((
-                proof_verification_request,
-                proof_statement_hash.to_string(),
-                proof_byte_length,
-            ));
-
-            let mut verified_proof_record = proof_record_without_root;
-            verified_proof_record["proofRecordRoot"] = json!(proof_record_root);
-            verified_proof_records.push(verified_proof_record);
-        }
-        let expected_coverage_count = participant_count
-            .checked_mul(target_rns_limb_count)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "restricted compact VSS coverage count overflowed",
-                )
-            })?;
-        if restricted_coverage_for_material.len() != expected_coverage_count {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "compact VSS share-linkage proof record linkageItems must cover every recipient and target limb for each source statement",
-            ));
-        }
-        for (proof_verification_request, proof_statement_hash, proof_byte_length) in
-            pending_proof_verifications
-        {
-            let proof_verification = super::verify_compact_vss_share_linkage_proof_from_request(
-                &proof_verification_request,
-            )?;
-            compare_required_string(
-                string_at_path(&proof_verification, &["proofFamily"])?,
-                COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                "restricted compact VSS proof verification proofFamily",
-            )?;
-            compare_required_string(
-                hash_at_path(&proof_verification, &["statementHash"])?,
-                &proof_statement_hash,
-                "restricted compact VSS proof verification statementHash",
-            )?;
-            compare_required_u64(
-                unsigned_at_path(&proof_verification, &["proofByteLength"])?,
-                proof_byte_length as u64,
-                "restricted compact VSS proof verification proofByteLength",
-            )?;
-            verified_restricted_proof_count += 1;
-        }
-        let proof_material_without_root = json!({
-            "objectType": "CompactVssShareLinkageProofMaterial",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
-            "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
-            "qShareHash": q_share_hash,
-            "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash,
-            "commitmentProfileHash": commitment_profile_hash,
-            "setupEpoch": setup_epoch,
-            "sourceTrusteeIdentity": source_trustee_identity,
-            "sourceTrusteeRosterPosition": source_statement_index,
-            "shareLinkageStatementRoot": statement_root,
-            "sourceStatementRoot": source_statement_root,
-            "proofRecords": verified_proof_records,
-        });
-        let proof_material_root = hash_at_path(proof_material, &["proofMaterialRoot"])?;
-        let expected_proof_material_root =
-            derive_protocol_hash("SetupProofRecordBindingHash", &proof_material_without_root)?;
-        if expected_proof_material_root != proof_material_root {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "compact VSS share-linkage proof material root does not match its bound proof records",
-            ));
-        }
-        let mut verified_proof_material = proof_material_without_root;
-        verified_proof_material["proofMaterialRoot"] = json!(proof_material_root);
-        verified_proof_materials.push(verified_proof_material);
-    }
-
-    let proof_material_set_without_root = json!({
-        "objectType": "CompactVssShareLinkageProofMaterialSet",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
-        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_share_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
-        "setupEpoch": setup_epoch,
-        "participantCount": participant_count,
-        "shareLinkageStatementRoot": statement_root,
-        "proofMaterials": verified_proof_materials,
-    });
-    let proof_material_set_root = hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?;
-    let expected_proof_material_set_root = derive_protocol_hash(
-        "SetupProofRecordBindingHash",
-        &proof_material_set_without_root,
-    )?;
-    if expected_proof_material_set_root != proof_material_set_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "compact VSS share-linkage proof material set root does not match its bound proof materials",
-        ));
-    }
-
-    Ok(json!({
-        "ok": true,
-        "operation": "verifyCompactVssShareLinkageProofMaterialSet",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "shareLinkageStatementRoot": statement_root,
-        "proofMaterialSetRoot": proof_material_set_root,
-        "participantCount": participant_count,
-        "proofMaterialCount": proof_materials.len(),
-        "proofRecordCount": proof_record_count,
-        "totalProofByteLength": total_proof_byte_length,
-        "restrictedProofVerificationCount": verified_restricted_proof_count,
-    }))
-}
-
-pub(crate) fn verify_compact_vss_share_linkage_binary_proof_material_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let statement = value_at_path(request, &["statement"])?;
-    let transported_material =
-        value_at_path(request, &["transportedCompactVssShareLinkageProofMaterial"])?;
-    let coefficient_commitment_set = value_at_path(request, &["coefficientCommitmentSet"])?;
-    let recipient_share_commitment_set = value_at_path(request, &["recipientShareCommitmentSet"])?;
-    let proof_material_set = compact_vss_share_linkage_proof_material_set_from_binary_transport(
-        transported_material,
-        statement,
-    )?;
-
-    let verification = verify_compact_vss_share_linkage_proof_material_set_request(&json!({
-        "statement": statement.clone(),
-        "proofMaterialSet": proof_material_set,
-        "coefficientCommitmentSet": coefficient_commitment_set.clone(),
-        "recipientShareCommitmentSet": recipient_share_commitment_set.clone(),
-    }))?;
-
-    Ok(json!({
-        "ok": true,
-        "operation": "verifyCompactVssShareLinkageBinaryProofMaterial",
-        "setupProfileId": verification["setupProfileId"].clone(),
-        "proofFamily": verification["proofFamily"].clone(),
-        "shareLinkageStatementRoot": verification["shareLinkageStatementRoot"].clone(),
-        "proofMaterialSetRoot": verification["proofMaterialSetRoot"].clone(),
-        "participantCount": verification["participantCount"].clone(),
-        "proofMaterialCount": verification["proofMaterialCount"].clone(),
-        "proofRecordCount": verification["proofRecordCount"].clone(),
-        "totalProofByteLength": verification["totalProofByteLength"].clone(),
-        "restrictedProofVerificationCount": verification["restrictedProofVerificationCount"].clone(),
-        "binaryFormat": COMPACT_VSS_SHARE_LINKAGE_BINARY_FORMAT,
-        "binaryTotalByteLength": unsigned_at_path(transported_material, &["totalByteLength"])?,
-        "binaryChunkCount": unsigned_at_path(transported_material, &["chunkCount"])?,
-        "binaryFullObjectHash": hash_at_path(transported_material, &["fullObjectHash"])?,
-        "binaryChunkRoot": hash_at_path(transported_material, &["chunkRoot"])?,
-    }))
-}
-
-fn compact_vss_share_linkage_proof_material_set_from_binary_transport(
-    transported_material: &Value,
-    statement: &Value,
-) -> CanonicalResult<Value> {
-    compact_vss_verify_share_linkage_binary_transport_header(transported_material)?;
-    let chunks = compact_vss_share_linkage_binary_transport_chunks(transported_material)?;
-    compact_vss_verify_share_linkage_binary_transport_hashes(transported_material, &chunks)?;
-    let bytes = compact_vss_concatenate_binary_transport_chunks(&chunks)?;
-    let mut reader = crate::encoding::CanonicalReader::new(&bytes);
-    let magic = reader.read_exact(COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_BINARY_MAGIC.len())?;
-    if magic != COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_BINARY_MAGIC {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedMagic,
-            "compact VSS share-linkage proof material binary magic is invalid",
-        ));
-    }
-    if reader.read_varuint()? != 1 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::UnsupportedObjectVersion,
-            "compact VSS share-linkage proof material binary version is not supported",
-        ));
-    }
-    let share_linkage_statement_root =
-        compact_vss_read_binary_hash(&mut reader, "shareLinkageStatementRoot")?;
-    let proof_material_set_root =
-        compact_vss_read_binary_hash(&mut reader, "proofMaterialSetRoot")?;
-    compare_required_string(
-        &share_linkage_statement_root,
-        hash_at_path(statement, &["statementRoot"])?,
-        "compact VSS share-linkage binary proof material shareLinkageStatementRoot",
-    )?;
-    compare_required_string(
-        &proof_material_set_root,
-        hash_at_path(transported_material, &["proofMaterialSetRoot"])?,
-        "compact VSS share-linkage binary proof material proofMaterialSetRoot",
-    )?;
-    compare_required_string(
-        &share_linkage_statement_root,
-        hash_at_path(transported_material, &["shareLinkageStatementRoot"])?,
-        "compact VSS share-linkage binary proof material transport shareLinkageStatementRoot",
-    )?;
-
-    let proof_material_count = compact_vss_read_binary_usize(&mut reader, "proofMaterialCount")?;
-    let participant_count = compact_vss_usize_from_value(
-        unsigned_at_path(statement, &["participantCount"])?,
-        "compact VSS share-linkage statement participantCount",
-    )?;
-    if proof_material_count != participant_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage binary proof material count must match participantCount",
-        ));
-    }
-    let source_statement_records = array_at_path(statement, &["sourceStatementRecords"])?;
-    if source_statement_records.len() != participant_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage statement must contain one source statement per participant",
-        ));
-    }
-
-    let mut proof_materials = Vec::with_capacity(proof_material_count);
-    for source_statement_index in 0..proof_material_count {
-        let source_statement = source_statement_records
-            .get(source_statement_index)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage binary proof material has no matching source statement",
-                )
-            })?;
-        let source_trustee_roster_position =
-            compact_vss_read_binary_usize(&mut reader, "sourceTrusteeRosterPosition")?;
-        let source_statement_root =
-            compact_vss_read_binary_hash(&mut reader, "sourceStatementRoot")?;
-        let proof_record_count = compact_vss_read_binary_usize(&mut reader, "proofRecordCount")?;
-        let mut proof_records = Vec::with_capacity(proof_record_count);
-        for _proof_record_index in 0..proof_record_count {
-            let proof_statement_hash =
-                compact_vss_read_binary_hash(&mut reader, "proofStatementHash")?;
-            let linkage_item_count =
-                compact_vss_read_binary_usize(&mut reader, "linkageItemCount")?;
-            let mut linkage_items = Vec::with_capacity(linkage_item_count);
-            for _linkage_item_index in 0..linkage_item_count {
-                let recipient_roster_position =
-                    compact_vss_read_binary_usize(&mut reader, "recipientRosterPosition")?;
-                let source_rns_limb_index =
-                    compact_vss_read_binary_usize(&mut reader, "sourceRnsLimbIndex")?;
-                linkage_items.push(json!({
-                    "recipientRosterPosition": recipient_roster_position,
-                    "sourceRnsLimbIndex": source_rns_limb_index,
-                }));
-            }
-            let proof_byte_length = compact_vss_read_binary_usize(&mut reader, "proofByteLength")?;
-            let proof_bytes = reader.read_exact(proof_byte_length)?.to_vec();
-            let proof_bytes_base64 = crate::transcript_core::encode_standard_base64(&proof_bytes);
-            let proof_bytes_hash = hash512_hex(
-                COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-                &[&proof_bytes],
-            );
-            let proof_record_without_root = json!({
-                "objectType": "CompactVssShareLinkageProofRecord",
-                "objectVersion": 1,
-                "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-                "sourceStatementRoot": source_statement_root,
-                "proofStatementHash": proof_statement_hash,
-                "linkageItems": linkage_items,
-                "proofBytesHash": proof_bytes_hash,
-                "proofBytesBase64": proof_bytes_base64,
-            });
-            let mut proof_record = proof_record_without_root;
-            proof_record["proofRecordRoot"] = json!(derive_protocol_hash(
-                "SetupProofRecordBindingHash",
-                &proof_record,
-            )?);
-            proof_records.push(proof_record);
-        }
-
-        let proof_material_without_root = json!({
-            "objectType": "CompactVssShareLinkageProofMaterial",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
-            "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            "ceremonyId": string_at_path(statement, &["ceremonyId"])?,
-            "manifestHash": hash_at_path(statement, &["manifestHash"])?,
-            "rosterHash": hash_at_path(statement, &["rosterHash"])?,
-            "setupProfileHash": hash_at_path(statement, &["setupProfileHash"])?,
-            "qShareHash": hash_at_path(statement, &["qShareHash"])?,
-            "carryAwareVssShareRelationProfileHash": hash_at_path(
-                statement,
-                &["carryAwareVssShareRelationProfileHash"],
-            )?,
-            "commitmentProfileHash": hash_at_path(statement, &["commitmentProfileHash"])?,
-            "setupEpoch": string_at_path(statement, &["setupEpoch"])?,
-            "sourceTrusteeIdentity": string_at_path(source_statement, &["sourceTrusteeIdentity"])?,
-            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-            "shareLinkageStatementRoot": share_linkage_statement_root,
-            "sourceStatementRoot": source_statement_root,
-            "proofRecords": proof_records,
-        });
-        let mut proof_material = proof_material_without_root;
-        proof_material["proofMaterialRoot"] = json!(derive_protocol_hash(
-            "SetupProofRecordBindingHash",
-            &proof_material,
-        )?);
-        proof_materials.push(proof_material);
-    }
-    if !reader.is_finished() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::TrailingBytes,
-            "compact VSS share-linkage proof material binary has trailing bytes",
-        ));
-    }
-
-    let proof_material_set_without_root = json!({
-        "objectType": "CompactVssShareLinkageProofMaterialSet",
-        "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
-        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        "ceremonyId": string_at_path(statement, &["ceremonyId"])?,
-        "manifestHash": hash_at_path(statement, &["manifestHash"])?,
-        "rosterHash": hash_at_path(statement, &["rosterHash"])?,
-        "setupProfileHash": hash_at_path(statement, &["setupProfileHash"])?,
-        "qShareHash": hash_at_path(statement, &["qShareHash"])?,
-        "carryAwareVssShareRelationProfileHash": hash_at_path(
-            statement,
-            &["carryAwareVssShareRelationProfileHash"],
-        )?,
-        "commitmentProfileHash": hash_at_path(statement, &["commitmentProfileHash"])?,
-        "setupEpoch": string_at_path(statement, &["setupEpoch"])?,
-        "participantCount": participant_count,
-        "shareLinkageStatementRoot": share_linkage_statement_root,
-        "proofMaterials": proof_materials,
-    });
-    let mut proof_material_set = proof_material_set_without_root;
-    proof_material_set["proofMaterialSetRoot"] = json!(proof_material_set_root);
-
-    Ok(proof_material_set)
-}
-
-fn compact_vss_verify_share_linkage_binary_transport_header(
-    transported_material: &Value,
-) -> CanonicalResult<()> {
-    for (field_name, expected_value) in [
-        (
-            "objectType",
-            COMPACT_VSS_SHARE_LINKAGE_BINARY_TRANSPORT_OBJECT_TYPE,
-        ),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("profileId", COMPACT_VSS_COMMITMENT_PROFILE_ID),
-        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
-        ("binaryFormat", COMPACT_VSS_SHARE_LINKAGE_BINARY_FORMAT),
-    ] {
-        compare_required_string(
-            string_at_path(transported_material, &[field_name])?,
-            expected_value,
-            &format!("compact VSS share-linkage binary transport {field_name}"),
-        )?;
-    }
-    compare_required_u64(
-        unsigned_at_path(transported_material, &["objectVersion"])?,
-        1,
-        "compact VSS share-linkage binary transport objectVersion",
-    )?;
-    validate_hash_string(
-        hash_at_path(transported_material, &["proofMaterialSetRoot"])?,
-        "compact VSS share-linkage binary transport proofMaterialSetRoot",
-    )?;
-    validate_hash_string(
-        hash_at_path(transported_material, &["shareLinkageStatementRoot"])?,
-        "compact VSS share-linkage binary transport shareLinkageStatementRoot",
-    )?;
-    validate_hash_string(
-        hash_at_path(transported_material, &["fullObjectHash"])?,
-        "compact VSS share-linkage binary transport fullObjectHash",
-    )?;
-    validate_hash_string(
-        hash_at_path(transported_material, &["chunkRoot"])?,
-        "compact VSS share-linkage binary transport chunkRoot",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(transported_material, &["chunkSizeBytes"])?,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        "compact VSS share-linkage binary transport chunkSizeBytes",
-    )?;
-
-    Ok(())
-}
-
-fn compact_vss_share_linkage_binary_transport_chunks(
-    transported_material: &Value,
-) -> CanonicalResult<Vec<Vec<u8>>> {
-    let chunk_values = array_at_path(transported_material, &["chunks"])?;
-    if chunk_values.is_empty() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage binary transport chunks must be non-empty",
-        ));
-    }
-
-    chunk_values
-        .iter()
-        .enumerate()
-        .map(|(chunk_index, chunk_value)| {
-            let bytes_hex = string_at_path(chunk_value, &["bytesHex"])?;
-            crate::transcript_core::decode_hex(bytes_hex).map_err(|error| {
-                CanonicalError::new(
-                    error.code,
-                    format!(
-                        "compact VSS share-linkage binary transport chunks[{chunk_index}].bytesHex: {}",
-                        error.message
-                    ),
-                )
-            })
-        })
-        .collect()
-}
-
-fn compact_vss_verify_share_linkage_binary_transport_hashes(
-    transported_material: &Value,
-    chunks: &[Vec<u8>],
-) -> CanonicalResult<()> {
-    let chunk_count = unsigned_at_path(transported_material, &["chunkCount"])?;
-    compare_required_u64(
-        u64::try_from(chunks.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS share-linkage binary chunk count does not fit u64",
-            )
-        })?,
-        chunk_count,
-        "compact VSS share-linkage binary transport chunkCount",
-    )?;
-    let total_byte_length = chunks.iter().enumerate().try_fold(
-        0_u64,
-        |byte_count, (chunk_index, chunk)| {
-            if chunk.is_empty() {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage binary transport chunks must be non-empty",
-                ));
-            }
-            if chunk.len() as u64 > SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage binary transport chunk exceeds chunkSizeBytes",
-                ));
-            }
-            if chunk_index + 1 < chunks.len()
-                && chunk.len() as u64 != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
-            {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage binary transport contains a short non-final chunk",
-                ));
-            }
-            byte_count
-                .checked_add(u64::try_from(chunk.len()).map_err(|_| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "compact VSS share-linkage binary chunk length does not fit u64",
-                    )
-                })?)
-                .ok_or_else(|| {
-                    CanonicalError::new(
-                        CanonicalErrorCode::MalformedLength,
-                        "compact VSS share-linkage binary byte length overflowed",
-                    )
-                })
-        },
-    )?;
-    compare_required_u64(
-        total_byte_length,
-        unsigned_at_path(transported_material, &["totalByteLength"])?,
-        "compact VSS share-linkage binary transport totalByteLength",
-    )?;
-
-    let expected_full_object_hash = setup_proof_material_full_object_hash(
-        COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        total_byte_length,
-        chunks,
-    )?;
-    compare_required_string(
-        hash_at_path(transported_material, &["fullObjectHash"])?,
-        &expected_full_object_hash,
-        "compact VSS share-linkage binary transport fullObjectHash",
-    )?;
-    let mut expected_chunk_hashes = Vec::with_capacity(chunks.len());
-    for (chunk_index, chunk) in chunks.iter().enumerate() {
-        expected_chunk_hashes.push(setup_proof_material_chunk_hash(
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            &expected_full_object_hash,
-            chunk_index,
-            chunk,
-        )?);
-    }
-    let chunk_hash_values = array_at_path(transported_material, &["chunkHashes"])?;
-    if chunk_hash_values.len() != expected_chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage binary transport chunkHashes length must match chunks length",
-        ));
-    }
-    for (chunk_index, expected_chunk_hash) in expected_chunk_hashes.iter().enumerate() {
-        let observed_chunk_hash = chunk_hash_values
-            .get(chunk_index)
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "compact VSS share-linkage binary transport chunkHashes entries must be strings",
-                )
-            })?;
-        validate_hash_string(
-            observed_chunk_hash,
-            &format!("compact VSS share-linkage binary transport chunkHashes[{chunk_index}]"),
-        )?;
-        compare_required_string(
-            observed_chunk_hash,
-            expected_chunk_hash,
-            &format!("compact VSS share-linkage binary transport chunkHashes[{chunk_index}]"),
-        )?;
-    }
-    let expected_chunk_root = setup_proof_material_chunk_manifest_root(
-        COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        chunk_count,
-        total_byte_length,
-        &expected_chunk_hashes,
-        &expected_full_object_hash,
-    )?;
-    compare_required_string(
-        hash_at_path(transported_material, &["chunkRoot"])?,
-        &expected_chunk_root,
-        "compact VSS share-linkage binary transport chunkRoot",
-    )?;
-
-    Ok(())
-}
-
-fn compact_vss_concatenate_binary_transport_chunks(chunks: &[Vec<u8>]) -> CanonicalResult<Vec<u8>> {
-    let total_byte_length = chunks.iter().try_fold(0_usize, |byte_count, chunk| {
-        byte_count.checked_add(chunk.len()).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS share-linkage binary byte length overflowed",
-            )
-        })
-    })?;
-    let mut bytes = Vec::with_capacity(total_byte_length);
-    for chunk in chunks {
-        bytes.extend_from_slice(chunk);
-    }
-
-    Ok(bytes)
-}
-
-fn compact_vss_read_binary_hash(
-    reader: &mut crate::encoding::CanonicalReader<'_>,
-    _field_name: &str,
-) -> CanonicalResult<String> {
-    Ok(crate::transcript_core::encode_hex(reader.read_exact(64)?))
-}
-
-fn compact_vss_read_binary_usize(
-    reader: &mut crate::encoding::CanonicalReader<'_>,
-    field_name: &str,
-) -> CanonicalResult<usize> {
-    compact_vss_usize_from_value(reader.read_varuint()?, field_name)
-}
-
-fn compact_vss_usize_from_value(value: u64, field_name: &str) -> CanonicalResult<usize> {
-    usize::try_from(value).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            format!("{field_name} does not fit usize"),
-        )
-    })
-}
-
-#[derive(Clone, Copy)]
-struct CompactVssShareLinkageProofRecordLinkageItem {
-    recipient_roster_position: usize,
-    source_rns_limb_index: usize,
-}
-
-impl CompactVssShareLinkageProofRecordLinkageItem {
-    fn to_value(self) -> Value {
-        json!({
-            "recipientRosterPosition": self.recipient_roster_position,
-            "sourceRnsLimbIndex": self.source_rns_limb_index,
-        })
-    }
-}
-
-struct CompactVssShareLinkageProofRequestMaterialInput<'a> {
-    source_statement: &'a Value,
-    coefficient_source_record: &'a Value,
-    recipient_source_record: &'a Value,
-    linkage_items: &'a [CompactVssShareLinkageProofRecordLinkageItem],
-    proof_bytes: &'a [u8],
-    ring_degree: usize,
-    ceremony_id: &'a str,
-    manifest_hash: &'a str,
-    roster_hash: &'a str,
-    setup_epoch: &'a str,
-    public_matrix_seed_hash: &'a str,
-    source_trustee_identity: &'a str,
-    source_statement_index: usize,
-    threshold_degree: usize,
-    target_rns_limb_count: usize,
-}
-
-struct CompactVssShareLinkageItemMaterialInput<'a> {
-    coefficient_source_record: &'a Value,
-    recipient_source_record: &'a Value,
-    recipient_roster_position: usize,
-    source_rns_limb_index: usize,
-    threshold_degree: usize,
-    target_rns_limb_count: usize,
-}
-
-fn compact_vss_share_linkage_compare_source_opening_roots(
-    source_statement: &Value,
-    coefficient_source_record: &Value,
-    recipient_source_record: &Value,
-) -> CanonicalResult<()> {
-    let coefficient_records =
-        array_at_path(coefficient_source_record, &["coefficientCommitments"])?;
-    let coefficient_opening_roots = array_at_path(source_statement, &["coefficientOpeningRoots"])?;
-    if coefficient_records.len() != coefficient_opening_roots.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage proof material coefficient openings must cover the source statement",
-        ));
-    }
-    for (opening_root_index, coefficient_record) in coefficient_records.iter().enumerate() {
-        let expected_opening_root = hash_at_path(coefficient_record, &["coefficientOpeningRoot"])?;
-        let source_opening_root = coefficient_opening_roots
-            .get(opening_root_index)
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "compact VSS share-linkage proof material coefficient opening root must be a string",
-                )
-            })?;
-        compare_required_string(
-            source_opening_root,
-            expected_opening_root,
-            "compact VSS share-linkage proof material coefficientOpeningRoots",
-        )?;
-    }
-
-    let recipient_share_records =
-        array_at_path(recipient_source_record, &["recipientShareCommitments"])?;
-    let recipient_share_opening_roots =
-        array_at_path(source_statement, &["recipientShareOpeningRoots"])?;
-    if recipient_share_records.len() != recipient_share_opening_roots.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage proof material recipient-share openings must cover the source statement",
-        ));
-    }
-    for (opening_root_index, recipient_share_record) in recipient_share_records.iter().enumerate() {
-        let expected_opening_root = hash_at_path(recipient_share_record, &["shareOpeningRoot"])?;
-        let source_opening_root = recipient_share_opening_roots
-            .get(opening_root_index)
-            .and_then(Value::as_str)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "compact VSS share-linkage proof material recipient-share opening root must be a string",
-                )
-            })?;
-        compare_required_string(
-            source_opening_root,
-            expected_opening_root,
-            "compact VSS share-linkage proof material recipientShareOpeningRoots",
-        )?;
-    }
-
-    Ok(())
-}
-
-fn compact_vss_share_linkage_proof_record_linkage_items(
-    proof_record: &Value,
-    participant_count: usize,
-    target_rns_limb_count: usize,
-) -> CanonicalResult<Vec<CompactVssShareLinkageProofRecordLinkageItem>> {
-    array_at_path(proof_record, &["linkageItems"])?
-        .iter()
-        .enumerate()
-        .map(|(linkage_item_index, linkage_item)| {
-            let recipient_roster_position =
-                usize::try_from(unsigned_at_path(linkage_item, &["recipientRosterPosition"])?)
-                    .map_err(|_| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "compact VSS share-linkage proof record linkageItems recipientRosterPosition does not fit usize",
-                        )
-                    })?;
-            if recipient_roster_position >= participant_count {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    format!(
-                        "compact VSS share-linkage proof record linkageItems.{linkage_item_index} recipientRosterPosition is outside the statement"
-                    ),
-                ));
-            }
-            let source_rns_limb_index =
-                usize::try_from(unsigned_at_path(linkage_item, &["sourceRnsLimbIndex"])?)
-                    .map_err(|_| {
-                        CanonicalError::new(
-                            CanonicalErrorCode::MalformedLength,
-                            "compact VSS share-linkage proof record linkageItems sourceRnsLimbIndex does not fit usize",
-                        )
-                    })?;
-            if source_rns_limb_index >= target_rns_limb_count {
-                return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
-                    format!(
-                        "compact VSS share-linkage proof record linkageItems.{linkage_item_index} sourceRnsLimbIndex is outside the statement"
-                    ),
-                ));
-            }
-
-            Ok(CompactVssShareLinkageProofRecordLinkageItem {
-                recipient_roster_position,
-                source_rns_limb_index,
-            })
-        })
-        .collect()
-}
-
-fn compact_vss_share_linkage_item_from_material(
-    input: CompactVssShareLinkageItemMaterialInput<'_>,
-) -> CanonicalResult<Value> {
-    let coefficient_records =
-        array_at_path(input.coefficient_source_record, &["coefficientCommitments"])?;
-    let coefficient_record_offset = input
-        .source_rns_limb_index
-        .checked_mul(input.threshold_degree)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS share-linkage coefficient record offset overflowed",
-            )
-        })?;
-    let mut source_message_modulus = None;
-    let mut coefficient_commitment_roots = Vec::with_capacity(input.threshold_degree);
-    let mut coefficient_opening_roots = Vec::with_capacity(input.threshold_degree);
-    let mut coefficient_commitments = Vec::with_capacity(input.threshold_degree);
-    for coefficient_index in 0..input.threshold_degree {
-        let coefficient_record = coefficient_records
-            .get(coefficient_record_offset + coefficient_index)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "compact VSS share-linkage coefficient record is missing",
-                )
-            })?;
-        compare_required_u64(
-            unsigned_at_path(coefficient_record, &["rnsLimbIndex"])?,
-            input.source_rns_limb_index as u64,
-            "compact VSS share-linkage coefficient rnsLimbIndex",
-        )?;
-        compare_required_u64(
-            unsigned_at_path(coefficient_record, &["shamirCoefficientIndex"])?,
-            coefficient_index as u64,
-            "compact VSS share-linkage coefficient shamirCoefficientIndex",
-        )?;
-        let rns_prime = unsigned_at_path(coefficient_record, &["rnsPrime"])?;
-        if let Some(expected_modulus) = source_message_modulus {
-            compare_required_u64(
-                rns_prime,
-                expected_modulus,
-                "compact VSS share-linkage coefficient rnsPrime",
-            )?;
-        } else {
-            source_message_modulus = Some(rns_prime);
-        }
-        coefficient_commitment_roots.push(Value::String(
-            hash_at_path(coefficient_record, &["coefficientCommitmentRoot"])?.to_string(),
-        ));
-        coefficient_opening_roots.push(Value::String(
-            hash_at_path(coefficient_record, &["coefficientOpeningRoot"])?.to_string(),
-        ));
-        coefficient_commitments.push(value_at_path(coefficient_record, &["commitment"])?.clone());
-    }
-    let source_message_modulus = source_message_modulus.ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage source message modulus is missing",
-        )
-    })?;
-
-    let recipient_share_record_index = input
-        .recipient_roster_position
-        .checked_mul(input.target_rns_limb_count)
-        .and_then(|offset| offset.checked_add(input.source_rns_limb_index))
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS share-linkage recipient-share record index overflowed",
-            )
-        })?;
-    let recipient_share_records = array_at_path(
-        input.recipient_source_record,
-        &["recipientShareCommitments"],
-    )?;
-    let recipient_share_record = recipient_share_records
-        .get(recipient_share_record_index)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS share-linkage recipient-share record is missing",
-            )
-        })?;
-    compare_required_u64(
-        unsigned_at_path(recipient_share_record, &["recipientRosterPosition"])?,
-        input.recipient_roster_position as u64,
-        "compact VSS share-linkage recipient-share recipientRosterPosition",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(recipient_share_record, &["rnsLimbIndex"])?,
-        input.source_rns_limb_index as u64,
-        "compact VSS share-linkage recipient-share rnsLimbIndex",
-    )?;
-    compare_required_u64(
-        unsigned_at_path(recipient_share_record, &["rnsPrime"])?,
-        source_message_modulus,
-        "compact VSS share-linkage recipient-share rnsPrime",
-    )?;
-
-    Ok(json!({
-        "recipientIdentity": string_at_path(recipient_share_record, &["recipientIdentity"])?,
-        "recipientRosterPosition": input.recipient_roster_position,
-        "sourceRnsLimbIndex": input.source_rns_limb_index,
-        "sourceMessageModulus": source_message_modulus,
-        "coefficientCommitmentRoots": coefficient_commitment_roots,
-        "coefficientOpeningRoots": coefficient_opening_roots,
-        "coefficientCommitments": coefficient_commitments,
-        "recipientShareCommitmentRoot": hash_at_path(recipient_share_record, &["shareCommitmentRoot"])?,
-        "recipientShareOpeningRoot": hash_at_path(recipient_share_record, &["shareOpeningRoot"])?,
-        "recipientShareCommitment": value_at_path(recipient_share_record, &["commitment"])?.clone(),
-    }))
-}
-
-fn compact_vss_share_linkage_proof_request_from_material(
-    input: CompactVssShareLinkageProofRequestMaterialInput<'_>,
-) -> CanonicalResult<Value> {
-    if input.linkage_items.is_empty() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS share-linkage proof record linkageItems must be non-empty",
-        ));
-    }
-    let mut linkage_item_values = input
-        .linkage_items
-        .iter()
-        .map(|linkage_item| {
-            compact_vss_share_linkage_item_from_material(CompactVssShareLinkageItemMaterialInput {
-                coefficient_source_record: input.coefficient_source_record,
-                recipient_source_record: input.recipient_source_record,
-                recipient_roster_position: linkage_item.recipient_roster_position,
-                source_rns_limb_index: linkage_item.source_rns_limb_index,
-                threshold_degree: input.threshold_degree,
-                target_rns_limb_count: input.target_rns_limb_count,
-            })
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let primary_item = linkage_item_values.remove(0);
-    let mut compact_statement = primary_item.as_object().cloned().ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "compact VSS share-linkage reconstructed item must be an object",
-        )
-    })?;
-    compact_statement.insert(
-        "publicMatrixSeedHash".to_string(),
-        Value::String(input.public_matrix_seed_hash.to_string()),
-    );
-    compact_statement.insert(
-        "sourceTrusteeIdentity".to_string(),
-        Value::String(input.source_trustee_identity.to_string()),
-    );
-    compact_statement.insert(
-        "sourceTrusteeRosterPosition".to_string(),
-        json!(input.source_statement_index),
-    );
-    compact_statement.insert(
-        "sourceCoefficientCommitmentRoot".to_string(),
-        Value::String(
-            hash_at_path(input.source_statement, &["sourceCoefficientCommitmentRoot"])?.to_string(),
-        ),
-    );
-    compact_statement.insert(
-        "sourceRecipientShareCommitmentRoot".to_string(),
-        Value::String(
-            hash_at_path(
-                input.source_statement,
-                &["sourceRecipientShareCommitmentRoot"],
-            )?
-            .to_string(),
-        ),
-    );
-    if !linkage_item_values.is_empty() {
-        compact_statement.insert(
-            "additionalLinkageItems".to_string(),
-            Value::Array(linkage_item_values),
-        );
-    }
-
-    let context = json!({
-        "ceremonyId": input.ceremony_id,
-        "manifestHash": input.manifest_hash,
-        "rosterHash": input.roster_hash,
-        "trusteeIdentity": input.source_trustee_identity,
-        "trusteeRosterPosition": input.source_statement_index,
-        "setupEpoch": input.setup_epoch,
-        "sourceCoefficientCommitmentRoot": hash_at_path(input.source_statement, &["sourceCoefficientCommitmentRoot"])?,
-        "sourceRecipientShareCommitmentRoot": hash_at_path(input.source_statement, &["sourceRecipientShareCommitmentRoot"])?,
-    });
-
-    Ok(json!({
-        "context": context,
-        "ringDegree": input.ring_degree,
-        "compactVssShareLinkage": Value::Object(compact_statement),
-        "proofBytesHex": crate::transcript_core::encode_hex(input.proof_bytes),
-    }))
-}
-
-#[derive(Clone, Copy)]
 struct CompactVssShareLinkageStatementBinding<'a> {
     ceremony_id: &'a str,
     manifest_hash: &'a str,
@@ -2308,30 +896,31 @@ struct CompactVssShareLinkageEvidenceInput<'a> {
     verified_source_statement_records: &'a [Value],
 }
 
-fn verify_optional_compact_vss_share_linkage_evidence(
+fn verify_compact_vss_share_linkage_evidence(
     input: CompactVssShareLinkageEvidenceInput<'_>,
 ) -> CanonicalResult<()> {
-    match (
+    let (
+        Some(coefficient_commitment_set),
+        Some(recipient_share_commitment_set),
+        Some(aggregate_threshold_commitment_set),
+    ) = (
         input.request.get("coefficientCommitmentSet"),
         input.request.get("recipientShareCommitmentSet"),
         input.request.get("aggregateThresholdCommitmentSet"),
-    ) {
-        (None, None, None) => Ok(()),
-        (
-            Some(coefficient_commitment_set),
-            Some(recipient_share_commitment_set),
-            Some(aggregate_threshold_commitment_set),
-        ) => verify_compact_vss_share_linkage_evidence_sets(
-            input,
-            coefficient_commitment_set,
-            recipient_share_commitment_set,
-            aggregate_threshold_commitment_set,
-        ),
-        _ => Err(CanonicalError::new(
+    )
+    else {
+        return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
             "compact VSS share linkage evidence verification requires coefficient, recipient-share, and aggregate-threshold commitment sets",
-        )),
-    }
+        ));
+    };
+
+    verify_compact_vss_share_linkage_evidence_sets(
+        input,
+        coefficient_commitment_set,
+        recipient_share_commitment_set,
+        aggregate_threshold_commitment_set,
+    )
 }
 
 fn verify_compact_vss_share_linkage_evidence_sets(
@@ -2371,7 +960,6 @@ fn verify_compact_vss_share_linkage_evidence_sets(
         "compact VSS share linkage evidence aggregateThresholdCommitmentRoot",
     )?;
     for (verification, description) in [
-        (&coefficient_verification, "coefficient"),
         (&recipient_verification, "recipient-share"),
         (&aggregate_verification, "aggregate-threshold"),
     ] {
@@ -2390,6 +978,23 @@ fn verify_compact_vss_share_linkage_evidence_sets(
             input.statement.target_rns_limb_count as u64,
             &format!("compact VSS share linkage evidence {description} rnsLimbCount"),
         )?;
+    }
+    compare_required_string(
+        hash_at_path(&coefficient_verification, &["publicMatrixSeedHash"])?,
+        input.statement.public_matrix_seed_hash,
+        "compact VSS share linkage evidence coefficient publicMatrixSeedHash",
+    )?;
+    compare_required_u64(
+        unsigned_at_path(&coefficient_verification, &["participantCount"])?,
+        input.statement.participant_count as u64,
+        "compact VSS share linkage evidence coefficient participantCount",
+    )?;
+    let coefficient_rns_limb_count = usize_at_path(&coefficient_verification, &["rnsLimbCount"])?;
+    if coefficient_rns_limb_count < input.statement.target_rns_limb_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact VSS share linkage coefficient evidence must cover the target basis",
+        ));
     }
     compare_required_u64(
         unsigned_at_path(&coefficient_verification, &["thresholdDegree"])?,
@@ -2461,13 +1066,27 @@ fn verify_compact_vss_share_linkage_evidence_sets(
             array_at_path(coefficient_source_record, &["coefficientCommitments"])?;
         let source_statement_coefficient_opening_roots =
             array_at_path(source_statement, &["coefficientOpeningRoots"])?;
-        if coefficient_records.len() != source_statement_coefficient_opening_roots.len() {
+        let target_coefficient_record_count = input
+            .statement
+            .target_rns_limb_count
+            .checked_mul(input.statement.threshold_degree)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact VSS share linkage target coefficient count overflowed",
+                )
+            })?;
+        if source_statement_coefficient_opening_roots.len() != target_coefficient_record_count {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
                 "compact VSS share linkage evidence coefficient opening roots must cover the source statement",
             ));
         }
-        for (opening_root_index, coefficient_record) in coefficient_records.iter().enumerate() {
+        for (opening_root_index, coefficient_record) in coefficient_records
+            .iter()
+            .take(target_coefficient_record_count)
+            .enumerate()
+        {
             let expected_opening_root =
                 hash_at_path(coefficient_record, &["coefficientOpeningRoot"])?;
             let source_statement_opening_root = source_statement_coefficient_opening_roots
@@ -3965,6 +2584,7 @@ struct CompactCommitmentCoordinateInput<'a> {
     output_coordinate_index: usize,
     modulus: u64,
     message_coefficients: &'a [u64],
+    message_digits_by_coefficient: &'a [[u64; COMPACT_VSS_MESSAGE_DIGIT_COUNT]],
     randomness_by_column: &'a [Vec<i64>],
 }
 
@@ -3973,23 +2593,21 @@ fn compact_commitment_coordinate(
 ) -> CanonicalResult<u64> {
     let mut accumulator = 0_u128;
     for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-        let input_column = compact_vss_message_digit_column_label(digit_index)?;
-        for (ring_coefficient_index, matrix_residue) in
-            compact_projection_terms(CompactProjectionTermsInput {
-                public_matrix_seed_hash: input.public_matrix_seed_hash,
-                rns_limb_index: input.rns_limb_index,
-                commitment_modulus_index: input.commitment_modulus_index,
-                output_coordinate_index: input.output_coordinate_index,
-                input_column: &input_column,
-                ring_degree: input.message_coefficients.len(),
-                modulus: input.modulus,
-            })?
-        {
-            let digits =
-                compact_vss_message_digits(input.message_coefficients[ring_coefficient_index])?;
+        let input_column = compact_vss_message_digit_column_label_str(digit_index)?;
+        let projection_terms = cached_compact_projection_terms(CompactProjectionTermsInput {
+            public_matrix_seed_hash: input.public_matrix_seed_hash,
+            rns_limb_index: input.rns_limb_index,
+            commitment_modulus_index: input.commitment_modulus_index,
+            output_coordinate_index: input.output_coordinate_index,
+            input_column,
+            ring_degree: input.message_coefficients.len(),
+            modulus: input.modulus,
+        })?;
+        for &(ring_coefficient_index, matrix_residue) in projection_terms.iter() {
             accumulator = add_product_mod(
                 accumulator,
-                digits[digit_index] % input.modulus,
+                input.message_digits_by_coefficient[ring_coefficient_index][digit_index]
+                    % input.modulus,
                 matrix_residue,
                 input.modulus,
             );
@@ -3998,18 +2616,17 @@ fn compact_commitment_coordinate(
     for (randomness_column_index, randomness_column) in
         input.randomness_by_column.iter().enumerate()
     {
-        let input_column = format!("randomness:{randomness_column_index}");
-        for (ring_coefficient_index, matrix_residue) in
-            compact_projection_terms(CompactProjectionTermsInput {
-                public_matrix_seed_hash: input.public_matrix_seed_hash,
-                rns_limb_index: input.rns_limb_index,
-                commitment_modulus_index: input.commitment_modulus_index,
-                output_coordinate_index: input.output_coordinate_index,
-                input_column: &input_column,
-                ring_degree: randomness_column.len(),
-                modulus: input.modulus,
-            })?
-        {
+        let input_column = compact_vss_randomness_column_label(randomness_column_index)?;
+        let projection_terms = cached_compact_projection_terms(CompactProjectionTermsInput {
+            public_matrix_seed_hash: input.public_matrix_seed_hash,
+            rns_limb_index: input.rns_limb_index,
+            commitment_modulus_index: input.commitment_modulus_index,
+            output_coordinate_index: input.output_coordinate_index,
+            input_column,
+            ring_degree: randomness_column.len(),
+            modulus: input.modulus,
+        })?;
+        for &(ring_coefficient_index, matrix_residue) in projection_terms.iter() {
             accumulator = add_product_mod(
                 accumulator,
                 signed_integer_to_residue(randomness_column[ring_coefficient_index], input.modulus),
@@ -4025,28 +2642,47 @@ fn compact_commitment_coordinate(
 pub(in crate::bgv::setup) fn compact_vss_message_digit_column_label(
     digit_index: usize,
 ) -> CanonicalResult<String> {
-    if digit_index >= COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-        return Err(CanonicalError::new(
+    Ok(compact_vss_message_digit_column_label_str(digit_index)?.to_string())
+}
+
+fn compact_vss_message_digit_column_label_str(digit_index: usize) -> CanonicalResult<&'static str> {
+    match digit_index {
+        0 => Ok("message:0"),
+        1 => Ok("message:1"),
+        _ => Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "compact VSS message digit index is outside the selected profile",
-        ));
+        )),
     }
+}
 
-    Ok(format!("message:{digit_index}"))
+fn compact_vss_randomness_column_label(column_index: usize) -> CanonicalResult<&'static str> {
+    match column_index {
+        0 => Ok("randomness:0"),
+        1 => Ok("randomness:1"),
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS randomness column index is outside the selected profile",
+        )),
+    }
 }
 
 pub(in crate::bgv::setup) fn compact_vss_message_digit_weight(
     digit_index: usize,
     modulus: u64,
 ) -> CanonicalResult<u64> {
-    match digit_index {
-        0 => Ok(1 % modulus),
-        1 => Ok(COMPACT_VSS_MESSAGE_DIGIT_BASE % modulus),
-        _ => Err(CanonicalError::new(
+    if digit_index >= COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+        return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "compact VSS message digit index is outside the selected profile",
-        )),
+        ));
     }
+    let mut weight = 1_u128;
+    for _ in 0..digit_index {
+        weight = (weight * u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)) % u128::from(modulus);
+    }
+
+    Ok(weight as u64)
 }
 
 pub(in crate::bgv::setup) fn compact_vss_message_digits(
@@ -4063,36 +2699,24 @@ pub(in crate::bgv::setup) fn compact_vss_message_digits(
     if u128::from(coefficient) >= maximum_coefficient {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient exceeds the two-digit message range",
+            "compact VSS message coefficient exceeds the full-message coordinate range",
         ));
     }
 
-    Ok([
-        coefficient % COMPACT_VSS_MESSAGE_DIGIT_BASE,
-        coefficient / COMPACT_VSS_MESSAGE_DIGIT_BASE,
-    ])
-}
-
-fn compact_vss_trit_count_for_bound(bound_exclusive: u64) -> CanonicalResult<usize> {
-    if bound_exclusive == 0 {
+    let mut remaining = coefficient;
+    let mut digits = [0_u64; COMPACT_VSS_MESSAGE_DIGIT_COUNT];
+    for digit in &mut digits {
+        *digit = remaining % COMPACT_VSS_MESSAGE_DIGIT_BASE;
+        remaining /= COMPACT_VSS_MESSAGE_DIGIT_BASE;
+    }
+    if remaining != 0 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "compact VSS message coefficient bound must be positive",
+            "compact VSS message coefficient did not fit the selected digit range",
         ));
     }
-    let mut represented_bound = 1_u64;
-    let mut trit_count = 0_usize;
-    while represented_bound < bound_exclusive {
-        represented_bound = represented_bound.checked_mul(3).ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact VSS message trit bound overflowed",
-            )
-        })?;
-        trit_count += 1;
-    }
 
-    Ok(trit_count)
+    Ok(digits)
 }
 
 pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
@@ -4118,14 +2742,40 @@ pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
             "compact VSS message coefficient bound exceeds the two-digit message range",
         ));
     }
-    let high_digit_bound_exclusive =
-        message_bound_exclusive.div_ceil(COMPACT_VSS_MESSAGE_DIGIT_BASE);
-    let high_digit_trit_count = compact_vss_trit_count_for_bound(high_digit_bound_exclusive)?;
-
+    let high_digit_bound =
+        u128::from(message_bound_exclusive).div_ceil(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
+    let high_digit_trit_count = compact_vss_trit_count_for_bound(high_digit_bound)?;
     Ok(CompactVssMessageEncodingLayout {
         high_digit_trit_count,
         range_evidence: CompactVssMessageRangeEvidence::DigitAndTritColumns,
     })
+}
+
+fn compact_vss_trit_count_for_bound(bound_exclusive: u128) -> CanonicalResult<usize> {
+    if bound_exclusive == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS trit bound must be positive",
+        ));
+    }
+    let mut represented_bound = 1_u128;
+    let mut trit_count = 0_usize;
+    while represented_bound < bound_exclusive {
+        represented_bound = represented_bound.checked_mul(3).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS trit bound overflowed",
+            )
+        })?;
+        trit_count = trit_count.checked_add(1).ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS trit count overflowed",
+            )
+        })?;
+    }
+
+    Ok(trit_count)
 }
 
 pub(in crate::bgv::setup) fn compact_vss_message_digit_trits_for_count(
@@ -4162,6 +2812,7 @@ pub(in crate::bgv::setup) fn compact_vss_message_digit_trits_for_count(
     Ok(trits)
 }
 
+#[derive(Clone, Copy)]
 pub(in crate::bgv::setup) struct CompactProjectionTermsInput<'a> {
     pub(in crate::bgv::setup) public_matrix_seed_hash: &'a str,
     pub(in crate::bgv::setup) rns_limb_index: usize,
@@ -4172,33 +2823,98 @@ pub(in crate::bgv::setup) struct CompactProjectionTermsInput<'a> {
     pub(in crate::bgv::setup) modulus: u64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct CompactProjectionTermCacheKey {
+    public_matrix_seed_hash: String,
+    rns_limb_index: usize,
+    commitment_modulus_index: usize,
+    output_coordinate_index: usize,
+    input_column: String,
+    ring_degree: usize,
+    modulus: u64,
+}
+
+impl CompactProjectionTermCacheKey {
+    fn from_input(input: CompactProjectionTermsInput<'_>) -> Self {
+        Self {
+            public_matrix_seed_hash: input.public_matrix_seed_hash.to_owned(),
+            rns_limb_index: input.rns_limb_index,
+            commitment_modulus_index: input.commitment_modulus_index,
+            output_coordinate_index: input.output_coordinate_index,
+            input_column: input.input_column.to_owned(),
+            ring_degree: input.ring_degree,
+            modulus: input.modulus,
+        }
+    }
+}
+
+type CompactProjectionTerm = (usize, u64);
+type CompactProjectionTermCache =
+    HashMap<CompactProjectionTermCacheKey, Arc<[CompactProjectionTerm]>>;
+
+static COMPACT_PROJECTION_TERM_CACHE: OnceLock<Mutex<CompactProjectionTermCache>> = OnceLock::new();
+
 pub(in crate::bgv::setup) fn compact_projection_terms(
     input: CompactProjectionTermsInput<'_>,
-) -> CanonicalResult<Vec<(usize, u64)>> {
-    (0..COMPACT_VSS_PROJECTION_WEIGHT)
-        .map(|projection_term_index| {
-            Ok((
-                sample_compact_projection_index(SampleCompactProjectionInput {
-                    public_matrix_seed_hash: input.public_matrix_seed_hash,
-                    rns_limb_index: input.rns_limb_index,
-                    commitment_modulus_index: input.commitment_modulus_index,
-                    output_coordinate_index: input.output_coordinate_index,
-                    input_column: input.input_column,
-                    projection_term_index,
-                    ring_degree: input.ring_degree,
-                })?,
-                sample_compact_matrix_residue(SampleCompactMatrixInput {
-                    public_matrix_seed_hash: input.public_matrix_seed_hash,
-                    rns_limb_index: input.rns_limb_index,
-                    commitment_modulus_index: input.commitment_modulus_index,
-                    output_coordinate_index: input.output_coordinate_index,
-                    input_column: input.input_column,
-                    projection_term_index,
-                    modulus: input.modulus,
-                })?,
-            ))
-        })
-        .collect()
+) -> CanonicalResult<Vec<CompactProjectionTerm>> {
+    Ok(cached_compact_projection_terms(input)?.as_ref().to_vec())
+}
+
+fn cached_compact_projection_terms(
+    input: CompactProjectionTermsInput<'_>,
+) -> CanonicalResult<Arc<[CompactProjectionTerm]>> {
+    let cache_key = CompactProjectionTermCacheKey::from_input(input);
+    let cache = COMPACT_PROJECTION_TERM_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(cached_terms) = cache
+        .lock()
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "compact VSS projection-term cache is unavailable",
+            )
+        })?
+        .get(&cache_key)
+        .cloned()
+    {
+        return Ok(cached_terms);
+    }
+
+    let mut terms = Vec::with_capacity(COMPACT_VSS_PROJECTION_WEIGHT);
+    for projection_term_index in 0..COMPACT_VSS_PROJECTION_WEIGHT {
+        let ring_coefficient_index =
+            sample_compact_projection_index(SampleCompactProjectionInput {
+                public_matrix_seed_hash: input.public_matrix_seed_hash,
+                rns_limb_index: input.rns_limb_index,
+                commitment_modulus_index: input.commitment_modulus_index,
+                output_coordinate_index: input.output_coordinate_index,
+                input_column: input.input_column,
+                projection_term_index,
+                ring_degree: input.ring_degree,
+            })?;
+        let matrix_residue = sample_compact_matrix_residue(SampleCompactMatrixInput {
+            public_matrix_seed_hash: input.public_matrix_seed_hash,
+            rns_limb_index: input.rns_limb_index,
+            commitment_modulus_index: input.commitment_modulus_index,
+            output_coordinate_index: input.output_coordinate_index,
+            input_column: input.input_column,
+            projection_term_index,
+            modulus: input.modulus,
+        })?;
+        terms.push((ring_coefficient_index, matrix_residue));
+    }
+    let computed_terms: Arc<[CompactProjectionTerm]> = Arc::from(terms.into_boxed_slice());
+
+    let mut cache_guard = cache.lock().map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS projection-term cache is unavailable",
+        )
+    })?;
+    let cached_terms = cache_guard
+        .entry(cache_key)
+        .or_insert_with(|| Arc::clone(&computed_terms));
+
+    Ok(Arc::clone(cached_terms))
 }
 
 struct SampleCompactMatrixInput<'a> {
@@ -4216,21 +2932,12 @@ fn sample_compact_matrix_residue(input: SampleCompactMatrixInput<'_>) -> Canonic
     let limit = (1_u128 << 64) - ((1_u128 << 64) % modulus);
     let mut block_index = 0_usize;
     loop {
-        let preimage = [
-            input.public_matrix_seed_hash,
-            COMPACT_VSS_COMMITMENT_PROFILE_ID,
-            &input.rns_limb_index.to_string(),
-            &input.commitment_modulus_index.to_string(),
-            &input.output_coordinate_index.to_string(),
-            input.input_column,
-            &input.projection_term_index.to_string(),
-            &input.modulus.to_string(),
-            &block_index.to_string(),
-        ]
-        .join("|");
+        let mut preimage = compact_sampler_preimage_prefix(&input);
+        push_sampler_u64_field(&mut preimage, input.modulus);
+        push_sampler_usize_field(&mut preimage, block_index);
         let digest = hash512(
             COMPACT_VSS_MATRIX_RESIDUE_HASH_DOMAIN,
-            &[preimage.as_bytes()],
+            &[preimage.as_slice()],
         );
         for chunk in digest.chunks_exact(8) {
             let mut bytes = [0_u8; 8];
@@ -4266,21 +2973,12 @@ fn sample_compact_projection_index(
     let limit = (1_u128 << 64) - ((1_u128 << 64) % modulus);
     let mut block_index = 0_usize;
     loop {
-        let preimage = [
-            input.public_matrix_seed_hash,
-            COMPACT_VSS_COMMITMENT_PROFILE_ID,
-            &input.rns_limb_index.to_string(),
-            &input.commitment_modulus_index.to_string(),
-            &input.output_coordinate_index.to_string(),
-            input.input_column,
-            &input.projection_term_index.to_string(),
-            &input.ring_degree.to_string(),
-            &block_index.to_string(),
-        ]
-        .join("|");
+        let mut preimage = compact_sampler_preimage_prefix(&input);
+        push_sampler_usize_field(&mut preimage, input.ring_degree);
+        push_sampler_usize_field(&mut preimage, block_index);
         let digest = hash512(
             COMPACT_VSS_PROJECTION_INDEX_HASH_DOMAIN,
-            &[preimage.as_bytes()],
+            &[preimage.as_slice()],
         );
         for chunk in digest.chunks_exact(8) {
             let mut bytes = [0_u8; 8];
@@ -4296,6 +2994,117 @@ fn sample_compact_projection_index(
                 "compact VSS projection-index sampler block index overflowed",
             )
         })?;
+    }
+}
+
+trait CompactSamplerInput {
+    fn public_matrix_seed_hash(&self) -> &str;
+    fn rns_limb_index(&self) -> usize;
+    fn commitment_modulus_index(&self) -> usize;
+    fn output_coordinate_index(&self) -> usize;
+    fn input_column(&self) -> &str;
+    fn projection_term_index(&self) -> usize;
+}
+
+impl CompactSamplerInput for SampleCompactMatrixInput<'_> {
+    fn public_matrix_seed_hash(&self) -> &str {
+        self.public_matrix_seed_hash
+    }
+
+    fn rns_limb_index(&self) -> usize {
+        self.rns_limb_index
+    }
+
+    fn commitment_modulus_index(&self) -> usize {
+        self.commitment_modulus_index
+    }
+
+    fn output_coordinate_index(&self) -> usize {
+        self.output_coordinate_index
+    }
+
+    fn input_column(&self) -> &str {
+        self.input_column
+    }
+
+    fn projection_term_index(&self) -> usize {
+        self.projection_term_index
+    }
+}
+
+impl CompactSamplerInput for SampleCompactProjectionInput<'_> {
+    fn public_matrix_seed_hash(&self) -> &str {
+        self.public_matrix_seed_hash
+    }
+
+    fn rns_limb_index(&self) -> usize {
+        self.rns_limb_index
+    }
+
+    fn commitment_modulus_index(&self) -> usize {
+        self.commitment_modulus_index
+    }
+
+    fn output_coordinate_index(&self) -> usize {
+        self.output_coordinate_index
+    }
+
+    fn input_column(&self) -> &str {
+        self.input_column
+    }
+
+    fn projection_term_index(&self) -> usize {
+        self.projection_term_index
+    }
+}
+
+fn compact_sampler_preimage_prefix(input: &impl CompactSamplerInput) -> Vec<u8> {
+    let mut preimage = Vec::with_capacity(
+        input.public_matrix_seed_hash().len()
+            + COMPACT_VSS_COMMITMENT_PROFILE_ID.len()
+            + input.input_column().len()
+            + 96,
+    );
+    push_sampler_bytes_field(&mut preimage, input.public_matrix_seed_hash().as_bytes());
+    push_sampler_bytes_field(&mut preimage, COMPACT_VSS_COMMITMENT_PROFILE_ID.as_bytes());
+    push_sampler_usize_field(&mut preimage, input.rns_limb_index());
+    push_sampler_usize_field(&mut preimage, input.commitment_modulus_index());
+    push_sampler_usize_field(&mut preimage, input.output_coordinate_index());
+    push_sampler_bytes_field(&mut preimage, input.input_column().as_bytes());
+    push_sampler_usize_field(&mut preimage, input.projection_term_index());
+
+    preimage
+}
+
+fn push_sampler_bytes_field(preimage: &mut Vec<u8>, field: &[u8]) {
+    if !preimage.is_empty() {
+        preimage.push(b'|');
+    }
+    preimage.extend_from_slice(field);
+}
+
+fn push_sampler_usize_field(preimage: &mut Vec<u8>, value: usize) {
+    push_sampler_u64_field(preimage, value as u64);
+}
+
+fn push_sampler_u64_field(preimage: &mut Vec<u8>, value: u64) {
+    if !preimage.is_empty() {
+        preimage.push(b'|');
+    }
+    let mut remaining = value;
+    if remaining == 0 {
+        preimage.push(b'0');
+        return;
+    }
+    let mut digits = [0_u8; 20];
+    let mut digit_count = 0_usize;
+    while remaining > 0 {
+        digits[digit_count] = b'0' + (remaining % 10) as u8;
+        remaining /= 10;
+        digit_count += 1;
+    }
+    for digit in digits[..digit_count].iter().rev() {
+        preimage.push(*digit);
     }
 }
 
@@ -4652,13 +3461,16 @@ pub(in crate::bgv::setup) mod tests {
             &mut forged_source_statement["sourceStatementRecords"][0],
         )?;
         rebind_compact_share_linkage_statement_root(&mut forged_source_statement)?;
+        let missing_evidence_error = verify_compact_vss_share_linkage_statement_request(&json!({
+            "command": "VerifyCompactVssShareLinkageStatement",
+            "statement": forged_source_statement.clone(),
+        }))
+        .expect_err("compact share-linkage statement verification must require evidence sets");
         assert!(
-            verify_compact_vss_share_linkage_statement_request(&json!({
-                "command": "VerifyCompactVssShareLinkageStatement",
-                "statement": forged_source_statement.clone(),
-            }))
-            .is_ok(),
-            "statement-only linkage verification remains a root-binding check"
+            missing_evidence_error
+                .to_string()
+                .contains("requires coefficient, recipient-share, and aggregate-threshold"),
+            "missing compact share-linkage evidence should report the required evidence sets: {missing_evidence_error}"
         );
         assert!(
             verify_compact_vss_share_linkage_statement_request(&json!({
@@ -4690,8 +3502,8 @@ pub(in crate::bgv::setup) mod tests {
         let mismatch_error = verify_compact_vss_share_linkage_statement_request(&json!({
             "command": "VerifyCompactVssShareLinkageStatement",
             "statement": mismatched_statement,
-            "coefficientCommitmentSet": coefficient_set,
-            "recipientShareCommitmentSet": recipient_set,
+            "coefficientCommitmentSet": coefficient_set.clone(),
+            "recipientShareCommitmentSet": recipient_set.clone(),
             "aggregateThresholdCommitmentSet": mismatched_aggregate_set,
         }))
         .expect_err("evidence-backed linkage verification must reject a non-sum aggregate body");
@@ -4706,6 +3518,9 @@ pub(in crate::bgv::setup) mod tests {
             verify_compact_vss_share_linkage_statement_request(&json!({
                 "command": "VerifyCompactVssShareLinkageStatement",
                 "statement": tampered_statement,
+                "coefficientCommitmentSet": coefficient_set,
+                "recipientShareCommitmentSet": recipient_set,
+                "aggregateThresholdCommitmentSet": aggregate_set,
             }))
             .is_err(),
             "tampered share-linkage statement root must reject"

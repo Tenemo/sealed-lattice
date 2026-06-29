@@ -11,6 +11,7 @@ import {
     encodeCompactVssTernaryRandomnessColumnsHex,
     type CompactVssRecipientShareOpeningCredential,
 } from './compact-vss-commitments.js';
+import { bytesToStandardBase64 } from './proof-byte-encoding.js';
 import { setupProofProfileId } from './same-secret-consistency-records.js';
 import type { VerifiedVssCoefficientCommitmentMaterial } from './vss-coefficient-commitments.js';
 
@@ -453,6 +454,172 @@ const shareValuesToLittleEndian48Hex = (
     });
 
     return bytesToHex(bytes);
+};
+
+const compactVssShareCarryValueBitWidth = 11;
+
+const unsignedIntegerVectorToLittleEndianBitPackedBytes = (
+    values: readonly number[],
+    bitWidth: number,
+    fieldName: string,
+): Uint8Array => {
+    if (!Number.isSafeInteger(bitWidth) || bitWidth <= 0 || bitWidth > 30) {
+        throw new TypeError('bitWidth must be a positive safe integer.');
+    }
+    const valueBound = 1 << bitWidth;
+    const bytes = new Uint8Array(Math.ceil((values.length * bitWidth) / 8));
+    values.forEach((value, valueIndex) => {
+        if (!Number.isSafeInteger(value) || value < 0 || value >= valueBound) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must fit unsigned ${String(bitWidth)}-bit encoding.`,
+            );
+        }
+        let remainingValue = value;
+        let bitOffset = valueIndex * bitWidth;
+        for (let consumedBits = 0; consumedBits < bitWidth; ) {
+            const byteIndex = Math.floor(bitOffset / 8);
+            const bitIndexInByte = bitOffset % 8;
+            const chunkBitCount = Math.min(
+                8 - bitIndexInByte,
+                bitWidth - consumedBits,
+            );
+            const chunkMask = (1 << chunkBitCount) - 1;
+            bytes[byteIndex] =
+                (bytes[byteIndex] ?? 0) |
+                ((remainingValue & chunkMask) << bitIndexInByte);
+            remainingValue = Math.floor(remainingValue / (1 << chunkBitCount));
+            bitOffset += chunkBitCount;
+            consumedBits += chunkBitCount;
+        }
+    });
+
+    return bytes;
+};
+
+const unsignedIntegerVectorToLittleEndianBitPackedBase64 = (
+    values: readonly number[],
+    bitWidth: number,
+    fieldName: string,
+): string =>
+    bytesToStandardBase64(
+        unsignedIntegerVectorToLittleEndianBitPackedBytes(
+            values,
+            bitWidth,
+            fieldName,
+        ),
+    );
+
+const unsignedIntegerVectorToLittleEndianBitPackedBigIntBytes = (
+    values: readonly (number | bigint)[],
+    bitWidth: number,
+    fieldName: string,
+): Uint8Array => {
+    if (!Number.isSafeInteger(bitWidth) || bitWidth <= 0 || bitWidth > 64) {
+        throw new TypeError('bitWidth must be a positive safe integer.');
+    }
+    const maximumValueExclusive = 1n << BigInt(bitWidth);
+    const bytes = new Uint8Array(Math.ceil((values.length * bitWidth) / 8));
+    values.forEach((value, valueIndex) => {
+        const valueWide =
+            typeof value === 'bigint'
+                ? value
+                : Number.isSafeInteger(value)
+                  ? BigInt(value)
+                  : undefined;
+        if (
+            valueWide === undefined ||
+            valueWide < 0n ||
+            valueWide >= maximumValueExclusive
+        ) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must fit unsigned ${String(bitWidth)}-bit encoding.`,
+            );
+        }
+        let bitOffset = valueIndex * bitWidth;
+        for (let consumedBits = 0; consumedBits < bitWidth; ) {
+            const byteIndex = Math.floor(bitOffset / 8);
+            const bitIndexInByte = bitOffset % 8;
+            const chunkBitCount = Math.min(
+                8 - bitIndexInByte,
+                bitWidth - consumedBits,
+            );
+            const chunkMask = (1n << BigInt(chunkBitCount)) - 1n;
+            const chunkValue =
+                Number((valueWide >> BigInt(consumedBits)) & chunkMask) <<
+                bitIndexInByte;
+            bytes[byteIndex] = (bytes[byteIndex] ?? 0) | chunkValue;
+            bitOffset += chunkBitCount;
+            consumedBits += chunkBitCount;
+        }
+    });
+
+    return bytes;
+};
+
+const unsignedIntegerVectorToLittleEndianBitPackedBigIntBase64 = (
+    values: readonly (number | bigint)[],
+    bitWidth: number,
+    fieldName: string,
+): string =>
+    bytesToStandardBase64(
+        unsignedIntegerVectorToLittleEndianBitPackedBigIntBytes(
+            values,
+            bitWidth,
+            fieldName,
+        ),
+    );
+
+const unsignedIntegerBitWidth = (
+    values: readonly (number | bigint)[],
+    fieldName: string,
+): number => {
+    let maximumValue = 0n;
+    values.forEach((value, valueIndex) => {
+        const valueWide =
+            typeof value === 'bigint'
+                ? value
+                : Number.isSafeInteger(value)
+                  ? BigInt(value)
+                  : undefined;
+        if (valueWide === undefined || valueWide < 0n) {
+            throw new TypeError(
+                `${fieldName}.${String(valueIndex)} must be a non-negative integer.`,
+            );
+        }
+        maximumValue = maximumValue > valueWide ? maximumValue : valueWide;
+    });
+    let bitWidth = 1;
+    while (1n << BigInt(bitWidth) <= maximumValue) {
+        bitWidth += 1;
+        if (bitWidth > 64) {
+            throw new TypeError(`${fieldName} must fit unsigned 64-bit words.`);
+        }
+    }
+
+    return bitWidth;
+};
+
+const compactVssRecipientMessageDigitColumnStorage = (
+    columns: readonly (readonly (number | bigint)[])[],
+): JsonRecord => {
+    const bitWidths = columns.map((digitColumn, digitIndex) =>
+        unsignedIntegerBitWidth(
+            digitColumn,
+            `shareCommitmentMessageDigitColumns.${String(digitIndex)}`,
+        ),
+    );
+
+    return {
+        shareCommitmentMessageDigitColumnBitWidths: bitWidths,
+        shareCommitmentMessageDigitColumnsPackedBase64: columns.map(
+            (digitColumn, digitIndex) =>
+                unsignedIntegerVectorToLittleEndianBitPackedBigIntBase64(
+                    digitColumn,
+                    bitWidths[digitIndex] ?? 1,
+                    `shareCommitmentMessageDigitColumns.${String(digitIndex)}`,
+                ),
+        ),
+    };
 };
 
 const proofRandomnessByteLength = 64;
@@ -938,9 +1105,12 @@ const compactVssRecipientShareOpeningCredentialForLimb = (
                     recipient.recipientRosterPosition &&
                 credential.rnsLimbIndex === rnsLimbIndex,
         );
+    if (matchingCredentials.length === 0) {
+        return undefined;
+    }
     if (matchingCredentials.length !== 1) {
         throw new Error(
-            'compact VSS recipient share opening credentials must contain exactly one credential for each delivered private VSS limb.',
+            'compact VSS recipient share opening credentials must contain at most one credential for each delivered private VSS limb.',
         );
     }
     const credential = matchingCredentials[0];
@@ -960,6 +1130,8 @@ const compactVssRecipientShareOpeningCredentialForLimb = (
 
     const {
         shareValues: _deliveredShareValues,
+        shareCommitmentMessageCarryValues,
+        shareCommitmentMessageDigitColumns,
         randomnessByColumn,
         ...credentialWithoutShareValues
     } = credential;
@@ -967,6 +1139,17 @@ const compactVssRecipientShareOpeningCredentialForLimb = (
 
     return {
         ...credentialWithoutShareValues,
+        shareCommitmentMessageCarryValuesPacked11Base64:
+            unsignedIntegerVectorToLittleEndianBitPackedBase64(
+                shareCommitmentMessageCarryValues,
+                compactVssShareCarryValueBitWidth,
+                'shareCommitmentMessageCarryValues',
+            ),
+        ...(shareCommitmentMessageDigitColumns === undefined
+            ? {}
+            : compactVssRecipientMessageDigitColumnStorage(
+                  shareCommitmentMessageDigitColumns,
+              )),
         randomnessByColumnPackedTernaryHex:
             encodeCompactVssTernaryRandomnessColumnsHex(
                 randomnessByColumn,

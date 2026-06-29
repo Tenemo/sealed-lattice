@@ -602,11 +602,20 @@ describe('accepted setup public package API in Node', () => {
             participantCount: setupProfile.participantCount,
             thresholdDegree: setupProfile.qDec,
             commitmentRelation: {
+                relation: 'C = A_message * m + A_randomness * r mod q_c',
+                messageWidth: 2,
                 projectionWeight: 32,
                 coordinateCountPerCommitment: 48,
+                inputColumnLabels: [
+                    'message:0',
+                    'message:1',
+                    'randomness:0',
+                    'randomness:1',
+                ],
             },
             commonCommitmentKey: {
                 sparseProjectionShape: {
+                    inputColumnCount: 4,
                     sampledMatrixResiduesPerCommitment: 6_144,
                     sampledProjectionIndicesPerCommitment: 6_144,
                 },
@@ -618,10 +627,12 @@ describe('accepted setup public package API in Node', () => {
                 openingWitnessRows: [
                     expect.objectContaining({
                         rowId: 'compact-vss-fresh-opening-witness',
+                        messageCoefficientUpperBoundMultiplier: 1_111,
                         witnessCoefficientCount: 131_072,
                     }),
                     expect.objectContaining({
                         rowId: 'compact-vss-aggregate-opening-witness',
+                        messageCoefficientUpperBoundMultiplier: 11_110,
                         randomnessDifferenceInfinityBound: 20,
                     }),
                 ],

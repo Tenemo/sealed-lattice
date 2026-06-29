@@ -187,29 +187,6 @@ describe('transcript-core kernel in Node', () => {
             proofMaterials: [],
             marker: 'same-secret-proof',
         } as const;
-        const transportedCompactVssShareLinkageProofMaterial = {
-            objectType: 'CompactVssShareLinkageBinaryProofMaterialTransport',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
-            proofFamily: 'compact-vss-share-linkage',
-            binaryFormat: 'compact-vss-share-linkage-proof-material-binary-v1',
-            proofMaterialSetRoot: hashOne,
-            shareLinkageStatementRoot: hashTwo,
-            chunkSizeBytes: 1_048_576,
-            chunkCount: 1,
-            totalByteLength: 1,
-            fullObjectHash: hashThree,
-            chunkHashes: [hashThree],
-            chunkRoot: hashThree,
-            chunks: [emptyTransportChunk],
-            marker: 'compact-share-linkage-proof-material',
-        } as const;
-        const {
-            chunks: omittedCompactShareLinkageChunks,
-            ...transportedCompactVssShareLinkageProofMaterialReference
-        } = transportedCompactVssShareLinkageProofMaterial;
-        void omittedCompactShareLinkageChunks;
         const transportedPublicKeyShareMaterial = {
             objectType: 'SetupTransportedPublicKeyShareMaterial',
             objectVersion: 1,
@@ -294,7 +271,6 @@ describe('transcript-core kernel in Node', () => {
             expectedRosterHash: hashThree,
             transportedVssCoefficientCommitmentMaterial,
             transportedSameSecretProofMaterial,
-            transportedCompactVssShareLinkageProofMaterial,
             transportedPublicKeyShareMaterial,
             transportedPublicKeyShareProofMaterial,
             transportedEvaluationKeyShareProofMaterial,
@@ -313,8 +289,6 @@ describe('transcript-core kernel in Node', () => {
                 expectedRosterHash: hashThree,
                 transportedVssCoefficientCommitmentMaterial,
                 transportedSameSecretProofMaterial,
-                transportedCompactVssShareLinkageProofMaterial:
-                    transportedCompactVssShareLinkageProofMaterialReference,
                 transportedPublicKeyShareMaterial,
                 transportedPublicKeyShareProofMaterial,
                 transportedEvaluationKeyShareProofMaterial,

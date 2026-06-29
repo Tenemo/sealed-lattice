@@ -1341,19 +1341,6 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
 }
 
 #[test]
-fn target_decryption_result_verifier_refuses_compact_vss_public_material() {
-    let result =
-        verify_target_decryption_result_from_request(&json!({})).expect("fail-closed result");
-
-    assert_eq!(result["ok"], json!(false));
-    assert_eq!(result["operation"], json!("verifyTargetDecryptionResult"));
-    assert_eq!(
-        result["refusalReason"],
-        json!("CompactVssPublicMaterialNotBinding")
-    );
-}
-
-#[test]
 fn target_share_proof_relation_rejects_rebound_wrong_partial_decryption() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();

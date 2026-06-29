@@ -3,7 +3,7 @@ use super::*;
 use crate::bgv::setup::compact_vss_commitment::{
     COMPACT_VSS_MESSAGE_DIGIT_COUNT, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactProjectionTermsInput,
-    CompactVssMessageEncodingLayout, compact_projection_terms,
+    CompactVssMessageEncodingLayout, CompactVssMessageRangeEvidence, compact_projection_terms,
     compact_vss_message_digit_column_label, compact_vss_message_digit_weight,
     compact_vss_message_encoding_layout,
 };
@@ -25,6 +25,8 @@ pub(crate) struct CompactVssShareLinkagePublicVectorInput<'a> {
     pub(crate) recipient_share_commitment: &'a CompactVssShareLinkageCommitment,
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
+    pub(crate) coefficient_message_range_evidence: CompactVssMessageRangeEvidence,
+    pub(crate) recipient_message_range_evidence: CompactVssMessageRangeEvidence,
 }
 
 struct CompactVssShareLinkageItemView<'a> {
@@ -52,6 +54,17 @@ fn compact_vss_message_encoding_offsets(
     Ok(offsets)
 }
 
+fn compact_vss_message_encoding_layout_for_range(
+    message_bound: u64,
+    range_evidence: CompactVssMessageRangeEvidence,
+) -> CanonicalResult<CompactVssMessageEncodingLayout> {
+    let layout = compact_vss_message_encoding_layout(message_bound)?;
+    Ok(match range_evidence {
+        CompactVssMessageRangeEvidence::DigitAndTritColumns => layout,
+        CompactVssMessageRangeEvidence::DigitColumnsOnly => layout.with_digit_columns_only(),
+    })
+}
+
 fn compact_vss_message_vector_index(
     offsets: &[usize],
     message_index: usize,
@@ -74,6 +87,12 @@ fn compact_vss_message_vector_index(
 
 fn compact_vss_message_encoding_total(offsets: &[usize]) -> usize {
     offsets.last().copied().unwrap_or(0)
+}
+
+fn compact_vss_decoder_digit_count(layout: CompactVssMessageEncodingLayout) -> usize {
+    (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        .filter(|digit_index| layout.digit_trit_count(*digit_index).unwrap_or(0) > 0)
+        .count()
 }
 
 pub(crate) struct CompactSameSecretBridgePublicVectorInput<'a> {
@@ -164,8 +183,18 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
 
     let commitment_relation_count = commitment_count * COMPACT_VSS_OUTPUT_COORDINATE_COUNT;
     let share_relation_count = LINCHECK_REPETITIONS;
-    let decoder_relation_count =
-        commitment_count * COMPACT_VSS_MESSAGE_DIGIT_COUNT * LINCHECK_REPETITIONS;
+    let coefficient_message_encoding_layout = compact_vss_message_encoding_layout_for_range(
+        input.source_message_modulus,
+        input.coefficient_message_range_evidence,
+    )?;
+    let recipient_message_encoding_layout = compact_vss_message_encoding_layout_for_range(
+        input.source_message_modulus,
+        input.recipient_message_range_evidence,
+    )?;
+    let decoder_relation_count = (input.coefficient_commitments.len()
+        * compact_vss_decoder_digit_count(coefficient_message_encoding_layout)
+        + compact_vss_decoder_digit_count(recipient_message_encoding_layout))
+        * LINCHECK_REPETITIONS;
     let decoder_relation_offset = commitment_relation_count + share_relation_count;
     let relation_count = decoder_relation_offset + decoder_relation_count;
     if input.relation_alpha.len() != relation_count {
@@ -176,9 +205,9 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
 
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); input.ring_degree];
     let mut relation_claim = ChallengeExtensionTower::zero();
-    let message_encoding_layout =
-        compact_vss_message_encoding_layout(input.source_message_modulus)?;
-    let message_encoding_layouts = vec![message_encoding_layout; commitment_count];
+    let mut message_encoding_layouts =
+        vec![coefficient_message_encoding_layout; input.coefficient_commitments.len()];
+    message_encoding_layouts.push(recipient_message_encoding_layout);
     let message_encoding_offsets = compact_vss_message_encoding_offsets(&message_encoding_layouts)?;
     let mut message_encoding_vectors =
         vec![
@@ -209,6 +238,7 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
                 tower.add(&relation_claim, &tower.scale_base(alpha_value, *coordinate));
             for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
                 let input_column = compact_vss_message_digit_column_label(digit_index)?;
+                let message_encoding_layout = message_encoding_layouts[commitment_index];
                 let digit_vector_index = compact_vss_message_vector_index(
                     &message_encoding_offsets,
                     commitment_index,
@@ -279,6 +309,7 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
         for coefficient_index in 0..input.coefficient_commitments.len() {
             let power_modulus_residue = (trustee_point_power % u128::from(input.modulus)) as u64;
             for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+                let message_encoding_layout = message_encoding_layouts[coefficient_index];
                 let digit_weight = compact_vss_message_digit_weight(digit_index, input.modulus)?;
                 let scale = mul_mod_fast(power_modulus_residue, digit_weight, input.modulus);
                 let digit_vector_index = compact_vss_message_vector_index(
@@ -310,7 +341,7 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
             let digit_vector_index = compact_vss_message_vector_index(
                 &message_encoding_offsets,
                 recipient_message_index,
-                message_encoding_layout.digit_encoding_column(digit_index)?,
+                recipient_message_encoding_layout.digit_encoding_column(digit_index)?,
             )?;
             add_scaled_extension_basis_vector(
                 &mut message_encoding_vectors[digit_vector_index],
@@ -327,49 +358,59 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
         );
     }
 
-    for message_index in 0..commitment_count {
-        for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-            for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
-                let alpha_index = decoder_relation_offset
-                    + (message_index * COMPACT_VSS_MESSAGE_DIGIT_COUNT + digit_index)
-                        * LINCHECK_REPETITIONS
-                    + repetition;
-                let alpha_value = &input.relation_alpha[alpha_index];
-                let mut combined_u = extension_zero_vector();
-                for (target_value, source_value) in combined_u.iter_mut().zip(u_powers.iter()) {
-                    *target_value = tower.add(target_value, &tower.mul(alpha_value, source_value));
+    if decoder_relation_count > 0 {
+        let mut decoder_relation_index = 0_usize;
+        for (message_index, message_encoding_layout) in message_encoding_layouts.iter().enumerate()
+        {
+            for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+                let trit_count = message_encoding_layout.digit_trit_count(digit_index)?;
+                if trit_count == 0 {
+                    continue;
                 }
-                let digit_vector_index = compact_vss_message_vector_index(
-                    &message_encoding_offsets,
-                    message_index,
-                    message_encoding_layout.digit_encoding_column(digit_index)?,
-                )?;
-                add_scaled_extension_basis_vector(
-                    &mut message_encoding_vectors[digit_vector_index],
-                    &combined_u,
-                    1,
-                    tower,
-                );
-                let mut trit_weight = 1_u64 % input.modulus;
-                for trit_index in 0..message_encoding_layout.digit_trit_count(digit_index)? {
-                    let negated_trit_weight = if trit_weight == 0 {
-                        0
-                    } else {
-                        input.modulus - trit_weight
-                    };
-                    let trit_vector_index = compact_vss_message_vector_index(
+                for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
+                    let alpha_index = decoder_relation_offset
+                        + decoder_relation_index * LINCHECK_REPETITIONS
+                        + repetition;
+                    let alpha_value = &input.relation_alpha[alpha_index];
+                    let mut combined_u = extension_zero_vector();
+                    for (target_value, source_value) in combined_u.iter_mut().zip(u_powers.iter()) {
+                        *target_value =
+                            tower.add(target_value, &tower.mul(alpha_value, source_value));
+                    }
+                    let digit_vector_index = compact_vss_message_vector_index(
                         &message_encoding_offsets,
                         message_index,
-                        message_encoding_layout.trit_encoding_column(digit_index, trit_index)?,
+                        message_encoding_layout.digit_encoding_column(digit_index)?,
                     )?;
                     add_scaled_extension_basis_vector(
-                        &mut message_encoding_vectors[trit_vector_index],
+                        &mut message_encoding_vectors[digit_vector_index],
                         &combined_u,
-                        negated_trit_weight,
+                        1,
                         tower,
                     );
-                    trit_weight = mul_mod_fast(trit_weight, 3, input.modulus);
+                    let mut trit_weight = 1_u64 % input.modulus;
+                    for trit_index in 0..trit_count {
+                        let negated_trit_weight = if trit_weight == 0 {
+                            0
+                        } else {
+                            input.modulus - trit_weight
+                        };
+                        let trit_vector_index = compact_vss_message_vector_index(
+                            &message_encoding_offsets,
+                            message_index,
+                            message_encoding_layout
+                                .trit_encoding_column(digit_index, trit_index)?,
+                        )?;
+                        add_scaled_extension_basis_vector(
+                            &mut message_encoding_vectors[trit_vector_index],
+                            &combined_u,
+                            negated_trit_weight,
+                            tower,
+                        );
+                        trit_weight = mul_mod_fast(trit_weight, 3, input.modulus);
+                    }
                 }
+                decoder_relation_index += 1;
             }
         }
     }
@@ -395,6 +436,8 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
     ring_degree: usize,
     relation_alpha: &[ChallengeExtensionElement],
     u_power_vectors: &[Vec<ChallengeExtensionElement>],
+    coefficient_message_range_evidence: CompactVssMessageRangeEvidence,
+    recipient_message_range_evidence: CompactVssMessageRangeEvidence,
     tower: &ChallengeExtensionTower,
 ) -> CanonicalResult<(
     ChallengeExtensionElement,
@@ -431,12 +474,26 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
     let expected_relation_count = items
         .iter()
         .map(|item| {
-            (item.coefficient_commitments.len() + 1) * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-                + LINCHECK_REPETITIONS
-                + (item.coefficient_commitments.len() + 1)
-                    * COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                    * LINCHECK_REPETITIONS
+            let coefficient_layout = compact_vss_message_encoding_layout_for_range(
+                item.source_message_modulus,
+                coefficient_message_range_evidence,
+            )?;
+            let recipient_layout = compact_vss_message_encoding_layout_for_range(
+                item.source_message_modulus,
+                recipient_message_range_evidence,
+            )?;
+            let decoder_relation_count = (item.coefficient_commitments.len()
+                * compact_vss_decoder_digit_count(coefficient_layout)
+                + compact_vss_decoder_digit_count(recipient_layout))
+                * LINCHECK_REPETITIONS;
+            Ok(
+                (item.coefficient_commitments.len() + 1) * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                    + LINCHECK_REPETITIONS
+                    + decoder_relation_count,
+            )
         })
+        .collect::<CanonicalResult<Vec<_>>>()?
+        .into_iter()
         .sum::<usize>();
     if relation_alpha.len() != expected_relation_count {
         return Err(invalid_succinct_setup_proof(
@@ -451,7 +508,12 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
     let unique_coefficient_count = coefficient_slots.len();
     let coefficient_message_encoding_layouts = coefficient_slots
         .iter()
-        .map(|slot| compact_vss_message_encoding_layout(slot.source_message_modulus))
+        .map(|slot| {
+            compact_vss_message_encoding_layout_for_range(
+                slot.source_message_modulus,
+                coefficient_message_range_evidence,
+            )
+        })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let coefficient_message_encoding_offsets =
         compact_vss_message_encoding_offsets(&coefficient_message_encoding_layouts)?;
@@ -481,12 +543,23 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                 "compact VSS coefficient witness slot layout does not match the item",
             ));
         }
+        let item_coefficient_message_encoding_layout =
+            compact_vss_message_encoding_layout_for_range(
+                item.source_message_modulus,
+                coefficient_message_range_evidence,
+            )?;
+        let item_recipient_message_encoding_layout = compact_vss_message_encoding_layout_for_range(
+            item.source_message_modulus,
+            recipient_message_range_evidence,
+        )?;
+        let item_decoder_relation_count = (item.coefficient_commitments.len()
+            * compact_vss_decoder_digit_count(item_coefficient_message_encoding_layout)
+            + compact_vss_decoder_digit_count(item_recipient_message_encoding_layout))
+            * LINCHECK_REPETITIONS;
         let item_relation_count = (item.coefficient_commitments.len() + 1)
             * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
             + LINCHECK_REPETITIONS
-            + (item.coefficient_commitments.len() + 1)
-                * COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                * LINCHECK_REPETITIONS;
+            + item_decoder_relation_count;
         let (item_claim, item_vectors) = build_compact_vss_share_linkage_public_vectors(
             CompactVssShareLinkagePublicVectorInput {
                 public_matrix_seed_hash: &statement.public_matrix_seed_hash,
@@ -501,6 +574,8 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                 relation_alpha: &relation_alpha
                     [relation_alpha_offset..relation_alpha_offset + item_relation_count],
                 u_power_vectors,
+                coefficient_message_range_evidence,
+                recipient_message_range_evidence,
             },
             tower,
         )?;
@@ -508,10 +583,10 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
         relation_alpha_offset += item_relation_count;
 
         let mut item_vectors = item_vectors.into_iter();
-        let item_message_encoding_layout =
-            compact_vss_message_encoding_layout(item.source_message_modulus)?;
         for slot_index in &item.coefficient_slot_indices {
-            for encoding_column in 0..item_message_encoding_layout.encoding_column_count() {
+            for encoding_column in
+                0..item_coefficient_message_encoding_layout.encoding_column_count()
+            {
                 let item_vector = item_vectors.next().ok_or_else(|| {
                     invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
                 })?;
@@ -527,7 +602,7 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                 )?;
             }
         }
-        for _ in 0..item_message_encoding_layout.encoding_column_count() {
+        for _ in 0..item_recipient_message_encoding_layout.encoding_column_count() {
             recipient_share_message_encoding_vectors.push(item_vectors.next().ok_or_else(
                 || invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly"),
             )?);
@@ -643,18 +718,6 @@ pub(crate) fn build_compact_same_secret_bridge_public_vectors(
         ));
     }
 
-    let target_count = input.target_constant_commitments.len();
-    let commitment_relation_count = target_count * COMPACT_VSS_OUTPUT_COORDINATE_COUNT;
-    let bridge_relation_count = target_count * LINCHECK_REPETITIONS;
-    let decoder_relation_count =
-        target_count * COMPACT_VSS_MESSAGE_DIGIT_COUNT * LINCHECK_REPETITIONS;
-    let relation_count = commitment_relation_count + bridge_relation_count + decoder_relation_count;
-    if input.relation_alpha.len() != relation_count {
-        return Err(invalid_succinct_setup_proof(
-            "compact same-secret bridge challenge count does not match the relation count",
-        ));
-    }
-
     let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); input.ring_degree];
     let mut relation_claim = ChallengeExtensionTower::zero();
     let mut secret_vector = extension_zero_vector();
@@ -662,8 +725,29 @@ pub(crate) fn build_compact_same_secret_bridge_public_vectors(
     let message_encoding_layouts = input
         .target_rns_primes
         .iter()
-        .map(|target_rns_prime| compact_vss_message_encoding_layout(*target_rns_prime))
+        .map(|target_rns_prime| {
+            compact_vss_message_encoding_layout_for_range(
+                *target_rns_prime,
+                CompactVssMessageRangeEvidence::DigitColumnsOnly,
+            )
+        })
         .collect::<CanonicalResult<Vec<_>>>()?;
+    let target_count = input.target_constant_commitments.len();
+    let commitment_relation_count = target_count * COMPACT_VSS_OUTPUT_COORDINATE_COUNT;
+    let bridge_relation_count = target_count * LINCHECK_REPETITIONS;
+    let decoder_relation_count = message_encoding_layouts
+        .iter()
+        .copied()
+        .map(compact_vss_decoder_digit_count)
+        .sum::<usize>()
+        * LINCHECK_REPETITIONS;
+    let relation_count = commitment_relation_count + bridge_relation_count + decoder_relation_count;
+    if input.relation_alpha.len() != relation_count {
+        return Err(invalid_succinct_setup_proof(
+            "compact same-secret bridge challenge count does not match the relation count",
+        ));
+    }
+
     let message_encoding_offsets = compact_vss_message_encoding_offsets(&message_encoding_layouts)?;
     let mut message_encoding_vectors =
         vec![
@@ -767,43 +851,56 @@ pub(crate) fn build_compact_same_secret_bridge_public_vectors(
                 );
             }
         }
-        let decoder_relation_offset = commitment_relation_count
-            + bridge_relation_count
-            + target_rns_limb_index * COMPACT_VSS_MESSAGE_DIGIT_COUNT * LINCHECK_REPETITIONS;
-        for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-            for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
-                let alpha_index =
-                    decoder_relation_offset + digit_index * LINCHECK_REPETITIONS + repetition;
-                let alpha_value = &input.relation_alpha[alpha_index];
-                let scaled_u = u_powers
-                    .iter()
-                    .map(|value| tower.mul(alpha_value, value))
-                    .collect::<Vec<_>>();
-                let digit_vector_index = compact_vss_message_vector_index(
-                    &message_encoding_offsets,
-                    target_rns_limb_index,
-                    message_encoding_layout.digit_encoding_column(digit_index)?,
-                )?;
-                add_extension_vector(
-                    &mut message_encoding_vectors[digit_vector_index],
-                    &scaled_u,
-                    tower,
-                )?;
-                let mut trit_weight = 1_u64;
-                for trit_index in 0..message_encoding_layout.digit_trit_count(digit_index)? {
-                    let trit_vector_index = compact_vss_message_vector_index(
+    }
+
+    if decoder_relation_count > 0 {
+        let decoder_relation_offset = commitment_relation_count + bridge_relation_count;
+        let mut decoder_relation_index = 0_usize;
+        for (target_rns_limb_index, message_encoding_layout) in
+            message_encoding_layouts.iter().enumerate()
+        {
+            for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+                let trit_count = message_encoding_layout.digit_trit_count(digit_index)?;
+                if trit_count == 0 {
+                    continue;
+                }
+                for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
+                    let alpha_index = decoder_relation_offset
+                        + decoder_relation_index * LINCHECK_REPETITIONS
+                        + repetition;
+                    let alpha_value = &input.relation_alpha[alpha_index];
+                    let scaled_u = u_powers
+                        .iter()
+                        .map(|value| tower.mul(alpha_value, value))
+                        .collect::<Vec<_>>();
+                    let digit_vector_index = compact_vss_message_vector_index(
                         &message_encoding_offsets,
                         target_rns_limb_index,
-                        message_encoding_layout.trit_encoding_column(digit_index, trit_index)?,
+                        message_encoding_layout.digit_encoding_column(digit_index)?,
                     )?;
-                    add_scaled_extension_basis_vector(
-                        &mut message_encoding_vectors[trit_vector_index],
+                    add_extension_vector(
+                        &mut message_encoding_vectors[digit_vector_index],
                         &scaled_u,
-                        sub_mod_fast(0, trit_weight, input.modulus),
                         tower,
-                    );
-                    trit_weight = mul_mod_fast(trit_weight, 3, input.modulus);
+                    )?;
+                    let mut trit_weight = 1_u64;
+                    for trit_index in 0..trit_count {
+                        let trit_vector_index = compact_vss_message_vector_index(
+                            &message_encoding_offsets,
+                            target_rns_limb_index,
+                            message_encoding_layout
+                                .trit_encoding_column(digit_index, trit_index)?,
+                        )?;
+                        add_scaled_extension_basis_vector(
+                            &mut message_encoding_vectors[trit_vector_index],
+                            &scaled_u,
+                            sub_mod_fast(0, trit_weight, input.modulus),
+                            tower,
+                        );
+                        trit_weight = mul_mod_fast(trit_weight, 3, input.modulus);
+                    }
                 }
+                decoder_relation_index += 1;
             }
         }
     }

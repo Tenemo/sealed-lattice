@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 
 pub(super) fn setup_commitment_security_certificate_fixture(
     profile: &serde_json::Value,
@@ -157,6 +157,13 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
         .as_array()
         .expect("canonical target basis target primes")
         .clone();
+    let input_column_labels = (0..message_column_count)
+        .map(|digit_index| serde_json::json!(format!("message:{digit_index}")))
+        .chain(
+            (0..randomness_column_count)
+                .map(|column_index| serde_json::json!(format!("randomness:{column_index}"))),
+        )
+        .collect::<Vec<_>>();
 
     let binding_body = serde_json::json!({
         "objectType": "CompactVssParameterCertificateInputBinding",
@@ -169,7 +176,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
         "thresholdDegree": decryption_threshold,
         "ringDegree": POLYNOMIAL_DEGREE,
         "commitmentRelation": {
-            "relation": "C = A_message_0 * m_0 + A_message_1 * m_1 + A_randomness * r mod q_c",
+            "relation": "C = A_message * m + A_randomness * r mod q_c",
             "coefficientRing": "Z_q[X]/(X^N+1)",
             "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
             "commitmentModulusLimbs": commitment_modulus_limbs,
@@ -178,12 +185,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
             "randomnessWidth": randomness_column_count,
             "projectionWeight": projection_weight,
             "coordinateCountPerCommitment": coordinate_count_per_commitment,
-            "inputColumnLabels": [
-                "message:0",
-                "message:1",
-                "randomness:0",
-                "randomness:1"
-            ],
+            "inputColumnLabels": input_column_labels,
             "homomorphicAdditionRule": "commitments combine linearly only when profile, public matrix seed, source limb, and commitment modulus order match",
             "homomorphicScalarRule": "public Shamir and aggregation scalars multiply both message and randomness columns over the same commitment key",
         },
@@ -227,12 +229,10 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
             "sourceCoefficientRepresentation": "canonical residue modulo the selected source RNS prime",
             "targetCoefficientRepresentation": "canonical residue modulo the selected target RNS prime",
             "signedRepresentativeConvention": "same-secret bridge witnesses use the setup proof signed representative convention before reduction into each RNS prime",
-            "digitBase": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE,
-            "digitCount": message_column_count,
             "paddingAndBlockOrder": "two base-3^17 little-endian digit coefficients per message ring position",
             "freshEncodingRule": "exact canonical residue encoding into two message digit columns",
-            "linearDecoder": "little-endian base-3^17 decoder over the selected RNS limb",
-            "derivedEncodingRule": "Shamir recipient-share and aggregate threshold openings bind carried public-sum messages through decoded message digit columns and non-negative carry witnesses",
+            "proofRangeEncodingRule": "proof traces decompose the low digit with 17 trits and the high digit with the statement-bound trit count for the opened message class",
+            "derivedEncodingRule": "Shamir recipient-share and aggregate threshold openings bind carried public-sum messages through decoded message digit columns and private carry witnesses",
         },
         "normInputClasses": [
             {
@@ -245,8 +245,8 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
             {
                 "className": "messageEncodingNorm",
                 "sourceCoefficientUpperBoundMultiplier": 1_u64,
-                "recipientShareCoefficientUpperBoundMultiplier": 1_u64,
-                "aggregateCoefficientUpperBoundMultiplier": participant_count,
+                "recipientShareCoefficientUpperBoundMultiplier": maximum_one_source_shamir_scalar_l1,
+                "aggregateCoefficientUpperBoundMultiplier": one_recipient_aggregate_shamir_scalar_l1,
             },
             {
                 "className": "openingRandomnessNorm",
@@ -272,9 +272,9 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                         "coefficient",
                         "recipient-share"
                     ],
-                    "messageCoefficientBound": "selectedRnsPrime",
-                    "messageCoefficientUpperBoundMultiplier": 1_u64,
-                    "messageDifferenceUpperBoundMultiplier": 1_u64,
+                    "messageCoefficientBound": "selectedRnsPrime times the recipient Shamir scalar L1 for recipient-share openings",
+                    "messageCoefficientUpperBoundMultiplier": maximum_one_source_shamir_scalar_l1,
+                    "messageDifferenceUpperBoundMultiplier": maximum_one_source_shamir_scalar_l1,
                     "randomnessDistribution": "balanced-ternary-per-column-coefficient",
                     "randomnessCoefficientInfinityBound": 1_u64,
                     "randomnessDifferenceInfinityBound": 2_u64,
@@ -288,9 +288,9 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "commitmentRoles": [
                         "aggregate-threshold-share"
                     ],
-                    "messageCoefficientBound": "participantCount * selectedRnsPrime",
-                    "messageCoefficientUpperBoundMultiplier": participant_count,
-                    "messageDifferenceUpperBoundMultiplier": participant_count,
+                    "messageCoefficientBound": "selectedRnsPrime times the all-source recipient Shamir scalar L1",
+                    "messageCoefficientUpperBoundMultiplier": one_recipient_aggregate_shamir_scalar_l1,
+                    "messageDifferenceUpperBoundMultiplier": one_recipient_aggregate_shamir_scalar_l1,
                     "randomnessDistribution": "sum-of-source-balanced-ternary-openings",
                     "randomnessCoefficientInfinityBound": participant_count,
                     "randomnessDifferenceInfinityBound": aggregate_randomness_difference_infinity_bound,
@@ -309,12 +309,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "maximumRecipientTrusteePoint": participant_count,
                     "sourceShamirScalarL1": maximum_one_source_shamir_scalar_l1,
                     "combinedRelationTermL1": recipient_shamir_relation_l1,
-                    "appliesToColumns": [
-                        "message:0",
-                        "message:1",
-                        "randomness:0",
-                        "randomness:1"
-                    ],
+                    "appliesToColumns": input_column_labels,
                 },
                 {
                     "rowId": "compact-vss-aggregate-threshold-public-sum",
@@ -323,12 +318,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "aggregateOpeningTermCount": 1_u64,
                     "sourceOpeningScalarL1": participant_count,
                     "combinedRelationTermL1": aggregate_sum_relation_l1,
-                    "appliesToColumns": [
-                        "message:0",
-                        "message:1",
-                        "randomness:0",
-                        "randomness:1"
-                    ],
+                    "appliesToColumns": input_column_labels,
                 },
                 {
                     "rowId": "compact-vss-one-recipient-aggregate-from-source-coefficients",
@@ -336,12 +326,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "sourceTrusteeCount": participant_count,
                     "sourceCoefficientCountPerTrustee": decryption_threshold,
                     "oneRecipientAggregateShamirScalarL1": one_recipient_aggregate_shamir_scalar_l1,
-                    "appliesToColumns": [
-                        "message:0",
-                        "message:1",
-                        "randomness:0",
-                        "randomness:1"
-                    ],
+                    "appliesToColumns": input_column_labels,
                 },
             ],
             "targetBasisReductionRows": [
