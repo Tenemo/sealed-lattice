@@ -70,7 +70,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
     Ok(json!({
-        "isValid": true,
         "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
@@ -140,7 +139,6 @@ pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
     let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
     verify_evaluation_key_share(&statement, &proof)?;
     Ok(json!({
-        "isValid": true,
         "operation": "verifyTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),

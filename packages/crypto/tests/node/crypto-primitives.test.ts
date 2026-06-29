@@ -555,7 +555,7 @@ describe('crypto primitive boundary', () => {
         ).rejects.toThrow(/storageAad/u);
     });
 
-    it('requires explicit signature expectation bindings unless unbound verification is requested', () => {
+    it('requires an explicit signature expectation binding to verify', () => {
         const profile = createMlDsaSignatureProfileFixture();
         const keyPair = createMlDsaKeyPairFixture('crypto-test-boundary');
         const signedRoot = createSignedRoot();
@@ -575,7 +575,7 @@ describe('crypto primitive boundary', () => {
         });
         expect(
             verifySignedObjectSignature(signature, {
-                allowUnboundVerification: true,
+                publicKeyHash: keyPair.publicKeyHash,
             }),
         ).toMatchObject({
             isValid: true,

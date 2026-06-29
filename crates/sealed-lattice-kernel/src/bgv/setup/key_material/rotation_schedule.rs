@@ -81,7 +81,6 @@ pub(super) fn selected_rotation_set() -> CanonicalResult<Value> {
         "objectType": "BgvRotationSet",
         "generatedFor": "direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing",
         "finalizedBy": "encrypted-aggregate-evaluator-closure",
-        "regeneratePassiveSetupKeysIfChanged": true,
         "rotations": rotations.clone(),
         "dependencies": [
             "direct-encrypted-ballot-aggregation",

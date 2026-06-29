@@ -54,7 +54,7 @@ const pollValidation = validatePollSpec({
     topOptionCount: 1,
 });
 
-if (!pollValidation.ok) {
+if (!pollValidation.isValid) {
     throw new Error(
         pollValidation.errors[0]?.message ?? "Invalid poll specification.",
     );

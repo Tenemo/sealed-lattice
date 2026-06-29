@@ -289,7 +289,6 @@ describe('transcript-core kernel in Node', () => {
         const commandResponse = {
             success: true,
             value: {
-                isValid: true,
                 operation: 'beginSetupProofMaterialTransportStream',
                 verificationId: 'same-secret-proof-0',
                 proofFamily: 'same-secret-linkage-anchor',

@@ -44,7 +44,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdParameters = deriveThresholdParameters({
                 rosterSize,
-                casualMicroRosterAcknowledged: rosterSize < 10,
+                isCasualMicroRosterAcknowledged: rosterSize < 10,
                 dynamicRosterParametersCertificateHash:
                     rosterSize >= 10 && rosterSize !== 10
                         ? dynamicRosterParametersCertificateHash
@@ -80,7 +80,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         (rosterSize) => {
             const thresholdParameters = deriveThresholdParameters({
                 rosterSize,
-                casualMicroRosterAcknowledged: true,
+                isCasualMicroRosterAcknowledged: true,
             });
             const secret = normalizeFieldElement(rosterSize * 23);
             const polynomial = createDeterministicPolynomial(

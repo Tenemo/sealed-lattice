@@ -9,7 +9,6 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
     let result = verify_local_trustee_setup_state_from_request(&request)
         .expect("local trustee setup state verification");
 
-    assert_eq!(result["isValid"], true);
     assert_eq!(result["operation"], "verifyLocalTrusteeSetupState");
     assert_eq!(result["trusteeIdentity"], "trustee-3");
     assert_eq!(result["trusteeRosterPosition"], 3);

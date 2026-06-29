@@ -223,7 +223,6 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
     Ok(json!({
-        "isValid": true,
         "operation": "verifyBgvPassiveSetupPackage",
         "acceptedHashes": [
             setup_package_hash,
@@ -234,8 +233,6 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             string_at_path(setup_package, &["evaluationKeys", "evaluationKeyRoot"])?,
             string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
         ],
-        "refusedObjects": [],
-        "unresolvedReason": null,
     }))
 }
 

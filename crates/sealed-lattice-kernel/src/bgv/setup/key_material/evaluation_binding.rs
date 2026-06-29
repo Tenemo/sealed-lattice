@@ -198,7 +198,6 @@ pub(super) fn evaluation_key_material_binding(
         "publicRlweSampleCount": total_digit_count(&selected_relinearization_levels()?)
             + rotation_schedule.iter().map(|entry| entry.level + 1).sum::<usize>(),
         "keyMaterialStreamHash": key_switch_stream_hash,
-        "genericKeySwitchApiExported": false,
     });
     let key_switch_key_root = derive_canonical_object_hash(&key_switch_key_record)?;
     let record = json!({
@@ -221,7 +220,6 @@ pub(super) fn evaluation_key_material_binding(
         "keySwitchKeyRoot": key_switch_key_root,
         "keySwitchStreamHash": key_switch_stream_hash,
         "sampledRelationChecks": sampled_relation_checks,
-        "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
     let material_hash = derive_canonical_object_hash(&record)?;
 

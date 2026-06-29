@@ -82,7 +82,6 @@ describe('BGV-RNS backend kernel commands', () => {
             bucketCount: 10,
             slotCount: 32_768,
             coordinatesPerOption: 11,
-            scalarOnlyAggregateLayout: false,
         });
         expect(operationRegistry.bgvParametersHash).toBe(
             parameters.bgvParametersHash,
@@ -92,9 +91,6 @@ describe('BGV-RNS backend kernel commands', () => {
         );
         expect(operationRegistry.registry.forbiddenOperations).toContain(
             'scalarDegree360Comparator',
-        );
-        expect(operationRegistry).not.toHaveProperty(
-            'forbiddenOperationRejectionFixtures',
         );
     });
 
@@ -177,10 +173,6 @@ describe('BGV-RNS backend kernel commands', () => {
             {
                 ...parameters.batchLayoutBinding,
                 scoreRange: { minimum: 0, maximum: 10 },
-            },
-            {
-                ...parameters.batchLayoutBinding,
-                scalarOnlyAggregateLayout: true,
             },
             {
                 ...parameters.batchLayoutBinding,

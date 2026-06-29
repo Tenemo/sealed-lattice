@@ -111,7 +111,6 @@ describe('collective BGV setup kernel commands', () => {
                 localStateCommitment,
             }),
         ).toMatchObject({
-            isValid: true,
             operation: 'verifyLocalTrusteeSetupState',
             trusteeIdentity: 'trustee-3',
             trusteeRosterPosition: 3,

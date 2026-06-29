@@ -13,11 +13,11 @@ describe('lifecycle transition validation', () => {
         'votingOpen',
         'votingClosed',
         'encryptedBallotsSelected',
-        'ballotProofsVerified',
-        'encryptedBallotAggregateComputed',
+        'isBallotProofsVerified',
+        'isEncryptedBallotAggregateComputed',
         'evaluatorReplayed',
         'targetFinalityReached',
-        'targetAccepted',
+        'isTargetAccepted',
         'decryptionPending',
         'decryptionSharesReady',
         'resultDecoded',
@@ -45,11 +45,11 @@ describe('lifecycle transition validation', () => {
             'votingOpen',
             'votingClosed',
             'encryptedBallotsSelected',
-            'ballotProofsVerified',
-            'encryptedBallotAggregateComputed',
+            'isBallotProofsVerified',
+            'isEncryptedBallotAggregateComputed',
             'evaluatorReplayed',
             'targetFinalityReached',
-            'targetAccepted',
+            'isTargetAccepted',
             'decryptionPending',
             'decryptionSharesReady',
             'resultDecoded',
@@ -72,7 +72,7 @@ describe('lifecycle transition validation', () => {
         expect(
             isValidLifecycleTransition({
                 from: 'resultDecoded',
-                to: 'targetAccepted',
+                to: 'isTargetAccepted',
             }),
         ).toBe(false);
 

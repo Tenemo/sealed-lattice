@@ -122,7 +122,6 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
         })?;
 
     Ok(json!({
-        "isValid": true,
         "operation": "deriveThresholdShareCommitments",
         "ringDegree": ring_degree,
         "ringDegreeStatus": ring_degree_status,
@@ -192,7 +191,6 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         })?;
 
     Ok(json!({
-        "isValid": true,
         "operation": "deriveThresholdShareCommitmentsFromTransport",
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
         "ringDegree": derivation.ring_degree,
@@ -272,7 +270,6 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
     );
 
     Ok(json!({
-        "isValid": true,
         "operation": "beginThresholdShareCommitmentsFromTransportStream",
         "derivationId": derivation_id,
         "materialBinaryFormat": VSS_MATERIAL_BINARY_FORMAT,
@@ -293,13 +290,11 @@ pub(crate) fn abort_threshold_share_commitment_transport_derivation_stream_reque
     let mut sessions = sessions.lock().map_err(|_| {
         invalid_threshold_commitment_input("transport derivation session store is unavailable")
     })?;
-    let aborted = sessions.remove(&derivation_id).is_some();
+    sessions.remove(&derivation_id);
 
     Ok(json!({
-        "isValid": true,
         "operation": "abortThresholdShareCommitmentsFromTransportStream",
         "derivationId": derivation_id,
-        "aborted": aborted,
     }))
 }
 
@@ -362,13 +357,11 @@ pub(crate) fn release_verified_transported_vss_material_request(
     let mut verified_materials = verified_materials.lock().map_err(|_| {
         invalid_threshold_commitment_input("verified material store is unavailable")
     })?;
-    let released = verified_materials.remove(&verification_id).is_some();
+    verified_materials.remove(&verification_id);
 
     Ok(json!({
-        "isValid": true,
         "operation": "releaseVerifiedTransportedVssMaterial",
         "verificationId": verification_id,
-        "released": released,
     }))
 }
 

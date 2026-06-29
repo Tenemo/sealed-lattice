@@ -167,8 +167,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "galoisKeyShareBatchRoots": galois_key_share_batch_roots,
         "galoisKeyRoots": galois_key_roots,
         "genericKeySwitchKeyRoots": [],
-        "rawKeyBytesEmbedded": false,
-        "verifierGeneratedKeyMaterial": false,
     });
     evaluation_keys["evaluationKeySetHash"] = serde_json::json!(
         derive_canonical_object_hash(&evaluation_keys).expect("evaluation key set hash")

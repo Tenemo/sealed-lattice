@@ -22,8 +22,8 @@ const createContext = (
 ): CapabilityContext => ({
     lifecycleState: 'draft',
     thresholdParameters,
-    pollSpecValid: true,
-    localRosterAccepted: true,
+    isPollSpecValid: true,
+    isLocalRosterAccepted: true,
     rosterExternalAcceptanceHash: 'accepted-roster-hash',
     actionContextRosterExternalAcceptanceHash: 'accepted-roster-hash',
     ...overrides,
@@ -33,11 +33,11 @@ const targetAcceptedContext = (
     overrides: Partial<CapabilityContext> = {},
 ): CapabilityContext =>
     createContext({
-        lifecycleState: 'targetAccepted',
+        lifecycleState: 'isTargetAccepted',
         thresholdParameters: certifiedThresholdParameters,
-        targetFinalityAccepted: true,
-        targetAccepted: true,
-        targetDecryptionCertificatePresent: true,
+        isTargetFinalityAccepted: true,
+        isTargetAccepted: true,
+        isTargetDecryptionCertificatePresent: true,
         ...overrides,
     });
 
@@ -48,11 +48,11 @@ describe('election foundation capability evaluator', () => {
                 'VerifyEncryptedBallotProofs',
                 createContext({
                     lifecycleState: 'votingClosed',
-                    localRosterAccepted: false,
+                    isLocalRosterAccepted: false,
                     setupCompleteCount:
                         thresholdParameters.setupCompletionQuorum,
                     turnoutCount: thresholdParameters.releaseQuorum,
-                    directProofTransportPresent: true,
+                    isDirectProofTransportPresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'LocalRosterNotAccepted' });
@@ -131,14 +131,14 @@ describe('election foundation capability evaluator', () => {
                     finalRosterHash: 'final-roster-hash',
                     frozenRosterParametersHash: 'threshold-parameters-hash',
                     lifecycleState: 'rosterFrozen',
-                    encryptedBallotLayoutFrozen: true,
-                    ballotValidityProofParametersFrozen: true,
-                    evaluatorReplayParametersFrozen: true,
-                    targetOutputLayoutFrozen: true,
-                    targetDecryptionParametersReferencePresent: true,
+                    isEncryptedBallotLayoutFrozen: true,
+                    isBallotValidityProofParametersFrozen: true,
+                    isEvaluatorReplayParametersFrozen: true,
+                    isTargetOutputLayoutFrozen: true,
+                    isTargetDecryptionParametersReferencePresent: true,
                     setupCompleteCount:
                         thresholdParameters.setupCompletionQuorum,
-                    trusteeSetupComplete: true,
+                    isTrusteeSetupComplete: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'OpenVoting' });
@@ -159,7 +159,7 @@ describe('election foundation capability evaluator', () => {
                     setupCompleteCount:
                         thresholdParameters.setupCompletionQuorum - 1,
                     turnoutCount: thresholdParameters.releaseQuorum,
-                    directProofTransportPresent: true,
+                    isDirectProofTransportPresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'setupIncomplete' });
@@ -171,7 +171,7 @@ describe('election foundation capability evaluator', () => {
                     setupCompleteCount:
                         thresholdParameters.setupCompletionQuorum,
                     turnoutCount: thresholdParameters.releaseQuorum - 1,
-                    directProofTransportPresent: true,
+                    isDirectProofTransportPresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'turnoutFloorNotReached' });
@@ -194,7 +194,7 @@ describe('election foundation capability evaluator', () => {
                     setupCompleteCount:
                         thresholdParameters.setupCompletionQuorum,
                     turnoutCount: thresholdParameters.releaseQuorum,
-                    directProofTransportPresent: true,
+                    isDirectProofTransportPresent: true,
                 }),
             ),
         ).toEqual({
@@ -214,8 +214,8 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'AggregateEncryptedBallots',
                 createContext({
-                    lifecycleState: 'ballotProofsVerified',
-                    ballotProofsVerified: false,
+                    lifecycleState: 'isBallotProofsVerified',
+                    isBallotProofsVerified: false,
                 }),
             ),
         ).toMatchObject({ reason: 'BallotProofsMissing' });
@@ -223,8 +223,8 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'AggregateEncryptedBallots',
                 createContext({
-                    lifecycleState: 'ballotProofsVerified',
-                    ballotProofsVerified: true,
+                    lifecycleState: 'isBallotProofsVerified',
+                    isBallotProofsVerified: true,
                 }),
             ),
         ).toEqual({
@@ -237,16 +237,16 @@ describe('election foundation capability evaluator', () => {
         expect(
             evaluateActionCapability(
                 'ReplayEvaluator',
-                createContext({ lifecycleState: 'ballotProofsVerified' }),
+                createContext({ lifecycleState: 'isBallotProofsVerified' }),
             ),
         ).toMatchObject({ reason: 'InvalidLifecycleState' });
         expect(
             evaluateActionCapability(
                 'ReplayEvaluator',
                 createContext({
-                    lifecycleState: 'encryptedBallotAggregateComputed',
-                    encryptedBallotAggregateComputed: false,
-                    mobileReplayEvidencePresent: true,
+                    lifecycleState: 'isEncryptedBallotAggregateComputed',
+                    isEncryptedBallotAggregateComputed: false,
+                    isMobileReplayEvidencePresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'EncryptedBallotAggregateMissing' });
@@ -254,9 +254,9 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'ReplayEvaluator',
                 createContext({
-                    lifecycleState: 'encryptedBallotAggregateComputed',
-                    encryptedBallotAggregateComputed: true,
-                    mobileReplayEvidencePresent: false,
+                    lifecycleState: 'isEncryptedBallotAggregateComputed',
+                    isEncryptedBallotAggregateComputed: true,
+                    isMobileReplayEvidencePresent: false,
                 }),
             ),
         ).toMatchObject({ reason: 'MissingMobileReplayEvidence' });
@@ -264,9 +264,9 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'ReplayEvaluator',
                 createContext({
-                    lifecycleState: 'encryptedBallotAggregateComputed',
-                    encryptedBallotAggregateComputed: true,
-                    mobileReplayEvidencePresent: true,
+                    lifecycleState: 'isEncryptedBallotAggregateComputed',
+                    isEncryptedBallotAggregateComputed: true,
+                    isMobileReplayEvidencePresent: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'ReplayEvaluator' });
@@ -277,7 +277,7 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'AcceptTarget',
                 createContext({
-                    lifecycleState: 'encryptedBallotAggregateComputed',
+                    lifecycleState: 'isEncryptedBallotAggregateComputed',
                 }),
             ),
         ).toMatchObject({ reason: 'InvalidLifecycleState' });
@@ -286,7 +286,7 @@ describe('election foundation capability evaluator', () => {
                 'AcceptTarget',
                 createContext({
                     lifecycleState: 'evaluatorReplayed',
-                    evaluatorReplaySucceeded: true,
+                    isEvaluatorReplaySucceeded: true,
                 }),
             ),
         ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
@@ -295,7 +295,7 @@ describe('election foundation capability evaluator', () => {
                 'AcceptTarget',
                 createContext({
                     lifecycleState: 'targetFinalityReached',
-                    targetFinalityAccepted: true,
+                    isTargetFinalityAccepted: true,
                 }),
             ),
         ).toMatchObject({ reason: 'EvaluatorReplayMissing' });
@@ -304,8 +304,8 @@ describe('election foundation capability evaluator', () => {
                 'AcceptTarget',
                 createContext({
                     lifecycleState: 'targetFinalityReached',
-                    targetFinalityAccepted: true,
-                    evaluatorReplaySucceeded: true,
+                    isTargetFinalityAccepted: true,
+                    isEvaluatorReplaySucceeded: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });
@@ -321,15 +321,15 @@ describe('election foundation capability evaluator', () => {
         expect(
             evaluateActionCapability(
                 'CreateTargetBoundDecryptionShare',
-                createContext({ lifecycleState: 'targetAccepted' }),
+                createContext({ lifecycleState: 'isTargetAccepted' }),
             ),
         ).toMatchObject({ reason: 'TargetFinalityCheckpointMissing' });
         expect(
             evaluateActionCapability(
                 'CreateTargetBoundDecryptionShare',
                 createContext({
-                    lifecycleState: 'targetAccepted',
-                    targetFinalityAccepted: true,
+                    lifecycleState: 'isTargetAccepted',
+                    isTargetFinalityAccepted: true,
                 }),
             ),
         ).toMatchObject({ reason: 'TargetNotAccepted' });
@@ -337,9 +337,9 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'CreateTargetBoundDecryptionShare',
                 createContext({
-                    lifecycleState: 'targetAccepted',
-                    targetFinalityAccepted: true,
-                    targetAccepted: true,
+                    lifecycleState: 'isTargetAccepted',
+                    isTargetFinalityAccepted: true,
+                    isTargetAccepted: true,
                 }),
             ),
         ).toMatchObject({ reason: 'TargetDecryptionParametersNotCertified' });
@@ -347,7 +347,7 @@ describe('election foundation capability evaluator', () => {
             evaluateActionCapability(
                 'CreateTargetBoundDecryptionShare',
                 targetAcceptedContext({
-                    targetDecryptionCertificatePresent: false,
+                    isTargetDecryptionCertificatePresent: false,
                 }),
             ),
         ).toMatchObject({ reason: 'MissingTargetDecryptionCertificate' });
@@ -388,7 +388,7 @@ describe('election foundation capability evaluator', () => {
                     thresholdParameters,
                     decryptionShareCount:
                         thresholdParameters.decryptionThreshold,
-                    targetDecryptionCertificatePresent: true,
+                    isTargetDecryptionCertificatePresent: true,
                 }),
             ),
         ).toMatchObject({
@@ -403,7 +403,7 @@ describe('election foundation capability evaluator', () => {
                     decryptionShareCount:
                         (certifiedThresholdParameters.decryptionShareQuorum ??
                             0) - 1,
-                    targetDecryptionCertificatePresent: true,
+                    isTargetDecryptionCertificatePresent: true,
                 }),
             ),
         ).toMatchObject({ reason: 'FirstThresholdSharesNotReached' });
@@ -426,7 +426,7 @@ describe('election foundation capability evaluator', () => {
                     thresholdParameters: certifiedThresholdParameters,
                     decryptionShareCount:
                         certifiedThresholdParameters.decryptionShareQuorum ?? 0,
-                    targetDecryptionCertificatePresent: true,
+                    isTargetDecryptionCertificatePresent: true,
                 }),
             ),
         ).toEqual({
@@ -442,8 +442,8 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
                     thresholdParameters: certifiedThresholdParameters,
-                    targetFinalityAccepted: true,
-                    targetAccepted: true,
+                    isTargetFinalityAccepted: true,
+                    isTargetAccepted: true,
                     decryptionShareCount:
                         certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
@@ -455,9 +455,9 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
                     thresholdParameters: certifiedThresholdParameters,
-                    targetFinalityAccepted: true,
-                    targetAccepted: true,
-                    targetDecryptionParametersVerified: true,
+                    isTargetFinalityAccepted: true,
+                    isTargetAccepted: true,
+                    isTargetDecryptionParametersVerified: true,
                     decryptionShareCount:
                         certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
@@ -469,10 +469,10 @@ describe('election foundation capability evaluator', () => {
                 createContext({
                     lifecycleState: 'decryptionSharesReady',
                     thresholdParameters: certifiedThresholdParameters,
-                    targetFinalityAccepted: true,
-                    targetAccepted: true,
-                    targetDecryptionParametersVerified: true,
-                    targetDecryptionClosureApplied: true,
+                    isTargetFinalityAccepted: true,
+                    isTargetAccepted: true,
+                    isTargetDecryptionParametersVerified: true,
+                    isTargetDecryptionClosureApplied: true,
                     decryptionShareCount:
                         certifiedThresholdParameters.decryptionShareQuorum ?? 0,
                 }),
@@ -484,7 +484,7 @@ describe('election foundation capability evaluator', () => {
         'no longer gates target acceptance on roster certification: casual micro-roster size %d and certified dynamic rosters both pass',
         (rosterSize) => {
             const casualThresholdParameters = deriveThresholdParameters({
-                casualMicroRosterAcknowledged: true,
+                isCasualMicroRosterAcknowledged: true,
                 rosterSize,
             });
             const dynamicThresholdParameters = deriveThresholdParameters({
@@ -499,8 +499,8 @@ describe('election foundation capability evaluator', () => {
                     createContext({
                         lifecycleState: 'targetFinalityReached',
                         thresholdParameters: casualThresholdParameters,
-                        targetFinalityAccepted: true,
-                        evaluatorReplaySucceeded: true,
+                        isTargetFinalityAccepted: true,
+                        isEvaluatorReplaySucceeded: true,
                     }),
                 ),
             ).toEqual({ allowed: true, action: 'AcceptTarget' });
@@ -511,8 +511,8 @@ describe('election foundation capability evaluator', () => {
                     createContext({
                         lifecycleState: 'targetFinalityReached',
                         thresholdParameters: dynamicThresholdParameters,
-                        targetFinalityAccepted: true,
-                        evaluatorReplaySucceeded: true,
+                        isTargetFinalityAccepted: true,
+                        isEvaluatorReplaySucceeded: true,
                     }),
                 ),
             ).toEqual({ allowed: true, action: 'AcceptTarget' });
@@ -525,9 +525,9 @@ describe('election foundation capability evaluator', () => {
                 'AcceptTarget',
                 createContext({
                     lifecycleState: 'targetFinalityReached',
-                    targetFinalityAccepted: true,
-                    evaluatorReplaySucceeded: true,
-                    runtimeParametersSupported: false,
+                    isTargetFinalityAccepted: true,
+                    isEvaluatorReplaySucceeded: true,
+                    isRuntimeParametersSupported: false,
                 }),
             ),
         ).toMatchObject({ reason: 'OutsideMeasuredRuntimeParameters' });
@@ -537,8 +537,8 @@ describe('election foundation capability evaluator', () => {
                 'AcceptTarget',
                 createContext({
                     lifecycleState: 'targetFinalityReached',
-                    targetFinalityAccepted: true,
-                    evaluatorReplaySucceeded: true,
+                    isTargetFinalityAccepted: true,
+                    isEvaluatorReplaySucceeded: true,
                 }),
             ),
         ).toEqual({ allowed: true, action: 'AcceptTarget' });

@@ -20,7 +20,6 @@ const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
 export type SignatureExpectation = {
-    readonly allowUnboundVerification?: boolean;
     readonly objectType?: SignedObjectType;
     readonly objectVersion?: number;
     readonly signerRole?: SignerRole;
@@ -508,10 +507,7 @@ const verifySignedObjectSignatureInner = (
         return shapeFailure;
     }
 
-    if (
-        expectation.allowUnboundVerification !== true &&
-        !hasExplicitSignatureExpectationBinding(expectation)
-    ) {
+    if (!hasExplicitSignatureExpectationBinding(expectation)) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature verification requires explicit expectation bindings.',

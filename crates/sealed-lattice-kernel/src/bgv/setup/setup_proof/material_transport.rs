@@ -113,7 +113,6 @@ pub(crate) fn begin_setup_proof_material_transport_stream_request(
     );
 
     Ok(json!({
-        "isValid": true,
         "operation": "beginSetupProofMaterialTransportStream",
         "verificationId": verification_id,
         "proofFamily": header.proof_family,
@@ -595,7 +594,6 @@ fn absorb_setup_proof_material_transport_stream_chunk(
     session.next_chunk_index += 1;
 
     Ok(json!({
-        "isValid": true,
         "operation": "absorbSetupProofMaterialTransportStreamChunk",
         "absorbedChunkIndex": chunk_index,
         "nextChunkIndex": session.next_chunk_index,
@@ -715,7 +713,6 @@ fn finish_setup_proof_material_transport_stream(
         );
 
     Ok(json!({
-        "isValid": true,
         "operation": "finishSetupProofMaterialTransportStream",
         "verificationId": verification_id,
         "proofFamily": session.header.proof_family,

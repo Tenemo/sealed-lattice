@@ -23,7 +23,6 @@ pub(crate) fn target_layout_hash(option_count: usize) -> CanonicalResult<String>
         "optionCount": option_count,
         "targetIdSlotRule": "(option + 1) * [rank < topCount]",
         "targetOrderSlotRule": "(rank + 1) * [rank < topCount]",
-        "intermediateOpeningsAllowed": false,
         "slotCount": POLYNOMIAL_DEGREE,
     }))
 }

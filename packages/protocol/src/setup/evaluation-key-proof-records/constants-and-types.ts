@@ -355,7 +355,6 @@ export type TrusteeEvaluationKeyStatementContext = Readonly<{
 }>;
 
 export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
-    readonly isValid: true;
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
@@ -455,8 +454,6 @@ export type PublicEvaluationKeySet = Readonly<
         readonly galoisKeyShareBatchRoots: readonly GaloisKeyShareBatchRootReference[];
         readonly galoisKeyRoots: readonly GaloisKeyRootReference[];
         readonly genericKeySwitchKeyRoots: readonly ProtocolHash[];
-        readonly rawKeyBytesEmbedded: false;
-        readonly verifierGeneratedKeyMaterial: false;
         readonly publicEvaluationKeyMaterialEncoding?: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
         readonly publicEvaluationKeyMaterialChunkSizeBytes?: number;

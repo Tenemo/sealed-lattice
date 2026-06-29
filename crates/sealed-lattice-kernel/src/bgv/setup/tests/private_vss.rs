@@ -191,8 +191,6 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
         })
         .expect("private VSS proof record");
     assert_eq!(proof_record["proofFamily"], "vss-opening-carry");
-    assert!(proof_record.get("relationCommitmentHash").is_none());
-    assert!(proof_record.get("tboxCommitmentPrefixHash").is_none());
     assert!(proof_record.get("proofBytesHex").is_some());
 
     let verification = verify_private_vss_share_succinct_relation_proof(

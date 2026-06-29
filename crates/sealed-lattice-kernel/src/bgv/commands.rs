@@ -494,7 +494,7 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "e1ee6ae0c273b721b8a264351e321ce1aa48c918e68be4a70124ff955341a4057a0a828d30f28821270d043d60988cd16fbaf03b51e3b53d617a9f4fccff733d"
+            "e5d8f3f60bdf809eafd51ae4e6992b51451196aa3f9a31effdf4622a93fa101c74a0fcdcb098ff9444fb2eba6cd7ffe75213a061a513f0f24d04b19f5673e3ac"
         );
 
         let ciphertext =
@@ -505,7 +505,7 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "13b81ddfad714f9d2acfbea317fc2903a6fb923cdd896249bccb6d16fa34f23074fd1227ce54462b9090812b31ecc7ab3c9340ad7a9d754924ac4c8c5c25debd"
+            "acd57d646cf4f044a0442f5e5ccc82163b119d1e9ca0e133957a4ad59d376f0f3badb56bcf8e1d51ff4d48c62350499a7ca0bd0c0a405aba88d64e9bee1c542b"
         );
 
         let base_conversion =
@@ -515,11 +515,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "931f921d820dda486c015b4ce487cb8782382cf61b9dde136cf0c7799ecb486086bd1dc383514dee5bd1caf4113cd5e83e41d03a4645e2559d47473dc33d7078"
+            "76ce2f1da7d1ab3b2e3678f303547a87de7768e60e65279ca1fd9603cb5d2605927b32c289208bc38a3d9fd00816fbdfba6853d9c17f8e7c652ca72ef7eb756b"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "f665c828ebaaccd684dc53aeedbeed9ae31e1aa44e3008df6526ffc6517a7bb4120258c68b00ede7543cd3c1573b31b391b26e512a401bbad6761979e15d5fe0"
+            "fcb46f1e37b689314bec81be9aec0ad25c4de119ea982a74e266c25b04382badf58d6f7fc276e49d9256997af1ba66de54cc22f5ad3e5827c11dade0f5de2bfe"
         );
     }
 

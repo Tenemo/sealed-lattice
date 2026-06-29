@@ -310,8 +310,6 @@ export function createPublicEvaluationKeySet(
         galoisKeyShareBatchRoots,
         galoisKeyRoots,
         genericKeySwitchKeyRoots: [],
-        rawKeyBytesEmbedded: false,
-        verifierGeneratedKeyMaterial: false,
         ...(input.publicEvaluationKeyMaterialReference ?? {}),
     } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
 

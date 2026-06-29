@@ -32,7 +32,7 @@ const pollSpec = {
 const expectFeasibleThresholds = (rosterSize: number): void => {
     const decryptionThreshold = Math.floor(rosterSize / 3) + 1;
     const thresholdParameters = deriveThresholdParameters({
-        casualMicroRosterAcknowledged: rosterSize < 10,
+        isCasualMicroRosterAcknowledged: rosterSize < 10,
         dynamicRosterParametersCertificateHash:
             rosterSize >= 10 && rosterSize !== 10
                 ? dynamicRosterParametersCertificateHash
@@ -160,7 +160,7 @@ describe('election foundation threshold parameters', () => {
         'marks acknowledged roster size $rosterSize as a casual micro-roster',
         ({ rosterSize, threshold }) => {
             const thresholdParameters = deriveThresholdParameters({
-                casualMicroRosterAcknowledged: true,
+                isCasualMicroRosterAcknowledged: true,
                 rosterSize,
             });
 

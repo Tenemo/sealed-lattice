@@ -288,7 +288,6 @@ pub(super) fn direct_ballot_evaluator_replay_context_hash(
         "bgvParametersHash": bgv_parameters_hash()?,
         "evaluationKeyMaterial": evaluation_key_material,
         "targetLayoutHash": input.target_layout_hash,
-        "intermediateOpeningsAllowed": false,
     }))
 }
 

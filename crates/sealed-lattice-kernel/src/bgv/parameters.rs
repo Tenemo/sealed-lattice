@@ -52,10 +52,6 @@ pub(crate) fn bgv_parameters_value() -> Value {
         "bucketCount": 10,
         "coordinatesPerOption": 11,
         "slotCount": POLYNOMIAL_DEGREE,
-        "scalarOnlyAggregateLayout": false,
-        "rejectScalarOnlyAggregateLayouts": true,
-        "coefficientDomainOnly": true,
-        "lattigoSerializationAccepted": false,
         "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
         "forbiddenOperations": FORBIDDEN_EVALUATOR_OPERATIONS,
     })
@@ -76,7 +72,6 @@ pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
         "bucketCount": 10,
         "slotCount": POLYNOMIAL_DEGREE,
         "coordinatesPerOption": 11,
-        "scalarOnlyAggregateLayout": false,
     }))
 }
 
@@ -337,7 +332,6 @@ mod tests {
     fn batch_layout_binding_rejects_scalar_only_layouts_by_construction() {
         let binding = batch_layout_binding_value().expect("layout binding");
 
-        assert_eq!(binding["scalarOnlyAggregateLayout"], false);
         assert_eq!(binding["bucketCount"], 10);
         assert_eq!(binding["slotCount"], POLYNOMIAL_DEGREE);
         assert_eq!(binding["coordinatesPerOption"], 11);

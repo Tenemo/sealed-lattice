@@ -12,28 +12,28 @@ const transitionMap = {
     votingOpen: ['votingClosed', 'forkDetected'],
     votingClosed: ['encryptedBallotsSelected', 'forkDetected'],
     encryptedBallotsSelected: [
-        'ballotProofsVerified',
+        'isBallotProofsVerified',
         'pending',
         'forkDetected',
     ],
-    ballotProofsVerified: [
-        'encryptedBallotAggregateComputed',
+    isBallotProofsVerified: [
+        'isEncryptedBallotAggregateComputed',
         'pending',
         'forkDetected',
     ],
-    encryptedBallotAggregateComputed: [
+    isEncryptedBallotAggregateComputed: [
         'evaluatorReplayed',
         'pending',
         'forkDetected',
     ],
     evaluatorReplayed: ['targetFinalityReached', 'pending', 'forkDetected'],
     targetFinalityReached: [
-        'targetAccepted',
+        'isTargetAccepted',
         'outsideSupportedParameters',
         'pending',
         'forkDetected',
     ],
-    targetAccepted: ['decryptionPending', 'forkDetected'],
+    isTargetAccepted: ['decryptionPending', 'forkDetected'],
     decryptionPending: ['decryptionSharesReady', 'pending', 'forkDetected'],
     decryptionSharesReady: [
         'resultDecoded',

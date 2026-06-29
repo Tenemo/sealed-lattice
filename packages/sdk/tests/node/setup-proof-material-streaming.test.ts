@@ -166,13 +166,11 @@ describe('setup proof material streaming in the public package', () => {
                     );
 
                     return {
-                        isValid: true,
                         operation: 'beginSetupProofMaterialTransportStream',
                     };
                 },
             ),
             absorbSetupProofMaterialTransportStreamChunk: vi.fn(() => ({
-                isValid: true,
                 operation: 'absorbSetupProofMaterialTransportStreamChunk',
             })),
             finishSetupProofMaterialTransportStream: vi.fn(
@@ -184,7 +182,6 @@ describe('setup proof material streaming in the public package', () => {
                             );
 
                         return {
-                            isValid: true,
                             operation:
                                 'finishSetupProofMaterialTransportStream',
                             verifiedSetupProofMaterial: {

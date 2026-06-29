@@ -77,7 +77,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         });
 
         expect(verification).toMatchObject({
-            isValid: true,
             operation: 'verifyBgvPassiveSetupPackage',
         });
     });

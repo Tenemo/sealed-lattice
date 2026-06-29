@@ -201,7 +201,6 @@ mod tests {
             "ringDegree": TEST_RING_DEGREE,
         }))?;
 
-        assert_eq!(response["isValid"], true);
         assert_eq!(response["operation"], "computeSetupCommitmentFromOpening");
         assert_eq!(
             response["commitmentRoot"]

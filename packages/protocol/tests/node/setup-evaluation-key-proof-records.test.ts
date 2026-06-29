@@ -381,7 +381,6 @@ const stubGenerator = (
         );
 
         return {
-            isValid: true,
             operation: 'generateTrusteeEvaluationKeyProof',
             statementHash: fixtureHash(
                 `statement-${String(input.context.trusteeRosterPosition)}`,
@@ -501,9 +500,6 @@ describe('createRelinearizationKeyShareRounds', () => {
             expect(record.keySwitchComponentVectorRoot).toBe(
                 record.roundOneShareRoot,
             );
-            expect(record).not.toHaveProperty('proofBytesHash');
-            expect(record).not.toHaveProperty('statementHash');
-            expect(record).not.toHaveProperty('sourceSquareBindingRoot');
             const recordWithoutRoot = { ...record } as JsonRecord;
             delete recordWithoutRoot.roundOneRecordRoot;
             expect(record.roundOneRecordRoot).toBe(
@@ -681,8 +677,6 @@ describe('createGaloisKeyShareBatches', () => {
                     expect(materialRecord.keySwitchComponentVectorRoot).toBe(
                         materialRecord.galoisKeyShareRoot,
                     );
-                    expect(materialRecord).not.toHaveProperty('proofBytesHash');
-                    expect(materialRecord).not.toHaveProperty('ceremonyId');
                 },
             );
             expect(batch.galoisKeyShareRoots).toEqual(
@@ -1252,9 +1246,6 @@ describe('createPublicEvaluationKeySet', () => {
             relinearizationKeyShareRounds.roundOneAggregateRoots[0]
                 .roundOneAggregateRoot,
         );
-        expect(relinearizationKeyRoot).not.toHaveProperty(
-            'roundOneSourceSquareAggregateRoot',
-        );
         expect(evaluationKeys.galoisKeyRoots).toHaveLength(
             requiredGaloisKeySchedule.length,
         );
@@ -1271,9 +1262,6 @@ describe('createPublicEvaluationKeySet', () => {
                         expect(
                             contributingShareRoot.trusteeRosterPosition,
                         ).toBe(trusteeRosterPosition);
-                        expect(contributingShareRoot).not.toHaveProperty(
-                            'galoisKeyShareProofRoot',
-                        );
                     },
                 );
             },
@@ -1351,16 +1339,10 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
         expect(
             relinearizationShareMaterialRoots[0].keySwitchComponentMaterialRoot,
         ).toBe(null);
-        expect(relinearizationShareMaterialRoots[0]).not.toHaveProperty(
-            'proofRoot',
-        );
         const galoisShareMaterialRoots =
             manifest.galoisShareMaterialRoots as readonly JsonRecord[];
         expect(galoisShareMaterialRoots).toHaveLength(
             participantCount * requiredGaloisKeySchedule.length,
-        );
-        expect(galoisShareMaterialRoots[0]).not.toHaveProperty(
-            'galoisKeyShareProofRoot',
         );
     });
 

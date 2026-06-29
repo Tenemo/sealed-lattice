@@ -87,7 +87,6 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
     }
 
     Ok(json!({
-        "isValid": true,
         "operation": "verifyLocalTrusteeSetupState",
         "trusteeIdentity": string_field(local_state, "trusteeIdentity")?,
         "trusteeRosterPosition": trustee_roster_position,

@@ -651,7 +651,6 @@ export type RestoreLocalTrusteeSetupStateInput = Readonly<{
 }>;
 
 export type LocalTrusteeSetupStateVerification = Readonly<{
-    readonly isValid: true;
     readonly operation: 'verifyLocalTrusteeSetupState';
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
@@ -664,7 +663,6 @@ export type LocalTrusteeSetupStateVerification = Readonly<{
 }>;
 
 export type RestoredLocalTrusteeSetupState = Readonly<{
-    readonly isValid: true;
     readonly operation: 'restoreLocalTrusteeSetupState';
     readonly localStateCommitment: LocalTrusteeSetupStateCommitment;
     readonly sealedLocalStatePayload: LocalTrusteeSetupStateSealedPayload;
@@ -1090,7 +1088,6 @@ export const restoreLocalTrusteeSetupState = async (
     assertRestoredLocalStateBindings(input, sealedLocalStatePayload);
 
     return {
-        isValid: true,
         operation: 'restoreLocalTrusteeSetupState',
         localStateCommitment: input.localStateCommitment,
         sealedLocalStatePayload,

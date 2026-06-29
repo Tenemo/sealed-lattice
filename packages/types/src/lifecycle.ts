@@ -32,7 +32,7 @@ export type ThresholdParametersInput = {
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
     readonly targetBoundShareSelectionParameters?: TargetBoundShareSelectionParameters;
     readonly dynamicRosterParametersCertificateHash?: ProtocolHash;
-    readonly casualMicroRosterAcknowledged?: boolean;
+    readonly isCasualMicroRosterAcknowledged?: boolean;
 };
 
 /** Roster parameters classification for the derived threshold parameters. */
@@ -168,11 +168,11 @@ export type LifecycleState =
     | 'votingOpen'
     | 'votingClosed'
     | 'encryptedBallotsSelected'
-    | 'ballotProofsVerified'
-    | 'encryptedBallotAggregateComputed'
+    | 'isBallotProofsVerified'
+    | 'isEncryptedBallotAggregateComputed'
     | 'evaluatorReplayed'
     | 'targetFinalityReached'
-    | 'targetAccepted'
+    | 'isTargetAccepted'
     | 'decryptionPending'
     | 'decryptionSharesReady'
     | 'resultDecoded'
@@ -224,33 +224,32 @@ export type RecoveryState =
 export type CapabilityContext = {
     readonly lifecycleState: LifecycleState;
     readonly thresholdParameters: ThresholdParameters;
-    readonly pollSpecValid: boolean;
+    readonly isPollSpecValid: boolean;
     readonly finalRosterHash?: ProtocolHash;
     readonly frozenRosterParametersHash?: ProtocolHash;
-    readonly trusteeSetupComplete?: boolean;
-    readonly encryptedBallotLayoutFrozen?: boolean;
-    readonly ballotValidityProofParametersFrozen?: boolean;
-    readonly evaluatorReplayParametersFrozen?: boolean;
-    readonly targetOutputLayoutFrozen?: boolean;
-    readonly targetDecryptionParametersReferencePresent?: boolean;
-    readonly localRosterAccepted?: boolean;
+    readonly isTrusteeSetupComplete?: boolean;
+    readonly isEncryptedBallotLayoutFrozen?: boolean;
+    readonly isBallotValidityProofParametersFrozen?: boolean;
+    readonly isEvaluatorReplayParametersFrozen?: boolean;
+    readonly isTargetOutputLayoutFrozen?: boolean;
+    readonly isTargetDecryptionParametersReferencePresent?: boolean;
+    readonly isLocalRosterAccepted?: boolean;
     readonly rosterExternalAcceptanceHash?: ProtocolHash;
     readonly actionContextRosterExternalAcceptanceHash?: ProtocolHash | null;
     readonly setupCompleteCount?: number;
     readonly turnoutCount?: number;
     readonly decryptionShareCount?: number;
-    readonly ballotProofsVerified?: boolean;
-    readonly encryptedBallotAggregateComputed?: boolean;
-    readonly evaluatorReplaySucceeded?: boolean;
-    readonly targetFinalityAccepted?: boolean;
-    readonly targetAccepted?: boolean;
-    readonly targetDecryptionParametersVerified?: boolean;
-    readonly runtimeParametersSupported?: boolean;
-    readonly directProofTransportPresent?: boolean;
-    readonly mobileReplayEvidencePresent?: boolean;
-    readonly targetDecryptionCertificatePresent?: boolean;
-    readonly targetDecryptionClosureApplied?: boolean;
-    readonly activeMaliciousClosureApplied?: boolean;
+    readonly isBallotProofsVerified?: boolean;
+    readonly isEncryptedBallotAggregateComputed?: boolean;
+    readonly isEvaluatorReplaySucceeded?: boolean;
+    readonly isTargetFinalityAccepted?: boolean;
+    readonly isTargetAccepted?: boolean;
+    readonly isTargetDecryptionParametersVerified?: boolean;
+    readonly isRuntimeParametersSupported?: boolean;
+    readonly isDirectProofTransportPresent?: boolean;
+    readonly isMobileReplayEvidencePresent?: boolean;
+    readonly isTargetDecryptionCertificatePresent?: boolean;
+    readonly isTargetDecryptionClosureApplied?: boolean;
     readonly recoveryState?: RecoveryState;
 };
 

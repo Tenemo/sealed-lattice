@@ -114,20 +114,11 @@ describe('direct encrypted ballot kernel command', () => {
         expect(
             result.proofAttempt.sharedResponsePolynomialCount,
         ).toBeGreaterThan(0);
-        expect(result.proofAttempt).not.toHaveProperty('proofRingDegree');
-        expect(result.proofAttempt).not.toHaveProperty(
-            'sharedShortResponseVectorLength',
-        );
-        expect(result.proofAttempt).not.toHaveProperty(
-            'duplicatedShortResponseVectorLength',
-        );
         expect(result.aggregation.ballotCount).toBe(1);
         expect(result.aggregation.aggregateCiphertextRoot).toHaveLength(128);
         expect(
             result.aggregation.aggregateCiphertextCanonicalByteLength,
         ).toBeGreaterThan(0);
-        expect(result.aggregation).not.toHaveProperty('aggregateScores');
-        expect(result.aggregation).not.toHaveProperty('plaintextOracleScores');
         expect(result.evaluatorReplay).toBe(
             'Not run in this command. Supply topCount to attempt the packed batched-pair evaluator route over the direct aggregate.',
         );

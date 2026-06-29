@@ -265,7 +265,6 @@ pub(crate) fn compute_setup_commitment_from_opening_request(
     let coefficient_vector_hash = public_commitment_coefficient_vector_hash512(&commitment);
 
     Ok(json!({
-        "isValid": true,
         "operation": "computeSetupCommitmentFromOpening",
         "commitment": setup_commitment_full_value(&commitment),
         "commitmentRoot": commitment_root,

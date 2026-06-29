@@ -81,8 +81,6 @@ pub(super) fn evaluation_key_size_certificate(evaluation_keys: &Value) -> Canoni
         "totalEvaluationKeyByteEstimate": total_evaluation_key_bytes,
         "chunkingStrategy": {
             "chunkSizeBytes": 262144,
-            "chunkRootRequired": true,
-            "streamingVerificationRequired": true
         },
     }))
 }
@@ -101,8 +99,6 @@ pub(super) fn evaluation_key_streaming_commitment(
         "evaluationKeyMaterialCommitmentHash": evaluation_keys["evaluationKeyMaterialCommitmentHash"],
         "evaluationKeyMaterialCommitment": evaluation_keys["evaluationKeyMaterialCommitment"],
         "serializationPolicy": "sealed-lattice-canonical-json-evaluation-key-material-commitment-stream",
-        "streamCommitmentEvidence": true,
-        "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
     let stream_bytes = canonical_json(&stream_record)?.into_bytes();
     let chunk_root_value = chunk_root(&stream_bytes, EVALUATION_KEY_CHUNK_SIZE_BYTES)?;
@@ -114,8 +110,6 @@ pub(super) fn evaluation_key_streaming_commitment(
         "chunkSizeBytes": EVALUATION_KEY_CHUNK_SIZE_BYTES,
         "chunkRoot": chunk_root_value,
         "chunkCount": stream_bytes.len().div_ceil(EVALUATION_KEY_CHUNK_SIZE_BYTES),
-        "streamCommitmentEvidence": true,
-        "fullCoefficientStreamMaterializedInSetupPackage": false,
     });
     let commitment_hash = derive_canonical_object_hash(&commitment_record)?;
 

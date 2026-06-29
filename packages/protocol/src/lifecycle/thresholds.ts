@@ -183,7 +183,7 @@ const deriveRosterParameters = (
         );
 
     if (rosterSize < minimumDynamicRosterSize) {
-        if (input.casualMicroRosterAcknowledged !== true) {
+        if (input.isCasualMicroRosterAcknowledged !== true) {
             throw new Error(
                 'Casual micro-roster parameter sets require explicit acknowledgement.',
             );
@@ -385,7 +385,7 @@ export const deriveFrozenRosterParameters = (input: {
 
     const thresholdParameters = deriveThresholdParameters({
         rosterSize,
-        casualMicroRosterAcknowledged: rosterSize < minimumDynamicRosterSize,
+        isCasualMicroRosterAcknowledged: rosterSize < minimumDynamicRosterSize,
         dynamicRosterParametersCertificateHash:
             dynamicRosterParametersCertificateHash ?? undefined,
         heBackendCorruptionModel: input.heBackendCorruptionModel,

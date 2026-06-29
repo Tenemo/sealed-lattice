@@ -983,8 +983,6 @@ fn setup_proof_parameters_value() -> CanonicalResult<Value> {
                 "transportRootStatus": "embedded-and-binary-chunked-proof-material-roots-bind-proof-size-bytes-proof-bytes-hash-and-statement-hash"
             },
             "chunking": "required-for-large-proof-material",
-            "chunkRootRequired": true,
-            "statementRootRequired": true,
             "canonicalJsonRole": "root-bound metadata only"
         },
         "verificationPolicy": {

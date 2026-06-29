@@ -696,10 +696,7 @@ export const createTrusteeEvaluationKeyProofs = (
             proofRandomnessSeedHex,
             proofRandomnessNonceHex,
         });
-        if (
-            generatedProof.isValid !== true ||
-            generatedProof.operation !== 'generateTrusteeEvaluationKeyProof'
-        ) {
+        if (generatedProof.operation !== 'generateTrusteeEvaluationKeyProof') {
             throw new Error(
                 'trusteeEvaluationKeyProofGenerator returned the wrong operation.',
             );
