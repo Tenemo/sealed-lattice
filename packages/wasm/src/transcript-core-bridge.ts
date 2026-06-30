@@ -14,6 +14,7 @@ export type {
     BgvCompactVssCommitmentOpeningInput,
     BgvCompactVssCommitmentBodyMetadata,
     BgvLocalTrusteeSetupStateVerification,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofStatement,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvObjectValidation,

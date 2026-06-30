@@ -448,6 +448,18 @@ impl CompactVssShareLinkageStatement {
         1 + self.additional_linkage_items.len()
     }
 
+    pub(crate) fn packed_item_lane_count(&self) -> usize {
+        self.item_count().next_power_of_two()
+    }
+
+    pub(crate) fn packed_ring_degree(&self, ring_degree: usize) -> CanonicalResult<usize> {
+        ring_degree
+            .checked_mul(self.packed_item_lane_count())
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof("compact VSS packed ring degree overflowed")
+            })
+    }
+
     fn append_coefficient_witness_slots(
         slots: &mut Vec<CompactVssCoefficientWitnessSlot>,
         slot_indices_by_item: &mut Vec<Vec<usize>>,
@@ -515,30 +527,31 @@ impl CompactVssShareLinkageStatement {
         self.coefficient_witness_slot_layout().0
     }
 
-    pub(crate) fn message_bounds(&self) -> Vec<u64> {
-        let mut bounds = self
-            .coefficient_witness_slots()
-            .into_iter()
-            .map(|slot| slot.source_message_modulus)
-            .collect::<Vec<_>>();
-        bounds.push(self.source_message_modulus);
-        bounds.extend(
-            self.additional_linkage_items
-                .iter()
-                .map(|item| item.source_message_modulus),
-        );
-
-        bounds
+    pub(crate) fn maximum_coefficient_commitment_count(&self) -> usize {
+        std::iter::once(self.coefficient_commitments.len())
+            .chain(
+                self.additional_linkage_items
+                    .iter()
+                    .map(|item| item.coefficient_commitments.len()),
+            )
+            .max()
+            .unwrap_or(0)
     }
 
-    pub(crate) fn recipient_message_bounds(&self) -> Vec<u64> {
+    fn maximum_source_message_modulus(&self) -> u64 {
         std::iter::once(self.source_message_modulus)
             .chain(
                 self.additional_linkage_items
                     .iter()
                     .map(|item| item.source_message_modulus),
             )
-            .collect()
+            .max()
+            .unwrap_or(self.source_message_modulus)
+    }
+
+    pub(crate) fn packed_message_bounds(&self) -> Vec<u64> {
+        let message_bound = self.maximum_source_message_modulus();
+        vec![message_bound; self.maximum_coefficient_commitment_count() + 1]
     }
 
     pub(crate) fn coefficient_witness_slot_indices_by_item(&self) -> Vec<Vec<usize>> {
@@ -558,8 +571,8 @@ impl CompactVssShareLinkageStatement {
                 .sum::<usize>()
     }
 
-    pub(crate) fn total_opening_randomness_column_count(&self) -> usize {
-        (self.unique_coefficient_witness_slot_count() + self.item_count())
+    pub(crate) fn packed_opening_randomness_column_count(&self) -> usize {
+        (self.maximum_coefficient_commitment_count() + 1)
             * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
     }
 }
@@ -656,7 +669,7 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn compact_vss_coefficient_count(&self, limb_index: usize) -> usize {
         match &self.compact_vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.unique_coefficient_witness_slot_count()
+                statement.maximum_coefficient_commitment_count()
             }
             _ => 0,
         }
@@ -683,7 +696,7 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn compact_vss_randomness_count(&self, limb_index: usize) -> usize {
         match &self.compact_vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.total_opening_randomness_column_count()
+                statement.packed_opening_randomness_column_count()
             }
             _ => 0,
         }
@@ -692,7 +705,7 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn compact_vss_message_bounds(&self, limb_index: usize) -> Vec<u64> {
         match &self.compact_vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.message_bounds()
+                statement.packed_message_bounds()
             }
             _ => Vec::new(),
         }
@@ -728,6 +741,11 @@ impl TrusteeEvaluationKeyStatement {
                     .sum()
             })
             .unwrap_or(0)
+    }
+
+    pub(crate) fn target_decryption_total_message_digit_count(&self) -> usize {
+        self.target_decryption_total_message_count()
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
     }
 
     fn target_decryption_limb_message_range(
@@ -781,6 +799,18 @@ impl TrusteeEvaluationKeyStatement {
                 Some(statement.smudging_message_coefficient_bound)
             }
         }
+    }
+
+    pub(crate) fn target_decryption_message_digit_bound(
+        &self,
+        global_message_index: usize,
+        digit_index: usize,
+    ) -> Option<u64> {
+        crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+            self.target_decryption_message_bound(global_message_index)?,
+            digit_index,
+        )
+        .ok()
     }
 
     pub(crate) fn target_decryption_smudging_message_global_index(&self) -> Option<usize> {
@@ -923,6 +953,19 @@ impl TrusteeEvaluationKeyStatement {
             .unwrap_or(0)
     }
 
+    fn target_decryption_decoder_digit_count_for_bound(message_bound: u64) -> usize {
+        let Ok(layout) =
+            crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                message_bound,
+            )
+        else {
+            return 0;
+        };
+        (0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+            .filter(|digit_index| layout.digit_trit_count(*digit_index).unwrap_or(0) > 0)
+            .count()
+    }
+
     pub(crate) fn target_decryption_relation_count(&self, limb_index: usize) -> usize {
         match &self.target_decryption_share {
             Some(statement) => {
@@ -946,10 +989,13 @@ impl TrusteeEvaluationKeyStatement {
                         limb_statement.role_statements.len() * LINCHECK_REPETITIONS
                     })
                     .unwrap_or(0);
-                let decoder_relation_count = self.target_decryption_message_count(limb_index)
-                    * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                let decoder_relation_count = self
+                    .target_decryption_message_bounds(limb_index)
+                    .into_iter()
+                    .map(Self::target_decryption_decoder_digit_count_for_bound)
+                    .sum::<usize>()
                     * LINCHECK_REPETITIONS;
-                commitment_relation_count + decoder_relation_count + target_relation_count
+                commitment_relation_count + target_relation_count + decoder_relation_count
             }
             None => 0,
         }

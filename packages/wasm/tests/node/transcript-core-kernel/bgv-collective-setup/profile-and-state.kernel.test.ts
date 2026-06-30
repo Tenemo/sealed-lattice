@@ -137,7 +137,7 @@ describe('collective BGV setup kernel commands', () => {
             profile.compactVssParameterCertificateInputBinding;
         expect(certificateInputBinding).toMatchObject({
             objectType: 'CompactVssParameterCertificateInputBinding',
-            objectVersion: 2,
+            objectVersion: 3,
             profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
             participantCount: 10,
             sourceRnsLimbCount: 17,
@@ -168,6 +168,10 @@ describe('collective BGV setup kernel commands', () => {
                     sampledMatrixResiduesPerCommitment: 6_144,
                     sampledProjectionIndicesPerCommitment: 6_144,
                 },
+            },
+            messageEncoding: {
+                proofRangeEncodingRule:
+                    'share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims',
             },
             sameSecretBridgeInput: {
                 targetBasisHash: profile.canonicalTargetBasisHash,

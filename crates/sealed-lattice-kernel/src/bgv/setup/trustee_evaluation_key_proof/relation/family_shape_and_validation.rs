@@ -870,8 +870,7 @@ fn validate_masked_claim_lift_window(
         ));
     }
     if statement.compact_vss_share_linkage.is_some() {
-        let first_digit_global_claim_id =
-            (statement.compact_vss_item_count(0) * COMPACT_VSS_CONSISTENCY_REPETITIONS) as u64;
+        let first_digit_global_claim_id = COMPACT_VSS_CONSISTENCY_REPETITIONS as u64;
         let (digit_lower_bound, digit_upper_bound) =
             masked_claim_bounds_for_global_claim(statement, first_digit_global_claim_id)?;
         let required_digit_residue_count = masked_claim_lift_residue_count_for_moduli(
@@ -891,8 +890,9 @@ fn validate_masked_claim_lift_window(
         if let Some(first_smudging_global_message_index) =
             statement.target_decryption_smudging_message_global_index()
         {
-            let first_smudging_global_claim_id =
-                (first_smudging_global_message_index * CONSISTENCY_REPETITIONS) as u64;
+            let first_smudging_global_claim_id = (first_smudging_global_message_index
+                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+                * CONSISTENCY_REPETITIONS) as u64;
             let smudging_limb_indices = statement
                 .target_decryption_message_claim_limb_indices(first_smudging_global_message_index);
             let (smudging_lower_bound, smudging_upper_bound) =
@@ -912,8 +912,9 @@ fn validate_masked_claim_lift_window(
                 ));
             }
         }
-        let first_randomness_global_claim_id =
-            (statement.target_decryption_total_message_count() * CONSISTENCY_REPETITIONS) as u64;
+        let first_randomness_global_claim_id = (statement
+            .target_decryption_total_message_digit_count()
+            * CONSISTENCY_REPETITIONS) as u64;
         let (randomness_lower_bound, randomness_upper_bound) =
             masked_claim_bounds_for_global_claim(statement, first_randomness_global_claim_id)?;
         let required_randomness_residue_count = masked_claim_lift_residue_count_for_moduli(

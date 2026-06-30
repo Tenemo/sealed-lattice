@@ -78,6 +78,8 @@ pub(super) fn read_target_ciphertext_pair(
         target_order_root: target_order.root,
         target_ciphertext_hash,
         target_ciphertext_binding_hash,
+        #[cfg(test)]
+        top_count,
     })
 }
 

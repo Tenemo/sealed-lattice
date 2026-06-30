@@ -16,6 +16,8 @@ mod proof_relation;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 mod proof_slice;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
+mod result_release;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_generation;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_records;
@@ -34,6 +36,7 @@ pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
     generate_bgv_target_decryption_share_from_local_share_request,
     generate_bgv_target_decryption_share_proof_material_from_local_witness_request,
+    verify_and_release_bgv_target_decryption_result_from_request,
     verify_bgv_target_decryption_share_proof_material_from_request,
     verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
@@ -50,20 +53,28 @@ use proof_relation::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use proof_slice::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
+use result_release::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_generation::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_records::*;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_statement::*;
 
-use serde_json::json;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use serde_json::Value;
+use serde_json::json;
 
 use crate::{
     bgv::evaluator::top_k::TIE_POLICY, encoding::CanonicalResult, hashing::derive_protocol_hash,
 };
 
+#[cfg(test)]
+use crate::bgv::{
+    evaluator::{engine::decryption_accumulator_to_coefficients, top_k::packed_score_slot},
+    modular_arithmetic::{inverse_mod, sub_mod},
+    ntt::forward_negacyclic_ntt,
+};
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::{
     bgv::{
@@ -132,8 +143,7 @@ const TARGET_DECRYPTION_SMUDGING_COMMITMENT_RANDOMNESS_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-randomness-v1";
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) const TARGET_DECRYPTION_SMUDGING_PROFILE_ID: &str =
-    "sealed-lattice-target-decryption-zero-share-smudging-development-v1";
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+    "sealed-lattice-target-decryption-zero-share-smudging-v1";
 pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
@@ -226,6 +236,8 @@ struct TargetCiphertextPair {
     target_order_root: String,
     target_ciphertext_hash: String,
     target_ciphertext_binding_hash: String,
+    #[cfg(test)]
+    top_count: usize,
 }
 
 #[cfg(test)]

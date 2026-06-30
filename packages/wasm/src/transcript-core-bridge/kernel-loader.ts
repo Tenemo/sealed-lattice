@@ -25,6 +25,7 @@ import type {
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
     BgvCompactVssShareLinkageProofGeneration,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -43,6 +44,7 @@ import type {
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionResultRelease,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
@@ -475,6 +477,18 @@ export const createTranscriptCoreKernelLoader = (
                             proofStatement: input.proofStatement,
                         },
                     ),
+                verifyAndReleaseBgvTargetDecryptionResult: (
+                    input,
+                ): BgvTargetDecryptionResultRelease =>
+                    executeCommand<BgvTargetDecryptionResultRelease>({
+                        command: 'VerifyAndReleaseBgvTargetDecryptionResult',
+                        setupPackage: input.setupPackage,
+                        targetAcceptedRecord: input.targetAcceptedRecord,
+                        targetCiphertextBinding: input.targetCiphertextBinding,
+                        targetCiphertexts: input.targetCiphertexts,
+                        targetShareProfile: input.targetShareProfile,
+                        targetShareProofs: input.targetShareProofs,
+                    }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({
                         command: 'VerifyBgvPassiveSetup',
@@ -725,6 +739,7 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'VerifyCompactVssCommitmentOpening',
                         opening: input.opening,
                         expectedCommitmentRoot: input.expectedCommitmentRoot,
+                        expectedOpeningRoot: input.expectedOpeningRoot,
                     }),
                 verifyCompactVssCoefficientCommitmentSet: (
                     input,
@@ -771,6 +786,23 @@ export const createTranscriptCoreKernelLoader = (
                                 input.recipientShareCommitmentSet,
                             aggregateThresholdCommitmentSet:
                                 input.aggregateThresholdCommitmentSet,
+                        },
+                    ),
+                verifyCompactVssShareLinkageProofMaterialSet: (
+                    input,
+                ): BgvCompactVssShareLinkageProofMaterialSetVerification =>
+                    executeCommand<BgvCompactVssShareLinkageProofMaterialSetVerification>(
+                        {
+                            command:
+                                'VerifyCompactVssShareLinkageProofMaterialSet',
+                            statement: input.statement,
+                            coefficientCommitmentSet:
+                                input.coefficientCommitmentSet,
+                            recipientShareCommitmentSet:
+                                input.recipientShareCommitmentSet,
+                            aggregateThresholdCommitmentSet:
+                                input.aggregateThresholdCommitmentSet,
+                            proofMaterialSet: input.proofMaterialSet,
                         },
                     ),
                 verifyCompactVssSameSecretBridgeStatementSet: (

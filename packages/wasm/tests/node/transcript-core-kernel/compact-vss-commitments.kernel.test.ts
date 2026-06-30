@@ -13,6 +13,7 @@ import {
     compactVssShareLinkageProofBatchingRule,
     compactVssShareLinkageShamirEvaluationRule,
     computeCompactVssCommitmentFromOpening,
+    createCompactVssShareLinkageProofMaterialSet,
     createCompactVssShareLinkageStatement,
     decodeCompactVssCommitmentBody,
     encodeCompactVssCommitmentBody,
@@ -27,6 +28,7 @@ import {
     type CompactVssCommitmentRole,
     type CompactVssCommitmentValue,
     type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageProofStatement as ProtocolCompactVssShareLinkageProofStatement,
     type CompactVssShareLinkageStatement,
 } from '#packages/protocol/src/setup/compact-vss-commitments';
 import {
@@ -1540,6 +1542,170 @@ const compactVssProofFixture = (
     };
 };
 
+const compactVssProofPrimaryLinkageItem = (
+    proofStatement: BgvCompactVssShareLinkageProofStatement,
+): NonNullable<
+    BgvCompactVssShareLinkageProofStatement['additionalLinkageItems']
+>[number] => ({
+    recipientIdentity: proofStatement.recipientIdentity,
+    recipientRosterPosition: proofStatement.recipientRosterPosition,
+    sourceRnsLimbIndex: proofStatement.sourceRnsLimbIndex,
+    sourceMessageModulus: proofStatement.sourceMessageModulus,
+    coefficientCommitmentRoots: proofStatement.coefficientCommitmentRoots,
+    coefficientOpeningRoots: proofStatement.coefficientOpeningRoots,
+    coefficientCommitments: proofStatement.coefficientCommitments,
+    recipientShareCommitmentRoot: proofStatement.recipientShareCommitmentRoot,
+    recipientShareOpeningRoot: proofStatement.recipientShareOpeningRoot,
+    recipientShareCommitment: proofStatement.recipientShareCommitment,
+});
+
+const compactVssProofAggregateThresholdCommitment = (
+    recipientShareRecord: CompactVssRecipientShareCommitment,
+): CompactVssAggregateThresholdCommitment => {
+    const combinedCommitment = combineCompactVssCommitments({
+        commitmentRole: 'aggregate-threshold-share',
+        commitmentContext: {
+            objectType: 'CompactVssAggregateThresholdShareCommitmentContext',
+            objectVersion: 1,
+            recipientIdentity: recipientShareRecord.recipientIdentity,
+            recipientRosterPosition:
+                recipientShareRecord.recipientRosterPosition,
+            recipientTrusteePoint: recipientShareRecord.recipientTrusteePoint,
+            rnsLimbIndex: recipientShareRecord.rnsLimbIndex,
+            rnsPrime: recipientShareRecord.rnsPrime,
+        },
+        terms: [
+            {
+                commitment: recipientShareRecord.commitment,
+                scalar: 1,
+            },
+        ],
+    }).commitment;
+
+    return {
+        objectType: 'CompactVssAggregateThresholdCommitment',
+        objectVersion: 1,
+        profileId: compactVssCommitmentProfileId,
+        recipientIdentity: recipientShareRecord.recipientIdentity,
+        recipientRosterPosition: recipientShareRecord.recipientRosterPosition,
+        recipientTrusteePoint: recipientShareRecord.recipientTrusteePoint,
+        rnsLimbIndex: recipientShareRecord.rnsLimbIndex,
+        rnsPrime: recipientShareRecord.rnsPrime,
+        aggregateCommitmentRoot: deriveProtocolHash(
+            'SetupCommitmentRoot',
+            combinedCommitment,
+        ),
+        aggregateOpeningRoot: recipientShareRecord.shareOpeningRoot,
+        commitment: combinedCommitment,
+        sourceShareCommitmentRoots: [recipientShareRecord.shareCommitmentRoot],
+        sourceShareOpeningRoots: [recipientShareRecord.shareOpeningRoot],
+    };
+};
+
+const compactVssProofMaterialEvidence = (
+    proofStatement: BgvCompactVssShareLinkageProofStatement,
+): CompactShareLinkageEvidence => {
+    const proofItems = [
+        compactVssProofPrimaryLinkageItem(proofStatement),
+        ...(proofStatement.additionalLinkageItems ?? []),
+    ];
+    const coefficientSourceRecord = compactVssProofSourceCoefficientRecord({
+        sourceTrusteeIdentity: proofStatement.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition: proofStatement.sourceTrusteeRosterPosition,
+        publicMatrixSeedHash: proofStatement.publicMatrixSeedHash,
+        targetRnsLimbCount: 2,
+        proofItems,
+    });
+    const recipientSourceRecord = compactVssProofSourceRecipientShareRecord({
+        sourceTrusteeIdentity: proofStatement.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition: proofStatement.sourceTrusteeRosterPosition,
+        participantCount: 1,
+        targetRnsLimbCount: 2,
+        proofItems,
+    });
+    const coefficientSetWithoutRoot = {
+        objectType: 'CompactVssCoefficientCommitmentSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        profileId: compactVssCommitmentProfileId,
+        publicMatrixSeedHash: proofStatement.publicMatrixSeedHash,
+        participantCount: 1,
+        rnsLimbCount: 2,
+        thresholdDegree: compactVssProofCoefficientCount,
+        ringDegree: compactVssProofRingDegree,
+        sourceTrusteeRecords: [coefficientSourceRecord],
+    } as const;
+    const coefficientCommitmentSet = {
+        ...coefficientSetWithoutRoot,
+        coefficientCommitmentRoot: deriveProtocolHash(
+            'VssCoefficientCommitmentRoot',
+            coefficientSetWithoutRoot,
+        ),
+    };
+    const recipientSetWithoutRoot = {
+        objectType: 'CompactVssRecipientShareCommitmentSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        profileId: compactVssCommitmentProfileId,
+        publicMatrixSeedHash: proofStatement.publicMatrixSeedHash,
+        participantCount: 1,
+        rnsLimbCount: 2,
+        ringDegree: compactVssProofRingDegree,
+        sourceTrusteeRecords: [recipientSourceRecord],
+    } as const;
+    const recipientShareCommitmentSet = {
+        ...recipientSetWithoutRoot,
+        recipientShareCommitmentRoot: deriveProtocolHash(
+            'ThresholdShareCommitmentRoot',
+            recipientSetWithoutRoot,
+        ),
+    };
+    const aggregateSetWithoutRoot = {
+        objectType: 'CompactVssAggregateThresholdCommitmentSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        profileId: compactVssCommitmentProfileId,
+        publicMatrixSeedHash: proofStatement.publicMatrixSeedHash,
+        participantCount: 1,
+        rnsLimbCount: 2,
+        ringDegree: compactVssProofRingDegree,
+        recipientRecords: recipientSourceRecord.recipientShareCommitments.map(
+            compactVssProofAggregateThresholdCommitment,
+        ),
+    } as const;
+    const aggregateThresholdCommitmentSet = {
+        ...aggregateSetWithoutRoot,
+        aggregateThresholdCommitmentRoot: deriveProtocolHash(
+            'ThresholdShareCommitmentRoot',
+            aggregateSetWithoutRoot,
+        ),
+    };
+    const statement = createCompactVssShareLinkageStatement({
+        setupContext: {
+            ceremonyId: 'compact-vss-proof-wasm-test',
+            manifestHash: compactVssProofHash('1'),
+            rosterHash: compactVssProofHash('2'),
+            setupProfileHash: compactVssProofHash('3'),
+            qShareHash: compactVssProofHash('4'),
+            carryAwareVssShareRelationProfileHash: compactVssProofHash('5'),
+            commitmentProfileHash: compactVssProofHash('6'),
+            setupEpoch: 'setup-epoch-1',
+        },
+        publicMatrixSeedHash: proofStatement.publicMatrixSeedHash,
+        targetBasisHash: canonicalTargetBasisHash(),
+        coefficientCommitmentSet,
+        recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet,
+    });
+
+    return {
+        statement,
+        coefficientCommitmentSet,
+        recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet,
+    };
+};
+
 const compactSameSecretBridgeProofFixture = (): {
     readonly context: BgvTrusteeEvaluationKeyStatementContext;
     readonly compactSameSecretBridge: BgvCompactSameSecretBridgeProofStatement;
@@ -2078,10 +2244,12 @@ describe('compact VSS commitment kernel commands', () => {
         const verification = kernel.verifyCompactVssCommitmentOpening({
             opening,
             expectedCommitmentRoot: protocolComputation.commitmentRoot,
+            expectedOpeningRoot: protocolComputation.openingRoot,
         });
         expect(verification).toMatchObject({
             operation: 'verifyCompactVssCommitmentOpening',
             commitmentRoot: protocolComputation.commitmentRoot,
+            openingRoot: protocolComputation.openingRoot,
         });
 
         expect(() =>
@@ -2095,6 +2263,7 @@ describe('compact VSS commitment kernel commands', () => {
                     ],
                 },
                 expectedCommitmentRoot: protocolComputation.commitmentRoot,
+                expectedOpeningRoot: protocolComputation.openingRoot,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
     });
@@ -2115,7 +2284,7 @@ describe('compact VSS commitment kernel commands', () => {
             operation: 'generateCompactVssShareLinkageProof',
             proofFamily: 'compact-vss-share-linkage',
             coefficientCommitmentCount: compactVssProofCoefficientCount * 3,
-            coefficientWitnessColumnCount: compactVssProofCoefficientCount * 2,
+            coefficientWitnessColumnCount: compactVssProofCoefficientCount,
         });
         expect(generation.proofByteLength).toBeGreaterThan(0);
 
@@ -2273,6 +2442,85 @@ describe('compact VSS commitment kernel commands', () => {
                 proofBytesHex: generation.proofBytesHex,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
+    });
+
+    it('verifies compact share-linkage proof material sets through WASM', async () => {
+        const kernel: TranscriptCoreKernel = await loadTranscriptCoreKernel();
+        const fixture = compactVssProofFixture();
+        const evidence = compactVssProofMaterialEvidence(
+            fixture.compactVssShareLinkage,
+        );
+        const generation = kernel.generateCompactVssShareLinkageProof({
+            ...fixture,
+            ringDegree: compactVssProofRingDegree,
+            proofRandomnessSeedHex: 'de'.repeat(64),
+            proofRandomnessNonceHex: 'ad'.repeat(64),
+        });
+        const sourceStatement = evidence.statement.sourceStatementRecords[0];
+        if (sourceStatement === undefined) {
+            throw new Error(
+                'compact VSS material fixture is missing a source statement.',
+            );
+        }
+        const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
+            statement: evidence.statement,
+            coefficientCommitmentSet: evidence.coefficientCommitmentSet,
+            recipientShareCommitmentSet: evidence.recipientShareCommitmentSet,
+            aggregateThresholdCommitmentSet:
+                evidence.aggregateThresholdCommitmentSet,
+            ringDegree: compactVssProofRingDegree,
+            proofRecordInputs: [
+                {
+                    sourceStatementRoot: sourceStatement.sourceStatementRoot,
+                    compactVssShareLinkage:
+                        fixture.compactVssShareLinkage as ProtocolCompactVssShareLinkageProofStatement,
+                    proofBytesHex: generation.proofBytesHex,
+                },
+            ],
+        });
+
+        const verification =
+            kernel.verifyCompactVssShareLinkageProofMaterialSet({
+                statement: evidence.statement,
+                coefficientCommitmentSet: evidence.coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    evidence.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    evidence.aggregateThresholdCommitmentSet,
+                proofMaterialSet,
+            });
+        expect(verification).toMatchObject({
+            operation: 'verifyCompactVssShareLinkageProofMaterialSet',
+            proofFamily: 'compact-vss-share-linkage',
+            statementRoot: evidence.statement.statementRoot,
+            proofMaterialSetRoot: proofMaterialSet.proofMaterialSetRoot,
+            participantCount: 1,
+            targetRnsLimbCount: 2,
+            proofRecordCount: 1,
+            coveredLinkageItemCount: 2,
+            totalProofByteLength: generation.proofByteLength,
+            proofVerificationCount: 1,
+        });
+
+        expect(() =>
+            kernel.verifyCompactVssShareLinkageProofMaterialSet({
+                statement: evidence.statement,
+                coefficientCommitmentSet: evidence.coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    evidence.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    evidence.aggregateThresholdCommitmentSet,
+                proofMaterialSet: {
+                    ...proofMaterialSet,
+                    proofRecords: proofMaterialSet.proofRecords.map(
+                        (proofRecord) => ({
+                            ...proofRecord,
+                            linkageItems: proofRecord.linkageItems.slice(0, 1),
+                        }),
+                    ),
+                },
+            }),
+        ).toThrow(/linkageItems/u);
     });
 
     it('generates and verifies compact same-secret bridge proofs through WASM', async () => {
@@ -2454,6 +2702,7 @@ describe('compact VSS commitment kernel commands', () => {
             kernel.verifyCompactVssCommitmentOpening({
                 opening,
                 expectedCommitmentRoot: protocolComputation.commitmentRoot,
+                expectedOpeningRoot: protocolComputation.openingRoot,
             }).commitmentRoot,
         ).toBe(protocolComputation.commitmentRoot);
 

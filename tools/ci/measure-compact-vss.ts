@@ -17,17 +17,25 @@ import {
     computeCompactVssCommitmentFromOpening,
     createCompactVssCoefficientCommitmentSet,
     createCompactVssDerivedRecipientShareCommitmentBundle,
+    createCompactVssRecipientShareCommitmentBundle,
+    createCompactVssShareLinkageProofMaterialSet,
     createCompactVssShareLinkageStatement,
     decodeCompactVssCommitmentBody,
     encodeCompactVssCommitmentBody,
     verifyCompactVssCommitmentOpening,
     verifyCompactVssDerivedRecipientShareCommitmentSet,
+    verifyCompactVssRecipientShareCommitmentSet,
+    verifyCompactVssShareLinkageProofMaterialSet,
     verifyCompactVssShareLinkageStatement,
     type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssCommitmentBodyMetadata,
     type CompactVssCommitmentOpeningInput,
     type CompactVssCommitmentValue,
+    type CompactVssRecipientShareOpeningCredential,
     type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageProofRecordInput,
+    type CompactVssShareLinkageProofStatement,
+    type CompactVssShareLinkageProofStatementItem,
     type CompactVssShareLinkageStatement,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import {
@@ -71,6 +79,7 @@ import type {
 } from '#packages/wasm/src/transcript-core-bridge.js';
 
 const warmRunCount = 5;
+const privateStateBuildRunCount = 3;
 const firstProfileParticipantCount = 10;
 const firstProfileThresholdDegree = 4;
 const currentFullCoefficientTransportBytes = 1_604_341_697;
@@ -117,6 +126,8 @@ const targetProofMaterialMeasurementRequested =
     process.env.SEALED_LATTICE_MEASURE_TARGET_PROOF_MATERIAL === '1';
 const fullShareLinkageBatchMeasurementRequested =
     process.env.SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH === '1';
+const fullSameSecretBridgeMeasurementRequested =
+    process.env.SEALED_LATTICE_MEASURE_FULL_SAME_SECRET_BRIDGE === '1';
 
 const isPowerOfTwo = (value: number): boolean =>
     Number.isSafeInteger(value) &&
@@ -286,17 +297,54 @@ type RestrictedCompactSameSecretBridgeProofMaterialMeasurement = Readonly<{
     >;
 }>;
 
+type FullSameSecretBridgeProofMeasurementNotMeasured = Readonly<{
+    readonly measurementMode: string;
+}>;
+
+type FullSameSecretBridgeProofMeasurementMeasured = Readonly<{
+    readonly measurementMode: string;
+    readonly ringDegree: number;
+    readonly targetRnsLimbCount: number;
+    readonly proofByteLength: number;
+    readonly statementHash: ProtocolHash;
+    readonly generation: MeasuredOperation<
+        ReturnType<TranscriptCoreKernel['generateCompactSameSecretBridgeProof']>
+    >;
+    readonly verification: MeasuredOperation<
+        ReturnType<TranscriptCoreKernel['verifyCompactSameSecretBridgeProof']>
+    >;
+}>;
+
+type FullSameSecretBridgeProofMeasurement =
+    | FullSameSecretBridgeProofMeasurementMeasured
+    | FullSameSecretBridgeProofMeasurementNotMeasured;
+
+const fullSameSecretBridgeProofWasMeasured = (
+    measurement: FullSameSecretBridgeProofMeasurement,
+): measurement is FullSameSecretBridgeProofMeasurementMeasured =>
+    'proofByteLength' in measurement;
+
 type FullShareLinkageBatchMeasurementNotMeasured = Readonly<{
     readonly measurementMode: string;
 }>;
 
 type FullShareLinkageBatchDerivedFixture = Readonly<{
+    readonly setupContext: CollectiveBgvSetupContext;
+    readonly publicMatrixSeedHash: ProtocolHash;
     readonly coefficientCommitmentSet: ReturnType<
         typeof createCompactVssCoefficientCommitmentSet
     >;
     readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
     readonly aggregateThresholdCommitmentSet: CompactVssAggregateThresholdCommitmentSet;
     readonly shareLinkageStatement: CompactVssShareLinkageStatement;
+    readonly sourceTrusteeOpeningStates: readonly PrivateVssSourceTrusteeContributionState[];
+    readonly recipientShareOpeningCredentials: readonly CompactVssRecipientShareOpeningCredential[];
+    readonly coefficientOpeningRandomness: (input: {
+        readonly trusteeRosterPosition: number;
+        readonly rnsLimbIndex: number;
+        readonly shamirCoefficientIndex: number;
+        readonly ringDegree: number;
+    }) => readonly (readonly number[])[];
     readonly recipientShareOpeningCredentialCount: number;
 }>;
 
@@ -308,6 +356,8 @@ type FullShareLinkageBatchDerivedMeasurement = Readonly<{
     readonly aggregateThresholdRecordCount: number;
     readonly ringDegree: number;
     readonly oneSourceShareLinkageProofByteLength: number;
+    readonly proofMaterialSetJsonBytes: number;
+    readonly proofMaterialSetRoot: ProtocolHash;
     readonly oneSourcePayloadWithBridgeProofBytes: number;
     readonly repeatedAllSourceShareLinkageProofBytes: number;
     readonly repeatedAllSourcePayloadWithBridgeProofBytes: number;
@@ -315,13 +365,29 @@ type FullShareLinkageBatchDerivedMeasurement = Readonly<{
     readonly coefficientWitnessColumnCount: number;
     readonly recipientShareOpeningCredentialCount: number;
     readonly verification: Readonly<{
-        readonly derivedRecipientShareCommitments: MeasuredOperation<
-            ReturnType<
-                typeof verifyCompactVssDerivedRecipientShareCommitmentSet
-            >
+        readonly recipientShareCommitments: MeasuredOperation<
+            ReturnType<typeof verifyCompactVssRecipientShareCommitmentSet>
         >;
         readonly shareLinkageStatement: MeasuredOperation<
             ReturnType<typeof verifyCompactVssShareLinkageStatement>
+        >;
+        readonly sourceProofGeneration: MeasuredOperation<
+            ReturnType<
+                TranscriptCoreKernel['generateCompactVssShareLinkageProof']
+            >
+        >;
+        readonly sourceProofVerification: MeasuredOperation<
+            ReturnType<
+                TranscriptCoreKernel['verifyCompactVssShareLinkageProof']
+            >
+        >;
+        readonly proofMaterialSet: MeasuredOperation<
+            ReturnType<typeof verifyCompactVssShareLinkageProofMaterialSet>
+        >;
+        readonly wasmProofMaterialSet: MeasuredOperation<
+            ReturnType<
+                TranscriptCoreKernel['verifyCompactVssShareLinkageProofMaterialSet']
+            >
         >;
     }>;
 }>;
@@ -329,6 +395,18 @@ type FullShareLinkageBatchDerivedMeasurement = Readonly<{
 type FullShareLinkageBatchMeasurement =
     | FullShareLinkageBatchDerivedMeasurement
     | FullShareLinkageBatchMeasurementNotMeasured;
+
+type CompactVssSourceBatchProofInput = Omit<
+    Parameters<TranscriptCoreKernel['generateCompactVssShareLinkageProof']>[0],
+    | 'compactVssShareLinkage'
+    | 'proofRandomnessNonceHex'
+    | 'proofRandomnessSeedHex'
+    | 'ringDegree'
+> &
+    Readonly<{
+        readonly sourceStatementRoot: ProtocolHash;
+        readonly compactVssShareLinkage: CompactVssShareLinkageProofStatement;
+    }>;
 
 const fullShareLinkageBatchWasMeasured = (
     measurement: FullShareLinkageBatchMeasurement,
@@ -518,6 +596,52 @@ const timed = <Result>(
     return { result, milliseconds };
 };
 
+const timedAsync = async <Result>(
+    operation: () => Promise<Result>,
+): Promise<
+    Readonly<{
+        readonly result: Result;
+        readonly milliseconds: number;
+    }>
+> => {
+    const startedAtMilliseconds = performance.now();
+    const result = await operation();
+    const milliseconds = performance.now() - startedAtMilliseconds;
+
+    return { result, milliseconds };
+};
+
+const measureAsyncMedianResult = async <Result>(
+    operation: () => Promise<Result>,
+    sampleCount: number,
+): Promise<
+    Readonly<{
+        readonly result: Result;
+        readonly medianMilliseconds: number;
+    }>
+> => {
+    if (!Number.isSafeInteger(sampleCount) || sampleCount <= 0) {
+        throw new Error(
+            'asynchronous measurement sample count must be positive.',
+        );
+    }
+    const measurements: number[] = [];
+    let lastResult: Result | undefined;
+    for (let runIndex = 0; runIndex < sampleCount; runIndex += 1) {
+        const measurement = await timedAsync(operation);
+        measurements.push(measurement.milliseconds);
+        lastResult = measurement.result;
+    }
+    if (lastResult === undefined) {
+        throw new Error('asynchronous measurement did not produce a result.');
+    }
+
+    return {
+        result: lastResult,
+        medianMilliseconds: median(measurements),
+    };
+};
+
 const fullRingOpening = (): CompactVssCommitmentOpeningInput => {
     const publicMatrixSeedHash = deriveProtocolHash(
         'SetupPublicMatrixSeedHash',
@@ -569,13 +693,14 @@ const fullRingOpening = (): CompactVssCommitmentOpeningInput => {
 const repeatedProtocolHash = (hexDigit: string): string => hexDigit.repeat(128);
 
 const restrictedProofTernaryRandomness = (
+    ringDegree: number,
     seedOffset: number,
 ): readonly (readonly number[])[] =>
     Array.from(
         { length: compactVssCommitmentRandomnessColumnCount },
         (_unusedColumn, columnIndex) =>
             Array.from(
-                { length: restrictedProofRingDegree },
+                { length: ringDegree },
                 (_unusedCoefficient, coefficientIndex) =>
                     ((seedOffset + columnIndex * 5 + coefficientIndex * 7) %
                         3) -
@@ -583,97 +708,251 @@ const restrictedProofTernaryRandomness = (
             ),
     );
 
-const restrictedCompactSameSecretBridgeProofFixture =
-    (): RestrictedCompactSameSecretBridgeProofFixture => {
-        const publicMatrixSeedHash = repeatedProtocolHash('8');
-        const targetRnsPrimes = acceptedBgvSetupQSharePrimes.slice(
-            0,
-            targetRnsLimbCount,
-        );
-        const secretCoefficients = Array.from(
-            { length: restrictedProofRingDegree },
-            (_unusedCoefficient, coefficientIndex) => {
-                if (coefficientIndex % 3 === 0) {
-                    return -1;
-                }
-                return coefficientIndex % 3 === 1 ? 0 : 1;
-            },
-        );
-        const negativeIndicatorCoefficients = secretCoefficients.map(
-            (coefficient) => (coefficient < 0 ? 1 : 0),
-        );
-        const openingRandomnessByLimb = targetRnsPrimes.map(
-            (_targetRnsPrime, targetRnsLimbIndex) =>
-                restrictedProofTernaryRandomness(67 + targetRnsLimbIndex),
-        );
-        const targetConstantComputations = targetRnsPrimes.map(
-            (targetRnsPrime, targetRnsLimbIndex) => {
-                const messageCoefficients = secretCoefficients.map(
-                    (coefficient, coefficientIndex) =>
-                        coefficient +
-                        negativeIndicatorCoefficients[coefficientIndex] *
-                            targetRnsPrime,
+const restrictedCompactSameSecretBridgeProofFixture = (
+    ringDegree = restrictedProofRingDegree,
+): RestrictedCompactSameSecretBridgeProofFixture => {
+    const publicMatrixSeedHash = repeatedProtocolHash('8');
+    const targetRnsPrimes = acceptedBgvSetupQSharePrimes.slice(
+        0,
+        targetRnsLimbCount,
+    );
+    const secretCoefficients = Array.from(
+        { length: ringDegree },
+        (_unusedCoefficient, coefficientIndex) => {
+            if (coefficientIndex % 3 === 0) {
+                return -1;
+            }
+            return coefficientIndex % 3 === 1 ? 0 : 1;
+        },
+    );
+    const negativeIndicatorCoefficients = secretCoefficients.map(
+        (coefficient) => (coefficient < 0 ? 1 : 0),
+    );
+    const openingRandomnessByLimb = targetRnsPrimes.map(
+        (_targetRnsPrime, targetRnsLimbIndex) =>
+            restrictedProofTernaryRandomness(
+                ringDegree,
+                67 + targetRnsLimbIndex,
+            ),
+    );
+    const targetConstantComputations = targetRnsPrimes.map(
+        (targetRnsPrime, targetRnsLimbIndex) => {
+            const messageCoefficients = secretCoefficients.map(
+                (coefficient, coefficientIndex) =>
+                    coefficient +
+                    negativeIndicatorCoefficients[coefficientIndex] *
+                        targetRnsPrime,
+            );
+
+            return computeCompactVssCommitmentFromOpening({
+                commitmentRole: 'coefficient',
+                commitmentContext: {
+                    objectType: 'CompactSameSecretBridgeMeasurementContext',
+                    objectVersion: 1,
+                    targetRnsLimbIndex,
+                },
+                publicMatrixSeedHash,
+                rnsLimbIndex: targetRnsLimbIndex,
+                rnsPrime: targetRnsPrime,
+                ringDegree,
+                messageCoefficients,
+                messageCoefficientBound: targetRnsPrime,
+                randomnessByColumn: openingRandomnessByLimb[targetRnsLimbIndex],
+            });
+        },
+    );
+    const sameSecretProofFamilyBindingRoot = repeatedProtocolHash('f');
+    const trusteeSecretCommitmentRoot = repeatedProtocolHash('7');
+    const targetBasisHash = canonicalTargetBasisHash;
+    const targetConstantCoefficientCommitmentRoots = targetRnsPrimes.map(
+        (rnsPrime, rnsLimbIndex) => {
+            const targetConstantComputation =
+                targetConstantComputations[rnsLimbIndex];
+            if (targetConstantComputation === undefined) {
+                throw new Error(
+                    'restricted compact same-secret bridge fixture is missing a target commitment.',
                 );
+            }
 
-                return computeCompactVssCommitmentFromOpening({
-                    commitmentRole: 'coefficient',
-                    commitmentContext: {
-                        objectType: 'CompactSameSecretBridgeMeasurementContext',
-                        objectVersion: 1,
-                        targetRnsLimbIndex,
-                    },
-                    publicMatrixSeedHash,
-                    rnsLimbIndex: targetRnsLimbIndex,
-                    rnsPrime: targetRnsPrime,
-                    ringDegree: restrictedProofRingDegree,
-                    messageCoefficients,
-                    messageCoefficientBound: targetRnsPrime,
-                    randomnessByColumn:
-                        openingRandomnessByLimb[targetRnsLimbIndex],
-                });
-            },
-        );
-        const sameSecretProofFamilyBindingRoot = repeatedProtocolHash('f');
-        const trusteeSecretCommitmentRoot = repeatedProtocolHash('7');
-        const targetBasisHash = canonicalTargetBasisHash;
-        const targetConstantCoefficientCommitmentRoots = targetRnsPrimes.map(
-            (rnsPrime, rnsLimbIndex) => {
-                const targetConstantComputation =
-                    targetConstantComputations[rnsLimbIndex];
-                if (targetConstantComputation === undefined) {
-                    throw new Error(
-                        'restricted compact same-secret bridge fixture is missing a target commitment.',
-                    );
-                }
+            return {
+                rnsLimbIndex,
+                rnsPrime,
+                shamirCoefficientIndex: 0 as const,
+                coefficientCommitmentRoot:
+                    targetConstantComputation.commitmentRoot,
+            };
+        },
+    );
+    const targetConstantCoefficientCommitments = targetRnsPrimes.map(
+        (rnsPrime, rnsLimbIndex) => {
+            const targetConstantComputation =
+                targetConstantComputations[rnsLimbIndex];
+            if (targetConstantComputation === undefined) {
+                throw new Error(
+                    'restricted compact same-secret bridge fixture is missing a target commitment.',
+                );
+            }
 
-                return {
-                    rnsLimbIndex,
-                    rnsPrime,
+            return {
+                rnsLimbIndex,
+                rnsPrime,
+                shamirCoefficientIndex: 0 as const,
+                commitment: targetConstantComputation.commitment,
+            };
+        },
+    );
+    const sameSecretContext = {
+        ceremonyId: 'compact-same-secret-bridge-proof-measurement',
+        manifestHash: repeatedProtocolHash('1'),
+        rosterHash: repeatedProtocolHash('2'),
+        setupProfileHash: repeatedProtocolHash('3'),
+        qShareHash: repeatedProtocolHash('4'),
+        carryAwareVssShareRelationProfileHash: repeatedProtocolHash('5'),
+        commitmentProfileHash: repeatedProtocolHash('6'),
+        setupEpoch: 'setup-epoch-1',
+    } as const;
+    const sameSecretStatementWithoutRoot = {
+        objectType: 'SameSecretConsistencyStatement',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        ...sameSecretContext,
+        trusteeIdentity: 'trustee-0',
+        trusteeRosterPosition: 0,
+        vssSourceTrusteeCommitmentRoot: repeatedProtocolHash('9'),
+        constantCoefficientCommitmentRoots:
+            targetConstantCoefficientCommitmentRoots.map(
+                (targetConstantRoot) => ({
+                    rnsLimbIndex: targetConstantRoot.rnsLimbIndex,
+                    rnsPrime: targetConstantRoot.rnsPrime,
                     shamirCoefficientIndex: 0 as const,
-                    coefficientCommitmentRoot:
-                        targetConstantComputation.commitmentRoot,
-                };
+                    commitmentRoot:
+                        targetConstantRoot.coefficientCommitmentRoot,
+                }),
+            ),
+        trusteeSecretCommitmentRoot,
+        boundSecretDependentProofFamilies: [
+            'vss-constant-relation',
+            'public-key-share',
+            'relinearization-key-share',
+            'galois-key-share',
+        ],
+        sameSecretProofFamilyBindingRoot,
+        sameSecretRelation,
+    } as const;
+    const sameSecretStatementRoot = deriveProtocolHash(
+        'SameSecretConsistencyRoot',
+        sameSecretStatementWithoutRoot,
+    );
+    const sameSecretStatementRecord = {
+        ...sameSecretStatementWithoutRoot,
+        sameSecretStatementRoot,
+    } as const;
+    const sameSecretProofRecordWithoutRoot = {
+        objectType: 'SameSecretProof',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        ...sameSecretContext,
+        trusteeIdentity: 'trustee-0',
+        trusteeRosterPosition: 0,
+        ringDegree,
+        sameSecretStatementRoot,
+        trusteeSecretCommitmentRoot,
+        sameSecretProofFamilyBindingRoot,
+        statementHash: deriveProtocolHash('SameSecretProofRoot', {
+            fixture: 'same-secret-proof-statement',
+        }),
+        proofSizeBytes: 1,
+        proofBytesHash: hash512Hex(
+            'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1',
+            [Buffer.from('ab', 'hex')],
+        ),
+        proofBytesHex: 'ab',
+    } as const;
+    const sameSecretProofRoot = deriveProtocolHash(
+        'SameSecretProofRoot',
+        sameSecretProofRecordWithoutRoot,
+    );
+    const sameSecretProofRecord = {
+        ...sameSecretProofRecordWithoutRoot,
+        sameSecretProofRoot,
+    } as const;
+    const sameSecretConsistencyWithoutRoot = {
+        objectType: 'SameSecretConsistencyStatementSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        ...sameSecretContext,
+        participantCount: 1,
+        rnsLimbCount: targetRnsPrimes.length,
+        thresholdDegree: 1,
+        vssCoefficientCommitmentRoot: repeatedProtocolHash('9'),
+        sameSecretProofFamilyBindingRoot,
+        trusteeSecretCommitmentRoots: [
+            {
+                trusteeIdentity: 'trustee-0',
+                trusteeRosterPosition: 0,
+                trusteeSecretCommitmentRoot,
             },
-        );
-        const targetConstantCoefficientCommitments = targetRnsPrimes.map(
-            (rnsPrime, rnsLimbIndex) => {
-                const targetConstantComputation =
-                    targetConstantComputations[rnsLimbIndex];
-                if (targetConstantComputation === undefined) {
-                    throw new Error(
-                        'restricted compact same-secret bridge fixture is missing a target commitment.',
-                    );
-                }
-
-                return {
-                    rnsLimbIndex,
-                    rnsPrime,
-                    shamirCoefficientIndex: 0 as const,
-                    commitment: targetConstantComputation.commitment,
-                };
+        ],
+        statementRecords: [sameSecretStatementRecord],
+    } as const;
+    const sameSecretConsistency = {
+        ...sameSecretConsistencyWithoutRoot,
+        sameSecretConsistencyRoot: deriveProtocolHash(
+            'SameSecretConsistencyRoot',
+            sameSecretConsistencyWithoutRoot,
+        ),
+    } as SameSecretConsistencyStatementSet;
+    const sameSecretProofsWithoutRoot = {
+        objectType: 'SameSecretProofSet',
+        objectVersion: 1,
+        setupProfileId: 'CollectiveBgvSetup-v1',
+        commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
+        setupProofProfileId,
+        proofFamily: sameSecretProofFamily,
+        proofAccountingHash: deriveProtocolHash('SameSecretProofRoot', {
+            fixture: 'same-secret-proof-accounting',
+        }),
+        ...sameSecretContext,
+        participantCount: 1,
+        rnsLimbCount: targetRnsPrimes.length,
+        sameSecretConsistencyRoot:
+            sameSecretConsistency.sameSecretConsistencyRoot,
+        sameSecretProofFamilyBindingRoot,
+        vssCoefficientCommitmentMaterialRoot: repeatedProtocolHash('9'),
+        sameSecretProofRoots: [
+            {
+                trusteeIdentity: 'trustee-0',
+                trusteeRosterPosition: 0,
+                sameSecretProofRoot,
             },
-        );
-        const sameSecretContext = {
+        ],
+        proofRecords: [sameSecretProofRecord],
+    } as const;
+    const sameSecretProofs = {
+        ...sameSecretProofsWithoutRoot,
+        sameSecretProofSetRoot: deriveProtocolHash(
+            'SameSecretProofRoot',
+            sameSecretProofsWithoutRoot,
+        ),
+    } as SameSecretProofSet;
+    const compactSameSecretBridgeStatementRoot = deriveProtocolHash(
+        'SetupProofRecordBindingHash',
+        {
+            objectType: 'CompactVssSameSecretBridgeStatement',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            compactCommitmentProfileId: compactVssCommitmentProfileId,
+            setupProofProfileId: 'SealedLattice-SetupProof-v1',
+            proofFamily: 'same-secret-linkage-anchor',
             ceremonyId: 'compact-same-secret-bridge-proof-measurement',
             manifestHash: repeatedProtocolHash('1'),
             rosterHash: repeatedProtocolHash('2'),
@@ -682,228 +961,77 @@ const restrictedCompactSameSecretBridgeProofFixture =
             carryAwareVssShareRelationProfileHash: repeatedProtocolHash('5'),
             commitmentProfileHash: repeatedProtocolHash('6'),
             setupEpoch: 'setup-epoch-1',
-        } as const;
-        const sameSecretStatementWithoutRoot = {
-            objectType: 'SameSecretConsistencyStatement',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
-            setupProofProfileId,
-            proofFamily: sameSecretProofFamily,
-            ...sameSecretContext,
+            targetBasisHash,
+            publicMatrixSeedHash,
+            ringDegree,
             trusteeIdentity: 'trustee-0',
             trusteeRosterPosition: 0,
-            vssSourceTrusteeCommitmentRoot: repeatedProtocolHash('9'),
-            constantCoefficientCommitmentRoots:
-                targetConstantCoefficientCommitmentRoots.map(
-                    (targetConstantRoot) => ({
-                        rnsLimbIndex: targetConstantRoot.rnsLimbIndex,
-                        rnsPrime: targetConstantRoot.rnsPrime,
-                        shamirCoefficientIndex: 0 as const,
-                        commitmentRoot:
-                            targetConstantRoot.coefficientCommitmentRoot,
-                    }),
-                ),
-            trusteeSecretCommitmentRoot,
-            boundSecretDependentProofFamilies: [
-                'vss-constant-relation',
-                'public-key-share',
-                'relinearization-key-share',
-                'galois-key-share',
-            ],
-            sameSecretProofFamilyBindingRoot,
-            sameSecretRelation,
-        } as const;
-        const sameSecretStatementRoot = deriveProtocolHash(
-            'SameSecretConsistencyRoot',
-            sameSecretStatementWithoutRoot,
-        );
-        const sameSecretStatementRecord = {
-            ...sameSecretStatementWithoutRoot,
             sameSecretStatementRoot,
-        } as const;
-        const sameSecretProofRecordWithoutRoot = {
-            objectType: 'SameSecretProof',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
-            setupProofProfileId,
-            proofFamily: sameSecretProofFamily,
-            ...sameSecretContext,
-            trusteeIdentity: 'trustee-0',
-            trusteeRosterPosition: 0,
-            ringDegree: restrictedProofRingDegree,
-            sameSecretStatementRoot,
-            trusteeSecretCommitmentRoot,
-            sameSecretProofFamilyBindingRoot,
-            statementHash: deriveProtocolHash('SameSecretProofRoot', {
-                fixture: 'same-secret-proof-statement',
-            }),
-            proofSizeBytes: 1,
-            proofBytesHash: hash512Hex(
-                'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1',
-                [Buffer.from('ab', 'hex')],
-            ),
-            proofBytesHex: 'ab',
-        } as const;
-        const sameSecretProofRoot = deriveProtocolHash(
-            'SameSecretProofRoot',
-            sameSecretProofRecordWithoutRoot,
-        );
-        const sameSecretProofRecord = {
-            ...sameSecretProofRecordWithoutRoot,
             sameSecretProofRoot,
-        } as const;
-        const sameSecretConsistencyWithoutRoot = {
-            objectType: 'SameSecretConsistencyStatementSet',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
-            setupProofProfileId,
-            proofFamily: sameSecretProofFamily,
-            ...sameSecretContext,
-            participantCount: 1,
-            rnsLimbCount: targetRnsPrimes.length,
-            thresholdDegree: 1,
-            vssCoefficientCommitmentRoot: repeatedProtocolHash('9'),
+            trusteeSecretCommitmentRoot,
             sameSecretProofFamilyBindingRoot,
-            trusteeSecretCommitmentRoots: [
-                {
-                    trusteeIdentity: 'trustee-0',
-                    trusteeRosterPosition: 0,
-                    trusteeSecretCommitmentRoot,
-                },
-            ],
-            statementRecords: [sameSecretStatementRecord],
-        } as const;
-        const sameSecretConsistency = {
-            ...sameSecretConsistencyWithoutRoot,
-            sameSecretConsistencyRoot: deriveProtocolHash(
-                'SameSecretConsistencyRoot',
-                sameSecretConsistencyWithoutRoot,
-            ),
-        } as SameSecretConsistencyStatementSet;
-        const sameSecretProofsWithoutRoot = {
-            objectType: 'SameSecretProofSet',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            commitmentProfileId: 'SealedLattice-BDLOP-Commitment-v1',
-            setupProofProfileId,
-            proofFamily: sameSecretProofFamily,
-            proofAccountingHash: deriveProtocolHash('SameSecretProofRoot', {
-                fixture: 'same-secret-proof-accounting',
-            }),
-            ...sameSecretContext,
-            participantCount: 1,
-            rnsLimbCount: targetRnsPrimes.length,
-            sameSecretConsistencyRoot:
-                sameSecretConsistency.sameSecretConsistencyRoot,
-            sameSecretProofFamilyBindingRoot,
-            vssCoefficientCommitmentMaterialRoot: repeatedProtocolHash('9'),
-            sameSecretProofRoots: [
-                {
-                    trusteeIdentity: 'trustee-0',
-                    trusteeRosterPosition: 0,
-                    sameSecretProofRoot,
-                },
-            ],
-            proofRecords: [sameSecretProofRecord],
-        } as const;
-        const sameSecretProofs = {
-            ...sameSecretProofsWithoutRoot,
-            sameSecretProofSetRoot: deriveProtocolHash(
-                'SameSecretProofRoot',
-                sameSecretProofsWithoutRoot,
-            ),
-        } as SameSecretProofSet;
-        const compactSameSecretBridgeStatementRoot = deriveProtocolHash(
-            'SetupProofRecordBindingHash',
-            {
-                objectType: 'CompactVssSameSecretBridgeStatement',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                compactCommitmentProfileId: compactVssCommitmentProfileId,
-                setupProofProfileId: 'SealedLattice-SetupProof-v1',
-                proofFamily: 'same-secret-linkage-anchor',
-                ceremonyId: 'compact-same-secret-bridge-proof-measurement',
-                manifestHash: repeatedProtocolHash('1'),
-                rosterHash: repeatedProtocolHash('2'),
-                setupProfileHash: repeatedProtocolHash('3'),
-                qShareHash: repeatedProtocolHash('4'),
-                carryAwareVssShareRelationProfileHash:
-                    repeatedProtocolHash('5'),
-                commitmentProfileHash: repeatedProtocolHash('6'),
-                setupEpoch: 'setup-epoch-1',
-                targetBasisHash,
-                publicMatrixSeedHash,
-                ringDegree: restrictedProofRingDegree,
-                trusteeIdentity: 'trustee-0',
-                trusteeRosterPosition: 0,
-                sameSecretStatementRoot,
-                sameSecretProofRoot,
-                trusteeSecretCommitmentRoot,
-                sameSecretProofFamilyBindingRoot,
-                dataBasisRelation:
-                    'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs',
-                integerSupport: compactVssSameSecretBridgeIntegerSupport,
-                signedRepresentativeConvention:
-                    compactVssSameSecretBridgeSignedRepresentativeConvention,
-                compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
-                targetBasisLimbOrder:
-                    compactVssSameSecretBridgeTargetBasisLimbOrder,
-                targetConstantCoefficientCommitmentRoots,
-                targetConstantCoefficientCommitments,
-                relation: compactVssSameSecretBridgeRelation,
-            },
-        );
+            dataBasisRelation:
+                'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs',
+            integerSupport: compactVssSameSecretBridgeIntegerSupport,
+            signedRepresentativeConvention:
+                compactVssSameSecretBridgeSignedRepresentativeConvention,
+            compactCommitmentEncoding: compactVssCommitmentBinaryFormat,
+            targetBasisLimbOrder:
+                compactVssSameSecretBridgeTargetBasisLimbOrder,
+            targetConstantCoefficientCommitmentRoots,
+            targetConstantCoefficientCommitments,
+            relation: compactVssSameSecretBridgeRelation,
+        },
+    );
 
-        return {
-            context: {
-                ceremonyId: 'compact-same-secret-bridge-proof-measurement',
-                manifestHash: repeatedProtocolHash('1'),
-                rosterHash: repeatedProtocolHash('2'),
-                trusteeIdentity: 'trustee-0',
-                trusteeRosterPosition: 0,
-                setupEpoch: 'setup-epoch-1',
-                compactSameSecretBridgeStatementRoot,
-                sameSecretStatementRoot,
-                sameSecretProofRoot,
-                sameSecretProofFamilyBindingRoot,
-            },
-            compactSameSecretBridge: {
-                compactSameSecretBridgeStatementRoot,
-                sameSecretStatementRoot,
-                sameSecretProofRoot,
-                sameSecretProofFamilyBindingRoot,
-                publicMatrixSeedHash,
-                sourceTrusteeIdentity: 'trustee-0',
-                sourceTrusteeRosterPosition: 0,
-                targetBasisHash,
-                targetRnsPrimes,
-                targetConstantCommitmentRoots:
-                    targetConstantCoefficientCommitmentRoots.map(
-                        (commitmentRoot) =>
-                            commitmentRoot.coefficientCommitmentRoot,
-                    ),
-                targetConstantCommitments: targetConstantComputations.map(
-                    (computation) => computation.commitment,
+    return {
+        context: {
+            ceremonyId: 'compact-same-secret-bridge-proof-measurement',
+            manifestHash: repeatedProtocolHash('1'),
+            rosterHash: repeatedProtocolHash('2'),
+            trusteeIdentity: 'trustee-0',
+            trusteeRosterPosition: 0,
+            setupEpoch: 'setup-epoch-1',
+            compactSameSecretBridgeStatementRoot,
+            sameSecretStatementRoot,
+            sameSecretProofRoot,
+            sameSecretProofFamilyBindingRoot,
+        },
+        compactSameSecretBridge: {
+            compactSameSecretBridgeStatementRoot,
+            sameSecretStatementRoot,
+            sameSecretProofRoot,
+            sameSecretProofFamilyBindingRoot,
+            publicMatrixSeedHash,
+            sourceTrusteeIdentity: 'trustee-0',
+            sourceTrusteeRosterPosition: 0,
+            targetBasisHash,
+            targetRnsPrimes,
+            targetConstantCommitmentRoots:
+                targetConstantCoefficientCommitmentRoots.map(
+                    (commitmentRoot) =>
+                        commitmentRoot.coefficientCommitmentRoot,
                 ),
-            },
-            sameSecretConsistency,
-            sameSecretProofs,
-            secretCoefficients,
-            negativeIndicatorCoefficients,
-            openingRandomnessByLimb,
-        };
+            targetConstantCommitments: targetConstantComputations.map(
+                (computation) => computation.commitment,
+            ),
+        },
+        sameSecretConsistency,
+        sameSecretProofs,
+        secretCoefficients,
+        negativeIndicatorCoefficients,
+        openingRandomnessByLimb,
     };
+};
 
 const measureSyncOperation = <Result>(
     operation: () => Result,
+    warmRuns = warmRunCount,
 ): MeasuredOperation<Result> => {
     const cold = timed(operation);
     const warmMeasurements: number[] = [];
     let lastResult = cold.result;
-    for (let runIndex = 0; runIndex < warmRunCount; runIndex += 1) {
+    for (let runIndex = 0; runIndex < warmRuns; runIndex += 1) {
         const warm = timed(operation);
         warmMeasurements.push(warm.milliseconds);
         lastResult = warm.result;
@@ -912,7 +1040,10 @@ const measureSyncOperation = <Result>(
     return {
         samples: {
             coldMilliseconds: cold.milliseconds,
-            warmMedianMilliseconds: median(warmMeasurements),
+            warmMedianMilliseconds:
+                warmMeasurements.length === 0
+                    ? cold.milliseconds
+                    : median(warmMeasurements),
             warmSamplesMilliseconds: warmMeasurements,
         },
         lastResult,
@@ -952,6 +1083,7 @@ const measureTypeScriptPath = (
         verifyCompactVssCommitmentOpening({
             opening,
             expectedCommitmentRoot: generation.lastResult.commitmentRoot,
+            expectedOpeningRoot: generation.lastResult.openingRoot,
         }),
     );
 
@@ -981,6 +1113,7 @@ const measureWasmPath = (
         kernel.verifyCompactVssCommitmentOpening({
             opening,
             expectedCommitmentRoot: generation.lastResult.commitmentRoot,
+            expectedOpeningRoot: generation.lastResult.openingRoot,
         }),
     );
 
@@ -1027,11 +1160,12 @@ const measureCompactShareLinkagePublicVerification = (
 const measureRestrictedCompactSameSecretBridgeProof = (
     kernel: TranscriptCoreKernel,
     fixture: RestrictedCompactSameSecretBridgeProofFixture,
+    ringDegree = restrictedProofRingDegree,
 ): RestrictedCompactSameSecretBridgeProofMeasurement => {
     const generation = measureSyncOperation(() =>
         kernel.generateCompactSameSecretBridgeProof({
             ...fixture,
-            ringDegree: restrictedProofRingDegree,
+            ringDegree,
             proofRandomnessSeedHex: '12'.repeat(64),
             proofRandomnessNonceHex: '34'.repeat(64),
         }),
@@ -1039,7 +1173,7 @@ const measureRestrictedCompactSameSecretBridgeProof = (
     const verification = measureSyncOperation(() =>
         kernel.verifyCompactSameSecretBridgeProof({
             context: fixture.context,
-            ringDegree: restrictedProofRingDegree,
+            ringDegree,
             compactSameSecretBridge: fixture.compactSameSecretBridge,
             proofBytesHex: generation.lastResult.proofBytesHex,
         }),
@@ -1072,6 +1206,7 @@ const measureRestrictedCompactSameSecretBridgeProof = (
 
 const restrictedCompactSameSecretBridgeStatementSet = (
     fixture: RestrictedCompactSameSecretBridgeProofFixture,
+    ringDegree = restrictedProofRingDegree,
 ): CompactVssSameSecretBridgeStatementSet => {
     const targetConstantCoefficientCommitmentRoots =
         fixture.compactSameSecretBridge.targetRnsPrimes.map(
@@ -1142,7 +1277,7 @@ const restrictedCompactSameSecretBridgeStatementSet = (
         targetBasisHash: fixture.compactSameSecretBridge.targetBasisHash,
         publicMatrixSeedHash:
             fixture.compactSameSecretBridge.publicMatrixSeedHash,
-        ringDegree: restrictedProofRingDegree,
+        ringDegree,
         trusteeIdentity: fixture.context.trusteeIdentity,
         trusteeRosterPosition: fixture.context.trusteeRosterPosition,
         sameSecretStatementRoot:
@@ -1187,7 +1322,7 @@ const restrictedCompactSameSecretBridgeStatementSet = (
         targetBasisHash: fixture.compactSameSecretBridge.targetBasisHash,
         publicMatrixSeedHash:
             fixture.compactSameSecretBridge.publicMatrixSeedHash,
-        ringDegree: restrictedProofRingDegree,
+        ringDegree,
         participantCount: 1,
         targetRnsLimbCount:
             fixture.compactSameSecretBridge.targetRnsPrimes.length,
@@ -1218,8 +1353,12 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
     kernel: TranscriptCoreKernel,
     fixture: RestrictedCompactSameSecretBridgeProofFixture,
     proofGeneration: RestrictedCompactSameSecretBridgeProofMeasurement['generation'],
+    ringDegree = restrictedProofRingDegree,
 ): RestrictedCompactSameSecretBridgeProofMaterialMeasurement => {
-    const statementSet = restrictedCompactSameSecretBridgeStatementSet(fixture);
+    const statementSet = restrictedCompactSameSecretBridgeStatementSet(
+        fixture,
+        ringDegree,
+    );
     const proofMaterialSet = createCompactVssSameSecretBridgeProofMaterialSet({
         statementSet,
         sameSecretConsistency: fixture.sameSecretConsistency,
@@ -1267,6 +1406,125 @@ const measureRestrictedCompactSameSecretBridgeProofMaterial = (
 
     return { proofMaterialSetJsonBytes, verification };
 };
+
+const measureFullSameSecretBridgeProof = (
+    kernel: TranscriptCoreKernel,
+): FullSameSecretBridgeProofMeasurement => {
+    if (!fullSameSecretBridgeMeasurementRequested) {
+        return {
+            measurementMode:
+                'Set SEALED_LATTICE_MEASURE_FULL_SAME_SECRET_BRIDGE=1 to run the accepted-ring compact same-secret bridge proof measurement.',
+        };
+    }
+
+    const ringDegree = acceptedBgvProfileRingDegree;
+    const fixture = restrictedCompactSameSecretBridgeProofFixture(ringDegree);
+    const measurement = measureRestrictedCompactSameSecretBridgeProof(
+        kernel,
+        fixture,
+        ringDegree,
+    );
+
+    return {
+        measurementMode:
+            'accepted-ring compact same-secret bridge proof measurement',
+        ringDegree,
+        targetRnsLimbCount:
+            measurement.generation.lastResult.targetRnsLimbCount,
+        proofByteLength: measurement.generation.lastResult.proofByteLength,
+        statementHash: measurement.generation.lastResult.statementHash,
+        generation: measurement.generation,
+        verification: measurement.verification,
+    };
+};
+
+const fullSameSecretBridgeProofReport = (
+    measurement: FullSameSecretBridgeProofMeasurement,
+): JsonRecord => {
+    if (!fullSameSecretBridgeProofWasMeasured(measurement)) {
+        return measurement;
+    }
+
+    return {
+        measurementMode: measurement.measurementMode,
+        ringDegree: measurement.ringDegree,
+        targetRnsLimbCount: measurement.targetRnsLimbCount,
+        proofByteLength: measurement.proofByteLength,
+        statementHash: measurement.statementHash,
+        generation: measurement.generation.samples,
+        verification: measurement.verification.samples,
+    };
+};
+
+function jsonByteLength(value: unknown): number {
+    return Buffer.byteLength(
+        JSON.stringify(value, (_key, entry: unknown) =>
+            typeof entry === 'bigint' ? entry.toString() : entry,
+        ),
+        'utf8',
+    );
+}
+
+function measurementHash(label: string): ProtocolHash {
+    return deriveProtocolHash('SetupProofRecordBindingHash', {
+        objectType: 'CompactVssManualMeasurementReference',
+        objectVersion: 1,
+        label,
+    });
+}
+
+function measurementSetupContext(): CollectiveBgvSetupContext {
+    return {
+        ceremonyId: 'compact-vss-manual-measurement',
+        manifestHash: measurementHash('manifest'),
+        rosterHash: measurementHash('roster'),
+        setupProfileHash: measurementHash('setup-profile'),
+        qShareHash: measurementHash('q-share'),
+        carryAwareVssShareRelationProfileHash: measurementHash(
+            'carry-aware-vss-share-relation-profile',
+        ),
+        commitmentProfileHash: measurementHash('commitment-profile'),
+        setupEpoch: 'compact-vss-measurement-epoch',
+    };
+}
+
+function deterministicResidueVectorForRingDegree(
+    rnsPrime: number,
+    rnsLimbIndex: number,
+    shamirCoefficientIndex: number,
+    ringDegree: number,
+): readonly number[] {
+    const modulus = BigInt(rnsPrime);
+    const limbOffset = BigInt(101 + rnsLimbIndex * 4_099);
+    const coefficientOffset = BigInt(1_009 + shamirCoefficientIndex * 8_191);
+
+    return Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
+        const residue =
+            (BigInt(coefficientIndex + 1) * 65_537n +
+                limbOffset +
+                coefficientOffset) %
+            modulus;
+
+        return Number((modulus - 1n - residue) % modulus);
+    });
+}
+
+function deterministicRandomnessColumns(
+    seedOffset: number,
+    ringDegree: number,
+): readonly (readonly number[])[] {
+    return Array.from(
+        { length: compactVssCommitmentRandomnessColumnCount },
+        (_unusedColumn, columnIndex) =>
+            Array.from(
+                { length: ringDegree },
+                (_unusedCoefficient, coefficientIndex) =>
+                    ((seedOffset + columnIndex * 11 + coefficientIndex * 17) %
+                        3) -
+                    1,
+            ),
+    );
+}
 
 const restrictedFirstProfileSourceTrusteeState = (
     setupContext: CollectiveBgvSetupContext,
@@ -1369,6 +1627,10 @@ const fullShareLinkageBatchDerivedFixture =
                 restrictedProofRingDegree,
             ),
         );
+        const proofRnsPrimes = acceptedBgvSetupQSharePrimes.slice(
+            0,
+            targetRnsLimbCount,
+        );
         const coefficientOpeningRandomness = ({
             trusteeRosterPosition,
             rnsLimbIndex,
@@ -1392,21 +1654,20 @@ const fullShareLinkageBatchDerivedFixture =
                 setupContext,
                 publicMatrixSeedHash,
                 participantCount: firstProfileParticipantCount,
-                qSharePrimes: acceptedBgvSetupQSharePrimes,
+                qSharePrimes: proofRnsPrimes,
                 ringDegree: restrictedProofRingDegree,
                 thresholdDegree: firstProfileThresholdDegree,
                 sourceTrusteeOpeningStates,
                 coefficientOpeningRandomness,
             });
         const recipientShareBundle =
-            createCompactVssDerivedRecipientShareCommitmentBundle({
+            createCompactVssRecipientShareCommitmentBundle({
                 setupContext,
                 publicMatrixSeedHash,
                 participantCount: firstProfileParticipantCount,
-                qSharePrimes: acceptedBgvSetupQSharePrimes,
+                qSharePrimes: proofRnsPrimes,
                 ringDegree: restrictedProofRingDegree,
                 thresholdDegree: firstProfileThresholdDegree,
-                derivedRnsLimbCount: targetRnsLimbCount,
                 coefficientCommitmentSet,
                 sourceTrusteeOpeningStates,
                 recipientTrustees,
@@ -1416,10 +1677,7 @@ const fullShareLinkageBatchDerivedFixture =
             setupContext,
             publicMatrixSeedHash,
             participantCount: firstProfileParticipantCount,
-            qSharePrimes: acceptedBgvSetupQSharePrimes.slice(
-                0,
-                targetRnsLimbCount,
-            ),
+            qSharePrimes: proofRnsPrimes,
             ringDegree: restrictedProofRingDegree,
             recipientTrustees,
             recipientShareOpeningCredentials:
@@ -1437,16 +1695,245 @@ const fullShareLinkageBatchDerivedFixture =
         });
 
         return {
+            setupContext,
+            publicMatrixSeedHash,
             coefficientCommitmentSet,
             recipientShareCommitmentSet:
                 recipientShareBundle.recipientShareCommitmentSet,
             aggregateThresholdCommitmentSet:
                 aggregateBundle.aggregateThresholdCommitmentSet,
             shareLinkageStatement,
+            sourceTrusteeOpeningStates,
+            recipientShareOpeningCredentials:
+                recipientShareBundle.recipientShareOpeningCredentials,
+            coefficientOpeningRandomness,
             recipientShareOpeningCredentialCount:
                 recipientShareBundle.recipientShareOpeningCredentials.length,
         };
     };
+
+const compactVssShareLinkageCredentialForItem = (
+    fixture: FullShareLinkageBatchDerivedFixture,
+    sourceTrusteeRosterPosition: number,
+    recipientRosterPosition: number,
+    sourceRnsLimbIndex: number,
+): CompactVssRecipientShareOpeningCredential => {
+    const credential = fixture.recipientShareOpeningCredentials.find(
+        (candidate) =>
+            candidate.sourceTrusteeRosterPosition ===
+                sourceTrusteeRosterPosition &&
+            candidate.recipientRosterPosition === recipientRosterPosition &&
+            candidate.rnsLimbIndex === sourceRnsLimbIndex,
+    );
+    if (credential === undefined) {
+        throw new Error(
+            'compact share-linkage measurement fixture is missing a recipient-share opening credential.',
+        );
+    }
+
+    return credential;
+};
+
+const compactVssShareLinkageProofItemForCredential = (
+    fixture: FullShareLinkageBatchDerivedFixture,
+    credential: CompactVssRecipientShareOpeningCredential,
+): CompactVssShareLinkageProofStatementItem => {
+    const coefficientSourceRecord =
+        fixture.coefficientCommitmentSet.sourceTrusteeRecords[
+            credential.sourceTrusteeRosterPosition
+        ];
+    const recipientSourceRecord =
+        fixture.recipientShareCommitmentSet.sourceTrusteeRecords[
+            credential.sourceTrusteeRosterPosition
+        ];
+    if (
+        coefficientSourceRecord === undefined ||
+        recipientSourceRecord === undefined
+    ) {
+        throw new Error(
+            'compact share-linkage measurement fixture is missing source records.',
+        );
+    }
+    const coefficientStart =
+        credential.rnsLimbIndex * firstProfileThresholdDegree;
+    const coefficientRecords =
+        coefficientSourceRecord.coefficientCommitments.slice(
+            coefficientStart,
+            coefficientStart + firstProfileThresholdDegree,
+        );
+    if (coefficientRecords.length !== firstProfileThresholdDegree) {
+        throw new Error(
+            'compact share-linkage measurement fixture is missing coefficient records.',
+        );
+    }
+    const recipientRecordIndex =
+        credential.recipientRosterPosition * targetRnsLimbCount +
+        credential.rnsLimbIndex;
+    const recipientRecord =
+        recipientSourceRecord.recipientShareCommitments[recipientRecordIndex];
+    if (recipientRecord === undefined) {
+        throw new Error(
+            'compact share-linkage measurement fixture is missing a recipient-share record.',
+        );
+    }
+
+    return {
+        recipientIdentity: credential.recipientIdentity,
+        recipientRosterPosition: credential.recipientRosterPosition,
+        sourceRnsLimbIndex: credential.rnsLimbIndex,
+        sourceMessageModulus: credential.rnsPrime,
+        coefficientCommitmentRoots: coefficientRecords.map(
+            (record) => record.coefficientCommitmentRoot,
+        ),
+        coefficientOpeningRoots: coefficientRecords.map(
+            (record) => record.coefficientOpeningRoot,
+        ),
+        coefficientCommitments: coefficientRecords.map(
+            (record) => record.commitment,
+        ),
+        recipientShareCommitmentRoot: recipientRecord.shareCommitmentRoot,
+        recipientShareOpeningRoot: recipientRecord.shareOpeningRoot,
+        recipientShareCommitment: recipientRecord.commitment,
+    };
+};
+
+const compactVssSourceBatchProofInput = (
+    fixture: FullShareLinkageBatchDerivedFixture,
+    sourceTrusteeRosterPosition: number,
+): CompactVssSourceBatchProofInput => {
+    const sourceStatement =
+        fixture.shareLinkageStatement.sourceStatementRecords[
+            sourceTrusteeRosterPosition
+        ];
+    const sourceState =
+        fixture.sourceTrusteeOpeningStates[sourceTrusteeRosterPosition];
+    if (sourceStatement === undefined || sourceState === undefined) {
+        throw new Error(
+            'compact share-linkage source-batch fixture is missing a source statement.',
+        );
+    }
+    const credentials = Array.from(
+        { length: firstProfileParticipantCount },
+        (_unusedRecipient, recipientRosterPosition) =>
+            Array.from(
+                { length: targetRnsLimbCount },
+                (_unusedLimb, sourceRnsLimbIndex) =>
+                    compactVssShareLinkageCredentialForItem(
+                        fixture,
+                        sourceTrusteeRosterPosition,
+                        recipientRosterPosition,
+                        sourceRnsLimbIndex,
+                    ),
+            ),
+    ).flat();
+    const proofItems = credentials.map((credential) =>
+        compactVssShareLinkageProofItemForCredential(fixture, credential),
+    );
+    const primaryProofItem = proofItems[0];
+    if (primaryProofItem === undefined) {
+        throw new Error(
+            'compact share-linkage source-batch fixture has no proof items.',
+        );
+    }
+    const compactVssShareLinkage: CompactVssShareLinkageProofStatement = {
+        publicMatrixSeedHash: fixture.publicMatrixSeedHash,
+        sourceTrusteeIdentity: sourceStatement.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition,
+        sourceCoefficientCommitmentRoot:
+            sourceStatement.sourceCoefficientCommitmentRoot,
+        sourceRecipientShareCommitmentRoot:
+            sourceStatement.sourceRecipientShareCommitmentRoot,
+        ...primaryProofItem,
+        additionalLinkageItems: proofItems.slice(1),
+    };
+    const coefficientMessagesByShamirIndex: number[][] = [];
+    const coefficientOpeningRandomnessByShamirIndex: number[][][] = [];
+    const seenCoefficientOpenings = new Set<string>();
+    proofItems.forEach((proofItem) => {
+        proofItem.coefficientOpeningRoots.forEach(
+            (coefficientOpeningRoot, shamirCoefficientIndex) => {
+                const key = [
+                    proofItem.sourceRnsLimbIndex,
+                    shamirCoefficientIndex,
+                    coefficientOpeningRoot,
+                ].join(':');
+                if (seenCoefficientOpenings.has(key)) {
+                    return;
+                }
+                seenCoefficientOpenings.add(key);
+                const coefficientOpening = sourceState.coefficientOpenings.find(
+                    (candidate) =>
+                        candidate.rnsLimbIndex ===
+                            proofItem.sourceRnsLimbIndex &&
+                        candidate.shamirCoefficientIndex ===
+                            shamirCoefficientIndex,
+                );
+                if (coefficientOpening === undefined) {
+                    throw new Error(
+                        'compact share-linkage source-batch fixture is missing coefficient opening witness material.',
+                    );
+                }
+                coefficientMessagesByShamirIndex.push([
+                    ...coefficientOpening.coefficientMessage,
+                ]);
+                coefficientOpeningRandomnessByShamirIndex.push(
+                    fixture
+                        .coefficientOpeningRandomness({
+                            trusteeRosterPosition: sourceTrusteeRosterPosition,
+                            rnsLimbIndex: proofItem.sourceRnsLimbIndex,
+                            shamirCoefficientIndex,
+                            ringDegree: restrictedProofRingDegree,
+                        })
+                        .map((column) => [...column]),
+                );
+            },
+        );
+    });
+    const recipientShareMessagesByItem = credentials.map((credential) => [
+        ...credential.shareValues,
+    ]);
+    const recipientShareOpeningRandomnessByItem = credentials.map(
+        (credential) =>
+            credential.randomnessByColumn.map((column) => [...column]),
+    );
+    const carryWitnessesByItem = credentials.map((credential) => [
+        ...credential.shareCommitmentMessageCarryValues,
+    ]);
+    const primaryCredential = credentials[0];
+    if (primaryCredential === undefined) {
+        throw new Error(
+            'compact share-linkage source-batch fixture is missing the primary credential.',
+        );
+    }
+
+    return {
+        context: {
+            ceremonyId: sourceStatement.ceremonyId,
+            manifestHash: sourceStatement.manifestHash,
+            rosterHash: sourceStatement.rosterHash,
+            trusteeIdentity: sourceStatement.sourceTrusteeIdentity,
+            trusteeRosterPosition: sourceTrusteeRosterPosition,
+            setupEpoch: sourceStatement.setupEpoch,
+            sourceCoefficientCommitmentRoot:
+                sourceStatement.sourceCoefficientCommitmentRoot,
+            sourceRecipientShareCommitmentRoot:
+                sourceStatement.sourceRecipientShareCommitmentRoot,
+        },
+        compactVssShareLinkage,
+        coefficientMessagesByShamirIndex,
+        recipientShareMessages: [...primaryCredential.shareValues],
+        coefficientOpeningRandomnessByShamirIndex,
+        recipientShareOpeningRandomness:
+            primaryCredential.randomnessByColumn.map((column) => [...column]),
+        carryWitnesses: [
+            ...primaryCredential.shareCommitmentMessageCarryValues,
+        ],
+        recipientShareMessagesByItem,
+        recipientShareOpeningRandomnessByItem,
+        carryWitnessesByItem,
+        sourceStatementRoot: sourceStatement.sourceStatementRoot,
+    };
+};
 
 const measureFullShareLinkageBatchDerived = (
     kernel: TranscriptCoreKernel,
@@ -1456,17 +1943,14 @@ const measureFullShareLinkageBatchDerived = (
     if (!fullShareLinkageBatchMeasurementRequested) {
         return {
             measurementMode:
-                'Set SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH=1 to run the restricted-ring derived compact linkage measurement.',
+                'Set SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH=1 to run the restricted-ring compact linkage proof-material measurement.',
         };
     }
 
     const fixture = fullShareLinkageBatchDerivedFixture();
-    const derivedRecipientShareCommitments = measureSyncOperation(() =>
-        verifyCompactVssDerivedRecipientShareCommitmentSet({
-            setupContext: measurementSetupContext(),
-            coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+    const recipientShareCommitments = measureSyncOperation(() =>
+        verifyCompactVssRecipientShareCommitmentSet({
             recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
-            derivedRnsLimbCount: targetRnsLimbCount,
         }),
     );
     const shareLinkageStatement = measureSyncOperation(() =>
@@ -1483,10 +1967,101 @@ const measureFullShareLinkageBatchDerived = (
         fixture.shareLinkageStatement.shareLinkageStatementRoot
     ) {
         throw new Error(
-            'derived compact linkage statement root differs after verification.',
+            'compact linkage statement root differs after verification.',
         );
     }
-    const oneSourceShareLinkageProofByteLength = 0;
+    const sourceZeroProofInput = compactVssSourceBatchProofInput(fixture, 0);
+    const sourceZeroProofGeneration = measureSyncOperation(() =>
+        kernel.generateCompactVssShareLinkageProof({
+            ...sourceZeroProofInput,
+            ringDegree: restrictedProofRingDegree,
+            proofRandomnessSeedHex: '56'.repeat(64),
+            proofRandomnessNonceHex: '78'.repeat(64),
+        }),
+    );
+    const sourceZeroProofVerification = measureSyncOperation(() =>
+        kernel.verifyCompactVssShareLinkageProof({
+            context: sourceZeroProofInput.context,
+            ringDegree: restrictedProofRingDegree,
+            compactVssShareLinkage: sourceZeroProofInput.compactVssShareLinkage,
+            proofBytesHex: sourceZeroProofGeneration.lastResult.proofBytesHex,
+        }),
+    );
+    if (
+        sourceZeroProofGeneration.lastResult.statementHash !==
+        sourceZeroProofVerification.lastResult.statementHash
+    ) {
+        throw new Error(
+            'compact linkage source-batch proof statement hashes differ.',
+        );
+    }
+    const proofRecordInputs: CompactVssShareLinkageProofRecordInput[] = [
+        {
+            sourceStatementRoot: sourceZeroProofInput.sourceStatementRoot,
+            compactVssShareLinkage: sourceZeroProofInput.compactVssShareLinkage,
+            proofBytesHex: sourceZeroProofGeneration.lastResult.proofBytesHex,
+        },
+    ];
+    for (
+        let sourceTrusteeRosterPosition = 1;
+        sourceTrusteeRosterPosition < firstProfileParticipantCount;
+        sourceTrusteeRosterPosition += 1
+    ) {
+        const sourceProofInput = compactVssSourceBatchProofInput(
+            fixture,
+            sourceTrusteeRosterPosition,
+        );
+        const sourceProofGeneration =
+            kernel.generateCompactVssShareLinkageProof({
+                ...sourceProofInput,
+                ringDegree: restrictedProofRingDegree,
+                proofRandomnessSeedHex: '56'.repeat(64),
+                proofRandomnessNonceHex: '78'.repeat(64),
+            });
+        proofRecordInputs.push({
+            sourceStatementRoot: sourceProofInput.sourceStatementRoot,
+            compactVssShareLinkage: sourceProofInput.compactVssShareLinkage,
+            proofBytesHex: sourceProofGeneration.proofBytesHex,
+        });
+    }
+    const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
+        statement: fixture.shareLinkageStatement,
+        coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+        recipientShareCommitmentSet: fixture.recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet:
+            fixture.aggregateThresholdCommitmentSet,
+        ringDegree: restrictedProofRingDegree,
+        proofRecordInputs,
+    });
+    const proofMaterialSetJsonBytes = jsonByteLength(proofMaterialSet);
+    const proofMaterialSetVerification = measureSyncOperation(
+        () =>
+            verifyCompactVssShareLinkageProofMaterialSet({
+                statement: fixture.shareLinkageStatement,
+                coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    fixture.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    fixture.aggregateThresholdCommitmentSet,
+                proofMaterialSet,
+            }),
+        0,
+    );
+    const wasmProofMaterialSetVerification = measureSyncOperation(
+        () =>
+            kernel.verifyCompactVssShareLinkageProofMaterialSet({
+                statement: fixture.shareLinkageStatement,
+                coefficientCommitmentSet: fixture.coefficientCommitmentSet,
+                recipientShareCommitmentSet:
+                    fixture.recipientShareCommitmentSet,
+                aggregateThresholdCommitmentSet:
+                    fixture.aggregateThresholdCommitmentSet,
+                proofMaterialSet,
+            }),
+        0,
+    );
+    const oneSourceShareLinkageProofByteLength =
+        sourceZeroProofGeneration.lastResult.proofByteLength;
     const oneSourcePayloadWithBridgeProofBytes =
         oneSourceShareLinkageProofByteLength + bridgeProofByteLength;
     const sourceRecipientRecordCount =
@@ -1495,7 +2070,8 @@ const measureFullShareLinkageBatchDerived = (
         targetRnsLimbCount;
 
     return {
-        measurementMode: 'restricted-ring derived compact linkage measurement',
+        measurementMode:
+            'restricted-ring compact linkage proof-material measurement',
         participantCount: firstProfileParticipantCount,
         targetRnsLimbCount,
         sourceRecipientRecordCount,
@@ -1503,22 +2079,31 @@ const measureFullShareLinkageBatchDerived = (
             firstProfileParticipantCount * targetRnsLimbCount,
         ringDegree: restrictedProofRingDegree,
         oneSourceShareLinkageProofByteLength,
+        proofMaterialSetJsonBytes,
+        proofMaterialSetRoot: proofMaterialSet.proofMaterialSetRoot,
         oneSourcePayloadWithBridgeProofBytes,
         repeatedAllSourceShareLinkageProofBytes:
-            oneSourceShareLinkageProofByteLength * firstProfileParticipantCount,
+            wasmProofMaterialSetVerification.lastResult.totalProofByteLength,
         repeatedAllSourcePayloadWithBridgeProofBytes:
-            oneSourcePayloadWithBridgeProofBytes * firstProfileParticipantCount,
+            wasmProofMaterialSetVerification.lastResult.totalProofByteLength +
+            bridgeProofByteLength,
         coefficientCommitmentCount:
-            firstProfileParticipantCount *
-            acceptedBgvSetupQSharePrimes.length *
-            firstProfileThresholdDegree,
+            fixture.coefficientCommitmentSet.sourceTrusteeRecords.reduce(
+                (totalCount, sourceRecord) =>
+                    totalCount + sourceRecord.coefficientCommitments.length,
+                0,
+            ),
         coefficientWitnessColumnCount:
-            acceptedBgvSetupQSharePrimes.length * firstProfileThresholdDegree,
+            sourceZeroProofGeneration.lastResult.coefficientWitnessColumnCount,
         recipientShareOpeningCredentialCount:
             fixture.recipientShareOpeningCredentialCount,
         verification: {
-            derivedRecipientShareCommitments,
+            recipientShareCommitments,
             shareLinkageStatement,
+            sourceProofGeneration: sourceZeroProofGeneration,
+            sourceProofVerification: sourceZeroProofVerification,
+            proofMaterialSet: proofMaterialSetVerification,
+            wasmProofMaterialSet: wasmProofMaterialSetVerification,
         },
     };
 };
@@ -1540,6 +2125,8 @@ const fullShareLinkageBatchReport = (
         ringDegree: measurement.ringDegree,
         oneSourceShareLinkageProofByteLength:
             measurement.oneSourceShareLinkageProofByteLength,
+        proofMaterialSetJsonBytes: measurement.proofMaterialSetJsonBytes,
+        proofMaterialSetRoot: measurement.proofMaterialSetRoot,
         oneSourcePayloadWithBridgeProofBytes:
             measurement.oneSourcePayloadWithBridgeProofBytes,
         repeatedAllSourceShareLinkageProofBytes:
@@ -1555,11 +2142,26 @@ const fullShareLinkageBatchReport = (
             measurement.verification.shareLinkageStatement.lastResult
                 .shareLinkageStatementRoot,
         verification: {
-            derivedRecipientShareCommitments:
-                measurement.verification.derivedRecipientShareCommitments
-                    .samples,
+            recipientShareCommitments:
+                measurement.verification.recipientShareCommitments.samples,
             shareLinkageStatement:
                 measurement.verification.shareLinkageStatement.samples,
+            sourceProofGeneration:
+                measurement.verification.sourceProofGeneration.samples,
+            sourceProofVerification:
+                measurement.verification.sourceProofVerification.samples,
+            proofMaterialSet: measurement.verification.proofMaterialSet.samples,
+            wasmProofMaterialSet:
+                measurement.verification.wasmProofMaterialSet.samples,
+            coveredLinkageItemCount:
+                measurement.verification.wasmProofMaterialSet.lastResult
+                    .coveredLinkageItemCount,
+            proofVerificationCount:
+                measurement.verification.wasmProofMaterialSet.lastResult
+                    .proofVerificationCount,
+            totalProofByteLength:
+                measurement.verification.wasmProofMaterialSet.lastResult
+                    .totalProofByteLength,
         },
     };
 };
@@ -1596,14 +2198,6 @@ const assertAtLeast = (
 const equalBytes = (left: Uint8Array, right: Uint8Array): boolean =>
     left.byteLength === right.byteLength &&
     left.every((leftByte, byteIndex) => leftByte === right[byteIndex]);
-
-const jsonByteLength = (value: unknown): number =>
-    Buffer.byteLength(
-        JSON.stringify(value, (_key, entry: unknown) =>
-            typeof entry === 'bigint' ? entry.toString() : entry,
-        ),
-        'utf8',
-    );
 
 const objectField = (
     value: unknown,
@@ -2060,8 +2654,13 @@ const targetProofMaskDigitCountForClaim = (
     const vectorIndex = Math.floor(
         localClaimIndex / proofConsistencyRepetitions,
     );
-    if (vectorIndex < localMessageGlobalIndices.length) {
-        const globalMessageIndex = localMessageGlobalIndices[vectorIndex];
+    const localMessageDigitVectorCount =
+        localMessageGlobalIndices.length * compactVssMessageDigitCount;
+    if (vectorIndex < localMessageDigitVectorCount) {
+        const localMessageIndex = Math.floor(
+            vectorIndex / compactVssMessageDigitCount,
+        );
+        const globalMessageIndex = localMessageGlobalIndices[localMessageIndex];
         if (globalMessageIndex === undefined) {
             throw new Error(
                 'target proof local message index is outside the layout.',
@@ -2106,15 +2705,20 @@ const targetProofLimbLayout = (
 
             return (
                 totalColumns +
-                compactVssMessageEncodingLayoutForBound(messageBound)
-                    .encodingColumnCount
+                compactVssMessageEncodingLayoutForBound(
+                    messageBound,
+                    'digit-columns-only',
+                ).encodingColumnCount
             );
         },
         0,
     );
     const logicalColumnCount =
         messageEncodingColumnCount + randomnessColumnCount;
-    const claimCount = logicalColumnCount * proofConsistencyRepetitions;
+    const claimVectorCount =
+        localMessageGlobalIndices.length * compactVssMessageDigitCount +
+        randomnessColumnCount;
+    const claimCount = claimVectorCount * proofConsistencyRepetitions;
     let maskSlotCount = 0;
     for (
         let localClaimIndex = 0;
@@ -2294,7 +2898,7 @@ const encodedSetupProofByteBreakdownForProofBytes = (
             `${proofDescription} format marker`,
         ),
     ).toString('ascii');
-    if (formatMarker !== 'BGVPRF18') {
+    if (formatMarker !== 'BGVPRF19') {
         throw new Error(
             `${proofDescription} byte stream uses an unexpected format marker.`,
         );
@@ -2534,47 +3138,6 @@ const assertTargetStatementBindingIsProofless = (value: unknown): void => {
     }
 };
 
-const measurementHash = (label: string): ProtocolHash =>
-    deriveProtocolHash('SetupProofRecordBindingHash', {
-        objectType: 'CompactVssManualMeasurementReference',
-        objectVersion: 1,
-        label,
-    });
-
-const measurementSetupContext = (): CollectiveBgvSetupContext => ({
-    ceremonyId: 'compact-vss-manual-measurement',
-    manifestHash: measurementHash('manifest'),
-    rosterHash: measurementHash('roster'),
-    setupProfileHash: measurementHash('setup-profile'),
-    qShareHash: measurementHash('q-share'),
-    carryAwareVssShareRelationProfileHash: measurementHash(
-        'carry-aware-vss-share-relation-profile',
-    ),
-    commitmentProfileHash: measurementHash('commitment-profile'),
-    setupEpoch: 'compact-vss-measurement-epoch',
-});
-
-const deterministicResidueVectorForRingDegree = (
-    rnsPrime: number,
-    rnsLimbIndex: number,
-    shamirCoefficientIndex: number,
-    ringDegree: number,
-): readonly number[] => {
-    const modulus = BigInt(rnsPrime);
-    const limbOffset = BigInt(101 + rnsLimbIndex * 4_099);
-    const coefficientOffset = BigInt(1_009 + shamirCoefficientIndex * 8_191);
-
-    return Array.from({ length: ringDegree }, (_unused, coefficientIndex) => {
-        const residue =
-            (BigInt(coefficientIndex + 1) * 65_537n +
-                limbOffset +
-                coefficientOffset) %
-            modulus;
-
-        return Number((modulus - 1n - residue) % modulus);
-    });
-};
-
 const deterministicResidueVector = (
     rnsPrime: number,
     rnsLimbIndex: number,
@@ -2585,22 +3148,6 @@ const deterministicResidueVector = (
         rnsLimbIndex,
         shamirCoefficientIndex,
         acceptedBgvProfileRingDegree,
-    );
-
-const deterministicRandomnessColumns = (
-    seedOffset: number,
-    ringDegree: number,
-): readonly (readonly number[])[] =>
-    Array.from(
-        { length: compactVssCommitmentRandomnessColumnCount },
-        (_unusedColumn, columnIndex) =>
-            Array.from(
-                { length: ringDegree },
-                (_unusedCoefficient, coefficientIndex) =>
-                    ((seedOffset + columnIndex * 11 + coefficientIndex * 17) %
-                        3) -
-                    1,
-            ),
     );
 
 const sourceTrusteeContributionState = (
@@ -2991,41 +3538,52 @@ const encryptedLocalStateMeasurement = (
 const measurePrivateStateDevelopmentArtifacts = async (
     fixture: FullRingPrivateStateFixture,
 ): Promise<PrivateStateDevelopmentArtifactMeasurement> => {
-    const observedPrivateEnvelopes: JsonRecord[] = [];
-    const observedTransportedProofMaterials: JsonRecord[] = [];
-    const mailboxStartedAtMilliseconds = performance.now();
-    const deliverySet = await createPrivateVssMailboxDeliverySet({
-        kernel: privateMailboxMeasurementKernel(
+    const mailboxMeasurement = await measureAsyncMedianResult(async () => {
+        const observedPrivateEnvelopes: JsonRecord[] = [];
+        const observedTransportedProofMaterials: JsonRecord[] = [];
+        const deliverySet = await createPrivateVssMailboxDeliverySet({
+            kernel: privateMailboxMeasurementKernel(
+                observedPrivateEnvelopes,
+                observedTransportedProofMaterials,
+            ),
+            setupContext: fixture.setupContext,
+            phaseOrderHash: measurementHash('phase-order'),
+            publicMatrixSeedHash: fixture.publicMatrixSeedHash,
+            vssCoefficientCommitmentRoot: fixture.vssCoefficientCommitmentRoot,
+            qSharePrimes: acceptedBgvSetupQSharePrimes,
+            ringDegree: acceptedBgvProfileRingDegree,
+            participantCount: 1,
+            deliveryPhaseNumber: 6,
+            verificationPhaseNumber: 7,
+            privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
+            privateVssShareProofFactory: ({ rnsLimbIndex }) =>
+                privateVssShareProofFramingSample(rnsLimbIndex),
+            compactVssRecipientShareOpeningCredentials:
+                fixture.compactRecipientShareOpeningCredentials,
+            sourceTrusteeContributionStates: [
+                fixture.sourceTrusteeContributionState,
+            ],
+            recipients: [
+                {
+                    recipientIdentity: 'trustee-0',
+                    recipientRosterPosition: 0,
+                    mailboxPublicKeyBytesHex: fixture.mailboxPublicKeyBytesHex,
+                },
+            ],
+        });
+
+        return {
+            deliverySet,
             observedPrivateEnvelopes,
             observedTransportedProofMaterials,
-        ),
-        setupContext: fixture.setupContext,
-        phaseOrderHash: measurementHash('phase-order'),
-        publicMatrixSeedHash: fixture.publicMatrixSeedHash,
-        vssCoefficientCommitmentRoot: fixture.vssCoefficientCommitmentRoot,
-        qSharePrimes: acceptedBgvSetupQSharePrimes,
-        ringDegree: acceptedBgvProfileRingDegree,
-        participantCount: 1,
-        deliveryPhaseNumber: 6,
-        verificationPhaseNumber: 7,
-        privateVssShareProofMaterialEncoding: 'binary-chunked-proof-bytes',
-        privateVssShareProofFactory: ({ rnsLimbIndex }) =>
-            privateVssShareProofFramingSample(rnsLimbIndex),
-        compactVssRecipientShareOpeningCredentials:
-            fixture.compactRecipientShareOpeningCredentials,
-        sourceTrusteeContributionStates: [
-            fixture.sourceTrusteeContributionState,
-        ],
-        recipients: [
-            {
-                recipientIdentity: 'trustee-0',
-                recipientRosterPosition: 0,
-                mailboxPublicKeyBytesHex: fixture.mailboxPublicKeyBytesHex,
-            },
-        ],
-    });
-    const mailboxBuildMilliseconds =
-        performance.now() - mailboxStartedAtMilliseconds;
+        };
+    }, privateStateBuildRunCount);
+    const {
+        deliverySet,
+        observedPrivateEnvelopes,
+        observedTransportedProofMaterials,
+    } = mailboxMeasurement.result;
+    const mailboxBuildMilliseconds = mailboxMeasurement.medianMilliseconds;
     const envelopeReference = firstEnvelopeReference(deliverySet);
     const privateEnvelope = observedPrivateEnvelopes[0];
     if (privateEnvelope === undefined) {
@@ -3100,13 +3658,16 @@ const measurePrivateStateDevelopmentArtifacts = async (
         deliverySet,
         privateEnvelope,
     );
-    const localStateStartedAtMilliseconds = performance.now();
-    const localState =
-        await createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
-            localStateInput,
-        );
+    const localStateMeasurement = await measureAsyncMedianResult(
+        () =>
+            createEncryptedLocalTrusteeSetupStateFromVerifiedShares(
+                localStateInput,
+            ),
+        privateStateBuildRunCount,
+    );
+    const localState = localStateMeasurement.result;
     const localStateBuildMilliseconds =
-        performance.now() - localStateStartedAtMilliseconds;
+        localStateMeasurement.medianMilliseconds;
     const encryptedLocalState = encryptedLocalStateMeasurement(
         localState,
         deliverySet.envelopeReferences.length,
@@ -3454,6 +4015,7 @@ const implementedDevelopmentArtifactByteAccounting = (
     fullShareLinkageBatchMeasurement: FullShareLinkageBatchMeasurement,
     restrictedBridgeProofMeasurement: RestrictedCompactSameSecretBridgeProofMeasurement,
     restrictedBridgeProofMaterialMeasurement: RestrictedCompactSameSecretBridgeProofMaterialMeasurement,
+    fullSameSecretBridgeProofMeasurement: FullSameSecretBridgeProofMeasurement,
     privateStateMeasurement: PrivateStateDevelopmentArtifactMeasurement,
     targetDecryptionMeasurement: TargetDecryptionDevelopmentMeasurements,
 ): Readonly<Record<string, unknown>> => {
@@ -3486,6 +4048,9 @@ const implementedDevelopmentArtifactByteAccounting = (
             sameSecretBridgeProofMaterialJsonBytes:
                 restrictedBridgeProofMaterialMeasurement.proofMaterialSetJsonBytes,
         },
+        targetReadySameSecretBridgeProof: fullSameSecretBridgeProofReport(
+            fullSameSecretBridgeProofMeasurement,
+        ),
         privateStateDevelopmentArtifacts: privateStateMeasurement,
         targetDecryptionDevelopmentArtifacts:
             targetDecryptionMeasurement.artifacts,
@@ -3500,6 +4065,7 @@ const enforceManualMeasurementBudgets = (input: {
     readonly fullShareLinkageBatchMeasurement: FullShareLinkageBatchMeasurement;
     readonly restrictedBridgeProofMeasurement: RestrictedCompactSameSecretBridgeProofMeasurement;
     readonly restrictedBridgeProofMaterialMeasurement: RestrictedCompactSameSecretBridgeProofMaterialMeasurement;
+    readonly fullSameSecretBridgeProofMeasurement: FullSameSecretBridgeProofMeasurement;
     readonly privateStateDevelopmentArtifactMeasurement: PrivateStateDevelopmentArtifactMeasurement;
     readonly wasmWarmGenerationExtrapolatedSeconds: number;
     readonly wasmWarmVerificationExtrapolatedSeconds: number;
@@ -3610,13 +4176,13 @@ const enforceManualMeasurementBudgets = (input: {
             input.fullShareLinkageBatchMeasurement
                 .oneSourcePayloadWithBridgeProofBytes,
             maximumRestrictedProofPayloadBytes,
-            'one-source derived compact linkage plus bridge proof payload',
+            'one-source compact linkage source-batch plus bridge proof payload',
         );
         assertAtMost(
             input.fullShareLinkageBatchMeasurement
                 .repeatedAllSourcePayloadWithBridgeProofBytes,
             input.measurement.budgetComparison.publicSetupDownloadBudgetBytes,
-            'repeated all-source derived compact linkage plus bridge proof payload',
+            'repeated all-source compact linkage source-batch plus bridge proof payload',
         );
     }
     if (
@@ -3712,6 +4278,8 @@ const main = async (): Promise<void> => {
             restrictedBridgeProofFixture,
             restrictedBridgeProofMeasurement.generation,
         );
+    const fullSameSecretBridgeProofMeasurement =
+        measureFullSameSecretBridgeProof(kernel);
     const fullShareLinkageBatchMeasurement =
         measureFullShareLinkageBatchDerived(
             kernel,
@@ -3786,6 +4354,7 @@ const main = async (): Promise<void> => {
             fullShareLinkageBatchMeasurement,
             restrictedBridgeProofMeasurement,
             restrictedBridgeProofMaterialMeasurement,
+            fullSameSecretBridgeProofMeasurement,
             privateStateDevelopmentArtifactMeasurement,
             wasmWarmGenerationExtrapolatedSeconds,
             wasmWarmVerificationExtrapolatedSeconds,
@@ -3844,6 +4413,10 @@ const main = async (): Promise<void> => {
                             restrictedBridgeProofMeasurement.verification
                                 .samples,
                     },
+                    targetReadySameSecretBridgeProof:
+                        fullSameSecretBridgeProofReport(
+                            fullSameSecretBridgeProofMeasurement,
+                        ),
                     compactShareLinkageSourceBatchProof:
                         fullShareLinkageBatchReport(
                             fullShareLinkageBatchMeasurement,
@@ -3908,6 +4481,7 @@ const main = async (): Promise<void> => {
                         fullShareLinkageBatchMeasurement,
                         restrictedBridgeProofMeasurement,
                         restrictedBridgeProofMaterialMeasurement,
+                        fullSameSecretBridgeProofMeasurement,
                         privateStateDevelopmentArtifactMeasurement,
                         targetDecryptionDevelopmentArtifactMeasurement,
                     ),
@@ -3997,6 +4571,10 @@ const main = async (): Promise<void> => {
                         restrictedBridgeProofMaterialMeasurement.verification
                             .samples,
                 },
+                targetReadySameSecretBridgeProof:
+                    fullSameSecretBridgeProofReport(
+                        fullSameSecretBridgeProofMeasurement,
+                    ),
             },
             null,
             2,

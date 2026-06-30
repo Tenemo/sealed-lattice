@@ -6,6 +6,8 @@ const COMPACT_VSS_RECIPIENT_SHARE_COMMITMENT_SET_FIELD: &str =
 const COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
     "compactVssAggregateThresholdCommitmentSet";
 const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "compactVssShareLinkageStatement";
+const COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD: &str =
+    "compactVssShareLinkageProofMaterialSet";
 
 pub(super) fn verify_optional_compact_vss_public_material(
     setup_package: &Value,
@@ -16,6 +18,7 @@ pub(super) fn verify_optional_compact_vss_public_material(
         COMPACT_VSS_RECIPIENT_SHARE_COMMITMENT_SET_FIELD,
         COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD,
         COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD,
+        COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD,
     ];
     let present_field_count = compact_public_material_fields
         .iter()
@@ -36,7 +39,7 @@ pub(super) fn verify_optional_compact_vss_public_material(
         return Ok(Some(compact_vss_public_material_refusal(
             "compactVssPublicMaterialIncomplete",
             format!(
-                "compact VSS public material requires all compact commitment sets and the share-linkage statement; missing {missing_fields}"
+                "compact VSS public material requires all compact commitment sets, the share-linkage statement, and its proof material set; missing {missing_fields}"
             ),
             "setupPackage",
         )?));
@@ -44,8 +47,8 @@ pub(super) fn verify_optional_compact_vss_public_material(
 
     Ok(Some(compact_vss_public_material_refusal(
         "compactVssPublicMaterialNotBinding",
-        "compact VSS public material is not accepted by this verifier because the current sparse linear commitment is not binding for full-width coefficient vectors",
-        "setupPackage.compactVssCoefficientCommitmentSet",
+        "compact VSS public material uses a compact commitment profile without certificate-grade binding evidence; remove compact VSS public material or replace it with a reviewed binding profile before accepted setup",
+        "setupPackage",
     )?))
 }
 
@@ -94,7 +97,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_compact_vss_public_material_refuses_complete_field_group() -> CanonicalResult<()> {
+    fn optional_compact_vss_public_material_requires_proof_material() -> CanonicalResult<()> {
         let response = verify_optional_compact_vss_public_material(
             &json!({
                 "compactVssCoefficientCommitmentSet": {},
@@ -109,11 +112,37 @@ mod tests {
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactVssPublicMaterialNotBinding")
+            json!("compactVssPublicMaterialIncomplete")
         );
+        assert!(
+            response["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message")
+                .contains("compactVssShareLinkageProofMaterialSet")
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn optional_compact_vss_public_material_refuses_complete_field_group_until_binding_review()
+    -> CanonicalResult<()> {
+        let response = verify_optional_compact_vss_public_material(
+            &json!({
+                "compactVssCoefficientCommitmentSet": {},
+                "compactVssRecipientShareCommitmentSet": {},
+                "compactVssAggregateThresholdCommitmentSet": {},
+                "compactVssShareLinkageStatement": {},
+                "compactVssShareLinkageProofMaterialSet": {},
+            }),
+            &json!({}),
+        )
+        .expect("complete compact VSS public material refusal")
+        .expect("complete compact VSS public material must refuse");
+
+        assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
-            response["refusedObjects"][0]["objectPath"],
-            json!("setupPackage.compactVssCoefficientCommitmentSet")
+            response["refusedObjects"][0]["reasonCode"],
+            json!("compactVssPublicMaterialNotBinding")
         );
         Ok(())
     }

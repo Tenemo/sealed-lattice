@@ -9,7 +9,7 @@ import {
 type JsonRecord = Record<string, unknown>;
 
 const targetDecryptionSmudgingProfileId =
-    'sealed-lattice-target-decryption-zero-share-smudging-development-v1';
+    'sealed-lattice-target-decryption-zero-share-smudging-v1';
 const targetDecryptionSmudgingSeedHashDomain =
     'sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1';
 const targetDecryptionPlaintextMultiple = 65_537;
@@ -17,7 +17,6 @@ const targetDecryptionPlaintextMultiple = 65_537;
 const textEncoder = new TextEncoder();
 
 type TargetDecryptionSmudgingSeedDerivationInput = Readonly<{
-    readonly localSmudgingSeedMaterial: string;
     readonly setupPackage: unknown;
     readonly targetAcceptedRecord: unknown;
     readonly targetDecryptionCiphertextHash: ProtocolHash;
@@ -40,7 +39,6 @@ type LocalTrusteeTargetDecryptionSmudgingWitness = Readonly<
         readonly rosterPosition: number;
         readonly interpolationPoint: number;
         readonly plaintextMultiple: typeof targetDecryptionPlaintextMultiple;
-        readonly smudgingSeedHex: string;
     }
 >;
 
@@ -51,7 +49,6 @@ type LocalTargetDecryptionShareWitnessPreparationInput = Readonly<{
     readonly targetDecryptionCiphertextHash: ProtocolHash;
     readonly targetShareProfile: unknown;
     readonly trusteeIdentity: string;
-    readonly localSmudgingSeedMaterial: string;
 }>;
 
 type PreparedLocalTargetDecryptionShareWitness = Readonly<
@@ -114,14 +111,6 @@ const nonNegativeIntegerField = (
     }
 
     return fieldValue;
-};
-
-const validateSmudgingSeedHex = (value: string): void => {
-    if (!/^[0-9a-f]{128}$/u.test(value)) {
-        throw new Error(
-            'target-decryption smudging seed must be a 64-byte lowercase hexadecimal value.',
-        );
-    }
 };
 
 const encoded = (value: string): Uint8Array => textEncoder.encode(value);
@@ -238,9 +227,6 @@ const setupParticipant = (
 export const deriveTargetDecryptionSmudgingSeedHex = (
     input: TargetDecryptionSmudgingSeedDerivationInput,
 ): string => {
-    if (input.localSmudgingSeedMaterial.length === 0) {
-        throw new Error('localSmudgingSeedMaterial must not be empty.');
-    }
     const bindingHashes = targetBindingHashes(
         input.setupPackage,
         input.targetAcceptedRecord,
@@ -249,7 +235,6 @@ export const deriveTargetDecryptionSmudgingSeedHex = (
     );
 
     return hash512Hex(targetDecryptionSmudgingSeedHashDomain, [
-        encoded(input.localSmudgingSeedMaterial),
         encoded(bindingHashes.setupPackageHash),
         encoded(bindingHashes.targetAcceptedRecordHash),
         encoded(bindingHashes.targetContextHash),
@@ -274,8 +259,6 @@ const createLocalTrusteeTargetDecryptionSmudgingWitness = (
         input.targetDecryptionCiphertextHash,
         input.targetShareProfile,
     );
-    const smudgingSeedHex = deriveTargetDecryptionSmudgingSeedHex(input);
-    validateSmudgingSeedHex(smudgingSeedHex);
 
     return {
         objectType: 'LocalTrusteeTargetDecryptionSmudgingWitness',
@@ -293,7 +276,6 @@ const createLocalTrusteeTargetDecryptionSmudgingWitness = (
         rosterPosition: participant.rosterPosition,
         interpolationPoint: participant.interpolationPoint,
         plaintextMultiple: targetDecryptionPlaintextMultiple,
-        smudgingSeedHex,
     };
 };
 

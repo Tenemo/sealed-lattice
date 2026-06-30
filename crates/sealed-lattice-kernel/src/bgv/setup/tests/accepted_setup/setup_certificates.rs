@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::bgv::profile::{data_basis_modulus_bits, extended_basis_modulus_bits};
 
 const HE_LATTICE_ESTIMATOR_OUTPUT_CANONICAL_SHA256: &str =
@@ -69,7 +69,7 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
         compact_binding["profileId"],
         "sealed-lattice-compact-vss-sparse-linear-v1"
     );
-    assert_eq!(compact_binding["objectVersion"], serde_json::json!(2));
+    assert_eq!(compact_binding["objectVersion"], serde_json::json!(3));
     assert_eq!(
         compact_binding["commitmentRelation"]["projectionWeight"],
         serde_json::json!(32)
@@ -77,6 +77,10 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
     assert_eq!(
         compact_binding["commonCommitmentKey"]["sparseProjectionShape"]["sampledMatrixResiduesPerCommitment"],
         serde_json::json!(6_144)
+    );
+    assert_eq!(
+        compact_binding["messageEncoding"]["proofRangeEncodingRule"],
+        "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims"
     );
     assert_eq!(
         compact_binding["normInputClasses"][0]["maximumOneSourceShamirScalarL1"],
@@ -109,6 +113,39 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
     assert_eq!(
         compact_binding["parameterReviewInputs"]["linearRelationRows"][1]["combinedRelationTermL1"],
         serde_json::json!(11)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["maskedClaimNormRows"]
+            .as_array()
+            .expect("compact VSS masked claim norm rows")
+            .iter()
+            .filter_map(|entry| entry["rowId"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "compact-vss-share-linkage-carry-claim",
+            "compact-vss-share-linkage-message-digit-claim",
+            "compact-vss-same-secret-bridge-non-digit-claim",
+            "compact-vss-same-secret-bridge-message-digit-claim",
+            "compact-vss-target-decryption-aggregate-message-claim",
+            "compact-vss-target-decryption-smudging-message-claim",
+            "compact-vss-target-decryption-randomness-claim",
+        ]
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["maskedClaimNormRows"][0]["maskDigitCount"],
+        serde_json::json!(75)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["maskedClaimNormRows"][1]["maskDigitCount"],
+        serde_json::json!(87)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["maskedClaimNormRows"][4]["maskDigitCount"],
+        serde_json::json!(142)
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["maskedClaimNormRows"][5]["witnessInfinityBoundDecimal"],
+        serde_json::json!("32")
     );
     assert_eq!(
         compact_binding["parameterReviewInputs"]["targetBasisReductionRows"][0]["sourceSignedRepresentativeInfinityBound"],

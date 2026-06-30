@@ -50,6 +50,7 @@ use crate::{
             verify_compact_vss_same_secret_bridge_proof_material_set_request,
             verify_compact_vss_same_secret_bridge_statement_set_request,
             verify_compact_vss_share_linkage_proof_from_request,
+            verify_compact_vss_share_linkage_proof_material_set_from_request,
             verify_compact_vss_share_linkage_statement_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
@@ -185,6 +186,12 @@ pub(crate) fn generate_compact_vss_share_linkage_proof(request: &Value) -> Canon
 
 pub(crate) fn verify_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
     verify_compact_vss_share_linkage_proof_from_request(request)
+}
+
+pub(crate) fn verify_compact_vss_share_linkage_proof_material_set(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    verify_compact_vss_share_linkage_proof_material_set_from_request(request)
 }
 
 pub(crate) fn generate_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {

@@ -198,12 +198,20 @@ fn compact_vss_share_linkage_instance() -> (
         "three compact share-linkage items bind eight public coefficient commitments"
     );
     assert_eq!(
-        layout.compact_vss_coefficient_columns, 5,
-        "the two same-source items share three coefficient witness columns"
+        layout.compact_vss_coefficient_columns, 3,
+        "the packed compact share-linkage trace keeps one coefficient column per Shamir position"
     );
     assert_eq!(
         layout.compact_vss_item_columns, 3,
         "the compact share-linkage statement should batch three carried share relations"
+    );
+    assert_eq!(
+        layout.base_ring_degree, 128,
+        "the compact share-linkage layout keeps the source ring degree as the lane width"
+    );
+    assert_eq!(
+        layout.ring_degree, 512,
+        "three compact share-linkage items are packed into four trace lanes"
     );
     assert!(
         layout.compact_vss_randomness_columns > 0,
@@ -211,9 +219,8 @@ fn compact_vss_share_linkage_instance() -> (
     );
     assert_eq!(
         layout.consistency_vector_count(),
-        layout.compact_vss_item_columns
-            + layout.compact_vss_message_vector_count()
-                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        1 + layout.compact_vss_message_vector_count()
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
         "compact share-linkage consistency claims must bind carries and message digits"
     );
     assert_eq!(

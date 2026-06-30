@@ -2,6 +2,13 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCommonRandomness } from '../common-randomness-records.js';
 import type {
+    CompactVssAggregateThresholdCommitmentSet,
+    CompactVssCoefficientCommitmentSet,
+    CompactVssRecipientShareCommitmentSet,
+    CompactVssShareLinkageProofMaterialSet,
+    CompactVssShareLinkageStatement,
+} from '../compact-vss-commitments.js';
+import type {
     GaloisKeyShareBatch,
     PublicEvaluationKeySet,
     RelinearizationKeyShareRounds,
@@ -21,6 +28,8 @@ import type {
     TransportedPublicKeyShareProofMaterialSet,
 } from '../public-key-share-records.js';
 import type {
+    CompactVssSameSecretBridgeProofMaterialSet,
+    CompactVssSameSecretBridgeStatementSet,
     SameSecretConsistencyStatementSet,
     SameSecretProofSet,
     TransportedSameSecretProofMaterialSet,
@@ -108,10 +117,31 @@ export type SetupPackageInput = Readonly<{
     readonly thresholdShareCommitments?:
         | ThresholdShareCommitmentSet
         | JsonRecord;
+    readonly compactVssCoefficientCommitmentSet?:
+        | CompactVssCoefficientCommitmentSet
+        | JsonRecord;
+    readonly compactVssRecipientShareCommitmentSet?:
+        | CompactVssRecipientShareCommitmentSet
+        | JsonRecord;
+    readonly compactVssAggregateThresholdCommitmentSet?:
+        | CompactVssAggregateThresholdCommitmentSet
+        | JsonRecord;
+    readonly compactVssShareLinkageStatement?:
+        | CompactVssShareLinkageStatement
+        | JsonRecord;
+    readonly compactVssShareLinkageProofMaterialSet?:
+        | CompactVssShareLinkageProofMaterialSet
+        | JsonRecord;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
     readonly transportedSameSecretProofMaterial?:
         | TransportedSameSecretProofMaterialSet
+        | JsonRecord;
+    readonly compactSameSecretBridgeStatementSet?:
+        | CompactVssSameSecretBridgeStatementSet
+        | JsonRecord;
+    readonly compactSameSecretBridgeProofMaterialSet?:
+        | CompactVssSameSecretBridgeProofMaterialSet
         | JsonRecord;
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
@@ -167,8 +197,29 @@ export type SetupPackage = Readonly<
         readonly vssShareAcceptances: VssShareAcceptanceSet;
         readonly vssComplaints?: VssComplaintSet | JsonRecord;
         readonly thresholdShareCommitments: ThresholdShareCommitmentSet;
+        readonly compactVssCoefficientCommitmentSet?:
+            | CompactVssCoefficientCommitmentSet
+            | JsonRecord;
+        readonly compactVssRecipientShareCommitmentSet?:
+            | CompactVssRecipientShareCommitmentSet
+            | JsonRecord;
+        readonly compactVssAggregateThresholdCommitmentSet?:
+            | CompactVssAggregateThresholdCommitmentSet
+            | JsonRecord;
+        readonly compactVssShareLinkageStatement?:
+            | CompactVssShareLinkageStatement
+            | JsonRecord;
+        readonly compactVssShareLinkageProofMaterialSet?:
+            | CompactVssShareLinkageProofMaterialSet
+            | JsonRecord;
         readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
         readonly sameSecretProofs: SameSecretProofSet | JsonRecord;
+        readonly compactSameSecretBridgeStatementSet?:
+            | CompactVssSameSecretBridgeStatementSet
+            | JsonRecord;
+        readonly compactSameSecretBridgeProofMaterialSet?:
+            | CompactVssSameSecretBridgeProofMaterialSet
+            | JsonRecord;
         readonly publicKeyShares: PublicKeyShareSet;
         readonly publicKeyShareProofs: PublicKeyShareProofSet;
         readonly publicKeyShareMaterial:

@@ -50,6 +50,19 @@ fn target_decryption_message_vector_index(
     Ok(start + encoding_column)
 }
 
+fn target_decryption_decoder_digit_count(
+    layout: CompactVssMessageEncodingLayout,
+) -> CanonicalResult<usize> {
+    let mut count = 0_usize;
+    for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+        if layout.digit_trit_count(digit_index)? > 0 {
+            count += 1;
+        }
+    }
+
+    Ok(count)
+}
+
 pub(crate) struct TargetDecryptionSharePublicVectorInput<'a> {
     pub(crate) proof_statement: &'a TrusteeEvaluationKeyStatement,
     pub(crate) statement: &'a TargetDecryptionShareStatement,
@@ -136,8 +149,6 @@ pub(crate) fn build_target_decryption_share_public_vectors(
         } else {
             0
         };
-    let decoder_relation_count =
-        message_count * COMPACT_VSS_MESSAGE_DIGIT_COUNT * LINCHECK_REPETITIONS;
     let randomness_count = input
         .proof_statement
         .target_decryption_randomness_count(input.limb_index);
@@ -150,9 +161,20 @@ pub(crate) fn build_target_decryption_share_public_vectors(
     let target_relation_count = active_target_limb
         .map(|limb_statement| limb_statement.role_statements.len() * LINCHECK_REPETITIONS)
         .unwrap_or(0);
-    if input.relation_alpha.len()
-        != commitment_relation_count + decoder_relation_count + target_relation_count
-    {
+    let decoder_relation_count =
+        message_encoding_layouts
+            .iter()
+            .try_fold(0_usize, |sum, layout| {
+                sum.checked_add(target_decryption_decoder_digit_count(*layout)?)
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "target-decryption decoder relation count overflowed",
+                        )
+                    })
+            })?
+            * LINCHECK_REPETITIONS;
+    let decoder_relation_offset = commitment_relation_count + target_relation_count;
+    if input.relation_alpha.len() != decoder_relation_offset + decoder_relation_count {
         return Err(invalid_succinct_setup_proof(
             "target-decryption share challenge count does not match the relation count",
         ));
@@ -251,49 +273,6 @@ pub(crate) fn build_target_decryption_share_public_vectors(
         }
     }
 
-    let decoder_relation_offset = commitment_relation_count;
-    for message_index in 0..message_count {
-        let message_encoding_layout = message_encoding_layouts[message_index];
-        for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-            for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
-                let alpha_index = decoder_relation_offset
-                    + (message_index * COMPACT_VSS_MESSAGE_DIGIT_COUNT + digit_index)
-                        * LINCHECK_REPETITIONS
-                    + repetition;
-                let alpha_value = &input.relation_alpha[alpha_index];
-                let scaled_u = u_powers
-                    .iter()
-                    .map(|value| tower.mul(alpha_value, value))
-                    .collect::<Vec<_>>();
-                let digit_vector_index = target_decryption_message_vector_index(
-                    &message_encoding_offsets,
-                    message_index,
-                    message_encoding_layout.digit_encoding_column(digit_index)?,
-                )?;
-                add_extension_vector(
-                    &mut message_encoding_vectors[digit_vector_index],
-                    &scaled_u,
-                    tower,
-                );
-                let mut trit_weight = 1_u64;
-                for trit_index in 0..message_encoding_layout.digit_trit_count(digit_index)? {
-                    let trit_vector_index = target_decryption_message_vector_index(
-                        &message_encoding_offsets,
-                        message_index,
-                        message_encoding_layout.trit_encoding_column(digit_index, trit_index)?,
-                    )?;
-                    add_scaled_extension_basis_vector(
-                        &mut message_encoding_vectors[trit_vector_index],
-                        &scaled_u,
-                        sub_mod_fast(0, trit_weight, input.modulus),
-                        tower,
-                    );
-                    trit_weight = mul_mod_fast(trit_weight, 3, input.modulus);
-                }
-            }
-        }
-    }
-
     if let Some(limb_statement) = active_target_limb {
         let interpolation_point = input.statement.interpolation_point % input.modulus;
         let plaintext_multiple = input.statement.plaintext_multiple % input.modulus;
@@ -334,10 +313,8 @@ pub(crate) fn build_target_decryption_share_public_vectors(
             }
 
             for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
-                let alpha_value = &input.relation_alpha[commitment_relation_count
-                    + decoder_relation_count
-                    + role_index * LINCHECK_REPETITIONS
-                    + repetition];
+                let alpha_value = &input.relation_alpha
+                    [commitment_relation_count + role_index * LINCHECK_REPETITIONS + repetition];
                 let scaled_u = u_powers
                     .iter()
                     .map(|value| tower.mul(alpha_value, value))
@@ -393,6 +370,57 @@ pub(crate) fn build_target_decryption_share_public_vectors(
         }
     }
 
+    if decoder_relation_count > 0 {
+        let mut decoder_relation_index = 0_usize;
+        for (message_index, message_encoding_layout) in message_encoding_layouts.iter().enumerate()
+        {
+            for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+                let trit_count = message_encoding_layout.digit_trit_count(digit_index)?;
+                if trit_count == 0 {
+                    continue;
+                }
+                for (repetition, u_powers) in input.u_power_vectors.iter().enumerate() {
+                    let alpha_index = decoder_relation_offset
+                        + decoder_relation_index * LINCHECK_REPETITIONS
+                        + repetition;
+                    let alpha_value = &input.relation_alpha[alpha_index];
+                    let scaled_u = u_powers
+                        .iter()
+                        .map(|value| tower.mul(alpha_value, value))
+                        .collect::<Vec<_>>();
+                    let digit_vector_index = target_decryption_message_vector_index(
+                        &message_encoding_offsets,
+                        message_index,
+                        message_encoding_layout.digit_encoding_column(digit_index)?,
+                    )?;
+                    add_scaled_extension_basis_vector(
+                        &mut message_encoding_vectors[digit_vector_index],
+                        &scaled_u,
+                        1,
+                        tower,
+                    );
+                    let mut trit_weight = 1_u64 % input.modulus;
+                    for trit_index in 0..trit_count {
+                        let trit_vector_index = target_decryption_message_vector_index(
+                            &message_encoding_offsets,
+                            message_index,
+                            message_encoding_layout
+                                .trit_encoding_column(digit_index, trit_index)?,
+                        )?;
+                        add_scaled_extension_basis_vector(
+                            &mut message_encoding_vectors[trit_vector_index],
+                            &scaled_u,
+                            sub_mod_fast(0, trit_weight, input.modulus),
+                            tower,
+                        );
+                        trit_weight = mul_mod_fast(trit_weight, 3, input.modulus);
+                    }
+                }
+                decoder_relation_index += 1;
+            }
+        }
+    }
+
     let mut vectors = Vec::with_capacity(message_encoding_vectors.len() + randomness_vectors.len());
     vectors.extend(message_encoding_vectors);
     vectors.extend(randomness_vectors);
@@ -434,16 +462,6 @@ fn add_compact_projection_vector(
     }
 
     Ok(())
-}
-
-fn add_extension_vector(
-    target: &mut [ChallengeExtensionElement],
-    source: &[ChallengeExtensionElement],
-    tower: &ChallengeExtensionTower,
-) {
-    for (target_value, source_value) in target.iter_mut().zip(source.iter()) {
-        *target_value = tower.add(target_value, source_value);
-    }
 }
 
 fn add_scaled_extension_basis_vector(

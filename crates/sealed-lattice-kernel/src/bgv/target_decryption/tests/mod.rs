@@ -1,4 +1,4 @@
-﻿use super::*;
+use super::*;
 use crate::bgv::{
     evaluator::engine::encode_slots_to_coefficients,
     evaluator::records::target_layout_hash,
@@ -633,7 +633,6 @@ fn local_target_share_witness(
             })
         })
         .collect::<Vec<_>>();
-
     json!({
         "objectType": "LocalTrusteeTargetDecryptionProofWitnessMaterial",
         "objectVersion": 1,
@@ -657,8 +656,7 @@ fn local_target_share_witness(
             &target_ciphertext_pair,
             &target_share_profile,
             participant,
-            "target-decryption-setup-seed",
-        ),
+        ).expect("target-decryption smudging witness"),
         "compactAggregateOpening": {
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,
@@ -985,6 +983,153 @@ fn target_decryption_smudging_zero_shares_cancel_for_interpolation_quorum() {
         &interpolation_points,
         &target_order_smudging_by_participant,
     );
+}
+
+#[test]
+fn target_decryption_quorum_release_recovers_target_slots() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile_value = target_share_profile(&setup_package);
+    let setup_binding = read_setup_binding(&setup_package).expect("setup binding");
+    let target_share_profile_binding =
+        read_target_share_profile(&target_share_profile_value, &setup_binding)
+            .expect("target share profile");
+    let target_accepted =
+        read_target_accepted_binding(&accepted_record, &setup_binding).expect("target accepted");
+    let target_ciphertext_pair = read_target_ciphertext_pair(
+        &target_ciphertexts,
+        &target_ciphertext_binding,
+        &target_accepted,
+    )
+    .expect("target ciphertext pair");
+
+    let trustees = ["trustee-1", "trustee-2"];
+    let mut interpolation_points = Vec::with_capacity(trustees.len());
+    let mut target_id_partials_by_share = Vec::with_capacity(trustees.len());
+    let mut target_order_partials_by_share = Vec::with_capacity(trustees.len());
+    for trustee_identity in trustees {
+        let local_target_share_witness_value = local_target_share_witness(
+            &setup_package,
+            &accepted_record,
+            &target_ciphertext_binding,
+            &target_ciphertexts,
+            &target_share_profile_value,
+            trustee_identity,
+        );
+        let local_share = generate_local_share(
+            &setup_package,
+            &accepted_record,
+            &target_ciphertext_binding,
+            &target_ciphertexts,
+            &target_share_profile_value,
+            &local_target_share_witness_value,
+            trustee_identity,
+        );
+        interpolation_points.push(
+            local_share["interpolationPoint"]
+                .as_u64()
+                .expect("interpolation point"),
+        );
+        target_id_partials_by_share.push(
+            read_partial_limb_set(
+                &local_share["sharePayload"],
+                "targetId",
+                target_ciphertext_pair.target_id.level,
+            )
+            .expect("target-id partials"),
+        );
+        target_order_partials_by_share.push(
+            read_partial_limb_set(
+                &local_share["sharePayload"],
+                "targetOrder",
+                target_ciphertext_pair.target_order.level,
+            )
+            .expect("target-order partials"),
+        );
+    }
+    assert_eq!(
+        target_id_partials_by_share.len(),
+        target_share_profile_binding.minimum_shares_for_interpolation
+    );
+
+    let target_id_partial_refs = target_id_partials_by_share
+        .iter()
+        .map(Vec::as_slice)
+        .collect::<Vec<_>>();
+    let target_order_partial_refs = target_order_partials_by_share
+        .iter()
+        .map(Vec::as_slice)
+        .collect::<Vec<_>>();
+    let target_id_slots = release_target_role_slots(
+        &target_ciphertext_pair.target_id,
+        &interpolation_points,
+        &target_id_partial_refs,
+    )
+    .expect("target-id release");
+    let target_order_slots = release_target_role_slots(
+        &target_ciphertext_pair.target_order,
+        &interpolation_points,
+        &target_order_partial_refs,
+    )
+    .expect("target-order release");
+
+    let mut expected_target_ids = vec![0_u64; MAXIMUM_OPTION_COUNT];
+    let mut expected_target_orders = vec![0_u64; MAXIMUM_OPTION_COUNT];
+    expected_target_ids[0] = 1;
+    expected_target_ids[2] = 3;
+    expected_target_orders[0] = 1;
+    expected_target_orders[2] = 2;
+    assert_eq!(
+        packed_target_option_values(&target_id_slots, target_ciphertext_pair.top_count)
+            .expect("target-id options"),
+        expected_target_ids
+    );
+    assert_eq!(
+        packed_target_option_values(&target_order_slots, target_ciphertext_pair.top_count)
+            .expect("target-order options"),
+        expected_target_orders
+    );
+
+    let mut tampered_target_id_partials_by_share = target_id_partials_by_share;
+    tampered_target_id_partials_by_share[0][0][0] = add_mod_fast(
+        tampered_target_id_partials_by_share[0][0][0],
+        1,
+        DATA_PRIMES[0],
+    );
+    let tampered_target_id_partial_refs = tampered_target_id_partials_by_share
+        .iter()
+        .map(Vec::as_slice)
+        .collect::<Vec<_>>();
+    let tampered_target_id_slots = release_target_role_slots(
+        &target_ciphertext_pair.target_id,
+        &interpolation_points,
+        &tampered_target_id_partial_refs,
+    )
+    .expect("tampered target-id release");
+    assert_ne!(
+        packed_target_option_values(&tampered_target_id_slots, target_ciphertext_pair.top_count)
+            .expect("tampered target-id options"),
+        expected_target_ids
+    );
+}
+
+#[test]
+fn target_result_release_refuses_current_compact_material() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile_value = target_share_profile(&setup_package);
+    let error = verify_and_release_bgv_target_decryption_result_from_request(&json!({
+        "setupPackage": setup_package,
+        "targetAcceptedRecord": accepted_record,
+        "targetCiphertextBinding": target_ciphertext_binding,
+        "targetCiphertexts": target_ciphertexts,
+        "targetShareProfile": target_share_profile_value,
+        "targetShareProofs": [],
+    }))
+    .expect_err("target result release must refuse current compact material");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
+    assert!(error.message.contains("certificate-grade binding evidence"));
 }
 
 #[test]
@@ -1443,56 +1588,6 @@ fn target_share_proof_relation_rejects_rebound_wrong_smudging_report() {
         trustee_identity: "trustee-1",
     })
     .expect_err("rebound wrong smudging report must not satisfy the relation");
-
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
-    assert!(error.message.contains("restored local witness relation"));
-}
-
-#[test]
-fn target_share_proof_relation_rejects_wrong_smudging_opening_seed() {
-    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
-        target_fixture();
-    let target_share_profile = target_share_profile(&setup_package);
-    let mut local_target_share_witness_value = local_target_share_witness(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        "trustee-1",
-    );
-    let local_share = generate_local_share(
-        &setup_package,
-        &accepted_record,
-        &target_ciphertext_binding,
-        &target_ciphertexts,
-        &target_share_profile,
-        &local_target_share_witness_value,
-        "trustee-1",
-    );
-    let original_seed =
-        local_target_share_witness_value["targetDecryptionSmudging"]["smudgingSeedHex"]
-            .as_str()
-            .expect("smudging seed")
-            .to_string();
-    local_target_share_witness_value["targetDecryptionSmudging"]["smudgingSeedHex"] =
-        json!(if original_seed == "1".repeat(128) {
-            "2".repeat(128)
-        } else {
-            "1".repeat(128)
-        });
-
-    let error = derive_share_proof_statement(TargetShareProofStatementInput {
-        setup_package: &setup_package,
-        accepted_record: &accepted_record,
-        target_ciphertext_binding: &target_ciphertext_binding,
-        target_ciphertexts: &target_ciphertexts,
-        target_share_profile: &target_share_profile,
-        local_target_share_witness_value: &local_target_share_witness_value,
-        target_decryption_share: &local_share,
-        trustee_identity: "trustee-1",
-    })
-    .expect_err("wrong smudging opening seed must not satisfy the relation");
 
     assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
     assert!(error.message.contains("restored local witness relation"));

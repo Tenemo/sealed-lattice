@@ -11,7 +11,7 @@ fn first_profile_setup_profile_hash_is_byte_stable() {
         profile["setupProfileHash"]
             .as_str()
             .expect("setup profile hash"),
-        "494a2bd8cb4fa6e9079f67c6668576b10cb69d6ecc19afce9fccd1668dba769e8d418b5c849f134a2e4441c5d12e1efe759e28839a065915ef895ea6b18b8143",
+        "85d6c8aaa9ecd7697b74177d4f5a219d18dc80c9421dba0f743a97efb0e2f5f5f663df3ddb79cbb4a9663dc45fab0b25d5663c5efd5eb064e7476b0615262cda",
     );
 }
 
@@ -132,7 +132,7 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["objectVersion"],
-        serde_json::json!(2_u64)
+        serde_json::json!(3_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["relation"],
@@ -172,6 +172,10 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         profile["compactVssParameterCertificateInputBinding"]["commonCommitmentKey"]["sparseProjectionShape"]
             ["sampledProjectionIndicesPerCommitment"],
         serde_json::json!(6_144_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["messageEncoding"]["proofRangeEncodingRule"],
+        "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims"
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["normInputClasses"]
@@ -224,6 +228,31 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["linearRelationRows"]
             [1]["combinedRelationTermL1"],
         serde_json::json!(11_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["maskedClaimNormRows"]
+            .as_array()
+            .expect("compact parameter masked claim norm rows")
+            .iter()
+            .filter_map(|entry| entry["rowId"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "compact-vss-share-linkage-carry-claim",
+            "compact-vss-share-linkage-message-digit-claim",
+            "compact-vss-same-secret-bridge-non-digit-claim",
+            "compact-vss-same-secret-bridge-message-digit-claim",
+            "compact-vss-target-decryption-aggregate-message-claim",
+            "compact-vss-target-decryption-smudging-message-claim",
+            "compact-vss-target-decryption-randomness-claim",
+        ]
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["maskedClaimNormRows"]
+            [4]["witnessInfinityBoundDecimal"],
+        serde_json::json!(
+            (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE - 1)
+                .to_string()
+        )
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["targetBasisReductionRows"]

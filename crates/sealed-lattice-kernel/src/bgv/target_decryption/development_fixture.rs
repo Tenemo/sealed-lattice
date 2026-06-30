@@ -464,8 +464,7 @@ fn development_local_target_share_witness(
             target_ciphertexts,
             target_share_profile,
             participant,
-            DEVELOPMENT_TARGET_DECRYPTION_SETUP_SEED,
-        ),
+        )?,
         "compactAggregateOpening": {
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,

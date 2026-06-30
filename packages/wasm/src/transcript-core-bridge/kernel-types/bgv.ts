@@ -915,6 +915,7 @@ export type BgvCompactVssCommitmentOpeningVerification = {
     readonly operation: 'verifyCompactVssCommitmentOpening';
     readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly commitmentRoot: ProtocolHash;
+    readonly openingRoot: ProtocolHash;
 };
 
 export type BgvCompactVssCoefficientCommitmentSetVerification = {
@@ -1016,6 +1017,22 @@ export type BgvCompactVssShareLinkageProofVerification = {
     readonly coefficientCommitmentCount: number;
     readonly coefficientWitnessColumnCount: number;
     readonly proofByteLength: number;
+};
+
+export type BgvCompactVssShareLinkageProofMaterialSetVerification = {
+    readonly ok: true;
+    readonly operation: 'verifyCompactVssShareLinkageProofMaterialSet';
+    readonly setupProfileId: 'CollectiveBgvSetup-v1';
+    readonly proofFamily: 'compact-vss-share-linkage';
+    readonly statementRoot: ProtocolHash;
+    readonly proofMaterialSetRoot: ProtocolHash;
+    readonly participantCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly ringDegree: number;
+    readonly proofRecordCount: number;
+    readonly coveredLinkageItemCount: number;
+    readonly totalProofByteLength: number;
+    readonly proofVerificationCount: number;
 };
 
 export type BgvCompactSameSecretBridgeProofStatement = {
@@ -1359,4 +1376,21 @@ export type BgvTargetDecryptionShareProofStatementBindingVerification = {
     readonly ok: false;
     readonly operation: 'verifyBgvTargetDecryptionShareProofStatementBinding';
     readonly refusalReason: 'TargetDecryptionProofUnavailable';
+};
+
+export type BgvTargetDecryptionResultRelease = {
+    readonly ok: true;
+    readonly operation: 'verifyAndReleaseBgvTargetDecryptionResult';
+    readonly targetResultHash: ProtocolHash;
+    readonly targetIdByOption: readonly number[];
+    readonly targetOrderByOption: readonly number[];
+    readonly topCount: number;
+    readonly shareEvidence: readonly {
+        readonly trusteeIdentity: string;
+        readonly rosterPosition: number;
+        readonly interpolationPoint: number;
+        readonly targetDecryptionShareHash: ProtocolHash;
+        readonly proofStatementRoot: ProtocolHash;
+        readonly proofMaterialRoot: ProtocolHash;
+    }[];
 };

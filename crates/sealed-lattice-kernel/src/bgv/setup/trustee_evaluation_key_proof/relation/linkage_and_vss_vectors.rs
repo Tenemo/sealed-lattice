@@ -261,9 +261,13 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
     let consistency_repetitions = family_shape.consistency_repetitions();
     if statement.target_decryption_share.is_some() {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
-        if global_vector_index < statement.target_decryption_total_message_count() {
+        let target_message_digit_vector_count =
+            statement.target_decryption_total_message_digit_count();
+        if global_vector_index < target_message_digit_vector_count {
+            let global_message_index = global_vector_index
+                / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
             match statement
-                .target_decryption_message_claim_kind(global_vector_index)
+                .target_decryption_message_claim_kind(global_message_index)
                 .expect("target-decryption message claim id is in range")
             {
                 TargetDecryptionMessageClaimKind::AggregateOpening => {
@@ -278,8 +282,7 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         }
     } else if statement.compact_vss_share_linkage.is_some() {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
-        let carry_vector_count = statement.compact_vss_item_count(0);
-        if global_vector_index < carry_vector_count {
+        if global_vector_index == 0 {
             COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT
         } else {
             COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT
@@ -310,7 +313,12 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
     global_claim_id: u64,
 ) -> CanonicalResult<(BigInt, BigInt)> {
     let family_shape = statement.family_shape()?;
-    let ring_degree = statement.ring_degree;
+    let ring_degree = statement
+        .compact_vss_share_linkage
+        .as_ref()
+        .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
+        .transpose()?
+        .unwrap_or(statement.ring_degree);
     let consistency_repetitions = family_shape.consistency_repetitions();
     let coefficient_bound = (1_i128 << family_shape.consistency_coefficient_bits()) - 1;
     let witness_bound = match &statement.private_vss_share {
@@ -331,7 +339,7 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
         None => match &statement.compact_vss_share_linkage {
             Some(compact_vss_share_linkage) => {
                 let global_vector_index = global_claim_id as usize / consistency_repetitions;
-                if global_vector_index < statement.compact_vss_item_count(0) {
+                if global_vector_index == 0 {
                     let primary_carry_bound = private_vss_share_lifted_carry_bound(
                         compact_vss_share_linkage.recipient_roster_position,
                         compact_vss_share_linkage.coefficient_commitments.len(),
@@ -368,34 +376,22 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                     } else {
                         2
                     }
-                } else if let Some(target_decryption_share) = &statement.target_decryption_share {
+                } else if statement.target_decryption_share.is_some() {
                     let global_vector_index = global_claim_id as usize / consistency_repetitions;
-                    if global_vector_index < statement.target_decryption_total_message_count() {
-                        match statement
-                            .target_decryption_message_claim_kind(global_vector_index)
-                            .expect("target-decryption message claim id is in range")
-                        {
-                            TargetDecryptionMessageClaimKind::AggregateOpening => {
-                                target_decryption_share
-                                    .limb_statements
-                                    .iter()
-                                    .map(|limb_statement| {
-                                        i128::from(
-                                            limb_statement.target_rns_prime.saturating_sub(1),
-                                        )
-                                    })
-                                    .max()
-                                    .unwrap_or(1)
-                                    .max(i128::from(
-                                        target_decryption_share.aggregate_message_coefficient_bound,
-                                    ))
-                                    .max(1)
-                            }
-                            TargetDecryptionMessageClaimKind::SmudgingOpening => i128::from(
-                                target_decryption_share.smudging_message_coefficient_bound,
+                    let target_message_digit_vector_count =
+                        statement.target_decryption_total_message_digit_count();
+                    if global_vector_index < target_message_digit_vector_count {
+                        let global_message_index = global_vector_index
+                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_index = global_vector_index
+                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_bound = statement
+                            .target_decryption_message_digit_bound(
+                                global_message_index,
+                                digit_index,
                             )
-                            .max(1),
-                        }
+                            .expect("target-decryption digit claim id is in range");
+                        i128::from(digit_bound.saturating_sub(1))
                     } else {
                         1
                     }

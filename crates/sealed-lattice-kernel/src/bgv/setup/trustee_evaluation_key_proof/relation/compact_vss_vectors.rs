@@ -500,49 +500,88 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
             "compact VSS share-linkage challenge count does not match the batched relation count",
         ));
     }
+    let packed_ring_degree = statement.packed_ring_degree(ring_degree)?;
+    if u_power_vectors.len() != LINCHECK_REPETITIONS
+        || u_power_vectors
+            .iter()
+            .any(|vector| vector.len() != packed_ring_degree)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact VSS batched lincheck vector length does not match the packed ring degree",
+        ));
+    }
 
     let mut relation_alpha_offset = 0_usize;
     let mut relation_claim = ChallengeExtensionTower::zero();
-    let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); ring_degree];
+    let extension_zero_vector = || vec![ChallengeExtensionTower::zero(); packed_ring_degree];
+    let coefficient_column_count = statement.maximum_coefficient_commitment_count();
     let coefficient_slots = statement.coefficient_witness_slots();
-    let unique_coefficient_count = coefficient_slots.len();
-    let coefficient_message_encoding_layouts = coefficient_slots
+    let message_bounds = statement.packed_message_bounds();
+    if message_bounds.len() != coefficient_column_count + 1 {
+        return Err(invalid_succinct_setup_proof(
+            "compact VSS packed message bounds do not match the packed column layout",
+        ));
+    }
+    let mut message_encoding_layouts = message_bounds
         .iter()
-        .map(|slot| {
+        .take(coefficient_column_count)
+        .map(|message_bound| {
             compact_vss_message_encoding_layout_for_range(
-                slot.source_message_modulus,
+                *message_bound,
                 coefficient_message_range_evidence,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let coefficient_message_encoding_offsets =
-        compact_vss_message_encoding_offsets(&coefficient_message_encoding_layouts)?;
-    let mut coefficient_message_encoding_vectors =
+    message_encoding_layouts.push(compact_vss_message_encoding_layout_for_range(
+        message_bounds[coefficient_column_count],
+        recipient_message_range_evidence,
+    )?);
+    let message_encoding_offsets = compact_vss_message_encoding_offsets(&message_encoding_layouts)?;
+    let mut message_encoding_vectors =
         vec![
             extension_zero_vector();
-            compact_vss_message_encoding_total(&coefficient_message_encoding_offsets)
+            compact_vss_message_encoding_total(&message_encoding_offsets)
         ];
-    let mut recipient_share_message_encoding_vectors = Vec::new();
-    let mut recipient_share_carry_vectors = Vec::with_capacity(items.len());
+    let mut recipient_share_carry_vector = extension_zero_vector();
     let mut coefficient_randomness_vectors = vec![
         extension_zero_vector();
-        unique_coefficient_count
+        coefficient_column_count
             * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
     ];
     let mut recipient_share_randomness_vectors =
-        Vec::with_capacity(items.len() * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT);
+        vec![extension_zero_vector(); COMPACT_VSS_RANDOMNESS_COLUMN_COUNT];
 
-    for item in items {
+    for (item_index, item) in items.into_iter().enumerate() {
         if item.coefficient_slot_indices.len() != item.coefficient_commitments.len()
             || item
                 .coefficient_slot_indices
                 .iter()
-                .any(|slot_index| *slot_index >= unique_coefficient_count)
+                .any(|slot_index| *slot_index >= coefficient_slots.len())
         {
             return Err(invalid_succinct_setup_proof(
                 "compact VSS coefficient witness slot layout does not match the item",
             ));
         }
+        if item.coefficient_commitments.len() > coefficient_column_count {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS item coefficient count exceeds the packed column layout",
+            ));
+        }
+        let lane_offset = item_index.checked_mul(ring_degree).ok_or_else(|| {
+            invalid_succinct_setup_proof("compact VSS item lane offset overflowed")
+        })?;
+        let lane_end = lane_offset
+            .checked_add(ring_degree)
+            .ok_or_else(|| invalid_succinct_setup_proof("compact VSS item lane end overflowed"))?;
+        if lane_end > packed_ring_degree {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS item lane is outside the packed trace",
+            ));
+        }
+        let item_u_power_vectors = u_power_vectors
+            .iter()
+            .map(|vector| vector[lane_offset..lane_end].to_vec())
+            .collect::<Vec<_>>();
         let item_coefficient_message_encoding_layout =
             compact_vss_message_encoding_layout_for_range(
                 item.source_message_modulus,
@@ -552,6 +591,22 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
             item.source_message_modulus,
             recipient_message_range_evidence,
         )?;
+        for coefficient_position in 0..item.coefficient_commitments.len() {
+            if message_encoding_layouts[coefficient_position].encoding_column_count()
+                != item_coefficient_message_encoding_layout.encoding_column_count()
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "compact VSS item message layout does not match the packed column layout",
+                ));
+            }
+        }
+        if message_encoding_layouts[coefficient_column_count].encoding_column_count()
+            != item_recipient_message_encoding_layout.encoding_column_count()
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact VSS recipient message layout does not match the packed column layout",
+            ));
+        }
         let item_decoder_relation_count = (item.coefficient_commitments.len()
             * compact_vss_decoder_digit_count(item_coefficient_message_encoding_layout)
             + compact_vss_decoder_digit_count(item_recipient_message_encoding_layout))
@@ -573,7 +628,7 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                 recipient_share_commitment: item.recipient_share_commitment,
                 relation_alpha: &relation_alpha
                     [relation_alpha_offset..relation_alpha_offset + item_relation_count],
-                u_power_vectors,
+                u_power_vectors: &item_u_power_vectors,
                 coefficient_message_range_evidence,
                 recipient_message_range_evidence,
             },
@@ -583,7 +638,7 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
         relation_alpha_offset += item_relation_count;
 
         let mut item_vectors = item_vectors.into_iter();
-        for slot_index in &item.coefficient_slot_indices {
+        for coefficient_position in 0..item.coefficient_commitments.len() {
             for encoding_column in
                 0..item_coefficient_message_encoding_layout.encoding_column_count()
             {
@@ -591,43 +646,68 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                     invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
                 })?;
                 let vector_index = compact_vss_message_vector_index(
-                    &coefficient_message_encoding_offsets,
-                    *slot_index,
+                    &message_encoding_offsets,
+                    coefficient_position,
                     encoding_column,
                 )?;
-                add_extension_vector(
-                    &mut coefficient_message_encoding_vectors[vector_index],
+                add_extension_vector_to_lane(
+                    &mut message_encoding_vectors[vector_index],
                     &item_vector,
+                    lane_offset,
                     tower,
                 )?;
             }
         }
-        for _ in 0..item_recipient_message_encoding_layout.encoding_column_count() {
-            recipient_share_message_encoding_vectors.push(item_vectors.next().ok_or_else(
-                || invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly"),
-            )?);
+        for encoding_column in 0..item_recipient_message_encoding_layout.encoding_column_count() {
+            let item_vector = item_vectors.next().ok_or_else(|| {
+                invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
+            })?;
+            let vector_index = compact_vss_message_vector_index(
+                &message_encoding_offsets,
+                coefficient_column_count,
+                encoding_column,
+            )?;
+            add_extension_vector_to_lane(
+                &mut message_encoding_vectors[vector_index],
+                &item_vector,
+                lane_offset,
+                tower,
+            )?;
         }
-        recipient_share_carry_vectors.push(item_vectors.next().ok_or_else(|| {
+        let carry_vector = item_vectors.next().ok_or_else(|| {
             invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
-        })?);
-        for slot_index in &item.coefficient_slot_indices {
+        })?;
+        add_extension_vector_to_lane(
+            &mut recipient_share_carry_vector,
+            &carry_vector,
+            lane_offset,
+            tower,
+        )?;
+        for coefficient_position in 0..item.coefficient_commitments.len() {
             for randomness_column_index in 0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
                 let item_vector = item_vectors.next().ok_or_else(|| {
                     invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
                 })?;
-                let vector_index =
-                    *slot_index * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT + randomness_column_index;
-                add_extension_vector(
+                let vector_index = coefficient_position * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+                    + randomness_column_index;
+                add_extension_vector_to_lane(
                     &mut coefficient_randomness_vectors[vector_index],
                     &item_vector,
+                    lane_offset,
                     tower,
                 )?;
             }
         }
-        for _ in 0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
-            recipient_share_randomness_vectors.push(item_vectors.next().ok_or_else(|| {
+        for randomness_column_index in 0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+            let item_vector = item_vectors.next().ok_or_else(|| {
                 invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
-            })?);
+            })?;
+            add_extension_vector_to_lane(
+                &mut recipient_share_randomness_vectors[randomness_column_index],
+                &item_vector,
+                lane_offset,
+                tower,
+            )?;
         }
         if item_vectors.next().is_some() {
             return Err(invalid_succinct_setup_proof(
@@ -635,17 +715,20 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
             ));
         }
     }
+    if relation_alpha_offset != relation_alpha.len() {
+        return Err(invalid_succinct_setup_proof(
+            "compact VSS batch relation challenge offset did not consume every challenge",
+        ));
+    }
 
     let mut vectors = Vec::with_capacity(
-        coefficient_message_encoding_vectors.len()
-            + recipient_share_message_encoding_vectors.len()
-            + recipient_share_carry_vectors.len()
+        message_encoding_vectors.len()
+            + 1
             + coefficient_randomness_vectors.len()
             + recipient_share_randomness_vectors.len(),
     );
-    vectors.extend(coefficient_message_encoding_vectors);
-    vectors.extend(recipient_share_message_encoding_vectors);
-    vectors.extend(recipient_share_carry_vectors);
+    vectors.extend(message_encoding_vectors);
+    vectors.push(recipient_share_carry_vector);
     vectors.extend(coefficient_randomness_vectors);
     vectors.extend(recipient_share_randomness_vectors);
 
@@ -973,6 +1056,27 @@ fn add_extension_vector(
         ));
     }
     for (target_value, source_value) in target.iter_mut().zip(source) {
+        *target_value = tower.add(target_value, source_value);
+    }
+
+    Ok(())
+}
+
+fn add_extension_vector_to_lane(
+    target: &mut [ChallengeExtensionElement],
+    source: &[ChallengeExtensionElement],
+    lane_offset: usize,
+    tower: &ChallengeExtensionTower,
+) -> CanonicalResult<()> {
+    let lane_end = lane_offset
+        .checked_add(source.len())
+        .ok_or_else(|| invalid_succinct_setup_proof("compact VSS packed lane offset overflowed"))?;
+    if lane_end > target.len() {
+        return Err(invalid_succinct_setup_proof(
+            "compact VSS packed lane is outside the shared column",
+        ));
+    }
+    for (target_value, source_value) in target[lane_offset..lane_end].iter_mut().zip(source) {
         *target_value = tower.add(target_value, source_value);
     }
 

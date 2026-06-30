@@ -1,7 +1,22 @@
 import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    verifyCompactVssShareLinkageProofMaterialSet,
+    type CompactVssAggregateThresholdCommitmentSet,
+    type CompactVssCoefficientCommitmentSet,
+    type CompactVssRecipientShareCommitmentSet,
+    type CompactVssShareLinkageProofMaterialSet,
+    type CompactVssShareLinkageStatement,
+} from '../compact-vss-commitments.js';
 import type { RequiredGaloisKeyScheduleEntry } from '../evaluator-key-schedule.js';
+import {
+    verifyCompactVssSameSecretBridgeProofMaterialSet,
+    type CompactVssSameSecretBridgeProofMaterialSet,
+    type CompactVssSameSecretBridgeStatementSet,
+    type SameSecretProofSet,
+    type TransportedSameSecretProofMaterialSet,
+} from '../same-secret-consistency-records.js';
 import type { SetupPhaseRecord } from '../setup-phase-records.js';
 import {
     deriveThresholdShareCommitments,
@@ -253,6 +268,160 @@ const assertKeyRecordBindings = (input: SetupPackageInput): void => {
     hashField(input.evaluationKeys, 'evaluationKeySetHash', 'evaluationKeys');
 };
 
+const compactVssPublicMaterialFieldNames = [
+    'compactVssCoefficientCommitmentSet',
+    'compactVssRecipientShareCommitmentSet',
+    'compactVssAggregateThresholdCommitmentSet',
+    'compactVssShareLinkageStatement',
+    'compactVssShareLinkageProofMaterialSet',
+] as const satisfies readonly (keyof SetupPackageInput)[];
+
+const compactSameSecretBridgeFieldNames = [
+    'compactSameSecretBridgeStatementSet',
+    'compactSameSecretBridgeProofMaterialSet',
+] as const satisfies readonly (keyof SetupPackageInput)[];
+
+const assertCompleteOptionalFieldGroup = <
+    FieldName extends keyof SetupPackageInput,
+>(
+    input: SetupPackageInput,
+    fieldNames: readonly FieldName[],
+    groupDescription: string,
+): void => {
+    const presentFieldNames = fieldNames.filter(
+        (fieldName) => input[fieldName] !== undefined,
+    );
+    if (presentFieldNames.length === 0) {
+        return;
+    }
+    const missingFieldNames = fieldNames.filter(
+        (fieldName) => input[fieldName] === undefined,
+    );
+    if (missingFieldNames.length > 0) {
+        throw new Error(
+            `${groupDescription} requires ${missingFieldNames.join(', ')} when any related field is supplied.`,
+        );
+    }
+};
+
+const assertPublicMatrixSeedMatchesCommonRandomness = (
+    commonRandomnessPublicMatrixSeedHash: ProtocolHash,
+    publicMatrixSeedHash: unknown,
+    objectPath: string,
+): void => {
+    if (publicMatrixSeedHash !== commonRandomnessPublicMatrixSeedHash) {
+        throw new Error(
+            `${objectPath}.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.`,
+        );
+    }
+};
+
+const assertOptionalCompactVssPublicMaterial = (
+    input: SetupPackageInput,
+): void => {
+    assertCompleteOptionalFieldGroup(
+        input,
+        compactVssPublicMaterialFieldNames,
+        'compact VSS public material',
+    );
+    if (input.compactVssCoefficientCommitmentSet === undefined) {
+        return;
+    }
+
+    const commonRandomnessPublicMatrixSeedHash = hashField(
+        input.commonRandomness,
+        'publicMatrixSeedHash',
+        'commonRandomness',
+    );
+    const coefficientCommitmentSet =
+        input.compactVssCoefficientCommitmentSet as CompactVssCoefficientCommitmentSet;
+    const recipientShareCommitmentSet =
+        input.compactVssRecipientShareCommitmentSet as CompactVssRecipientShareCommitmentSet;
+    const aggregateThresholdCommitmentSet =
+        input.compactVssAggregateThresholdCommitmentSet as CompactVssAggregateThresholdCommitmentSet;
+    const statement =
+        input.compactVssShareLinkageStatement as CompactVssShareLinkageStatement;
+    const proofMaterialSet =
+        input.compactVssShareLinkageProofMaterialSet as CompactVssShareLinkageProofMaterialSet;
+
+    verifyCompactVssShareLinkageProofMaterialSet({
+        coefficientCommitmentSet,
+        recipientShareCommitmentSet,
+        aggregateThresholdCommitmentSet,
+        statement,
+        proofMaterialSet,
+    });
+    for (const [objectPath, publicMatrixSeedHash] of [
+        [
+            'compactVssCoefficientCommitmentSet',
+            coefficientCommitmentSet.publicMatrixSeedHash,
+        ],
+        [
+            'compactVssRecipientShareCommitmentSet',
+            recipientShareCommitmentSet.publicMatrixSeedHash,
+        ],
+        [
+            'compactVssAggregateThresholdCommitmentSet',
+            aggregateThresholdCommitmentSet.publicMatrixSeedHash,
+        ],
+        ['compactVssShareLinkageStatement', statement.publicMatrixSeedHash],
+        [
+            'compactVssShareLinkageProofMaterialSet',
+            proofMaterialSet.publicMatrixSeedHash,
+        ],
+    ] as const) {
+        assertPublicMatrixSeedMatchesCommonRandomness(
+            commonRandomnessPublicMatrixSeedHash,
+            publicMatrixSeedHash,
+            objectPath,
+        );
+    }
+};
+
+const assertOptionalCompactSameSecretBridge = (
+    input: SetupPackageInput,
+): void => {
+    assertCompleteOptionalFieldGroup(
+        input,
+        compactSameSecretBridgeFieldNames,
+        'compact same-secret bridge material',
+    );
+    if (input.compactSameSecretBridgeStatementSet === undefined) {
+        return;
+    }
+
+    const commonRandomnessPublicMatrixSeedHash = hashField(
+        input.commonRandomness,
+        'publicMatrixSeedHash',
+        'commonRandomness',
+    );
+    const statementSet =
+        input.compactSameSecretBridgeStatementSet as CompactVssSameSecretBridgeStatementSet;
+    const proofMaterialSet =
+        input.compactSameSecretBridgeProofMaterialSet as CompactVssSameSecretBridgeProofMaterialSet;
+
+    verifyCompactVssSameSecretBridgeProofMaterialSet({
+        statementSet,
+        sameSecretConsistency: input.sameSecretConsistency,
+        sameSecretProofs: input.sameSecretProofs as SameSecretProofSet,
+        transportedSameSecretProofMaterial:
+            input.transportedSameSecretProofMaterial as
+                | TransportedSameSecretProofMaterialSet
+                | undefined,
+        proofMaterialSet,
+    });
+    assertPublicMatrixSeedMatchesCommonRandomness(
+        commonRandomnessPublicMatrixSeedHash,
+        statementSet.publicMatrixSeedHash,
+        'compactSameSecretBridgeStatementSet',
+    );
+    assertPublicMatrixSeedMatchesCommonRandomness(
+        commonRandomnessPublicMatrixSeedHash,
+        proofMaterialSet.publicMatrixSeedHash,
+        'compactSameSecretBridgeProofMaterialSet',
+    );
+};
+
 const assertCommonRandomnessPublicDerivationsBindPackageInput = (
     input: SetupPackageInput,
 ): void => {
@@ -464,6 +633,8 @@ export const validateInput = (
     );
     assertKeyRecordBindings(input);
     assertCommonRandomnessPublicDerivationsBindPackageInput(input);
+    assertOptionalCompactVssPublicMaterial(input);
+    assertOptionalCompactSameSecretBridge(input);
     assertCertificateBindings(certificates);
     assertGaloisScheduleCovered(input);
 };

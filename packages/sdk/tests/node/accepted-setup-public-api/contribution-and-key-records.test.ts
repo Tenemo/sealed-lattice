@@ -597,7 +597,7 @@ describe('accepted setup public package API in Node', () => {
         );
         expect(compactVssParameterCertificateInputBinding).toMatchObject({
             objectType: 'CompactVssParameterCertificateInputBinding',
-            objectVersion: 2,
+            objectVersion: 3,
             profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
             participantCount: setupProfile.participantCount,
             thresholdDegree: setupProfile.qDec,
@@ -619,6 +619,10 @@ describe('accepted setup public package API in Node', () => {
                     sampledMatrixResiduesPerCommitment: 6_144,
                     sampledProjectionIndicesPerCommitment: 6_144,
                 },
+            },
+            messageEncoding: {
+                proofRangeEncodingRule:
+                    'share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims',
             },
             sameSecretBridgeInput: {
                 targetBasisHash: setupProfile.canonicalTargetBasisHash,
@@ -903,6 +907,22 @@ describe('accepted setup public package API in Node', () => {
                 },
             }),
         ).toThrow(/verifier-derived commitments/u);
+        expect(() =>
+            publicSetupApi.createSetupPackage({
+                ...setupPackageInput,
+                compactVssCoefficientCommitmentSet: {},
+            }),
+        ).toThrow(
+            /compact VSS public material requires compactVssRecipientShareCommitmentSet/u,
+        );
+        expect(() =>
+            publicSetupApi.createSetupPackage({
+                ...setupPackageInput,
+                compactSameSecretBridgeStatementSet: {},
+            }),
+        ).toThrow(
+            /compact same-secret bridge material requires compactSameSecretBridgeProofMaterialSet/u,
+        );
         for (const requiredPublicKeyClosureField of [
             'sameSecretProofs',
             'publicKeyShareMaterial',

@@ -130,7 +130,7 @@ pub(in super::super) fn build_limb_public_vectors(
     masked_claims: &[u64],
 ) -> CanonicalResult<LimbPublicVectors> {
     let tower = ChallengeExtensionTower::for_modulus(modulus)?;
-    let ring_degree = statement.ring_degree;
+    let ring_degree = layout.ring_degree;
     let u_powers = challenges
         .lincheck_challenges
         .iter()
@@ -206,7 +206,7 @@ pub(in super::super) fn build_limb_public_vectors(
                 compact_vss_share_linkage,
                 limb_index,
                 modulus,
-                ring_degree,
+                layout.base_ring_degree,
                 &challenges.linkage_alpha,
                 &u_powers,
                 layout.compact_vss_coefficient_message_range_evidence(),

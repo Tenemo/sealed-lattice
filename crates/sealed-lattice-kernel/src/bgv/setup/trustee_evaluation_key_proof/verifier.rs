@@ -527,8 +527,14 @@ pub(crate) fn verify_evaluation_key_share(
     proof: &SuccinctEvaluationKeyProof,
 ) -> CanonicalResult<()> {
     statement.validate_shape()?;
+    let proof_trace_ring_degree = statement
+        .compact_vss_share_linkage
+        .as_ref()
+        .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
+        .transpose()?
+        .unwrap_or(statement.ring_degree);
     accounting::enforce_current_succinct_proof_soundness_policy(
-        statement.ring_degree / TRACE_SPLIT,
+        proof_trace_ring_degree / TRACE_SPLIT,
     )?;
     let proof_limb_indices = statement.proof_limb_indices();
     if proof.limb_proofs.len() != proof_limb_indices.len() {
@@ -551,7 +557,7 @@ pub(crate) fn verify_evaluation_key_share(
             transcript.challenge_bounded_integers(
                 "consistency-vector",
                 family_shape.consistency_coefficient_bits(),
-                statement.ring_degree,
+                proof_trace_ring_degree,
             )
         })
         .collect::<Vec<_>>();

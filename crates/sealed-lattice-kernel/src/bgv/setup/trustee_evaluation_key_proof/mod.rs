@@ -59,6 +59,7 @@ pub(crate) use commands::{
     generate_trustee_evaluation_key_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
     verify_compact_vss_share_linkage_proof_from_request,
+    verify_compact_vss_share_linkage_proof_material_set_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 #[cfg(any(feature = "target-decryption-development-commands", test))]
@@ -186,10 +187,10 @@ pub(super) const LINCHECK_REPETITIONS: usize = 2;
 // wider carry and message-digit combinations: four 40-bit repetitions preserve
 // the same 160-bit pre-union collision budget while avoiding mask columns for
 // repetitions that carry no additional collision margin.
-pub(super) const CONSISTENCY_REPETITIONS: usize = 20;
-pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
-pub(super) const COMPACT_VSS_CONSISTENCY_REPETITIONS: usize = 4;
-pub(super) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
+pub(in crate::bgv::setup) const CONSISTENCY_REPETITIONS: usize = 20;
+pub(in crate::bgv::setup) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
+pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_REPETITIONS: usize = 4;
+pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
 // Each consistency claim is one shared integer (clear bounded combination plus
 // a family-selected mask committed digit-wise in base-3 mask columns) published
 // as its residue in every proof field carrying that claim. Setup proof families
@@ -198,17 +199,19 @@ pub(super) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 40;
 // because lifted aggregate messages have a much larger clear range. Target
 // smudging-message claims and opening-randomness claims have smaller witness
 // ranges and use the shorter target-specific masks below.
-pub(super) const CLAIM_MASK_RADIX: u64 = 3;
-pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
-pub(super) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
+pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
+pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
+pub(in crate::bgv::setup) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
 // Compact VSS digit consistency claims have a larger clear range than carries.
 // Eighty-seven base-3 mask digits stay inside the three setup-field CRT lift
 // window while keeping the digit-claim mask margin comparable to the carry
 // claim margin.
-pub(super) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
-pub(super) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize = 142;
-pub(super) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize = 114;
-pub(super) const TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT: usize = 114;
+pub(in crate::bgv::setup) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
+pub(in crate::bgv::setup) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
+    142;
+pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
+    114;
+pub(in crate::bgv::setup) const TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT: usize = 114;
 // FRI query count at rate 1/2. CHANGE (2026, Option B): the per-query
 // soundness is no longer the disproved one-bit (1 - rho) up-to-capacity bound
 // but the CS25 entropy-capacity bound (about 0.938 bit per query for the prime

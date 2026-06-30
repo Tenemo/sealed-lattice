@@ -37,6 +37,7 @@ pub(crate) use trustee_evaluation_key_proof::{
     generate_trustee_evaluation_key_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
     verify_compact_vss_share_linkage_proof_from_request,
+    verify_compact_vss_share_linkage_proof_material_set_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
 mod validation;

@@ -578,12 +578,18 @@ fn prove_evaluation_key_share_with_limb_batch_size(
         transcript.absorb("witness-tree-root", witness_tree_root);
     }
     let family_shape = statement.family_shape()?;
+    let consistency_vector_length = statement
+        .compact_vss_share_linkage
+        .as_ref()
+        .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
+        .transpose()?
+        .unwrap_or(statement.ring_degree);
     let consistency_vectors = (0..family_shape.consistency_repetitions())
         .map(|_| {
             transcript.challenge_bounded_integers(
                 "consistency-vector",
                 family_shape.consistency_coefficient_bits(),
-                statement.ring_degree,
+                consistency_vector_length,
             )
         })
         .collect::<Vec<_>>();

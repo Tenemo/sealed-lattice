@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde_json::{Value, json};
 
 use super::accounting::{
@@ -35,10 +37,12 @@ use crate::bgv::setup::compact_vss_commitment::{
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
 };
 use crate::bgv::setup::setup_proof::SETUP_PROOF_PROFILE_ID;
-use crate::hashing::{derive_protocol_hash, to_hex};
+use crate::hashing::{derive_protocol_hash, hash512_hex, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
+const COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
+    "sealed-lattice/setup/compact-vss-share-linkage/proof-bytes-v1";
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";
@@ -272,7 +276,7 @@ pub(crate) fn generate_compact_vss_share_linkage_proof_from_request(
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "coefficientCommitmentCount": compact_statement.total_coefficient_commitment_count(),
-        "coefficientWitnessColumnCount": compact_statement.unique_coefficient_witness_slot_count(),
+        "coefficientWitnessColumnCount": compact_statement.maximum_coefficient_commitment_count(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
     }))
@@ -297,8 +301,727 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_from_request(
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "coefficientCommitmentCount": compact_statement.total_coefficient_commitment_count(),
-        "coefficientWitnessColumnCount": compact_statement.unique_coefficient_witness_slot_count(),
+        "coefficientWitnessColumnCount": compact_statement.maximum_coefficient_commitment_count(),
         "proofByteLength": proof_bytes.len(),
+    }))
+}
+
+struct CompactVssShareLinkageMaterialRecordStatementInput<'a> {
+    proof_statement: &'a Value,
+    source_statement: &'a Value,
+    coefficient_commitment_set: &'a Value,
+    recipient_share_commitment_set: &'a Value,
+    participant_count: usize,
+    target_rns_limb_count: usize,
+    threshold_degree: usize,
+    source_roster_position: usize,
+}
+
+fn compare_string_value(actual: &str, expected: &str, description: &str) -> CanonicalResult<()> {
+    if actual != expected {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{description} must match"
+        )));
+    }
+
+    Ok(())
+}
+
+fn compare_u64_value(actual: u64, expected: u64, description: &str) -> CanonicalResult<()> {
+    if actual != expected {
+        return Err(invalid_succinct_setup_proof(format!(
+            "{description} must match"
+        )));
+    }
+
+    Ok(())
+}
+
+fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_succinct_setup_proof(format!("{field_name} must be an array")))
+}
+
+fn compact_vss_share_linkage_item_values(proof_statement: &Value) -> CanonicalResult<Vec<&Value>> {
+    let mut items = vec![proof_statement];
+    match proof_statement.get("additionalLinkageItems") {
+        None => {}
+        Some(Value::Array(additional_items)) => items.extend(additional_items.iter()),
+        Some(_) => {
+            return Err(invalid_succinct_setup_proof(
+                "compactVssShareLinkage.additionalLinkageItems must be an array",
+            ));
+        }
+    }
+
+    Ok(items)
+}
+
+fn verify_compact_vss_share_linkage_material_record_statement(
+    input: CompactVssShareLinkageMaterialRecordStatementInput<'_>,
+) -> CanonicalResult<Vec<Value>> {
+    for (field_name, expected_value) in [
+        (
+            "publicMatrixSeedHash",
+            read_string(input.source_statement, "publicMatrixSeedHash")?,
+        ),
+        (
+            "sourceTrusteeIdentity",
+            read_string(input.source_statement, "sourceTrusteeIdentity")?,
+        ),
+        (
+            "sourceCoefficientCommitmentRoot",
+            read_string(input.source_statement, "sourceCoefficientCommitmentRoot")?,
+        ),
+        (
+            "sourceRecipientShareCommitmentRoot",
+            read_string(input.source_statement, "sourceRecipientShareCommitmentRoot")?,
+        ),
+    ] {
+        compare_string_value(
+            read_string(input.proof_statement, field_name)?,
+            expected_value,
+            &format!("compact share-linkage proof statement {field_name}"),
+        )?;
+    }
+    compare_u64_value(
+        read_u64(input.proof_statement, "sourceTrusteeRosterPosition")?,
+        input.source_roster_position as u64,
+        "compact share-linkage proof statement sourceTrusteeRosterPosition",
+    )?;
+
+    let items = compact_vss_share_linkage_item_values(input.proof_statement)?;
+    if items.is_empty() {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof statement must cover at least one item",
+        ));
+    }
+    let mut coverage = Vec::with_capacity(items.len());
+    for (item_index, item) in items.iter().enumerate() {
+        coverage.push(
+            verify_compact_vss_share_linkage_item_against_public_records(
+                *item,
+                input.source_statement,
+                input.coefficient_commitment_set,
+                input.recipient_share_commitment_set,
+                input.participant_count,
+                input.target_rns_limb_count,
+                input.threshold_degree,
+                input.source_roster_position,
+                item_index,
+            )?,
+        );
+    }
+
+    Ok(coverage)
+}
+
+fn verify_compact_vss_share_linkage_item_against_public_records(
+    item: &Value,
+    source_statement: &Value,
+    coefficient_commitment_set: &Value,
+    recipient_share_commitment_set: &Value,
+    participant_count: usize,
+    target_rns_limb_count: usize,
+    threshold_degree: usize,
+    source_roster_position: usize,
+    item_index: usize,
+) -> CanonicalResult<Value> {
+    let recipient_roster_position = usize::try_from(read_u64(item, "recipientRosterPosition")?)
+        .map_err(|_| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage item recipientRosterPosition does not fit usize",
+            )
+        })?;
+    let source_rns_limb_index =
+        usize::try_from(read_u64(item, "sourceRnsLimbIndex")?).map_err(|_| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage item sourceRnsLimbIndex does not fit usize",
+            )
+        })?;
+    if recipient_roster_position >= participant_count
+        || source_rns_limb_index >= target_rns_limb_count
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage item coverage is outside the source statement dimensions",
+        ));
+    }
+
+    let coefficient_source_records =
+        array_field(coefficient_commitment_set, "sourceTrusteeRecords")?;
+    let recipient_source_records =
+        array_field(recipient_share_commitment_set, "sourceTrusteeRecords")?;
+    let coefficient_source_record = coefficient_source_records
+        .get(source_roster_position)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage coefficient set is missing the proof source",
+            )
+        })?;
+    let recipient_source_record = recipient_source_records
+        .get(source_roster_position)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage recipient-share set is missing the proof source",
+            )
+        })?;
+    for source_record in [coefficient_source_record, recipient_source_record] {
+        compare_string_value(
+            read_string(source_record, "sourceTrusteeIdentity")?,
+            read_string(source_statement, "sourceTrusteeIdentity")?,
+            "compact share-linkage proof sourceTrusteeIdentity",
+        )?;
+        compare_u64_value(
+            read_u64(source_record, "sourceTrusteeRosterPosition")?,
+            source_roster_position as u64,
+            "compact share-linkage proof sourceTrusteeRosterPosition",
+        )?;
+    }
+    compare_string_value(
+        read_string(coefficient_source_record, "sourceCoefficientCommitmentRoot")?,
+        read_string(source_statement, "sourceCoefficientCommitmentRoot")?,
+        "compact share-linkage proof sourceCoefficientCommitmentRoot",
+    )?;
+    compare_string_value(
+        read_string(
+            recipient_source_record,
+            "sourceRecipientShareCommitmentRoot",
+        )?,
+        read_string(source_statement, "sourceRecipientShareCommitmentRoot")?,
+        "compact share-linkage proof sourceRecipientShareCommitmentRoot",
+    )?;
+
+    let source_message_modulus = read_u64(item, "sourceMessageModulus")?;
+    let coefficient_commitment_roots = read_string_array(item, "coefficientCommitmentRoots")?;
+    let coefficient_opening_roots = read_string_array(item, "coefficientOpeningRoots")?;
+    let coefficient_commitments = array_field(item, "coefficientCommitments")?;
+    if coefficient_commitment_roots.len() != threshold_degree
+        || coefficient_opening_roots.len() != threshold_degree
+        || coefficient_commitments.len() != threshold_degree
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof item must carry one coefficient commitment per threshold coefficient",
+        ));
+    }
+    let coefficient_records = array_field(coefficient_source_record, "coefficientCommitments")?;
+    let source_statement_coefficient_opening_roots =
+        array_field(source_statement, "coefficientOpeningRoots")?;
+    for coefficient_index in 0..threshold_degree {
+        let coefficient_record_index = source_rns_limb_index
+            .checked_mul(threshold_degree)
+            .and_then(|offset| offset.checked_add(coefficient_index))
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage coefficient record index overflowed",
+                )
+            })?;
+        let coefficient_record = coefficient_records
+            .get(coefficient_record_index)
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage coefficient set is missing a proof item coefficient",
+                )
+            })?;
+        compare_u64_value(
+            read_u64(coefficient_record, "rnsLimbIndex")?,
+            source_rns_limb_index as u64,
+            "compact share-linkage proof coefficient rnsLimbIndex",
+        )?;
+        compare_u64_value(
+            read_u64(coefficient_record, "rnsPrime")?,
+            source_message_modulus,
+            "compact share-linkage proof coefficient rnsPrime",
+        )?;
+        compare_u64_value(
+            read_u64(coefficient_record, "shamirCoefficientIndex")?,
+            coefficient_index as u64,
+            "compact share-linkage proof coefficient shamirCoefficientIndex",
+        )?;
+        compare_string_value(
+            &coefficient_commitment_roots[coefficient_index],
+            read_string(coefficient_record, "coefficientCommitmentRoot")?,
+            "compact share-linkage proof coefficientCommitmentRoot",
+        )?;
+        compare_string_value(
+            &coefficient_opening_roots[coefficient_index],
+            read_string(coefficient_record, "coefficientOpeningRoot")?,
+            "compact share-linkage proof coefficientOpeningRoot",
+        )?;
+        if source_statement_coefficient_opening_roots
+            .get(coefficient_record_index)
+            .and_then(Value::as_str)
+            != Some(coefficient_opening_roots[coefficient_index].as_str())
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact share-linkage proof coefficient opening root must match the source statement",
+            ));
+        }
+        if coefficient_commitments.get(coefficient_index) != coefficient_record.get("commitment") {
+            return Err(invalid_succinct_setup_proof(
+                "compact share-linkage proof coefficient commitment body must match the public coefficient record",
+            ));
+        }
+    }
+
+    let recipient_records = array_field(recipient_source_record, "recipientShareCommitments")?;
+    let recipient_record_index = recipient_roster_position
+        .checked_mul(target_rns_limb_count)
+        .and_then(|offset| offset.checked_add(source_rns_limb_index))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("compact share-linkage recipient record index overflowed")
+        })?;
+    let recipient_record = recipient_records
+        .get(recipient_record_index)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage recipient-share set is missing a proof item recipient",
+            )
+        })?;
+    compare_string_value(
+        read_string(item, "recipientIdentity")?,
+        read_string(recipient_record, "recipientIdentity")?,
+        "compact share-linkage proof recipientIdentity",
+    )?;
+    compare_u64_value(
+        read_u64(recipient_record, "recipientRosterPosition")?,
+        recipient_roster_position as u64,
+        "compact share-linkage proof recipientRosterPosition",
+    )?;
+    compare_u64_value(
+        read_u64(recipient_record, "rnsLimbIndex")?,
+        source_rns_limb_index as u64,
+        "compact share-linkage proof recipient rnsLimbIndex",
+    )?;
+    compare_u64_value(
+        read_u64(recipient_record, "rnsPrime")?,
+        source_message_modulus,
+        "compact share-linkage proof recipient rnsPrime",
+    )?;
+    compare_string_value(
+        read_string(item, "recipientShareCommitmentRoot")?,
+        read_string(recipient_record, "shareCommitmentRoot")?,
+        "compact share-linkage proof recipientShareCommitmentRoot",
+    )?;
+    compare_string_value(
+        read_string(item, "recipientShareOpeningRoot")?,
+        read_string(recipient_record, "shareOpeningRoot")?,
+        "compact share-linkage proof recipientShareOpeningRoot",
+    )?;
+    let source_statement_recipient_opening_roots =
+        array_field(source_statement, "recipientShareOpeningRoots")?;
+    if source_statement_recipient_opening_roots
+        .get(recipient_record_index)
+        .and_then(Value::as_str)
+        != Some(read_string(item, "recipientShareOpeningRoot")?)
+    {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof recipient opening root must match the source statement",
+        ));
+    }
+    if item.get("recipientShareCommitment") != recipient_record.get("commitment") {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof recipient-share commitment body must match the public recipient-share record",
+        ));
+    }
+
+    Ok(json!({
+        "sourceTrusteeRosterPosition": source_roster_position,
+        "recipientRosterPosition": recipient_roster_position,
+        "sourceRnsLimbIndex": source_rns_limb_index,
+        "itemIndex": item_index,
+    }))
+}
+
+pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let statement = request.get("statement").ok_or_else(|| {
+        invalid_succinct_setup_proof("compact share-linkage material statement must be present")
+    })?;
+    let statement_verification =
+        super::super::verify_compact_vss_share_linkage_statement_request(request)?;
+    let statement_root = read_string(&statement_verification, "statementRoot")?;
+    let participant_count = usize::try_from(read_u64(&statement_verification, "participantCount")?)
+        .map_err(|_| invalid_succinct_setup_proof("participantCount does not fit usize"))?;
+    let target_rns_limb_count =
+        usize::try_from(read_u64(&statement_verification, "targetRnsLimbCount")?)
+            .map_err(|_| invalid_succinct_setup_proof("targetRnsLimbCount does not fit usize"))?;
+    let threshold_degree =
+        usize::try_from(read_u64(&statement_verification, "thresholdDegree")?)
+            .map_err(|_| invalid_succinct_setup_proof("thresholdDegree does not fit usize"))?;
+    let coefficient_commitment_set = request.get("coefficientCommitmentSet").ok_or_else(|| {
+        invalid_succinct_setup_proof(
+            "compact share-linkage material coefficientCommitmentSet must be present",
+        )
+    })?;
+    let recipient_share_commitment_set =
+        request.get("recipientShareCommitmentSet").ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage material recipientShareCommitmentSet must be present",
+            )
+        })?;
+    let ring_degree = usize::try_from(read_u64(coefficient_commitment_set, "ringDegree")?)
+        .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
+    let proof_material_set = request.get("proofMaterialSet").ok_or_else(|| {
+        invalid_succinct_setup_proof("compact share-linkage proofMaterialSet must be present")
+    })?;
+
+    compare_string_value(
+        read_string(proof_material_set, "objectType")?,
+        "CompactVssShareLinkageProofMaterialSet",
+        "compact share-linkage proof material set objectType",
+    )?;
+    compare_u64_value(
+        read_u64(proof_material_set, "objectVersion")?,
+        1,
+        "compact share-linkage proof material set objectVersion",
+    )?;
+    for (field_name, expected_value) in [
+        ("setupProfileId", "CollectiveBgvSetup-v1"),
+        ("profileId", COMPACT_VSS_COMMITMENT_PROFILE_ID),
+        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
+        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
+        ("ceremonyId", read_string(statement, "ceremonyId")?),
+        ("setupEpoch", read_string(statement, "setupEpoch")?),
+    ] {
+        compare_string_value(
+            read_string(proof_material_set, field_name)?,
+            expected_value,
+            &format!("compact share-linkage proof material set {field_name}"),
+        )?;
+    }
+    for field_name in [
+        "manifestHash",
+        "rosterHash",
+        "setupProfileHash",
+        "qShareHash",
+        "carryAwareVssShareRelationProfileHash",
+        "commitmentProfileHash",
+        "publicMatrixSeedHash",
+        "targetBasisHash",
+        "coefficientCommitmentRoot",
+        "recipientShareCommitmentRoot",
+        "aggregateThresholdCommitmentRoot",
+    ] {
+        compare_string_value(
+            read_string(proof_material_set, field_name)?,
+            read_string(statement, field_name)?,
+            &format!("compact share-linkage proof material set {field_name}"),
+        )?;
+    }
+    compare_string_value(
+        read_string(proof_material_set, "statementRoot")?,
+        statement_root,
+        "compact share-linkage proof material set statementRoot",
+    )?;
+    compare_u64_value(
+        read_u64(proof_material_set, "participantCount")?,
+        participant_count as u64,
+        "compact share-linkage proof material set participantCount",
+    )?;
+    compare_u64_value(
+        read_u64(proof_material_set, "targetRnsLimbCount")?,
+        target_rns_limb_count as u64,
+        "compact share-linkage proof material set targetRnsLimbCount",
+    )?;
+    compare_u64_value(
+        read_u64(proof_material_set, "thresholdDegree")?,
+        threshold_degree as u64,
+        "compact share-linkage proof material set thresholdDegree",
+    )?;
+    compare_u64_value(
+        read_u64(proof_material_set, "ringDegree")?,
+        ring_degree as u64,
+        "compact share-linkage proof material set ringDegree",
+    )?;
+
+    let source_statement_records = statement
+        .get("sourceStatementRecords")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage statement sourceStatementRecords must be an array",
+            )
+        })?;
+    let proof_records = proof_material_set
+        .get("proofRecords")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage proof material set proofRecords must be an array",
+            )
+        })?;
+    if proof_records.is_empty() {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof material set must contain proof records",
+        ));
+    }
+
+    let mut covered_items = BTreeSet::new();
+    let mut verified_records = Vec::with_capacity(proof_records.len());
+    let mut total_proof_byte_length = 0usize;
+    let mut proof_verification_count = 0usize;
+    for (proof_record_index, proof_record) in proof_records.iter().enumerate() {
+        compare_string_value(
+            read_string(proof_record, "objectType")?,
+            "CompactVssShareLinkageProofRecord",
+            "compact share-linkage proof record objectType",
+        )?;
+        compare_u64_value(
+            read_u64(proof_record, "objectVersion")?,
+            1,
+            "compact share-linkage proof record objectVersion",
+        )?;
+        compare_string_value(
+            read_string(proof_record, "proofFamily")?,
+            COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            "compact share-linkage proof record proofFamily",
+        )?;
+        let source_roster_position = usize::try_from(read_u64(
+            proof_record,
+            "sourceTrusteeRosterPosition",
+        )?)
+        .map_err(|_| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage proof record sourceTrusteeRosterPosition does not fit usize",
+            )
+        })?;
+        let source_statement = source_statement_records
+            .get(source_roster_position)
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage proof record source roster position is outside the statement",
+                )
+            })?;
+        let source_statement_root = read_string(source_statement, "sourceStatementRoot")?;
+        compare_string_value(
+            read_string(proof_record, "sourceStatementRoot")?,
+            source_statement_root,
+            "compact share-linkage proof record sourceStatementRoot",
+        )?;
+        compare_string_value(
+            read_string(proof_record, "sourceTrusteeIdentity")?,
+            read_string(source_statement, "sourceTrusteeIdentity")?,
+            "compact share-linkage proof record sourceTrusteeIdentity",
+        )?;
+
+        let compact_vss_share_linkage =
+            proof_record.get("compactVssShareLinkage").ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage proof record compactVssShareLinkage must be present",
+                )
+            })?;
+        let coverage = verify_compact_vss_share_linkage_material_record_statement(
+            CompactVssShareLinkageMaterialRecordStatementInput {
+                proof_statement: compact_vss_share_linkage,
+                source_statement,
+                coefficient_commitment_set,
+                recipient_share_commitment_set,
+                participant_count,
+                target_rns_limb_count,
+                threshold_degree,
+                source_roster_position,
+            },
+        )?;
+        let record_linkage_items = proof_record
+            .get("linkageItems")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage proof record linkageItems must be an array",
+                )
+            })?;
+        if record_linkage_items.len() != coverage.len() {
+            return Err(invalid_succinct_setup_proof(
+                "compact share-linkage proof record linkageItems must match the proof statement coverage",
+            ));
+        }
+        for (item_index, coverage_item) in coverage.iter().enumerate() {
+            if record_linkage_items.get(item_index) != Some(coverage_item) {
+                return Err(invalid_succinct_setup_proof(
+                    "compact share-linkage proof record linkageItems must be the canonical proof statement coverage",
+                ));
+            }
+            let recipient_roster_position = usize::try_from(read_u64(
+                coverage_item,
+                "recipientRosterPosition",
+            )?)
+            .map_err(|_| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage coverage recipientRosterPosition does not fit usize",
+                )
+            })?;
+            let source_rns_limb_index =
+                usize::try_from(read_u64(coverage_item, "sourceRnsLimbIndex")?).map_err(|_| {
+                    invalid_succinct_setup_proof(
+                        "compact share-linkage coverage sourceRnsLimbIndex does not fit usize",
+                    )
+                })?;
+            if !covered_items.insert((
+                source_roster_position,
+                recipient_roster_position,
+                source_rns_limb_index,
+            )) {
+                return Err(invalid_succinct_setup_proof(
+                    "compact share-linkage proof material set repeats a source recipient-limb item",
+                ));
+            }
+        }
+
+        let proof_bytes_base64 = read_string(proof_record, "proofBytesBase64")?;
+        let proof_bytes = crate::transcript_core::decode_standard_base64(
+            proof_bytes_base64,
+            "compact share-linkage proofBytesBase64",
+        )?;
+        let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?;
+        let expected_proof_bytes_hash = hash512_hex(
+            COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
+            &[&proof_bytes],
+        );
+        compare_string_value(
+            proof_bytes_hash,
+            &expected_proof_bytes_hash,
+            "compact share-linkage proof record proofBytesHash",
+        )?;
+        total_proof_byte_length = total_proof_byte_length
+            .checked_add(proof_bytes.len())
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage proof material byte length overflowed",
+                )
+            })?;
+
+        let proof_record_without_root = json!({
+            "objectType": "CompactVssShareLinkageProofRecord",
+            "objectVersion": 1,
+            "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            "sourceStatementRoot": source_statement_root,
+            "sourceTrusteeIdentity": read_string(source_statement, "sourceTrusteeIdentity")?,
+            "sourceTrusteeRosterPosition": source_roster_position,
+            "linkageItems": coverage,
+            "compactVssShareLinkage": compact_vss_share_linkage,
+            "proofBytesHash": proof_bytes_hash,
+            "proofBytesBase64": proof_bytes_base64,
+        });
+        let expected_record_root =
+            derive_protocol_hash("SetupProofRecordBindingHash", &proof_record_without_root)?;
+        compare_string_value(
+            read_string(proof_record, "proofRecordRoot")?,
+            &expected_record_root,
+            "compact share-linkage proof record proofRecordRoot",
+        )?;
+
+        let proof_request = json!({
+            "context": {
+                "ceremonyId": read_string(statement, "ceremonyId")?,
+                "manifestHash": read_string(statement, "manifestHash")?,
+                "rosterHash": read_string(statement, "rosterHash")?,
+                "trusteeIdentity": read_string(source_statement, "sourceTrusteeIdentity")?,
+                "trusteeRosterPosition": source_roster_position,
+                "setupEpoch": read_string(statement, "setupEpoch")?,
+                "sourceCoefficientCommitmentRoot": read_string(source_statement, "sourceCoefficientCommitmentRoot")?,
+                "sourceRecipientShareCommitmentRoot": read_string(source_statement, "sourceRecipientShareCommitmentRoot")?,
+            },
+            "ringDegree": ring_degree,
+            "compactVssShareLinkage": compact_vss_share_linkage,
+            "proofBytesHex": to_hex(&proof_bytes),
+        });
+        verify_compact_vss_share_linkage_proof_from_request(&proof_request).map_err(|error| {
+            CanonicalError::new(
+                error.code,
+                format!(
+                    "compact share-linkage proof record {proof_record_index} did not verify: {}",
+                    error.message
+                ),
+            )
+        })?;
+        proof_verification_count += 1;
+
+        let mut verified_record = proof_record_without_root;
+        verified_record["proofRecordRoot"] = json!(expected_record_root);
+        verified_records.push(verified_record);
+    }
+
+    let expected_coverage_count = participant_count
+        .checked_mul(participant_count)
+        .and_then(|count| count.checked_mul(target_rns_limb_count))
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("compact share-linkage coverage count overflowed")
+        })?;
+    if covered_items.len() != expected_coverage_count {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof material set must cover every source, recipient, and target limb exactly once",
+        ));
+    }
+    for source_roster_position in 0..participant_count {
+        for recipient_roster_position in 0..participant_count {
+            for source_rns_limb_index in 0..target_rns_limb_count {
+                if !covered_items.contains(&(
+                    source_roster_position,
+                    recipient_roster_position,
+                    source_rns_limb_index,
+                )) {
+                    return Err(invalid_succinct_setup_proof(
+                        "compact share-linkage proof material set is missing a source recipient-limb item",
+                    ));
+                }
+            }
+        }
+    }
+
+    let proof_material_set_without_root = json!({
+        "objectType": "CompactVssShareLinkageProofMaterialSet",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
+        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "ceremonyId": read_string(statement, "ceremonyId")?,
+        "manifestHash": read_string(statement, "manifestHash")?,
+        "rosterHash": read_string(statement, "rosterHash")?,
+        "setupProfileHash": read_string(statement, "setupProfileHash")?,
+        "qShareHash": read_string(statement, "qShareHash")?,
+        "carryAwareVssShareRelationProfileHash": read_string(statement, "carryAwareVssShareRelationProfileHash")?,
+        "commitmentProfileHash": read_string(statement, "commitmentProfileHash")?,
+        "setupEpoch": read_string(statement, "setupEpoch")?,
+        "publicMatrixSeedHash": read_string(statement, "publicMatrixSeedHash")?,
+        "targetBasisHash": read_string(statement, "targetBasisHash")?,
+        "ringDegree": ring_degree,
+        "participantCount": participant_count,
+        "targetRnsLimbCount": target_rns_limb_count,
+        "thresholdDegree": threshold_degree,
+        "coefficientCommitmentRoot": read_string(statement, "coefficientCommitmentRoot")?,
+        "recipientShareCommitmentRoot": read_string(statement, "recipientShareCommitmentRoot")?,
+        "aggregateThresholdCommitmentRoot": read_string(statement, "aggregateThresholdCommitmentRoot")?,
+        "statementRoot": statement_root,
+        "proofRecords": verified_records,
+    });
+    let expected_material_root = derive_protocol_hash(
+        "SetupProofRecordBindingHash",
+        &proof_material_set_without_root,
+    )?;
+    compare_string_value(
+        read_string(proof_material_set, "proofMaterialSetRoot")?,
+        &expected_material_root,
+        "compact share-linkage proof material set proofMaterialSetRoot",
+    )?;
+
+    Ok(json!({
+        "ok": true,
+        "operation": "verifyCompactVssShareLinkageProofMaterialSet",
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "statementRoot": statement_root,
+        "proofMaterialSetRoot": expected_material_root,
+        "participantCount": participant_count,
+        "targetRnsLimbCount": target_rns_limb_count,
+        "ringDegree": ring_degree,
+        "proofRecordCount": proof_records.len(),
+        "coveredLinkageItemCount": covered_items.len(),
+        "totalProofByteLength": total_proof_byte_length,
+        "proofVerificationCount": proof_verification_count,
     }))
 }
 

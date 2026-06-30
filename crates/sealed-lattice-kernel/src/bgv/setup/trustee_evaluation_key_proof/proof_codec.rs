@@ -13,7 +13,7 @@ use crate::bgv::profile::DATA_PRIMES;
 // the byte stream carries no self-describing lengths except compact
 // folded-layer sibling tables and folded-layer opening lengths that are checked
 // against the statement, and trailing bytes are refused.
-const PROOF_MAGIC: &[u8; 8] = b"BGVPRF18";
+const PROOF_MAGIC: &[u8; 8] = b"BGVPRF19";
 
 // Every limb modulus the proof commits over is a profile data prime: a ~2^47
 // value whose residues fit in 47 bits. Field and challenge-extension

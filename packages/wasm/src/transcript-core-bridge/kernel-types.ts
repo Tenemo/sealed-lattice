@@ -31,6 +31,7 @@ import type {
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
     BgvCompactVssShareLinkageProofGeneration,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofStatement,
     BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
@@ -56,6 +57,7 @@ import type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionResultRelease,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
@@ -98,6 +100,7 @@ export type {
     BgvCompactVssSameSecretBridgeProofMaterialSetVerification,
     BgvCompactVssSameSecretBridgeStatementSetVerification,
     BgvCompactVssShareLinkageProofGeneration,
+    BgvCompactVssShareLinkageProofMaterialSetVerification,
     BgvCompactVssShareLinkageProofStatement,
     BgvCompactVssShareLinkageProofVerification,
     BgvCompactVssShareLinkageStatementVerification,
@@ -122,6 +125,7 @@ export type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionResultRelease,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
@@ -268,6 +272,18 @@ export type TranscriptCoreKernel = {
         readonly targetDecryptionShare: BgvTargetDecryptionShare;
         readonly proofStatement: BgvTargetDecryptionShareProofStatement;
     }): BgvTargetDecryptionShareProofStatementBindingVerification;
+    verifyAndReleaseBgvTargetDecryptionResult(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly targetShareProofs: readonly {
+            readonly targetDecryptionShare: BgvTargetDecryptionShare;
+            readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+            readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
+        }[];
+    }): BgvTargetDecryptionResultRelease;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly expectedSetupPackageHash?: ProtocolHash;
@@ -355,6 +371,15 @@ export type TranscriptCoreKernel = {
         readonly compactVssShareLinkage: BgvCompactVssShareLinkageProofStatement;
         readonly proofBytesHex: string;
     }): BgvCompactVssShareLinkageProofVerification;
+    verifyCompactVssShareLinkageProofMaterialSet(input: {
+        readonly statement: Readonly<Record<string, unknown>>;
+        readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
+        readonly recipientShareCommitmentSet: Readonly<Record<string, unknown>>;
+        readonly aggregateThresholdCommitmentSet: Readonly<
+            Record<string, unknown>
+        >;
+        readonly proofMaterialSet: Readonly<Record<string, unknown>>;
+    }): BgvCompactVssShareLinkageProofMaterialSetVerification;
     generateCompactSameSecretBridgeProof(input: {
         readonly context: BgvTrusteeEvaluationKeyStatementContext;
         readonly ringDegree: number;
@@ -393,6 +418,7 @@ export type TranscriptCoreKernel = {
     verifyCompactVssCommitmentOpening(input: {
         readonly opening: BgvCompactVssCommitmentOpeningInput;
         readonly expectedCommitmentRoot: ProtocolHash;
+        readonly expectedOpeningRoot: ProtocolHash;
     }): BgvCompactVssCommitmentOpeningVerification;
     verifyCompactVssCoefficientCommitmentSet(input: {
         readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
@@ -665,6 +691,19 @@ type TranscriptCoreKernelCommand =
           readonly proofStatement: BgvTargetDecryptionShareProofStatement;
       }
     | {
+          readonly command: 'VerifyAndReleaseBgvTargetDecryptionResult';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly targetShareProofs: readonly {
+              readonly targetDecryptionShare: BgvTargetDecryptionShare;
+              readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+              readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
+          }[];
+      }
+    | {
           readonly command: 'VerifyBgvPassiveSetup';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly expectedSetupPackageHash?: ProtocolHash;
@@ -801,6 +840,7 @@ type TranscriptCoreKernelCommand =
           readonly command: 'VerifyCompactVssCommitmentOpening';
           readonly opening: BgvCompactVssCommitmentOpeningInput;
           readonly expectedCommitmentRoot: ProtocolHash;
+          readonly expectedOpeningRoot: ProtocolHash;
       }
     | {
           readonly command: 'VerifyCompactVssCoefficientCommitmentSet';
@@ -828,6 +868,18 @@ type TranscriptCoreKernelCommand =
           readonly aggregateThresholdCommitmentSet: Readonly<
               Record<string, unknown>
           >;
+      }
+    | {
+          readonly command: 'VerifyCompactVssShareLinkageProofMaterialSet';
+          readonly statement: Readonly<Record<string, unknown>>;
+          readonly coefficientCommitmentSet: Readonly<Record<string, unknown>>;
+          readonly recipientShareCommitmentSet: Readonly<
+              Record<string, unknown>
+          >;
+          readonly aggregateThresholdCommitmentSet: Readonly<
+              Record<string, unknown>
+          >;
+          readonly proofMaterialSet: Readonly<Record<string, unknown>>;
       }
     | {
           readonly command: 'VerifyCompactVssSameSecretBridgeStatementSet';

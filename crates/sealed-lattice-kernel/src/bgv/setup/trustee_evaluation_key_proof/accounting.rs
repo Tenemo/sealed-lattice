@@ -6,7 +6,10 @@ use super::merkle_commitment::MERKLE_DIGEST_BYTES;
 use super::*;
 use crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL;
 use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
-use crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
+use crate::bgv::setup::compact_vss_commitment::{
+    COMPACT_VSS_MESSAGE_DIGIT_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+    compact_vss_message_digit_bound,
+};
 use crate::hashing::derive_protocol_hash;
 
 // Repo-owned accounting for the trustee-batched succinct evaluation-key
@@ -721,9 +724,12 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
             invalid_succinct_setup_proof("target accounting smudging message count overflowed")
         })?;
     let target_aggregate_message_claims_per_share = target_aggregate_message_vector_count
-        .checked_mul(
-            TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT,
-        )
+        .checked_mul(COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        .and_then(|count| {
+            count.checked_mul(
+                TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT,
+            )
+        })
         .and_then(|count| count.checked_mul(CONSISTENCY_REPETITIONS))
         .ok_or_else(|| {
             invalid_succinct_setup_proof(
@@ -731,9 +737,12 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
             )
         })?;
     let target_smudging_message_claims_per_share = target_smudging_message_vector_count
-        .checked_mul(
-            TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT,
-        )
+        .checked_mul(COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        .and_then(|count| {
+            count.checked_mul(
+                TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT,
+            )
+        })
         .and_then(|count| count.checked_mul(CONSISTENCY_REPETITIONS))
         .ok_or_else(|| {
             invalid_succinct_setup_proof(
@@ -791,8 +800,21 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         })?;
     let aggregate_message_coefficient_bound =
         u128::from(maximum_active_target_prime) * u128::from(FIRST_PROFILE_PARTICIPANT_COUNT);
+    let aggregate_message_bound_u64 =
+        u64::try_from(aggregate_message_coefficient_bound).map_err(|_| {
+            invalid_succinct_setup_proof("target accounting aggregate bound does not fit u64")
+        })?;
+    let aggregate_message_digit_bound = (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        .map(|digit_index| {
+            compact_vss_message_digit_bound(aggregate_message_bound_u64, digit_index)
+                .map(|digit_bound| u128::from(digit_bound.saturating_sub(1)))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
     let consistency_coefficient_bound = u128::from((1_u64 << CONSISTENCY_COEFFICIENT_BITS) - 1);
-    let aggregate_message_clear_claim_bound = aggregate_message_coefficient_bound
+    let aggregate_message_clear_claim_bound = aggregate_message_digit_bound
         .checked_mul(POLYNOMIAL_DEGREE as u128)
         .and_then(|bound| bound.checked_mul(consistency_coefficient_bound))
         .ok_or_else(|| invalid_succinct_setup_proof("target accounting clear bound overflowed"))?;
@@ -812,7 +834,20 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         .ok_or_else(|| {
             invalid_succinct_setup_proof("target accounting smudging bound overflowed")
         })?;
-    let smudging_message_clear_claim_bound = smudging_message_coefficient_bound
+    let smudging_message_bound_u64 =
+        u64::try_from(smudging_message_coefficient_bound).map_err(|_| {
+            invalid_succinct_setup_proof("target accounting smudging bound does not fit u64")
+        })?;
+    let smudging_message_digit_bound = (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        .map(|digit_index| {
+            compact_vss_message_digit_bound(smudging_message_bound_u64, digit_index)
+                .map(|digit_bound| u128::from(digit_bound.saturating_sub(1)))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    let smudging_message_clear_claim_bound = smudging_message_digit_bound
         .checked_mul(POLYNOMIAL_DEGREE as u128)
         .and_then(|bound| bound.checked_mul(consistency_coefficient_bound))
         .ok_or_else(|| {
@@ -859,14 +894,17 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
                 "perClaimStatisticalDistanceLog2": aggregate_message_per_claim_leakage_log2,
                 "clearClaimBoundBits": aggregate_message_clear_claim_bound_bits,
                 "maskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+                "messageDigitCount": COMPACT_VSS_MESSAGE_DIGIT_COUNT,
                 "aggregateMessagePerClaimStatisticalDistanceLog2": aggregate_message_per_claim_leakage_log2,
                 "aggregateMessageClearClaimBoundBits": aggregate_message_clear_claim_bound_bits,
+                "aggregateMessageDigitBoundDecimal": aggregate_message_digit_bound.to_string(),
                 "aggregateMessageMaskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
                 "aggregateMessageClaimsPerTargetShare": target_aggregate_message_claims_per_share,
                 "aggregateMessageClaimBudgetLog2Approximate": aggregate_message_claim_budget_log2,
                 "aggregateMessageTotalLeakageLog2Approximate": aggregate_message_total_leakage_log2,
                 "smudgingMessagePerClaimStatisticalDistanceLog2": smudging_message_per_claim_leakage_log2,
                 "smudgingMessageClearClaimBoundBits": smudging_message_clear_claim_bound_bits,
+                "smudgingMessageDigitBoundDecimal": smudging_message_digit_bound.to_string(),
                 "smudgingMessageMaskDigitCount": TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
                 "smudgingMessageClaimsPerTargetShare": target_smudging_message_claims_per_share,
                 "smudgingMessageClaimBudgetLog2Approximate": smudging_message_claim_budget_log2,
@@ -910,7 +948,7 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         integer_binding.insert(
             "crtWindowRule".to_string(),
             Value::String(
-                "the target-share proof's lifted aggregate opening messages may be as large as the active target prime times the participant count, so the aggregate-message clear claim bound is about two to the seventy-four; each aggregate-message consistency claim is carried by five proof fields whose product exceeds twice the 142-digit base-3 mask-plus-clear window, while smudging-message and ternary opening-randomness consistency claims use a 114-digit base-3 mask and four proof fields; statements with too few active fields are refused before proving"
+                "the target-share proof carries direct digit claims: the aggregate-message digit clear claim bound is about two to the fifty; each aggregate-message digit consistency claim is carried by five proof fields whose product exceeds twice the 142-digit base-3 mask-plus-clear window, while smudging-message digit and ternary opening-randomness consistency claims use a 114-digit base-3 mask and four proof fields; statements with too few active fields are refused before proving"
                     .to_string(),
             ),
         );

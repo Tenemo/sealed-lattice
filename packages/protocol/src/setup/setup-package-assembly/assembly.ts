@@ -89,8 +89,50 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
             : { vssComplaints: input.vssComplaints }),
         vssShareAcceptances: input.vssShareAcceptances,
         thresholdShareCommitments,
+        ...(input.compactVssCoefficientCommitmentSet === undefined
+            ? {}
+            : {
+                  compactVssCoefficientCommitmentSet:
+                      input.compactVssCoefficientCommitmentSet,
+              }),
+        ...(input.compactVssRecipientShareCommitmentSet === undefined
+            ? {}
+            : {
+                  compactVssRecipientShareCommitmentSet:
+                      input.compactVssRecipientShareCommitmentSet,
+              }),
+        ...(input.compactVssAggregateThresholdCommitmentSet === undefined
+            ? {}
+            : {
+                  compactVssAggregateThresholdCommitmentSet:
+                      input.compactVssAggregateThresholdCommitmentSet,
+              }),
+        ...(input.compactVssShareLinkageStatement === undefined
+            ? {}
+            : {
+                  compactVssShareLinkageStatement:
+                      input.compactVssShareLinkageStatement,
+              }),
+        ...(input.compactVssShareLinkageProofMaterialSet === undefined
+            ? {}
+            : {
+                  compactVssShareLinkageProofMaterialSet:
+                      input.compactVssShareLinkageProofMaterialSet,
+              }),
         sameSecretConsistency: input.sameSecretConsistency,
         sameSecretProofs: input.sameSecretProofs,
+        ...(input.compactSameSecretBridgeStatementSet === undefined
+            ? {}
+            : {
+                  compactSameSecretBridgeStatementSet:
+                      input.compactSameSecretBridgeStatementSet,
+              }),
+        ...(input.compactSameSecretBridgeProofMaterialSet === undefined
+            ? {}
+            : {
+                  compactSameSecretBridgeProofMaterialSet:
+                      input.compactSameSecretBridgeProofMaterialSet,
+              }),
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
         publicKeyShareMaterial: input.publicKeyShareMaterial,

@@ -193,6 +193,15 @@ use crate::bgv::evaluator::top_k::{
     packed_rank_return_basis_galois_elements,
 };
 use crate::bgv::profile::SPECIAL_PRIME;
+use crate::bgv::setup::trustee_evaluation_key_proof::{
+    CLAIM_MASK_DIGIT_COUNT, CLAIM_MASK_RADIX, COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT,
+    COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS, COMPACT_VSS_CONSISTENCY_REPETITIONS,
+    COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT, CONSISTENCY_COEFFICIENT_BITS,
+    CONSISTENCY_REPETITIONS, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
+    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+};
+use crate::bgv::target_decryption::TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND;
 use crate::protocol_signatures::{
     ProtocolSignatureExpectation, verify_protocol_signature_envelope,
 };
@@ -1180,6 +1189,94 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
         .participant_count
         .checked_add(1)
         .ok_or_else(|| static_accounting_error("aggregate sum relation L1 overflowed"))?;
+    let compact_vss_message_digit_maximum =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE - 1;
+    let setup_consistency_coefficient_maximum =
+        consistency_coefficient_maximum(CONSISTENCY_COEFFICIENT_BITS)?;
+    let compact_vss_consistency_coefficient_maximum =
+        consistency_coefficient_maximum(COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS)?;
+    let largest_target_rns_prime = DATA_PRIMES
+        .iter()
+        .take(target_rns_limb_count as usize)
+        .copied()
+        .max()
+        .ok_or_else(|| static_accounting_error("compact VSS target RNS limb set is empty"))?;
+    let aggregate_target_message_coefficient_bound = u128::from(largest_target_rns_prime)
+        .checked_mul(u128::from(roster.participant_count))
+        .ok_or_else(|| {
+            static_accounting_error("aggregate target message coefficient bound overflowed")
+        })?;
+    let aggregate_target_message_bound_u64 =
+        u64::try_from(aggregate_target_message_coefficient_bound).map_err(|_| {
+            static_accounting_error("aggregate target message coefficient bound overflowed")
+        })?;
+    let aggregate_target_message_digit_maximum = (0..message_column_count as usize)
+        .map(|digit_index| {
+            crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+                aggregate_target_message_bound_u64,
+                digit_index,
+            )
+            .map(|digit_bound| digit_bound.saturating_sub(1))
+            .map_err(|error| static_accounting_error(error.message))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    let target_decryption_smudging_message_coefficient_bound =
+        u64::try_from(TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND)
+            .map_err(|_| static_accounting_error("target smudging bound must be positive"))?
+            .checked_mul(2)
+            .and_then(|bound| bound.checked_add(1))
+            .ok_or_else(|| {
+                static_accounting_error("target smudging message coefficient bound overflowed")
+            })?;
+    let smudging_target_message_digit_maximum = (0..message_column_count as usize)
+        .map(|digit_index| {
+            crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+                target_decryption_smudging_message_coefficient_bound,
+                digit_index,
+            )
+            .map(|digit_bound| digit_bound.saturating_sub(1))
+            .map_err(|error| static_accounting_error(error.message))
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    let compact_share_linkage_carry_clear_claim_bound_decimal = masked_claim_clear_bound_decimal(
+        u128::from(maximum_one_source_shamir_scalar_l1),
+        ring_degree,
+        COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS,
+    )?;
+    let compact_share_linkage_digit_clear_claim_bound_decimal = masked_claim_clear_bound_decimal(
+        u128::from(compact_vss_message_digit_maximum),
+        ring_degree,
+        COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS,
+    )?;
+    let bridge_non_digit_clear_claim_bound_decimal =
+        masked_claim_clear_bound_decimal(2, ring_degree, CONSISTENCY_COEFFICIENT_BITS)?;
+    let bridge_digit_clear_claim_bound_decimal = masked_claim_clear_bound_decimal(
+        u128::from(compact_vss_message_digit_maximum),
+        ring_degree,
+        CONSISTENCY_COEFFICIENT_BITS,
+    )?;
+    let aggregate_target_message_digit_clear_claim_bound_decimal =
+        masked_claim_clear_bound_decimal(
+            u128::from(aggregate_target_message_digit_maximum),
+            ring_degree,
+            CONSISTENCY_COEFFICIENT_BITS,
+        )?;
+    let smudging_target_message_digit_clear_claim_bound_decimal = masked_claim_clear_bound_decimal(
+        u128::from(smudging_target_message_digit_maximum),
+        ring_degree,
+        CONSISTENCY_COEFFICIENT_BITS,
+    )?;
+    let target_randomness_clear_claim_bound_decimal =
+        masked_claim_clear_bound_decimal(1, ring_degree, CONSISTENCY_COEFFICIENT_BITS)?;
+    let bridge_direct_digit_vector_count = target_rns_limb_count
+        .checked_mul(message_column_count)
+        .ok_or_else(|| static_accounting_error("bridge direct digit vector count overflowed"))?;
     let commitment_modulus_limbs = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
         .iter()
         .map(|commitment_modulus_index| {
@@ -1204,7 +1301,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
 
     Ok(json!({
         "objectType": "CompactVssParameterCertificateInputBinding",
-        "objectVersion": 2,
+        "objectVersion": 3,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
         "participantCount": roster.participant_count,
@@ -1268,7 +1365,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
             "signedRepresentativeConvention": "same-secret bridge witnesses use the setup proof signed representative convention before reduction into each RNS prime",
             "paddingAndBlockOrder": "two base-3^17 little-endian digit coefficients per message ring position",
             "freshEncodingRule": "exact canonical residue encoding into two message digit columns",
-            "proofRangeEncodingRule": "proof traces decompose the low digit with 17 trits and the high digit with the statement-bound trit count for the opened message class",
+            "proofRangeEncodingRule": "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims",
             "derivedEncodingRule": "Shamir recipient-share and aggregate threshold openings bind carried public-sum messages through decoded message digit columns and private carry witnesses",
         },
         "normInputClasses": [
@@ -1366,6 +1463,138 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                     "appliesToColumns": input_column_labels,
                 },
             ],
+            "maskedClaimNormRows": [
+                {
+                    "rowId": "compact-vss-share-linkage-carry-claim",
+                    "proofFamily": "compact-vss-share-linkage",
+                    "claimVectorClass": "packed-opening-carry",
+                    "appliesToRelations": [
+                        "compact-vss-recipient-share-shamir-evaluation",
+                        "compact-vss-aggregate-threshold-public-sum",
+                        "compact-vss-one-recipient-aggregate-from-source-coefficients"
+                    ],
+                    "witnessInfinityBound": maximum_one_source_shamir_scalar_l1,
+                    "clearClaimBoundDecimal": compact_share_linkage_carry_clear_claim_bound_decimal,
+                    "consistencyRepetitions": COMPACT_VSS_CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": compact_vss_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "carry claims use the lifted Shamir carry bound for each packed item",
+                },
+                {
+                    "rowId": "compact-vss-share-linkage-message-digit-claim",
+                    "proofFamily": "compact-vss-share-linkage",
+                    "claimVectorClass": "message-digit",
+                    "appliesToRelations": [
+                        "compact-vss-recipient-share-shamir-evaluation",
+                        "compact-vss-aggregate-threshold-public-sum",
+                        "compact-vss-one-recipient-aggregate-from-source-coefficients"
+                    ],
+                    "messageDigitBaseDecimal": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE.to_string(),
+                    "messageDigitCount": message_column_count,
+                    "witnessInfinityBoundDecimal": compact_vss_message_digit_maximum.to_string(),
+                    "clearClaimBoundDecimal": compact_share_linkage_digit_clear_claim_bound_decimal,
+                    "consistencyRepetitions": COMPACT_VSS_CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": compact_vss_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns without trit decoder columns",
+                },
+                {
+                    "rowId": "compact-vss-same-secret-bridge-non-digit-claim",
+                    "proofFamily": "compact-same-secret-bridge",
+                    "claimVectorClass": "secret-indicator-or-randomness",
+                    "appliesToRelations": [
+                        "compact-vss-same-secret-bridge-target-reduction"
+                    ],
+                    "witnessInfinityBound": 2_u64,
+                    "clearClaimBoundDecimal": bridge_non_digit_clear_claim_bound_decimal,
+                    "consistencyRepetitions": CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "non-digit bridge claims keep the setup-family consistency mask",
+                },
+                {
+                    "rowId": "compact-vss-same-secret-bridge-message-digit-claim",
+                    "proofFamily": "compact-same-secret-bridge",
+                    "claimVectorClass": "target-message-digit",
+                    "appliesToRelations": [
+                        "compact-vss-same-secret-bridge-target-reduction"
+                    ],
+                    "targetRnsLimbCount": target_rns_limb_count,
+                    "messageDigitBaseDecimal": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE.to_string(),
+                    "messageDigitCount": message_column_count,
+                    "directDigitVectorCount": bridge_direct_digit_vector_count,
+                    "witnessInfinityBoundDecimal": compact_vss_message_digit_maximum.to_string(),
+                    "clearClaimBoundDecimal": bridge_digit_clear_claim_bound_decimal,
+                    "consistencyRepetitions": CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "bridge target messages use direct digit claims and do not add message trit decoder columns",
+                },
+                {
+                    "rowId": "compact-vss-target-decryption-aggregate-message-claim",
+                    "proofFamily": "target-decryption-share",
+                    "claimVectorClass": "aggregate-opening-message-digit",
+                    "appliesToRelations": [
+                        "target-decryption-share-proof"
+                    ],
+                    "targetRnsLimbCount": target_rns_limb_count,
+                    "largestTargetRnsPrime": largest_target_rns_prime,
+                    "aggregateMessageCoefficientBoundDecimal": aggregate_target_message_coefficient_bound.to_string(),
+                    "messageDigitBaseDecimal": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE.to_string(),
+                    "messageDigitCount": message_column_count,
+                    "witnessInfinityBoundDecimal": aggregate_target_message_digit_maximum.to_string(),
+                    "clearClaimBoundDecimal": aggregate_target_message_digit_clear_claim_bound_decimal,
+                    "consistencyRepetitions": CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit without trit decoder columns",
+                },
+                {
+                    "rowId": "compact-vss-target-decryption-smudging-message-claim",
+                    "proofFamily": "target-decryption-share",
+                    "claimVectorClass": "smudging-opening-message-digit",
+                    "appliesToRelations": [
+                        "target-decryption-share-proof"
+                    ],
+                    "smudgingMessageCoefficientBound": target_decryption_smudging_message_coefficient_bound,
+                    "messageDigitBaseDecimal": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE.to_string(),
+                    "messageDigitCount": message_column_count,
+                    "witnessInfinityBoundDecimal": smudging_target_message_digit_maximum.to_string(),
+                    "clearClaimBoundDecimal": smudging_target_message_digit_clear_claim_bound_decimal,
+                    "consistencyRepetitions": CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit without trit decoder columns",
+                },
+                {
+                    "rowId": "compact-vss-target-decryption-randomness-claim",
+                    "proofFamily": "target-decryption-share",
+                    "claimVectorClass": "target-opening-randomness",
+                    "appliesToRelations": [
+                        "target-decryption-share-proof"
+                    ],
+                    "witnessInfinityBound": 1_u64,
+                    "clearClaimBoundDecimal": target_randomness_clear_claim_bound_decimal,
+                    "consistencyRepetitions": CONSISTENCY_REPETITIONS,
+                    "consistencyCoefficientBits": CONSISTENCY_COEFFICIENT_BITS,
+                    "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
+                    "claimMaskRadix": CLAIM_MASK_RADIX,
+                    "maskDigitCount": TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
+                    "rangeEvidenceRule": "target opening randomness claims use ternary witness columns and the target randomness mask",
+                },
+            ],
             "targetBasisReductionRows": [
                 {
                     "rowId": "compact-vss-same-secret-bridge-target-reduction",
@@ -1391,6 +1620,15 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                         "compact-vss-aggregate-threshold-public-sum",
                         "compact-vss-one-recipient-aggregate-from-source-coefficients"
                     ],
+                    "maskedClaimNormRows": [
+                        "compact-vss-share-linkage-carry-claim",
+                        "compact-vss-share-linkage-message-digit-claim",
+                        "compact-vss-same-secret-bridge-non-digit-claim",
+                        "compact-vss-same-secret-bridge-message-digit-claim",
+                        "compact-vss-target-decryption-aggregate-message-claim",
+                        "compact-vss-target-decryption-smudging-message-claim",
+                        "compact-vss-target-decryption-randomness-claim"
+                    ],
                     "collisionDifferenceRule": "subtract two accepted openings over the integers before reducing to the commitment modulus",
                 },
                 {
@@ -1399,6 +1637,15 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                     "openingWitnessRows": [
                         "compact-vss-fresh-opening-witness",
                         "compact-vss-aggregate-opening-witness"
+                    ],
+                    "maskedClaimNormRows": [
+                        "compact-vss-share-linkage-carry-claim",
+                        "compact-vss-share-linkage-message-digit-claim",
+                        "compact-vss-same-secret-bridge-non-digit-claim",
+                        "compact-vss-same-secret-bridge-message-digit-claim",
+                        "compact-vss-target-decryption-aggregate-message-claim",
+                        "compact-vss-target-decryption-smudging-message-claim",
+                        "compact-vss-target-decryption-randomness-claim"
                     ],
                     "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
                     "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
@@ -1556,6 +1803,31 @@ fn shamir_scalar_l1_amplification(
     }
 
     Ok(amplification)
+}
+
+fn consistency_coefficient_maximum(coefficient_bits: u32) -> CanonicalResult<u128> {
+    if coefficient_bits >= u128::BITS {
+        return Err(static_accounting_error(
+            "consistency coefficient bit width overflowed",
+        ));
+    }
+
+    Ok((1_u128 << coefficient_bits) - 1)
+}
+
+fn masked_claim_clear_bound_decimal(
+    witness_infinity_bound: u128,
+    ring_degree: u64,
+    consistency_coefficient_bits: u32,
+) -> CanonicalResult<String> {
+    let consistency_coefficient_maximum =
+        consistency_coefficient_maximum(consistency_coefficient_bits)?;
+    let clear_bound = witness_infinity_bound
+        .checked_mul(u128::from(ring_degree))
+        .and_then(|bound| bound.checked_mul(consistency_coefficient_maximum))
+        .ok_or_else(|| static_accounting_error("masked claim clear bound overflowed"))?;
+
+    Ok(clear_bound.to_string())
 }
 
 fn checked_accounting_product(values: &[u64], label: &str) -> CanonicalResult<u64> {
@@ -1953,8 +2225,57 @@ pub(in crate::bgv::setup) fn accepted_hashes_from_package(setup_package: &Value)
         accepted_hashes.push(hash.to_string());
     }
     if let Some(hash) = setup_package
+        .get("compactVssCoefficientCommitmentSet")
+        .and_then(|commitment_set| commitment_set.get("coefficientCommitmentRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("compactVssRecipientShareCommitmentSet")
+        .and_then(|commitment_set| commitment_set.get("recipientShareCommitmentRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("compactVssAggregateThresholdCommitmentSet")
+        .and_then(|commitment_set| commitment_set.get("aggregateThresholdCommitmentRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("compactVssShareLinkageStatement")
+        .and_then(|statement| statement.get("statementRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("compactVssShareLinkageProofMaterialSet")
+        .and_then(|material_set| material_set.get("proofMaterialSetRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
         .get("publicKeyShareProofs")
         .and_then(|proof_set| proof_set.get("publicKeyShareProofSetRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("compactSameSecretBridgeStatementSet")
+        .and_then(|statement_set| statement_set.get("compactSameSecretBridgeStatementSetRoot"))
+        .and_then(Value::as_str)
+    {
+        accepted_hashes.push(hash.to_string());
+    }
+    if let Some(hash) = setup_package
+        .get("compactSameSecretBridgeProofMaterialSet")
+        .and_then(|material_set| material_set.get("proofMaterialSetRoot"))
         .and_then(Value::as_str)
     {
         accepted_hashes.push(hash.to_string());

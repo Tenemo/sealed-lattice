@@ -215,6 +215,13 @@ pub(crate) fn verify_bgv_target_decryption_share_binary_proof_material_from_requ
     )
 }
 
+pub(crate) fn verify_and_release_bgv_target_decryption_result_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    value_at_path(request, &["setupPackage"])?;
+    refuse_target_decryption_result_release()
+}
+
 fn read_target_decryption_participant<'a>(
     setup_binding: &'a SetupBinding,
     trustee_identity: &str,

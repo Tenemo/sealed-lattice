@@ -294,11 +294,18 @@ pub(crate) fn verify_compact_vss_commitment_opening_request(
 ) -> CanonicalResult<Value> {
     let opening = value_at_path(request, &["opening"])?;
     let expected_commitment_root = hash_at_path(request, &["expectedCommitmentRoot"])?;
+    let expected_opening_root = hash_at_path(request, &["expectedOpeningRoot"])?;
     let computation = compute_compact_vss_commitment_from_opening_value(opening)?;
     if computation.commitment_root != expected_commitment_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ProfileComponentMismatch,
             "compact VSS commitment opening does not match the expected commitment root",
+        ));
+    }
+    if computation.opening_root != expected_opening_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ProfileComponentMismatch,
+            "compact VSS commitment opening does not match the expected opening root",
         ));
     }
 
@@ -307,6 +314,7 @@ pub(crate) fn verify_compact_vss_commitment_opening_request(
         "operation": "verifyCompactVssCommitmentOpening",
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "commitmentRoot": computation.commitment_root,
+        "openingRoot": computation.opening_root,
     }))
 }
 
@@ -2719,6 +2727,50 @@ pub(in crate::bgv::setup) fn compact_vss_message_digits(
     Ok(digits)
 }
 
+pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
+    message_bound_exclusive: u64,
+    digit_index: usize,
+) -> CanonicalResult<u64> {
+    if message_bound_exclusive == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS message coefficient bound must be positive",
+        ));
+    }
+    let maximum_coefficient = u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
+        .checked_pow(COMPACT_VSS_MESSAGE_DIGIT_COUNT as u32)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS message digit range overflowed",
+            )
+        })?;
+    if u128::from(message_bound_exclusive) > maximum_coefficient {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS message coefficient bound exceeds the two-digit message range",
+        ));
+    }
+
+    match digit_index {
+        0 => Ok(message_bound_exclusive.min(COMPACT_VSS_MESSAGE_DIGIT_BASE)),
+        1 => {
+            let high_digit_bound = u128::from(message_bound_exclusive)
+                .div_ceil(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
+            u64::try_from(high_digit_bound).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact VSS high digit bound overflowed",
+                )
+            })
+        }
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS message digit index is outside the selected profile",
+        )),
+    }
+}
+
 pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
     message_bound_exclusive: u64,
 ) -> CanonicalResult<CompactVssMessageEncodingLayout> {
@@ -3167,9 +3219,11 @@ pub(in crate::bgv::setup) mod tests {
     use serde_json::json;
 
     use super::{
-        COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_COMMITMENT_PROFILE_ID,
-        COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES,
+        COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactProjectionTermsInput,
         CompactVssCommitmentComputation, CompactVssCommitmentOpeningInput,
+        compact_projection_terms, compact_vss_message_digit_column_label_str,
         compute_compact_vss_commitment_from_opening,
         compute_compact_vss_commitment_from_opening_request,
         decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
@@ -3179,7 +3233,10 @@ pub(in crate::bgv::setup) mod tests {
         verify_compact_vss_recipient_share_commitment_set_request,
         verify_compact_vss_share_linkage_statement_request,
     };
-    use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+    use crate::{
+        bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
+    };
 
     #[test]
     fn compact_commitment_command_verifies_and_rejects_tampering() -> CanonicalResult<()> {
@@ -3209,6 +3266,7 @@ pub(in crate::bgv::setup) mod tests {
         let verification = verify_compact_vss_commitment_opening_request(&json!({
             "opening": request,
             "expectedCommitmentRoot": response["commitmentRoot"],
+            "expectedOpeningRoot": response["openingRoot"],
         }))?;
         assert_eq!(
             verification["operation"],
@@ -3221,6 +3279,7 @@ pub(in crate::bgv::setup) mod tests {
             verify_compact_vss_commitment_opening_request(&json!({
                 "opening": tampered_opening,
                 "expectedCommitmentRoot": response["commitmentRoot"],
+                "expectedOpeningRoot": response["openingRoot"],
             }))
             .is_err(),
             "tampered compact opening must reject"
@@ -3233,6 +3292,91 @@ pub(in crate::bgv::setup) mod tests {
             "wrong compact randomness shape must reject"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn compact_sparse_projection_accepts_two_opening_roots_for_unprojected_message_coefficient()
+    -> CanonicalResult<()> {
+        let public_matrix_seed_hash = compact_test_public_matrix_seed_hash();
+        let input_column = compact_vss_message_digit_column_label_str(0)?;
+        let mut projected_coefficient_positions = vec![false; POLYNOMIAL_DEGREE];
+
+        for commitment_modulus_index in COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES {
+            for output_coordinate_index in 0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
+                for (ring_coefficient_index, _) in
+                    compact_projection_terms(CompactProjectionTermsInput {
+                        public_matrix_seed_hash: &public_matrix_seed_hash,
+                        rns_limb_index: 0,
+                        commitment_modulus_index,
+                        output_coordinate_index,
+                        input_column,
+                        ring_degree: POLYNOMIAL_DEGREE,
+                        modulus: DATA_PRIMES[commitment_modulus_index],
+                    })?
+                {
+                    projected_coefficient_positions[ring_coefficient_index] = true;
+                }
+            }
+        }
+
+        let unprojected_coefficient_index = projected_coefficient_positions
+            .iter()
+            .position(|is_projected| !*is_projected)
+            .expect("current sparse compact VSS profile leaves a message coefficient unprojected");
+        let commitment_context = json!({
+            "objectType": "CompactVssCoefficientCommitmentContext",
+            "objectVersion": 1,
+            "ceremonyId": "compact-vss-test",
+            "sourceTrusteeIdentity": "source-0",
+            "sourceTrusteeRosterPosition": 0,
+            "rnsLimbIndex": 0,
+            "rnsPrime": DATA_PRIMES[0],
+            "shamirCoefficientIndex": 0,
+        });
+        let zero_message_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
+        let mut changed_message_coefficients = zero_message_coefficients.clone();
+        changed_message_coefficients[unprojected_coefficient_index] = 1;
+        let randomness_by_column =
+            vec![vec![0_i64; POLYNOMIAL_DEGREE]; COMPACT_VSS_RANDOMNESS_COLUMN_COUNT];
+
+        let zero_opening =
+            compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
+                commitment_role: "coefficient",
+                commitment_context: &commitment_context,
+                public_matrix_seed_hash: &public_matrix_seed_hash,
+                rns_limb_index: 0,
+                rns_prime: DATA_PRIMES[0],
+                ring_degree: POLYNOMIAL_DEGREE,
+                message_coefficients: &zero_message_coefficients,
+                message_coefficient_bound: DATA_PRIMES[0],
+                randomness_by_column: &randomness_by_column,
+            })?;
+        let changed_opening =
+            compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
+                commitment_role: "coefficient",
+                commitment_context: &commitment_context,
+                public_matrix_seed_hash: &public_matrix_seed_hash,
+                rns_limb_index: 0,
+                rns_prime: DATA_PRIMES[0],
+                ring_degree: POLYNOMIAL_DEGREE,
+                message_coefficients: &changed_message_coefficients,
+                message_coefficient_bound: DATA_PRIMES[0],
+                randomness_by_column: &randomness_by_column,
+            })?;
+
+        assert_eq!(
+            zero_opening.commitment_root, changed_opening.commitment_root,
+            "unprojected message coefficients cannot affect the sparse public commitment root"
+        );
+        assert_eq!(
+            zero_opening.commitment, changed_opening.commitment,
+            "unprojected message coefficients cannot affect the sparse commitment body"
+        );
+        assert_ne!(
+            zero_opening.opening_root, changed_opening.opening_root,
+            "the private opening root still sees the changed full opening payload"
+        );
         Ok(())
     }
 

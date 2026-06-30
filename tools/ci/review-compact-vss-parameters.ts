@@ -5,11 +5,16 @@ import { fileURLToPath } from 'node:url';
 
 import { deriveProtocolHash } from '#packages/crypto/src/index.js';
 import {
+    compactVssCarryClaimMaskDigitCount,
     compactVssCommitmentMeasurement,
+    compactVssDigitClaimMaskDigitCount,
     compactVssMessageDigitBase,
     compactVssMessageDigitCount,
     compactVssMessageDigitTritCount,
     compactVssParameterCertificateInputBinding,
+    targetDecryptionAggregateMessageClaimMaskDigitCount,
+    targetDecryptionRandomnessClaimMaskDigitCount,
+    targetDecryptionSmudgingMessageClaimMaskDigitCount,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import {
     sameSecretAnchorArgument,
@@ -41,7 +46,7 @@ const artifactPath = path.resolve(
         'tests/fixtures/compact-vss-parameter-review-results.json',
 );
 const expectedArtifactCanonicalSha256 =
-    '8783174bcf1dfef6a105f3802a163c77ebfffb941af4edeebf7358c98727fa0e';
+    '8024b690e58cc7df58efea893cae0053952f6320e881833ef765d9e36fde2b86';
 
 const participantCount = 10;
 const thresholdDegree = 4;
@@ -54,32 +59,6 @@ const targetRnsPrimes = acceptedBgvSetupQSharePrimes.slice(
 );
 const residueByteCount = 8;
 const minimumPublicCommitmentReductionFactor = 2_800;
-const compactVssMessageDigitBaseNumber = Number(compactVssMessageDigitBase);
-
-const tritCountForBound = (boundExclusive: number): number => {
-    if (!Number.isSafeInteger(boundExclusive) || boundExclusive <= 0) {
-        throw new Error('trit bound must be a positive safe integer.');
-    }
-    let representedBound = 1;
-    let tritCount = 0;
-    while (representedBound < boundExclusive) {
-        representedBound *= 3;
-        if (!Number.isSafeInteger(representedBound)) {
-            throw new Error('trit bound exceeded the safe integer range.');
-        }
-        tritCount += 1;
-    }
-
-    return tritCount;
-};
-
-const highDigitTritCountForMessageBound = (
-    messageBoundExclusive: number,
-): number =>
-    tritCountForBound(
-        Math.ceil(messageBoundExclusive / compactVssMessageDigitBaseNumber),
-    );
-
 const canonicalTargetBasis = {
     objectType: 'CanonicalTargetBasis',
     objectVersion: 1,
@@ -273,16 +252,6 @@ const activeCompactMessageColumnReview = (input: {
     const largestFreshMessageCoefficientExclusive = input.largestSourceRnsPrime;
     const largestAggregateMessageCoefficientExclusive =
         participantCount * input.largestSourceRnsPrime;
-    const freshHighDigitTritCount = highDigitTritCountForMessageBound(
-        largestFreshMessageCoefficientExclusive,
-    );
-    const aggregateHighDigitTritCount = highDigitTritCountForMessageBound(
-        largestAggregateMessageCoefficientExclusive,
-    );
-    const freshTritColumnsPerMessageVector =
-        compactVssMessageDigitTritCount + freshHighDigitTritCount;
-    const aggregateTritColumnsPerMessageVector =
-        compactVssMessageDigitTritCount + aggregateHighDigitTritCount;
     const sampledMatrixResiduesPerCoordinate =
         activeInputColumnLabels.length * input.projectionWeight;
     const sampledMatrixResiduesPerCommitment =
@@ -307,9 +276,9 @@ const activeCompactMessageColumnReview = (input: {
         finding:
             'The active compact commitment uses two base-3^17 message digit columns plus the existing two randomness columns: this preserves the compact public body while making the committed message columns short enough for the binding review precondition.',
         activationInterpretation:
-            'This row records the active source constants and the proof obligations still blocking accepted setup; it is not accepted setup evidence by itself.',
+            'This row records the active source constants and the proof obligations still blocking target-ready result release; it is not production activation evidence by itself.',
         activeConstruction:
-            'encode each carried message coefficient as two little-endian base-3^17 digits and commit both digit columns plus the two randomness columns; share-linkage and same-secret bridge rows bind those digits directly through masked consistency claims, while target-decryption rows retain statement-bound trit decoder columns for target proof messages',
+            'encode each carried message coefficient as two little-endian base-3^17 digits and commit both digit columns plus the two randomness columns; share-linkage, same-secret bridge, and target-decryption rows bind those digits directly through masked consistency claims',
         messageDigitBaseDecimal: compactVssMessageDigitBase.toString(),
         messageDigitCount: compactVssMessageDigitCount,
         messageDigitTritCount: compactVssMessageDigitTritCount,
@@ -368,7 +337,7 @@ const activeCompactMessageColumnReview = (input: {
                 estimatorColumnDifferenceInfinityBound
             ).toString(),
             interpretation:
-                'The digit columns avoid the full-residue witness bound only where verifier-checked proof constraints bind them as bounded digits. Final certification still needs relation norms for direct digit claims and target decoder rows, multi-opening witness bounds, structured-ring analysis, and a reviewed hiding row for the final public sample count.',
+                'The digit columns avoid the full-residue witness bound only where verifier-checked proof constraints bind them as bounded digits. The source-bound review input now records direct digit, carry, target direct-digit, and target masked-claim norm rows; final certification still needs multi-opening witness bounds, structured-ring analysis, and a reviewed hiding row for the final public sample count.',
         },
         proofRangeEvidenceModel: {
             committedMessageColumns: compactVssMessageDigitCount,
@@ -377,37 +346,34 @@ const activeCompactMessageColumnReview = (input: {
                 appliedRows: [
                     'compact share-linkage',
                     'compact same-secret bridge',
+                    'target-decryption share',
                 ],
                 digitBoundMechanism:
                     'masked consistency claims bind each committed message digit with the base-3^17 digit bound and do not carry message trit decoder columns',
-                lowDigitTritColumns: 0,
-                highDigitTritColumns: 0,
+                carryClaimMaskDigitCount: compactVssCarryClaimMaskDigitCount,
+                messageDigitClaimMaskDigitCount:
+                    compactVssDigitClaimMaskDigitCount,
             },
-            targetDecoderEvidence: {
+            targetDirectDigitClaimEvidence: {
                 appliedRows: ['target-decryption share'],
                 digitBoundMechanism:
-                    'target-decryption message digits are accompanied inside the proof trace by ternary columns checked with the existing M(M - 1)(M - 2) row constraint; the low digit uses 17 trits and the high digit uses the statement-bound count',
-                digitDecoderRelation:
-                    'digit = sum_{position=0}^{tritCount - 1} trit[position] * 3^position',
-                lowDigitTritColumns: compactVssMessageDigitTritCount,
-                freshHighDigitTritColumns: freshHighDigitTritCount,
-                aggregateHighDigitTritColumns: aggregateHighDigitTritCount,
-                freshTritColumnsPerMessageVector,
-                aggregateTritColumnsPerMessageVector,
-                freshRangeProofInputColumnCountPerMessageVector:
-                    freshTritColumnsPerMessageVector,
-                aggregateRangeProofInputColumnCountPerMessageVector:
-                    aggregateTritColumnsPerMessageVector,
+                    'target-decryption message digits are committed as digit columns and each digit column is bound by a masked consistency claim; target proof rows do not carry trit decoder columns',
+                aggregateMessageClaimMaskDigitCount:
+                    targetDecryptionAggregateMessageClaimMaskDigitCount,
+                smudgingMessageClaimMaskDigitCount:
+                    targetDecryptionSmudgingMessageClaimMaskDigitCount,
+                randomnessClaimMaskDigitCount:
+                    targetDecryptionRandomnessClaimMaskDigitCount,
             },
             interpretation:
-                'Direct digit claims and target decoder columns are proof evidence, not compact public commitment body columns. They must stay measured before activation, but they keep the public commitment body at two message columns plus two randomness columns.',
+                'Direct digit claims are proof evidence, not extra compact public commitment body columns. They must stay measured before activation, but they keep the public commitment body at two message columns plus two randomness columns.',
         },
         implementationWorkRequired: [
-            'complete a certificate-grade Module-SIS binding review for the exact digit decoder weights, relation L1 norms, and multi-opening witness differences',
+            'complete a certificate-grade Module-SIS binding review for multi-opening witness differences and the final compact relation',
             'complete a Module-LWE hiding review for the final four-column public sample count, correlated openings, corrupted-recipient leakage model, and multi-opening loss',
-            'bind accepted-setup verification to the regenerated compact parameter certificate before allowing complete compact public material to pass accepted setup',
+            'keep accepted setup fail-closed for complete compact material until replacement binding and hiding evidence is bound by source-derived checks',
             'measure proof-material byte size, proof generation time, and proof verification time on the final compact proof path',
-            'keep accepted setup fail-closed until the replacement review artifact, measurement evidence, and accepted-setup certificate binding are all regenerated from source constants',
+            'keep target-result release unpublished and development-only until the replacement review artifact, measurement evidence, and release boundary are regenerated from source constants',
         ],
         sampledMatrixResiduesPerCoordinate,
         sampledMatrixResiduesPerCommitment,
@@ -416,22 +382,22 @@ const activeCompactMessageColumnReview = (input: {
 
 const compactProofActivationReview = (): JsonRecord => ({
     finding:
-        'The compact commitment profile is active in the commitment computation and compact proof relations, but it is not accepted-setup evidence until the final binding, hiding, measurement, and certificate-binding rows are closed.',
+        'The compact commitment profile is active in the commitment computation and compact proof relations, but accepted setup and target-result release stay fail-closed for complete compact material until the final binding, hiding, measurement, and release-verifier rows are closed.',
     currentVerifierFacts: [
         'compact share-linkage row checks cover compact opening randomness plus direct message-digit and carry consistency claims without message trit decoder columns',
         'compact same-secret bridge vectors consume message projections and direct digit consistency claims tying target messages to secret + target_prime * negative_indicator without message trit decoder columns',
-        'target-decryption share proofs consume message projections, decoder linchecks, decoded aggregate and smudging relations, and masked consistency claims on the decoded messages',
-        'prover-side witness validation and opening-input range checks remain input hygiene; load-bearing range evidence comes from verifier-checked direct digit claim bounds or target-decryption trit decoder constraints',
+        'target-decryption share proofs consume message projections, released-share relations, and masked consistency claims on each committed message digit',
+        'prover-side witness validation and opening-input range checks remain input hygiene; load-bearing range evidence comes from verifier-checked direct digit claim bounds',
     ],
     unsafeShortcut:
-        'Do not promote the active compact profile to accepted setup by relying on honest-prover range checks, private opening validation, or documentation-only range bounds.',
+        'Do not promote the active compact profile to target-result release by relying on honest-prover range checks, private opening validation, or documentation-only range bounds.',
     requiredProofChanges: [
-        'review the exact final relation, including decoder weights, relation L1 norms, range-evidence cost, and correlated multi-opening exposure',
+        'review the exact final relation, including correlated multi-opening exposure and the final range-evidence cost',
         'measure the converted source-batch proof-material byte size and proof generation and verification times',
-        'connect accepted-setup compact material acceptance to regenerated certificate input bindings instead of the current fail-closed refusal',
+        'connect any public target-result release to regenerated certificate input bindings instead of the current unpublished development command',
     ],
     implementationConsequence:
-        'Accepted setup must remain fail-closed for complete compact VSS public material until the source-derived review artifact, measurement evidence, and accepted-setup certificate binding are regenerated from the final constants.',
+        'Accepted setup refuses complete compact VSS public material and compact same-secret bridge material for the current profile; target-result release must remain unavailable until the source-derived review artifact, measurement evidence, and public release boundary are regenerated from the final constants.',
 });
 
 const artifact = (): JsonRecord => {
@@ -552,7 +518,7 @@ const artifact = (): JsonRecord => {
 
     return {
         objectType: 'CompactVssParameterReview',
-        objectVersion: 9,
+        objectVersion: 10,
         command:
             'pnpm exec tsx ./tools/ci/review-compact-vss-parameters.ts --check-artifact',
         artifactCanonicalization:
@@ -662,9 +628,9 @@ const artifact = (): JsonRecord => {
         },
         activationGate: {
             finding:
-                'Accepted setup and target-result verification must stay fail-closed for complete compact VSS public material until the final compact relation has certificate-grade binding, hiding, measurement, and accepted-setup binding evidence.',
+                'Public target-result activation must stay closed until the compact relation has target-ready binding, hiding, measurement, and release evidence.',
             currentVerifierRule:
-                'Absent compact VSS public material may remain optional, incomplete compact public material must refuse as incomplete, and complete compact public material must refuse before interpolation or target-result acceptance.',
+                'Absent compact VSS public material may remain optional, incomplete compact public material must refuse as incomplete, and complete compact public material must refuse as not binding; public target-result acceptance remains unavailable.',
             requiredReplacementEvidence: [
                 'a binding theorem for the final compact VSS message space',
                 'a reviewed extractor or opening argument covering coefficient, recipient-share, aggregate, same-secret bridge, and target-smudging commitments',

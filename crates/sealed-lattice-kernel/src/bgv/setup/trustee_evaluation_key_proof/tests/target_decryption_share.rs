@@ -253,6 +253,26 @@ fn target_decryption_share_proof_requires_enough_lift_fields() {
         target_field_layout.target_decryption_logical_columns(),
         target_decryption_message_encoding_columns_for_limb(&instance.statement, 4)
     );
+    assert!(
+        target_field_layout.target_decryption_message_trit_count(0, 0) > 0,
+        "target-decryption messages must carry trit decoder columns"
+    );
+    let target_only_relation_count = instance
+        .statement
+        .target_decryption_share
+        .as_ref()
+        .and_then(|target_statement| {
+            target_statement
+                .limb_statements
+                .iter()
+                .find(|limb_statement| limb_statement.target_rns_limb_index == 4)
+        })
+        .map(|limb_statement| limb_statement.role_statements.len() * LINCHECK_REPETITIONS)
+        .expect("target limb statement");
+    assert!(
+        target_field_layout.target_decryption_relation_count > target_only_relation_count,
+        "target-decryption relation challenges must include decoder rows"
+    );
 
     let mut sparse_request = instance.command_request;
     let sparse_limb_statement =
@@ -368,8 +388,16 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
     let (claim_lower_bound, claim_upper_bound) =
         masked_claim_bounds_for_global_claim(&instance.statement, 0).expect("target mask bounds");
     let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
+    let aggregate_message_digit_bound =
+        crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+            u64::try_from(aggregate_message_coefficient_bound)
+                .expect("aggregate message bound fits u64"),
+            0,
+        )
+        .expect("aggregate message digit bound")
+        .saturating_sub(1);
     let expected_clear_claim_bound =
-        aggregate_message_coefficient_bound * SMALL_RING_DEGREE as i128 * coefficient_bound;
+        i128::from(aggregate_message_digit_bound) * SMALL_RING_DEGREE as i128 * coefficient_bound;
     assert_eq!(
         claim_lower_bound,
         num_bigint::BigInt::from(-expected_clear_claim_bound)
@@ -381,14 +409,24 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
             + num_bigint::BigInt::from(expected_clear_claim_bound)
     );
 
-    let first_smudging_global_claim_id = CONSISTENCY_REPETITIONS as u64;
+    let first_smudging_global_claim_id = (instance
+        .statement
+        .target_decryption_smudging_message_global_index()
+        .expect("first smudging message")
+        * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+        * CONSISTENCY_REPETITIONS) as u64;
     let (smudging_lower_bound, smudging_upper_bound) =
         masked_claim_bounds_for_global_claim(&instance.statement, first_smudging_global_claim_id)
             .expect("target smudging message mask bounds");
-    let expected_smudging_clear_claim_bound =
-        i128::from(target_statement.smudging_message_coefficient_bound)
-            * SMALL_RING_DEGREE as i128
-            * coefficient_bound;
+    let expected_smudging_clear_claim_bound = i128::from(
+        crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_bound(
+            target_statement.smudging_message_coefficient_bound,
+            0,
+        )
+        .expect("smudging message digit bound")
+        .saturating_sub(1),
+    ) * SMALL_RING_DEGREE as i128
+        * coefficient_bound;
     assert_eq!(
         smudging_lower_bound,
         num_bigint::BigInt::from(-expected_smudging_clear_claim_bound)
@@ -400,9 +438,10 @@ fn target_decryption_share_mask_bound_uses_lifted_aggregate_bound() {
             + num_bigint::BigInt::from(expected_smudging_clear_claim_bound)
     );
 
-    let first_randomness_global_claim_id =
-        (instance.statement.target_decryption_total_message_count() * CONSISTENCY_REPETITIONS)
-            as u64;
+    let first_randomness_global_claim_id = (instance
+        .statement
+        .target_decryption_total_message_digit_count()
+        * CONSISTENCY_REPETITIONS) as u64;
     let (randomness_lower_bound, randomness_upper_bound) =
         masked_claim_bounds_for_global_claim(&instance.statement, first_randomness_global_claim_id)
             .expect("target randomness mask bounds");

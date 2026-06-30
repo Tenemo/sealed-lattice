@@ -303,8 +303,12 @@ pub(super) fn read_local_target_decryption_share_witness(
         PLAINTEXT_MODULUS,
         "local target-decryption smudging witness plaintext multiple",
     )?;
-    let smudging_seed_hex = string_at_path(smudging_witness, &["smudgingSeedHex"])?.to_string();
-    validate_smudging_seed_hex(&smudging_seed_hex)?;
+    let smudging_seed_hex = target_decryption_smudging_seed_hex(
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_profile,
+    );
     let smudging_polynomial_openings = target_decryption_smudging_polynomial_openings(
         setup_binding,
         target_accepted,
@@ -628,12 +632,10 @@ pub(super) fn target_decryption_smudging_seed_hex(
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
-    private_setup_seed: &str,
 ) -> String {
     hash512_hex(
         TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN,
         &[
-            private_setup_seed.as_bytes(),
             setup_binding.setup_package_hash.as_bytes(),
             target_accepted.target_accepted_record_hash.as_bytes(),
             target_accepted.target_context_hash.as_bytes(),
@@ -651,9 +653,8 @@ pub(super) fn target_decryption_smudging_witness_value(
     target_ciphertexts: &TargetCiphertextPair,
     target_share_profile: &TargetShareProfile,
     participant: &ParticipantBinding,
-    private_setup_seed: &str,
-) -> Value {
-    json!({
+) -> CanonicalResult<Value> {
+    Ok(json!({
         "objectType": "LocalTrusteeTargetDecryptionSmudgingWitness",
         "objectVersion": 1,
         "profileId": TARGET_DECRYPTION_SMUDGING_PROFILE_ID,
@@ -668,26 +669,7 @@ pub(super) fn target_decryption_smudging_witness_value(
         "rosterPosition": participant.roster_position,
         "interpolationPoint": participant.interpolation_point,
         "plaintextMultiple": PLAINTEXT_MODULUS,
-        "smudgingSeedHex": target_decryption_smudging_seed_hex(
-            setup_binding,
-            target_accepted,
-            target_ciphertexts,
-            target_share_profile,
-            private_setup_seed,
-        ),
-    })
-}
-
-pub(super) fn validate_smudging_seed_hex(seed_hex: &str) -> CanonicalResult<()> {
-    let seed_bytes = decode_hex(seed_hex)?;
-    if seed_bytes.len() != 64 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "target-decryption smudging seed must be a 64-byte lowercase hexadecimal value",
-        ));
-    }
-
-    Ok(())
+    }))
 }
 
 pub(super) fn smudging_noise_share_bound(

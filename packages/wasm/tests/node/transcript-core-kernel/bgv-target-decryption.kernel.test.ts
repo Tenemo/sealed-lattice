@@ -100,12 +100,9 @@ describe('BGV target-decryption kernel commands', () => {
             fixture.localTargetShareWitness,
         );
         const kernelGeneratedSmudgingWitness =
-            restoredCompactLocalWitness.targetDecryptionSmudging as
-                | { readonly smudgingSeedHex?: unknown }
-                | undefined;
+            restoredCompactLocalWitness.targetDecryptionSmudging;
         delete restoredCompactLocalWitness.targetDecryptionSmudging;
         const derivedSmudgingSeedHex = deriveTargetDecryptionSmudgingSeedHex({
-            localSmudgingSeedMaterial: fixture.setupPrivateWitness.setupSeed,
             setupPackage: fixture.setupPackage,
             targetAcceptedRecord: fixture.targetAcceptedRecord,
             targetDecryptionCiphertextHash,
@@ -113,8 +110,6 @@ describe('BGV target-decryption kernel commands', () => {
         });
         expect(
             deriveTargetDecryptionSmudgingSeedHex({
-                localSmudgingSeedMaterial:
-                    fixture.setupPrivateWitness.setupSeed,
                 setupPackage: fixture.setupPackage,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetDecryptionCiphertextHash: 'a'.repeat(128),
@@ -129,8 +124,6 @@ describe('BGV target-decryption kernel commands', () => {
                 targetDecryptionCiphertextHash,
                 targetShareProfile: fixture.targetShareProfile,
                 trusteeIdentity: fixture.trusteeIdentity,
-                localSmudgingSeedMaterial:
-                    fixture.setupPrivateWitness.setupSeed,
             });
 
         const localShare =
@@ -144,9 +137,6 @@ describe('BGV target-decryption kernel commands', () => {
                 trusteeIdentity: fixture.trusteeIdentity,
             });
 
-        expect(kernelGeneratedSmudgingWitness?.smudgingSeedHex).toBe(
-            derivedSmudgingSeedHex,
-        );
         expect(
             preparedLocalTargetShareWitness.targetDecryptionSmudging,
         ).toEqual(kernelGeneratedSmudgingWitness);
@@ -163,14 +153,12 @@ describe('BGV target-decryption kernel commands', () => {
                 targetDecryptionCiphertextHash,
                 targetShareProfile: fixture.targetShareProfile,
                 trusteeIdentity: fixture.trusteeIdentity,
-                localSmudgingSeedMaterial:
-                    fixture.setupPrivateWitness.setupSeed,
             }),
         ).toThrow(/already contains target-decryption smudging material/u);
         expect(localShare.sharePayload.smudgingInputReport).toMatchObject({
             objectType: 'TargetDecryptionSmudgingInputReport',
             smudgingProfileId:
-                'sealed-lattice-target-decryption-zero-share-smudging-development-v1',
+                'sealed-lattice-target-decryption-zero-share-smudging-v1',
         });
         expect(
             localShare.sharePayload.smudgingInputReport.roleReports,
@@ -359,6 +347,30 @@ describe('BGV target-decryption kernel commands', () => {
             operation: 'verifyBgvTargetDecryptionShareProofStatementBinding',
             refusalReason: 'TargetDecryptionProofUnavailable',
         });
+
+        let targetResultReleaseError: unknown;
+        try {
+            kernel.verifyAndReleaseBgvTargetDecryptionResult({
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetCiphertextBinding: fixture.targetCiphertextBinding,
+                targetCiphertexts: fixture.targetCiphertexts,
+                targetShareProfile: fixture.targetShareProfile,
+                targetShareProofs: [],
+            });
+        } catch (error: unknown) {
+            targetResultReleaseError = error;
+        }
+        expect(targetResultReleaseError).toBeInstanceOf(
+            TranscriptCoreKernelCommandError,
+        );
+        expect(
+            (targetResultReleaseError as TranscriptCoreKernelCommandError).code,
+        ).toBe('InvalidProtocolObject');
+        expect(
+            (targetResultReleaseError as TranscriptCoreKernelCommandError)
+                .message,
+        ).toContain('certificate-grade binding evidence');
 
         let invalidProofMaterialGenerationError: unknown;
         try {
