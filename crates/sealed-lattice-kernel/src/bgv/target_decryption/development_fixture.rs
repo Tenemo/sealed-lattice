@@ -158,7 +158,7 @@ fn development_compact_aggregate_threshold_commitment_set(
             recipient_records.push(json!({
                 "objectType": "CompactVssAggregateThresholdCommitment",
                 "objectVersion": 1,
-                "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+                "profileId": crate::bgv::setup::COMPACT_VSS_COMMITMENT_PROFILE_ID,
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
@@ -177,7 +177,7 @@ fn development_compact_aggregate_threshold_commitment_set(
         "objectType": "CompactVssAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+        "profileId": crate::bgv::setup::COMPACT_VSS_COMMITMENT_PROFILE_ID,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": rns_limb_count,
@@ -468,7 +468,7 @@ fn development_local_target_share_witness(
         "compactAggregateOpening": {
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,
-            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+            "profileId": crate::bgv::setup::COMPACT_VSS_COMMITMENT_PROFILE_ID,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash()?,
             "shareLinkageStatementRoot": share_linkage_statement_root,

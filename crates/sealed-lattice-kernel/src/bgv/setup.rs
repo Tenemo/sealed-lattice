@@ -59,7 +59,7 @@ pub(crate) use compact_same_secret_bridge::{
 pub(crate) use compact_vss_commitment::{
     COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
-    compute_compact_vss_commitment_from_opening,
+    compact_vss_canonical_message_digit_columns, compute_compact_vss_commitment_from_opening,
 };
 pub(crate) use compact_vss_commitment::{
     compute_compact_vss_commitment_from_opening_request,

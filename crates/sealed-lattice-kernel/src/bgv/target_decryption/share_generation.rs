@@ -1197,6 +1197,10 @@ fn target_decryption_smudging_commitment_opening(
 fn target_decryption_smudging_commitment_record(
     opening: &TargetDecryptionSmudgingCommitmentOpening,
 ) -> CanonicalResult<Value> {
+    let message_digit_columns = crate::bgv::setup::compact_vss_canonical_message_digit_columns(
+        &opening.message_coefficients,
+        POLYNOMIAL_DEGREE,
+    )?;
     let computation =
         compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
             commitment_role: TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
@@ -1206,6 +1210,7 @@ fn target_decryption_smudging_commitment_record(
             rns_prime: opening.rns_prime,
             ring_degree: POLYNOMIAL_DEGREE,
             message_coefficients: &opening.message_coefficients,
+            message_digit_columns: &message_digit_columns,
             message_coefficient_bound: (TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND as u64) * 2
                 + 1,
             randomness_by_column: &opening.randomness_by_column,

@@ -3,26 +3,16 @@ use super::*;
 
 type CompactVssMessageEncodingLayout =
     crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout;
-type CompactVssMessageRangeEvidence =
-    crate::bgv::setup::compact_vss_commitment::CompactVssMessageRangeEvidence;
 
 fn compact_vss_message_encoding_layouts_for_bounds(
     message_bounds: Vec<u64>,
-    range_evidence: CompactVssMessageRangeEvidence,
 ) -> CanonicalResult<Vec<CompactVssMessageEncodingLayout>> {
     message_bounds
         .into_iter()
         .map(|message_bound| {
-            let layout =
-                crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
-                    message_bound,
-                )?;
-            Ok(match range_evidence {
-                CompactVssMessageRangeEvidence::DigitAndTritColumns => layout,
-                CompactVssMessageRangeEvidence::DigitColumnsOnly => {
-                    layout.with_digit_columns_only()
-                }
-            })
+            crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                message_bound,
+            )
         })
         .collect()
 }
@@ -131,22 +121,13 @@ impl LimbColumnLayout {
             statement.target_decryption_message_count(limb_index);
         let target_decryption_relation_count =
             statement.target_decryption_relation_count(limb_index);
-        let compact_vss_range_evidence = CompactVssMessageRangeEvidence::DigitColumnsOnly;
         let compact_vss_message_bounds = statement.compact_vss_message_bounds(limb_index);
         let compact_vss_message_encoding_layouts = compact_vss_message_bounds
             .into_iter()
             .map(|message_bound| {
-                compact_vss_message_encoding_layouts_for_bounds(
-                    vec![message_bound],
-                    compact_vss_range_evidence,
+                crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                    message_bound,
                 )
-                .and_then(|mut layouts| {
-                    layouts.pop().ok_or_else(|| {
-                        invalid_succinct_setup_proof(
-                            "compact VSS message layout construction returned no layout",
-                        )
-                    })
-                })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         if compact_vss_message_encoding_layouts.len()
@@ -163,7 +144,6 @@ impl LimbColumnLayout {
         let compact_same_secret_bridge_message_encoding_layouts =
             compact_vss_message_encoding_layouts_for_bounds(
                 statement.compact_same_secret_bridge_message_bounds(limb_index),
-                CompactVssMessageRangeEvidence::DigitColumnsOnly,
             )?;
         let compact_same_secret_bridge_message_encoding_offsets =
             compact_vss_message_encoding_offsets_for_layouts(
@@ -172,7 +152,6 @@ impl LimbColumnLayout {
         let target_decryption_message_encoding_layouts =
             compact_vss_message_encoding_layouts_for_bounds(
                 statement.target_decryption_message_bounds(limb_index),
-                CompactVssMessageRangeEvidence::DigitAndTritColumns,
             )?;
         if target_decryption_message_encoding_layouts.len() != target_decryption_message_columns {
             return Err(invalid_succinct_setup_proof(
@@ -467,9 +446,8 @@ impl LimbColumnLayout {
         } else if self.compact_same_secret_bridge_active() {
             // Compact same-secret bridge claims the signed secret, the binary
             // negative indicator, every target-message digit, and the compact
-            // opening randomness. The digit claims bind the target messages
-            // across commitment fields, so this relation does not carry trit
-            // decoder columns.
+            // opening randomness. Decoder rows bind those digit columns to
+            // verifier-visible trit columns.
             2 + self.compact_same_secret_bridge_target_count()
                 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
                 + self.linkage_randomness_columns
@@ -515,38 +493,6 @@ impl LimbColumnLayout {
             .copied()
             .map(Self::compact_vss_decoder_digit_count_for_layout)
             .unwrap_or(0)
-    }
-
-    pub(crate) fn compact_vss_coefficient_message_range_evidence(
-        &self,
-    ) -> CompactVssMessageRangeEvidence {
-        self.compact_vss_message_encoding_layouts
-            .first()
-            .copied()
-            .map(|layout| {
-                if layout.has_digit_decoder_relations() {
-                    CompactVssMessageRangeEvidence::DigitAndTritColumns
-                } else {
-                    CompactVssMessageRangeEvidence::DigitColumnsOnly
-                }
-            })
-            .unwrap_or(CompactVssMessageRangeEvidence::DigitColumnsOnly)
-    }
-
-    pub(crate) fn compact_vss_recipient_message_range_evidence(
-        &self,
-    ) -> CompactVssMessageRangeEvidence {
-        self.compact_vss_message_encoding_layouts
-            .get(self.compact_vss_coefficient_columns)
-            .copied()
-            .map(|layout| {
-                if layout.has_digit_decoder_relations() {
-                    CompactVssMessageRangeEvidence::DigitAndTritColumns
-                } else {
-                    CompactVssMessageRangeEvidence::DigitColumnsOnly
-                }
-            })
-            .unwrap_or(CompactVssMessageRangeEvidence::DigitColumnsOnly)
     }
 
     pub(crate) fn compact_vss_message_encoding_layout(

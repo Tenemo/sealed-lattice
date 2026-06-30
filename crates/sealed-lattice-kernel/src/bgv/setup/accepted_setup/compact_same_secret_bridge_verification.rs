@@ -48,11 +48,126 @@ pub(super) fn verify_optional_compact_same_secret_bridge_statement_set(
         )?));
     }
 
-    Ok(Some(compact_same_secret_bridge_refusal(
-        "compactSameSecretBridgeNotBinding",
-        "compact same-secret bridge material depends on compact VSS public material whose commitment profile lacks certificate-grade binding evidence; keep the standalone bridge proof verifier as development evidence only",
-        "setupPackage",
-    )?))
+    if let Err(error) = verify_compact_same_secret_bridge_prebinding(setup_package) {
+        return Ok(Some(compact_same_secret_bridge_refusal(
+            "compactSameSecretBridgeMalformed",
+            format!(
+                "compact same-secret bridge material is malformed: {}",
+                error.message
+            ),
+            "setupPackage",
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn verify_compact_same_secret_bridge_prebinding(setup_package: &Value) -> CanonicalResult<()> {
+    let statement_set = setup_package
+        .get(COMPACT_SAME_SECRET_BRIDGE_STATEMENT_SET_FIELD)
+        .ok_or_else(|| {
+            compact_same_secret_bridge_error("compact same-secret bridge statement set")
+        })?;
+    let proof_material_set = setup_package
+        .get(COMPACT_SAME_SECRET_BRIDGE_PROOF_MATERIAL_SET_FIELD)
+        .ok_or_else(|| {
+            compact_same_secret_bridge_error("compact same-secret bridge proof material set")
+        })?;
+    let same_secret_consistency = setup_package
+        .get("sameSecretConsistency")
+        .ok_or_else(|| compact_same_secret_bridge_error("same-secret consistency"))?;
+    let same_secret_proofs = setup_package
+        .get("sameSecretProofs")
+        .ok_or_else(|| compact_same_secret_bridge_error("same-secret proofs"))?;
+
+    let statement_verification =
+        crate::bgv::setup::verify_compact_vss_same_secret_bridge_statement_set_request(&json!({
+            "statementSet": statement_set,
+            "sameSecretConsistency": same_secret_consistency,
+            "sameSecretProofs": same_secret_proofs,
+        }))?;
+    verify_compact_same_secret_bridge_setup_binding(
+        setup_package,
+        statement_set,
+        &statement_verification,
+        same_secret_consistency,
+        same_secret_proofs,
+    )?;
+
+    crate::bgv::setup::verify_compact_vss_same_secret_bridge_proof_material_set_request(&json!({
+        "statementSet": statement_set,
+        "sameSecretConsistency": same_secret_consistency,
+        "sameSecretProofs": same_secret_proofs,
+        "proofMaterialSet": proof_material_set,
+    }))?;
+    Ok(())
+}
+
+fn verify_compact_same_secret_bridge_setup_binding(
+    setup_package: &Value,
+    statement_set: &Value,
+    statement_verification: &Value,
+    same_secret_consistency: &Value,
+    same_secret_proofs: &Value,
+) -> CanonicalResult<()> {
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        compact_same_secret_bridge_error("compact same-secret bridge requires setup context")
+    })?;
+    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
+        compact_same_secret_bridge_error("compact same-secret bridge requires common randomness")
+    })?;
+    let coefficient_commitment_set = setup_package
+        .get("compactVssCoefficientCommitmentSet")
+        .ok_or_else(|| {
+            compact_same_secret_bridge_error(
+                "compact same-secret bridge requires compact coefficient commitment set",
+            )
+        })?;
+
+    compare_setup_context_binding(
+        setup_context,
+        statement_set,
+        "compact same-secret bridge statement set",
+    )?;
+    compare_setup_context_participant_count(
+        setup_context,
+        statement_verification,
+        "compact same-secret bridge statement set",
+    )?;
+    compare_setup_context_threshold_degree(
+        setup_context,
+        statement_verification,
+        "compact same-secret bridge statement set",
+    )?;
+    compare_required_string(
+        hash_at_path(statement_verification, &["publicMatrixSeedHash"])?,
+        hash_at_path(common_randomness, &["publicMatrixSeedHash"])?,
+        "compact same-secret bridge statement set publicMatrixSeedHash",
+    )?;
+    compare_required_string(
+        hash_at_path(
+            statement_verification,
+            &["compactCoefficientCommitmentRoot"],
+        )?,
+        hash_at_path(coefficient_commitment_set, &["coefficientCommitmentRoot"])?,
+        "compact same-secret bridge statement set compactCoefficientCommitmentRoot",
+    )?;
+    compare_required_string(
+        hash_at_path(statement_verification, &["sameSecretConsistencyRoot"])?,
+        hash_at_path(same_secret_consistency, &["sameSecretConsistencyRoot"])?,
+        "compact same-secret bridge statement set sameSecretConsistencyRoot",
+    )?;
+    compare_required_string(
+        hash_at_path(statement_verification, &["sameSecretProofSetRoot"])?,
+        hash_at_path(same_secret_proofs, &["sameSecretProofSetRoot"])?,
+        "compact same-secret bridge statement set sameSecretProofSetRoot",
+    )?;
+
+    Ok(())
+}
+
+fn compact_same_secret_bridge_error(message: &'static str) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 fn compact_same_secret_bridge_refusal(
@@ -135,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_compact_same_secret_bridge_refuses_complete_field_group_until_binding_review()
+    fn optional_compact_same_secret_bridge_rejects_malformed_complete_field_group()
     -> CanonicalResult<()> {
         let response = verify_optional_compact_same_secret_bridge_statement_set(
             &json!({
@@ -152,7 +267,7 @@ mod tests {
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactSameSecretBridgeNotBinding")
+            json!("compactSameSecretBridgeMalformed")
         );
         Ok(())
     }

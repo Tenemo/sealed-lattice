@@ -45,11 +45,164 @@ pub(super) fn verify_optional_compact_vss_public_material(
         )?));
     }
 
-    Ok(Some(compact_vss_public_material_refusal(
-        "compactVssPublicMaterialNotBinding",
-        "compact VSS public material uses a compact commitment profile without certificate-grade binding evidence; remove compact VSS public material or replace it with a reviewed binding profile before accepted setup",
-        "setupPackage",
-    )?))
+    if let Err(error) = verify_compact_vss_public_material_binding(setup_package) {
+        return Ok(Some(compact_vss_public_material_refusal(
+            "compactVssPublicMaterialMalformed",
+            format!(
+                "compact VSS public material is malformed: {}",
+                error.message
+            ),
+            "setupPackage",
+        )?));
+    }
+
+    Ok(None)
+}
+
+fn verify_compact_vss_public_material_binding(setup_package: &Value) -> CanonicalResult<()> {
+    let coefficient_set = setup_package
+        .get(COMPACT_VSS_COEFFICIENT_COMMITMENT_SET_FIELD)
+        .ok_or_else(|| compact_public_material_error("compact coefficient commitment set"))?;
+    let recipient_share_set = setup_package
+        .get(COMPACT_VSS_RECIPIENT_SHARE_COMMITMENT_SET_FIELD)
+        .ok_or_else(|| compact_public_material_error("compact recipient-share commitment set"))?;
+    let aggregate_threshold_set = setup_package
+        .get(COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
+        .ok_or_else(|| compact_public_material_error("compact aggregate threshold set"))?;
+    let statement = setup_package
+        .get(COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD)
+        .ok_or_else(|| compact_public_material_error("compact share-linkage statement"))?;
+    let proof_material_set = setup_package
+        .get(COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD)
+        .ok_or_else(|| compact_public_material_error("compact share-linkage proof material set"))?;
+
+    let coefficient_verification =
+        crate::bgv::setup::verify_compact_vss_coefficient_commitment_set_request(&json!({
+            "coefficientCommitmentSet": coefficient_set,
+        }))?;
+    let recipient_share_verification =
+        crate::bgv::setup::verify_compact_vss_recipient_share_commitment_set_request(&json!({
+            "recipientShareCommitmentSet": recipient_share_set,
+        }))?;
+    let aggregate_threshold_verification =
+        crate::bgv::setup::verify_compact_vss_aggregate_threshold_commitment_set_request(&json!({
+            "aggregateThresholdCommitmentSet": aggregate_threshold_set,
+        }))?;
+    let statement_request = json!({
+        "statement": statement,
+        "coefficientCommitmentSet": coefficient_set,
+        "recipientShareCommitmentSet": recipient_share_set,
+        "aggregateThresholdCommitmentSet": aggregate_threshold_set,
+    });
+    let statement_verification =
+        crate::bgv::setup::verify_compact_vss_share_linkage_statement_request(&statement_request)?;
+
+    let setup_context = setup_package.get("setupContext").ok_or_else(|| {
+        compact_public_material_error("compact VSS public material requires setup context")
+    })?;
+    compare_setup_context_binding(
+        setup_context,
+        statement,
+        "compact VSS share-linkage statement",
+    )?;
+    compare_setup_context_participant_count(
+        setup_context,
+        &coefficient_verification,
+        "compact VSS coefficient commitment set",
+    )?;
+    compare_setup_context_threshold_degree(
+        setup_context,
+        &coefficient_verification,
+        "compact VSS coefficient commitment set",
+    )?;
+    compare_setup_context_participant_count(
+        setup_context,
+        &recipient_share_verification,
+        "compact VSS recipient-share commitment set",
+    )?;
+    compare_setup_context_participant_count(
+        setup_context,
+        &aggregate_threshold_verification,
+        "compact VSS aggregate threshold commitment set",
+    )?;
+    compare_setup_context_participant_count(
+        setup_context,
+        &statement_verification,
+        "compact VSS share-linkage statement",
+    )?;
+    compare_setup_context_threshold_degree(
+        setup_context,
+        &statement_verification,
+        "compact VSS share-linkage statement",
+    )?;
+
+    let common_randomness = setup_package.get("commonRandomness").ok_or_else(|| {
+        compact_public_material_error("compact VSS public material requires common randomness")
+    })?;
+    let accepted_public_matrix_seed_hash =
+        hash_at_path(common_randomness, &["publicMatrixSeedHash"])?;
+    compare_required_string(
+        hash_at_path(&coefficient_verification, &["publicMatrixSeedHash"])?,
+        accepted_public_matrix_seed_hash,
+        "compact VSS coefficient set publicMatrixSeedHash",
+    )?;
+    compare_required_string(
+        hash_at_path(&recipient_share_verification, &["publicMatrixSeedHash"])?,
+        accepted_public_matrix_seed_hash,
+        "compact VSS recipient-share set publicMatrixSeedHash",
+    )?;
+    compare_required_string(
+        hash_at_path(&aggregate_threshold_verification, &["publicMatrixSeedHash"])?,
+        accepted_public_matrix_seed_hash,
+        "compact VSS aggregate set publicMatrixSeedHash",
+    )?;
+    compare_required_string(
+        hash_at_path(&statement_verification, &["publicMatrixSeedHash"])?,
+        accepted_public_matrix_seed_hash,
+        "compact VSS share-linkage statement publicMatrixSeedHash",
+    )?;
+    compare_required_string(
+        hash_at_path(&statement_verification, &["targetBasisHash"])?,
+        &canonical_target_basis_hash()?,
+        "compact VSS share-linkage statement targetBasisHash",
+    )?;
+    compare_required_string(
+        hash_at_path(&statement_verification, &["coefficientCommitmentRoot"])?,
+        hash_at_path(&coefficient_verification, &["coefficientCommitmentRoot"])?,
+        "compact VSS share-linkage statement coefficientCommitmentRoot",
+    )?;
+    compare_required_string(
+        hash_at_path(&statement_verification, &["recipientShareCommitmentRoot"])?,
+        hash_at_path(
+            &recipient_share_verification,
+            &["recipientShareCommitmentRoot"],
+        )?,
+        "compact VSS share-linkage statement recipientShareCommitmentRoot",
+    )?;
+    compare_required_string(
+        hash_at_path(
+            &statement_verification,
+            &["aggregateThresholdCommitmentRoot"],
+        )?,
+        hash_at_path(
+            &aggregate_threshold_verification,
+            &["aggregateThresholdCommitmentRoot"],
+        )?,
+        "compact VSS share-linkage statement aggregateThresholdCommitmentRoot",
+    )?;
+
+    crate::bgv::setup::verify_compact_vss_share_linkage_proof_material_set_from_request(&json!({
+        "statement": statement,
+        "coefficientCommitmentSet": coefficient_set,
+        "recipientShareCommitmentSet": recipient_share_set,
+        "aggregateThresholdCommitmentSet": aggregate_threshold_set,
+        "proofMaterialSet": proof_material_set,
+    }))?;
+    Ok(())
+}
+
+fn compact_public_material_error(message: &'static str) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 fn compact_vss_public_material_refusal(
@@ -124,7 +277,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_compact_vss_public_material_refuses_complete_field_group_until_binding_review()
+    fn optional_compact_vss_public_material_rejects_malformed_complete_field_group()
     -> CanonicalResult<()> {
         let response = verify_optional_compact_vss_public_material(
             &json!({
@@ -142,7 +295,13 @@ mod tests {
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
             response["refusedObjects"][0]["reasonCode"],
-            json!("compactVssPublicMaterialNotBinding")
+            json!("compactVssPublicMaterialMalformed")
+        );
+        assert!(
+            response["refusedObjects"][0]["message"]
+                .as_str()
+                .expect("refusal message")
+                .contains("objectType")
         );
         Ok(())
     }

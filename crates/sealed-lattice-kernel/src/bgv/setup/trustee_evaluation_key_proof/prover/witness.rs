@@ -261,7 +261,12 @@ pub(super) fn build_limb_witness_commitment(
             target[lane_offset..lane_end].copy_from_slice(source);
             Ok(())
         };
-        for message_position in 0..layout.compact_vss_coefficient_columns {
+        for (message_position, message_bound) in message_bounds
+            .iter()
+            .copied()
+            .take(layout.compact_vss_coefficient_columns)
+            .enumerate()
+        {
             let mut packed_messages = vec![0_i64; packed_ring_degree];
             for (item_index, coefficient_slot_indices) in
                 coefficient_slot_indices_by_item.iter().enumerate()
@@ -286,7 +291,7 @@ pub(super) fn build_limb_witness_commitment(
             }
             for logical_vector in compact_vss_message_encoding_vectors_with_layout(
                 &packed_messages,
-                message_bounds[message_position],
+                message_bound,
                 modulus,
                 layout.compact_vss_message_encoding_layout(message_position),
             )? {
@@ -417,8 +422,7 @@ pub(super) fn build_limb_witness_commitment(
                 modulus,
                 crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
                     *target_rns_prime,
-                )?
-                .with_digit_columns_only(),
+                )?,
             )? {
                 append_logical_vector(&logical_vector);
             }

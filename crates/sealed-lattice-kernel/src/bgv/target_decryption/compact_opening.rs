@@ -2,7 +2,7 @@ use super::*;
 
 use crate::bgv::setup::{
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
-    compute_compact_vss_commitment_from_opening,
+    compact_vss_canonical_message_digit_columns, compute_compact_vss_commitment_from_opening,
 };
 
 const COMPACT_VSS_AGGREGATE_COMMITMENT_ROLE: &str = "aggregate-threshold-share";
@@ -116,6 +116,10 @@ pub(super) fn compute_compact_aggregate_opening(
         input.rns_limb_index,
         input.rns_prime,
     );
+    let message_digit_columns = compact_vss_canonical_message_digit_columns(
+        input.aggregate_commitment_message_values,
+        POLYNOMIAL_DEGREE,
+    )?;
     let computation =
         compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
             commitment_role: COMPACT_VSS_AGGREGATE_COMMITMENT_ROLE,
@@ -125,6 +129,7 @@ pub(super) fn compute_compact_aggregate_opening(
             rns_prime: input.rns_prime,
             ring_degree: POLYNOMIAL_DEGREE,
             message_coefficients: input.aggregate_commitment_message_values,
+            message_digit_columns: &message_digit_columns,
             message_coefficient_bound: input.message_coefficient_bound,
             randomness_by_column: input.aggregate_randomness_by_column,
         })?;

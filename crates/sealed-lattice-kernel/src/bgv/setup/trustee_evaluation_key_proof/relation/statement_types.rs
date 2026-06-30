@@ -119,6 +119,10 @@ pub(crate) struct CompactVssShareLinkageStatement {
 
 #[derive(Clone)]
 pub(crate) struct CompactVssShareLinkageItem {
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) source_coefficient_commitment_root: String,
+    pub(crate) source_recipient_share_commitment_root: String,
     pub(crate) recipient_identity: String,
     pub(crate) recipient_roster_position: u64,
     pub(crate) source_rns_limb_index: usize,
@@ -133,6 +137,7 @@ pub(crate) struct CompactVssShareLinkageItem {
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct CompactVssCoefficientWitnessSlot {
+    pub(crate) source_trustee_roster_position: u64,
     pub(crate) source_rns_limb_index: usize,
     pub(crate) source_message_modulus: u64,
     pub(crate) shamir_coefficient_index: usize,
@@ -463,6 +468,7 @@ impl CompactVssShareLinkageStatement {
     fn append_coefficient_witness_slots(
         slots: &mut Vec<CompactVssCoefficientWitnessSlot>,
         slot_indices_by_item: &mut Vec<Vec<usize>>,
+        source_trustee_roster_position: u64,
         source_rns_limb_index: usize,
         source_message_modulus: u64,
         coefficient_commitment_roots: &[String],
@@ -476,6 +482,7 @@ impl CompactVssShareLinkageStatement {
                 .enumerate()
         {
             let slot = CompactVssCoefficientWitnessSlot {
+                source_trustee_roster_position,
                 source_rns_limb_index,
                 source_message_modulus,
                 shamir_coefficient_index,
@@ -504,6 +511,7 @@ impl CompactVssShareLinkageStatement {
         Self::append_coefficient_witness_slots(
             &mut slots,
             &mut slot_indices_by_item,
+            self.source_trustee_roster_position,
             self.source_rns_limb_index,
             self.source_message_modulus,
             &self.coefficient_commitment_roots,
@@ -513,6 +521,7 @@ impl CompactVssShareLinkageStatement {
             Self::append_coefficient_witness_slots(
                 &mut slots,
                 &mut slot_indices_by_item,
+                item.source_trustee_roster_position,
                 item.source_rns_limb_index,
                 item.source_message_modulus,
                 &item.coefficient_commitment_roots,

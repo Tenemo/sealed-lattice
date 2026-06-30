@@ -695,6 +695,7 @@ export const createTranscriptCoreKernelLoader = (
                         rnsPrime: input.rnsPrime,
                         ringDegree: input.ringDegree,
                         messageCoefficients: input.messageCoefficients,
+                        messageDigitColumns: input.messageDigitColumns,
                         messageCoefficientBound: input.messageCoefficientBound,
                         randomnessByColumn: input.randomnessByColumn,
                     }),

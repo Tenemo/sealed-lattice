@@ -1752,6 +1752,12 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                               aggregateThresholdCommitmentSet.ringDegree,
                           fieldName: 'recipientShareOpeningCredential',
                       });
+            const shareDigitColumns =
+                credential.shareCommitmentMessageDigitColumns ??
+                compactVssCanonicalMessageDigitColumns(
+                    credential.shareValues,
+                    aggregateThresholdCommitmentSet.ringDegree,
+                );
             const recipientShareOpening = {
                 commitmentRole: 'recipient-share',
                 commitmentContext: {
@@ -1776,8 +1782,7 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                 rnsPrime: credential.rnsPrime,
                 ringDegree: aggregateThresholdCommitmentSet.ringDegree,
                 messageCoefficients: recipientShareMessageCoefficients,
-                messageDigitColumns:
-                    credential.shareCommitmentMessageDigitColumns,
+                messageDigitColumns: shareDigitColumns,
                 messageCoefficientBound:
                     credential.shareCommitmentMessageDigitColumns === undefined
                         ? credential.rnsPrime
@@ -1798,12 +1803,6 @@ const aggregateCompactVssOpeningCredentialsFromRecipientCredentials = (input: {
                     'compact VSS recipient share opening credential does not open its public recipient-share commitment.',
                 );
             }
-            const shareDigitColumns =
-                credential.shareCommitmentMessageDigitColumns ??
-                compactVssCanonicalMessageDigitColumns(
-                    credential.shareValues,
-                    aggregateThresholdCommitmentSet.ringDegree,
-                );
             shareDigitColumns.forEach((column, digitIndex) => {
                 const aggregateColumn =
                     aggregateCommitmentMessageDigitColumns[digitIndex];

@@ -1,4 +1,4 @@
-﻿import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
     contextFields,
@@ -597,14 +597,16 @@ describe('accepted setup public package API in Node', () => {
         );
         expect(compactVssParameterCertificateInputBinding).toMatchObject({
             objectType: 'CompactVssParameterCertificateInputBinding',
-            objectVersion: 3,
-            profileId: 'sealed-lattice-compact-vss-sparse-linear-v1',
+            objectVersion: 8,
+            profileId:
+                'sealed-lattice-compact-vss-development-covered-linear-v1',
             participantCount: setupProfile.participantCount,
             thresholdDegree: setupProfile.qDec,
             commitmentRelation: {
                 relation: 'C = A_message * m + A_randomness * r mod q_c',
                 messageWidth: 2,
-                projectionWeight: 32,
+                messageCoverageTermsPerCoordinate: 683,
+                randomnessProjectionWeight: 32,
                 coordinateCountPerCommitment: 48,
                 inputColumnLabels: [
                     'message:0',
@@ -614,15 +616,21 @@ describe('accepted setup public package API in Node', () => {
                 ],
             },
             commonCommitmentKey: {
-                sparseProjectionShape: {
+                messageCoverageShape: {
                     inputColumnCount: 4,
-                    sampledMatrixResiduesPerCommitment: 6_144,
-                    sampledProjectionIndicesPerCommitment: 6_144,
+                    messageCoverageTermsPerCoordinate: 683,
+                    sampledMessageMatrixResiduesPerCommitment: 65_536,
+                    coveredMessageCoefficientsPerMessageColumn: 32_768,
+                    uncoveredMessageCoefficientsPerMessageColumn: 0,
+                },
+                randomnessProjectionShape: {
+                    sampledMatrixResiduesPerCommitment: 3_072,
+                    sampledRandomnessProjectionIndicesPerCommitment: 3_072,
                 },
             },
             messageEncoding: {
                 proofRangeEncodingRule:
-                    'share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims',
+                    'share-linkage, same-secret bridge, and target-decryption rows bind message digit columns with masked consistency claims and verifier-side trit decoder columns',
             },
             sameSecretBridgeInput: {
                 targetBasisHash: setupProfile.canonicalTargetBasisHash,
@@ -640,6 +648,13 @@ describe('accepted setup public package API in Node', () => {
                         randomnessDifferenceInfinityBound: 20,
                     }),
                 ],
+                commitmentExposureRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-final-public-commitment-exposure',
+                        totalCompactCommitments: 1_450,
+                        totalPublicCommitmentCoordinates: 69_600,
+                    }),
+                ],
                 linearRelationRows: [
                     expect.objectContaining({
                         rowId: 'compact-vss-recipient-share-shamir-evaluation',
@@ -652,6 +667,41 @@ describe('accepted setup public package API in Node', () => {
                     expect.objectContaining({
                         rowId: 'compact-vss-one-recipient-aggregate-from-source-coefficients',
                         oneRecipientAggregateShamirScalarL1: 11_110,
+                    }),
+                ],
+                multiOpeningRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-multi-opening-review-input',
+                        maximumNonReconstructingRecipientCount: 3,
+                        corruptedRecipientOpeningCredentialCount: 210,
+                    }),
+                ],
+                moduleSisBindingRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-covered-message-module-sis-binding-input',
+                    }),
+                ],
+                moduleLweHidingRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-covered-message-module-lwe-hiding-input',
+                    }),
+                ],
+                certificateConclusionRows: [
+                    expect.objectContaining({
+                        rowId: 'compact-vss-covered-message-module-sis-binding-conclusion',
+                        problem: 'Module-SIS',
+                    }),
+                    expect.objectContaining({
+                        rowId: 'compact-vss-covered-message-module-lwe-hiding-conclusion',
+                        problem: 'Module-LWE',
+                        corruptedRecipientOpeningCredentialCount: 210,
+                    }),
+                    expect.objectContaining({
+                        rowId: 'compact-vss-structured-ring-review-conclusion',
+                    }),
+                    expect.objectContaining({
+                        rowId: 'compact-vss-multi-opening-review-conclusion',
+                        totalCompactCommitments: 1_450,
                     }),
                 ],
             },

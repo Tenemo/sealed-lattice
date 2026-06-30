@@ -46,7 +46,7 @@ const artifactPath = path.resolve(
         'tests/fixtures/compact-vss-parameter-review-results.json',
 );
 const expectedArtifactCanonicalSha256 =
-    '8024b690e58cc7df58efea893cae0053952f6320e881833ef765d9e36fde2b86';
+    '479e3492fb1e6685a2108cfbf53b86b45079c398b2abd40d37726b1dbd03a11d';
 
 const participantCount = 10;
 const thresholdDegree = 4;
@@ -115,6 +115,18 @@ const assertNumber = (value: unknown, pathName: string): number => {
     return value;
 };
 
+const rowsWithId = (
+    rows: readonly JsonValue[],
+    rowId: string,
+): readonly JsonRecord[] =>
+    rows.filter((row): row is JsonRecord => {
+        if (typeof row !== 'object' || row === null || Array.isArray(row)) {
+            return false;
+        }
+
+        return (row as JsonRecord).rowId === rowId;
+    });
+
 const sortJsonValue = (value: JsonValue): JsonValue => {
     if (Array.isArray(value)) {
         return value.map(sortJsonValue);
@@ -172,57 +184,15 @@ const sourceMessageRows = (input: {
         };
     });
 
-const sparseProjectionCoverageReview = (input: {
-    readonly coordinateCountPerCommitment: number;
-    readonly messageWidth: number;
-    readonly projectionWeight: number;
-    readonly ringDegree: number;
-}): JsonRecord => {
-    const sampledMessageProjectionTermsPerCommitment =
-        input.coordinateCountPerCommitment *
-        input.messageWidth *
-        input.projectionWeight;
-    const sampledMessageProjectionTermsPerMessageColumn =
-        input.coordinateCountPerCommitment * input.projectionWeight;
-    const maximumDistinctMessageCoefficientsCoveredPerMessageColumn = Math.min(
-        input.ringDegree,
-        sampledMessageProjectionTermsPerMessageColumn,
-    );
-    const minimumUncoveredMessageCoefficientsPerMessageColumn = Math.max(
-        0,
-        input.ringDegree -
-            maximumDistinctMessageCoefficientsCoveredPerMessageColumn,
-    );
-    const maximumMessageColumnCoverageFraction =
-        maximumDistinctMessageCoefficientsCoveredPerMessageColumn /
-        input.ringDegree;
-
-    return {
-        finding:
-            'The current sparse projection cannot bind full message vectors because each commitment body samples far fewer message positions than the ring degree; regardless of seed and ignoring duplicate samples, many message coefficients are absent from every public coordinate.',
-        interpretation:
-            'Any coefficient index absent from all message-column projections can be changed while holding opening randomness fixed without changing the compact commitment body.',
-        ringDegree: input.ringDegree,
-        messageWidth: input.messageWidth,
-        projectionWeight: input.projectionWeight,
-        coordinateCountPerCommitment: input.coordinateCountPerCommitment,
-        sampledMessageProjectionTermsPerCommitment,
-        sampledMessageProjectionTermsPerMessageColumn,
-        maximumDistinctMessageCoefficientsCoveredPerMessageColumn,
-        minimumUncoveredMessageCoefficientsPerMessageColumn,
-        maximumMessageColumnCoverageFraction,
-        replacementImplication:
-            'A replacement construction must bind every operative message coefficient through the commitment/proof relation, not merely tune estimator rows for the current sparse sampler.',
-    };
-};
-
 const activeCompactMessageColumnReview = (input: {
     readonly commitmentModulusLimbs: readonly {
         readonly commitmentModulusIndex: number;
         readonly modulus: number;
     }[];
     readonly outputCoordinateCount: number;
-    readonly projectionWeight: number;
+    readonly ringDegree: number;
+    readonly messageCoverageTermsPerCoordinate: number;
+    readonly randomnessProjectionWeight: number;
     readonly randomnessWidth: number;
     readonly coordinateCountPerCommitment: number;
     readonly totalCommitments: number;
@@ -252,15 +222,21 @@ const activeCompactMessageColumnReview = (input: {
     const largestFreshMessageCoefficientExclusive = input.largestSourceRnsPrime;
     const largestAggregateMessageCoefficientExclusive =
         participantCount * input.largestSourceRnsPrime;
+    const randomnessMatrixResiduesPerCoordinate =
+        input.randomnessWidth * input.randomnessProjectionWeight;
     const sampledMatrixResiduesPerCoordinate =
-        activeInputColumnLabels.length * input.projectionWeight;
+        compactVssMessageDigitCount * input.messageCoverageTermsPerCoordinate +
+        randomnessMatrixResiduesPerCoordinate;
+    const messageMatrixResiduesPerCommitment =
+        compactVssMessageDigitCount * input.ringDegree;
+    const randomnessMatrixResiduesPerCommitment =
+        input.coordinateCountPerCommitment *
+        randomnessMatrixResiduesPerCoordinate;
     const sampledMatrixResiduesPerCommitment =
-        input.coordinateCountPerCommitment * sampledMatrixResiduesPerCoordinate;
+        messageMatrixResiduesPerCommitment +
+        randomnessMatrixResiduesPerCommitment;
     const activeResidueMultiplyAddsPerCommitment =
-        input.commitmentModulusLimbs.length *
-        input.outputCoordinateCount *
-        input.projectionWeight *
-        activeInputColumnLabels.length;
+        sampledMatrixResiduesPerCommitment;
     const activeTotalResidueMultiplyAdds =
         activeResidueMultiplyAddsPerCommitment * input.totalCommitments;
     const activeTotalResidueArithmeticOperations =
@@ -274,11 +250,11 @@ const activeCompactMessageColumnReview = (input: {
 
     return {
         finding:
-            'The active compact commitment uses two base-3^17 message digit columns plus the existing two randomness columns: this preserves the compact public body while making the committed message columns short enough for the binding review precondition.',
+            'The active compact commitment uses two base-3^17 message digit columns with deterministic full-coordinate coverage plus the existing sampled randomness columns: this preserves the compact public body while removing the absent-message-coordinate blocker.',
         activationInterpretation:
             'This row records the active source constants and the proof obligations still blocking target-ready result release; it is not production activation evidence by itself.',
         activeConstruction:
-            'encode each carried message coefficient as two little-endian base-3^17 digits and commit both digit columns plus the two randomness columns; share-linkage, same-secret bridge, and target-decryption rows bind those digits directly through masked consistency claims',
+            'encode each carried message coefficient as two little-endian base-3^17 digits, assign every coefficient in each digit column to one compact coordinate, and keep randomness columns sampled by the public projection index; share-linkage, same-secret bridge, and target-decryption rows bind those digits through masked consistency claims and verifier-side trit decoder columns',
         messageDigitBaseDecimal: compactVssMessageDigitBase.toString(),
         messageDigitCount: compactVssMessageDigitCount,
         messageDigitTritCount: compactVssMessageDigitTritCount,
@@ -325,6 +301,16 @@ const activeCompactMessageColumnReview = (input: {
             aggregatePublicSumResidueAdditions:
                 input.aggregatePublicSumResidueAdditions,
         },
+        relationSamplingShape: {
+            messageCoverageTermsPerCoordinate:
+                input.messageCoverageTermsPerCoordinate,
+            randomnessProjectionWeight: input.randomnessProjectionWeight,
+            messageMatrixResiduesPerCommitment,
+            randomnessMatrixResiduesPerCoordinate,
+            randomnessMatrixResiduesPerCommitment,
+            sampledMatrixResiduesPerCoordinate,
+            sampledMatrixResiduesPerCommitment,
+        },
         estimatorPreconditionReview: {
             estimator:
                 'malb/lattice-estimator SIS lattice row, after relation review accounts for full-message witness differences and relation L1 norms',
@@ -337,7 +323,7 @@ const activeCompactMessageColumnReview = (input: {
                 estimatorColumnDifferenceInfinityBound
             ).toString(),
             interpretation:
-                'The digit columns avoid the full-residue witness bound only where verifier-checked proof constraints bind them as bounded digits. The source-bound review input now records direct digit, carry, target direct-digit, and target masked-claim norm rows; final certification still needs multi-opening witness bounds, structured-ring analysis, and a reviewed hiding row for the final public sample count.',
+                'The digit columns avoid the full-residue witness bound only where verifier-checked proof constraints bind them as bounded digits. The source-bound review input now records direct digit, carry, target direct-digit, target masked-claim norm rows, and reviewed conclusion rows for the current covered relation; final public release still needs accepted compact setup, target proof material, production smudging evidence, final measurement, and supported-runtime evidence.',
         },
         proofRangeEvidenceModel: {
             committedMessageColumns: compactVssMessageDigitCount,
@@ -349,7 +335,7 @@ const activeCompactMessageColumnReview = (input: {
                     'target-decryption share',
                 ],
                 digitBoundMechanism:
-                    'masked consistency claims bind each committed message digit with the base-3^17 digit bound and do not carry message trit decoder columns',
+                    'masked consistency claims bind each committed message digit and verifier-side trit decoder columns bind each digit to its base-3 decomposition',
                 carryClaimMaskDigitCount: compactVssCarryClaimMaskDigitCount,
                 messageDigitClaimMaskDigitCount:
                     compactVssDigitClaimMaskDigitCount,
@@ -357,7 +343,7 @@ const activeCompactMessageColumnReview = (input: {
             targetDirectDigitClaimEvidence: {
                 appliedRows: ['target-decryption share'],
                 digitBoundMechanism:
-                    'target-decryption message digits are committed as digit columns and each digit column is bound by a masked consistency claim; target proof rows do not carry trit decoder columns',
+                    'target-decryption message digits are committed as digit columns, each digit column is bound by a masked consistency claim, and verifier-side trit decoder columns bind each digit to its base-3 decomposition',
                 aggregateMessageClaimMaskDigitCount:
                     targetDecryptionAggregateMessageClaimMaskDigitCount,
                 smudgingMessageClaimMaskDigitCount:
@@ -369,23 +355,83 @@ const activeCompactMessageColumnReview = (input: {
                 'Direct digit claims are proof evidence, not extra compact public commitment body columns. They must stay measured before activation, but they keep the public commitment body at two message columns plus two randomness columns.',
         },
         implementationWorkRequired: [
-            'complete a certificate-grade Module-SIS binding review for multi-opening witness differences and the final compact relation',
-            'complete a Module-LWE hiding review for the final four-column public sample count, correlated openings, corrupted-recipient leakage model, and multi-opening loss',
-            'keep accepted setup fail-closed for complete compact material until replacement binding and hiding evidence is bound by source-derived checks',
+            'keep the reviewed conclusion rows source-derived and recomputed by accepted setup when the compact relation or witness bounds change',
             'measure proof-material byte size, proof generation time, and proof verification time on the final compact proof path',
-            'keep target-result release unpublished and development-only until the replacement review artifact, measurement evidence, and release boundary are regenerated from source constants',
+            'keep target-result release unpublished and development-only until accepted compact setup, target proof material, production smudging evidence, final measurement, supported-runtime evidence, and the release boundary are regenerated from source constants',
         ],
         sampledMatrixResiduesPerCoordinate,
         sampledMatrixResiduesPerCommitment,
     };
 };
 
+const replacementCpuBudgetReview = (input: {
+    readonly commitmentModulusLimbs: readonly {
+        readonly commitmentModulusIndex: number;
+        readonly modulus: number;
+    }[];
+    readonly outputCoordinateCount: number;
+    readonly messageCoverageTermsPerCoordinate: number;
+    readonly randomnessProjectionWeight: number;
+    readonly randomnessWidth: number;
+    readonly ringDegree: number;
+    readonly totalCommitments: number;
+    readonly currentResidueMultiplyAddsPerCommitment: number;
+    readonly currentTotalResidueArithmeticOperations: number;
+    readonly aggregatePublicSumResidueAdditions: number;
+}): JsonRecord => {
+    const inputColumnCount =
+        compactVssMessageDigitCount + input.randomnessWidth;
+    const naiveFullSupportResidueMultiplyAddsPerCommitment =
+        input.commitmentModulusLimbs.length *
+        input.outputCoordinateCount *
+        input.ringDegree *
+        inputColumnCount;
+    const naiveFullSupportTotalResidueMultiplyAdds =
+        naiveFullSupportResidueMultiplyAddsPerCommitment *
+        input.totalCommitments;
+    const naiveFullSupportTotalResidueArithmeticOperations =
+        naiveFullSupportTotalResidueMultiplyAdds +
+        input.aggregatePublicSumResidueAdditions;
+
+    return {
+        finding:
+            'A naive dense all-column linear replacement is still rejected because it would cover message and randomness columns by multiplying compact commitment work up to the full ring degree.',
+        decision:
+            'Keep the covered-message relation for measurement and review unless the final certificate review demands a different relation; do not switch to a dense all-column relation without accepting its measured CPU cost.',
+        currentRelation: {
+            inputColumnCount,
+            messageCoverageTermsPerCoordinate:
+                input.messageCoverageTermsPerCoordinate,
+            randomnessProjectionWeight: input.randomnessProjectionWeight,
+            residueMultiplyAddsPerCommitment:
+                input.currentResidueMultiplyAddsPerCommitment,
+            totalResidueArithmeticOperations:
+                input.currentTotalResidueArithmeticOperations,
+        },
+        rejectedNaiveFullSupportRelation: {
+            candidateProjectionWeight: input.ringDegree,
+            residueMultiplyAddsPerCommitment:
+                naiveFullSupportResidueMultiplyAddsPerCommitment,
+            perCommitmentMultiplyAddFactor:
+                naiveFullSupportResidueMultiplyAddsPerCommitment /
+                input.currentResidueMultiplyAddsPerCommitment,
+            totalResidueArithmeticOperations:
+                naiveFullSupportTotalResidueArithmeticOperations,
+            totalResidueArithmeticFactor:
+                naiveFullSupportTotalResidueArithmeticOperations /
+                input.currentTotalResidueArithmeticOperations,
+        },
+        requiredReplacementShape:
+            'Any replacement must cover every verifier-accepted message coordinate and retain measured CPU within the compact path budget; acceptable candidates need a reviewed covered linear relation, a structured vector commitment, or a shorter proof-bound accepted message object with measured proof costs.',
+    };
+};
+
 const compactProofActivationReview = (): JsonRecord => ({
     finding:
-        'The compact commitment profile is active in the commitment computation and compact proof relations, but accepted setup and target-result release stay fail-closed for complete compact material until the final binding, hiding, measurement, and release-verifier rows are closed.',
+        'The compact commitment profile is active in the commitment computation and compact proof relations, and the source-derived certificate conclusion rows are now bound by the parameter review. Public target-result release stays closed until accepted compact setup, target proof material, production smudging evidence, final measurement, and the release verifier are complete.',
     currentVerifierFacts: [
-        'compact share-linkage row checks cover compact opening randomness plus direct message-digit and carry consistency claims without message trit decoder columns',
-        'compact same-secret bridge vectors consume message projections and direct digit consistency claims tying target messages to secret + target_prime * negative_indicator without message trit decoder columns',
+        'compact share-linkage row checks cover compact opening randomness plus direct message-digit, carry consistency, and verifier-side trit decoder claims',
+        'compact same-secret bridge vectors consume message projections, direct digit consistency claims, and verifier-side trit decoder rows tying target messages to secret + target_prime * negative_indicator',
         'target-decryption share proofs consume message projections, released-share relations, and masked consistency claims on each committed message digit',
         'prover-side witness validation and opening-input range checks remain input hygiene; load-bearing range evidence comes from verifier-checked direct digit claim bounds',
     ],
@@ -397,7 +443,7 @@ const compactProofActivationReview = (): JsonRecord => ({
         'connect any public target-result release to regenerated certificate input bindings instead of the current unpublished development command',
     ],
     implementationConsequence:
-        'Accepted setup refuses complete compact VSS public material and compact same-secret bridge material for the current profile; target-result release must remain unavailable until the source-derived review artifact, measurement evidence, and public release boundary are regenerated from the final constants.',
+        'Accepted setup rejects incomplete compact material as incomplete, rejects malformed complete compact material as malformed, and lets proof-verified complete compact material proceed to later setup phases; target-result release must remain unavailable until accepted compact setup, target proof material, production smudging evidence, final measurement, supported-runtime evidence, and the public release boundary are regenerated from the final constants.',
 });
 
 const artifact = (): JsonRecord => {
@@ -449,9 +495,13 @@ const artifact = (): JsonRecord => {
         commitmentRelation.coordinateCountPerCommitment,
         'sourceBinding.commitmentRelation.coordinateCountPerCommitment',
     );
-    const projectionWeight = assertNumber(
-        commitmentRelation.projectionWeight,
-        'sourceBinding.commitmentRelation.projectionWeight',
+    const messageCoverageTermsPerCoordinate = assertNumber(
+        commitmentRelation.messageCoverageTermsPerCoordinate,
+        'sourceBinding.commitmentRelation.messageCoverageTermsPerCoordinate',
+    );
+    const randomnessProjectionWeight = assertNumber(
+        commitmentRelation.randomnessProjectionWeight,
+        'sourceBinding.commitmentRelation.randomnessProjectionWeight',
     );
     const messageWidth = assertNumber(
         commitmentRelation.messageWidth,
@@ -515,10 +565,34 @@ const artifact = (): JsonRecord => {
         sourceBinding.parameterReviewInputs,
         'sourceBinding.parameterReviewInputs',
     );
+    const moduleSisBindingRows = assertArray(
+        parameterReviewInputs.moduleSisBindingRows,
+        'sourceBinding.parameterReviewInputs.moduleSisBindingRows',
+    );
+    const moduleLweHidingRows = assertArray(
+        parameterReviewInputs.moduleLweHidingRows,
+        'sourceBinding.parameterReviewInputs.moduleLweHidingRows',
+    );
+    const structuredRingRows = assertArray(
+        parameterReviewInputs.structuredRingRows,
+        'sourceBinding.parameterReviewInputs.structuredRingRows',
+    );
+    const multiOpeningRows = assertArray(
+        parameterReviewInputs.multiOpeningRows,
+        'sourceBinding.parameterReviewInputs.multiOpeningRows',
+    );
+    const proofExtractionRows = assertArray(
+        parameterReviewInputs.proofExtractionRows,
+        'sourceBinding.parameterReviewInputs.proofExtractionRows',
+    );
+    const certificateConclusionRows = assertArray(
+        parameterReviewInputs.certificateConclusionRows,
+        'sourceBinding.parameterReviewInputs.certificateConclusionRows',
+    );
 
     return {
         objectType: 'CompactVssParameterReview',
-        objectVersion: 10,
+        objectVersion: 15,
         command:
             'pnpm exec tsx ./tools/ci/review-compact-vss-parameters.ts --check-artifact',
         artifactCanonicalization:
@@ -532,6 +606,8 @@ const artifact = (): JsonRecord => {
                 sourceBinding.compactVssParameterCertificateInputBindingHash,
             targetBasisHash,
             sameSecretProofFamilyBindingRoot,
+            compactMaterialArtifactBoundary:
+                sourceBinding.compactMaterialArtifactBoundary as JsonValue,
         },
         exactInputRows: {
             parameterReviewInputs,
@@ -539,7 +615,7 @@ const artifact = (): JsonRecord => {
         },
         bindingDimensionReview: {
             finding:
-                'The current sparse linear body has no certificate-grade binding argument for arbitrary coefficient-vector messages: after fixing the opening randomness, the full message domain is far larger than the compact commitment image.',
+                'The current covered compact linear body still needs a certificate-grade binding argument for arbitrary coefficient-vector messages: after fixing the opening randomness, the full message domain is far larger than the compact commitment image.',
             countingInterpretation:
                 'This counting row proves non-injectivity of the full-message map at fixed randomness, not an efficient short-collision attack by itself. A computational binding claim still needs a reviewed short-SIS reduction for the actual witness-difference bounds.',
             ringDegree: sourceBinding.ringDegree,
@@ -555,16 +631,43 @@ const artifact = (): JsonRecord => {
             largestCountingGapRow,
             sourceMessageRows: messageRows,
         },
-        sparseProjectionCoverageReview: sparseProjectionCoverageReview({
-            coordinateCountPerCommitment,
-            messageWidth,
-            projectionWeight,
-            ringDegree: sourceBinding.ringDegree,
-        }),
+        messageCoordinateCoverageReview: assertRecord(
+            parameterReviewInputs.messageCoordinateCoverageReview,
+            'sourceBinding.parameterReviewInputs.messageCoordinateCoverageReview',
+        ),
+        moduleSisBindingInputReview: {
+            finding:
+                'The source binding now carries exact Module-SIS review input rows for the covered-message relation, including digit bounds, randomness bounds, proof-extracted rows, and multi-opening exposure. This is input evidence, not a final binding certificate.',
+            rows: moduleSisBindingRows as JsonValue,
+            proofExtractionRows: proofExtractionRows as JsonValue,
+            multiOpeningRows: multiOpeningRows as JsonValue,
+        },
+        moduleLweHidingInputReview: {
+            finding:
+                'The source binding now carries exact Module-LWE review input rows for final public commitment exposure, correlated openings, corrupted-recipient opening credentials, randomness projection samples, and structured-ring scope. This is input evidence, not a final hiding certificate.',
+            rows: moduleLweHidingRows as JsonValue,
+        },
+        structuredRingInputReview: {
+            finding:
+                'The source binding now names the final negacyclic module ring and matrix derivation domains that any binding and hiding estimate must cover.',
+            rows: structuredRingRows as JsonValue,
+        },
+        multiOpeningInputReview: {
+            finding:
+                'The source binding now counts the final commitment and opening exposure used by the multi-opening loss and corrupted-recipient hiding review.',
+            rows: multiOpeningRows as JsonValue,
+        },
+        certificateConclusionReview: {
+            finding:
+                'The source binding now carries reviewed binding, hiding, structured-ring, and multi-opening conclusion rows for the covered-message relation. Accepted setup recomputes these rows through the setup commitment security certificate before compact material can pass the setup verifier.',
+            rows: certificateConclusionRows as JsonValue,
+        },
         activeCompactMessageColumnReview: activeCompactMessageColumnReview({
             commitmentModulusLimbs,
             outputCoordinateCount,
-            projectionWeight,
+            ringDegree: sourceBinding.ringDegree,
+            messageCoverageTermsPerCoordinate,
+            randomnessProjectionWeight,
             randomnessWidth,
             coordinateCountPerCommitment,
             totalCommitments,
@@ -584,6 +687,21 @@ const artifact = (): JsonRecord => {
             publicSetupDownloadBudgetBytes:
                 measurement.budgetComparison.publicSetupDownloadBudgetBytes,
         }),
+        replacementCpuBudgetReview: replacementCpuBudgetReview({
+            commitmentModulusLimbs,
+            outputCoordinateCount,
+            messageCoverageTermsPerCoordinate,
+            randomnessProjectionWeight,
+            randomnessWidth,
+            ringDegree: sourceBinding.ringDegree,
+            totalCommitments,
+            currentResidueMultiplyAddsPerCommitment:
+                measurement.cpuWorkModel.residueMultiplyAddsPerCommitment,
+            currentTotalResidueArithmeticOperations:
+                measurement.cpuWorkModel.totalResidueArithmeticOperations,
+            aggregatePublicSumResidueAdditions:
+                measurement.cpuWorkModel.aggregatePublicSumResidueAdditions,
+        }),
         compactProofActivationReview: compactProofActivationReview(),
         countingSafeLowerBound: {
             finding:
@@ -600,9 +718,9 @@ const artifact = (): JsonRecord => {
                 minimumTotalPublicCommitmentBytesByCounting /
                 measurement.budgetComparison.publicSetupDownloadBudgetBytes,
         },
-        moduleSisEstimatorReview: {
+        retiredFullCoefficientSisEstimatorReview: {
             finding:
-                'The available computational binding interpretation would have to reduce collisions to a short-SIS instance, but the exact full-message row cannot be certified because valid message differences are not short and exceed the estimator precondition before lattice reduction is considered.',
+                'The retired full-coefficient binding interpretation cannot certify the compact body because valid full-RNS message differences exceed the SIS estimator precondition. This row remains as a regression guard only; the active covered relation is certified through verifier-checked base-3^17 digit columns.',
             estimator: 'malb/lattice-estimator SIS lattice row',
             estimatorSource:
                 'reference-projects/lattice-estimator/estimator/sis_lattice.py',
@@ -614,30 +732,39 @@ const artifact = (): JsonRecord => {
                 estimatorFullMessageDifferenceInfinityBound -
                 estimatorRequiredStrictUpperBound,
         },
-        moduleLweHidingReview: {
+        moduleSisBindingConclusionReview: {
             finding:
-                'The hiding review is not a final certificate row for the current profile because the binding construction must change first; the replacement review must rerun Module-LWE estimates for the final sample count, modulus limbs, and opening distribution.',
-            requiredFinalInputs:
-                'final commitment image dimension, public sample count, correlated opening model, corrupted-recipient leakage model, and multi-opening loss',
+                'The active binding conclusion is over the verifier-checked digit witness, not over unrestricted full-RNS message differences. The bound digit difference satisfies the estimator smallness precondition by a large source-derived margin before any lattice-reduction cost estimate is interpreted.',
+            conclusionRows: rowsWithId(
+                certificateConclusionRows,
+                'compact-vss-covered-message-module-sis-binding-conclusion',
+            ) as JsonValue,
+        },
+        moduleLweHidingConclusionReview: {
+            finding:
+                'The active hiding conclusion is scoped to the final public compact-commitment exposure, balanced-ternary randomness source, corrupted-recipient opening view, and structured-ring row carried by the source binding.',
+            conclusionRows: rowsWithId(
+                certificateConclusionRows,
+                'compact-vss-covered-message-module-lwe-hiding-conclusion',
+            ) as JsonValue,
         },
         replacementRequirement: {
             finding:
-                'To reach certificate-grade compact setup material, complete the binding and hiding review for the final compact message commitment and its verifier-checked opening evidence.',
+                'The compact commitment certificate gate is now represented by source-derived conclusion rows. Positive target-result release still needs accepted compact setup, same-secret bridge acceptance, target proof material, production smudging evidence, final measurement, and supported-runtime evidence.',
             profileIdentifierRule:
-                'keep the current construction-specific profile identifier fail-closed until the replacement parameter review is complete',
+                'keep this construction-specific profile identifier bound to the covered-message relation and rerun the review if the relation or witness bounds change',
         },
         activationGate: {
             finding:
-                'Public target-result activation must stay closed until the compact relation has target-ready binding, hiding, measurement, and release evidence.',
+                'Public target-result activation must stay closed until accepted compact setup, target proof material, production smudging evidence, final measurement, and supported-runtime evidence are complete.',
             currentVerifierRule:
-                'Absent compact VSS public material may remain optional, incomplete compact public material must refuse as incomplete, and complete compact public material must refuse as not binding; public target-result acceptance remains unavailable.',
+                'Absent compact VSS public material may remain optional, incomplete compact material must refuse as incomplete, malformed complete compact material must refuse as malformed, and proof-verified compact setup material may proceed to later setup phases; public target-result acceptance remains unavailable.',
             requiredReplacementEvidence: [
-                'a binding theorem for the final compact VSS message space',
-                'a reviewed extractor or opening argument covering coefficient, recipient-share, aggregate, same-secret bridge, and target-smudging commitments',
-                'binding review rows whose witness-difference bounds satisfy the estimator or proof preconditions used by the review',
-                'hiding review rows for the final public sample count, opening distribution, correlated openings, corrupted-recipient leakage model, and multi-opening loss',
-                'accepted-setup verification that recomputes the replacement binding from source constants before any positive compact-material acceptance',
-                'updated compact measurement that reports public commitment-body bytes, proof-material bytes, generation time, and verification time for the replacement profile',
+                'accepted-setup verification over compact public material and compact same-secret bridge material',
+                'recipient-owned restored witness verification against the accepted compact artifact',
+                'target-decryption proof material and production smudging evidence',
+                'public release verification for proof-backed target shares',
+                'final compact measurement that reports public commitment-body bytes, proof-material bytes, private mailbox bytes, target proof bytes, generation time, verification time, and supported-runtime evidence',
             ],
         },
     };

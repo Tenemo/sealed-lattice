@@ -8,6 +8,8 @@ import {
     compactVssEncodedCommitmentByteLength,
     compactVssCommitmentProfileId,
     compactVssCommitmentRandomnessColumnCount,
+    compactVssMessageDigitBase,
+    compactVssMessageDigitCount,
     compactVssShareLinkageAggregateThresholdRule,
     compactVssShareLinkageCommonKeyRule,
     compactVssShareLinkageProofBatchingRule,
@@ -119,34 +121,57 @@ const compactVssSetupContext = (): CollectiveBgvSetupContext => ({
     setupEpoch: 'setup-epoch',
 });
 
-const compactVssOpening = (): BgvCompactVssCommitmentOpeningInput => ({
-    commitmentRole: 'aggregate-threshold-share',
-    commitmentContext: {
-        objectType: 'CompactVssAggregateThresholdShareCommitmentContext',
-        objectVersion: 1,
-        ceremonyId: 'compact-vss-wasm-test',
-        manifestHash: '1'.repeat(128),
-        rosterHash: '2'.repeat(128),
-        setupProfileHash: '3'.repeat(128),
-        qShareHash: '4'.repeat(128),
-        carryAwareVssShareRelationProfileHash: '5'.repeat(128),
-        commitmentProfileHash: '6'.repeat(128),
-        setupEpoch: 'setup-epoch',
-        recipientIdentity: 'trustee-1',
-        recipientRosterPosition: 0,
+const compactVssMessageDigitColumns = (
+    messageCoefficients: readonly number[],
+): readonly (readonly number[])[] =>
+    Array.from({ length: compactVssMessageDigitCount }, (_unused, digitIndex) =>
+        messageCoefficients.map((coefficient) => {
+            let remaining = BigInt(coefficient);
+            for (
+                let skippedDigitIndex = 0;
+                skippedDigitIndex < digitIndex;
+                skippedDigitIndex += 1
+            ) {
+                remaining /= compactVssMessageDigitBase;
+            }
+
+            return Number(remaining % compactVssMessageDigitBase);
+        }),
+    );
+
+const compactVssOpening = (): BgvCompactVssCommitmentOpeningInput => {
+    const messageCoefficients = [1, 2, 3, 4, 5, 6, 7, 8];
+
+    return {
+        commitmentRole: 'aggregate-threshold-share',
+        commitmentContext: {
+            objectType: 'CompactVssAggregateThresholdShareCommitmentContext',
+            objectVersion: 1,
+            ceremonyId: 'compact-vss-wasm-test',
+            manifestHash: '1'.repeat(128),
+            rosterHash: '2'.repeat(128),
+            setupProfileHash: '3'.repeat(128),
+            qShareHash: '4'.repeat(128),
+            carryAwareVssShareRelationProfileHash: '5'.repeat(128),
+            commitmentProfileHash: '6'.repeat(128),
+            setupEpoch: 'setup-epoch',
+            recipientIdentity: 'trustee-1',
+            recipientRosterPosition: 0,
+            rnsLimbIndex: 0,
+            rnsPrime: 97,
+        },
+        publicMatrixSeedHash: '7'.repeat(128),
         rnsLimbIndex: 0,
         rnsPrime: 97,
-    },
-    publicMatrixSeedHash: '7'.repeat(128),
-    rnsLimbIndex: 0,
-    rnsPrime: 97,
-    ringDegree: 8,
-    messageCoefficients: [1, 2, 3, 4, 5, 6, 7, 8],
-    randomnessByColumn: [
-        [0, 1, -1, 2, -2, 3, -3, 4],
-        [5, -5, 6, -6, 7, -7, 8, -8],
-    ],
-});
+        ringDegree: 8,
+        messageCoefficients,
+        messageDigitColumns: compactVssMessageDigitColumns(messageCoefficients),
+        randomnessByColumn: [
+            [0, 1, -1, 2, -2, 3, -3, 4],
+            [5, -5, 6, -6, 7, -7, 8, -8],
+        ],
+    };
+};
 
 const writeTestLittleEndianU64 = (
     bytes: Uint8Array,
@@ -246,6 +271,7 @@ const compactVssTestCommitment = (
 ): ReturnType<typeof computeCompactVssCommitmentFromOpening> &
     Readonly<{ openingRoot: string }> => {
     const seed = compactVssSeed(seedParts);
+    const messageCoefficients = compactVssMessageCoefficients(seed, rnsPrime);
     const opening = {
         commitmentRole,
         commitmentContext: {
@@ -258,7 +284,8 @@ const compactVssTestCommitment = (
         rnsLimbIndex,
         rnsPrime,
         ringDegree: compactVssRingDegree,
-        messageCoefficients: compactVssMessageCoefficients(seed, rnsPrime),
+        messageCoefficients,
+        messageDigitColumns: compactVssMessageDigitColumns(messageCoefficients),
         messageCoefficientBound: rnsPrime,
         randomnessByColumn: compactVssRandomnessByColumn(seed),
     } as const;
@@ -611,6 +638,10 @@ const compactSameSecretBridgeStatementRecord = (
             );
         }
         const seed = compactVssSeed([71, trusteeRosterPosition, rnsLimbIndex]);
+        const messageCoefficients = compactVssMessageCoefficients(
+            seed,
+            rnsPrime,
+        );
         const targetConstantCommitment = computeCompactVssCommitmentFromOpening(
             {
                 commitmentRole: 'coefficient',
@@ -624,10 +655,9 @@ const compactSameSecretBridgeStatementRecord = (
                 rnsLimbIndex,
                 rnsPrime,
                 ringDegree: compactVssRingDegree,
-                messageCoefficients: compactVssMessageCoefficients(
-                    seed,
-                    rnsPrime,
-                ),
+                messageCoefficients,
+                messageDigitColumns:
+                    compactVssMessageDigitColumns(messageCoefficients),
                 messageCoefficientBound: rnsPrime,
                 randomnessByColumn: compactVssRandomnessByColumn(seed),
             },
@@ -653,8 +683,7 @@ const compactSameSecretBridgeStatementRecord = (
         objectType: 'CompactVssSameSecretBridgeStatement',
         objectVersion: 1,
         setupProfileId: 'CollectiveBgvSetup-v1',
-        compactCommitmentProfileId:
-            'sealed-lattice-compact-vss-sparse-linear-v1',
+        compactCommitmentProfileId: compactVssCommitmentProfileId,
         setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofFamily: 'same-secret-linkage-anchor',
         ceremonyId: 'compact-vss-wasm-test',
@@ -712,8 +741,7 @@ const compactSameSecretBridgeStatementSet =
             objectType: 'CompactVssSameSecretBridgeStatementSet',
             objectVersion: 1,
             setupProfileId: 'CollectiveBgvSetup-v1',
-            compactCommitmentProfileId:
-                'sealed-lattice-compact-vss-sparse-linear-v1',
+            compactCommitmentProfileId: compactVssCommitmentProfileId,
             setupProofProfileId: 'SealedLattice-SetupProof-v1',
             proofFamily: 'same-secret-linkage-anchor',
             ceremonyId: 'compact-vss-wasm-test',
@@ -1303,6 +1331,8 @@ const compactVssProofFixture = (
     readonly carryWitnessesByItem: readonly (readonly number[])[];
 } => {
     const publicMatrixSeedHash = compactVssProofHash('7');
+    let sourceCoefficientCommitmentRoot = compactVssProofHash('a');
+    let sourceRecipientShareCommitmentRoot = compactVssProofHash('b');
     const coefficientComputationsForSourceLimb = (
         sourceRnsLimbIndex: number,
         sourceMessageModulus: number,
@@ -1323,6 +1353,8 @@ const compactVssProofFixture = (
                     rnsPrime: sourceMessageModulus,
                     ringDegree: compactVssProofRingDegree,
                     messageCoefficients: messages,
+                    messageDigitColumns:
+                        compactVssMessageDigitColumns(messages),
                     messageCoefficientBound: sourceMessageModulus,
                     randomnessByColumn:
                         coefficientOpeningRandomnessByShamirIndex[
@@ -1410,6 +1442,9 @@ const compactVssProofFixture = (
             rnsPrime: sourceMessageModulus,
             ringDegree: compactVssProofRingDegree,
             messageCoefficients: recipientShareMessages,
+            messageDigitColumns: compactVssMessageDigitColumns(
+                recipientShareMessages,
+            ),
             messageCoefficientBound: sourceMessageModulus,
             randomnessByColumn: recipientShareOpeningRandomness,
         } as const;
@@ -1421,6 +1456,10 @@ const compactVssProofFixture = (
         };
 
         return {
+            sourceTrusteeIdentity: 'trustee-0',
+            sourceTrusteeRosterPosition: 0,
+            sourceCoefficientCommitmentRoot,
+            sourceRecipientShareCommitmentRoot,
             recipientIdentity: `recipient-${recipientRosterPosition}`,
             recipientRosterPosition,
             sourceRnsLimbIndex,
@@ -1460,8 +1499,6 @@ const compactVssProofFixture = (
         sameSourceAdditionalProofItem === undefined
             ? [additionalProofItem]
             : [sameSourceAdditionalProofItem, additionalProofItem];
-    let sourceCoefficientCommitmentRoot = compactVssProofHash('a');
-    let sourceRecipientShareCommitmentRoot = compactVssProofHash('b');
     if (input.includeSameSourceAdditional !== true) {
         const proofItems = [primaryProofItem, ...additionalLinkageItems];
         const sourceTrusteeIdentity = 'trustee-0';
@@ -1483,6 +1520,24 @@ const compactVssProofFixture = (
                 proofItems,
             }).sourceRecipientShareCommitmentRoot;
     }
+    const bindSourceRoots = (
+        proofItem: CompactVssProofFixtureItem,
+    ): CompactVssProofFixtureItem => ({
+        ...proofItem,
+        sourceCoefficientCommitmentRoot,
+        sourceRecipientShareCommitmentRoot,
+    });
+    const boundPrimaryProofItem = bindSourceRoots(primaryProofItem);
+    const boundSameSourceAdditionalProofItem =
+        sameSourceAdditionalProofItem === undefined
+            ? undefined
+            : bindSourceRoots(sameSourceAdditionalProofItem);
+    const boundAdditionalProofItem = bindSourceRoots(additionalProofItem);
+    const boundAdditionalLinkageItems =
+        boundSameSourceAdditionalProofItem === undefined
+            ? [boundAdditionalProofItem]
+            : [boundSameSourceAdditionalProofItem, boundAdditionalProofItem];
+    const shareLinkageStatementRoot = compactVssProofHash('c');
 
     return {
         context: {
@@ -1492,17 +1547,13 @@ const compactVssProofFixture = (
             trusteeIdentity: 'trustee-0',
             trusteeRosterPosition: 0,
             setupEpoch: 'setup-epoch-1',
-            sourceCoefficientCommitmentRoot,
-            sourceRecipientShareCommitmentRoot,
+            shareLinkageStatementRoot,
         },
         compactVssShareLinkage: {
             publicMatrixSeedHash,
-            sourceTrusteeIdentity: 'trustee-0',
-            sourceTrusteeRosterPosition: 0,
-            sourceCoefficientCommitmentRoot,
-            sourceRecipientShareCommitmentRoot,
-            ...primaryProofItem,
-            additionalLinkageItems,
+            shareLinkageStatementRoot,
+            ...boundPrimaryProofItem,
+            additionalLinkageItems: boundAdditionalLinkageItems,
         },
         coefficientMessagesByShamirIndex: [
             ...primaryProofItem.coefficientMessagesByShamirIndex,
@@ -1547,6 +1598,12 @@ const compactVssProofPrimaryLinkageItem = (
 ): NonNullable<
     BgvCompactVssShareLinkageProofStatement['additionalLinkageItems']
 >[number] => ({
+    sourceTrusteeIdentity: proofStatement.sourceTrusteeIdentity,
+    sourceTrusteeRosterPosition: proofStatement.sourceTrusteeRosterPosition,
+    sourceCoefficientCommitmentRoot:
+        proofStatement.sourceCoefficientCommitmentRoot,
+    sourceRecipientShareCommitmentRoot:
+        proofStatement.sourceRecipientShareCommitmentRoot,
     recipientIdentity: proofStatement.recipientIdentity,
     recipientRosterPosition: proofStatement.recipientRosterPosition,
     sourceRnsLimbIndex: proofStatement.sourceRnsLimbIndex,
@@ -1755,6 +1812,8 @@ const compactSameSecretBridgeProofFixture = (): {
                 rnsPrime: targetRnsPrime,
                 ringDegree: compactVssProofRingDegree,
                 messageCoefficients,
+                messageDigitColumns:
+                    compactVssMessageDigitColumns(messageCoefficients),
                 messageCoefficientBound: targetRnsPrime,
                 randomnessByColumn: openingRandomnessByLimb[targetRnsLimbIndex],
             });
@@ -2450,18 +2509,24 @@ describe('compact VSS commitment kernel commands', () => {
         const evidence = compactVssProofMaterialEvidence(
             fixture.compactVssShareLinkage,
         );
+        const compactVssShareLinkage = {
+            ...fixture.compactVssShareLinkage,
+            shareLinkageStatementRoot: evidence.statement.statementRoot,
+        };
+        const context = {
+            ...fixture.context,
+            trusteeIdentity: 'compact-vss-share-linkage',
+            trusteeRosterPosition: 0,
+            shareLinkageStatementRoot: evidence.statement.statementRoot,
+        };
         const generation = kernel.generateCompactVssShareLinkageProof({
             ...fixture,
+            context,
+            compactVssShareLinkage,
             ringDegree: compactVssProofRingDegree,
             proofRandomnessSeedHex: 'de'.repeat(64),
             proofRandomnessNonceHex: 'ad'.repeat(64),
         });
-        const sourceStatement = evidence.statement.sourceStatementRecords[0];
-        if (sourceStatement === undefined) {
-            throw new Error(
-                'compact VSS material fixture is missing a source statement.',
-            );
-        }
         const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
             statement: evidence.statement,
             coefficientCommitmentSet: evidence.coefficientCommitmentSet,
@@ -2471,9 +2536,8 @@ describe('compact VSS commitment kernel commands', () => {
             ringDegree: compactVssProofRingDegree,
             proofRecordInputs: [
                 {
-                    sourceStatementRoot: sourceStatement.sourceStatementRoot,
                     compactVssShareLinkage:
-                        fixture.compactVssShareLinkage as ProtocolCompactVssShareLinkageProofStatement,
+                        compactVssShareLinkage as ProtocolCompactVssShareLinkageProofStatement,
                     proofBytesHex: generation.proofBytesHex,
                 },
             ],
@@ -2683,10 +2747,15 @@ describe('compact VSS commitment kernel commands', () => {
 
     it('accepts carried aggregate messages within the explicit coefficient bound', async () => {
         const kernel = await loadTranscriptCoreKernel();
+        const carriedMessage = Number(compactVssMessageDigitBase) + 7;
         const opening = {
             ...compactVssOpening(),
-            messageCoefficients: [1, 2, 98, 4, 5, 6, 7, 8],
-            messageCoefficientBound: 194,
+            messageCoefficients: [1, 2, carriedMessage, 4, 5, 6, 7, 8],
+            messageDigitColumns: [
+                [1, 2, carriedMessage, 4, 5, 6, 7, 8],
+                [0, 0, 0, 0, 0, 0, 0, 0],
+            ],
+            messageCoefficientBound: Number(compactVssMessageDigitBase) * 2,
         } satisfies BgvCompactVssCommitmentOpeningInput;
         const protocolComputation =
             computeCompactVssCommitmentFromOpening(opening);
@@ -2706,12 +2775,22 @@ describe('compact VSS commitment kernel commands', () => {
             }).commitmentRoot,
         ).toBe(protocolComputation.commitmentRoot);
 
+        expect(
+            compactVssCommitmentPrivateOpeningRoot({
+                ...opening,
+                messageDigitColumns: [
+                    [1, 2, 7, 4, 5, 6, 7, 8],
+                    [0, 0, 1, 0, 0, 0, 0, 0],
+                ],
+            }),
+        ).not.toBe(protocolComputation.openingRoot);
+
         expect(() =>
             kernel.computeCompactVssCommitmentFromOpening({
                 ...opening,
                 messageCoefficients: [
                     ...opening.messageCoefficients.slice(0, 3),
-                    194,
+                    Number(compactVssMessageDigitBase) * 2,
                     ...opening.messageCoefficients.slice(4),
                 ],
             }),

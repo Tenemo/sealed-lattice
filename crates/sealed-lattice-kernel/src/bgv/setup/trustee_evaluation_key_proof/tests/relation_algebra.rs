@@ -2,8 +2,9 @@ use super::*;
 use crate::bgv::modular_arithmetic::pow_mod;
 use crate::bgv::setup::compact_vss_commitment::{
     COMPACT_VSS_MESSAGE_DIGIT_COUNT, CompactVssCommitmentOpeningInput,
-    compact_vss_message_digit_trits_for_count, compact_vss_message_digits,
-    compact_vss_message_encoding_layout, compute_compact_vss_commitment_from_opening,
+    compact_vss_canonical_message_digit_columns, compact_vss_message_digit_trits_for_count,
+    compact_vss_message_digits, compact_vss_message_encoding_layout,
+    compute_compact_vss_commitment_from_opening,
 };
 use crate::bgv::setup::trustee_evaluation_key_proof::signed_value_residue;
 use serde_json::json;
@@ -282,8 +283,6 @@ fn compact_vss_share_linkage_vectors_match_carried_share_openings() {
             recipient_share_commitment: &recipient_share_commitment,
             relation_alpha: &relation_alpha,
             u_power_vectors: &u_power_vectors,
-            coefficient_message_range_evidence: crate::bgv::setup::compact_vss_commitment::CompactVssMessageRangeEvidence::DigitAndTritColumns,
-            recipient_message_range_evidence: crate::bgv::setup::compact_vss_commitment::CompactVssMessageRangeEvidence::DigitAndTritColumns,
         },
         &tower,
     )
@@ -383,6 +382,9 @@ fn compact_commitment_coordinates_for_test(
     randomness_by_column: &[Vec<i64>],
     commitment_modulus_index: usize,
 ) -> Vec<u64> {
+    let message_digit_columns =
+        compact_vss_canonical_message_digit_columns(message_coefficients, ring_degree)
+            .expect("compact VSS message digit columns");
     let computation =
         compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
             commitment_role,
@@ -392,6 +394,7 @@ fn compact_commitment_coordinates_for_test(
             rns_prime,
             ring_degree,
             message_coefficients,
+            message_digit_columns: &message_digit_columns,
             message_coefficient_bound: rns_prime,
             randomness_by_column,
         })

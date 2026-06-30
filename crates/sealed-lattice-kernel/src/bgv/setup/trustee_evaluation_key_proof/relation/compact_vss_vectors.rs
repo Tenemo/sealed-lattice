@@ -3,7 +3,7 @@ use super::*;
 use crate::bgv::setup::compact_vss_commitment::{
     COMPACT_VSS_MESSAGE_DIGIT_COUNT, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactProjectionTermsInput,
-    CompactVssMessageEncodingLayout, CompactVssMessageRangeEvidence, compact_projection_terms,
+    CompactVssMessageEncodingLayout, compact_projection_terms,
     compact_vss_message_digit_column_label, compact_vss_message_digit_weight,
     compact_vss_message_encoding_layout,
 };
@@ -25,8 +25,6 @@ pub(crate) struct CompactVssShareLinkagePublicVectorInput<'a> {
     pub(crate) recipient_share_commitment: &'a CompactVssShareLinkageCommitment,
     pub(crate) relation_alpha: &'a [ChallengeExtensionElement],
     pub(crate) u_power_vectors: &'a [Vec<ChallengeExtensionElement>],
-    pub(crate) coefficient_message_range_evidence: CompactVssMessageRangeEvidence,
-    pub(crate) recipient_message_range_evidence: CompactVssMessageRangeEvidence,
 }
 
 struct CompactVssShareLinkageItemView<'a> {
@@ -52,17 +50,6 @@ fn compact_vss_message_encoding_offsets(
     }
 
     Ok(offsets)
-}
-
-fn compact_vss_message_encoding_layout_for_range(
-    message_bound: u64,
-    range_evidence: CompactVssMessageRangeEvidence,
-) -> CanonicalResult<CompactVssMessageEncodingLayout> {
-    let layout = compact_vss_message_encoding_layout(message_bound)?;
-    Ok(match range_evidence {
-        CompactVssMessageRangeEvidence::DigitAndTritColumns => layout,
-        CompactVssMessageRangeEvidence::DigitColumnsOnly => layout.with_digit_columns_only(),
-    })
 }
 
 fn compact_vss_message_vector_index(
@@ -183,14 +170,10 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
 
     let commitment_relation_count = commitment_count * COMPACT_VSS_OUTPUT_COORDINATE_COUNT;
     let share_relation_count = LINCHECK_REPETITIONS;
-    let coefficient_message_encoding_layout = compact_vss_message_encoding_layout_for_range(
-        input.source_message_modulus,
-        input.coefficient_message_range_evidence,
-    )?;
-    let recipient_message_encoding_layout = compact_vss_message_encoding_layout_for_range(
-        input.source_message_modulus,
-        input.recipient_message_range_evidence,
-    )?;
+    let coefficient_message_encoding_layout =
+        compact_vss_message_encoding_layout(input.source_message_modulus)?;
+    let recipient_message_encoding_layout =
+        compact_vss_message_encoding_layout(input.source_message_modulus)?;
     let decoder_relation_count = (input.coefficient_commitments.len()
         * compact_vss_decoder_digit_count(coefficient_message_encoding_layout)
         + compact_vss_decoder_digit_count(recipient_message_encoding_layout))
@@ -306,10 +289,14 @@ pub(crate) fn build_compact_vss_share_linkage_public_vectors(
             *target_value = tower.add(target_value, &tower.mul(share_alpha, source_value));
         }
         let mut trustee_point_power = 1_u128;
-        for coefficient_index in 0..input.coefficient_commitments.len() {
+        for (coefficient_index, message_encoding_layout) in message_encoding_layouts
+            .iter()
+            .copied()
+            .take(input.coefficient_commitments.len())
+            .enumerate()
+        {
             let power_modulus_residue = (trustee_point_power % u128::from(input.modulus)) as u64;
             for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-                let message_encoding_layout = message_encoding_layouts[coefficient_index];
                 let digit_weight = compact_vss_message_digit_weight(digit_index, input.modulus)?;
                 let scale = mul_mod_fast(power_modulus_residue, digit_weight, input.modulus);
                 let digit_vector_index = compact_vss_message_vector_index(
@@ -436,8 +423,6 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
     ring_degree: usize,
     relation_alpha: &[ChallengeExtensionElement],
     u_power_vectors: &[Vec<ChallengeExtensionElement>],
-    coefficient_message_range_evidence: CompactVssMessageRangeEvidence,
-    recipient_message_range_evidence: CompactVssMessageRangeEvidence,
     tower: &ChallengeExtensionTower,
 ) -> CanonicalResult<(
     ChallengeExtensionElement,
@@ -474,14 +459,10 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
     let expected_relation_count = items
         .iter()
         .map(|item| {
-            let coefficient_layout = compact_vss_message_encoding_layout_for_range(
-                item.source_message_modulus,
-                coefficient_message_range_evidence,
-            )?;
-            let recipient_layout = compact_vss_message_encoding_layout_for_range(
-                item.source_message_modulus,
-                recipient_message_range_evidence,
-            )?;
+            let coefficient_layout =
+                compact_vss_message_encoding_layout(item.source_message_modulus)?;
+            let recipient_layout =
+                compact_vss_message_encoding_layout(item.source_message_modulus)?;
             let decoder_relation_count = (item.coefficient_commitments.len()
                 * compact_vss_decoder_digit_count(coefficient_layout)
                 + compact_vss_decoder_digit_count(recipient_layout))
@@ -525,16 +506,10 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
     let mut message_encoding_layouts = message_bounds
         .iter()
         .take(coefficient_column_count)
-        .map(|message_bound| {
-            compact_vss_message_encoding_layout_for_range(
-                *message_bound,
-                coefficient_message_range_evidence,
-            )
-        })
+        .map(|message_bound| compact_vss_message_encoding_layout(*message_bound))
         .collect::<CanonicalResult<Vec<_>>>()?;
-    message_encoding_layouts.push(compact_vss_message_encoding_layout_for_range(
+    message_encoding_layouts.push(compact_vss_message_encoding_layout(
         message_bounds[coefficient_column_count],
-        recipient_message_range_evidence,
     )?);
     let message_encoding_offsets = compact_vss_message_encoding_offsets(&message_encoding_layouts)?;
     let mut message_encoding_vectors =
@@ -583,16 +558,14 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
             .map(|vector| vector[lane_offset..lane_end].to_vec())
             .collect::<Vec<_>>();
         let item_coefficient_message_encoding_layout =
-            compact_vss_message_encoding_layout_for_range(
-                item.source_message_modulus,
-                coefficient_message_range_evidence,
-            )?;
-        let item_recipient_message_encoding_layout = compact_vss_message_encoding_layout_for_range(
-            item.source_message_modulus,
-            recipient_message_range_evidence,
-        )?;
-        for coefficient_position in 0..item.coefficient_commitments.len() {
-            if message_encoding_layouts[coefficient_position].encoding_column_count()
+            compact_vss_message_encoding_layout(item.source_message_modulus)?;
+        let item_recipient_message_encoding_layout =
+            compact_vss_message_encoding_layout(item.source_message_modulus)?;
+        for message_encoding_layout in message_encoding_layouts
+            .iter()
+            .take(item.coefficient_commitments.len())
+        {
+            if message_encoding_layout.encoding_column_count()
                 != item_coefficient_message_encoding_layout.encoding_column_count()
             {
                 return Err(invalid_succinct_setup_proof(
@@ -629,8 +602,6 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                 relation_alpha: &relation_alpha
                     [relation_alpha_offset..relation_alpha_offset + item_relation_count],
                 u_power_vectors: &item_u_power_vectors,
-                coefficient_message_range_evidence,
-                recipient_message_range_evidence,
             },
             tower,
         )?;
@@ -698,12 +669,15 @@ pub(crate) fn build_compact_vss_share_linkage_batch_public_vectors(
                 )?;
             }
         }
-        for randomness_column_index in 0..COMPACT_VSS_RANDOMNESS_COLUMN_COUNT {
+        for recipient_share_randomness_vector in recipient_share_randomness_vectors
+            .iter_mut()
+            .take(COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
+        {
             let item_vector = item_vectors.next().ok_or_else(|| {
                 invalid_succinct_setup_proof("compact VSS batch vectors ended unexpectedly")
             })?;
             add_extension_vector_to_lane(
-                &mut recipient_share_randomness_vectors[randomness_column_index],
+                recipient_share_randomness_vector,
                 &item_vector,
                 lane_offset,
                 tower,
@@ -808,12 +782,7 @@ pub(crate) fn build_compact_same_secret_bridge_public_vectors(
     let message_encoding_layouts = input
         .target_rns_primes
         .iter()
-        .map(|target_rns_prime| {
-            compact_vss_message_encoding_layout_for_range(
-                *target_rns_prime,
-                CompactVssMessageRangeEvidence::DigitColumnsOnly,
-            )
-        })
+        .map(|target_rns_prime| compact_vss_message_encoding_layout(*target_rns_prime))
         .collect::<CanonicalResult<Vec<_>>>()?;
     let target_count = input.target_constant_commitments.len();
     let commitment_relation_count = target_count * COMPACT_VSS_OUTPUT_COORDINATE_COUNT;

@@ -87,6 +87,8 @@ const targetRnsLimbCount = 7;
 const canonicalTargetCiphertextLevel = targetRnsLimbCount - 1;
 const selectedEvaluatorWorkingLevel = 15;
 const restrictedProofRingDegree = 128;
+const compactVssMaximumMixedBatchItemsPerProof =
+    acceptedBgvProfileRingDegree / restrictedProofRingDegree;
 const minimumPublicCommitmentReductionFactor = 2_800;
 const maximumRecipientPrivateMailboxDownloadBytes = 128 * 1024 * 1024;
 const maximumSourceTrusteePrivateMailboxUploadBytes = 256 * 1024 * 1024;
@@ -164,9 +166,6 @@ const compactVssTritCountForBound = (
 
 const compactVssMessageEncodingLayoutForBound = (
     messageBoundExclusive: number,
-    rangeEvidence:
-        | 'digit-and-trit-columns'
-        | 'digit-columns-only' = 'digit-and-trit-columns',
 ): CompactVssMessageEncodingLayout => {
     if (
         !Number.isSafeInteger(messageBoundExclusive) ||
@@ -181,13 +180,6 @@ const compactVssMessageEncodingLayoutForBound = (
     const highDigitTritCount = compactVssTritCountForBound(
         highDigitBoundExclusive,
     );
-    if (rangeEvidence === 'digit-columns-only') {
-        return {
-            highDigitTritCount,
-            totalTritCount: 0,
-            encodingColumnCount: compactVssMessageDigitCount,
-        };
-    }
     const totalTritCount = compactVssMessageDigitTritCount + highDigitTritCount;
 
     return {
@@ -355,12 +347,12 @@ type FullShareLinkageBatchDerivedMeasurement = Readonly<{
     readonly sourceRecipientRecordCount: number;
     readonly aggregateThresholdRecordCount: number;
     readonly ringDegree: number;
-    readonly oneSourceShareLinkageProofByteLength: number;
+    readonly largestShareLinkageProofByteLength: number;
     readonly proofMaterialSetJsonBytes: number;
     readonly proofMaterialSetRoot: ProtocolHash;
-    readonly oneSourcePayloadWithBridgeProofBytes: number;
-    readonly repeatedAllSourceShareLinkageProofBytes: number;
-    readonly repeatedAllSourcePayloadWithBridgeProofBytes: number;
+    readonly largestPayloadWithBridgeProofBytes: number;
+    readonly allSourceShareLinkageProofBytes: number;
+    readonly allSourcePayloadWithBridgeProofBytes: number;
     readonly coefficientCommitmentCount: number;
     readonly coefficientWitnessColumnCount: number;
     readonly recipientShareOpeningCredentialCount: number;
@@ -371,12 +363,12 @@ type FullShareLinkageBatchDerivedMeasurement = Readonly<{
         readonly shareLinkageStatement: MeasuredOperation<
             ReturnType<typeof verifyCompactVssShareLinkageStatement>
         >;
-        readonly sourceProofGeneration: MeasuredOperation<
+        readonly largestBatchProofGeneration: MeasuredOperation<
             ReturnType<
                 TranscriptCoreKernel['generateCompactVssShareLinkageProof']
             >
         >;
-        readonly sourceProofVerification: MeasuredOperation<
+        readonly largestBatchProofVerification: MeasuredOperation<
             ReturnType<
                 TranscriptCoreKernel['verifyCompactVssShareLinkageProof']
             >
@@ -396,7 +388,7 @@ type FullShareLinkageBatchMeasurement =
     | FullShareLinkageBatchDerivedMeasurement
     | FullShareLinkageBatchMeasurementNotMeasured;
 
-type CompactVssSourceBatchProofInput = Omit<
+type CompactVssFullBatchProofInput = Omit<
     Parameters<TranscriptCoreKernel['generateCompactVssShareLinkageProof']>[0],
     | 'compactVssShareLinkage'
     | 'proofRandomnessNonceHex'
@@ -404,14 +396,13 @@ type CompactVssSourceBatchProofInput = Omit<
     | 'ringDegree'
 > &
     Readonly<{
-        readonly sourceStatementRoot: ProtocolHash;
         readonly compactVssShareLinkage: CompactVssShareLinkageProofStatement;
     }>;
 
 const fullShareLinkageBatchWasMeasured = (
     measurement: FullShareLinkageBatchMeasurement,
 ): measurement is FullShareLinkageBatchDerivedMeasurement =>
-    'oneSourceShareLinkageProofByteLength' in measurement;
+    'largestShareLinkageProofByteLength' in measurement;
 
 type TargetDecryptionDevelopmentArtifactMeasurement = Readonly<{
     readonly localTargetShareWitnessJsonBytes: number;
@@ -642,6 +633,24 @@ const measureAsyncMedianResult = async <Result>(
     };
 };
 
+const compactVssMessageDigitColumns = (
+    messageCoefficients: readonly number[],
+): readonly (readonly number[])[] =>
+    Array.from({ length: compactVssMessageDigitCount }, (_unused, digitIndex) =>
+        messageCoefficients.map((coefficient) => {
+            let remaining = BigInt(coefficient);
+            for (
+                let skippedDigitIndex = 0;
+                skippedDigitIndex < digitIndex;
+                skippedDigitIndex += 1
+            ) {
+                remaining /= compactVssMessageDigitBase;
+            }
+
+            return Number(remaining % compactVssMessageDigitBase);
+        }),
+    );
+
 const fullRingOpening = (): CompactVssCommitmentOpeningInput => {
     const publicMatrixSeedHash = deriveProtocolHash(
         'SetupPublicMatrixSeedHash',
@@ -686,6 +695,7 @@ const fullRingOpening = (): CompactVssCommitmentOpeningInput => {
         rnsPrime,
         ringDegree: acceptedBgvProfileRingDegree,
         messageCoefficients,
+        messageDigitColumns: compactVssMessageDigitColumns(messageCoefficients),
         randomnessByColumn,
     };
 };
@@ -756,6 +766,8 @@ const restrictedCompactSameSecretBridgeProofFixture = (
                 rnsPrime: targetRnsPrime,
                 ringDegree,
                 messageCoefficients,
+                messageDigitColumns:
+                    compactVssMessageDigitColumns(messageCoefficients),
                 messageCoefficientBound: targetRnsPrime,
                 randomnessByColumn: openingRandomnessByLimb[targetRnsLimbIndex],
             });
@@ -1778,6 +1790,12 @@ const compactVssShareLinkageProofItemForCredential = (
     }
 
     return {
+        sourceTrusteeIdentity: coefficientSourceRecord.sourceTrusteeIdentity,
+        sourceTrusteeRosterPosition: credential.sourceTrusteeRosterPosition,
+        sourceCoefficientCommitmentRoot:
+            coefficientSourceRecord.sourceCoefficientCommitmentRoot,
+        sourceRecipientShareCommitmentRoot:
+            recipientSourceRecord.sourceRecipientShareCommitmentRoot,
         recipientIdentity: credential.recipientIdentity,
         recipientRosterPosition: credential.recipientRosterPosition,
         sourceRnsLimbIndex: credential.rnsLimbIndex,
@@ -1797,52 +1815,44 @@ const compactVssShareLinkageProofItemForCredential = (
     };
 };
 
-const compactVssSourceBatchProofInput = (
+const compactVssFullBatchCredentials = (
     fixture: FullShareLinkageBatchDerivedFixture,
-    sourceTrusteeRosterPosition: number,
-): CompactVssSourceBatchProofInput => {
-    const sourceStatement =
-        fixture.shareLinkageStatement.sourceStatementRecords[
-            sourceTrusteeRosterPosition
-        ];
-    const sourceState =
-        fixture.sourceTrusteeOpeningStates[sourceTrusteeRosterPosition];
-    if (sourceStatement === undefined || sourceState === undefined) {
-        throw new Error(
-            'compact share-linkage source-batch fixture is missing a source statement.',
-        );
-    }
-    const credentials = Array.from(
+): readonly CompactVssRecipientShareOpeningCredential[] =>
+    Array.from(
         { length: firstProfileParticipantCount },
-        (_unusedRecipient, recipientRosterPosition) =>
+        (_unusedSource, sourceTrusteeRosterPosition) =>
             Array.from(
-                { length: targetRnsLimbCount },
-                (_unusedLimb, sourceRnsLimbIndex) =>
-                    compactVssShareLinkageCredentialForItem(
-                        fixture,
-                        sourceTrusteeRosterPosition,
-                        recipientRosterPosition,
-                        sourceRnsLimbIndex,
+                { length: firstProfileParticipantCount },
+                (_unusedRecipient, recipientRosterPosition) =>
+                    Array.from(
+                        { length: targetRnsLimbCount },
+                        (_unusedLimb, sourceRnsLimbIndex) =>
+                            compactVssShareLinkageCredentialForItem(
+                                fixture,
+                                sourceTrusteeRosterPosition,
+                                recipientRosterPosition,
+                                sourceRnsLimbIndex,
+                            ),
                     ),
             ),
-    ).flat();
+    ).flat(2);
+
+const compactVssFullBatchProofInput = (
+    fixture: FullShareLinkageBatchDerivedFixture,
+    credentials: readonly CompactVssRecipientShareOpeningCredential[],
+): CompactVssFullBatchProofInput => {
     const proofItems = credentials.map((credential) =>
         compactVssShareLinkageProofItemForCredential(fixture, credential),
     );
     const primaryProofItem = proofItems[0];
     if (primaryProofItem === undefined) {
         throw new Error(
-            'compact share-linkage source-batch fixture has no proof items.',
+            'compact share-linkage mixed-batch fixture has no proof items.',
         );
     }
     const compactVssShareLinkage: CompactVssShareLinkageProofStatement = {
         publicMatrixSeedHash: fixture.publicMatrixSeedHash,
-        sourceTrusteeIdentity: sourceStatement.sourceTrusteeIdentity,
-        sourceTrusteeRosterPosition,
-        sourceCoefficientCommitmentRoot:
-            sourceStatement.sourceCoefficientCommitmentRoot,
-        sourceRecipientShareCommitmentRoot:
-            sourceStatement.sourceRecipientShareCommitmentRoot,
+        shareLinkageStatementRoot: fixture.shareLinkageStatement.statementRoot,
         ...primaryProofItem,
         additionalLinkageItems: proofItems.slice(1),
     };
@@ -1853,6 +1863,7 @@ const compactVssSourceBatchProofInput = (
         proofItem.coefficientOpeningRoots.forEach(
             (coefficientOpeningRoot, shamirCoefficientIndex) => {
                 const key = [
+                    proofItem.sourceTrusteeRosterPosition,
                     proofItem.sourceRnsLimbIndex,
                     shamirCoefficientIndex,
                     coefficientOpeningRoot,
@@ -1861,6 +1872,15 @@ const compactVssSourceBatchProofInput = (
                     return;
                 }
                 seenCoefficientOpenings.add(key);
+                const sourceState =
+                    fixture.sourceTrusteeOpeningStates[
+                        proofItem.sourceTrusteeRosterPosition
+                    ];
+                if (sourceState === undefined) {
+                    throw new Error(
+                        'compact share-linkage mixed-batch fixture is missing source opening state.',
+                    );
+                }
                 const coefficientOpening = sourceState.coefficientOpenings.find(
                     (candidate) =>
                         candidate.rnsLimbIndex ===
@@ -1870,7 +1890,7 @@ const compactVssSourceBatchProofInput = (
                 );
                 if (coefficientOpening === undefined) {
                     throw new Error(
-                        'compact share-linkage source-batch fixture is missing coefficient opening witness material.',
+                        'compact share-linkage mixed-batch fixture is missing coefficient opening witness material.',
                     );
                 }
                 coefficientMessagesByShamirIndex.push([
@@ -1879,7 +1899,8 @@ const compactVssSourceBatchProofInput = (
                 coefficientOpeningRandomnessByShamirIndex.push(
                     fixture
                         .coefficientOpeningRandomness({
-                            trusteeRosterPosition: sourceTrusteeRosterPosition,
+                            trusteeRosterPosition:
+                                proofItem.sourceTrusteeRosterPosition,
                             rnsLimbIndex: proofItem.sourceRnsLimbIndex,
                             shamirCoefficientIndex,
                             ringDegree: restrictedProofRingDegree,
@@ -1902,22 +1923,20 @@ const compactVssSourceBatchProofInput = (
     const primaryCredential = credentials[0];
     if (primaryCredential === undefined) {
         throw new Error(
-            'compact share-linkage source-batch fixture is missing the primary credential.',
+            'compact share-linkage mixed-batch fixture is missing the primary credential.',
         );
     }
 
     return {
         context: {
-            ceremonyId: sourceStatement.ceremonyId,
-            manifestHash: sourceStatement.manifestHash,
-            rosterHash: sourceStatement.rosterHash,
-            trusteeIdentity: sourceStatement.sourceTrusteeIdentity,
-            trusteeRosterPosition: sourceTrusteeRosterPosition,
-            setupEpoch: sourceStatement.setupEpoch,
-            sourceCoefficientCommitmentRoot:
-                sourceStatement.sourceCoefficientCommitmentRoot,
-            sourceRecipientShareCommitmentRoot:
-                sourceStatement.sourceRecipientShareCommitmentRoot,
+            ceremonyId: fixture.shareLinkageStatement.ceremonyId,
+            manifestHash: fixture.shareLinkageStatement.manifestHash,
+            rosterHash: fixture.shareLinkageStatement.rosterHash,
+            trusteeIdentity: 'compact-vss-share-linkage',
+            trusteeRosterPosition: 0,
+            setupEpoch: fixture.shareLinkageStatement.setupEpoch,
+            shareLinkageStatementRoot:
+                fixture.shareLinkageStatement.statementRoot,
         },
         compactVssShareLinkage,
         coefficientMessagesByShamirIndex,
@@ -1931,7 +1950,6 @@ const compactVssSourceBatchProofInput = (
         recipientShareMessagesByItem,
         recipientShareOpeningRandomnessByItem,
         carryWitnessesByItem,
-        sourceStatementRoot: sourceStatement.sourceStatementRoot,
     };
 };
 
@@ -1970,58 +1988,76 @@ const measureFullShareLinkageBatchDerived = (
             'compact linkage statement root differs after verification.',
         );
     }
-    const sourceZeroProofInput = compactVssSourceBatchProofInput(fixture, 0);
-    const sourceZeroProofGeneration = measureSyncOperation(() =>
+    const credentialBatches: CompactVssRecipientShareOpeningCredential[][] = [];
+    const allCredentials = compactVssFullBatchCredentials(fixture);
+    for (
+        let credentialOffset = 0;
+        credentialOffset < allCredentials.length;
+        credentialOffset += compactVssMaximumMixedBatchItemsPerProof
+    ) {
+        credentialBatches.push(
+            allCredentials.slice(
+                credentialOffset,
+                credentialOffset + compactVssMaximumMixedBatchItemsPerProof,
+            ),
+        );
+    }
+    const largestBatchCredentials = credentialBatches[0];
+    if (largestBatchCredentials === undefined) {
+        throw new Error(
+            'compact share-linkage mixed-batch measurement has no credentials.',
+        );
+    }
+    const largestBatchProofInput = compactVssFullBatchProofInput(
+        fixture,
+        largestBatchCredentials,
+    );
+    const largestBatchProofGeneration = measureSyncOperation(() =>
         kernel.generateCompactVssShareLinkageProof({
-            ...sourceZeroProofInput,
+            ...largestBatchProofInput,
             ringDegree: restrictedProofRingDegree,
             proofRandomnessSeedHex: '56'.repeat(64),
             proofRandomnessNonceHex: '78'.repeat(64),
         }),
     );
-    const sourceZeroProofVerification = measureSyncOperation(() =>
+    const largestBatchProofVerification = measureSyncOperation(() =>
         kernel.verifyCompactVssShareLinkageProof({
-            context: sourceZeroProofInput.context,
+            context: largestBatchProofInput.context,
             ringDegree: restrictedProofRingDegree,
-            compactVssShareLinkage: sourceZeroProofInput.compactVssShareLinkage,
-            proofBytesHex: sourceZeroProofGeneration.lastResult.proofBytesHex,
+            compactVssShareLinkage:
+                largestBatchProofInput.compactVssShareLinkage,
+            proofBytesHex: largestBatchProofGeneration.lastResult.proofBytesHex,
         }),
     );
     if (
-        sourceZeroProofGeneration.lastResult.statementHash !==
-        sourceZeroProofVerification.lastResult.statementHash
+        largestBatchProofGeneration.lastResult.statementHash !==
+        largestBatchProofVerification.lastResult.statementHash
     ) {
         throw new Error(
-            'compact linkage source-batch proof statement hashes differ.',
+            'compact linkage mixed-batch proof statement hashes differ.',
         );
     }
     const proofRecordInputs: CompactVssShareLinkageProofRecordInput[] = [
         {
-            sourceStatementRoot: sourceZeroProofInput.sourceStatementRoot,
-            compactVssShareLinkage: sourceZeroProofInput.compactVssShareLinkage,
-            proofBytesHex: sourceZeroProofGeneration.lastResult.proofBytesHex,
+            compactVssShareLinkage:
+                largestBatchProofInput.compactVssShareLinkage,
+            proofBytesHex: largestBatchProofGeneration.lastResult.proofBytesHex,
         },
     ];
-    for (
-        let sourceTrusteeRosterPosition = 1;
-        sourceTrusteeRosterPosition < firstProfileParticipantCount;
-        sourceTrusteeRosterPosition += 1
-    ) {
-        const sourceProofInput = compactVssSourceBatchProofInput(
+    for (const credentialBatch of credentialBatches.slice(1)) {
+        const proofInput = compactVssFullBatchProofInput(
             fixture,
-            sourceTrusteeRosterPosition,
+            credentialBatch,
         );
-        const sourceProofGeneration =
-            kernel.generateCompactVssShareLinkageProof({
-                ...sourceProofInput,
-                ringDegree: restrictedProofRingDegree,
-                proofRandomnessSeedHex: '56'.repeat(64),
-                proofRandomnessNonceHex: '78'.repeat(64),
-            });
+        const proofGeneration = kernel.generateCompactVssShareLinkageProof({
+            ...proofInput,
+            ringDegree: restrictedProofRingDegree,
+            proofRandomnessSeedHex: '56'.repeat(64),
+            proofRandomnessNonceHex: '78'.repeat(64),
+        });
         proofRecordInputs.push({
-            sourceStatementRoot: sourceProofInput.sourceStatementRoot,
-            compactVssShareLinkage: sourceProofInput.compactVssShareLinkage,
-            proofBytesHex: sourceProofGeneration.proofBytesHex,
+            compactVssShareLinkage: proofInput.compactVssShareLinkage,
+            proofBytesHex: proofGeneration.proofBytesHex,
         });
     }
     const proofMaterialSet = createCompactVssShareLinkageProofMaterialSet({
@@ -2060,10 +2096,10 @@ const measureFullShareLinkageBatchDerived = (
             }),
         0,
     );
-    const oneSourceShareLinkageProofByteLength =
-        sourceZeroProofGeneration.lastResult.proofByteLength;
-    const oneSourcePayloadWithBridgeProofBytes =
-        oneSourceShareLinkageProofByteLength + bridgeProofByteLength;
+    const largestShareLinkageProofByteLength =
+        largestBatchProofGeneration.lastResult.proofByteLength;
+    const largestPayloadWithBridgeProofBytes =
+        largestShareLinkageProofByteLength + bridgeProofByteLength;
     const sourceRecipientRecordCount =
         firstProfileParticipantCount *
         firstProfileParticipantCount *
@@ -2078,13 +2114,13 @@ const measureFullShareLinkageBatchDerived = (
         aggregateThresholdRecordCount:
             firstProfileParticipantCount * targetRnsLimbCount,
         ringDegree: restrictedProofRingDegree,
-        oneSourceShareLinkageProofByteLength,
+        largestShareLinkageProofByteLength,
         proofMaterialSetJsonBytes,
         proofMaterialSetRoot: proofMaterialSet.proofMaterialSetRoot,
-        oneSourcePayloadWithBridgeProofBytes,
-        repeatedAllSourceShareLinkageProofBytes:
+        largestPayloadWithBridgeProofBytes,
+        allSourceShareLinkageProofBytes:
             wasmProofMaterialSetVerification.lastResult.totalProofByteLength,
-        repeatedAllSourcePayloadWithBridgeProofBytes:
+        allSourcePayloadWithBridgeProofBytes:
             wasmProofMaterialSetVerification.lastResult.totalProofByteLength +
             bridgeProofByteLength,
         coefficientCommitmentCount:
@@ -2094,14 +2130,15 @@ const measureFullShareLinkageBatchDerived = (
                 0,
             ),
         coefficientWitnessColumnCount:
-            sourceZeroProofGeneration.lastResult.coefficientWitnessColumnCount,
+            largestBatchProofGeneration.lastResult
+                .coefficientWitnessColumnCount,
         recipientShareOpeningCredentialCount:
             fixture.recipientShareOpeningCredentialCount,
         verification: {
             recipientShareCommitments,
             shareLinkageStatement,
-            sourceProofGeneration: sourceZeroProofGeneration,
-            sourceProofVerification: sourceZeroProofVerification,
+            largestBatchProofGeneration,
+            largestBatchProofVerification,
             proofMaterialSet: proofMaterialSetVerification,
             wasmProofMaterialSet: wasmProofMaterialSetVerification,
         },
@@ -2123,16 +2160,16 @@ const fullShareLinkageBatchReport = (
         aggregateThresholdRecordCount:
             measurement.aggregateThresholdRecordCount,
         ringDegree: measurement.ringDegree,
-        oneSourceShareLinkageProofByteLength:
-            measurement.oneSourceShareLinkageProofByteLength,
+        largestShareLinkageProofByteLength:
+            measurement.largestShareLinkageProofByteLength,
         proofMaterialSetJsonBytes: measurement.proofMaterialSetJsonBytes,
         proofMaterialSetRoot: measurement.proofMaterialSetRoot,
-        oneSourcePayloadWithBridgeProofBytes:
-            measurement.oneSourcePayloadWithBridgeProofBytes,
-        repeatedAllSourceShareLinkageProofBytes:
-            measurement.repeatedAllSourceShareLinkageProofBytes,
-        repeatedAllSourcePayloadWithBridgeProofBytes:
-            measurement.repeatedAllSourcePayloadWithBridgeProofBytes,
+        largestPayloadWithBridgeProofBytes:
+            measurement.largestPayloadWithBridgeProofBytes,
+        allSourceShareLinkageProofBytes:
+            measurement.allSourceShareLinkageProofBytes,
+        allSourcePayloadWithBridgeProofBytes:
+            measurement.allSourcePayloadWithBridgeProofBytes,
         coefficientCommitmentCount: measurement.coefficientCommitmentCount,
         coefficientWitnessColumnCount:
             measurement.coefficientWitnessColumnCount,
@@ -2146,10 +2183,10 @@ const fullShareLinkageBatchReport = (
                 measurement.verification.recipientShareCommitments.samples,
             shareLinkageStatement:
                 measurement.verification.shareLinkageStatement.samples,
-            sourceProofGeneration:
-                measurement.verification.sourceProofGeneration.samples,
-            sourceProofVerification:
-                measurement.verification.sourceProofVerification.samples,
+            largestBatchProofGeneration:
+                measurement.verification.largestBatchProofGeneration.samples,
+            largestBatchProofVerification:
+                measurement.verification.largestBatchProofVerification.samples,
             proofMaterialSet: measurement.verification.proofMaterialSet.samples,
             wasmProofMaterialSet:
                 measurement.verification.wasmProofMaterialSet.samples,
@@ -2705,10 +2742,8 @@ const targetProofLimbLayout = (
 
             return (
                 totalColumns +
-                compactVssMessageEncodingLayoutForBound(
-                    messageBound,
-                    'digit-columns-only',
-                ).encodingColumnCount
+                compactVssMessageEncodingLayoutForBound(messageBound)
+                    .encodingColumnCount
             );
         },
         0,
@@ -4059,6 +4094,70 @@ const implementedDevelopmentArtifactByteAccounting = (
     };
 };
 
+const naiveFullSupportReplacementWorkModel = (input: {
+    readonly measurement: ReturnType<typeof compactVssCommitmentMeasurement>;
+    readonly wasmWarmGenerationExtrapolatedSeconds: number;
+    readonly wasmWarmVerificationExtrapolatedSeconds: number;
+}): Readonly<Record<string, unknown>> => {
+    const inputColumnCount =
+        compactVssMessageDigitCount + compactVssCommitmentRandomnessColumnCount;
+    const denseResidueMultiplyAddsPerCommitment =
+        input.measurement.commitmentModulusLimbCount *
+        input.measurement.outputCoordinateCount *
+        input.measurement.ringDegree *
+        inputColumnCount;
+    const perCommitmentMultiplyAddFactor =
+        denseResidueMultiplyAddsPerCommitment /
+        input.measurement.cpuWorkModel.residueMultiplyAddsPerCommitment;
+    const denseTotalResidueMultiplyAdds =
+        denseResidueMultiplyAddsPerCommitment *
+        input.measurement.cpuWorkModel.totalCommitments;
+    const denseTotalResidueArithmeticOperations =
+        denseTotalResidueMultiplyAdds +
+        input.measurement.cpuWorkModel.aggregatePublicSumResidueAdditions;
+    const totalResidueArithmeticFactor =
+        denseTotalResidueArithmeticOperations /
+        input.measurement.cpuWorkModel.totalResidueArithmeticOperations;
+    const warmGenerationExtrapolatedSeconds =
+        input.wasmWarmGenerationExtrapolatedSeconds *
+        perCommitmentMultiplyAddFactor;
+    const warmVerificationExtrapolatedSeconds =
+        input.wasmWarmVerificationExtrapolatedSeconds *
+        perCommitmentMultiplyAddFactor;
+
+    return {
+        candidate: 'naive dense full-support linear relation',
+        decision:
+            'rejected because it covers every ring coefficient in every input column with full-ring support, which exceeds the existing warm WASM compact-primitive time guard by the static work model.',
+        inputColumnCount,
+        currentMessageCoverageTermsPerCoordinate:
+            input.measurement.messageCoverageTermsPerCoordinate,
+        currentRandomnessProjectionWeight:
+            input.measurement.randomnessProjectionWeight,
+        candidateProjectionWeight: input.measurement.ringDegree,
+        currentResidueMultiplyAddsPerCommitment:
+            input.measurement.cpuWorkModel.residueMultiplyAddsPerCommitment,
+        candidateResidueMultiplyAddsPerCommitment:
+            denseResidueMultiplyAddsPerCommitment,
+        perCommitmentMultiplyAddFactor,
+        currentTotalResidueArithmeticOperations:
+            input.measurement.cpuWorkModel.totalResidueArithmeticOperations,
+        candidateTotalResidueArithmeticOperations:
+            denseTotalResidueArithmeticOperations,
+        totalResidueArithmeticFactor,
+        currentWarmGenerationExtrapolatedSeconds:
+            input.wasmWarmGenerationExtrapolatedSeconds,
+        currentWarmVerificationExtrapolatedSeconds:
+            input.wasmWarmVerificationExtrapolatedSeconds,
+        candidateWarmGenerationExtrapolatedSeconds:
+            warmGenerationExtrapolatedSeconds,
+        candidateWarmVerificationExtrapolatedSeconds:
+            warmVerificationExtrapolatedSeconds,
+        maximumWarmWasmFullProfileGenerationSeconds,
+        maximumWarmWasmFullProfileVerificationSeconds,
+    };
+};
+
 const enforceManualMeasurementBudgets = (input: {
     readonly measurement: ReturnType<typeof compactVssCommitmentMeasurement>;
     readonly compactShareLinkagePublicVerification: CompactShareLinkagePublicVerificationMeasurement;
@@ -4174,15 +4273,15 @@ const enforceManualMeasurementBudgets = (input: {
     ) {
         assertAtMost(
             input.fullShareLinkageBatchMeasurement
-                .oneSourcePayloadWithBridgeProofBytes,
+                .largestPayloadWithBridgeProofBytes,
             maximumRestrictedProofPayloadBytes,
-            'one-source compact linkage source-batch plus bridge proof payload',
+            'largest compact linkage mixed-batch plus bridge proof payload',
         );
         assertAtMost(
             input.fullShareLinkageBatchMeasurement
-                .repeatedAllSourcePayloadWithBridgeProofBytes,
+                .allSourcePayloadWithBridgeProofBytes,
             input.measurement.budgetComparison.publicSetupDownloadBudgetBytes,
-            'repeated all-source compact linkage source-batch plus bridge proof payload',
+            'all-source compact linkage mixed-batch plus bridge proof payload',
         );
     }
     if (
@@ -4259,6 +4358,18 @@ const main = async (): Promise<void> => {
 
                 return coefficient;
             },
+        ),
+        messageDigitColumns: opening.messageDigitColumns.map(
+            (column, digitIndex) =>
+                column.map((digit, coefficientIndex) => {
+                    if (typeof digit === 'bigint') {
+                        throw new Error(
+                            `WASM compact VSS measurement opening digit ${String(digitIndex)}.${String(coefficientIndex)} exceeds the bridge number representation.`,
+                        );
+                    }
+
+                    return digit;
+                }),
         ),
     } satisfies BgvCompactVssCommitmentOpeningInput;
     const wasmMeasurement = measureWasmPath(kernel, wasmOpening, metadata);
@@ -4474,6 +4585,13 @@ const main = async (): Promise<void> => {
                 currentFullCoefficientTransportBytes:
                     measurement.currentFullCoefficientTransportBytes,
                 cpuWorkModel: measurement.cpuWorkModel,
+                rejectedReplacementCandidateWorkModels: [
+                    naiveFullSupportReplacementWorkModel({
+                        measurement,
+                        wasmWarmGenerationExtrapolatedSeconds,
+                        wasmWarmVerificationExtrapolatedSeconds,
+                    }),
+                ],
                 implementedDevelopmentArtifactByteAccounting:
                     implementedDevelopmentArtifactByteAccounting(
                         measurement,

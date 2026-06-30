@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
 pub(crate) const COMPACT_VSS_COMMITMENT_PROFILE_ID: &str =
-    "sealed-lattice-compact-vss-sparse-linear-v1";
+    "sealed-lattice-compact-vss-development-covered-linear-v1";
 pub(super) const COMPACT_VSS_COMMITMENT_BINARY_FORMAT: &str =
     "sealed-lattice-compact-vss-commitment-binary-v1";
 pub(crate) const COMPACT_VSS_OUTPUT_COORDINATE_COUNT: usize = 16;
@@ -11,14 +11,14 @@ pub(crate) const COMPACT_VSS_MESSAGE_DIGIT_COUNT: usize = 2;
 pub(crate) const COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT: usize = 17;
 pub(crate) const COMPACT_VSS_MESSAGE_DIGIT_BASE: u64 = 129_140_163;
 pub(crate) const COMPACT_VSS_RANDOMNESS_COLUMN_COUNT: usize = 2;
-pub(in crate::bgv::setup) const COMPACT_VSS_PROJECTION_WEIGHT: usize = 32;
+pub(in crate::bgv::setup) const COMPACT_VSS_RANDOMNESS_PROJECTION_WEIGHT: usize = 32;
 const COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES: [usize; 3] = [0, 1, 2];
 const COMPACT_VSS_MATRIX_RESIDUE_HASH_DOMAIN: &str =
     "sealed-lattice-compact-vss-commitment/matrix-residue-v1";
 const COMPACT_VSS_PROJECTION_INDEX_HASH_DOMAIN: &str =
     "sealed-lattice-compact-vss-commitment/projection-index-v1";
 const COMPACT_VSS_OPENING_PAYLOAD_HASH_DOMAIN: &str =
-    "sealed-lattice-compact-vss-commitment/opening-payload-v1";
+    "sealed-lattice-compact-vss-commitment/opening-payload-v2";
 const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_RELATION: &str = "recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments";
 const COMPACT_VSS_SHARE_LINKAGE_PROOF_BATCHING_RULE: &str = "one public share-linkage statement record is bound per source trustee, batching every recipient and target-basis limb for that source";
 const COMPACT_VSS_SHARE_LINKAGE_SHAMIR_EVALUATION_RULE: &str = "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point";
@@ -26,51 +26,18 @@ const COMPACT_VSS_SHARE_LINKAGE_AGGREGATE_THRESHOLD_RULE: &str = "aggregate thre
 const COMPACT_VSS_SHARE_LINKAGE_COMMON_KEY_RULE: &str = "coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::bgv::setup) enum CompactVssMessageRangeEvidence {
-    DigitAndTritColumns,
-    DigitColumnsOnly,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::setup) struct CompactVssMessageEncodingLayout {
     high_digit_trit_count: usize,
-    range_evidence: CompactVssMessageRangeEvidence,
 }
 
 impl CompactVssMessageEncodingLayout {
-    pub(in crate::bgv::setup) fn with_digit_columns_only(self) -> Self {
-        Self {
-            high_digit_trit_count: self.high_digit_trit_count,
-            range_evidence: CompactVssMessageRangeEvidence::DigitColumnsOnly,
-        }
-    }
-
-    pub(in crate::bgv::setup) fn has_digit_decoder_relations(self) -> bool {
-        self.total_trit_count() > 0
-    }
-
     pub(in crate::bgv::setup) fn digit_trit_count(
         self,
         digit_index: usize,
     ) -> CanonicalResult<usize> {
-        if self.range_evidence == CompactVssMessageRangeEvidence::DigitColumnsOnly {
-            return if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-                Ok(0)
-            } else {
-                Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "compact VSS message digit index is outside the selected profile",
-                ))
-            };
-        }
         match digit_index {
             0 => Ok(COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT),
-            1 => match self.range_evidence {
-                CompactVssMessageRangeEvidence::DigitAndTritColumns => {
-                    Ok(self.high_digit_trit_count)
-                }
-                CompactVssMessageRangeEvidence::DigitColumnsOnly => unreachable!(),
-            },
+            1 => Ok(self.high_digit_trit_count),
             _ => Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "compact VSS message digit index is outside the selected profile",
@@ -79,12 +46,7 @@ impl CompactVssMessageEncodingLayout {
     }
 
     pub(in crate::bgv::setup) fn total_trit_count(self) -> usize {
-        match self.range_evidence {
-            CompactVssMessageRangeEvidence::DigitAndTritColumns => {
-                COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT + self.high_digit_trit_count
-            }
-            CompactVssMessageRangeEvidence::DigitColumnsOnly => 0,
-        }
+        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT + self.high_digit_trit_count
     }
 
     pub(in crate::bgv::setup) fn encoding_column_count(self) -> usize {
@@ -95,16 +57,6 @@ impl CompactVssMessageEncodingLayout {
         self,
         digit_index: usize,
     ) -> CanonicalResult<usize> {
-        if self.range_evidence == CompactVssMessageRangeEvidence::DigitColumnsOnly {
-            return if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-                Ok(digit_index)
-            } else {
-                Err(CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    "compact VSS message digit index is outside the selected profile",
-                ))
-            };
-        }
         if digit_index < COMPACT_VSS_MESSAGE_DIGIT_COUNT {
             Ok(digit_index)
         } else {
@@ -151,6 +103,7 @@ pub(crate) struct CompactVssCommitmentOpeningInput<'a> {
     pub(crate) rns_prime: u64,
     pub(crate) ring_degree: usize,
     pub(crate) message_coefficients: &'a [u64],
+    pub(crate) message_digit_columns: &'a [Vec<u64>],
     pub(crate) message_coefficient_bound: u64,
     pub(crate) randomness_by_column: &'a [Vec<i64>],
 }
@@ -184,7 +137,6 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
             "compact VSS message coefficient count must match ringDegree",
         ));
     }
-    let mut message_digits_by_coefficient = Vec::with_capacity(input.message_coefficients.len());
     for (coefficient_index, coefficient) in input.message_coefficients.iter().enumerate() {
         if *coefficient >= input.message_coefficient_bound {
             return Err(CanonicalError::new(
@@ -194,8 +146,13 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
                 ),
             ));
         }
-        message_digits_by_coefficient.push(compact_vss_message_digits(*coefficient)?);
     }
+    let message_digit_columns = compact_vss_message_digit_columns_for_opening(
+        input.message_coefficients,
+        input.message_digit_columns,
+        input.message_coefficient_bound,
+        input.ring_degree,
+    )?;
     validate_compact_vss_randomness_columns(
         input.randomness_by_column,
         input.ring_degree,
@@ -225,8 +182,7 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
                         commitment_modulus_index: *commitment_modulus_index,
                         output_coordinate_index,
                         modulus,
-                        message_coefficients: input.message_coefficients,
-                        message_digits_by_coefficient: &message_digits_by_coefficient,
+                        message_digit_columns: &message_digit_columns,
                         randomness_by_column: input.randomness_by_column,
                     })
                 })
@@ -268,6 +224,7 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
             "ringDegree": input.ring_degree,
             "openingPayloadHash512": compact_vss_opening_payload_hash(
                 input.message_coefficients,
+                &message_digit_columns,
                 input.randomness_by_column,
             )?,
         }),
@@ -713,6 +670,11 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
     let commitment_profile_hash = hash_at_path(statement, &["commitmentProfileHash"])?;
     let public_matrix_seed_hash = hash_at_path(statement, &["publicMatrixSeedHash"])?;
     let target_basis_hash = hash_at_path(statement, &["targetBasisHash"])?;
+    let ring_degree = read_positive_usize_at_path(
+        statement,
+        &["ringDegree"],
+        "compact VSS share linkage statement ringDegree",
+    )?;
     let coefficient_commitment_root = hash_at_path(statement, &["coefficientCommitmentRoot"])?;
     let recipient_share_commitment_root =
         hash_at_path(statement, &["recipientShareCommitmentRoot"])?;
@@ -784,6 +746,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
                     setup_epoch,
                     public_matrix_seed_hash,
                     target_basis_hash,
+                    ring_degree,
                     participant_count,
                     target_rns_limb_count,
                     threshold_degree,
@@ -809,6 +772,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
         "setupEpoch": setup_epoch,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "targetBasisHash": target_basis_hash,
+        "ringDegree": ring_degree,
         "participantCount": participant_count,
         "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": threshold_degree,
@@ -843,6 +807,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
             setup_epoch,
             public_matrix_seed_hash,
             target_basis_hash,
+            ring_degree,
             participant_count,
             target_rns_limb_count,
             threshold_degree,
@@ -860,6 +825,7 @@ pub(crate) fn verify_compact_vss_share_linkage_statement_request(
         "statementRoot": statement_root,
         "publicMatrixSeedHash": public_matrix_seed_hash,
         "targetBasisHash": target_basis_hash,
+        "ringDegree": ring_degree,
         "participantCount": participant_count,
         "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": threshold_degree,
@@ -884,6 +850,7 @@ struct CompactVssShareLinkageStatementBinding<'a> {
     setup_epoch: &'a str,
     public_matrix_seed_hash: &'a str,
     target_basis_hash: &'a str,
+    ring_degree: usize,
     participant_count: usize,
     target_rns_limb_count: usize,
     threshold_degree: usize,
@@ -982,6 +949,11 @@ fn verify_compact_vss_share_linkage_evidence_sets(
             &format!("compact VSS share linkage evidence {description} participantCount"),
         )?;
         compare_required_u64(
+            unsigned_at_path(verification, &["ringDegree"])?,
+            input.statement.ring_degree as u64,
+            &format!("compact VSS share linkage evidence {description} ringDegree"),
+        )?;
+        compare_required_u64(
             unsigned_at_path(verification, &["rnsLimbCount"])?,
             input.statement.target_rns_limb_count as u64,
             &format!("compact VSS share linkage evidence {description} rnsLimbCount"),
@@ -996,6 +968,11 @@ fn verify_compact_vss_share_linkage_evidence_sets(
         unsigned_at_path(&coefficient_verification, &["participantCount"])?,
         input.statement.participant_count as u64,
         "compact VSS share linkage evidence coefficient participantCount",
+    )?;
+    compare_required_u64(
+        unsigned_at_path(&coefficient_verification, &["ringDegree"])?,
+        input.statement.ring_degree as u64,
+        "compact VSS share linkage evidence coefficient ringDegree",
     )?;
     let coefficient_rns_limb_count = usize_at_path(&coefficient_verification, &["rnsLimbCount"])?;
     if coefficient_rns_limb_count < input.statement.target_rns_limb_count {
@@ -1406,6 +1383,11 @@ fn verify_compact_vss_share_linkage_source_statement(
         "compact VSS share linkage source statement participantCount",
     )?;
     compare_required_u64(
+        unsigned_at_path(input.source_statement_record, &["ringDegree"])?,
+        input.statement.ring_degree as u64,
+        "compact VSS share linkage source statement ringDegree",
+    )?;
+    compare_required_u64(
         unsigned_at_path(input.source_statement_record, &["targetRnsLimbCount"])?,
         input.statement.target_rns_limb_count as u64,
         "compact VSS share linkage source statement targetRnsLimbCount",
@@ -1565,6 +1547,7 @@ fn verify_compact_vss_share_linkage_source_statement(
         "targetBasisHash": input.statement.target_basis_hash,
         "sourceTrusteeIdentity": source_trustee_identity,
         "sourceTrusteeRosterPosition": input.expected_source_position,
+        "ringDegree": input.statement.ring_degree,
         "participantCount": input.statement.participant_count,
         "targetRnsLimbCount": input.statement.target_rns_limb_count,
         "thresholdDegree": input.statement.threshold_degree,
@@ -2415,6 +2398,8 @@ fn compute_compact_vss_commitment_from_opening_value(
         ring_degree,
         message_coefficient_bound,
     )?;
+    let message_digit_columns =
+        read_compact_vss_message_digit_columns(opening, "messageDigitColumns", ring_degree)?;
     let randomness_by_column =
         read_compact_vss_randomness_by_column(opening, "randomnessByColumn", ring_degree, None)?;
 
@@ -2426,6 +2411,7 @@ fn compute_compact_vss_commitment_from_opening_value(
         rns_prime,
         ring_degree,
         message_coefficients: &message_coefficients,
+        message_digit_columns: &message_digit_columns,
         message_coefficient_bound,
         randomness_by_column: &randomness_by_column,
     })
@@ -2494,6 +2480,128 @@ fn read_compact_vss_message_coefficients(
             Ok(value)
         })
         .collect()
+}
+
+fn read_compact_vss_message_digit_columns(
+    value: &Value,
+    field_name: &str,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    let columns_value = value.get(field_name).ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{field_name} must be an array"),
+        )
+    })?;
+    let columns = columns_value.as_array().ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{field_name} must be an array"),
+        )
+    })?;
+    if columns.len() != COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            format!("{field_name} must contain the selected message digit count"),
+        ));
+    }
+
+    columns
+        .iter()
+        .enumerate()
+        .map(|(digit_index, column)| {
+            let values = column.as_array().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!("{field_name}.{digit_index} must be an array"),
+                )
+            })?;
+            if values.len() != ring_degree {
+                return Err(CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    format!("{field_name}.{digit_index} length must match ringDegree"),
+                ));
+            }
+
+            values
+                .iter()
+                .enumerate()
+                .map(|(coefficient_index, value)| {
+                    value.as_u64().ok_or_else(|| {
+                        CanonicalError::new(
+                            CanonicalErrorCode::InvalidFixture,
+                            format!(
+                                "{field_name}.{digit_index}.{coefficient_index} must be a non-negative integer"
+                            ),
+                        )
+                    })
+                })
+                .collect()
+        })
+        .collect::<CanonicalResult<Vec<_>>>()
+}
+
+fn compact_vss_message_digit_columns_for_opening(
+    message_coefficients: &[u64],
+    message_digit_columns: &[Vec<u64>],
+    message_coefficient_bound: u64,
+    ring_degree: usize,
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    if message_digit_columns.len() != COMPACT_VSS_MESSAGE_DIGIT_COUNT {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact VSS messageDigitColumns must contain the selected message digit count",
+        ));
+    }
+    for (digit_index, column) in message_digit_columns.iter().enumerate() {
+        if column.len() != ring_degree {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                format!(
+                    "compact VSS messageDigitColumns.{digit_index} length must match ringDegree"
+                ),
+            ));
+        }
+    }
+    let columns = message_digit_columns.to_vec();
+
+    let digit_weights = (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT)
+        .map(|digit_index| {
+            u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
+                .checked_pow(digit_index as u32)
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact VSS message digit weight overflowed",
+                    )
+                })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    for (coefficient_index, expected_coefficient) in message_coefficients.iter().enumerate() {
+        let mut decoded = 0_u128;
+        for (digit_index, column) in columns.iter().enumerate() {
+            decoded = decoded
+                .checked_add(u128::from(column[coefficient_index]) * digit_weights[digit_index])
+                .ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::MalformedLength,
+                        "compact VSS message digit column decoding overflowed",
+                    )
+                })?;
+        }
+        if decoded != u128::from(*expected_coefficient)
+            || decoded >= u128::from(message_coefficient_bound)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "compact VSS message digit columns do not decode to messageCoefficients.{coefficient_index}"
+                ),
+            ));
+        }
+    }
+
+    Ok(columns)
 }
 
 fn validate_compact_vss_commitment_role(commitment_role: &str) -> CanonicalResult<()> {
@@ -2591,8 +2699,7 @@ struct CompactCommitmentCoordinateInput<'a> {
     commitment_modulus_index: usize,
     output_coordinate_index: usize,
     modulus: u64,
-    message_coefficients: &'a [u64],
-    message_digits_by_coefficient: &'a [[u64; COMPACT_VSS_MESSAGE_DIGIT_COUNT]],
+    message_digit_columns: &'a [Vec<u64>],
     randomness_by_column: &'a [Vec<i64>],
 }
 
@@ -2600,6 +2707,7 @@ fn compact_commitment_coordinate(
     input: CompactCommitmentCoordinateInput<'_>,
 ) -> CanonicalResult<u64> {
     let mut accumulator = 0_u128;
+    let ring_degree = input.message_digit_columns[0].len();
     for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
         let input_column = compact_vss_message_digit_column_label_str(digit_index)?;
         let projection_terms = cached_compact_projection_terms(CompactProjectionTermsInput {
@@ -2608,14 +2716,13 @@ fn compact_commitment_coordinate(
             commitment_modulus_index: input.commitment_modulus_index,
             output_coordinate_index: input.output_coordinate_index,
             input_column,
-            ring_degree: input.message_coefficients.len(),
+            ring_degree,
             modulus: input.modulus,
         })?;
         for &(ring_coefficient_index, matrix_residue) in projection_terms.iter() {
             accumulator = add_product_mod(
                 accumulator,
-                input.message_digits_by_coefficient[ring_coefficient_index][digit_index]
-                    % input.modulus,
+                input.message_digit_columns[digit_index][ring_coefficient_index] % input.modulus,
                 matrix_residue,
                 input.modulus,
             );
@@ -2662,6 +2769,74 @@ fn compact_vss_message_digit_column_label_str(digit_index: usize) -> CanonicalRe
             "compact VSS message digit index is outside the selected profile",
         )),
     }
+}
+
+fn is_compact_vss_message_digit_column_label(input_column: &str) -> bool {
+    (0..COMPACT_VSS_MESSAGE_DIGIT_COUNT).any(|digit_index| {
+        compact_vss_message_digit_column_label_str(digit_index)
+            .map(|message_column| message_column == input_column)
+            .unwrap_or(false)
+    })
+}
+
+pub(in crate::bgv::setup) fn compact_vss_coordinate_count_per_commitment() -> usize {
+    COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES.len() * COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+}
+
+pub(in crate::bgv::setup) fn compact_vss_message_coverage_terms_per_coordinate(
+    ring_degree: usize,
+) -> CanonicalResult<usize> {
+    let coordinate_count = compact_vss_coordinate_count_per_commitment();
+    ring_degree
+        .checked_add(coordinate_count - 1)
+        .map(|adjusted| adjusted / coordinate_count)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS message coverage term count overflowed",
+            )
+        })
+}
+
+fn compact_vss_commitment_modulus_position(
+    commitment_modulus_index: usize,
+) -> CanonicalResult<usize> {
+    COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .position(|candidate_index| *candidate_index == commitment_modulus_index)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "compact VSS commitment modulus index is outside the selected profile",
+            )
+        })
+}
+
+fn compact_vss_covered_message_ring_coefficient_index(
+    commitment_modulus_index: usize,
+    output_coordinate_index: usize,
+    coverage_term_index: usize,
+) -> CanonicalResult<usize> {
+    let commitment_modulus_position =
+        compact_vss_commitment_modulus_position(commitment_modulus_index)?;
+    let coordinate_index = commitment_modulus_position
+        .checked_mul(COMPACT_VSS_OUTPUT_COORDINATE_COUNT)
+        .and_then(|value| value.checked_add(output_coordinate_index))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS message coverage coordinate index overflowed",
+            )
+        })?;
+    coverage_term_index
+        .checked_mul(compact_vss_coordinate_count_per_commitment())
+        .and_then(|value| value.checked_add(coordinate_index))
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS message coverage coefficient index overflowed",
+            )
+        })
 }
 
 fn compact_vss_randomness_column_label(column_index: usize) -> CanonicalResult<&'static str> {
@@ -2725,6 +2900,30 @@ pub(in crate::bgv::setup) fn compact_vss_message_digits(
     }
 
     Ok(digits)
+}
+
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) fn compact_vss_canonical_message_digit_columns(
+    message_coefficients: &[u64],
+    ring_degree: usize,
+) -> CanonicalResult<Vec<Vec<u64>>> {
+    if message_coefficients.len() != ring_degree {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact VSS message coefficient count must match ringDegree",
+        ));
+    }
+    let mut columns = vec![vec![0_u64; ring_degree]; COMPACT_VSS_MESSAGE_DIGIT_COUNT];
+    for (coefficient_index, coefficient) in message_coefficients.iter().enumerate() {
+        for (digit_index, digit) in compact_vss_message_digits(*coefficient)?
+            .into_iter()
+            .enumerate()
+        {
+            columns[digit_index][coefficient_index] = digit;
+        }
+    }
+
+    Ok(columns)
 }
 
 pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
@@ -2799,7 +2998,6 @@ pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
     let high_digit_trit_count = compact_vss_trit_count_for_bound(high_digit_bound)?;
     Ok(CompactVssMessageEncodingLayout {
         high_digit_trit_count,
-        range_evidence: CompactVssMessageRangeEvidence::DigitAndTritColumns,
     })
 }
 
@@ -2931,18 +3129,35 @@ fn cached_compact_projection_terms(
         return Ok(cached_terms);
     }
 
-    let mut terms = Vec::with_capacity(COMPACT_VSS_PROJECTION_WEIGHT);
-    for projection_term_index in 0..COMPACT_VSS_PROJECTION_WEIGHT {
+    let term_count = if is_compact_vss_message_digit_column_label(input.input_column) {
+        compact_vss_message_coverage_terms_per_coordinate(input.ring_degree)?
+    } else {
+        COMPACT_VSS_RANDOMNESS_PROJECTION_WEIGHT
+    };
+    let mut terms = Vec::with_capacity(term_count);
+    for projection_term_index in 0..term_count {
         let ring_coefficient_index =
-            sample_compact_projection_index(SampleCompactProjectionInput {
-                public_matrix_seed_hash: input.public_matrix_seed_hash,
-                rns_limb_index: input.rns_limb_index,
-                commitment_modulus_index: input.commitment_modulus_index,
-                output_coordinate_index: input.output_coordinate_index,
-                input_column: input.input_column,
-                projection_term_index,
-                ring_degree: input.ring_degree,
-            })?;
+            if is_compact_vss_message_digit_column_label(input.input_column) {
+                let scheduled_index = compact_vss_covered_message_ring_coefficient_index(
+                    input.commitment_modulus_index,
+                    input.output_coordinate_index,
+                    projection_term_index,
+                )?;
+                if scheduled_index >= input.ring_degree {
+                    continue;
+                }
+                scheduled_index
+            } else {
+                sample_compact_projection_index(SampleCompactProjectionInput {
+                    public_matrix_seed_hash: input.public_matrix_seed_hash,
+                    rns_limb_index: input.rns_limb_index,
+                    commitment_modulus_index: input.commitment_modulus_index,
+                    output_coordinate_index: input.output_coordinate_index,
+                    input_column: input.input_column,
+                    projection_term_index,
+                    ring_degree: input.ring_degree,
+                })?
+            };
         let matrix_residue = sample_compact_matrix_residue(SampleCompactMatrixInput {
             public_matrix_seed_hash: input.public_matrix_seed_hash,
             rns_limb_index: input.rns_limb_index,
@@ -3170,10 +3385,18 @@ fn signed_integer_to_residue(value: i64, modulus: u64) -> u64 {
 
 fn compact_vss_opening_payload_hash(
     message_coefficients: &[u64],
+    message_digit_columns: &[Vec<u64>],
     randomness_by_column: &[Vec<i64>],
 ) -> CanonicalResult<String> {
-    let word_count = 2_usize
+    let word_count = 3_usize
         .checked_add(message_coefficients.len())
+        .and_then(|count| {
+            message_digit_columns
+                .iter()
+                .try_fold(count, |total, column| {
+                    total.checked_add(1)?.checked_add(column.len())
+                })
+        })
         .and_then(|count| {
             randomness_by_column
                 .iter()
@@ -3191,6 +3414,13 @@ fn compact_vss_opening_payload_hash(
     bytes.extend((message_coefficients.len() as u64).to_le_bytes());
     for coefficient in message_coefficients {
         bytes.extend(coefficient.to_le_bytes());
+    }
+    bytes.extend((message_digit_columns.len() as u64).to_le_bytes());
+    for column in message_digit_columns {
+        bytes.extend((column.len() as u64).to_le_bytes());
+        for digit in column {
+            bytes.extend(digit.to_le_bytes());
+        }
     }
     bytes.extend((randomness_by_column.len() as u64).to_le_bytes());
     for column in randomness_by_column {
@@ -3219,11 +3449,10 @@ pub(in crate::bgv::setup) mod tests {
     use serde_json::json;
 
     use super::{
-        COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES,
-        COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactProjectionTermsInput,
-        CompactVssCommitmentComputation, CompactVssCommitmentOpeningInput,
-        compact_projection_terms, compact_vss_message_digit_column_label_str,
+        COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        COMPACT_VSS_MESSAGE_DIGIT_BASE, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
+        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentComputation,
+        CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
         compute_compact_vss_commitment_from_opening,
         compute_compact_vss_commitment_from_opening_request,
         decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
@@ -3233,10 +3462,7 @@ pub(in crate::bgv::setup) mod tests {
         verify_compact_vss_recipient_share_commitment_set_request,
         verify_compact_vss_share_linkage_statement_request,
     };
-    use crate::{
-        bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
-        encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    };
+    use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
 
     #[test]
     fn compact_commitment_command_verifies_and_rejects_tampering() -> CanonicalResult<()> {
@@ -3292,91 +3518,54 @@ pub(in crate::bgv::setup) mod tests {
             "wrong compact randomness shape must reject"
         );
 
+        let mut missing_digit_columns = compact_opening_request();
+        missing_digit_columns
+            .as_object_mut()
+            .expect("compact opening request")
+            .remove("messageDigitColumns");
+        assert!(
+            compute_compact_vss_commitment_from_opening_request(&missing_digit_columns).is_err(),
+            "compact opening command must require message digit columns"
+        );
+
         Ok(())
     }
 
     #[test]
-    fn compact_sparse_projection_accepts_two_opening_roots_for_unprojected_message_coefficient()
-    -> CanonicalResult<()> {
-        let public_matrix_seed_hash = compact_test_public_matrix_seed_hash();
-        let input_column = compact_vss_message_digit_column_label_str(0)?;
-        let mut projected_coefficient_positions = vec![false; POLYNOMIAL_DEGREE];
+    fn compact_commitment_opening_root_binds_explicit_message_digit_columns() -> CanonicalResult<()>
+    {
+        let carried_message = COMPACT_VSS_MESSAGE_DIGIT_BASE + 7;
+        let mut request = compact_opening_request();
+        request["messageCoefficientBound"] = json!(COMPACT_VSS_MESSAGE_DIGIT_BASE * 2);
+        request["messageCoefficients"][2] = json!(carried_message);
+        request["messageDigitColumns"] = json!([
+            [1_u64, 2, carried_message, 4, 5, 6, 7, 8],
+            [0_u64, 0, 0, 0, 0, 0, 0, 0],
+        ]);
+        let response = compute_compact_vss_commitment_from_opening_request(&request)?;
 
-        for commitment_modulus_index in COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES {
-            for output_coordinate_index in 0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
-                for (ring_coefficient_index, _) in
-                    compact_projection_terms(CompactProjectionTermsInput {
-                        public_matrix_seed_hash: &public_matrix_seed_hash,
-                        rns_limb_index: 0,
-                        commitment_modulus_index,
-                        output_coordinate_index,
-                        input_column,
-                        ring_degree: POLYNOMIAL_DEGREE,
-                        modulus: DATA_PRIMES[commitment_modulus_index],
-                    })?
-                {
-                    projected_coefficient_positions[ring_coefficient_index] = true;
-                }
-            }
-        }
-
-        let unprojected_coefficient_index = projected_coefficient_positions
-            .iter()
-            .position(|is_projected| !*is_projected)
-            .expect("current sparse compact VSS profile leaves a message coefficient unprojected");
-        let commitment_context = json!({
-            "objectType": "CompactVssCoefficientCommitmentContext",
-            "objectVersion": 1,
-            "ceremonyId": "compact-vss-test",
-            "sourceTrusteeIdentity": "source-0",
-            "sourceTrusteeRosterPosition": 0,
-            "rnsLimbIndex": 0,
-            "rnsPrime": DATA_PRIMES[0],
-            "shamirCoefficientIndex": 0,
-        });
-        let zero_message_coefficients = vec![0_u64; POLYNOMIAL_DEGREE];
-        let mut changed_message_coefficients = zero_message_coefficients.clone();
-        changed_message_coefficients[unprojected_coefficient_index] = 1;
-        let randomness_by_column =
-            vec![vec![0_i64; POLYNOMIAL_DEGREE]; COMPACT_VSS_RANDOMNESS_COLUMN_COUNT];
-
-        let zero_opening =
-            compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
-                commitment_role: "coefficient",
-                commitment_context: &commitment_context,
-                public_matrix_seed_hash: &public_matrix_seed_hash,
-                rns_limb_index: 0,
-                rns_prime: DATA_PRIMES[0],
-                ring_degree: POLYNOMIAL_DEGREE,
-                message_coefficients: &zero_message_coefficients,
-                message_coefficient_bound: DATA_PRIMES[0],
-                randomness_by_column: &randomness_by_column,
-            })?;
-        let changed_opening =
-            compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
-                commitment_role: "coefficient",
-                commitment_context: &commitment_context,
-                public_matrix_seed_hash: &public_matrix_seed_hash,
-                rns_limb_index: 0,
-                rns_prime: DATA_PRIMES[0],
-                ring_degree: POLYNOMIAL_DEGREE,
-                message_coefficients: &changed_message_coefficients,
-                message_coefficient_bound: DATA_PRIMES[0],
-                randomness_by_column: &randomness_by_column,
-            })?;
-
-        assert_eq!(
-            zero_opening.commitment_root, changed_opening.commitment_root,
-            "unprojected message coefficients cannot affect the sparse public commitment root"
-        );
-        assert_eq!(
-            zero_opening.commitment, changed_opening.commitment,
-            "unprojected message coefficients cannot affect the sparse commitment body"
+        let mut canonical_digits_request = request.clone();
+        canonical_digits_request["messageDigitColumns"] =
+            json!([[1_u64, 2, 7, 4, 5, 6, 7, 8], [0_u64, 0, 1, 0, 0, 0, 0, 0],]);
+        let canonical_digits_response =
+            compute_compact_vss_commitment_from_opening_request(&canonical_digits_request)?;
+        assert_ne!(
+            response["commitmentRoot"],
+            canonical_digits_response["commitmentRoot"]
         );
         assert_ne!(
-            zero_opening.opening_root, changed_opening.opening_root,
-            "the private opening root still sees the changed full opening payload"
+            response["openingRoot"],
+            canonical_digits_response["openingRoot"]
         );
+
+        let mut mismatched_digits_request = request;
+        mismatched_digits_request["messageDigitColumns"][0][2] = json!(carried_message - 1);
+        assert!(
+            compute_compact_vss_commitment_from_opening_request(&mismatched_digits_request)
+                .is_err(),
+            "explicit compact VSS message digit columns must decode to the declared message coefficients"
+        );
+
         Ok(())
     }
 
@@ -3698,6 +3887,10 @@ pub(in crate::bgv::setup) mod tests {
             "rnsPrime": 97,
             "ringDegree": 8,
             "messageCoefficients": [1, 2, 3, 4, 5, 6, 7, 8],
+            "messageDigitColumns": [
+                [1, 2, 3, 4, 5, 6, 7, 8],
+                [0, 0, 0, 0, 0, 0, 0, 0]
+            ],
             "randomnessByColumn": [
                 [0, 1, -1, 2, -2, 3, -3, 4],
                 [5, -5, 6, -6, 7, -7, 8, -8]
@@ -3730,7 +3923,7 @@ pub(in crate::bgv::setup) mod tests {
             "objectType": "CompactVssCoefficientCommitmentSet",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
             "publicMatrixSeedHash": "7".repeat(128),
             "participantCount": 2,
             "rnsLimbCount": 2,
@@ -3878,6 +4071,10 @@ pub(in crate::bgv::setup) mod tests {
         });
         let public_matrix_seed_hash = compact_test_public_matrix_seed_hash();
         let message_coefficients = compact_test_message_coefficients(seed, rns_prime);
+        let message_digit_columns = compact_vss_canonical_message_digit_columns(
+            &message_coefficients,
+            compact_test_ring_degree(),
+        )?;
         let randomness_by_column = compact_test_randomness_by_column(seed);
         let computation =
             compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
@@ -3888,6 +4085,7 @@ pub(in crate::bgv::setup) mod tests {
                 rns_prime,
                 ring_degree: compact_test_ring_degree(),
                 message_coefficients: &message_coefficients,
+                message_digit_columns: &message_digit_columns,
                 message_coefficient_bound: rns_prime,
                 randomness_by_column: &randomness_by_column,
             })?;
@@ -4240,7 +4438,7 @@ pub(in crate::bgv::setup) mod tests {
                     "objectType": "CompactVssShareLinkageSourceStatement",
                     "objectVersion": 1,
                     "setupProfileId": "CollectiveBgvSetup-v1",
-                    "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+                    "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
                     "ceremonyId": "compact-vss-test",
                     "manifestHash": "1".repeat(128),
                     "rosterHash": "2".repeat(128),
@@ -4253,6 +4451,7 @@ pub(in crate::bgv::setup) mod tests {
                     "targetBasisHash": target_basis_hash.clone(),
                     "sourceTrusteeIdentity": format!("source-{source_trustee_roster_position}"),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
+                    "ringDegree": 8,
                     "participantCount": 2,
                     "targetRnsLimbCount": 2,
                     "thresholdDegree": 2,
@@ -4283,7 +4482,7 @@ pub(in crate::bgv::setup) mod tests {
             "objectType": "CompactVssShareLinkageStatement",
             "objectVersion": 1,
             "setupProfileId": "CollectiveBgvSetup-v1",
-            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+            "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
             "ceremonyId": "compact-vss-test",
             "manifestHash": "1".repeat(128),
             "rosterHash": "2".repeat(128),
@@ -4294,6 +4493,7 @@ pub(in crate::bgv::setup) mod tests {
             "setupEpoch": "setup-epoch",
             "publicMatrixSeedHash": "7".repeat(128),
             "targetBasisHash": target_basis_hash,
+            "ringDegree": 8,
             "participantCount": 2,
             "targetRnsLimbCount": 2,
             "thresholdDegree": 2,

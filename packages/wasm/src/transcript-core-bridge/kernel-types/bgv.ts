@@ -404,7 +404,8 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly ringDegree: number;
         readonly commitmentModulusLimbIndices: readonly number[];
         readonly outputCoordinateCount: number;
-        readonly projectionWeight: number;
+        readonly messageCoverageTermsPerCoordinate: number;
+        readonly randomnessProjectionWeight: number;
         readonly randomnessColumnCount: number;
         readonly inputColumnLabels: readonly string[];
         readonly matrixResidueHashDomain: string;
@@ -413,16 +414,19 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly matrixResiduePreimageFields: readonly string[];
         readonly projectionIndexPreimageFields: readonly string[];
         readonly coordinateCountPerCommitment: number;
+        readonly messageMatrixResiduesPerCommitment: number;
+        readonly randomnessMatrixResiduesPerCoordinate: number;
+        readonly randomnessMatrixResiduesPerCommitment: number;
         readonly sampledMatrixResiduesPerCoordinate: number;
-        readonly sampledProjectionIndicesPerCoordinate: number;
+        readonly sampledRandomnessProjectionIndicesPerCoordinate: number;
         readonly sampledMatrixResiduesPerCommitment: number;
-        readonly sampledProjectionIndicesPerCommitment: number;
+        readonly sampledRandomnessProjectionIndicesPerCommitment: number;
         readonly residueMultiplyAddsPerCommitment: number;
     };
     readonly compactVssMatrixExpansionProfileHash: ProtocolHash;
     readonly compactVssParameterCertificateInputBinding: {
         readonly objectType: 'CompactVssParameterCertificateInputBinding';
-        readonly objectVersion: 2;
+        readonly objectVersion: 8;
         readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly profileId: string;
         readonly compactVssParameterCertificateInputBindingHash: ProtocolHash;
@@ -433,6 +437,9 @@ export type BgvCollectiveSetupProfileDescription = {
         readonly ringDegree: number;
         readonly commitmentRelation: Readonly<Record<string, unknown>>;
         readonly commonCommitmentKey: Readonly<Record<string, unknown>>;
+        readonly compactMaterialArtifactBoundary: Readonly<
+            Record<string, unknown>
+        >;
         readonly messageEncoding: Readonly<Record<string, unknown>>;
         readonly normInputClasses: readonly Readonly<Record<string, unknown>>[];
         readonly parameterReviewInputs: Readonly<Record<string, unknown>>;
@@ -780,8 +787,7 @@ export type BgvTrusteeEvaluationKeyStatementContext = {
           readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
       }
     | {
-          readonly sourceCoefficientCommitmentRoot: ProtocolHash;
-          readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
+          readonly shareLinkageStatementRoot: ProtocolHash;
       }
     | {
           readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
@@ -865,6 +871,7 @@ export type BgvCompactVssCommitmentOpeningInput = {
     readonly rnsPrime: number;
     readonly ringDegree: number;
     readonly messageCoefficients: readonly number[];
+    readonly messageDigitColumns: readonly (readonly number[])[];
     readonly messageCoefficientBound?: number;
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
@@ -972,6 +979,10 @@ export type BgvCompactVssShareLinkageStatementVerification = {
 };
 
 export type BgvCompactVssShareLinkageProofStatementItem = {
+    readonly sourceTrusteeIdentity: string;
+    readonly sourceTrusteeRosterPosition: number;
+    readonly sourceCoefficientCommitmentRoot: ProtocolHash;
+    readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
     readonly recipientIdentity: string;
     readonly recipientRosterPosition: number;
     readonly sourceRnsLimbIndex: number;
@@ -989,10 +1000,7 @@ export type BgvCompactVssShareLinkageProofStatementItem = {
 export type BgvCompactVssShareLinkageProofStatement =
     BgvCompactVssShareLinkageProofStatementItem & {
         readonly publicMatrixSeedHash: ProtocolHash;
-        readonly sourceTrusteeIdentity: string;
-        readonly sourceTrusteeRosterPosition: number;
-        readonly sourceCoefficientCommitmentRoot: ProtocolHash;
-        readonly sourceRecipientShareCommitmentRoot: ProtocolHash;
+        readonly shareLinkageStatementRoot: ProtocolHash;
         readonly additionalLinkageItems?: readonly BgvCompactVssShareLinkageProofStatementItem[];
     };
 

@@ -104,11 +104,11 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssMatrixExpansionProfile"]["sampledMatrixResiduesPerCoordinate"],
-        serde_json::json!(128_u64)
+        serde_json::json!(1_430_u64)
     );
     assert_eq!(
         profile["compactVssMatrixExpansionProfile"]["sampledMatrixResiduesPerCommitment"],
-        serde_json::json!(6_144_u64)
+        serde_json::json!(68_608_u64)
     );
     assert_eq!(
         profile["compactVssMatrixExpansionProfile"]["inputColumnLabels"],
@@ -132,15 +132,38 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["objectVersion"],
-        serde_json::json!(3_u64)
+        serde_json::json!(7_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["compactMaterialArtifactBoundary"]["artifactRole"],
+        "compact-vss-setup-public-material"
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["compactMaterialArtifactBoundary"]["publicMaterialFields"],
+        serde_json::json!([
+            "compactVssCoefficientCommitmentSet",
+            "compactVssRecipientShareCommitmentSet",
+            "compactVssAggregateThresholdCommitmentSet",
+            "compactVssShareLinkageStatement",
+            "compactVssShareLinkageProofMaterialSet"
+        ])
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["compactMaterialArtifactBoundary"]["proofObligations"]
+            [2]["proofFamily"],
+        "target-decryption-share"
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["relation"],
         "C = A_message * m + A_randomness * r mod q_c"
     );
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["projectionWeight"],
+        profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["randomnessProjectionWeight"],
         serde_json::json!(32_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["messageCoverageTermsPerCoordinate"],
+        serde_json::json!(683_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["commitmentRelation"]["coordinateCountPerCommitment"],
@@ -164,18 +187,18 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         ])
     );
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["commonCommitmentKey"]["sparseProjectionShape"]
-            ["sampledMatrixResiduesPerCommitment"],
-        serde_json::json!(6_144_u64)
+        profile["compactVssParameterCertificateInputBinding"]["commonCommitmentKey"]["messageCoverageShape"]
+            ["sampledMessageMatrixResiduesPerCommitment"],
+        serde_json::json!(65_536_u64)
     );
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["commonCommitmentKey"]["sparseProjectionShape"]
-            ["sampledProjectionIndicesPerCommitment"],
-        serde_json::json!(6_144_u64)
+        profile["compactVssParameterCertificateInputBinding"]["commonCommitmentKey"]["randomnessProjectionShape"]
+            ["sampledRandomnessProjectionIndicesPerCommitment"],
+        serde_json::json!(3_072_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["messageEncoding"]["proofRangeEncodingRule"],
-        "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims"
+        "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns with masked consistency claims and verifier-side trit decoder columns"
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["normInputClasses"]
@@ -220,6 +243,16 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         serde_json::json!(20_u64)
     );
     assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["commitmentExposureRows"]
+            [0]["totalCompactCommitments"],
+        serde_json::json!(1_450_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["commitmentExposureRows"]
+            [0]["totalPublicCommitmentCoordinates"],
+        serde_json::json!(69_600_u64)
+    );
+    assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["linearRelationRows"]
             [0]["combinedRelationTermL1"],
         serde_json::json!(1_112_u64)
@@ -260,16 +293,36 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         profile["canonicalTargetBasisHash"]
     );
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["estimatorInputRows"][0]["projectionWeight"],
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["structuredRingRows"]
+            [0]["rowId"],
+        serde_json::json!("compact-vss-structured-ring-review-input")
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["multiOpeningRows"]
+            [0]["corruptedRecipientOpeningCredentialCount"],
+        serde_json::json!(210_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["moduleSisBindingRows"]
+            [0]["rowId"],
+        serde_json::json!("compact-vss-covered-message-module-sis-binding-input")
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["moduleLweHidingRows"]
+            [0]["totalSampledRandomnessProjectionIndices"],
+        serde_json::json!(4_454_400_u64)
+    );
+    assert_eq!(
+        profile["compactVssParameterCertificateInputBinding"]["estimatorInputRows"][0]["randomnessProjectionWeight"],
         serde_json::json!(32_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["estimatorInputRows"][0]["sampledMatrixResiduesPerCommitment"],
-        serde_json::json!(6_144_u64)
+        serde_json::json!(68_608_u64)
     );
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["estimatorInputRows"][1]["sampledProjectionIndicesPerCommitment"],
-        serde_json::json!(6_144_u64)
+        profile["compactVssParameterCertificateInputBinding"]["estimatorInputRows"][1]["sampledRandomnessProjectionIndicesPerCommitment"],
+        serde_json::json!(3_072_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["sameSecretBridgeInput"]["targetBasisHash"],

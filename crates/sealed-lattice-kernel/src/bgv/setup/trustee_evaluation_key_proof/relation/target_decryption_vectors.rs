@@ -325,14 +325,16 @@ pub(crate) fn build_target_decryption_share_public_vectors(
                     input.modulus,
                 )?;
                 add_scaled_extension_vector_to_message_digits(
-                    &mut message_encoding_vectors,
-                    &message_encoding_offsets,
-                    &message_encoding_layouts,
-                    limb_message_offset,
-                    &aggregate_factor,
-                    1,
+                    AddScaledExtensionVectorToMessageDigitsInput {
+                        message_encoding_vectors: &mut message_encoding_vectors,
+                        message_encoding_offsets: &message_encoding_offsets,
+                        message_encoding_layouts: &message_encoding_layouts,
+                        message_index: limb_message_offset,
+                        source: &aggregate_factor,
+                        coefficient: 1,
+                        modulus: input.modulus,
+                    },
                     tower,
-                    input.modulus,
                 )?;
 
                 let mut scaled_u_sum = ChallengeExtensionTower::zero();
@@ -349,14 +351,16 @@ pub(crate) fn build_target_decryption_share_public_vectors(
 
                 for (smudging_index, smudging_scale) in smudging_scales.iter().enumerate() {
                     add_scaled_extension_vector_to_message_digits(
-                        &mut message_encoding_vectors,
-                        &message_encoding_offsets,
-                        &message_encoding_layouts,
-                        smudging_message_offset + smudging_index,
-                        &scaled_u,
-                        *smudging_scale,
+                        AddScaledExtensionVectorToMessageDigitsInput {
+                            message_encoding_vectors: &mut message_encoding_vectors,
+                            message_encoding_offsets: &message_encoding_offsets,
+                            message_encoding_layouts: &message_encoding_layouts,
+                            message_index: smudging_message_offset + smudging_index,
+                            source: &scaled_u,
+                            coefficient: *smudging_scale,
+                            modulus: input.modulus,
+                        },
                         tower,
-                        input.modulus,
                     )?;
                     let offset_scale =
                         mul_mod_fast(*smudging_scale, coefficient_offset, input.modulus);
@@ -440,6 +444,16 @@ struct AddCompactProjectionVectorInput<'a, 'b> {
     modulus: u64,
 }
 
+struct AddScaledExtensionVectorToMessageDigitsInput<'a> {
+    message_encoding_vectors: &'a mut [Vec<ChallengeExtensionElement>],
+    message_encoding_offsets: &'a [usize],
+    message_encoding_layouts: &'a [CompactVssMessageEncodingLayout],
+    message_index: usize,
+    source: &'a [ChallengeExtensionElement],
+    coefficient: u64,
+    modulus: u64,
+}
+
 fn add_compact_projection_vector(
     input: AddCompactProjectionVectorInput<'_, '_>,
     tower: &ChallengeExtensionTower,
@@ -476,32 +490,28 @@ fn add_scaled_extension_basis_vector(
 }
 
 fn add_scaled_extension_vector_to_message_digits(
-    message_encoding_vectors: &mut [Vec<ChallengeExtensionElement>],
-    message_encoding_offsets: &[usize],
-    message_encoding_layouts: &[CompactVssMessageEncodingLayout],
-    message_index: usize,
-    source: &[ChallengeExtensionElement],
-    coefficient: u64,
+    input: AddScaledExtensionVectorToMessageDigitsInput<'_>,
     tower: &ChallengeExtensionTower,
-    modulus: u64,
 ) -> CanonicalResult<()> {
-    let message_encoding_layout =
-        *message_encoding_layouts.get(message_index).ok_or_else(|| {
+    let message_encoding_layout = *input
+        .message_encoding_layouts
+        .get(input.message_index)
+        .ok_or_else(|| {
             invalid_succinct_setup_proof(
                 "target-decryption message index is outside the vector layout",
             )
         })?;
     for digit_index in 0..COMPACT_VSS_MESSAGE_DIGIT_COUNT {
-        let digit_weight = compact_vss_message_digit_weight(digit_index, modulus)?;
+        let digit_weight = compact_vss_message_digit_weight(digit_index, input.modulus)?;
         let vector_index = target_decryption_message_vector_index(
-            message_encoding_offsets,
-            message_index,
+            input.message_encoding_offsets,
+            input.message_index,
             message_encoding_layout.digit_encoding_column(digit_index)?,
         )?;
         add_scaled_extension_basis_vector(
-            &mut message_encoding_vectors[vector_index],
-            source,
-            mul_mod_fast(coefficient, digit_weight, modulus),
+            &mut input.message_encoding_vectors[vector_index],
+            input.source,
+            mul_mod_fast(input.coefficient, digit_weight, input.modulus),
             tower,
         );
     }

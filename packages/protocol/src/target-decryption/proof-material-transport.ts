@@ -31,7 +31,7 @@ export type BgvTargetDecryptionShareProofMaterial = Readonly<
     }
 >;
 
-export type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
+type BgvTargetDecryptionShareBinaryProofMaterialTransport = Readonly<
     JsonRecord & {
         readonly objectType: 'BgvTargetDecryptionShareBinaryProofMaterialTransport';
         readonly objectVersion: 1;

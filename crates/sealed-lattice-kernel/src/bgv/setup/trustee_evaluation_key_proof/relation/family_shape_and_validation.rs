@@ -14,10 +14,8 @@ pub(crate) const PRIVATE_VSS_SHARE_BINDING_LABELS: [&str; 3] = [
     "privateEnvelopeAadHash",
     "shareValuesHash",
 ];
-pub(crate) const COMPACT_VSS_SHARE_LINKAGE_BINDING_LABELS: [&str; 2] = [
-    "sourceCoefficientCommitmentRoot",
-    "sourceRecipientShareCommitmentRoot",
-];
+pub(crate) const COMPACT_VSS_SHARE_LINKAGE_BINDING_LABELS: [&str; 1] =
+    ["shareLinkageStatementRoot"];
 pub(crate) const COMPACT_SAME_SECRET_BRIDGE_BINDING_LABELS: [&str; 4] = [
     "compactSameSecretBridgeStatementRoot",
     "sameSecretStatementRoot",
@@ -399,12 +397,16 @@ impl TrusteeEvaluationKeyStatement {
             );
             for item in &compact_vss_share_linkage.additional_linkage_items {
                 for field in [
+                    item.source_trustee_identity.as_str(),
+                    item.source_coefficient_commitment_root.as_str(),
+                    item.source_recipient_share_commitment_root.as_str(),
                     item.recipient_identity.as_str(),
                     item.recipient_share_commitment_root.as_str(),
                     item.recipient_share_opening_root.as_str(),
                 ] {
                     append_len_prefixed_str(&mut preimage, field);
                 }
+                preimage.extend_from_slice(&item.source_trustee_roster_position.to_le_bytes());
                 preimage.extend_from_slice(&item.recipient_roster_position.to_le_bytes());
                 append_usize(&mut preimage, item.source_rns_limb_index);
                 preimage.extend_from_slice(&item.source_message_modulus.to_le_bytes());
@@ -1135,6 +1137,24 @@ fn validate_compact_vss_share_linkage_statement(
         &statement.recipient_share_commitment,
     )?;
     for (item_index, item) in statement.additional_linkage_items.iter().enumerate() {
+        validate_context_token(
+            &format!(
+                "compactVssShareLinkage.additionalLinkageItems.{item_index}.sourceTrusteeIdentity"
+            ),
+            &item.source_trustee_identity,
+        )?;
+        validate_protocol_hash_hex(
+            &format!(
+                "compactVssShareLinkage.additionalLinkageItems.{item_index}.sourceCoefficientCommitmentRoot"
+            ),
+            &item.source_coefficient_commitment_root,
+        )?;
+        validate_protocol_hash_hex(
+            &format!(
+                "compactVssShareLinkage.additionalLinkageItems.{item_index}.sourceRecipientShareCommitmentRoot"
+            ),
+            &item.source_recipient_share_commitment_root,
+        )?;
         validate_compact_vss_share_linkage_item(
             &format!("compactVssShareLinkage.additionalLinkageItems.{item_index}"),
             &item.recipient_identity,

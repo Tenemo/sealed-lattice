@@ -209,8 +209,6 @@ pub(in super::super) fn build_limb_public_vectors(
                 layout.base_ring_degree,
                 &challenges.linkage_alpha,
                 &u_powers,
-                layout.compact_vss_coefficient_message_range_evidence(),
-                layout.compact_vss_recipient_message_range_evidence(),
                 &tower,
             )?;
         combined_claim = tower.add(&combined_claim, &compact_vss_claim);

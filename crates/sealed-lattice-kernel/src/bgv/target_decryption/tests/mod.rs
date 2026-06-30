@@ -271,7 +271,7 @@ fn compact_aggregate_threshold_commitment_set(
             recipient_records.push(json!({
                 "objectType": "CompactVssAggregateThresholdCommitment",
                 "objectVersion": 1,
-                "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+                "profileId": crate::bgv::setup::COMPACT_VSS_COMMITMENT_PROFILE_ID,
                 "recipientIdentity": participant.trustee_identity.as_str(),
                 "recipientRosterPosition": participant.roster_position,
                 "recipientTrusteePoint": participant.interpolation_point,
@@ -290,7 +290,7 @@ fn compact_aggregate_threshold_commitment_set(
         "objectType": "CompactVssAggregateThresholdCommitmentSet",
         "objectVersion": 1,
         "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+        "profileId": crate::bgv::setup::COMPACT_VSS_COMMITMENT_PROFILE_ID,
         "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash.as_str(),
         "participantCount": setup_binding.participants.len(),
         "rnsLimbCount": rns_limb_count,
@@ -406,6 +406,17 @@ struct TargetShareProofStatementBindingInput<'a> {
     proof_statement: &'a Value,
 }
 
+struct TargetShareProofMaterialVerificationInput<'a> {
+    setup_package: &'a Value,
+    accepted_record: &'a Value,
+    target_ciphertext_binding: &'a Value,
+    target_ciphertexts: &'a Value,
+    target_share_profile: &'a Value,
+    target_decryption_share: &'a Value,
+    proof_statement: &'a Value,
+    proof_material: &'a Value,
+}
+
 fn verify_share_proof_statement_binding(
     input: TargetShareProofStatementBindingInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -417,6 +428,21 @@ fn verify_share_proof_statement_binding(
         "targetShareProfile": input.target_share_profile,
         "targetDecryptionShare": input.target_decryption_share,
         "proofStatement": input.proof_statement,
+    }))
+}
+
+fn verify_share_proof_material(
+    input: TargetShareProofMaterialVerificationInput<'_>,
+) -> CanonicalResult<Value> {
+    verify_bgv_target_decryption_share_proof_material_from_request(&json!({
+        "setupPackage": input.setup_package,
+        "targetAcceptedRecord": input.accepted_record,
+        "targetCiphertextBinding": input.target_ciphertext_binding,
+        "targetCiphertexts": input.target_ciphertexts,
+        "targetShareProfile": input.target_share_profile,
+        "targetDecryptionShare": input.target_decryption_share,
+        "proofStatement": input.proof_statement,
+        "proofMaterial": input.proof_material,
     }))
 }
 
@@ -439,6 +465,54 @@ fn rebind_target_proof_material_root(proof_material: &mut Value) {
     proof_material["proofMaterialRoot"] = json!(
         derive_protocol_hash("TargetDecryptionShareProofMaterialRoot", proof_material)
             .expect("target proof material root")
+    );
+}
+
+fn rebind_target_share_fields_in_statement(statement: &mut Value, target_decryption_share: &Value) {
+    statement["targetDecryptionShareHash"] =
+        target_decryption_share["targetDecryptionShareHash"].clone();
+    statement["shareRoot"] = target_decryption_share["shareRoot"].clone();
+    statement["smudgingInputReportHash"] =
+        target_decryption_share["sharePayload"]["smudgingInputReportHash"].clone();
+    rebind_share_proof_statement_root(statement);
+}
+
+fn rebind_smudging_commitment_record_root(statement: &mut Value, record_index: usize) {
+    let commitment =
+        statement["smudgingCommitmentBinding"]["smudgingCommitmentSet"]["commitmentRecords"]
+            [record_index]["commitment"]
+            .clone();
+    statement["smudgingCommitmentBinding"]["smudgingCommitmentSet"]["commitmentRecords"]
+        [record_index]["commitmentRoot"] = json!(
+        derive_protocol_hash("SetupCommitmentRoot", &commitment).expect("smudging commitment root")
+    );
+}
+
+fn rebind_smudging_commitment_set_root(statement: &mut Value) {
+    let smudging_commitment_set =
+        &mut statement["smudgingCommitmentBinding"]["smudgingCommitmentSet"];
+    smudging_commitment_set
+        .as_object_mut()
+        .expect("smudging commitment set object")
+        .remove("smudgingCommitmentSetRoot");
+    let smudging_commitment_set_root = derive_protocol_hash(
+        "TargetDecryptionSmudgingCommitmentSetRoot",
+        smudging_commitment_set,
+    )
+    .expect("smudging commitment set root");
+    smudging_commitment_set["smudgingCommitmentSetRoot"] =
+        json!(smudging_commitment_set_root.clone());
+    statement["smudgingCommitmentBinding"]["smudgingCommitmentSetRoot"] =
+        json!(smudging_commitment_set_root);
+}
+
+fn assert_target_proof_verification_rejected(error: &CanonicalError) {
+    assert!(
+        error.message.contains("proof")
+            || error.message.contains("transcript")
+            || error.message.contains("row check"),
+        "{}",
+        error.message
     );
 }
 
@@ -660,7 +734,7 @@ fn local_target_share_witness(
         "compactAggregateOpening": {
             "objectType": "LocalTrusteeCompactVssAggregateOpeningWitness",
             "objectVersion": 1,
-            "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+            "profileId": crate::bgv::setup::COMPACT_VSS_COMMITMENT_PROFILE_ID,
             "publicMatrixSeedHash": public_matrix_seed_hash,
             "targetBasisHash": canonical_target_basis_hash().expect("target basis hash"),
             "shareLinkageStatementRoot": share_linkage_statement_root,
@@ -1129,7 +1203,7 @@ fn target_result_release_refuses_current_compact_material() {
     .expect_err("target result release must refuse current compact material");
 
     assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-    assert!(error.message.contains("certificate-grade binding evidence"));
+    assert!(error.message.contains("proof-backed target shares"));
 }
 
 #[test]
@@ -1394,16 +1468,16 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
             .is_some(),
         "proof material should package proof bytes as base64"
     );
-    let verified = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShare": &local_share,
-        "proofStatement": &statement,
-        "proofMaterial": &proof_material,
-    }))
+    let verified = verify_share_proof_material(TargetShareProofMaterialVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        target_decryption_share: &local_share,
+        proof_statement: &statement,
+        proof_material: &proof_material,
+    })
     .expect("verify target proof material");
     assert_eq!(verified["ok"], true);
     assert_eq!(
@@ -1411,22 +1485,78 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
         proof_material["proofMaterialRoot"]
     );
 
+    let mut tampered_share = local_share.clone();
+    change_first_partial_decryption_coefficient(&mut tampered_share);
+    rebind_target_decryption_share_hashes(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        &mut tampered_share,
+        "trustee-1",
+    );
+    let mut tampered_share_statement = statement.clone();
+    rebind_target_share_fields_in_statement(&mut tampered_share_statement, &tampered_share);
+    let error = verify_share_proof_material(TargetShareProofMaterialVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        target_decryption_share: &tampered_share,
+        proof_statement: &tampered_share_statement,
+        proof_material: &proof_material,
+    })
+    .expect_err("rebound wrong released partial must reject proof material verification");
+    assert_target_proof_verification_rejected(&error);
+
+    let mut tampered_smudging_statement = statement.clone();
+    let smudging_coordinate = tampered_smudging_statement["smudgingCommitmentBinding"]
+        ["smudgingCommitmentSet"]["commitmentRecords"][0]["commitment"]["commitmentLimbs"][0]
+        ["coordinates"][0]
+        .as_u64()
+        .expect("smudging commitment coordinate");
+    let smudging_modulus = tampered_smudging_statement["smudgingCommitmentBinding"]
+        ["smudgingCommitmentSet"]["commitmentRecords"][0]["commitment"]["commitmentLimbs"][0]
+        ["modulus"]
+        .as_u64()
+        .expect("smudging commitment modulus");
+    tampered_smudging_statement["smudgingCommitmentBinding"]["smudgingCommitmentSet"]["commitmentRecords"]
+        [0]["commitment"]["commitmentLimbs"][0]["coordinates"][0] =
+        json!((smudging_coordinate + 1) % smudging_modulus);
+    rebind_smudging_commitment_record_root(&mut tampered_smudging_statement, 0);
+    rebind_smudging_commitment_set_root(&mut tampered_smudging_statement);
+    rebind_share_proof_statement_root(&mut tampered_smudging_statement);
+    let error = verify_share_proof_material(TargetShareProofMaterialVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        target_decryption_share: &local_share,
+        proof_statement: &tampered_smudging_statement,
+        proof_material: &proof_material,
+    })
+    .expect_err("rebound wrong smudging commitment body must reject proof material verification");
+    assert_target_proof_verification_rejected(&error);
+
     let mut missing_record_material = proof_material.clone();
     missing_record_material["proofRecords"]
         .as_array_mut()
         .expect("proof records")
         .pop();
     rebind_target_proof_material_root(&mut missing_record_material);
-    let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShare": &local_share,
-        "proofStatement": &statement,
-        "proofMaterial": missing_record_material,
-    }))
+    let error = verify_share_proof_material(TargetShareProofMaterialVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        target_decryption_share: &local_share,
+        proof_statement: &statement,
+        proof_material: &missing_record_material,
+    })
     .expect_err("missing proof material coverage must reject");
     assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
     assert!(
@@ -1438,16 +1568,16 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
     let mut invalid_base64_material = proof_material.clone();
     invalid_base64_material["proofRecords"][0]["proofBytesBase64"] = json!("not canonical base64");
     rebind_target_proof_material_root(&mut invalid_base64_material);
-    let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShare": &local_share,
-        "proofStatement": &statement,
-        "proofMaterial": invalid_base64_material,
-    }))
+    let error = verify_share_proof_material(TargetShareProofMaterialVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        target_decryption_share: &local_share,
+        proof_statement: &statement,
+        proof_material: &invalid_base64_material,
+    })
     .expect_err("malformed base64 proof bytes must reject");
     assert!(
         error.message.contains("proofBytesBase64"),
@@ -1467,22 +1597,18 @@ fn heavy_target_decryption_share_proof_material_verifies_complete_active_slices(
     tampered_proof_material["proofRecords"][0]["proofBytesBase64"] =
         json!(encode_standard_base64(&proof_bytes));
     rebind_target_proof_material_root(&mut tampered_proof_material);
-    let error = verify_bgv_target_decryption_share_proof_material_from_request(&json!({
-        "setupPackage": &setup_package,
-        "targetAcceptedRecord": &accepted_record,
-        "targetCiphertextBinding": &target_ciphertext_binding,
-        "targetCiphertexts": &target_ciphertexts,
-        "targetShareProfile": &target_share_profile_value,
-        "targetDecryptionShare": &local_share,
-        "proofStatement": &statement,
-        "proofMaterial": tampered_proof_material,
-    }))
+    let error = verify_share_proof_material(TargetShareProofMaterialVerificationInput {
+        setup_package: &setup_package,
+        accepted_record: &accepted_record,
+        target_ciphertext_binding: &target_ciphertext_binding,
+        target_ciphertexts: &target_ciphertexts,
+        target_share_profile: &target_share_profile_value,
+        target_decryption_share: &local_share,
+        proof_statement: &statement,
+        proof_material: &tampered_proof_material,
+    })
     .expect_err("tampered proof bytes must reject");
-    assert!(
-        error.message.contains("proof") || error.message.contains("transcript"),
-        "{}",
-        error.message
-    );
+    assert_target_proof_verification_rejected(&error);
 }
 
 #[test]
@@ -2585,7 +2711,11 @@ fn local_target_share_witness_rejects_wrong_compact_aggregate_message() {
     .expect_err("wrong compact aggregate message must be refused");
 
     assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
-    assert!(error.message.contains("opening root"), "{}", error.message);
+    assert!(
+        error.message.contains("commitment root"),
+        "{}",
+        error.message
+    );
 }
 
 #[test]

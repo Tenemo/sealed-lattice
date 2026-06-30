@@ -116,6 +116,55 @@ describe('BGV target-decryption kernel commands', () => {
                 targetShareProfile: fixture.targetShareProfile,
             }),
         ).not.toBe(derivedSmudgingSeedHex);
+        const setupPackageWithWrongMatrixSeed = structuredClone(
+            fixture.setupPackage,
+        ) as SetupPackageWithCommonRandomness;
+        setupPackageWithWrongMatrixSeed.commonRandomness.publicMatrixSeedHash =
+            '0'.repeat(128);
+        expect(() =>
+            prepareLocalTargetDecryptionShareWitness({
+                restoredLocalTargetShareWitness: restoredCompactLocalWitness,
+                setupPackage: setupPackageWithWrongMatrixSeed,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetDecryptionCiphertextHash,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+            }),
+        ).toThrow(/publicMatrixSeedHash/u);
+        const targetAcceptedRecordWithWrongBasis = structuredClone(
+            fixture.targetAcceptedRecord,
+        ) as { targetBasisHash: string };
+        targetAcceptedRecordWithWrongBasis.targetBasisHash = '0'.repeat(128);
+        expect(() =>
+            prepareLocalTargetDecryptionShareWitness({
+                restoredLocalTargetShareWitness: restoredCompactLocalWitness,
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: targetAcceptedRecordWithWrongBasis,
+                targetDecryptionCiphertextHash,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+            }),
+        ).toThrow(/targetBasisHash/u);
+        const restoredWitnessWithWrongAggregateOpeningRoot = structuredClone(
+            restoredCompactLocalWitness,
+        ) as {
+            compactAggregateOpening: {
+                compactAggregateOpeningCredentials: Record<string, unknown>[];
+            };
+        };
+        restoredWitnessWithWrongAggregateOpeningRoot.compactAggregateOpening.compactAggregateOpeningCredentials[0].aggregateOpeningRoot =
+            '0'.repeat(128);
+        expect(() =>
+            prepareLocalTargetDecryptionShareWitness({
+                restoredLocalTargetShareWitness:
+                    restoredWitnessWithWrongAggregateOpeningRoot,
+                setupPackage: fixture.setupPackage,
+                targetAcceptedRecord: fixture.targetAcceptedRecord,
+                targetDecryptionCiphertextHash,
+                targetShareProfile: fixture.targetShareProfile,
+                trusteeIdentity: fixture.trusteeIdentity,
+            }),
+        ).toThrow(/accepted compact aggregate commitment record/u);
         const preparedLocalTargetShareWitness =
             prepareLocalTargetDecryptionShareWitness({
                 restoredLocalTargetShareWitness: restoredCompactLocalWitness,
@@ -370,7 +419,7 @@ describe('BGV target-decryption kernel commands', () => {
         expect(
             (targetResultReleaseError as TranscriptCoreKernelCommandError)
                 .message,
-        ).toContain('certificate-grade binding evidence');
+        ).toContain('proof-backed target shares');
 
         let invalidProofMaterialGenerationError: unknown;
         try {

@@ -67,20 +67,85 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
     );
     assert_eq!(
         compact_binding["profileId"],
-        "sealed-lattice-compact-vss-sparse-linear-v1"
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_COMMITMENT_PROFILE_ID
     );
-    assert_eq!(compact_binding["objectVersion"], serde_json::json!(3));
+    assert_eq!(compact_binding["objectVersion"], serde_json::json!(8));
+    let message_coordinate_coverage_review =
+        &compact_binding["parameterReviewInputs"]["messageCoordinateCoverageReview"];
     assert_eq!(
-        compact_binding["commitmentRelation"]["projectionWeight"],
+        message_coordinate_coverage_review["rowId"],
+        "compact-vss-message-coordinate-coverage"
+    );
+    assert_eq!(
+        message_coordinate_coverage_review["uncoveredMessageCoefficientsPerMessageColumn"],
+        serde_json::json!(0)
+    );
+    assert_eq!(
+        message_coordinate_coverage_review["sampledMessageTermsPerCommitment"],
+        serde_json::json!(65_536)
+    );
+    assert_eq!(
+        compact_binding["compactMaterialArtifactBoundary"]["artifactRole"],
+        "compact-vss-setup-public-material"
+    );
+    assert_eq!(
+        compact_binding["compactMaterialArtifactBoundary"]["publicMaterialFields"]
+            .as_array()
+            .expect("compact material public fields")
+            .iter()
+            .filter_map(|entry| entry.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "compactVssCoefficientCommitmentSet",
+            "compactVssRecipientShareCommitmentSet",
+            "compactVssAggregateThresholdCommitmentSet",
+            "compactVssShareLinkageStatement",
+            "compactVssShareLinkageProofMaterialSet",
+        ]
+    );
+    assert_eq!(
+        compact_binding["compactMaterialArtifactBoundary"]["commitmentOpeningRootObligations"][2]["sourceOpeningRootField"],
+        "sourceShareOpeningRoots"
+    );
+    assert_eq!(
+        compact_binding["compactMaterialArtifactBoundary"]["proofObligations"][1]["proofFamily"],
+        "compact-same-secret-bridge"
+    );
+    assert_eq!(
+        compact_binding["compactMaterialArtifactBoundary"]["certificateRows"]
+            .as_array()
+            .expect("compact material certificate rows")
+            .iter()
+            .filter_map(|entry| entry.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "compact-vss-module-sis-binding-review-input",
+            "compact-vss-module-lwe-hiding-review-input",
+            "compact-vss-covered-message-module-sis-binding-input",
+            "compact-vss-covered-message-module-lwe-hiding-input",
+            "compact-vss-structured-ring-review-input",
+            "compact-vss-multi-opening-review-input",
+            "compact-vss-covered-message-module-sis-binding-conclusion",
+            "compact-vss-covered-message-module-lwe-hiding-conclusion",
+            "compact-vss-structured-ring-review-conclusion",
+            "compact-vss-multi-opening-review-conclusion",
+        ]
+    );
+    assert_eq!(
+        compact_binding["commitmentRelation"]["randomnessProjectionWeight"],
         serde_json::json!(32)
     );
     assert_eq!(
-        compact_binding["commonCommitmentKey"]["sparseProjectionShape"]["sampledMatrixResiduesPerCommitment"],
-        serde_json::json!(6_144)
+        compact_binding["commonCommitmentKey"]["messageCoverageShape"]["sampledMessageMatrixResiduesPerCommitment"],
+        serde_json::json!(65_536)
+    );
+    assert_eq!(
+        compact_binding["commonCommitmentKey"]["randomnessProjectionShape"]["sampledRandomnessProjectionIndicesPerCommitment"],
+        serde_json::json!(3_072)
     );
     assert_eq!(
         compact_binding["messageEncoding"]["proofRangeEncodingRule"],
-        "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims"
+        "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns with masked consistency claims and verifier-side trit decoder columns"
     );
     assert_eq!(
         compact_binding["normInputClasses"][0]["maximumOneSourceShamirScalarL1"],
@@ -156,6 +221,29 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
         "Module-SIS"
     );
     assert_eq!(
+        compact_binding["parameterReviewInputs"]["certificateConclusionRows"]
+            .as_array()
+            .expect("compact VSS certificate conclusion rows")
+            .iter()
+            .filter_map(|entry| entry["rowId"].as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "compact-vss-covered-message-module-sis-binding-conclusion",
+            "compact-vss-covered-message-module-lwe-hiding-conclusion",
+            "compact-vss-structured-ring-review-conclusion",
+            "compact-vss-multi-opening-review-conclusion",
+        ]
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["certificateConclusionRows"][0]["estimatorPrecondition"]
+            ["source"],
+        "malb/lattice-estimator SIS lattice row requires length_bound < (q - 1) / 2"
+    );
+    assert_eq!(
+        compact_binding["parameterReviewInputs"]["certificateConclusionRows"][1]["corruptedRecipientOpeningCredentialCount"],
+        serde_json::json!(210)
+    );
+    assert_eq!(
         compact_binding["estimatorInputRows"][0]["rowId"],
         "compact-vss-module-sis-binding-input"
     );
@@ -176,6 +264,22 @@ fn collective_setup_verifier_refuses_tampered_compact_vss_parameter_binding() {
             package["setupCommitmentSecurityCertificate"]["compactVssParameterCertificateInputBinding"]
                 ["parameterReviewInputs"]["openingWitnessRows"][1]["randomnessDifferenceInfinityBound"] =
                 serde_json::json!(18_u64);
+        },
+        "commitmentSecurityCertificatePayloadMismatch",
+    );
+}
+
+#[test]
+fn collective_setup_verifier_refuses_tampered_compact_material_artifact_boundary() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_verifier_refuses_tampered_compact_material_artifact_boundary",
+    );
+    assert_minimal_collective_setup_package_refused(
+        "malformed compact VSS parameter input binding in commitment security certificate",
+        |package| {
+            package["setupCommitmentSecurityCertificate"]["compactVssParameterCertificateInputBinding"]
+                ["compactMaterialArtifactBoundary"]["certificateRows"][0] =
+                serde_json::json!("compact-vss-unreviewed-binding-input");
         },
         "commitmentSecurityCertificatePayloadMismatch",
     );

@@ -77,11 +77,6 @@ export {
     vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
-    compactVssMatrixExpansionProfile,
-    compactVssParameterCertificateInputBinding,
-    type CompactVssParameterCertificateInputBinding,
-} from './setup/compact-vss-commitments.js';
-export {
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares,
     createLocalTrusteeSetupStateCommitment,
     decryptLocalTrusteeSetupState,

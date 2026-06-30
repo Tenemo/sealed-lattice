@@ -308,13 +308,24 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_from_request(
 
 struct CompactVssShareLinkageMaterialRecordStatementInput<'a> {
     proof_statement: &'a Value,
-    source_statement: &'a Value,
+    statement: &'a Value,
+    statement_root: &'a str,
     coefficient_commitment_set: &'a Value,
     recipient_share_commitment_set: &'a Value,
     participant_count: usize,
     target_rns_limb_count: usize,
     threshold_degree: usize,
-    source_roster_position: usize,
+}
+
+struct CompactVssShareLinkagePublicRecordInput<'a> {
+    item: &'a Value,
+    statement: &'a Value,
+    coefficient_commitment_set: &'a Value,
+    recipient_share_commitment_set: &'a Value,
+    participant_count: usize,
+    target_rns_limb_count: usize,
+    threshold_degree: usize,
+    item_index: usize,
 }
 
 fn compare_string_value(actual: &str, expected: &str, description: &str) -> CanonicalResult<()> {
@@ -365,20 +376,9 @@ fn verify_compact_vss_share_linkage_material_record_statement(
     for (field_name, expected_value) in [
         (
             "publicMatrixSeedHash",
-            read_string(input.source_statement, "publicMatrixSeedHash")?,
+            read_string(input.statement, "publicMatrixSeedHash")?,
         ),
-        (
-            "sourceTrusteeIdentity",
-            read_string(input.source_statement, "sourceTrusteeIdentity")?,
-        ),
-        (
-            "sourceCoefficientCommitmentRoot",
-            read_string(input.source_statement, "sourceCoefficientCommitmentRoot")?,
-        ),
-        (
-            "sourceRecipientShareCommitmentRoot",
-            read_string(input.source_statement, "sourceRecipientShareCommitmentRoot")?,
-        ),
+        ("shareLinkageStatementRoot", input.statement_root),
     ] {
         compare_string_value(
             read_string(input.proof_statement, field_name)?,
@@ -386,11 +386,6 @@ fn verify_compact_vss_share_linkage_material_record_statement(
             &format!("compact share-linkage proof statement {field_name}"),
         )?;
     }
-    compare_u64_value(
-        read_u64(input.proof_statement, "sourceTrusteeRosterPosition")?,
-        input.source_roster_position as u64,
-        "compact share-linkage proof statement sourceTrusteeRosterPosition",
-    )?;
 
     let items = compact_vss_share_linkage_item_values(input.proof_statement)?;
     if items.is_empty() {
@@ -399,18 +394,19 @@ fn verify_compact_vss_share_linkage_material_record_statement(
         ));
     }
     let mut coverage = Vec::with_capacity(items.len());
-    for (item_index, item) in items.iter().enumerate() {
+    for (item_index, &item) in items.iter().enumerate() {
         coverage.push(
             verify_compact_vss_share_linkage_item_against_public_records(
-                *item,
-                input.source_statement,
-                input.coefficient_commitment_set,
-                input.recipient_share_commitment_set,
-                input.participant_count,
-                input.target_rns_limb_count,
-                input.threshold_degree,
-                input.source_roster_position,
-                item_index,
+                CompactVssShareLinkagePublicRecordInput {
+                    item,
+                    statement: input.statement,
+                    coefficient_commitment_set: input.coefficient_commitment_set,
+                    recipient_share_commitment_set: input.recipient_share_commitment_set,
+                    participant_count: input.participant_count,
+                    target_rns_limb_count: input.target_rns_limb_count,
+                    threshold_degree: input.threshold_degree,
+                    item_index,
+                },
             )?,
         );
     }
@@ -419,16 +415,22 @@ fn verify_compact_vss_share_linkage_material_record_statement(
 }
 
 fn verify_compact_vss_share_linkage_item_against_public_records(
-    item: &Value,
-    source_statement: &Value,
-    coefficient_commitment_set: &Value,
-    recipient_share_commitment_set: &Value,
-    participant_count: usize,
-    target_rns_limb_count: usize,
-    threshold_degree: usize,
-    source_roster_position: usize,
-    item_index: usize,
+    input: CompactVssShareLinkagePublicRecordInput<'_>,
 ) -> CanonicalResult<Value> {
+    let item = input.item;
+    let statement = input.statement;
+    let coefficient_commitment_set = input.coefficient_commitment_set;
+    let recipient_share_commitment_set = input.recipient_share_commitment_set;
+    let participant_count = input.participant_count;
+    let target_rns_limb_count = input.target_rns_limb_count;
+    let threshold_degree = input.threshold_degree;
+    let item_index = input.item_index;
+    let source_roster_position = usize::try_from(read_u64(item, "sourceTrusteeRosterPosition")?)
+        .map_err(|_| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage item sourceTrusteeRosterPosition does not fit usize",
+            )
+        })?;
     let recipient_roster_position = usize::try_from(read_u64(item, "recipientRosterPosition")?)
         .map_err(|_| {
             invalid_succinct_setup_proof(
@@ -448,6 +450,29 @@ fn verify_compact_vss_share_linkage_item_against_public_records(
             "compact share-linkage item coverage is outside the source statement dimensions",
         ));
     }
+    let source_statement_records = array_field(statement, "sourceStatementRecords")?;
+    let source_statement = source_statement_records
+        .get(source_roster_position)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage item source is outside the statement",
+            )
+        })?;
+    compare_string_value(
+        read_string(item, "sourceTrusteeIdentity")?,
+        read_string(source_statement, "sourceTrusteeIdentity")?,
+        "compact share-linkage proof item sourceTrusteeIdentity",
+    )?;
+    compare_string_value(
+        read_string(item, "sourceCoefficientCommitmentRoot")?,
+        read_string(source_statement, "sourceCoefficientCommitmentRoot")?,
+        "compact share-linkage proof item sourceCoefficientCommitmentRoot",
+    )?;
+    compare_string_value(
+        read_string(item, "sourceRecipientShareCommitmentRoot")?,
+        read_string(source_statement, "sourceRecipientShareCommitmentRoot")?,
+        "compact share-linkage proof item sourceRecipientShareCommitmentRoot",
+    )?;
 
     let coefficient_source_records =
         array_field(coefficient_commitment_set, "sourceTrusteeRecords")?;
@@ -737,14 +762,6 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
         "compact share-linkage proof material set ringDegree",
     )?;
 
-    let source_statement_records = statement
-        .get("sourceStatementRecords")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "compact share-linkage statement sourceStatementRecords must be an array",
-            )
-        })?;
     let proof_records = proof_material_set
         .get("proofRecords")
         .and_then(Value::as_array)
@@ -779,33 +796,6 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
             COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
             "compact share-linkage proof record proofFamily",
         )?;
-        let source_roster_position = usize::try_from(read_u64(
-            proof_record,
-            "sourceTrusteeRosterPosition",
-        )?)
-        .map_err(|_| {
-            invalid_succinct_setup_proof(
-                "compact share-linkage proof record sourceTrusteeRosterPosition does not fit usize",
-            )
-        })?;
-        let source_statement = source_statement_records
-            .get(source_roster_position)
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "compact share-linkage proof record source roster position is outside the statement",
-                )
-            })?;
-        let source_statement_root = read_string(source_statement, "sourceStatementRoot")?;
-        compare_string_value(
-            read_string(proof_record, "sourceStatementRoot")?,
-            source_statement_root,
-            "compact share-linkage proof record sourceStatementRoot",
-        )?;
-        compare_string_value(
-            read_string(proof_record, "sourceTrusteeIdentity")?,
-            read_string(source_statement, "sourceTrusteeIdentity")?,
-            "compact share-linkage proof record sourceTrusteeIdentity",
-        )?;
 
         let compact_vss_share_linkage =
             proof_record.get("compactVssShareLinkage").ok_or_else(|| {
@@ -816,13 +806,13 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
         let coverage = verify_compact_vss_share_linkage_material_record_statement(
             CompactVssShareLinkageMaterialRecordStatementInput {
                 proof_statement: compact_vss_share_linkage,
-                source_statement,
+                statement,
+                statement_root,
                 coefficient_commitment_set,
                 recipient_share_commitment_set,
                 participant_count,
                 target_rns_limb_count,
                 threshold_degree,
-                source_roster_position,
             },
         )?;
         let record_linkage_items = proof_record
@@ -844,6 +834,15 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
                     "compact share-linkage proof record linkageItems must be the canonical proof statement coverage",
                 ));
             }
+            let source_roster_position = usize::try_from(read_u64(
+                coverage_item,
+                "sourceTrusteeRosterPosition",
+            )?)
+            .map_err(|_| {
+                invalid_succinct_setup_proof(
+                    "compact share-linkage coverage sourceTrusteeRosterPosition does not fit usize",
+                )
+            })?;
             let recipient_roster_position = usize::try_from(read_u64(
                 coverage_item,
                 "recipientRosterPosition",
@@ -897,9 +896,6 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
             "objectType": "CompactVssShareLinkageProofRecord",
             "objectVersion": 1,
             "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            "sourceStatementRoot": source_statement_root,
-            "sourceTrusteeIdentity": read_string(source_statement, "sourceTrusteeIdentity")?,
-            "sourceTrusteeRosterPosition": source_roster_position,
             "linkageItems": coverage,
             "compactVssShareLinkage": compact_vss_share_linkage,
             "proofBytesHash": proof_bytes_hash,
@@ -918,11 +914,10 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
                 "ceremonyId": read_string(statement, "ceremonyId")?,
                 "manifestHash": read_string(statement, "manifestHash")?,
                 "rosterHash": read_string(statement, "rosterHash")?,
-                "trusteeIdentity": read_string(source_statement, "sourceTrusteeIdentity")?,
-                "trusteeRosterPosition": source_roster_position,
+                "trusteeIdentity": "compact-vss-share-linkage",
+                "trusteeRosterPosition": 0,
                 "setupEpoch": read_string(statement, "setupEpoch")?,
-                "sourceCoefficientCommitmentRoot": read_string(source_statement, "sourceCoefficientCommitmentRoot")?,
-                "sourceRecipientShareCommitmentRoot": read_string(source_statement, "sourceRecipientShareCommitmentRoot")?,
+                "shareLinkageStatementRoot": statement_root,
             },
             "ringDegree": ring_degree,
             "compactVssShareLinkage": compact_vss_share_linkage,
@@ -1267,97 +1262,22 @@ fn compact_vss_share_linkage_statement_from_request(
     let statement_value = request
         .get("compactVssShareLinkage")
         .ok_or_else(|| invalid_succinct_setup_proof("compactVssShareLinkage must be present"))?;
-    let source_coefficient_commitment_root =
-        read_string(statement_value, "sourceCoefficientCommitmentRoot")?.to_string();
-    let source_recipient_share_commitment_root =
-        read_string(statement_value, "sourceRecipientShareCommitmentRoot")?.to_string();
     let context = proof_context_from_value(
         context_value,
         SuccinctSetupProofFamilyShape::CompactVssShareLinkage,
     )?;
-    if context.binding_roots[0].1 != source_coefficient_commitment_root
-        || context.binding_roots[1].1 != source_recipient_share_commitment_root
-    {
+    let share_linkage_statement_root = read_string(statement_value, "shareLinkageStatementRoot")?;
+    if context.binding_roots[0].1 != share_linkage_statement_root {
         return Err(invalid_succinct_setup_proof(
-            "compact share-linkage context roots must match the statement roots",
-        ));
-    }
-    let source_trustee_identity =
-        read_string(statement_value, "sourceTrusteeIdentity")?.to_string();
-    let source_trustee_roster_position = read_u64(statement_value, "sourceTrusteeRosterPosition")?;
-    if context.trustee_identity != source_trustee_identity
-        || context.trustee_roster_position != source_trustee_roster_position
-    {
-        return Err(invalid_succinct_setup_proof(
-            "compact share-linkage context trustee must match the source trustee",
+            "compact share-linkage context root must match the share-linkage statement root",
         ));
     }
     let public_matrix_seed_hash = read_string(statement_value, "publicMatrixSeedHash")?.to_string();
-    let source_rns_limb_index =
-        usize::try_from(read_u64(statement_value, "sourceRnsLimbIndex")?)
-            .map_err(|_| invalid_succinct_setup_proof("sourceRnsLimbIndex does not fit usize"))?;
-    let source_message_modulus = read_u64(statement_value, "sourceMessageModulus")?;
-    let coefficient_commitment_roots =
-        read_string_array(statement_value, "coefficientCommitmentRoots")?;
-    let coefficient_opening_roots = read_string_array(statement_value, "coefficientOpeningRoots")?;
-    let coefficient_commitment_values = statement_value
-        .get("coefficientCommitments")
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof(
-                "compactVssShareLinkage.coefficientCommitments must be an array",
-            )
-        })?;
-    if coefficient_commitment_values.len() != coefficient_commitment_roots.len() {
-        return Err(invalid_succinct_setup_proof(
-            "compactVssShareLinkage coefficient commitments and roots must be aligned",
-        ));
-    }
-    if coefficient_commitment_values.len() != coefficient_opening_roots.len() {
-        return Err(invalid_succinct_setup_proof(
-            "compactVssShareLinkage coefficient commitments and opening roots must be aligned",
-        ));
-    }
-    let coefficient_commitments = coefficient_commitment_values
-        .iter()
-        .zip(coefficient_commitment_roots.iter())
-        .enumerate()
-        .map(|(coefficient_index, (value, expected_commitment_root))| {
-            compact_vss_share_linkage_commitment_from_value(
-                value,
-                CompactVssCommandCommitmentExpectation {
-                    field_name: format!("coefficientCommitments.{coefficient_index}"),
-                    root: expected_commitment_root,
-                    role: "coefficient",
-                    public_matrix_seed_hash: &public_matrix_seed_hash,
-                    rns_limb_index: source_rns_limb_index,
-                    rns_prime: source_message_modulus,
-                    ring_degree,
-                },
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    let recipient_share_commitment_root =
-        read_string(statement_value, "recipientShareCommitmentRoot")?.to_string();
-    let recipient_share_opening_root =
-        read_string(statement_value, "recipientShareOpeningRoot")?.to_string();
-    let recipient_share_commitment = compact_vss_share_linkage_commitment_from_value(
-        statement_value
-            .get("recipientShareCommitment")
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof(
-                    "compactVssShareLinkage.recipientShareCommitment must be present",
-                )
-            })?,
-        CompactVssCommandCommitmentExpectation {
-            field_name: "recipientShareCommitment".to_string(),
-            root: &recipient_share_commitment_root,
-            role: "recipient-share",
-            public_matrix_seed_hash: &public_matrix_seed_hash,
-            rns_limb_index: source_rns_limb_index,
-            rns_prime: source_message_modulus,
-            ring_degree,
-        },
+    let primary_item = compact_vss_share_linkage_item_from_value(
+        statement_value,
+        "compactVssShareLinkage",
+        &public_matrix_seed_hash,
+        ring_degree,
     )?;
     let additional_linkage_items = match statement_value.get("additionalLinkageItems") {
         None => Vec::new(),
@@ -1388,20 +1308,21 @@ fn compact_vss_share_linkage_statement_from_request(
         private_vss_share: None,
         compact_vss_share_linkage: Some(CompactVssShareLinkageStatement {
             public_matrix_seed_hash,
-            source_trustee_identity,
-            source_trustee_roster_position,
-            recipient_identity: read_string(statement_value, "recipientIdentity")?.to_string(),
-            recipient_roster_position: read_u64(statement_value, "recipientRosterPosition")?,
-            source_coefficient_commitment_root,
-            source_recipient_share_commitment_root,
-            source_rns_limb_index,
-            source_message_modulus,
-            coefficient_commitment_roots,
-            coefficient_opening_roots,
-            coefficient_commitments,
-            recipient_share_commitment_root,
-            recipient_share_opening_root,
-            recipient_share_commitment,
+            source_trustee_identity: primary_item.source_trustee_identity,
+            source_trustee_roster_position: primary_item.source_trustee_roster_position,
+            recipient_identity: primary_item.recipient_identity,
+            recipient_roster_position: primary_item.recipient_roster_position,
+            source_coefficient_commitment_root: primary_item.source_coefficient_commitment_root,
+            source_recipient_share_commitment_root: primary_item
+                .source_recipient_share_commitment_root,
+            source_rns_limb_index: primary_item.source_rns_limb_index,
+            source_message_modulus: primary_item.source_message_modulus,
+            coefficient_commitment_roots: primary_item.coefficient_commitment_roots,
+            coefficient_opening_roots: primary_item.coefficient_opening_roots,
+            coefficient_commitments: primary_item.coefficient_commitments,
+            recipient_share_commitment_root: primary_item.recipient_share_commitment_root,
+            recipient_share_opening_root: primary_item.recipient_share_opening_root,
+            recipient_share_commitment: primary_item.recipient_share_commitment,
             additional_linkage_items,
         }),
         compact_same_secret_bridge: None,
@@ -2113,6 +2034,15 @@ fn compact_vss_share_linkage_item_from_value(
     )?;
 
     Ok(CompactVssShareLinkageItem {
+        source_trustee_identity: read_string(value, "sourceTrusteeIdentity")?.to_string(),
+        source_trustee_roster_position: read_u64(value, "sourceTrusteeRosterPosition")?,
+        source_coefficient_commitment_root: read_string(value, "sourceCoefficientCommitmentRoot")?
+            .to_string(),
+        source_recipient_share_commitment_root: read_string(
+            value,
+            "sourceRecipientShareCommitmentRoot",
+        )?
+        .to_string(),
         recipient_identity: read_string(value, "recipientIdentity")?.to_string(),
         recipient_roster_position: read_u64(value, "recipientRosterPosition")?,
         source_rns_limb_index,

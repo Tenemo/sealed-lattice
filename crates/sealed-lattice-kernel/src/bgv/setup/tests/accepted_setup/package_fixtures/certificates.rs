@@ -135,16 +135,29 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
     let randomness_column_count = crate::bgv::setup::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT as u64;
     let message_column_count =
         crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT as u64;
-    let projection_weight =
-        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_PROJECTION_WEIGHT as u64;
+    let randomness_projection_weight =
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_PROJECTION_WEIGHT as u64;
+    let ring_degree = POLYNOMIAL_DEGREE as u64;
     let input_column_count = message_column_count + randomness_column_count;
     let coordinate_count_per_commitment = commitment_modulus_limb_count * output_coordinate_count;
-    let sampled_matrix_residues_per_coordinate = input_column_count * projection_weight;
-    let sampled_projection_indices_per_coordinate = sampled_matrix_residues_per_coordinate;
+    let message_coverage_terms_per_coordinate =
+        ring_degree.div_ceil(coordinate_count_per_commitment);
+    let message_matrix_residues_per_commitment = message_column_count * ring_degree;
+    let randomness_matrix_residues_per_coordinate =
+        randomness_column_count * randomness_projection_weight;
+    let sampled_randomness_projection_indices_per_coordinate =
+        randomness_matrix_residues_per_coordinate;
+    let randomness_matrix_residues_per_commitment =
+        coordinate_count_per_commitment * randomness_matrix_residues_per_coordinate;
     let sampled_matrix_residues_per_commitment =
-        coordinate_count_per_commitment * sampled_matrix_residues_per_coordinate;
-    let sampled_projection_indices_per_commitment =
-        coordinate_count_per_commitment * sampled_projection_indices_per_coordinate;
+        message_matrix_residues_per_commitment + randomness_matrix_residues_per_commitment;
+    let sampled_randomness_projection_indices_per_commitment =
+        coordinate_count_per_commitment * sampled_randomness_projection_indices_per_coordinate;
+    let scheduled_message_terms_per_message_column =
+        coordinate_count_per_commitment * message_coverage_terms_per_coordinate;
+    let unused_scheduled_terms_per_message_column =
+        scheduled_message_terms_per_message_column.saturating_sub(ring_degree);
+    let sampled_message_terms_per_commitment = message_column_count * ring_degree;
     let maximum_one_source_shamir_scalar_l1 =
         scalar_power_sum_fixture(decryption_threshold, participant_count);
     let one_recipient_aggregate_shamir_scalar_l1 =
@@ -166,6 +179,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
         .as_array()
         .expect("canonical target basis target primes")
         .clone();
+    let target_rns_limb_count = target_rns_primes.len() as u64;
     let input_column_labels = (0..message_column_count)
         .map(|digit_index| serde_json::json!(format!("message:{digit_index}")))
         .chain(
@@ -216,16 +230,43 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
         })
         .max()
         .unwrap_or(0);
-    let bridge_direct_digit_vector_count = target_rns_primes.len() as u64 * message_column_count;
+    let bridge_direct_digit_vector_count = target_rns_limb_count * message_column_count;
+    let source_coefficient_commitments =
+        participant_count * DATA_PRIMES.len() as u64 * decryption_threshold;
+    let recipient_share_commitments = participant_count * participant_count * target_rns_limb_count;
+    let aggregate_threshold_commitments = participant_count * target_rns_limb_count;
+    let total_compact_commitments = source_coefficient_commitments
+        + recipient_share_commitments
+        + aggregate_threshold_commitments;
+    let total_public_commitment_coordinates =
+        total_compact_commitments * coordinate_count_per_commitment;
+    let total_sampled_message_matrix_residues =
+        total_compact_commitments * message_matrix_residues_per_commitment;
+    let total_sampled_randomness_projection_indices =
+        total_compact_commitments * sampled_randomness_projection_indices_per_commitment;
+    let total_sampled_matrix_residues =
+        total_compact_commitments * sampled_matrix_residues_per_commitment;
+    let maximum_non_reconstructing_recipient_count = decryption_threshold.saturating_sub(1);
+    let corrupted_recipient_opening_credential_count =
+        maximum_non_reconstructing_recipient_count * participant_count * target_rns_limb_count;
+    let smallest_commitment_modulus = SETUP_COMMITMENT_MODULUS_LIMB_INDICES
+        .iter()
+        .map(|commitment_modulus_index| DATA_PRIMES[*commitment_modulus_index])
+        .min()
+        .expect("compact commitment modulus limbs");
+    let estimator_digit_difference_strict_upper_bound = (smallest_commitment_modulus - 1) / 2;
+    let estimator_digit_precondition_margin =
+        i128::from(estimator_digit_difference_strict_upper_bound)
+            - i128::from(compact_vss_message_digit_maximum);
 
     let binding_body = serde_json::json!({
         "objectType": "CompactVssParameterCertificateInputBinding",
-        "objectVersion": 3,
+        "objectVersion": 8,
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "profileId": "sealed-lattice-compact-vss-sparse-linear-v1",
+        "profileId": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_COMMITMENT_PROFILE_ID,
         "participantCount": participant_count,
         "sourceRnsLimbCount": DATA_PRIMES.len(),
-        "targetRnsLimbCount": target_rns_primes.len(),
+        "targetRnsLimbCount": target_rns_limb_count,
         "thresholdDegree": decryption_threshold,
         "ringDegree": POLYNOMIAL_DEGREE,
         "commitmentRelation": {
@@ -236,7 +277,8 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
             "outputCoordinateCount": output_coordinate_count,
             "messageWidth": message_column_count,
             "randomnessWidth": randomness_column_count,
-            "projectionWeight": projection_weight,
+            "messageCoverageTermsPerCoordinate": message_coverage_terms_per_coordinate,
+            "randomnessProjectionWeight": randomness_projection_weight,
             "coordinateCountPerCommitment": coordinate_count_per_commitment,
             "inputColumnLabels": input_column_labels,
             "homomorphicAdditionRule": "commitments combine linearly only when profile, public matrix seed, source limb, and commitment modulus order match",
@@ -244,7 +286,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
         },
         "commonCommitmentKey": {
             "matrixResidueHashDomain": "sealed-lattice-compact-vss-commitment/matrix-residue-v1",
-            "projectionIndexHashDomain": "sealed-lattice-compact-vss-commitment/projection-index-v1",
+            "randomnessProjectionIndexHashDomain": "sealed-lattice-compact-vss-commitment/projection-index-v1",
             "rejectionSamplingRule": "sample little-endian 64-bit chunks and reject values at or above 2^64 - (2^64 mod modulus or ringDegree)",
             "matrixResiduePreimageFields": [
                 "publicMatrixSeedHash",
@@ -257,7 +299,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                 "modulus",
                 "blockIndex"
             ],
-            "projectionIndexPreimageFields": [
+            "randomnessProjectionIndexPreimageFields": [
                 "publicMatrixSeedHash",
                 "profileId",
                 "rnsLimbIndex",
@@ -268,15 +310,100 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                 "ringDegree",
                 "blockIndex"
             ],
-            "sparseProjectionShape": {
+            "messageCoverageShape": {
                 "inputColumnCount": input_column_count,
-                "projectionWeight": projection_weight,
                 "coordinateCountPerCommitment": coordinate_count_per_commitment,
-                "sampledMatrixResiduesPerCoordinate": sampled_matrix_residues_per_coordinate,
-                "sampledProjectionIndicesPerCoordinate": sampled_projection_indices_per_coordinate,
-                "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
-                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+                "messageCoverageTermsPerCoordinate": message_coverage_terms_per_coordinate,
+                "sampledMessageMatrixResiduesPerCommitment": message_matrix_residues_per_commitment,
+                "coveredMessageCoefficientsPerMessageColumn": ring_degree,
+                "uncoveredMessageCoefficientsPerMessageColumn": 0_u64,
             },
+            "randomnessProjectionShape": {
+                "randomnessProjectionWeight": randomness_projection_weight,
+                "sampledMatrixResiduesPerCoordinate": randomness_matrix_residues_per_coordinate,
+                "sampledRandomnessProjectionIndicesPerCoordinate": sampled_randomness_projection_indices_per_coordinate,
+                "sampledMatrixResiduesPerCommitment": randomness_matrix_residues_per_commitment,
+                "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
+            },
+        },
+        "compactMaterialArtifactBoundary": {
+            "artifactRole": "compact-vss-setup-public-material",
+            "publicMaterialFields": [
+                "compactVssCoefficientCommitmentSet",
+                "compactVssRecipientShareCommitmentSet",
+                "compactVssAggregateThresholdCommitmentSet",
+                "compactVssShareLinkageStatement",
+                "compactVssShareLinkageProofMaterialSet"
+            ],
+            "bridgeMaterialFields": [
+                "compactSameSecretBridgeStatementSet",
+                "compactSameSecretBridgeProofMaterialSet",
+                "sameSecretConsistency",
+                "sameSecretProofs"
+            ],
+            "commitmentOpeningRootObligations": [
+                {
+                    "commitmentSet": "compactVssCoefficientCommitmentSet",
+                    "coordinateScope": "source trustee, source RNS limb, and Shamir coefficient",
+                    "commitmentRootField": "coefficientCommitmentRoot",
+                    "openingRootField": "coefficientOpeningRoot"
+                },
+                {
+                    "commitmentSet": "compactVssRecipientShareCommitmentSet",
+                    "coordinateScope": "source trustee, recipient trustee, and source RNS limb",
+                    "commitmentRootField": "shareCommitmentRoot",
+                    "openingRootField": "shareOpeningRoot"
+                },
+                {
+                    "commitmentSet": "compactVssAggregateThresholdCommitmentSet",
+                    "coordinateScope": "recipient trustee and target RNS limb",
+                    "commitmentRootField": "aggregateCommitmentRoot",
+                    "openingRootField": "aggregateOpeningRoot",
+                    "sourceCommitmentRootField": "sourceShareCommitmentRoots",
+                    "sourceOpeningRootField": "sourceShareOpeningRoots"
+                }
+            ],
+            "proofObligations": [
+                {
+                    "proofFamily": "compact-vss-share-linkage",
+                    "statementField": "compactVssShareLinkageStatement",
+                    "proofMaterialField": "compactVssShareLinkageProofMaterialSet",
+                    "boundRelations": [
+                        "source coefficient opening to recipient-share opening",
+                        "recipient-share opening to aggregate threshold opening"
+                    ]
+                },
+                {
+                    "proofFamily": "compact-same-secret-bridge",
+                    "statementField": "compactSameSecretBridgeStatementSet",
+                    "proofMaterialField": "compactSameSecretBridgeProofMaterialSet",
+                    "boundRelations": [
+                        "VSS constant coefficient opening to same-secret anchor",
+                        "same-secret anchor to target basis opening"
+                    ]
+                },
+                {
+                    "proofFamily": "target-decryption-share",
+                    "boundRelations": [
+                        "target aggregate opening to released target share",
+                        "target smudging opening to target-bound smudging share"
+                    ]
+                }
+            ],
+            "certificateRows": [
+                "compact-vss-module-sis-binding-review-input",
+                "compact-vss-module-lwe-hiding-review-input",
+                "compact-vss-covered-message-module-sis-binding-input",
+                "compact-vss-covered-message-module-lwe-hiding-input",
+                "compact-vss-structured-ring-review-input",
+                "compact-vss-multi-opening-review-input",
+                "compact-vss-covered-message-module-sis-binding-conclusion",
+                "compact-vss-covered-message-module-lwe-hiding-conclusion",
+                "compact-vss-structured-ring-review-conclusion",
+                "compact-vss-multi-opening-review-conclusion"
+            ],
+            "targetResultReleaseBoundary": "target-result release consumes compact material only through proof-bound aggregate and smudging openings tied to these commitment and opening roots",
+            "acceptancePrecondition": "source-derived binding and hiding conclusion rows must cover this exact artifact boundary before target-result release consumes compact material"
         },
         "messageEncoding": {
             "sourceCoefficientRepresentation": "canonical residue modulo the selected source RNS prime",
@@ -284,7 +411,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
             "signedRepresentativeConvention": "same-secret bridge witnesses use the setup proof signed representative convention before reduction into each RNS prime",
             "paddingAndBlockOrder": "two base-3^17 little-endian digit coefficients per message ring position",
             "freshEncodingRule": "exact canonical residue encoding into two message digit columns",
-            "proofRangeEncodingRule": "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims",
+            "proofRangeEncodingRule": "share-linkage, same-secret bridge, and target-decryption rows bind message digit columns with masked consistency claims and verifier-side trit decoder columns",
             "derivedEncodingRule": "Shamir recipient-share and aggregate threshold openings bind carried public-sum messages through decoded message digit columns and private carry witnesses",
         },
         "normInputClasses": [
@@ -317,6 +444,22 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                 "ringDegree": POLYNOMIAL_DEGREE,
                 "commitmentModulusLimbIndices": SETUP_COMMITMENT_MODULUS_LIMB_INDICES,
                 "commitmentModulusLimbs": commitment_modulus_limbs,
+            },
+            "messageCoordinateCoverageReview": {
+                "rowId": "compact-vss-message-coordinate-coverage",
+                "finding": "The active covered relation assigns every message coefficient in each committed digit column to one compact commitment coordinate before sampling its matrix residue.",
+                "interpretation": "This closes the previous absent-coordinate blocker for message columns. The binding and hiding conclusion rows consume this coverage row.",
+                "ringDegree": POLYNOMIAL_DEGREE,
+                "messageWidth": message_column_count,
+                "coordinateCountPerCommitment": coordinate_count_per_commitment,
+                "messageCoverageTermsPerCoordinate": message_coverage_terms_per_coordinate,
+                "scheduledMessageTermsPerMessageColumn": scheduled_message_terms_per_message_column,
+                "unusedScheduledTermsPerMessageColumn": unused_scheduled_terms_per_message_column,
+                "sampledMessageTermsPerCommitment": sampled_message_terms_per_commitment,
+                "coveredMessageCoefficientsPerMessageColumn": ring_degree,
+                "uncoveredMessageCoefficientsPerMessageColumn": 0_u64,
+                "coverageRule": "globalCoordinateIndex + coverageTermIndex * coordinateCountPerCommitment covers coefficient positions below ringDegree exactly once per message digit column",
+                "remainingReplacementRequirement": "Target-result release still needs accepted compact setup, same-secret bridge acceptance, production smudging evidence, and final runtime evidence.",
             },
             "openingWitnessRows": [
                 {
@@ -353,6 +496,23 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "witnessCoefficientCount": fresh_opening_witness_coefficient_count,
                 },
             ],
+            "commitmentExposureRows": [
+                {
+                    "rowId": "compact-vss-final-public-commitment-exposure",
+                    "sourceCoefficientCommitments": source_coefficient_commitments,
+                    "recipientShareCommitments": recipient_share_commitments,
+                    "aggregateThresholdCommitments": aggregate_threshold_commitments,
+                    "totalCompactCommitments": total_compact_commitments,
+                    "coordinateCountPerCommitment": coordinate_count_per_commitment,
+                    "totalPublicCommitmentCoordinates": total_public_commitment_coordinates,
+                    "sampledMessageMatrixResiduesPerCommitment": message_matrix_residues_per_commitment,
+                    "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
+                    "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                    "totalSampledMessageMatrixResidues": total_sampled_message_matrix_residues,
+                    "totalSampledRandomnessProjectionIndices": total_sampled_randomness_projection_indices,
+                    "totalSampledMatrixResidues": total_sampled_matrix_residues,
+                },
+            ],
             "linearRelationRows": [
                 {
                     "rowId": "compact-vss-recipient-share-shamir-evaluation",
@@ -382,6 +542,48 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "appliesToColumns": input_column_labels,
                 },
             ],
+            "proofExtractionRows": [
+                {
+                    "rowId": "compact-vss-share-linkage-proof-extraction-input",
+                    "proofFamily": "compact-vss-share-linkage",
+                    "extractedOpeningWitnessRows": [
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness"
+                    ],
+                    "extractedRelationRows": [
+                        "compact-vss-recipient-share-shamir-evaluation",
+                        "compact-vss-aggregate-threshold-public-sum",
+                        "compact-vss-one-recipient-aggregate-from-source-coefficients"
+                    ],
+                    "extractedMaskedClaimRows": [
+                        "compact-vss-share-linkage-carry-claim",
+                        "compact-vss-share-linkage-message-digit-claim"
+                    ],
+                    "rangeEvidenceRule": "message digit columns are verifier-decoded from 17 trits per digit and carry claims use masked consistency bounds",
+                },
+                {
+                    "rowId": "compact-vss-same-secret-bridge-proof-extraction-input",
+                    "proofFamily": "compact-same-secret-bridge",
+                    "extractedRelationRows": [
+                        "compact-vss-same-secret-bridge-target-reduction"
+                    ],
+                    "extractedMaskedClaimRows": [
+                        "compact-vss-same-secret-bridge-non-digit-claim",
+                        "compact-vss-same-secret-bridge-message-digit-claim"
+                    ],
+                    "rangeEvidenceRule": "target-basis bridge rows expose signed-short and target-message digit bounds through the setup proof consistency relation",
+                },
+                {
+                    "rowId": "compact-vss-target-decryption-proof-extraction-input",
+                    "proofFamily": "target-decryption-share",
+                    "extractedMaskedClaimRows": [
+                        "compact-vss-target-decryption-aggregate-message-claim",
+                        "compact-vss-target-decryption-smudging-message-claim",
+                        "compact-vss-target-decryption-randomness-claim"
+                    ],
+                    "rangeEvidenceRule": "target proof rows bind aggregate opening digits, smudging opening digits, and ternary opening randomness before release",
+                },
+            ],
             "maskedClaimNormRows": [
                 {
                     "rowId": "compact-vss-share-linkage-carry-claim",
@@ -394,7 +596,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     ],
                     "witnessInfinityBound": maximum_one_source_shamir_scalar_l1,
                     "clearClaimBoundDecimal": masked_claim_clear_bound_decimal_fixture(
-                        maximum_one_source_shamir_scalar_l1 as u128,
+                        maximum_one_source_shamir_scalar_l1,
                         POLYNOMIAL_DEGREE as u64,
                         COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS,
                     ),
@@ -427,7 +629,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "consistencyCoefficientMaximumDecimal": compact_vss_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns without trit decoder columns",
+                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns and verifier-side trit decoder columns",
                 },
                 {
                     "rowId": "compact-vss-same-secret-bridge-non-digit-claim",
@@ -471,7 +673,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "bridge target messages use direct digit claims and do not add message trit decoder columns",
+                    "rangeEvidenceRule": "bridge target messages use direct digit claims and verifier-side trit decoder columns",
                 },
                 {
                     "rowId": "compact-vss-target-decryption-aggregate-message-claim",
@@ -496,7 +698,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit without trit decoder columns",
+                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
                 },
                 {
                     "rowId": "compact-vss-target-decryption-smudging-message-claim",
@@ -519,7 +721,7 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit without trit decoder columns",
+                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
                 },
                 {
                     "rowId": "compact-vss-target-decryption-randomness-claim",
@@ -547,17 +749,48 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                     "rowId": "compact-vss-same-secret-bridge-target-reduction",
                     "sourceSecretDistribution": "standard-ternary",
                     "sourceSignedRepresentativeInfinityBound": 1_u64,
-                    "targetRnsLimbCount": target_rns_primes.len(),
+                    "targetRnsLimbCount": target_rns_limb_count,
                     "targetRnsPrimes": target_rns_primes,
                     "targetBasisHash": profile["canonicalTargetBasisHash"],
                     "targetBasisLimbOrder": "profile-order-prefix",
                     "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root_fixture(),
                 },
             ],
+            "structuredRingRows": [
+                {
+                    "rowId": "compact-vss-structured-ring-review-input",
+                    "coefficientRing": "Z_q[X]/(X^N+1)",
+                    "ringPolynomial": "X^N+1",
+                    "ringDegree": POLYNOMIAL_DEGREE,
+                    "cyclotomicFamily": "power-of-two negacyclic",
+                    "commitmentModulusLimbs": commitment_modulus_limbs,
+                    "matrixResidueHashDomain": "sealed-lattice-compact-vss-commitment/matrix-residue-v1",
+                    "randomnessProjectionIndexHashDomain": "sealed-lattice-compact-vss-commitment/projection-index-v1",
+                    "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                    "reviewScope": "binding and hiding estimates must account for the module/cyclotomic ring structure, not only scalar LWE rows",
+                },
+            ],
+            "multiOpeningRows": [
+                {
+                    "rowId": "compact-vss-multi-opening-review-input",
+                    "publicCommitmentExposureRow": "compact-vss-final-public-commitment-exposure",
+                    "sourceCoefficientCommitments": source_coefficient_commitments,
+                    "recipientShareCommitments": recipient_share_commitments,
+                    "aggregateThresholdCommitments": aggregate_threshold_commitments,
+                    "totalCompactCommitments": total_compact_commitments,
+                    "maximumNonReconstructingRecipientCount": maximum_non_reconstructing_recipient_count,
+                    "corruptedRecipientOpeningCredentialCount": corrupted_recipient_opening_credential_count,
+                    "correlatedOpeningModel": "recipient-share and aggregate openings are public linear combinations under the same compact commitment key; the hiding row must account for the joint view",
+                    "multiOpeningLossScope": "loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
+                },
+            ],
             "reviewReductionRows": [
                 {
                     "rowId": "compact-vss-module-sis-binding-review-input",
                     "problem": "Module-SIS",
+                    "bindingRows": [
+                        "compact-vss-covered-message-module-sis-binding-input"
+                    ],
                     "openingWitnessRows": [
                         "compact-vss-fresh-opening-witness",
                         "compact-vss-aggregate-opening-witness"
@@ -576,11 +809,22 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                         "compact-vss-target-decryption-smudging-message-claim",
                         "compact-vss-target-decryption-randomness-claim"
                     ],
+                    "proofExtractionRows": [
+                        "compact-vss-share-linkage-proof-extraction-input",
+                        "compact-vss-same-secret-bridge-proof-extraction-input",
+                        "compact-vss-target-decryption-proof-extraction-input"
+                    ],
+                    "multiOpeningRows": [
+                        "compact-vss-multi-opening-review-input"
+                    ],
                     "collisionDifferenceRule": "subtract two accepted openings over the integers before reducing to the commitment modulus",
                 },
                 {
                     "rowId": "compact-vss-module-lwe-hiding-review-input",
                     "problem": "Module-LWE",
+                    "hidingRows": [
+                        "compact-vss-covered-message-module-lwe-hiding-input"
+                    ],
                     "openingWitnessRows": [
                         "compact-vss-fresh-opening-witness",
                         "compact-vss-aggregate-opening-witness"
@@ -595,7 +839,165 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                         "compact-vss-target-decryption-randomness-claim"
                     ],
                     "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
-                    "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+                    "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
+                    "multiOpeningRows": [
+                        "compact-vss-multi-opening-review-input"
+                    ],
+                },
+            ],
+            "moduleSisBindingRows": [
+                {
+                    "rowId": "compact-vss-covered-message-module-sis-binding-input",
+                    "problem": "Module-SIS",
+                    "coefficientRing": "Z_q[X]/(X^N+1)",
+                    "ringDegree": POLYNOMIAL_DEGREE,
+                    "commitmentModulusLimbs": commitment_modulus_limbs,
+                    "outputCoordinateCount": output_coordinate_count,
+                    "coordinateCountPerCommitment": coordinate_count_per_commitment,
+                    "messageDigitBaseDecimal": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE.to_string(),
+                    "messageDigitCount": message_column_count,
+                    "messageDigitTritCount": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT,
+                    "messageDigitDifferenceInfinityBoundDecimal": compact_vss_message_digit_maximum.to_string(),
+                    "freshnessRandomnessDifferenceInfinityBound": 2_u64,
+                    "aggregateRandomnessDifferenceInfinityBound": aggregate_randomness_difference_infinity_bound,
+                    "sampledMessageMatrixResiduesPerCommitment": message_matrix_residues_per_commitment,
+                    "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
+                    "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
+                    "openingWitnessRows": [
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness"
+                    ],
+                    "linearRelationRows": [
+                        "compact-vss-recipient-share-shamir-evaluation",
+                        "compact-vss-aggregate-threshold-public-sum",
+                        "compact-vss-one-recipient-aggregate-from-source-coefficients"
+                    ],
+                    "proofExtractionRows": [
+                        "compact-vss-share-linkage-proof-extraction-input",
+                        "compact-vss-same-secret-bridge-proof-extraction-input",
+                        "compact-vss-target-decryption-proof-extraction-input"
+                    ],
+                    "multiOpeningRows": [
+                        "compact-vss-multi-opening-review-input"
+                    ],
+                    "estimatorSmallnessPrecondition": {
+                        "smallestCommitmentModulus": smallest_commitment_modulus,
+                        "strictDifferenceUpperBoundDecimal": estimator_digit_difference_strict_upper_bound.to_string(),
+                        "messageDigitDifferenceInfinityBoundDecimal": compact_vss_message_digit_maximum.to_string(),
+                        "marginDecimal": estimator_digit_precondition_margin.to_string(),
+                    },
+                },
+            ],
+            "moduleLweHidingRows": [
+                {
+                    "rowId": "compact-vss-covered-message-module-lwe-hiding-input",
+                    "problem": "Module-LWE",
+                    "coefficientRing": "Z_q[X]/(X^N+1)",
+                    "ringDegree": POLYNOMIAL_DEGREE,
+                    "commitmentModulusLimbs": commitment_modulus_limbs,
+                    "outputCoordinateCount": output_coordinate_count,
+                    "coordinateCountPerCommitment": coordinate_count_per_commitment,
+                    "randomnessColumnCount": randomness_column_count,
+                    "randomnessProjectionWeight": randomness_projection_weight,
+                    "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
+                    "publicCommitmentExposureRow": "compact-vss-final-public-commitment-exposure",
+                    "totalPublicCommitmentCoordinates": total_public_commitment_coordinates,
+                    "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
+                    "totalSampledRandomnessProjectionIndices": total_sampled_randomness_projection_indices,
+                    "maximumNonReconstructingRecipientCount": maximum_non_reconstructing_recipient_count,
+                    "corruptedRecipientOpeningCredentialCount": corrupted_recipient_opening_credential_count,
+                    "corruptedRecipientLeakageModel": "corrupted recipients learn their delivered shares and opening credentials; hiding must cover all other coefficient openings under the same compact key",
+                    "multiOpeningRows": [
+                        "compact-vss-multi-opening-review-input"
+                    ],
+                    "structuredRingRows": [
+                        "compact-vss-structured-ring-review-input"
+                    ],
+                },
+            ],
+            "certificateConclusionRows": [
+                {
+                    "rowId": "compact-vss-covered-message-module-sis-binding-conclusion",
+                    "problem": "Module-SIS",
+                    "construction": "covered-message compact Ajtai-style commitment over Z_q[X]/(X^N+1)",
+                    "reduction": "two verifier-valid openings for the same compact commitment subtract to a nonzero Module-SIS relation over the joint message-digit and randomness-difference witness",
+                    "sourceInputRows": [
+                        "compact-vss-covered-message-module-sis-binding-input",
+                        "compact-vss-message-coordinate-coverage",
+                        "compact-vss-fresh-opening-witness",
+                        "compact-vss-aggregate-opening-witness",
+                        "compact-vss-share-linkage-proof-extraction-input",
+                        "compact-vss-same-secret-bridge-proof-extraction-input",
+                        "compact-vss-target-decryption-proof-extraction-input",
+                        "compact-vss-multi-opening-review-input"
+                    ],
+                    "verifierRangeEvidence": "message digits are bounded by verifier-side trit decoder columns, carry claims, and masked consistency rows before a compact opening is accepted",
+                    "witnessDifferenceInfinityBoundDecimal": compact_vss_message_digit_maximum.to_string(),
+                    "randomnessDifferenceInfinityBounds": {
+                        "freshOpening": 2_u64,
+                        "aggregateOpening": aggregate_randomness_difference_infinity_bound,
+                    },
+                    "estimatorPrecondition": {
+                        "source": "malb/lattice-estimator SIS lattice row requires length_bound < (q - 1) / 2",
+                        "smallestCommitmentModulus": smallest_commitment_modulus,
+                        "strictDifferenceUpperBoundDecimal": estimator_digit_difference_strict_upper_bound.to_string(),
+                        "witnessDifferenceInfinityBoundDecimal": compact_vss_message_digit_maximum.to_string(),
+                        "marginDecimal": estimator_digit_precondition_margin.to_string(),
+                    },
+                    "literatureBasis": [
+                        "HSS24 modified Ajtai commitment: binding under MSIS for the joint message-and-randomness opening difference",
+                        "LNP22/Lyubashevsky-style opening proof extraction: verifier-accepted openings give bounded witness differences"
+                    ],
+                },
+                {
+                    "rowId": "compact-vss-covered-message-module-lwe-hiding-conclusion",
+                    "problem": "Module-LWE",
+                    "construction": "covered-message compact Ajtai-style commitment with two balanced-ternary randomness columns",
+                    "reduction": "public compact commitments are interpreted as Module-LWE samples hiding the message shift under the final public sample count and corrupted-recipient opening view",
+                    "sourceInputRows": [
+                        "compact-vss-covered-message-module-lwe-hiding-input",
+                        "compact-vss-final-public-commitment-exposure",
+                        "compact-vss-multi-opening-review-input",
+                        "compact-vss-structured-ring-review-input"
+                    ],
+                    "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
+                    "publicSampleRows": {
+                        "totalCompactCommitments": total_compact_commitments,
+                        "totalPublicCommitmentCoordinates": total_public_commitment_coordinates,
+                        "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
+                        "totalSampledRandomnessProjectionIndices": total_sampled_randomness_projection_indices,
+                    },
+                    "corruptedRecipientOpeningCredentialCount": corrupted_recipient_opening_credential_count,
+                    "leakageScope": "hiding review covers the joint public commitment view plus delivered openings for a non-reconstructing corrupted-recipient set",
+                    "literatureBasis": [
+                        "HSS24 modified Ajtai commitment: hiding under MLWE for the small randomness part",
+                        "ACF25-style functional-hiding caution: delegated derived openings are not used on the selected fresh-recipient-commitment path"
+                    ],
+                },
+                {
+                    "rowId": "compact-vss-structured-ring-review-conclusion",
+                    "construction": "power-of-two negacyclic module ring with uniformly sampled commitment residues from the bound matrix-expansion domains",
+                    "sourceInputRows": [
+                        "compact-vss-structured-ring-review-input"
+                    ],
+                    "ringDegree": POLYNOMIAL_DEGREE,
+                    "commitmentModulusLimbs": commitment_modulus_limbs,
+                    "matrixResidueHashDomain": "sealed-lattice-compact-vss-commitment/matrix-residue-v1",
+                    "randomnessProjectionIndexHashDomain": "sealed-lattice-compact-vss-commitment/projection-index-v1",
+                    "reviewScope": "binding and hiding conclusions are scoped to the declared module/cyclotomic ring and do not rely on scalar-only rows",
+                },
+                {
+                    "rowId": "compact-vss-multi-opening-review-conclusion",
+                    "sourceInputRows": [
+                        "compact-vss-multi-opening-review-input"
+                    ],
+                    "sourceCoefficientCommitments": source_coefficient_commitments,
+                    "recipientShareCommitments": recipient_share_commitments,
+                    "aggregateThresholdCommitments": aggregate_threshold_commitments,
+                    "totalCompactCommitments": total_compact_commitments,
+                    "maximumNonReconstructingRecipientCount": maximum_non_reconstructing_recipient_count,
+                    "corruptedRecipientOpeningCredentialCount": corrupted_recipient_opening_credential_count,
+                    "exposureScope": "multi-opening loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
                 },
             ],
         },
@@ -610,9 +1012,10 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                 "outputCoordinateCount": output_coordinate_count,
                 "messageWidth": message_column_count,
                 "randomnessWidth": randomness_column_count,
-                "projectionWeight": projection_weight,
+                "messageCoverageTermsPerCoordinate": message_coverage_terms_per_coordinate,
+                "randomnessProjectionWeight": randomness_projection_weight,
                 "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
-                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+                "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
             },
             {
                 "rowId": "compact-vss-module-lwe-hiding-input",
@@ -624,9 +1027,10 @@ fn compact_vss_parameter_certificate_input_binding_fixture(
                 "outputCoordinateCount": output_coordinate_count,
                 "messageWidth": message_column_count,
                 "randomnessWidth": randomness_column_count,
-                "projectionWeight": projection_weight,
+                "messageCoverageTermsPerCoordinate": message_coverage_terms_per_coordinate,
+                "randomnessProjectionWeight": randomness_projection_weight,
                 "sampledMatrixResiduesPerCommitment": sampled_matrix_residues_per_commitment,
-                "sampledProjectionIndicesPerCommitment": sampled_projection_indices_per_commitment,
+                "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,
             },
         ],
         "sameSecretBridgeInput": {

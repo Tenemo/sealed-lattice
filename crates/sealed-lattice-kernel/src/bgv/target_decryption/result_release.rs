@@ -3,7 +3,7 @@ use super::*;
 pub(super) fn refuse_target_decryption_result_release() -> CanonicalResult<Value> {
     Err(CanonicalError::new(
         CanonicalErrorCode::InvalidProtocolObject,
-        "target result release is unavailable while compact VSS public material uses a commitment profile without certificate-grade binding evidence",
+        "target result release is unavailable until accepted compact setup, proof-backed target shares, production smudging evidence, quorum interpolation checks, and final release verification are implemented",
     ))
 }
 

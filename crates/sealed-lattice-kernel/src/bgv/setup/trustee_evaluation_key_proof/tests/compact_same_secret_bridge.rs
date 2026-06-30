@@ -1,7 +1,8 @@
 use super::*;
 use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
 use crate::bgv::setup::compact_vss_commitment::{
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
+    compute_compact_vss_commitment_from_opening,
 };
 use serde_json::json;
 
@@ -23,13 +24,12 @@ fn compact_same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
     assert_eq!(
         layout.compact_same_secret_bridge_decoder_digit_count(),
-        0,
-        "compact bridge target-message digits are bounded by masked digit claims"
-    );
-    assert_eq!(
-        layout.compact_same_secret_bridge_message_encoding_columns(),
         bridge_digit_count,
-        "compact bridge target messages should carry only digit columns"
+        "compact bridge target-message digits must carry verifier-side decoder rows"
+    );
+    assert!(
+        layout.compact_same_secret_bridge_message_encoding_columns() > bridge_digit_count,
+        "compact bridge target messages must carry digit and trit columns"
     );
     assert_eq!(
         layout.consistency_vector_count(),
@@ -40,20 +40,20 @@ fn compact_same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         layout.compact_same_secret_bridge_relation_count(),
         layout.compact_same_secret_bridge_target_count()
             * (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
-                + LINCHECK_REPETITIONS),
-        "compact bridge relation challenges should not include decoder rows"
+                + LINCHECK_REPETITIONS)
+            + layout.compact_same_secret_bridge_decoder_digit_count() * LINCHECK_REPETITIONS,
+        "compact bridge relation challenges must include decoder rows"
     );
-    assert_eq!(
-        layout.compact_same_secret_bridge_message_trit_count(0, 0),
-        0,
-        "compact bridge target messages should not carry trit decoder columns"
+    assert!(
+        layout.compact_same_secret_bridge_message_trit_count(0, 0) > 0,
+        "compact bridge target messages must carry trit decoder columns"
     );
     let later_commitment_limb_layout =
         LimbColumnLayout::new(&statement, 1).expect("compact bridge second limb layout");
     assert_eq!(
         later_commitment_limb_layout.compact_same_secret_bridge_relation_count(),
         layout.compact_same_secret_bridge_relation_count(),
-        "compact bridge commitment limbs should use the same digit-only relation"
+        "compact bridge commitment limbs should use the same decoder-backed relation"
     );
     let proof =
         prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
@@ -273,6 +273,9 @@ fn compact_bridge_coordinates_by_modulus_for_test(
 ) -> Vec<Vec<u64>> {
     (0..SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
         .map(|commitment_modulus_index| {
+            let message_digit_columns =
+                compact_vss_canonical_message_digit_columns(message_coefficients, ring_degree)
+                    .expect("compact same-secret bridge message digit columns");
             let computation =
                 compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
                     commitment_role: "coefficient",
@@ -285,6 +288,7 @@ fn compact_bridge_coordinates_by_modulus_for_test(
                     rns_prime: target_rns_prime,
                     ring_degree,
                     message_coefficients,
+                    message_digit_columns: &message_digit_columns,
                     message_coefficient_bound: target_rns_prime,
                     randomness_by_column,
                 })

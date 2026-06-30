@@ -1,6 +1,7 @@
 use super::*;
 use crate::bgv::setup::compact_vss_commitment::{
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
+    compute_compact_vss_commitment_from_opening,
 };
 use serde_json::json;
 
@@ -120,25 +121,20 @@ fn compact_vss_share_linkage_instance() -> (
 
     let source_coefficient_commitment_root = repeated_hash("91");
     let source_recipient_share_commitment_root = repeated_hash("92");
+    let share_linkage_statement_root = repeated_hash("93");
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: super::super::COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY.to_string(),
             ceremony_id: "compact-vss-proof-test".to_string(),
             manifest_hash: repeated_hash("11"),
             roster_hash: repeated_hash("22"),
-            trustee_identity: "trustee-0".to_string(),
+            trustee_identity: "compact-vss-share-linkage".to_string(),
             trustee_roster_position: 0,
             setup_epoch: "setup-epoch-1".to_string(),
-            binding_roots: vec![
-                (
-                    "sourceCoefficientCommitmentRoot".to_string(),
-                    source_coefficient_commitment_root.clone(),
-                ),
-                (
-                    "sourceRecipientShareCommitmentRoot".to_string(),
-                    source_recipient_share_commitment_root.clone(),
-                ),
-            ],
+            binding_roots: vec![(
+                "shareLinkageStatementRoot".to_string(),
+                share_linkage_statement_root,
+            )],
         },
         ring_degree,
         keys: Vec::new(),
@@ -231,43 +227,44 @@ fn compact_vss_share_linkage_instance() -> (
         LimbColumnLayout::new(&statement, 1).expect("compact share-linkage second limb layout");
     assert_eq!(
         layout.compact_vss_coefficient_decoder_digit_count(),
-        0,
-        "compact share-linkage coefficient digits are bounded by masked digit claims"
+        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "compact share-linkage coefficient digits must carry verifier-side decoder rows"
     );
     assert_eq!(
         layout.compact_vss_recipient_decoder_digit_count(),
-        0,
-        "compact share-linkage recipient digits are bounded by masked digit claims"
-    );
-    assert_eq!(
-        layout.compact_vss_message_encoding_column_count(0),
         crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage coefficient messages should carry only digit columns"
-    );
-    assert_eq!(
-        layout.compact_vss_message_encoding_column_count(layout.compact_vss_coefficient_columns),
-        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
-        "compact share-linkage recipient messages should carry only digit columns"
-    );
-    assert_eq!(
-        layout.compact_vss_message_trit_count(layout.compact_vss_coefficient_columns, 0),
-        0,
-        "compact share-linkage recipient digits should not carry trit decoder columns"
+        "compact share-linkage recipient digits must carry verifier-side decoder rows"
     );
     assert!(
-        later_commitment_limb_layout.compact_vss_coefficient_decoder_digit_count() == 0
-            && later_commitment_limb_layout.compact_vss_recipient_decoder_digit_count() == 0,
-        "later compact share-linkage limbs also carry digit-only encodings"
+        layout.compact_vss_message_encoding_column_count(0)
+            > crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "compact share-linkage coefficient messages must carry digit and trit columns"
+    );
+    assert!(
+        layout.compact_vss_message_encoding_column_count(layout.compact_vss_coefficient_columns)
+            > crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "compact share-linkage recipient messages must carry digit and trit columns"
+    );
+    assert!(
+        layout.compact_vss_message_trit_count(layout.compact_vss_coefficient_columns, 0) > 0,
+        "compact share-linkage recipient digits must carry trit decoder columns"
+    );
+    assert!(
+        later_commitment_limb_layout.compact_vss_coefficient_decoder_digit_count()
+            == crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            && later_commitment_limb_layout.compact_vss_recipient_decoder_digit_count()
+                == crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT,
+        "later compact share-linkage limbs must also carry decoder-backed encodings"
     );
     assert_eq!(
         later_commitment_limb_layout.consistency_vector_count(),
         layout.consistency_vector_count(),
-        "digit-only limbs must keep the same cross-field claim set"
+        "decoder-backed limbs must keep the same cross-field claim set"
     );
     assert_eq!(
         later_commitment_limb_layout.compact_vss_message_encoding_columns(),
         layout.compact_vss_message_encoding_columns(),
-        "all compact share-linkage limbs should use the same digit-only message width"
+        "all compact share-linkage limbs should use the same decoder-backed message width"
     );
 
     let witness = super::super::relation::TrusteeEvaluationKeyWitness {
@@ -342,6 +339,10 @@ fn compact_share_linkage_item_statement(
     item: &CompactShareLinkageItemForTest,
 ) -> CompactVssShareLinkageItem {
     CompactVssShareLinkageItem {
+        source_trustee_identity: "trustee-0".to_string(),
+        source_trustee_roster_position: 0,
+        source_coefficient_commitment_root: repeated_hash("91"),
+        source_recipient_share_commitment_root: repeated_hash("92"),
         recipient_identity: item.recipient_identity.clone(),
         recipient_roster_position: item.recipient_roster_position,
         source_rns_limb_index: item.source_rns_limb_index,
@@ -539,6 +540,9 @@ fn compact_commitment_computation_for_test(
     message_coefficients: &[u64],
     randomness_by_column: &[Vec<i64>],
 ) -> CompactCommitmentComputationForTest {
+    let message_digit_columns =
+        compact_vss_canonical_message_digit_columns(message_coefficients, ring_degree)
+            .expect("compact VSS message digit columns");
     let computation =
         compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
             commitment_role,
@@ -548,6 +552,7 @@ fn compact_commitment_computation_for_test(
             rns_prime,
             ring_degree,
             message_coefficients,
+            message_digit_columns: &message_digit_columns,
             message_coefficient_bound: rns_prime,
             randomness_by_column,
         })

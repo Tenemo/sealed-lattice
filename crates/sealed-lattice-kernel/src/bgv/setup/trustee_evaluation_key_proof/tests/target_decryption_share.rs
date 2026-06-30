@@ -3,7 +3,8 @@ use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::modular_arithmetic::{add_mod_fast, mul_mod_fast};
 use crate::bgv::profile::PLAINTEXT_MODULUS;
 use crate::bgv::setup::compact_vss_commitment::{
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
+    compute_compact_vss_commitment_from_opening,
 };
 use serde_json::{Value, json};
 
@@ -956,6 +957,9 @@ fn compact_commitment_for_target_decryption_test(
     message_coefficient_bound: u64,
     randomness_by_column: &[Vec<i64>],
 ) -> CompactCommitmentForTargetDecryptionTest {
+    let message_digit_columns =
+        compact_vss_canonical_message_digit_columns(message_coefficients, ring_degree)
+            .expect("compact target-decryption message digit columns");
     let computation =
         compute_compact_vss_commitment_from_opening(CompactVssCommitmentOpeningInput {
             commitment_role,
@@ -965,6 +969,7 @@ fn compact_commitment_for_target_decryption_test(
             rns_prime,
             ring_degree,
             message_coefficients,
+            message_digit_columns: &message_digit_columns,
             message_coefficient_bound,
             randomness_by_column,
         })

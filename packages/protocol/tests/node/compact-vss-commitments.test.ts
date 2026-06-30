@@ -6,6 +6,7 @@ import {
     compactVssCommitmentMeasurement,
     compactVssMessageDigitBase,
     compactVssMessageDigitCount,
+    compactVssMessageDigitTritCount,
     compactVssMatrixExpansionProfile,
     compactVssParameterCertificateInputBinding,
     compactVssCommitmentProfileId,
@@ -15,7 +16,7 @@ import {
     compactVssShareLinkageCommonKeyRule,
     compactVssShareLinkageProofBatchingRule,
     compactVssShareLinkageShamirEvaluationRule,
-    compactVssProjectionWeight,
+    compactVssRandomnessProjectionWeight,
     compactVssEncodedCommitmentByteLength,
     combineCompactVssCommitments,
     createCompactVssCoefficientCommitmentSet,
@@ -148,6 +149,14 @@ const compactVssShareLinkageProofStatementForSource = (input: {
                     }
 
                     return {
+                        sourceTrusteeIdentity:
+                            sourceStatement.sourceTrusteeIdentity,
+                        sourceTrusteeRosterPosition:
+                            input.sourceTrusteeRosterPosition,
+                        sourceCoefficientCommitmentRoot:
+                            sourceStatement.sourceCoefficientCommitmentRoot,
+                        sourceRecipientShareCommitmentRoot:
+                            sourceStatement.sourceRecipientShareCommitmentRoot,
                         recipientIdentity: recipientRecord.recipientIdentity,
                         recipientRosterPosition,
                         sourceRnsLimbIndex,
@@ -179,12 +188,7 @@ const compactVssShareLinkageProofStatementForSource = (input: {
 
     return {
         publicMatrixSeedHash: input.statement.publicMatrixSeedHash,
-        sourceTrusteeIdentity: sourceStatement.sourceTrusteeIdentity,
-        sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
-        sourceCoefficientCommitmentRoot:
-            sourceStatement.sourceCoefficientCommitmentRoot,
-        sourceRecipientShareCommitmentRoot:
-            sourceStatement.sourceRecipientShareCommitmentRoot,
+        shareLinkageStatementRoot: input.statement.statementRoot,
         ...primaryProofItem,
         additionalLinkageItems: proofItems.slice(1),
     };
@@ -198,6 +202,24 @@ function residue(value: bigint, modulus: number): number {
         residueValue < 0n ? residueValue + modulusWide : residueValue,
     );
 }
+
+const compactVssMessageDigitColumns = (
+    messageCoefficients: readonly (number | bigint)[],
+): readonly (readonly number[])[] =>
+    Array.from({ length: compactVssMessageDigitCount }, (_unused, digitIndex) =>
+        messageCoefficients.map((coefficient) => {
+            let remaining = BigInt(coefficient);
+            for (
+                let skippedDigitIndex = 0;
+                skippedDigitIndex < digitIndex;
+                skippedDigitIndex += 1
+            ) {
+                remaining /= compactVssMessageDigitBase;
+            }
+
+            return Number(remaining % compactVssMessageDigitBase);
+        }),
+    );
 
 const opening = (
     label: string,
@@ -216,6 +238,7 @@ const opening = (
     rnsPrime: 65_537,
     ringDegree: messageCoefficients.length,
     messageCoefficients,
+    messageDigitColumns: compactVssMessageDigitColumns(messageCoefficients),
     randomnessByColumn: [
         messageCoefficients.map(
             (_unused, coefficientIndex) =>
@@ -232,15 +255,8 @@ const aggregateOpening = (
     leftOpening: CompactVssCommitmentOpeningInput,
     rightOpening: CompactVssCommitmentOpeningInput,
     rightScalar: number,
-): CompactVssCommitmentOpeningInput => ({
-    ...leftOpening,
-    commitmentRole: 'aggregate-threshold-share',
-    commitmentContext: {
-        objectType: 'CompactVssAggregateThresholdShareCommitmentContext',
-        objectVersion: 1,
-        recipientIdentity: 'recipient-0',
-    },
-    messageCoefficients: leftOpening.messageCoefficients.map(
+): CompactVssCommitmentOpeningInput => {
+    const messageCoefficients = leftOpening.messageCoefficients.map(
         (leftCoefficient, coefficientIndex) =>
             residue(
                 BigInt(leftCoefficient) +
@@ -252,19 +268,31 @@ const aggregateOpening = (
                         ),
                 leftOpening.rnsPrime,
             ),
-    ),
-    randomnessByColumn: leftOpening.randomnessByColumn.map(
-        (leftColumn, columnIndex) =>
-            leftColumn.map(
-                (leftCoefficient, coefficientIndex) =>
-                    leftCoefficient +
-                    rightScalar *
-                        (rightOpening.randomnessByColumn[columnIndex]?.[
-                            coefficientIndex
-                        ] ?? 0),
-            ),
-    ),
-});
+    );
+
+    return {
+        ...leftOpening,
+        commitmentRole: 'aggregate-threshold-share',
+        commitmentContext: {
+            objectType: 'CompactVssAggregateThresholdShareCommitmentContext',
+            objectVersion: 1,
+            recipientIdentity: 'recipient-0',
+        },
+        messageCoefficients,
+        messageDigitColumns: compactVssMessageDigitColumns(messageCoefficients),
+        randomnessByColumn: leftOpening.randomnessByColumn.map(
+            (leftColumn, columnIndex) =>
+                leftColumn.map(
+                    (leftCoefficient, coefficientIndex) =>
+                        leftCoefficient +
+                        rightScalar *
+                            (rightOpening.randomnessByColumn[columnIndex]?.[
+                                coefficientIndex
+                            ] ?? 0),
+                ),
+        ),
+    };
+};
 
 const writeTestLittleEndianU64 = (
     bytes: Uint8Array,
@@ -466,14 +494,18 @@ describe('compact VSS development commitments', () => {
             openingRoot: commitment.openingRoot,
         });
 
+        const tamperedMessageCoefficients = [
+            4,
+            ...firstOpening.messageCoefficients.slice(1),
+        ];
         expect(() =>
             verifyCompactVssCommitmentOpening({
                 opening: {
                     ...firstOpening,
-                    messageCoefficients: [
-                        4,
-                        ...firstOpening.messageCoefficients.slice(1),
-                    ],
+                    messageCoefficients: tamperedMessageCoefficients,
+                    messageDigitColumns: compactVssMessageDigitColumns(
+                        tamperedMessageCoefficients,
+                    ),
                 },
                 expectedCommitmentRoot: commitment.commitmentRoot,
                 expectedOpeningRoot: commitment.openingRoot,
@@ -589,7 +621,8 @@ describe('compact VSS development commitments', () => {
             ringDegree: 32_768,
             commitmentModulusLimbIndices: [0, 1, 2],
             outputCoordinateCount: 16,
-            projectionWeight: 32,
+            messageCoverageTermsPerCoordinate: 683,
+            randomnessProjectionWeight: 32,
             randomnessColumnCount: 2,
             inputColumnLabels: [
                 'message:0',
@@ -598,11 +631,14 @@ describe('compact VSS development commitments', () => {
                 'randomness:1',
             ],
             coordinateCountPerCommitment: 48,
-            sampledMatrixResiduesPerCoordinate: 128,
-            sampledProjectionIndicesPerCoordinate: 128,
-            sampledMatrixResiduesPerCommitment: 6_144,
-            sampledProjectionIndicesPerCommitment: 6_144,
-            residueMultiplyAddsPerCommitment: 6_144,
+            messageMatrixResiduesPerCommitment: 65_536,
+            randomnessMatrixResiduesPerCoordinate: 64,
+            randomnessMatrixResiduesPerCommitment: 3_072,
+            sampledMatrixResiduesPerCoordinate: 1_430,
+            sampledRandomnessProjectionIndicesPerCoordinate: 64,
+            sampledMatrixResiduesPerCommitment: 68_608,
+            sampledRandomnessProjectionIndicesPerCommitment: 3_072,
+            residueMultiplyAddsPerCommitment: 68_608,
         });
         expect(
             deriveProtocolHash('CompactVssMatrixExpansionProfileHash', profile),
@@ -636,6 +672,10 @@ describe('compact VSS development commitments', () => {
             rnsPrime: 65_537,
             ringDegree: zeroColumn.length,
             messageCoefficients: [1, ...zeroColumn.slice(1)],
+            messageDigitColumns: compactVssMessageDigitColumns([
+                1,
+                ...zeroColumn.slice(1),
+            ]),
             randomnessByColumn: [zeroColumn, zeroColumn],
         };
         const alternateSeedOpening = {
@@ -651,6 +691,7 @@ describe('compact VSS development commitments', () => {
         const randomnessOnlyOpening = {
             ...messageOnlyOpening,
             messageCoefficients: zeroColumn,
+            messageDigitColumns: compactVssMessageDigitColumns(zeroColumn),
             randomnessByColumn: [[1, ...zeroColumn.slice(1)], zeroColumn],
         };
 
@@ -707,7 +748,7 @@ describe('compact VSS development commitments', () => {
         );
     });
 
-    it('binds compact parameter certificate inputs without claiming final certificate evidence', () => {
+    it('binds compact parameter certificate inputs and conclusion rows', () => {
         const targetBasisHash = deriveProtocolHash('TargetBasisHash', {
             fixture: 'compact-vss-commitments',
             label: 'target-basis',
@@ -731,7 +772,7 @@ describe('compact VSS development commitments', () => {
 
         expect(binding).toMatchObject({
             objectType: 'CompactVssParameterCertificateInputBinding',
-            objectVersion: 3,
+            objectVersion: 8,
             setupProfileId: 'CollectiveBgvSetup-v1',
             profileId: compactVssCommitmentProfileId,
             participantCount: 10,
@@ -744,7 +785,8 @@ describe('compact VSS development commitments', () => {
                 outputCoordinateCount: 16,
                 messageWidth: 2,
                 randomnessWidth: 2,
-                projectionWeight: 32,
+                messageCoverageTermsPerCoordinate: 683,
+                randomnessProjectionWeight: 32,
                 coordinateCountPerCommitment: 48,
                 inputColumnLabels: [
                     'message:0',
@@ -754,19 +796,25 @@ describe('compact VSS development commitments', () => {
                 ],
             },
             commonCommitmentKey: {
-                sparseProjectionShape: {
+                messageCoverageShape: {
                     inputColumnCount: 4,
-                    projectionWeight: 32,
                     coordinateCountPerCommitment: 48,
-                    sampledMatrixResiduesPerCoordinate: 128,
-                    sampledProjectionIndicesPerCoordinate: 128,
-                    sampledMatrixResiduesPerCommitment: 6_144,
-                    sampledProjectionIndicesPerCommitment: 6_144,
+                    messageCoverageTermsPerCoordinate: 683,
+                    sampledMessageMatrixResiduesPerCommitment: 65_536,
+                    coveredMessageCoefficientsPerMessageColumn: 32_768,
+                    uncoveredMessageCoefficientsPerMessageColumn: 0,
+                },
+                randomnessProjectionShape: {
+                    randomnessProjectionWeight: 32,
+                    sampledMatrixResiduesPerCoordinate: 64,
+                    sampledRandomnessProjectionIndicesPerCoordinate: 64,
+                    sampledMatrixResiduesPerCommitment: 3_072,
+                    sampledRandomnessProjectionIndicesPerCommitment: 3_072,
                 },
             },
             messageEncoding: {
                 proofRangeEncodingRule:
-                    'share-linkage, same-secret bridge, and target-decryption rows bind message digit columns directly with masked consistency claims',
+                    'share-linkage, same-secret bridge, and target-decryption rows bind message digit columns with masked consistency claims and verifier-side trit decoder columns',
             },
             sameSecretBridgeInput: {
                 targetBasisHash,
@@ -814,6 +862,22 @@ describe('compact VSS development commitments', () => {
                     { commitmentModulusIndex: 2, modulus: 65_543 },
                 ],
             },
+            messageCoordinateCoverageReview: {
+                rowId: 'compact-vss-message-coordinate-coverage',
+                ringDegree: 32_768,
+                messageWidth: 2,
+                coordinateCountPerCommitment: 48,
+                messageCoverageTermsPerCoordinate: 683,
+                scheduledMessageTermsPerMessageColumn: 32_784,
+                unusedScheduledTermsPerMessageColumn: 16,
+                sampledMessageTermsPerCommitment: 65_536,
+                coveredMessageCoefficientsPerMessageColumn: 32_768,
+                uncoveredMessageCoefficientsPerMessageColumn: 0,
+                coverageRule:
+                    'globalCoordinateIndex + coverageTermIndex * coordinateCountPerCommitment covers coefficient positions below ringDegree exactly once per message digit column',
+                remainingReplacementRequirement:
+                    'Target-result release still needs accepted compact setup, same-secret bridge acceptance, production smudging evidence, and final runtime evidence.',
+            },
             openingWitnessRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-fresh-opening-witness',
@@ -829,6 +893,17 @@ describe('compact VSS development commitments', () => {
                     witnessCoefficientCount: 131_072,
                 }),
             ],
+            commitmentExposureRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-final-public-commitment-exposure',
+                    sourceCoefficientCommitments: 160,
+                    recipientShareCommitments: 200,
+                    aggregateThresholdCommitments: 20,
+                    totalCompactCommitments: 380,
+                    totalPublicCommitmentCoordinates: 18_240,
+                    totalSampledMatrixResidues: 26_071_040,
+                }),
+            ],
             linearRelationRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-recipient-share-shamir-evaluation',
@@ -842,6 +917,20 @@ describe('compact VSS development commitments', () => {
                 expect.objectContaining({
                     rowId: 'compact-vss-one-recipient-aggregate-from-source-coefficients',
                     oneRecipientAggregateShamirScalarL1: 11_110,
+                }),
+            ],
+            proofExtractionRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-share-linkage-proof-extraction-input',
+                    proofFamily: 'compact-vss-share-linkage',
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-same-secret-bridge-proof-extraction-input',
+                    proofFamily: 'compact-same-secret-bridge',
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-target-decryption-proof-extraction-input',
+                    proofFamily: 'target-decryption-share',
                 }),
             ],
             maskedClaimNormRows: [
@@ -921,10 +1010,28 @@ describe('compact VSS development commitments', () => {
                     sameSecretProofFamilyBindingRoot,
                 }),
             ],
+            structuredRingRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-structured-ring-review-input',
+                    cyclotomicFamily: 'power-of-two negacyclic',
+                    sampledMatrixResiduesPerCommitment: 68_608,
+                }),
+            ],
+            multiOpeningRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-multi-opening-review-input',
+                    totalCompactCommitments: 380,
+                    maximumNonReconstructingRecipientCount: 3,
+                    corruptedRecipientOpeningCredentialCount: 60,
+                }),
+            ],
             reviewReductionRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-module-sis-binding-review-input',
                     problem: 'Module-SIS',
+                    bindingRows: [
+                        'compact-vss-covered-message-module-sis-binding-input',
+                    ],
                     maskedClaimNormRows: [
                         'compact-vss-share-linkage-carry-claim',
                         'compact-vss-share-linkage-message-digit-claim',
@@ -938,7 +1045,83 @@ describe('compact VSS development commitments', () => {
                 expect.objectContaining({
                     rowId: 'compact-vss-module-lwe-hiding-review-input',
                     problem: 'Module-LWE',
-                    sampledProjectionIndicesPerCommitment: 6_144,
+                    hidingRows: [
+                        'compact-vss-covered-message-module-lwe-hiding-input',
+                    ],
+                    sampledRandomnessProjectionIndicesPerCommitment: 3_072,
+                }),
+            ],
+            moduleSisBindingRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-covered-message-module-sis-binding-input',
+                    messageDigitBaseDecimal:
+                        compactVssMessageDigitBase.toString(),
+                    messageDigitCount: compactVssMessageDigitCount,
+                    messageDigitTritCount: compactVssMessageDigitTritCount,
+                    messageDigitDifferenceInfinityBoundDecimal: (
+                        compactVssMessageDigitBase - 1n
+                    ).toString(),
+                    aggregateRandomnessDifferenceInfinityBound: 20,
+                    sampledMatrixResiduesPerCommitment: 68_608,
+                    estimatorSmallnessPrecondition: {
+                        smallestCommitmentModulus: 65_537,
+                        strictDifferenceUpperBoundDecimal: '32768',
+                        messageDigitDifferenceInfinityBoundDecimal:
+                            (compactVssMessageDigitBase - 1n).toString(),
+                        marginDecimal: '-129107394',
+                    },
+                }),
+            ],
+            moduleLweHidingRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-covered-message-module-lwe-hiding-input',
+                    totalPublicCommitmentCoordinates: 18_240,
+                    totalSampledRandomnessProjectionIndices: 1_167_360,
+                    maximumNonReconstructingRecipientCount: 3,
+                    corruptedRecipientOpeningCredentialCount: 60,
+                }),
+            ],
+            certificateConclusionRows: [
+                expect.objectContaining({
+                    rowId: 'compact-vss-covered-message-module-sis-binding-conclusion',
+                    problem: 'Module-SIS',
+                    sourceInputRows: expect.arrayContaining([
+                        'compact-vss-covered-message-module-sis-binding-input',
+                        'compact-vss-message-coordinate-coverage',
+                        'compact-vss-multi-opening-review-input',
+                    ]),
+                    witnessDifferenceInfinityBoundDecimal: (
+                        compactVssMessageDigitBase - 1n
+                    ).toString(),
+                    estimatorPrecondition: {
+                        source:
+                            'malb/lattice-estimator SIS lattice row requires length_bound < (q - 1) / 2',
+                        smallestCommitmentModulus: 65_537,
+                        strictDifferenceUpperBoundDecimal: '32768',
+                        witnessDifferenceInfinityBoundDecimal:
+                            (compactVssMessageDigitBase - 1n).toString(),
+                        marginDecimal: '-129107394',
+                    },
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-covered-message-module-lwe-hiding-conclusion',
+                    problem: 'Module-LWE',
+                    publicSampleRows: {
+                        totalCompactCommitments: 380,
+                        totalPublicCommitmentCoordinates: 18_240,
+                        sampledRandomnessProjectionIndicesPerCommitment: 3_072,
+                        totalSampledRandomnessProjectionIndices: 1_167_360,
+                    },
+                    corruptedRecipientOpeningCredentialCount: 60,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-structured-ring-review-conclusion',
+                    ringDegree: 32_768,
+                }),
+                expect.objectContaining({
+                    rowId: 'compact-vss-multi-opening-review-conclusion',
+                    totalCompactCommitments: 380,
+                    corruptedRecipientOpeningCredentialCount: 60,
                 }),
             ],
         });
@@ -947,17 +1130,19 @@ describe('compact VSS development commitments', () => {
                 rowId: 'compact-vss-module-sis-binding-input',
                 problem: 'Module-SIS',
                 outputCoordinateCount: 16,
-                projectionWeight: 32,
-                sampledMatrixResiduesPerCommitment: 6_144,
-                sampledProjectionIndicesPerCommitment: 6_144,
+                messageCoverageTermsPerCoordinate: 683,
+                randomnessProjectionWeight: 32,
+                sampledMatrixResiduesPerCommitment: 68_608,
+                sampledRandomnessProjectionIndicesPerCommitment: 3_072,
             }),
             expect.objectContaining({
                 rowId: 'compact-vss-module-lwe-hiding-input',
                 problem: 'Module-LWE',
                 outputCoordinateCount: 16,
-                projectionWeight: 32,
-                sampledMatrixResiduesPerCommitment: 6_144,
-                sampledProjectionIndicesPerCommitment: 6_144,
+                messageCoverageTermsPerCoordinate: 683,
+                randomnessProjectionWeight: 32,
+                sampledMatrixResiduesPerCommitment: 68_608,
+                sampledRandomnessProjectionIndicesPerCommitment: 3_072,
             }),
         ]);
 
@@ -1014,13 +1199,16 @@ describe('compact VSS development commitments', () => {
             totalCompactPublicCommitmentBytes: 556_800,
             largestSingleObjectBytes: 384,
             largestWasmBoundaryCopyBytes: 384,
-            projectionWeight: compactVssProjectionWeight,
+            messageCoverageTermsPerCoordinate: 683,
+            randomnessProjectionWeight: compactVssRandomnessProjectionWeight,
             cpuWorkModel: {
-                residueMultiplyAddsPerCommitment: 6_144,
+                residueMultiplyAddsPerCommitment: 68_608,
+                messageResidueMultiplyAddsPerCommitment: 65_536,
+                randomnessResidueMultiplyAddsPerCommitment: 3_072,
                 totalCommitments: 1_450,
-                totalResidueMultiplyAdds: 8_908_800,
+                totalResidueMultiplyAdds: 99_481_600,
                 aggregatePublicSumResidueAdditions: 33_600,
-                totalResidueArithmeticOperations: 8_942_400,
+                totalResidueArithmeticOperations: 99_515_200,
             },
             budgetComparison: {
                 publicSetupDownloadBudgetBytes: 67_108_864,
@@ -1246,8 +1434,7 @@ describe('compact VSS development commitments', () => {
         });
         const proofRecordInputs: CompactVssShareLinkageProofRecordInput[] =
             linkageStatement.sourceStatementRecords.map(
-                (sourceStatement, sourceTrusteeRosterPosition) => ({
-                    sourceStatementRoot: sourceStatement.sourceStatementRoot,
+                (_sourceStatement, sourceTrusteeRosterPosition) => ({
                     compactVssShareLinkage:
                         compactVssShareLinkageProofStatementForSource({
                             statement: linkageStatement,
@@ -2060,6 +2247,13 @@ describe('compact VSS development commitments', () => {
             rnsLimbIndex: 0,
             rnsPrime: qSharePrimes[0] ?? 1_000_000_007,
         };
+        const selectedMessageDigitColumns =
+            selectedCredential.shareCommitmentMessageDigitColumns;
+        if (selectedMessageDigitColumns === undefined) {
+            throw new Error(
+                'compact VSS derived recipient-share fixture is missing message digit columns.',
+            );
+        }
         const selectedOpening = {
             commitmentRole: 'recipient-share',
             commitmentContext: derivedRecipientShareContext,
@@ -2068,8 +2262,7 @@ describe('compact VSS development commitments', () => {
             rnsPrime: qSharePrimes[0] ?? 1_000_000_007,
             ringDegree,
             messageCoefficients: selectedMessageValues,
-            messageDigitColumns:
-                selectedCredential.shareCommitmentMessageDigitColumns,
+            messageDigitColumns: selectedMessageDigitColumns,
             messageCoefficientBound:
                 compactVssMessageDigitBase * compactVssMessageDigitBase,
             randomnessByColumn: selectedCredential.randomnessByColumn,
