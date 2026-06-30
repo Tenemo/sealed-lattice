@@ -342,9 +342,6 @@ describe('public-key share statement builders', () => {
         expect(directMaterialBundle.materialSet).toEqual(
             transportedEmbeddedMaterial.materialSet,
         );
-        expect(directMaterialBundle.materialSet).not.toHaveProperty(
-            'shareMaterialRecords',
-        );
         expect(directMaterialBundle.transportedPublicKeyShareMaterial).toEqual(
             transportedEmbeddedMaterial.transportedPublicKeyShareMaterial,
         );
@@ -354,7 +351,6 @@ describe('public-key share statement builders', () => {
             binaryFormat: publicKeyShareMaterialBinaryFormat,
             chunkSizeBytes: setupTransportChunkSizeBytes,
         });
-        expect(directMaterialBundle).not.toHaveProperty('shareMaterialRecords');
         expect(reconstructedMaterialRecords).toEqual(
             embeddedMaterialSet.shareMaterialRecords,
         );

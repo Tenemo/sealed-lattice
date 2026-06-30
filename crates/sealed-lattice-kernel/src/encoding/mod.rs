@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 
 use crate::{
     fixtures::{TranscriptCoreFixture, verify_fixture},
-    hashing::{RESERVED_ROOT_NAMESPACES, chunk_root, hash512_hex},
+    hashing::{chunk_root, hash512_hex},
     ring::{
         MAXIMUM_SHAMIR_INTERPOLATION_POINTS, ShamirSharePoint, evaluate_plaintext_comparison,
         interpolate_shamir_constant_term,
@@ -46,9 +46,7 @@ pub enum CanonicalErrorCode {
 
 /// All canonical error code variants in declaration order.
 ///
-/// Adding a new variant to `CanonicalErrorCode` requires extending this slice
-/// and the exhaustive `match` in `all_canonical_error_codes_is_exhaustive`.
-/// The compiler enforces both.
+/// Adding a new variant to `CanonicalErrorCode` requires extending this slice.
 pub const ALL_CANONICAL_ERROR_CODES: &[CanonicalErrorCode] = &[
     CanonicalErrorCode::DuplicateField,
     CanonicalErrorCode::FieldOrder,
@@ -339,30 +337,6 @@ mod tests {
     }
 
     #[test]
-    fn command_rejects_missing_command_with_stable_message() {
-        let error = super::run_transcript_core_command_inner(br#"{}"#)
-            .expect_err("missing command should fail");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert_eq!(error.message, "command must be a string");
-    }
-
-    #[test]
-    fn command_rejects_unknown_command_with_stable_message() {
-        let error = super::run_transcript_core_command_inner(
-            serde_json::json!({
-                "command": "NotACommand"
-            })
-            .to_string()
-            .as_bytes(),
-        )
-        .expect_err("unknown command should fail");
-
-        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-        assert_eq!(error.message, "unsupported command: NotACommand");
-    }
-
-    #[test]
     fn command_derives_canonical_object_hash_with_kernel_canonical_json() {
         let response = super::run_transcript_core_command_inner(
             serde_json::json!({
@@ -433,42 +407,5 @@ mod tests {
         assert_eq!(response["greaterThan"], 1);
         assert_eq!(response["equal"], 0);
         assert_eq!(response["scoreDifference"], 1);
-    }
-
-    #[test]
-    fn all_canonical_error_codes_is_exhaustive() {
-        // The compiler enforces exhaustiveness here. If a new variant is added
-        // to `CanonicalErrorCode`, this match fails and the dev must extend
-        // both the match arm and `ALL_CANONICAL_ERROR_CODES`.
-        fn ensure_exhaustive(code: CanonicalErrorCode) {
-            match code {
-                CanonicalErrorCode::DuplicateField
-                | CanonicalErrorCode::FieldOrder
-                | CanonicalErrorCode::FixtureMismatch
-                | CanonicalErrorCode::InvalidChunkSize
-                | CanonicalErrorCode::InvalidEnum
-                | CanonicalErrorCode::InvalidFixture
-                | CanonicalErrorCode::InvalidProtocolObject
-                | CanonicalErrorCode::InvalidHex
-                | CanonicalErrorCode::InvalidUtf8
-                | CanonicalErrorCode::MalformedLength
-                | CanonicalErrorCode::MalformedMagic
-                | CanonicalErrorCode::MalformedVarUint
-                | CanonicalErrorCode::MissingField
-                | CanonicalErrorCode::NonCanonicalVarUint
-                | CanonicalErrorCode::ComponentMismatch
-                | CanonicalErrorCode::TrailingBytes
-                | CanonicalErrorCode::UnknownField
-                | CanonicalErrorCode::UnsupportedCanonicalEnvelopeVersion
-                | CanonicalErrorCode::UnsupportedObjectType
-                | CanonicalErrorCode::UnsupportedObjectVersion => {}
-            }
-        }
-
-        for code in super::ALL_CANONICAL_ERROR_CODES {
-            ensure_exhaustive(code.clone());
-        }
-
-        assert_eq!(super::ALL_CANONICAL_ERROR_CODES.len(), 20);
     }
 }

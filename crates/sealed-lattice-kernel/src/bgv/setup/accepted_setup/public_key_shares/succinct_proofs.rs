@@ -297,24 +297,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
         )?));
     }
-    let mut proof_roots = Vec::new();
-    for succinct_proof_record in proof_records_array {
-        proof_roots.push(json!({
-            "trusteeIdentity": value_string(succinct_proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(succinct_proof_record, "trusteeRosterPosition")?,
-            "publicKeyShareSuccinctProofRoot": value_string(
-                succinct_proof_record,
-                "publicKeyShareSuccinctProofRoot",
-            )?,
-        }));
-    }
-    if proof_set.get("publicKeyShareSuccinctProofRoots") != Some(&Value::Array(proof_roots)) {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
-            "publicKeyShareSuccinctProofRootListMismatch",
-            "publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofRoots must match the ordered proof records",
-            "setupPackage.publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofRoots",
-        )?));
-    }
     let Some(succinct_proof_set_root) = proof_set
         .get("publicKeyShareSuccinctProofSetRoot")
         .and_then(Value::as_str)

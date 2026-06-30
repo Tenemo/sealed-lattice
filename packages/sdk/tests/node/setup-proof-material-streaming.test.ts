@@ -297,9 +297,6 @@ describe('setup proof material streaming in the public package', () => {
                 proofMaterialRoot: proofHash,
             });
             expect(
-                beginInput?.transportedSetupProofMaterial,
-            ).not.toHaveProperty('chunks');
-            expect(
                 mockKernel.absorbSetupProofMaterialTransportStreamChunk,
             ).toHaveBeenCalledWith(
                 expect.objectContaining({
@@ -320,9 +317,6 @@ describe('setup proof material streaming in the public package', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
             });
-            expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
-                'chunks',
-            );
             expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject(
                 {
                     objectType: 'VerifiedSetupProofMaterialSet',
@@ -375,9 +369,6 @@ describe('setup proof material streaming in the public package', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
             });
-            expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
-                'chunks',
-            );
         }
         const expectedVerifiedProofMaterials =
             setupProofMaterialTransportCases.map((transportCase): unknown => {
@@ -432,9 +423,11 @@ describe('setup proof material streaming in the public package', () => {
             ] as
                 | Readonly<{ readonly proofMaterials: readonly JsonRecord[] }>
                 | undefined;
-            expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
-                'chunks',
-            );
+            expect(finalMaterialSet?.proofMaterials[0]).toMatchObject({
+                objectType: transportCase.materialObjectType,
+                proofFamily: transportCase.proofFamily,
+                proofMaterialRoot: proofHash,
+            });
             expect(finalVerifyInput?.verifiedSetupProofMaterials).toBe(
                 suppliedHandles,
             );

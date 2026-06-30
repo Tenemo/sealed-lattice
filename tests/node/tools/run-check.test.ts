@@ -23,10 +23,10 @@ describe('check runner arguments', () => {
 
     it('rejects unknown check arguments and progress modes', () => {
         expect(() => parseCheckArguments(['--progress=sometimes'])).toThrow(
-            'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].',
+            'Usage: run-check.ts [--progress=auto|always|never].',
         );
         expect(() => parseCheckArguments(['--unknown'])).toThrow(
-            'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].',
+            'Usage: run-check.ts [--progress=auto|always|never].',
         );
     });
 

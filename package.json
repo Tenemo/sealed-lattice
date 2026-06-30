@@ -23,6 +23,8 @@
         "vectors:generate": "tsx ./tools/ci/verify-test-vectors.ts --generate",
         "test:lattigo-oracle": "tsx ./tools/lattigo-oracle/run-lattigo-oracle.ts",
         "test:rust:kernel:heavy": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts",
+        "test:rust:kernel:heavy:checks": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts --scope checks",
+        "test:rust:kernel:heavy:final-package": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts --scope final-package",
         "test:rust:kernel:heavy:iterate": "tsx ./tools/ci/run-rust-kernel-heavy-tests.ts --iterate",
         "test:node:fast": "tsx ./tools/ci/run-node-tests.ts --only fast",
         "test:node:protocol": "tsx ./tools/ci/run-node-tests.ts --only protocol",

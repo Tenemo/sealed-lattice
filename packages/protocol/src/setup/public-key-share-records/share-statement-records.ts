@@ -3,7 +3,6 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import { type SameSecretConsistencyStatementRecord } from '../same-secret-consistency-records.js';
 
 import {
-    publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
@@ -175,7 +174,6 @@ export const createPublicKeyShareSet = (
                 rnsLimbCount: input.qSharePrimes.length,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
-                proofBindingStatus: publicKeyShareProofBindingStatus,
             } as const satisfies Omit<
                 PublicKeyShareRecord,
                 'publicKeyShareRoot'
@@ -192,7 +190,6 @@ export const createPublicKeyShareSet = (
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
         objectVersion: 1,
-        proofBindingStatus: publicKeyShareProofBindingStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -201,11 +198,6 @@ export const createPublicKeyShareSet = (
         publicAPolynomialRoot: input.publicAPolynomialRoot,
         sameSecretConsistencyRoot:
             input.sameSecretConsistency.sameSecretConsistencyRoot,
-        publicKeyShareRoots: shareRecords.map((shareRecord) => ({
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-        })),
         shareRecords,
     } as const satisfies Omit<PublicKeyShareSet, 'publicKeyShareSetRoot'>;
 
@@ -289,9 +281,6 @@ export const createPublicKeyShareProofSet = (
                 trusteeSecretCommitmentRoot:
                     sameSecretStatement.trusteeSecretCommitmentRoot,
                 rnsLimbCount: input.qSharePrimes.length,
-                errorSupport: 'checked-by-public-key-share-succinct-proof-set',
-                proofBytesStatus:
-                    'supplied-by-public-key-share-succinct-proof-set',
             } as const satisfies Omit<
                 PublicKeyShareProofRecord,
                 'publicKeyShareProofRoot'
@@ -318,11 +307,6 @@ export const createPublicKeyShareProofSet = (
         sameSecretConsistencyRoot:
             input.sameSecretConsistency.sameSecretConsistencyRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        publicKeyShareProofRoots: proofRecords.map((proofRecord) => ({
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            publicKeyShareProofRoot: proofRecord.publicKeyShareProofRoot,
-        })),
         proofRecords,
     } as const satisfies Omit<
         PublicKeyShareProofSet,

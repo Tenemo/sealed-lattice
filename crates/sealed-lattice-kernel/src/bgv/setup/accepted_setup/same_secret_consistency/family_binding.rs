@@ -39,10 +39,7 @@ fn same_secret_proof_family_binding_value() -> Value {
         "objectVersion": 1,
         "proofFamily": "same-secret-linkage-anchor",
         "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
-        "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
         "boundSecretDependentProofFamilies": expected_same_secret_bound_proof_families_value(),
-        "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
-        "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
     })
 }
 

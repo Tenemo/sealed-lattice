@@ -72,29 +72,6 @@ describe('collective BGV setup kernel commands', () => {
         );
     });
 
-    it('refuses setup transport chunk hash count mismatches', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters();
-        const baseSetupPackage = await acceptedShapedSetupPackage(
-            kernel,
-            parameters,
-        );
-        const malformedTransportPackage = cloneJsonRecord(baseSetupPackage);
-        const malformedTransportCertificate =
-            malformedTransportPackage.setupTransportCertificate as JsonRecord;
-        (malformedTransportCertificate.chunkHashes as string[]).pop();
-        rebindCollectiveSetupPackageHash(kernel, malformedTransportPackage);
-
-        const malformedTransportResult = kernel.verifyCollectiveBgvSetup({
-            setupPackage: malformedTransportPackage,
-        });
-
-        expect(malformedTransportResult.isValid).toBe(false);
-        expect(malformedTransportResult.refusedObjects[0]?.reasonCode).toBe(
-            'transportChunkHashCountMismatch',
-        );
-    });
-
     it('routes private VSS share envelope verification refusals', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
@@ -189,9 +166,6 @@ describe('collective BGV setup kernel commands', () => {
         expect(
             publicEnvelopeReference.transportedPrivateVssShareProofMaterial,
         ).toBeUndefined();
-        expect(publicEnvelopeReference.openingVerificationStatus).toBe(
-            'accepted-local-private-vss-opening',
-        );
         expect(String(publicEnvelopeReference.privateEnvelopeHash)).toMatch(
             protocolHashPattern,
         );

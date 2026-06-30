@@ -114,7 +114,7 @@ pub(super) fn read_target_accepted_binding(
         "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
         "ceremonyId": string_at_path(record, &["ceremonyId"])?,
         "electionManifestHash": hash_at_path(record, &["electionManifestHash"])?,
-        "evaluatorReplayParametersHash": hash_at_path(record, &["evaluatorReplayParametersHash"])?,
+        "bgvParametersHash": hash_at_path(record, &["bgvParametersHash"])?,
         "evaluatorReplayRecordHash": hash_at_path(record, &["evaluatorReplayRecordHash"])?,
         "objectType": string_at_path(record, &["objectType"])?,
         "objectVersion": unsigned_at_path(record, &["objectVersion"])?,

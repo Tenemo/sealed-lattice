@@ -28,7 +28,6 @@ pub(super) fn public_key_shares_object(
         .as_array()
         .expect("same-secret statement records");
     let mut share_records = Vec::new();
-    let mut public_key_share_roots = Vec::new();
     for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let same_secret_statement = &statement_records[trustee_roster_position as usize];
@@ -68,22 +67,15 @@ pub(super) fn public_key_shares_object(
             "shareComponent": "component-zero-b_i",
             "rnsLimbCount": DATA_PRIMES.len(),
             "shareCoefficientVectorHash512ByLimb": share_coefficient_hashes,
-            "proofBindingStatus": "public-key-share-proof-required",
         });
         share_record["publicKeyShareRoot"] = serde_json::json!(
             derive_canonical_object_hash(&share_record).expect("public-key share root")
         );
-        public_key_share_roots.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareRoot": share_record["publicKeyShareRoot"],
-        }));
         share_records.push(share_record);
     }
     let mut share_set = serde_json::json!({
         "objectType": "PublicKeyShareSet",
         "objectVersion": 1,
-        "proofBindingStatus": "public-key-share-proof-required",
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
@@ -95,7 +87,6 @@ pub(super) fn public_key_shares_object(
         "publicKeyCrpRoot": public_key_crp_root,
         "publicAPolynomialRoot": public_a_polynomial_root,
         "sameSecretConsistencyRoot": same_secret_consistency["sameSecretConsistencyRoot"],
-        "publicKeyShareRoots": public_key_share_roots,
         "shareRecords": share_records,
     });
     share_set["publicKeyShareSetRoot"] = serde_json::json!(
@@ -135,7 +126,6 @@ pub(super) fn public_key_share_proofs_object(
         .as_array()
         .expect("public-key share records");
     let mut proof_records = Vec::new();
-    let mut public_key_share_proof_roots = Vec::new();
     for trustee_roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
         let same_secret_statement = &statement_records[trustee_roster_position as usize];
@@ -158,17 +148,10 @@ pub(super) fn public_key_share_proofs_object(
             "sameSecretStatementRoot": same_secret_statement["sameSecretStatementRoot"],
             "trusteeSecretCommitmentRoot": same_secret_statement["trusteeSecretCommitmentRoot"],
             "rnsLimbCount": DATA_PRIMES.len(),
-            "errorSupport": "checked-by-public-key-share-succinct-proof-set",
-            "proofBytesStatus": "supplied-by-public-key-share-succinct-proof-set",
         });
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
             derive_canonical_object_hash(&proof_record).expect("public-key share proof root")
         );
-        public_key_share_proof_roots.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareProofRoot": proof_record["publicKeyShareProofRoot"],
-        }));
         proof_records.push(proof_record);
     }
     let mut proof_set = serde_json::json!({
@@ -187,7 +170,6 @@ pub(super) fn public_key_share_proofs_object(
         "publicAPolynomialRoot": public_a_polynomial_root,
         "sameSecretConsistencyRoot": same_secret_consistency["sameSecretConsistencyRoot"],
         "publicKeyShareSetRoot": public_key_shares["publicKeyShareSetRoot"],
-        "publicKeyShareProofRoots": public_key_share_proof_roots,
         "proofRecords": proof_records,
     });
     proof_set["publicKeyShareProofSetRoot"] = serde_json::json!(
@@ -233,7 +215,6 @@ pub(super) fn evaluator_key_schedule_object(
         "relinearizationLevelSchedule": schedule_parameters["relinearizationLevelSchedule"],
         "requiredGaloisKeySchedule": schedule_parameters["requiredGaloisKeySchedule"],
         "requiredGaloisSetHash": schedule_parameters["requiredGaloisSetHash"],
-        "genericKeySwitchPolicy": "refused-unless-explicitly-required",
     });
     schedule["evaluatorKeyScheduleRoot"] = serde_json::json!(
         derive_canonical_object_hash(&schedule).expect("evaluator-key schedule root")

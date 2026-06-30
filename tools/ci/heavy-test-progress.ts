@@ -33,6 +33,8 @@ const runningTestsPattern = /^running (\d+) tests?/;
 // `has been running for over 60 seconds` notices use a different shape and are
 // intentionally not matched here.
 const finishedTestPattern = /^test (\S+) \.\.\. (ok|FAILED|ignored)\b/;
+const startedTestPattern = /^test (\S+) \.\.\.(?:\s|$)/;
+const resultOnlyPattern = /^(ok|FAILED|ignored)\b/;
 // libtest prints "test <name> has been running for over N seconds" roughly every
 // minute for a still-running test. The heartbeat above already conveys liveness
 // and progress, so on a suite whose tests routinely run several minutes these
@@ -63,6 +65,7 @@ export const createHeavyTestProgressReporter = (input: {
     let failedTestCount = 0;
     let lineBuffer = '';
     let heartbeatTimer: NodeJS.Timeout | undefined;
+    let pendingStartedTestName: string | undefined;
 
     const estimatedRunningCount = (): number => {
         if (expectedTestCount === undefined) {
@@ -99,6 +102,22 @@ export const createHeavyTestProgressReporter = (input: {
         );
     };
 
+    const recordCompletion = (
+        testName: string,
+        result: 'ok' | 'FAILED' | 'ignored',
+    ): void => {
+        if (pendingStartedTestName === testName) {
+            pendingStartedTestName = undefined;
+        }
+        completedTestCount += 1;
+        if (result === 'FAILED') {
+            failedTestCount += 1;
+        }
+        write(
+            `[${input.label}] ${formatElapsed(now() - startedAtMilliseconds)} - finished ${renderCounts()}: ${testName} (${result})\n`,
+        );
+    };
+
     const consumeLine = (line: string): void => {
         const runningMatch = runningTestsPattern.exec(line);
         if (runningMatch?.[1] !== undefined) {
@@ -108,12 +127,25 @@ export const createHeavyTestProgressReporter = (input: {
         }
         const finishedMatch = finishedTestPattern.exec(line);
         if (finishedMatch?.[1] !== undefined) {
-            completedTestCount += 1;
-            if (finishedMatch[2] === 'FAILED') {
-                failedTestCount += 1;
-            }
-            write(
-                `[${input.label}] ${formatElapsed(now() - startedAtMilliseconds)} - finished ${renderCounts()}: ${finishedMatch[1]} (${finishedMatch[2]})\n`,
+            recordCompletion(
+                finishedMatch[1],
+                finishedMatch[2] as 'ok' | 'FAILED' | 'ignored',
+            );
+            return;
+        }
+        const startedMatch = startedTestPattern.exec(line);
+        if (startedMatch?.[1] !== undefined) {
+            pendingStartedTestName = startedMatch[1];
+            return;
+        }
+        const resultOnlyMatch = resultOnlyPattern.exec(line);
+        if (
+            pendingStartedTestName !== undefined &&
+            resultOnlyMatch?.[1] !== undefined
+        ) {
+            recordCompletion(
+                pendingStartedTestName,
+                resultOnlyMatch[1] as 'ok' | 'FAILED' | 'ignored',
             );
         }
     };
@@ -132,6 +164,7 @@ export const createHeavyTestProgressReporter = (input: {
             completedTestCount = 0;
             failedTestCount = 0;
             lineBuffer = '';
+            pendingStartedTestName = undefined;
             stop();
             heartbeatTimer = setInterval(emitHeartbeat, heartbeatMilliseconds);
             // Do not let the heartbeat alone keep the process alive.

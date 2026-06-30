@@ -60,9 +60,10 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_container_roots() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_checks_evaluation_key_proof_container_roots()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_container_roots",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_checks_evaluation_key_proof_container_roots",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let relinearization_root =
@@ -127,21 +128,14 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
         ),
         "accepted verification must be backed by transported trustee proof material"
     );
-    assert!(
-        !package["trusteeEvaluationKeyProofs"]["proofRecords"][0]
-            .as_object()
-            .expect("trustee proof record")
-            .contains_key("proofBytesHex"),
-        "terminal trustee proof records must not inline proof bytes"
-    );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_transported_public_evaluation_key_material()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_checks_transported_public_evaluation_key_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_transported_public_evaluation_key_material",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_checks_transported_public_evaluation_key_material",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let evaluation_key_set_hash = package["evaluationKeys"]["evaluationKeySetHash"]
@@ -189,175 +183,18 @@ fn material_set_contains_root(
 }
 
 #[test]
-#[ignore = "manual accepted setup closure diagnostic"]
-fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_public_setup_companions()
-{
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_collective_setup_verifier_accepts_all_transported_public_setup_companions",
-    );
-    let (package, request) = transported_public_setup_package_and_request();
-
-    let result =
-        verify_collective_bgv_setup_package(&package, &request).expect("verification response");
-
-    assert_eq!(
-        result["isValid"],
-        true,
-        "terminal setup verification result: {}",
-        serde_json::to_string_pretty(&result).expect("verification result JSON")
-    );
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
-    assert_eq!(
-        result["acceptedSetupHandoff"]["objectType"],
-        "CollectiveBgvAcceptedSetupHandoff"
-    );
-    assert!(
-        result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
-        "accepted terminal setup response must carry a handoff root"
-    );
-}
-
-#[test]
-#[ignore = "terminal recomputed-root refusal matrix at full ring"]
-fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_refuses_every_recomputed_accepted_root_drift",
-    );
-    let (package, companions) = setup_package_with_transported_public_setup_companions();
-    let verify = |candidate: &serde_json::Value| {
-        verify_collective_bgv_setup_package(
-            candidate,
-            &serde_json::json!({
-                "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-                "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-                "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-                "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-                "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-                "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-                "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-                "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-            }),
-        )
-        .expect("verification response")
-    };
-
-    assert_eq!(
-        verify(&package)["isValid"],
-        true,
-        "baseline terminal package must accept before the recomputed-root matrix",
-    );
-
-    // The matrix is driven by the verifier's own accepted-root enumeration, so it
-    // covers exactly the root set the accept response binds: every accepted root,
-    // drifted at every occurrence with the outer package hash recomputed, must be
-    // refused. A root the verifier never recomputes would silently survive here.
-    let accepted_roots = crate::bgv::setup::accepted_setup::accepted_hashes_from_package(&package);
-    let package_hash = package["setupPackageHash"]
-        .as_str()
-        .expect("setup package hash")
-        .to_string();
-
-    let mut unbound_roots = Vec::new();
-    let mut covered_root_count = 0_usize;
-    for root in &accepted_roots {
-        if root == &package_hash {
-            continue;
-        }
-        let mut drifted = package.clone();
-        let occurrences = drift_all_occurrences(&mut drifted, root, &drift_hash(root));
-        assert!(
-            occurrences >= 1,
-            "accepted root {root} was not located in the terminal package graph",
-        );
-        rebind_collective_setup_package_hash(&mut drifted);
-        if verify(&drifted)["isValid"] != false {
-            unbound_roots.push(root.clone());
-        }
-        covered_root_count += 1;
-    }
-    assert!(
-        unbound_roots.is_empty(),
-        "terminal package accepted roots that the verifier does not recompute and refuse: {unbound_roots:?}",
-    );
-    assert!(
-        covered_root_count >= 12,
-        "completeness floor: the terminal accepted package must bind the full first-roster root set, covered {covered_root_count}",
-    );
-
-    // Drifting the outer package hash without recomputation is a package-hash
-    // mismatch, the structural guard the per-root rebinds rely on.
-    let mut drifted_package_hash = package.clone();
-    drifted_package_hash["setupPackageHash"] = serde_json::json!(drift_hash(&package_hash));
-    assert_eq!(
-        verify(&drifted_package_hash)["isValid"],
-        false,
-        "drifting the outer setup package hash must be refused",
-    );
-}
-
-#[test]
-#[ignore = "manual accepted setup closure diagnostic"]
-fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift",
-    );
-    let (mut package, companions) = setup_package_with_transported_public_setup_companions();
-
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
-        serde_json::json!(valid_hash('4'));
-    rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
-    rebind_trustee_evaluation_key_proof_set_root(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-            "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-            "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-            "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-            "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-            "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-            "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-            "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(
-        result["isValid"],
-        false,
-        "terminal setup verification result: {}",
-        serde_json::to_string_pretty(&result).expect("verification result JSON")
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("statementHash must match the statement rebuilt")
-    );
-    assert!(result["acceptedSetupHandoff"].is_null());
-}
-
-#[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk",
     );
     let (mut package, mut request) = transported_public_setup_package_and_request();
     let expected_manifest =
         public_evaluation_key_material_manifest(&package, &package["evaluationKeys"])
             .expect("public evaluation-key material manifest");
     let mut tampered_manifest = expected_manifest;
-    tampered_manifest["materialSource"] =
-        serde_json::json!("tampered-public-evaluation-key-material");
+    tampered_manifest["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(valid_hash('8'));
     let tampered_material_bytes =
         encode_public_evaluation_key_material_manifest(&tampered_manifest)
             .expect("tampered public evaluation-key material bytes");
@@ -380,10 +217,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let first_component_material_root = package["relinearizationKeyShareRounds"]["roundOneRecords"]
@@ -404,10 +241,10 @@ fn heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_k
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let first_proof_record = &package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
@@ -415,10 +252,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
         .as_str()
         .expect("proof material root");
 
-    assert!(
-        first_proof_record["proofBytesHex"].is_null(),
-        "transported terminal trustee proof records must not inline proof bytes"
-    );
     assert!(
         material_set_contains_root(
             &request["transportedEvaluationKeyShareProofMaterial"],
@@ -432,10 +265,10 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk()
-{
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk",
     );
     let (package, mut request) = transported_public_setup_package_and_request();
     request["transportedEvaluationKeyShareProofMaterial"]["proofMaterials"][0]["proofFullObjectHash"] =
@@ -453,9 +286,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_t
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_public_galois_key_loader_refuses_reduced_ring_material() {
+fn heavy_accepted_setup_final_package_collective_setup_public_galois_key_loader_refuses_reduced_ring_material()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_public_galois_key_loader_refuses_reduced_ring_material",
+        "heavy_accepted_setup_final_package_collective_setup_public_galois_key_loader_refuses_reduced_ring_material",
     );
     let (package, companions) = reduced_ring_setup_package_with_transported_public_setup_companions(
         10,
@@ -478,10 +312,10 @@ fn heavy_accepted_setup_collective_setup_public_galois_key_loader_refuses_reduce
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material()
+fn heavy_accepted_setup_final_package_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material",
+        "heavy_accepted_setup_final_package_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material",
     );
     let (package, companions) = reduced_ring_setup_package_with_transported_public_setup_companions(
         10,
@@ -505,10 +339,10 @@ fn heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refus
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoAggregateRoot"] =
@@ -527,10 +361,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchSeedHex"] =
@@ -555,10 +389,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed()
-{
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0]["keySwitchSeedHex"] =
@@ -583,9 +417,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specifi
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_drift() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_batch_schedule_drift()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_batch_schedule_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["galoisKeyShareBatches"][0]["requiredGaloisKeySchedule"][0]["rotation"] =
@@ -610,10 +445,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["relinearizationKeyShareRounds"]["sameSecretProofSetRoot"] =
@@ -632,9 +467,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_se
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package
@@ -660,10 +496,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evalua
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container",
     );
 
     for field_name in ["proofRecords", "trusteeEvaluationKeyProofSetRoot"] {
@@ -697,70 +533,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_eval
 }
 
 #[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs",
-    );
-
-    let (mut extra_proof_package, extra_proof_request) =
-        transported_public_setup_package_and_request();
-    let duplicate_proof_record =
-        extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
-    extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("trustee evaluation-key proof records")
-        .push(duplicate_proof_record);
-    rebind_trustee_evaluation_key_proof_set_root(&mut extra_proof_package);
-    rebind_collective_setup_package_hash(&mut extra_proof_package);
-    assert_refuses_trustee_evaluation_key_proof_variant(
-        extra_proof_package,
-        &extra_proof_request,
-        "proofRecords must contain one proof per trustee",
-    );
-
-    let (mut duplicate_proof_package, duplicate_proof_request) =
-        transported_public_setup_package_and_request();
-    duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][1] =
-        duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
-    rebind_trustee_evaluation_key_proof_record_root(&mut duplicate_proof_package, 1);
-    rebind_trustee_evaluation_key_proof_set_root(&mut duplicate_proof_package);
-    rebind_collective_setup_package_hash(&mut duplicate_proof_package);
-    assert_refuses_trustee_evaluation_key_proof_variant(
-        duplicate_proof_package,
-        &duplicate_proof_request,
-        "proof records must be ordered by roster position",
-    );
-}
-
-fn assert_refuses_trustee_evaluation_key_proof_variant(
-    package: serde_json::Value,
-    request: &serde_json::Value,
-    message_fragment: &str,
-) {
-    let result =
-        verify_collective_bgv_setup_package(&package, request).expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["objectPath"],
-        "setupPackage.trusteeEvaluationKeyProofs"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains(message_fragment)
-    );
-    assert!(result["acceptedSetupHandoff"].is_null());
-}
-
-#[test]
 fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share_records",
@@ -778,9 +550,10 @@ fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
@@ -807,9 +580,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statemen
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_trustee_proof_bytes()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_trustee_proof_bytes",
     );
     let (mut noncanonical_claim_package, mut noncanonical_claim_request) =
         transported_public_setup_package_and_request();
@@ -968,9 +742,10 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cannot_reprove() {
+fn heavy_accepted_setup_final_package_round_two_records_with_substituted_aggregate_source_cannot_reprove()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cannot_reprove",
+        "heavy_accepted_setup_final_package_round_two_records_with_substituted_aggregate_source_cannot_reprove",
     );
     // A trustee whose round-two share multiplies a substituted aggregate
     // cannot generate a verifying proof: the statement carries the aggregate

@@ -13,8 +13,6 @@ import {
 import {
     createLocalRunLog,
     currentProcessExitCode,
-    removeRunLogArguments,
-    runLogDisabledByArguments,
     type ActiveLocalRunLog,
 } from './local-run-log.js';
 import {
@@ -53,8 +51,7 @@ export type ParsedCheckArguments = {
     readonly progressMode: CheckProgressMode;
 };
 
-const checkUsage =
-    'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
+const checkUsage = 'Usage: run-check.ts [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
 const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
 
@@ -62,7 +59,6 @@ const rustKernelFastTestArguments = [
     'test',
     '-p',
     'sealed-lattice-kernel',
-    '--quiet',
     '--',
     '--skip',
     rustKernelHeavyTestPattern,
@@ -521,8 +517,7 @@ const overallExitCode = (results: readonly ValidationLaneResult[]): number => {
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const commandArguments = removeRunLogArguments(rawArguments);
-    const parsedArguments = parseCheckArguments(commandArguments);
+    const parsedArguments = parseCheckArguments(rawArguments);
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
@@ -535,13 +530,11 @@ const main = async (): Promise<void> => {
             parsedArguments.progressMode,
         ),
     });
-    const runLog = runLogDisabledByArguments(rawArguments)
-        ? undefined
-        : await createLocalRunLog({
-              commandLineArguments: rawArguments,
-              lanes: validationLanes.map((lane) => lane.name),
-              scriptName: 'check',
-          });
+    const runLog = await createLocalRunLog({
+        commandLineArguments: rawArguments,
+        lanes: validationLanes.map((lane) => lane.name),
+        scriptName: 'check',
+    });
     let timingDetails: CheckRunTimingDetails | undefined;
 
     try {

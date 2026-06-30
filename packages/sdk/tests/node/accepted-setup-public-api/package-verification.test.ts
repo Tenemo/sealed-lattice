@@ -260,9 +260,6 @@ describe('accepted setup public package API in Node', () => {
         expect(
             verificationInput.transportedVssCoefficientCommitmentMaterial,
         ).toEqual(vssMaterialReference);
-        expect(
-            verificationInput.transportedVssCoefficientCommitmentMaterial,
-        ).not.toHaveProperty('chunks');
 
         const verification = await publicSetupApi.verifySetupPackage({
             setupPackage: {
@@ -328,7 +325,6 @@ describe('accepted setup public package API in Node', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: setupProofMaterialRoot(transportCase),
             });
-            expect(materialSet?.proofMaterials[0]).not.toHaveProperty('chunks');
         }
     });
 

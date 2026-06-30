@@ -1,5 +1,3 @@
-use super::certificate::*;
-
 use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
@@ -88,18 +86,6 @@ pub(super) fn verify_binary_vss_material_transport_reference(
     }
 
     Ok(Ok(()))
-}
-
-pub(super) fn transport_chunk_hashes(
-    transport_certificate: &Value,
-    expected_chunk_count: usize,
-) -> CanonicalResult<Result<Vec<String>, Refusal>> {
-    transport_hashes_at(
-        transport_certificate,
-        "chunkHashes",
-        expected_chunk_count,
-        "setupPackage.setupTransportCertificate",
-    )
 }
 
 pub(super) fn transport_hashes_at(
@@ -203,38 +189,6 @@ pub(super) fn setup_transport_expected_hash_array(
     }
 
     Ok(chunk_hashes)
-}
-
-pub(super) fn setup_transport_full_object_set_hash(
-    transported_objects: &[SetupTransportedObjectBinding],
-    total_byte_length: u64,
-    chunk_count: u64,
-    chunk_hashes: &[String],
-) -> CanonicalResult<String> {
-    let transported_object_values = transported_objects
-        .iter()
-        .map(|transported_object| {
-            json!({
-                "objectName": transported_object.object_name,
-                "objectRole": transported_object.object_role,
-                "objectRoot": transported_object.object_root,
-                "byteLength": transported_object.byte_length,
-                "chunkStartIndex": transported_object.chunk_start_index,
-                "chunkCount": transported_object.chunk_count,
-                "chunkRoot": transported_object.chunk_root,
-                "fullObjectHash": transported_object.full_object_hash,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    derive_canonical_object_hash(&json!({
-        "objectType": "SetupTransportFullObjectSet",
-        "objectVersion": 1,
-        "transportedObjects": transported_object_values,
-        "totalByteLength": total_byte_length,
-        "chunkCount": chunk_count,
-        "chunkHashes": chunk_hashes,
-    }))
 }
 
 pub(in super::super) fn setup_transport_chunk_manifest_root(

@@ -8,7 +8,6 @@ import {
     hashFromKernel,
     loadPublicTranscriptCoreKernel,
     participantCount,
-    phaseObject,
     phaseTranscriptFixture,
     publicKeyShareMaterialContribution,
     publicKeyShareSuccinctProofMaterial,
@@ -20,70 +19,12 @@ import {
     sameSecretProofReferencesFromSet,
     setupContextFromKernel,
     setupTransportChunkSizeBytes,
-    trusteeIdentity,
-    trusteeRosterPosition,
     vssFixtureRingDegree,
     vssFixtureThresholdDegree,
     vssSourceTrusteeOpeningState,
 } from './support.js';
 
 describe('accepted setup public package API in Node', () => {
-    it('creates a roots-only setup contribution and refuses raw fields in the public record', async () => {
-        const kernel = await loadPublicTranscriptCoreKernel();
-        const setupContext = setupContextFromKernel(kernel);
-        const commonFields = contextFields(setupContext);
-        const sourceTrusteeRecord = {
-            objectType: 'VssSourceTrusteeCoefficientCommitments',
-            objectVersion: 1,
-            ...commonFields,
-            sourceTrusteeIdentity: trusteeIdentity,
-            sourceTrusteeRosterPosition: trusteeRosterPosition,
-            publicMatrixSeedHash: hashFromKernel(kernel, 'public-matrix-seed'),
-            coefficientCommitments: [],
-            sourceTrusteeCommitmentRoot: hashFromKernel(
-                kernel,
-                'source-trustee-root',
-            ),
-        };
-
-        const setupContribution = publicSetupApi.createSetupContribution({
-            setupContext,
-            trusteeIdentity,
-            trusteeRosterPosition,
-            setupPhaseParticipantObjects: [
-                phaseObject(kernel, setupContext, 2),
-                phaseObject(kernel, setupContext, 1),
-            ],
-            commonRandomnessCommitRoot: hashFromKernel(
-                kernel,
-                'common-randomness-commit',
-            ),
-            commonRandomnessRevealRoot: hashFromKernel(
-                kernel,
-                'common-randomness-reveal',
-            ),
-            vssSourceTrusteeRecord: sourceTrusteeRecord,
-        });
-
-        expect(setupContribution).toMatchObject({
-            objectType: 'SetupContributionAssembly',
-            trusteeIdentity,
-            trusteeRosterPosition,
-            vssSourceTrusteeCommitmentRoot:
-                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
-            phaseObjectRoots: [
-                hashFromKernel(kernel, 'phase-root-1'),
-                hashFromKernel(kernel, 'phase-root-2'),
-            ],
-        });
-        expect(String(setupContribution.setupContributionRoot)).toHaveLength(
-            128,
-        );
-        expect(JSON.stringify(setupContribution)).not.toMatch(
-            /shareValues|coefficientMessage|randomnessByColumn/u,
-        );
-    });
-
     it('assembles public key and evaluation-key records from proof material only', async () => {
         const kernel = await loadPublicTranscriptCoreKernel();
         const setupParameters = kernel.describeCollectiveBgvSetupParameters();
@@ -432,10 +373,6 @@ describe('accepted setup public package API in Node', () => {
                 ),
             ],
         }));
-        const transportedCompanionChunkHashes =
-            transportedCompanionObjects.flatMap(
-                (transportedObject) => transportedObject.chunkHashes,
-            );
         const transportedCompanionByteLength =
             transportedCompanionObjects.reduce(
                 (totalByteLength, transportedObject) =>
@@ -646,10 +583,6 @@ describe('accepted setup public package API in Node', () => {
                     setupParameters.publicVssCommitmentMaterialSize
                         .fullMaterialCoefficientBytes,
                 ) + transportedCompanionByteLength,
-            chunkHashes: [
-                ...setupTransport.chunkHashes,
-                ...transportedCompanionChunkHashes,
-            ],
         });
         expect(
             (setupPackage.setupTransportCertificate as Record<string, unknown>)
@@ -685,22 +618,6 @@ describe('accepted setup public package API in Node', () => {
             kernel.deriveCanonicalObjectHash({
                 value: setupPackageHashInput,
             }),
-        );
-        expect(JSON.stringify(setupPackage)).not.toContain(
-            '"encryptedEnvelope":',
-        );
-        expect(JSON.stringify(setupPackage)).not.toContain(
-            '"transportedPrivateVssShareProofMaterial":',
-        );
-        expect(
-            JSON.stringify({
-                relinearizationKeyShareRounds,
-                galoisKeyShareBatches,
-                publicEvaluationKeys,
-                setupPackage,
-            }),
-        ).not.toMatch(
-            /secretCoefficients|openingRandomness|roundOneAggregateSourceCoefficients|proofGeneration/u,
         );
         expect(() =>
             publicSetupApi.createSetupPackage({

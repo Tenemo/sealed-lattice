@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { createHeavyTestProgressReporter } from '#tools/ci/heavy-test-progress';
 
@@ -29,10 +29,6 @@ const startRun = (
 };
 
 describe('createHeavyTestProgressReporter', () => {
-    afterEach(() => {
-        vi.useRealTimers();
-    });
-
     it('reports each finished test with cumulative counts and a thread estimate', () => {
         const lines: string[] = [];
         const reporter = createHeavyTestProgressReporter({
@@ -77,6 +73,26 @@ describe('createHeavyTestProgressReporter', () => {
         expect(lines[0]).toContain('1/1 done');
     });
 
+    it('counts nocapture completions when the result is printed after test output', () => {
+        const lines: string[] = [];
+        const reporter = createHeavyTestProgressReporter({
+            label: 'heavy',
+            threadCount: 1,
+            now: () => 0,
+            write: (line) => lines.push(line),
+        });
+
+        startRun(reporter);
+        feedOutput(reporter, 'running 1 test\n');
+        feedOutput(reporter, 'test accepted_setup::with_output ... ');
+        feedOutput(reporter, 'diagnostic emitted by the test\n');
+        feedOutput(reporter, 'ok\n');
+
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain('finished 1/1 done, ~0 running');
+        expect(lines[0]).toContain('accepted_setup::with_output (ok)');
+    });
+
     it('does not count the libtest slow-test notice as a completion', () => {
         const lines: string[] = [];
         const reporter = createHeavyTestProgressReporter({
@@ -111,80 +127,6 @@ describe('createHeavyTestProgressReporter', () => {
         feedOutput(reporter, 'test accepted_setup::first ... ok\n');
 
         expect(lines[0]).toContain('1/5 done');
-    });
-
-    it('emits an elapsed heartbeat while tests are still running', () => {
-        vi.useFakeTimers();
-        let nowMilliseconds = 0;
-        const lines: string[] = [];
-        const reporter = createHeavyTestProgressReporter({
-            label: 'heavy',
-            threadCount: 3,
-            heartbeatMilliseconds: 1_000,
-            now: () => nowMilliseconds,
-            write: (line) => lines.push(line),
-        });
-
-        startRun(reporter);
-        feedOutput(reporter, 'running 2 tests\n');
-        nowMilliseconds = 65_000;
-        vi.advanceTimersByTime(1_000);
-
-        const heartbeat = lines.find((line) => line.includes('elapsed'));
-        expect(heartbeat).toBeDefined();
-        expect(heartbeat).toContain('1m05s elapsed');
-        expect(heartbeat).toContain('0/2 done, ~2 running');
-        reporter.stop();
-    });
-
-    it('stops the heartbeat once every test has finished', () => {
-        vi.useFakeTimers();
-        let nowMilliseconds = 0;
-        const lines: string[] = [];
-        const reporter = createHeavyTestProgressReporter({
-            label: 'heavy',
-            threadCount: 1,
-            heartbeatMilliseconds: 1_000,
-            now: () => nowMilliseconds,
-            write: (line) => lines.push(line),
-        });
-
-        startRun(reporter);
-        feedOutput(reporter, 'running 1 tests\n');
-        feedOutput(reporter, 'test accepted_setup::only ... ok\n');
-        const lineCountAfterCompletion = lines.length;
-
-        nowMilliseconds = 120_000;
-        vi.advanceTimersByTime(10_000);
-
-        expect(lines).toHaveLength(lineCountAfterCompletion);
-    });
-
-    it('stops emitting heartbeats after the reporter is stopped', () => {
-        vi.useFakeTimers();
-        let nowMilliseconds = 0;
-        const lines: string[] = [];
-        const reporter = createHeavyTestProgressReporter({
-            label: 'heavy',
-            threadCount: 2,
-            heartbeatMilliseconds: 1_000,
-            now: () => nowMilliseconds,
-            write: (line) => lines.push(line),
-        });
-
-        startRun(reporter);
-        feedOutput(reporter, 'running 2 tests\n');
-        reporter.observer.onCommandExit?.({
-            durationMilliseconds: 10,
-            exitCode: 0,
-            invocation,
-            terminationSignal: null,
-        });
-
-        nowMilliseconds = 90_000;
-        vi.advanceTimersByTime(10_000);
-
-        expect(lines).toHaveLength(0);
     });
 });
 

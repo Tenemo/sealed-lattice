@@ -14,7 +14,6 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyProofVerification,
     BgvEvaluatorOperationValidation,
     BgvLocalTrusteeSetupStateVerification,
     BgvObjectValidation,
@@ -32,7 +31,6 @@ import type {
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
-    BgvThresholdShareCommitmentTransportStreamAbort,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
@@ -204,10 +202,6 @@ export const createTranscriptCoreKernelLoader = (
                 listCanonicalErrorCodes: (): readonly string[] =>
                     executeCommand<readonly string[]>({
                         command: 'ListCanonicalErrorCodes',
-                    }),
-                listReservedRootNamespaces: (): readonly string[] =>
-                    executeCommand<readonly string[]>({
-                        command: 'ListReservedRootNamespaces',
                     }),
                 roundTripBytes: (input: Uint8Array): Uint8Array =>
                     runExclusiveKernelOperation('round-trip', () => {
@@ -417,7 +411,6 @@ export const createTranscriptCoreKernelLoader = (
                             input.coefficientMessagesByShamirIndex,
                         openingRandomnessByShamirIndex:
                             input.openingRandomnessByShamirIndex,
-                        proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
@@ -435,20 +428,8 @@ export const createTranscriptCoreKernelLoader = (
                         negativeIndicatorCoefficients:
                             input.negativeIndicatorCoefficients,
                         openingRandomnessByLimb: input.openingRandomnessByLimb,
-                        proofRandomnessSource: input.proofRandomnessSource,
                         proofRandomnessSeedHex: input.proofRandomnessSeedHex,
                         proofRandomnessNonceHex: input.proofRandomnessNonceHex,
-                    }),
-                verifyTrusteeEvaluationKeyProof: (
-                    input,
-                ): BgvTrusteeEvaluationKeyProofVerification =>
-                    executeCommand<BgvTrusteeEvaluationKeyProofVerification>({
-                        command: 'VerifyTrusteeEvaluationKeyProof',
-                        context: input.context,
-                        ringDegree: input.ringDegree,
-                        keys: input.keys,
-                        sameSecretLinkage: input.sameSecretLinkage,
-                        proofBytesHex: input.proofBytesHex,
                     }),
                 computeSetupCommitmentFromOpening: (
                     input,
@@ -503,16 +484,6 @@ export const createTranscriptCoreKernelLoader = (
                             publicMatrixSeedHash: input.publicMatrixSeedHash,
                             transportedVssCoefficientCommitmentMaterial:
                                 input.transportedVssCoefficientCommitmentMaterial,
-                        },
-                    ),
-                abortThresholdShareCommitmentsFromTransportStream: (
-                    input,
-                ): BgvThresholdShareCommitmentTransportStreamAbort =>
-                    executeCommand<BgvThresholdShareCommitmentTransportStreamAbort>(
-                        {
-                            command:
-                                'AbortThresholdShareCommitmentsFromTransportStream',
-                            derivationId: input.derivationId,
                         },
                     ),
                 absorbThresholdShareCommitmentsFromTransportStreamChunk: (

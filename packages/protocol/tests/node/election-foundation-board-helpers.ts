@@ -288,8 +288,7 @@ export const createTargetFinalityRecord = (
             objectType: 'FixtureTargetLayoutPlaceholder',
             layout: 'direct-sparse-target-layout-v1',
         }),
-        evaluatorReplayParametersHash:
-            manifestOpaqueBindings.evaluatorReplayParametersHash,
+        bgvParametersHash: manifestOpaqueBindings.bgvParametersHash,
         targetFinalityPolicyHash,
         topOptionCount: 2,
         tiePolicyHash: deriveFixtureHash('fixture-tie-policy-v1', {

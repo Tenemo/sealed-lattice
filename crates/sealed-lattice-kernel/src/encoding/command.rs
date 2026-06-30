@@ -6,7 +6,6 @@ use crate::hashing::derive_canonical_object_hash;
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
     ListCanonicalErrorCodes,
-    ListReservedRootNamespaces,
     AnalyzeCanonicalObject,
     ComputeChunkRoot,
     HashRaw,
@@ -25,12 +24,10 @@ enum TranscriptCoreCommand {
     VerifyPrivateVssShareEnvelope,
     GeneratePrivateVssShareProof,
     GenerateTrusteeEvaluationKeyProof,
-    VerifyTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
     DeriveThresholdShareCommitments,
     DeriveThresholdShareCommitmentsFromTransport,
     BeginThresholdShareCommitmentsFromTransportStream,
-    AbortThresholdShareCommitmentsFromTransportStream,
     AbsorbThresholdShareCommitmentsFromTransportStreamChunk,
     FinishThresholdShareCommitmentsFromTransportStream,
     ReleaseVerifiedTransportedVssMaterial,
@@ -82,12 +79,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
             ALL_CANONICAL_ERROR_CODES
                 .iter()
                 .map(|code| Value::String(code.as_str().to_string()))
-                .collect(),
-        )),
-        TranscriptCoreCommand::ListReservedRootNamespaces => Ok(Value::Array(
-            RESERVED_ROOT_NAMESPACES
-                .iter()
-                .map(|namespace| Value::String((*namespace).to_string()))
                 .collect(),
         )),
         TranscriptCoreCommand::AnalyzeCanonicalObject => {
@@ -214,12 +205,10 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
-        | TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
         | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
-        | TranscriptCoreCommand::AbortThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk
         | TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial
@@ -277,9 +266,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::commands::generate_trustee_evaluation_key_proof(request)
         }
-        TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof => {
-            crate::bgv::commands::verify_trustee_evaluation_key_proof(request)
-        }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::commands::compute_setup_commitment_from_opening(request)
         }
@@ -296,9 +282,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::absorb_threshold_share_commitments_from_transport_stream_chunk(
                 request,
             )
-        }
-        TranscriptCoreCommand::AbortThresholdShareCommitmentsFromTransportStream => {
-            crate::bgv::commands::abort_threshold_share_commitments_from_transport_stream(request)
         }
         TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::finish_threshold_share_commitments_from_transport_stream(request)

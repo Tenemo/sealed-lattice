@@ -186,22 +186,6 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs.proofRecords",
         )?));
     }
-    let mut proof_roots = Vec::new();
-    for proof_record in proof_records {
-        proof_roots.push(json!({
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "sameSecretProofRoot": value_string(proof_record, "sameSecretProofRoot")?,
-        }));
-    }
-    if proof_set.get("sameSecretProofRoots") != Some(&Value::Array(proof_roots)) {
-        return Ok(Some(same_secret_proof_refusal(
-            "sameSecretProofRootListMismatch",
-            "sameSecretProofs.sameSecretProofRoots must match the ordered proof records",
-            "setupPackage.sameSecretProofs.sameSecretProofRoots",
-        )?));
-    }
-
     let Some(proof_set_root) = proof_set
         .get("sameSecretProofSetRoot")
         .and_then(Value::as_str)

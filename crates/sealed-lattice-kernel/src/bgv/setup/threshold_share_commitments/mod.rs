@@ -282,22 +282,6 @@ pub(crate) fn begin_threshold_share_commitment_transport_derivation_stream_reque
     }))
 }
 
-pub(crate) fn abort_threshold_share_commitment_transport_derivation_stream_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let derivation_id = derivation_stream_id_field(request, "derivationId")?.to_string();
-    let sessions = vss_transport_derivation_sessions();
-    let mut sessions = sessions.lock().map_err(|_| {
-        invalid_threshold_commitment_input("transport derivation session store is unavailable")
-    })?;
-    sessions.remove(&derivation_id);
-
-    Ok(json!({
-        "operation": "abortThresholdShareCommitmentsFromTransportStream",
-        "derivationId": derivation_id,
-    }))
-}
-
 pub(crate) fn absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
     request: &Value,
 ) -> CanonicalResult<Value> {

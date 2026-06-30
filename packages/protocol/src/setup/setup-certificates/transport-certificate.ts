@@ -143,33 +143,11 @@ const setupTransportCertificateBody = (
             accumulatedLength + transportedObject.byteLength,
         0,
     );
-    const chunkHashes = transportedObjects.flatMap(
-        (transportedObject) => transportedObject.chunkHashes,
+    const chunkCount = transportedObjects.reduce(
+        (accumulatedChunkCount, transportedObject) =>
+            accumulatedChunkCount + transportedObject.chunkCount,
+        0,
     );
-    const chunkCount = chunkHashes.length;
-    const fullObjectHash = deriveCanonicalObjectHash({
-        objectType: 'SetupTransportFullObjectSet',
-        objectVersion: 1,
-        transportedObjects: transportedObjects.map((transportedObject) => ({
-            objectName: transportedObject.objectName,
-            objectRole: transportedObject.objectRole,
-            objectRoot: transportedObject.objectRoot,
-            byteLength: transportedObject.byteLength,
-            chunkStartIndex: transportedObject.chunkStartIndex,
-            chunkCount: transportedObject.chunkCount,
-            chunkRoot: transportedObject.chunkRoot,
-            fullObjectHash: transportedObject.fullObjectHash,
-        })),
-        totalByteLength,
-        chunkCount,
-        chunkHashes,
-    });
-    const chunkRoot = setupTransportChunkManifestRoot({
-        chunkCount,
-        totalByteLength,
-        chunkHashes,
-        fullObjectHash,
-    });
 
     return {
         objectType: 'SetupTransportCertificate',
@@ -187,9 +165,6 @@ const setupTransportCertificateBody = (
         resumePolicy: setupTransportResumePolicy,
         lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
         transportedObjects,
-        chunkHashes,
-        chunkRoot,
-        fullObjectHash,
     };
 };
 

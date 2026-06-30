@@ -9,7 +9,6 @@ use super::validation::{validate_setup_package_internal_bindings, validate_setup
 use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
     DATA_PRIMES, POLYNOMIAL_DEGREE,
-    abort_threshold_share_commitment_transport_derivation_stream_request,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,

@@ -227,19 +227,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "proofRandomnessNonceHex must be provided for private VSS proof generation",
     )
     .map_err(private_vss_refusal_to_error)?;
-    let proof_randomness_source = request
-        .get("proofRandomnessSource")
-        .and_then(Value::as_str)
-        .unwrap_or("fresh-csprng");
-    if !matches!(
-        proof_randomness_source,
-        "fresh-csprng" | "development-deterministic-fixture"
-    ) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
-        ));
-    }
     let share_values_hash = derive_canonical_object_hash(&json!({
         "objectType": "PrivateVssShareValueVector",
         "objectVersion": 1,
@@ -300,13 +287,6 @@ pub(crate) fn generate_private_vss_share_proof_from_request(
         "ringDegree": ring_degree,
         "shareValuesHash": share_values_hash,
         "privateVssShareProof": proof_record,
-        "proofRandomness": {
-            "source": proof_randomness_source,
-            "binding": "seed and nonce are bound to the private VSS share statement before proof masking",
-            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
-            "seedBytes": 64,
-            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
-        }
     }))
 }
 
@@ -358,20 +338,6 @@ fn statement_bound_private_vss_proof_randomness_seed_hex(
         "coefficientCommitmentRoots": coefficient_commitment_roots,
         "proofRandomnessNonceHex": proof_randomness_nonce_hex,
         "proofRandomnessSeedHex": proof_randomness_seed_hex,
-    }))
-}
-
-fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
-    validate_exact_randomness_hex(
-        proof_randomness_nonce_hex,
-        PROOF_RANDOMNESS_NONCE_BYTES,
-        "proofRandomnessNonceHex",
-    )?;
-
-    derive_canonical_object_hash(&json!({
-        "objectType": "PrivateVssShareProofRandomnessNonceHash",
-        "objectVersion": 1,
-        "nonceBytesHex": proof_randomness_nonce_hex,
     }))
 }
 

@@ -460,7 +460,6 @@ pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Valu
         "phaseOrder": phase_order_value(),
         "phaseOrderHash": phase_order_hash()?,
         "requiredFinalObjects": REQUIRED_FINAL_OBJECTS,
-        "genericKeySwitchPolicy": "refused-unless-explicitly-required-by-frozen-evaluator-schedule",
         "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
     }))
 }
@@ -870,7 +869,6 @@ fn evaluator_key_schedule_value_for_roster(
         "relinearizationLevelSchedule": expected_relinearization_level_schedule(),
         "requiredGaloisKeySchedule": required_galois_key_schedule,
         "requiredGaloisSetHash": required_galois_set_hash,
-        "genericKeySwitchPolicy": "refused-unless-explicitly-required",
     }))
 }
 

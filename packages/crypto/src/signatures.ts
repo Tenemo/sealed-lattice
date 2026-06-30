@@ -161,19 +161,6 @@ const validateProfile = (
             signature.signatureHash,
         );
     }
-    if (
-        signature.profile.providerName.length === 0 ||
-        signature.profile.providerVersion.length === 0 ||
-        !isProtocolHashString(signature.profile.providerBuildHash) ||
-        signature.profile.fips204Version.length === 0 ||
-        signature.profile.errataStatus.length === 0
-    ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignature',
-            'Signature profile metadata must be fully bound with canonical provider build material.',
-            signature.signatureHash,
-        );
-    }
     if (byteLength > mlDsaContextByteLimit) {
         return emptySignatureVerificationResult(
             'InvalidMlDsaContext',

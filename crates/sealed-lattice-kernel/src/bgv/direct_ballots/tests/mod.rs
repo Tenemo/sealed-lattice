@@ -1,7 +1,6 @@
 use std::sync::OnceLock;
 
 mod aggregation_and_evaluator;
-mod command_report;
 mod proof_transport;
 mod relation_proof_checks;
 mod request_validation;

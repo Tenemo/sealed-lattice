@@ -27,8 +27,6 @@ describe('recovery epoch shells', () => {
             deriveValidatedFirstValidOrder({
                 requiredContextHash: contextHash,
                 selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-                expectedSelectionPolicyHash:
-                    manifestPolicyHashes.firstValidPolicyHash,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -398,19 +396,19 @@ describe('recovery epoch shells', () => {
             ]),
         );
 
-        expect(
-            isActionCurrentForRecoveryEpoch({
-                actionContext: staleActionContext,
-                recoveryEpochState: currentEntry,
-                expectedRosterExternalAcceptanceHash: deriveCanonicalObjectHash(
-                    {
-                        objectType: 'RosterExternalAcceptanceHash',
-                        participant: 'participant-1',
-                        roster: 'different',
-                    },
-                ),
-            }).refusedObjects,
-        ).toEqual(
+        const wrongRosterActionResult = isActionCurrentForRecoveryEpoch({
+            actionContext: staleActionContext,
+            recoveryEpochState: currentEntry,
+            expectedRosterExternalAcceptanceHash: deriveCanonicalObjectHash({
+                objectType: 'RosterExternalAcceptanceHash',
+                participant: 'participant-1',
+                roster: 'different',
+            }),
+        });
+
+        expect(wrongRosterActionResult.isValid).toBe(false);
+        expect(wrongRosterActionResult.acceptedHashes).toEqual([]);
+        expect(wrongRosterActionResult.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({
                     code: 'RosterExternalAcceptanceInvalid',

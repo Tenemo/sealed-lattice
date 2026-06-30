@@ -48,8 +48,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly workingLevel: number;
     readonly evaluationKeyMaterialSource: string;
     readonly publicEvaluationKeyMaterialHash?: string;
-    readonly packedScoreRoot: string;
-    readonly rankRoot: string;
     readonly targetLayoutHash: string;
     readonly targetIdRoot: string;
     readonly targetOrderRoot: string;
@@ -70,7 +68,7 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
               readonly encryptedBallotAggregateHash: string;
               readonly targetCiphertextHash: string;
               readonly targetLayoutHash: string;
-              readonly evaluatorReplayParametersHash: string;
+              readonly bgvParametersHash: string;
               readonly targetFinalityPolicyHash: string;
           };
     readonly replayTimeMilliseconds: string;
@@ -105,32 +103,9 @@ export type DirectEncryptedBallotResult = {
         readonly responsePolynomialDegree: number;
         readonly sharedResponsePolynomialCount: number;
         readonly proofSizeBytes: number;
-        readonly verifiedProofSizeBytes: number;
         readonly totalProofBytes: number;
         readonly proofBytesHash: string;
         readonly proofGate: string;
-        readonly proofAccounting: {
-            readonly challengeBits: number;
-            readonly nominalChallengeBits: number;
-            readonly weakestCheckedRelation: string;
-            readonly weakestRelationEffectiveBitsPerCheck: number;
-            readonly supportRelationModulusBits: number;
-            readonly classicalSoundnessBitsAfterSupportUnionBound:
-                | number
-                | null;
-            readonly maskCoefficientBits: number;
-            readonly responseCoefficientBytes: number;
-            readonly supportCheckCount: number;
-            readonly supportMaximumDegree: number;
-            readonly supportUnionLossBits: number;
-            readonly targetClassicalSoundnessBits: number;
-            readonly minimumIndependentRepetitionsForTarget: number | null;
-            readonly estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses: number;
-            readonly estimatedRepeatedProofSizeBytes: number;
-            readonly estimatedRepeatedTotalProofBytes: number;
-            readonly witnessBoundBitsForMaskShiftAccounting: number;
-            readonly zeroKnowledgeShiftSlackBitsAfterResponseUnionBound: number;
-        };
         readonly proofTransport: {
             readonly encoding: string;
             readonly chunkSizeBytes: number;

@@ -59,8 +59,6 @@ describe('first-valid ordering shells', () => {
             objects,
             requiredContextHash: contextHash,
             selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-            expectedSelectionPolicyHash:
-                manifestPolicyHashes.firstValidPolicyHash,
             currentRecoveryEpochMap: {
                 'participant-1': recoveryEpochState,
                 'participant-2': {
@@ -81,11 +79,6 @@ describe('first-valid ordering shells', () => {
 
         const badInput: FirstValidOrderingInput = {
             ...input,
-            selectionPolicyHash: deriveCanonicalObjectHash({
-                objectType: 'ChallengeDomainHash',
-                payload: { policy: 'wrong' },
-                purpose: 'fixture-first-valid-policy-v1',
-            }),
             objects: [
                 {
                     ...objects[0],
@@ -108,9 +101,12 @@ describe('first-valid ordering shells', () => {
             ],
         };
 
-        expect(deriveValidatedFirstValidOrder(badInput).refusedObjects).toEqual(
+        const badResult = deriveValidatedFirstValidOrder(badInput);
+
+        expect(badResult.isValid).toBe(false);
+        expect(badResult.acceptedHashes).toEqual([]);
+        expect(badResult.refusedObjects).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ code: 'FirstValidPolicyMismatch' }),
                 expect.objectContaining({ code: 'FirstValidContextMismatch' }),
                 expect.objectContaining({ code: 'StaleRecoveryEpoch' }),
                 expect.objectContaining({
@@ -125,8 +121,6 @@ describe('first-valid ordering shells', () => {
             deriveValidatedFirstValidOrder({
                 requiredContextHash: contextHash,
                 selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-                expectedSelectionPolicyHash:
-                    manifestPolicyHashes.firstValidPolicyHash,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -186,8 +180,6 @@ describe('first-valid ordering shells', () => {
         const result = deriveValidatedFirstValidOrder({
             requiredContextHash: contextHash,
             selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-            expectedSelectionPolicyHash:
-                manifestPolicyHashes.firstValidPolicyHash,
             currentRecoveryEpochMap: {
                 'participant-1': {
                     signerIdentity: 'participant-1',

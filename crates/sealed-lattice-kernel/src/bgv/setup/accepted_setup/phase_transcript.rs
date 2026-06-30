@@ -772,7 +772,6 @@ fn phase_signature_context_hash(
     // domain-separates it from the phase object root under the shared canonical-object hash.
     derive_canonical_object_hash(&json!({
         "objectType": "SetupPhaseSignatureContext",
-        "purpose": "setup-phase-signature-context",
         "phaseId": phase_identifier,
         "phaseNumber": phase_number,
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,

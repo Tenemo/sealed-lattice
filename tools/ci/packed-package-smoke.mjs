@@ -27,7 +27,6 @@ assert(
     deriveValidatedFirstValidOrder({
         requiredContextHash: 'context',
         selectionPolicyHash: 'policy',
-        expectedSelectionPolicyHash: 'policy',
         currentRecoveryEpochMap: {
             participant: {
                 signerIdentity: 'participant',

@@ -261,15 +261,11 @@ pub(crate) fn compute_setup_commitment_from_opening_request(
         ring_degree,
     )?;
     let commitment_root = setup_commitment_root(&commitment)?;
-    let commitment_chunk_root = setup_commitment_chunk_root(&commitment, &commitment_root)?;
-    let coefficient_vector_hash = public_commitment_coefficient_vector_hash512(&commitment);
 
     Ok(json!({
         "operation": "computeSetupCommitmentFromOpening",
         "commitment": setup_commitment_full_value(&commitment),
         "commitmentRoot": commitment_root,
-        "commitmentChunkRoot": commitment_chunk_root,
-        "coefficientVectorHash512": coefficient_vector_hash,
     }))
 }
 

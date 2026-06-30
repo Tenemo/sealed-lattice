@@ -158,7 +158,7 @@ export type TargetProposal = {
     readonly encryptedBallotAggregateHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly evaluatorReplayParametersHash: ProtocolHash;
+    readonly bgvParametersHash: ProtocolHash;
     readonly targetFinalityPolicyHash: ProtocolHash;
     readonly topOptionCount: number;
     readonly tiePolicyHash: ProtocolHash;
@@ -236,7 +236,7 @@ export type AcceptedTargetFinalityCheckpoint = {
     readonly encryptedBallotAggregateHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly evaluatorReplayParametersHash: ProtocolHash;
+    readonly bgvParametersHash: ProtocolHash;
     readonly targetFinalityScope: string;
     readonly witnessPolicyHash: ProtocolHash;
     readonly targetFinalityPolicyHash: ProtocolHash;
@@ -251,7 +251,7 @@ export type EvaluatorReplayRecord = {
     readonly targetProposalHash: ProtocolHash;
     readonly encryptedBallotAggregateHash: ProtocolHash;
     readonly targetFinalityRecordHash: ProtocolHash;
-    readonly evaluatorReplayParametersHash: ProtocolHash;
+    readonly bgvParametersHash: ProtocolHash;
     readonly evaluatorReplayContextHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
@@ -274,7 +274,7 @@ export type TargetAcceptedRecord = {
     readonly targetContextHash: ProtocolHash;
     readonly targetFinalityRecordHash: ProtocolHash;
     readonly targetFinalityCheckpointHash: ProtocolHash;
-    readonly evaluatorReplayParametersHash: ProtocolHash;
+    readonly bgvParametersHash: ProtocolHash;
     readonly targetPreimageHash: ProtocolHash;
     readonly targetCiphertextHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
@@ -284,35 +284,5 @@ export type TargetAcceptedRecord = {
     readonly boardSequence: number;
     readonly boardPosition: number;
     readonly organizerIdentity: string;
-    readonly signature: ProtocolSignatureEnvelope;
-};
-
-export type TopKDecryptionShareShell = {
-    readonly objectType: 'TopKDecryptionShare';
-    readonly objectVersion: 1;
-    readonly topKDecryptionShareHash: ProtocolHash;
-    readonly ceremonyId: string;
-    readonly electionManifestHash: ProtocolHash;
-    readonly trusteeIdentity: string;
-    readonly targetAcceptedRecordHash: ProtocolHash;
-    readonly targetProposalHash: ProtocolHash;
-    readonly targetPreimageHash: ProtocolHash;
-    readonly targetFinalityRecordHash: ProtocolHash;
-    readonly targetFinalityCheckpointHash: ProtocolHash;
-    readonly evaluatorReplayRecordHash: ProtocolHash;
-    readonly targetContextHash: ProtocolHash;
-    readonly targetCiphertextHash: ProtocolHash;
-    readonly targetDecryptionParametersHash: ProtocolHash;
-    readonly targetDecryptionPreparationRecordHash: ProtocolHash;
-    readonly targetDecryptionCiphertextHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
-    readonly thresholdShareVerificationKeyRoot: ProtocolHash;
-    readonly thresholdShareVerificationKeyHash: ProtocolHash;
-    readonly trusteeThresholdVerificationKeyHash: ProtocolHash;
-    readonly boardSequence: number;
-    readonly boardPosition: number;
-    readonly recoveryEpoch: number;
-    readonly deviceEpoch: number;
-    readonly shareRoot: ProtocolHash;
     readonly signature: ProtocolSignatureEnvelope;
 };

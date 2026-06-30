@@ -1,8 +1,4 @@
 import {
-    removeRunLogArguments,
-    runLogDisabledByArguments,
-} from './local-run-log.js';
-import {
     resolvePackageManagerRunner,
     type PackageManagerRunner,
 } from './package-manager-runner.js';
@@ -78,24 +74,15 @@ const nodeTestScriptName = (lanes: readonly NodeTestLane[]): string =>
         ? `test:node:${lanes[0].replace('-', ':')}`
         : 'test:node';
 
-const nodeTestRunShouldLog = (
-    lanes: readonly NodeTestLane[],
-    commandArguments: readonly string[],
-): boolean =>
-    !runLogDisabledByArguments(commandArguments) &&
-    lanes.some((lane) => lane !== 'fast');
-
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const commandArguments = removeRunLogArguments(rawArguments);
-    const lanes = parseRequestedNodeTestLanes(commandArguments);
+    const lanes = parseRequestedNodeTestLanes(rawArguments);
     await runWorkspaceBuildThenParallelCommands({
         buildCommands: (packageManagerRunner) =>
             buildNodeTestCommands({ lanes, packageManagerRunner }),
         commandLineArguments: rawArguments,
         lanes,
         scriptName: nodeTestScriptName(lanes),
-        shouldCreateRunLog: nodeTestRunShouldLog(lanes, rawArguments),
     });
 };
 

@@ -296,31 +296,6 @@ fn collective_setup_verifier_refuses_non_binary_setup_transport() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_setup_transport_manifest",
-    );
-    assert_minimal_collective_setup_package_refused(
-        "setup transport manifest with a missing chunk hash",
-        |package| {
-            package["setupTransportCertificate"]["chunkHashes"]
-                .as_array_mut()
-                .expect("chunk hashes")
-                .pop();
-        },
-        "transportChunkHashCountMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "setup transport manifest with a wrong chunk root",
-        |package| {
-            package["setupTransportCertificate"]["chunkRoot"] = serde_json::json!(valid_hash('8'));
-        },
-        "transportChunkRootMismatch",
-    );
-}
-
-#[test]
 fn collective_setup_verifier_refuses_duplicate_setup_transport_object_root() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_duplicate_setup_transport_object_root",

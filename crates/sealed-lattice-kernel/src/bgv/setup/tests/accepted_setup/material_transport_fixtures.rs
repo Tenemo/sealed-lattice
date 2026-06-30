@@ -185,8 +185,6 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
         .expect("transported objects");
     let mut total_byte_length = 0_u64;
     let mut chunk_count = 0_u64;
-    let mut chunk_hashes = Vec::new();
-    let mut transported_object_summaries = Vec::new();
 
     for transported_object in transported_objects {
         let byte_length = transported_object["byteLength"]
@@ -201,51 +199,10 @@ pub(super) fn rebind_setup_transport_certificate(certificate: &mut serde_json::V
         chunk_count = chunk_count
             .checked_add(object_chunk_count)
             .expect("transport chunk count sum");
-        chunk_hashes.extend(
-            transported_object["chunkHashes"]
-                .as_array()
-                .expect("transported object chunk hashes")
-                .iter()
-                .map(|chunk_hash| {
-                    chunk_hash
-                        .as_str()
-                        .expect("transported object chunk hash")
-                        .to_string()
-                }),
-        );
-        transported_object_summaries.push(serde_json::json!({
-            "objectName": transported_object["objectName"].clone(),
-            "objectRole": transported_object["objectRole"].clone(),
-            "objectRoot": transported_object["objectRoot"].clone(),
-            "byteLength": byte_length,
-            "chunkStartIndex": transported_object["chunkStartIndex"].clone(),
-            "chunkCount": object_chunk_count,
-            "chunkRoot": transported_object["chunkRoot"].clone(),
-            "fullObjectHash": transported_object["fullObjectHash"].clone(),
-        }));
     }
-
-    let aggregate_full_object_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportFullObjectSet",
-        "objectVersion": 1,
-        "transportedObjects": transported_object_summaries,
-        "totalByteLength": total_byte_length,
-        "chunkCount": chunk_count,
-        "chunkHashes": chunk_hashes.clone(),
-    }))
-    .expect("setup transport aggregate full object hash");
-    let aggregate_chunk_root = setup_transport_chunk_manifest_root_fixture(
-        chunk_count,
-        total_byte_length,
-        &chunk_hashes,
-        &aggregate_full_object_hash,
-    );
 
     certificate["chunkCount"] = serde_json::json!(chunk_count);
     certificate["totalByteLength"] = serde_json::json!(total_byte_length);
-    certificate["chunkHashes"] = serde_json::json!(chunk_hashes);
-    certificate["fullObjectHash"] = serde_json::json!(aggregate_full_object_hash);
-    certificate["chunkRoot"] = serde_json::json!(aggregate_chunk_root);
     let mut certificate_hash_input = certificate.clone();
     certificate_hash_input
         .as_object_mut()
@@ -399,7 +356,6 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         .as_array_mut()
         .expect("same-secret proof records");
     let mut proof_materials = Vec::new();
-    let mut proof_roots = Vec::new();
     for proof_record in proof_records {
         let proof_bytes_hex = proof_record["proofBytesHex"]
             .as_str()
@@ -413,13 +369,6 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("same-secret proof transport hashes");
-        let trustee_identity = proof_record["trusteeIdentity"]
-            .as_str()
-            .expect("trustee identity")
-            .to_string();
-        let trustee_roster_position = proof_record["trusteeRosterPosition"]
-            .as_u64()
-            .expect("trustee roster position");
         let proof_record_object = proof_record
             .as_object_mut()
             .expect("same-secret proof record object");
@@ -441,11 +390,6 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
         proof_record["sameSecretProofRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record).expect("same-secret proof root")
         );
-        proof_roots.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
-        }));
         proof_materials.push(serde_json::json!({
             "objectType": "SetupTransportedSameSecretProofMaterial",
             "objectVersion": 1,
@@ -467,7 +411,6 @@ pub(super) fn move_same_secret_proof_bytes_to_transport(
                 .collect::<Vec<_>>(),
         }));
     }
-    package["sameSecretProofs"]["sameSecretProofRoots"] = serde_json::json!(proof_roots);
     rebind_collective_same_secret_proof_set_root(package);
 
     serde_json::json!({
@@ -485,7 +428,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
         .as_array_mut()
         .expect("public-key share succinct proof records");
     let mut proof_materials = Vec::new();
-    let mut proof_roots = Vec::new();
     for proof_record in proof_records {
         let proof_bytes_hex = proof_record["proofBytesHex"]
             .as_str()
@@ -499,13 +441,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("public-key proof transport hashes");
-        let trustee_identity = proof_record["trusteeIdentity"]
-            .as_str()
-            .expect("trustee identity")
-            .to_string();
-        let trustee_roster_position = proof_record["trusteeRosterPosition"]
-            .as_u64()
-            .expect("trustee roster position");
         let proof_material_root =
             public_key_share_succinct_proof_material_root(proof_record, &transport_hashes)
                 .expect("public-key share succinct proof material root");
@@ -527,11 +462,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
         proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record).expect("public-key succinct proof root")
         );
-        proof_roots.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
-        }));
         proof_materials.push(serde_json::json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "objectVersion": 1,
@@ -553,8 +483,6 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
                 .collect::<Vec<_>>(),
         }));
     }
-    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofRoots"] =
-        serde_json::json!(proof_roots);
     rebind_collective_public_key_succinct_proof_roots(package);
 
     serde_json::json!({

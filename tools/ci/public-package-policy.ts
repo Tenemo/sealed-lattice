@@ -103,7 +103,6 @@ export const forbiddenRuntimeExports = [
     'verifyLattigoOracle',
     'verifyTargetAcceptedRecord',
     'verifyTestShareCommitmentOpening',
-    'verifyTopKDecryptionShareShell',
 ] as const;
 
 export const vendoredProtocolRuntimeModules = [

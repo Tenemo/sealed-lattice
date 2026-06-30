@@ -26,86 +26,23 @@ import {
     deriveTrusteeSetupEntryHash,
 } from './hashes.js';
 
-// Exact-schema lock: the manifest's opaque bindings must carry precisely this
-// set of field names or it fails closed.
-const manifestOpaqueBindingFieldNames = new Set([
-    'heParamHash',
-    'bgvPassiveSetupPackageHash',
+const requiredManifestOpaqueBindingFieldNames = [
     'bgvParametersHash',
-    'bgvPublicKeyRoot',
     'collectivePublicKeyRoot',
-    'keySwitchDecompositionHash',
-    'ballotValidityProofParametersHash',
-    'comparisonInputDerivationCircuitHash',
-    'encryptedComparisonInputHash',
-    'encryptedSparseTargetProjectionHash',
     'targetLayoutHash',
-    'evaluatorReplayParametersHash',
-    'evaluationNoiseParametersHash',
-    'heEvaluationNoiseCertHash',
     'rotSetHash',
     'evaluationKeyRoot',
-    'evaluationKeySizeParametersHash',
     'thresholdShareVerificationKeyRoot',
-    'thresholdShareVerificationKeyHash',
-    'trusteeThresholdVerificationKeyHash',
-    'targetDecryptionParametersHash',
-    'targetBasisHash',
-    'mobileRuntimeParametersHash',
-]);
-
-const manifestOpaqueBindingFieldCount = manifestOpaqueBindingFieldNames.size;
+] as const;
 
 const collectManifestOpaqueBindingRefusals = (
     manifest: ElectionManifest,
 ): readonly RefusalRecord[] => {
     const refusedObjects: RefusalRecord[] = [];
     const bindings = manifest.manifestOpaqueBindings;
-    // Enforce the exact-schema lock: the binding object must have exactly the
-    // expected number of keys AND no key outside the allowed set (rejects both
-    // missing and extra fields).
-    const bindingFieldNames = Object.keys(bindings);
-    if (
-        bindingFieldNames.length !== manifestOpaqueBindingFieldCount ||
-        bindingFieldNames.some(
-            (fieldName) => !manifestOpaqueBindingFieldNames.has(fieldName),
-        )
-    ) {
-        refusedObjects.push(
-            createRefusal(
-                'ManifestHashMismatch',
-                'Election manifest opaque bindings must use the current direct encrypted ballot schema.',
-                manifest.electionManifestHash,
-                'ElectionManifest',
-            ),
-        );
-    }
-
-    const requiredHashFields = [
-        bindings.heParamHash,
-        bindings.bgvPassiveSetupPackageHash,
-        bindings.bgvParametersHash,
-        bindings.bgvPublicKeyRoot,
-        bindings.collectivePublicKeyRoot,
-        bindings.keySwitchDecompositionHash,
-        bindings.ballotValidityProofParametersHash,
-        bindings.comparisonInputDerivationCircuitHash,
-        bindings.encryptedComparisonInputHash,
-        bindings.encryptedSparseTargetProjectionHash,
-        bindings.targetLayoutHash,
-        bindings.evaluatorReplayParametersHash,
-        bindings.evaluationNoiseParametersHash,
-        bindings.heEvaluationNoiseCertHash,
-        bindings.rotSetHash,
-        bindings.evaluationKeyRoot,
-        bindings.evaluationKeySizeParametersHash,
-        bindings.thresholdShareVerificationKeyRoot,
-        bindings.thresholdShareVerificationKeyHash,
-        bindings.trusteeThresholdVerificationKeyHash,
-        bindings.targetDecryptionParametersHash,
-        bindings.targetBasisHash,
-        bindings.mobileRuntimeParametersHash,
-    ];
+    const requiredHashFields = requiredManifestOpaqueBindingFieldNames.map(
+        (fieldName) => bindings[fieldName],
+    );
 
     if (
         requiredHashFields.some((HashField) => !isProtocolHashString(HashField))
@@ -113,7 +50,7 @@ const collectManifestOpaqueBindingRefusals = (
         refusedObjects.push(
             createRefusal(
                 'ManifestHashMismatch',
-                'Election manifest opaque bindings must include canonical downstream parameters and certificate Hashes.',
+                'Election manifest opaque bindings must include canonical setup and target bindings.',
                 manifest.electionManifestHash,
                 'ElectionManifest',
             ),

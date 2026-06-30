@@ -30,9 +30,6 @@ fn passive_setup_generation_is_deterministic_and_verifiable() {
             .get("sampledLocalErrorCoefficients")
             .is_none()
     );
-    assert!(first["setupInputs"].get("privateSetupSeedHash").is_none());
-    assert!(first.get("privateSetupSeedHash").is_none());
-
     let verification = verify_passive_setup_package_from_request(&serde_json::json!({
         "setupPackage": first.clone(),
         "expectedRosterHash": request()["rosterHash"],

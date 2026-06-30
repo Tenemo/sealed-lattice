@@ -250,7 +250,6 @@ function packageShapePrivateVssEnvelopeReference(input: {
         privateEnvelopeAadHash,
         recipientMailboxPublicKeyHash: recipientMailboxKeyPair.publicKeyHash,
         localVerificationRoot,
-        openingVerificationStatus: 'accepted-local-private-vss-opening',
     } as const satisfies Omit<
         PrivateVssEnvelopeCommitment,
         'privateEnvelopeCommitmentRoot'

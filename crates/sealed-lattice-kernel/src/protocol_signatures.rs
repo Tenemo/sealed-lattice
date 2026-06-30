@@ -139,36 +139,6 @@ fn validate_profile(signature: &Value) -> Option<ProtocolSignatureFailure> {
             Some(signature),
         ));
     }
-    for field_name in [
-        "providerName",
-        "providerVersion",
-        "fips204Version",
-        "errataStatus",
-    ] {
-        if profile
-            .get(field_name)
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignature",
-                "Signature profile metadata must be fully bound with canonical provider material.",
-                Some(signature),
-            ));
-        }
-    }
-    if !profile
-        .get("providerBuildHash")
-        .and_then(Value::as_str)
-        .is_some_and(is_protocol_hash_string)
-    {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignature",
-            "Signature profile provider build hash must be a canonical protocol hash.",
-            Some(signature),
-        ));
-    }
-
     let actual_context_byte_length = context_string.len();
     if actual_context_byte_length > ML_DSA_CONTEXT_BYTE_LIMIT {
         return Some(ProtocolSignatureFailure::new(
@@ -686,20 +656,9 @@ pub(crate) fn create_ml_dsa_public_key_hash_fixture(seed_label: &str) -> Canonic
 
 #[cfg(test)]
 fn create_ml_dsa_signature_profile_fixture() -> CanonicalResult<Value> {
-    let provider_build_hash = derive_canonical_object_hash(&json!({
-        "objectType": "MlDsaProviderBuild",
-        "providerName": "fips204-deterministic-fixture",
-        "providerVersion": "0.4.6",
-    }))?;
-
     Ok(json!({
         "algorithm": ML_DSA_65_ALGORITHM,
         "mode": PURE_ML_DSA_MODE,
-        "providerName": "fips204-deterministic-fixture",
-        "providerVersion": "0.4.6",
-        "providerBuildHash": provider_build_hash,
-        "fips204Version": "FIPS 204",
-        "errataStatus": "none",
         "contextString": SUPPORTED_ML_DSA_CONTEXT_STRING,
         "contextStringByteLength": SUPPORTED_ML_DSA_CONTEXT_STRING.len(),
     }))

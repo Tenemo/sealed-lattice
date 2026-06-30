@@ -89,35 +89,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
             "loadingPolicy": "stream-verified-before-object-use",
         }
     ]);
-    let aggregate_full_object_hash = derive_canonical_object_hash(&serde_json::json!({
-            "objectType": "SetupTransportFullObjectSet",
-            "objectVersion": 1,
-            "transportedObjects": [{
-                "objectName": "vssCoefficientCommitmentMaterial",
-                "objectRole": "public-vss-coefficient-commitment-material",
-                "objectRoot": vss_coefficient_commitment_material["vssCoefficientCommitmentMaterialRoot"],
-                "byteLength": total_byte_length,
-                "chunkStartIndex": 0_u64,
-                "chunkCount": chunk_count,
-                "chunkRoot": vss_chunk_root,
-                "fullObjectHash": vss_full_object_hash,
-            }],
-            "totalByteLength": total_byte_length,
-            "chunkCount": chunk_count,
-            "chunkHashes": chunk_hashes,
-        }),
-    )
-    .expect("setup transport full object set hash");
-    let chunk_root = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportChunkManifest",
-        "objectVersion": 1,
-        "chunkSizeBytes": chunk_size_bytes,
-        "chunkCount": chunk_count,
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": aggregate_full_object_hash,
-    }))
-    .expect("setup transport aggregate chunk root");
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
             &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
@@ -141,9 +112,6 @@ pub(in super::super) fn setup_transport_certificate_fixture(
         "resumePolicy": "chunk-index-checkpointed-by-hash",
         "lazyLoadingPolicy": "root-addressed-large-object-loading",
         "transportedObjects": transported_objects,
-        "chunkHashes": chunk_hashes,
-        "chunkRoot": chunk_root,
-        "fullObjectHash": aggregate_full_object_hash,
     });
     let certificate_hash =
         derive_canonical_object_hash(&certificate).expect("setup transport certificate hash");

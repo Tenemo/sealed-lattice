@@ -6,5 +6,3 @@
 // row-coefficient vector domains) are bespoke `hash512_hex` callers and are not
 // listed here.
 pub const CANONICAL_OBJECT_HASH_NAMESPACE: &str = "sealed-lattice-root/canonical-object-v1";
-
-pub const RESERVED_ROOT_NAMESPACES: &[&str] = &[CANONICAL_OBJECT_HASH_NAMESPACE];

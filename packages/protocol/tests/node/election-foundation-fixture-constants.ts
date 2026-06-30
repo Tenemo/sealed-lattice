@@ -2,12 +2,6 @@ import {
     deriveCanonicalObjectHash,
     deriveProtocolSignatureHash,
 } from '@sealed-lattice/crypto';
-import {
-    ballotValidityProofId,
-    evaluatorReplayId,
-    mobileRuntimeId,
-    targetDecryptionId,
-} from '@sealed-lattice/types';
 import type {
     CanonicalSignedRootObject,
     ManifestOpaqueBindings,
@@ -165,58 +159,14 @@ export const manifestPolicyHashes: ManifestPolicyHashes = {
     witnessPolicyHash,
 };
 export const manifestOpaqueBindings: ManifestOpaqueBindings = {
-    heParamHash: deriveFixtureHash('fixture-he-parameter-set-v1', {
-        parameters: 'BGV-RNS-v1',
-    }),
-    bgvPassiveSetupPackageHash: deriveCanonicalObjectHash({
-        objectType: 'BGVPassiveSetupPackageHash',
-        setup: 'passive-full-roster-bgv',
-    }),
     bgvParametersHash,
-    bgvPublicKeyRoot: deriveCanonicalObjectHash({
-        objectType: 'BGVPublicKeyRoot',
-        key: 'bgv-collective',
-    }),
     collectivePublicKeyRoot: deriveCanonicalObjectHash({
         objectType: 'CollectivePublicKeyRoot',
         key: 'bgv-collective',
     }),
-    keySwitchDecompositionHash: deriveCanonicalObjectHash({
-        objectType: 'KeySwitchDecompositionHash',
-        parameters: 'key-switch-decomposition',
-    }),
-    ballotValidityProofParametersHash: deriveFixtureHash(
-        'fixture-ballot-validity-proof-v1',
-        { parameters: ballotValidityProofId },
-    ),
-    comparisonInputDerivationCircuitHash: deriveCanonicalObjectHash({
-        objectType: 'ComparisonInputDerivationCircuitHash',
-        circuit: 'comparison-input-derivation-circuit-v1',
-        selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
-    }),
-    encryptedComparisonInputHash: deriveCanonicalObjectHash({
-        objectType: 'EncryptedComparisonInputHash',
-        layout: 'encrypted-comparison-inputs-v1',
-        selectedEvaluatorPath: 'direct-encrypted-score-comparison-v1',
-    }),
-    encryptedSparseTargetProjectionHash: deriveCanonicalObjectHash({
-        objectType: 'EncryptedSparseTargetProjectionHash',
-        circuit: 'encrypted-sparse-target-projection-v1',
-    }),
     targetLayoutHash: deriveCanonicalObjectHash({
         objectType: 'TargetLayoutHash',
         layout: 'direct-sparse-target-layout-v1',
-    }),
-    evaluatorReplayParametersHash: deriveFixtureHash(
-        'fixture-evaluator-replay-v1',
-        { parameters: evaluatorReplayId },
-    ),
-    evaluationNoiseParametersHash: deriveFixtureHash(
-        'fixture-direct-evaluator-noise-v1',
-        { parameters: 'direct-evaluator-noise-v1' },
-    ),
-    heEvaluationNoiseCertHash: deriveFixtureHash('fixture-he-noise-cert-v1', {
-        certificate: 'direct-evaluator-noise-v1',
     }),
     rotSetHash: deriveCanonicalObjectHash({
         objectType: 'RotSetHash',
@@ -226,35 +176,10 @@ export const manifestOpaqueBindings: ManifestOpaqueBindings = {
         objectType: 'EvalKeyRoot',
         keys: 'direct-encrypted-ballot-evaluator-replay',
     }),
-    evaluationKeySizeParametersHash: deriveCanonicalObjectHash({
-        objectType: 'EvaluationKeySizeParametersHash',
-        parameters: 'passive-bgv-setup-evaluation-key-size',
-    }),
     thresholdShareVerificationKeyRoot: deriveCanonicalObjectHash({
         objectType: 'ThresholdShareVerificationKeyRoot',
         setup: 'threshold-share-verification-key-set',
     }),
-    thresholdShareVerificationKeyHash: deriveCanonicalObjectHash({
-        objectType: 'ThresholdShareVerificationKeyHash',
-        setup: 'threshold-share-verification-key-set',
-    }),
-    trusteeThresholdVerificationKeyHash: deriveCanonicalObjectHash({
-        objectType: 'TrusteeThresholdVerificationKeyHash',
-        setup: 'trustee-threshold-verification-key-set',
-    }),
-    targetDecryptionParametersHash: deriveCanonicalObjectHash({
-        objectType: 'TargetDecryptionParametersHash',
-        parameters: targetDecryptionId,
-    }),
-    targetBasisHash: deriveFixtureHash('fixture-target-basis-v1', {
-        parameters: 'direct-target-basis-v1',
-    }),
-    mobileRuntimeParametersHash: deriveFixtureHash(
-        'fixture-mobile-runtime-v1',
-        {
-            parameters: mobileRuntimeId,
-        },
-    ),
 };
 
 export const createSignature = (

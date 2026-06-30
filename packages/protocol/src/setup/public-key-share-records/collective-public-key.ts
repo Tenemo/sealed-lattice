@@ -131,8 +131,6 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
         objectType: 'CollectivePublicKey',
         objectVersion: 1,
         proofFamily: publicKeyShareProofFamily,
-        aggregationStatus:
-            'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,

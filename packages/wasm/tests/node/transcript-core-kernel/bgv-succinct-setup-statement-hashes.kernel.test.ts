@@ -49,7 +49,6 @@ const statementContext = (bindingRoots: JsonRecord): TrusteeStatementContext =>
     }) as TrusteeStatementContext;
 
 const proofRandomnessFields = {
-    proofRandomnessSource: 'development-deterministic-fixture',
     proofRandomnessSeedHex,
     proofRandomnessNonceHex,
 } as const;

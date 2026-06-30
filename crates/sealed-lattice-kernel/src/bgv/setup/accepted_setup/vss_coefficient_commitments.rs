@@ -739,28 +739,24 @@ fn verify_vss_coefficient_commitment_record(
             "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments",
         )?));
     }
-    for field_name in [
-        "commitmentRoot",
-        "commitmentChunkRoot",
-        "coefficientVectorHash512",
-    ] {
-        let Some(hash) = coefficient_record.get(field_name).and_then(Value::as_str) else {
-            return Ok(Some(verification_response(
-                Some("vssCoefficientCommitments"),
-                vec![format!(
-                    "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
-                )],
-                Vec::new(),
-                Vec::new(),
-            )?));
-        };
-        validate_hash_string(
-            hash,
-            &format!(
-                "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
-            ),
-        )?;
-    }
+    let Some(hash) = coefficient_record
+        .get("commitmentRoot")
+        .and_then(Value::as_str)
+    else {
+        return Ok(Some(verification_response(
+            Some("vssCoefficientCommitments"),
+            vec![
+                "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.commitmentRoot"
+                    .to_string(),
+            ],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    validate_hash_string(
+        hash,
+        "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.commitmentRoot",
+    )?;
 
     Ok(None)
 }

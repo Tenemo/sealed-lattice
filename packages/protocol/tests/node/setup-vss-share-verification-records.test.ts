@@ -401,7 +401,6 @@ describe('VSS share verification record builders', () => {
                 privateVssEnvelopeCommitmentRoot,
                 privateEnvelopeHash:
                     failedEnvelopeReference.privateEnvelopeHash,
-                verificationStatus: 'failed-local-private-vss-opening',
                 privateEnvelopeHashFromLocalVerification:
                     failedEnvelopeReference.privateEnvelopeHash,
                 localVerificationRoot: null,

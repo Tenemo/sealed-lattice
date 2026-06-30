@@ -98,7 +98,7 @@ fn accepted_record(
         "targetFinalityCheckpointHash": derive_canonical_object_hash(
             &json!({ "objectType": "TargetFinalityCheckpointHash", "finality": "checkpoint" }),
         ).expect("checkpoint hash"),
-        "evaluatorReplayParametersHash": bgv_parameters_hash()
+        "bgvParametersHash": bgv_parameters_hash()
             .expect("BGV parameters hash"),
         "targetPreimageHash": derive_canonical_object_hash(
             &json!({ "objectType": "TargetPreimageHash", "preimage": "accepted" }),

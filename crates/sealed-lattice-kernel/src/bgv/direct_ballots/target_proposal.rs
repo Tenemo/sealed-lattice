@@ -26,7 +26,7 @@ pub(super) fn direct_ballot_target_proposal(
         "encryptedBallotAggregateHash": aggregate_ciphertext_root,
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,
-        "evaluatorReplayParametersHash": bgv_parameters_hash()?,
+        "bgvParametersHash": bgv_parameters_hash()?,
         "targetFinalityPolicyHash": target_finality_policy_hash,
     });
     let target_proposal_hash = derive_canonical_object_hash(&proposal_without_hash)?;
@@ -41,7 +41,7 @@ pub(super) fn direct_ballot_target_proposal(
         "encryptedBallotAggregateHash": proposal_without_hash["encryptedBallotAggregateHash"],
         "targetCiphertextHash": proposal_without_hash["targetCiphertextHash"],
         "targetLayoutHash": proposal_without_hash["targetLayoutHash"],
-        "evaluatorReplayParametersHash": proposal_without_hash["evaluatorReplayParametersHash"],
+        "bgvParametersHash": proposal_without_hash["bgvParametersHash"],
         "targetFinalityPolicyHash": proposal_without_hash["targetFinalityPolicyHash"],
     }))
 }

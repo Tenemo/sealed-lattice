@@ -25,8 +25,7 @@ use serde_json::{Value, json};
 mod relation_proof;
 
 use relation_proof::{
-    DirectBallotRelationProofGeneration, DirectBallotRelationProofVerification,
-    direct_ballot_relation_proof_accounting, direct_ballot_relation_proof_bytes_hash,
+    DirectBallotRelationProofGeneration, direct_ballot_relation_proof_bytes_hash,
     direct_ballot_relation_proof_parameters_hash, generate_direct_ballot_relation_proof,
     verify_direct_ballot_relation_proof,
 };

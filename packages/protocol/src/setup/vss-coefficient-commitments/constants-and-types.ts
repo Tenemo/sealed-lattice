@@ -125,8 +125,6 @@ export type VssCoefficientCommitmentRecord = Readonly<
         readonly rnsPrime: number;
         readonly shamirCoefficientIndex: number;
         readonly commitmentRoot: ProtocolHash;
-        readonly commitmentChunkRoot: ProtocolHash;
-        readonly coefficientVectorHash512: string;
     }
 >;
 
@@ -403,8 +401,6 @@ export type VssSourceTrusteeCoefficientCommitmentContributionOptions =
 export type SetupCommitmentOpeningComputation = Readonly<{
     readonly commitment: JsonRecord;
     readonly commitmentRoot: ProtocolHash;
-    readonly commitmentChunkRoot: ProtocolHash;
-    readonly coefficientVectorHash512: string;
 }>;
 
 export type SetupCommitmentOpeningComputer = (

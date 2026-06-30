@@ -4,12 +4,7 @@ import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import {
-    createLocalRunLog,
-    removeRunLogArguments,
-    runLogDisabledByArguments,
-    safeLogSlug,
-} from '#tools/ci/local-run-log';
+import { createLocalRunLog, safeLogSlug } from '#tools/ci/local-run-log';
 import {
     runCommandsInSeries,
     type CommandInvocation,
@@ -250,23 +245,8 @@ describe('local run logs', () => {
         }
     });
 
-    it('uses explicit arguments for disabling logs and safe path names', () => {
-        expect(runLogDisabledByArguments(['--no-run-log'])).toBe(true);
-        expect(
-            removeRunLogArguments(['--only', 'kernel', '--no-run-log']),
-        ).toEqual(['--only', 'kernel']);
+    it('creates safe path names', () => {
         expect(safeLogSlug('../Kernel: merged<>?')).toBe('kernel-merged');
-    });
-
-    it('drops the package manager separator forwarded with run-log flags', () => {
-        // CI runs `pnpm test:node:fast -- --no-run-log`, which reaches the
-        // script as `--only fast -- --no-run-log`.
-        expect(
-            removeRunLogArguments(['--only', 'fast', '--', '--no-run-log']),
-        ).toEqual(['--only', 'fast']);
-        // CI runs `pnpm test:browser -- --no-run-log`, leaving only `-- --no-run-log`.
-        expect(removeRunLogArguments(['--', '--no-run-log'])).toEqual([]);
-        expect(runLogDisabledByArguments(['--', '--no-run-log'])).toBe(true);
     });
 
     it('deduplicates command log filenames inside one run', async () => {

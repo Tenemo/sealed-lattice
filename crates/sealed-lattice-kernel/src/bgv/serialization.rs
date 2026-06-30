@@ -7,7 +7,7 @@ use crate::{
         CanonicalError, CanonicalErrorCode, CanonicalReader, CanonicalResult, append_string,
         append_varuint,
     },
-    hashing::{hash512_hex, namespace_root},
+    hashing::namespace_root,
     transcript_core::{decode_hex, encode_hex},
 };
 
@@ -136,13 +136,6 @@ pub(crate) fn plaintext_root(canonical_bytes: &[u8]) -> String {
 
 pub(crate) fn ciphertext_root(canonical_bytes: &[u8]) -> String {
     namespace_root("sealed-lattice-root/ciphertext-root-v1", canonical_bytes)
-}
-
-pub(crate) fn canonical_bytes_hash(canonical_bytes: &[u8]) -> String {
-    hash512_hex(
-        "sealed-lattice-bgv-rns/canonical-bytes-v1",
-        &[canonical_bytes],
-    )
 }
 
 fn append_polynomial(output: &mut Vec<u8>, polynomial: &RnsPolynomial) {
@@ -276,10 +269,7 @@ fn validate_component_count(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BgvObjectKind, CANONICAL_MAGIC, canonical_bytes_hash, ciphertext_root, parse_bgv_object,
-        plaintext_root, serialize_bgv_object,
-    };
+    use super::{BgvObjectKind, CANONICAL_MAGIC, parse_bgv_object, serialize_bgv_object};
     use crate::{
         bgv::{
             encoding::encode_batch_plaintext_slots,
@@ -297,8 +287,6 @@ mod tests {
 
         assert_eq!(parsed.object_kind, BgvObjectKind::Plaintext);
         assert_eq!(parsed.components[0].moduli, vec![DATA_PRIMES[0]]);
-        assert_eq!(canonical_bytes_hash(&canonical_bytes).len(), 128);
-        assert_eq!(plaintext_root(&canonical_bytes).len(), 128);
         assert_eq!(
             serialize_bgv_object(parsed.object_kind, &parsed.components).expect("reserialize"),
             canonical_bytes
@@ -322,7 +310,6 @@ mod tests {
             parsed.components[0].bgv_parameters_hash,
             parsed.components[1].bgv_parameters_hash
         );
-        assert_eq!(ciphertext_root(&canonical_bytes).len(), 128);
         assert!(serialize_bgv_object(BgvObjectKind::Ciphertext, &[left.polynomial]).is_err());
     }
 

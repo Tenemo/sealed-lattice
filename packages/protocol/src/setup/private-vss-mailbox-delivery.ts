@@ -6,8 +6,6 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import type { VerifiedVssCoefficientCommitmentMaterial } from './vss-coefficient-commitments.js';
-
 type JsonRecord = Record<string, unknown>;
 
 type PrivateVssSetupContext = Readonly<
@@ -76,41 +74,6 @@ export type PrivateVssMailboxDeliveryKernel = {
     }) => {
         readonly commitment: JsonRecord;
         readonly commitmentRoot: ProtocolHash;
-        readonly commitmentChunkRoot: ProtocolHash;
-        readonly coefficientVectorHash512: string;
-    };
-    readonly deriveThresholdShareCommitmentsFromTransport?: (input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-        readonly transportedVssCoefficientCommitmentMaterial: unknown;
-    }) => {
-        readonly thresholdShareCommitmentRoot: ProtocolHash;
-        readonly thresholdShareCommitments: JsonRecord;
-        readonly vssCoefficientCommitmentMaterial: JsonRecord;
-    };
-    readonly beginThresholdShareCommitmentsFromTransportStream?: (input: {
-        readonly derivationId: string;
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly transportedVssCoefficientCommitmentMaterial: unknown;
-    }) => JsonRecord;
-    readonly absorbThresholdShareCommitmentsFromTransportStreamChunk?: (input: {
-        readonly derivationId: string;
-        readonly chunkIndex: number;
-        readonly bytesHex: string;
-    }) => JsonRecord;
-    readonly finishThresholdShareCommitmentsFromTransportStream?: (input: {
-        readonly derivationId: string;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-    }) => {
-        readonly thresholdShareCommitmentRoot: ProtocolHash;
-        readonly thresholdShareCommitments: JsonRecord;
-        readonly vssCoefficientCommitmentMaterial: JsonRecord;
-        readonly verifiedVssCoefficientCommitmentMaterial: VerifiedVssCoefficientCommitmentMaterial;
-        readonly transport: JsonRecord;
     };
     readonly generatePrivateVssShareProof?: (input: {
         readonly setupContext: unknown;
@@ -127,9 +90,6 @@ export type PrivateVssMailboxDeliveryKernel = {
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
         readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSource?:
-            | 'fresh-csprng'
-            | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }) => {
@@ -302,7 +262,6 @@ export type TransportedPrivateVssShareProofMaterialSet = Readonly<
 const privateEnvelopeDeliveryContentType = 'private-vss-share-envelope';
 const privateEnvelopeObjectType = 'PrivateVssShareEnvelope';
 const privateEnvelopeAadObjectType = 'PrivateVssEnvelopeAad';
-const localOpeningAcceptedStatus = 'accepted-local-private-vss-opening';
 const privateVssShareProofFamily = 'vss-opening-carry';
 const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
@@ -939,7 +898,6 @@ const privateEnvelope = (
                                 coefficientOpenings.map(
                                     (opening) => opening.randomnessByColumn,
                                 ),
-                            proofRandomnessSource: 'fresh-csprng',
                             proofRandomnessSeedHex,
                             proofRandomnessNonceHex,
                         });
@@ -1118,7 +1076,6 @@ const createEnvelopeCommitment = async (
                   transportedPrivateVssShareProofMaterial:
                       privateShareEnvelopeBuild.transportedPrivateVssShareProofMaterial,
               }),
-        openingVerificationStatus: localOpeningAcceptedStatus,
     } as const satisfies JsonRecord;
 
     return {

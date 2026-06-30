@@ -15,7 +15,7 @@ pub(in super::super) fn same_secret_proofs_object(
         .as_array()
         .expect("same-secret statement records");
     let participant_count = participant_count_from_package(package);
-    let per_trustee_records = (0..participant_count)
+    let proof_records = (0..participant_count)
         .into_par_iter()
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
@@ -159,22 +159,11 @@ pub(in super::super) fn same_secret_proofs_object(
             derive_canonical_object_hash(&proof_record)
                 .expect("same-secret proof root")
         );
-        let proof_root_entry = serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
-        });
         terminal_phase(&format!("generated same-secret proof trustee {trustee_roster_position}"));
 
-        (proof_root_entry, proof_record)
+        proof_record
         })
         .collect::<Vec<_>>();
-    let mut proof_records = Vec::new();
-    let mut same_secret_proof_roots = Vec::new();
-    for (proof_root_entry, proof_record) in per_trustee_records {
-        same_secret_proof_roots.push(proof_root_entry);
-        proof_records.push(proof_record);
-    }
     let mut proof_set = serde_json::json!({
         "objectType": "SameSecretProofSet",
         "objectVersion": 1,
@@ -190,7 +179,6 @@ pub(in super::super) fn same_secret_proofs_object(
         "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "vssCoefficientCommitmentMaterialRoot": package["vssCoefficientCommitmentMaterial"]["vssCoefficientCommitmentMaterialRoot"],
-        "sameSecretProofRoots": same_secret_proof_roots,
         "proofRecords": proof_records,
     });
     proof_set["sameSecretProofSetRoot"] = serde_json::json!(

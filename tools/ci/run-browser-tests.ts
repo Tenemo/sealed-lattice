@@ -1,7 +1,3 @@
-import {
-    removeRunLogArguments,
-    runLogDisabledByArguments,
-} from './local-run-log.js';
 import { type PackageManagerRunner } from './package-manager-runner.js';
 import { type CommandInvocation } from './run-command.js';
 import {
@@ -16,7 +12,7 @@ const parseBrowserTestArguments = (
     commandArguments: readonly string[],
 ): void => {
     if (commandArguments.length > 0) {
-        throw new Error('Usage: run-browser-tests.ts [--no-run-log].');
+        throw new Error('Usage: run-browser-tests.ts.');
     }
 };
 
@@ -35,14 +31,12 @@ const buildBrowserTestCommands = (
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const commandArguments = removeRunLogArguments(rawArguments);
-    parseBrowserTestArguments(commandArguments);
+    parseBrowserTestArguments(rawArguments);
     await runWorkspaceBuildThenParallelCommands({
         buildCommands: buildBrowserTestCommands,
         commandLineArguments: rawArguments,
         lanes: ['desktop', 'mobile'],
         scriptName: 'test:browser',
-        shouldCreateRunLog: !runLogDisabledByArguments(rawArguments),
     });
 };
 

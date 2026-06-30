@@ -536,7 +536,6 @@ fn private_vss_share_envelope_verifier_accepts_transported_succinct_private_shar
             proof_record["proofBytesEncoding"],
             SETUP_PROOF_MATERIAL_ENCODING
         );
-        assert!(proof_record.get("proofBytesHex").is_none());
         assert_eq!(
             proof_record["proofMaterialRoot"]
                 .as_str()
@@ -669,25 +668,6 @@ fn private_vss_share_envelope_verifier_refuses_duplicate_transported_private_sha
     request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
 
     assert_private_vss_share_proof_refusal_contains(&request, "duplicate proofMaterialRoot");
-}
-
-#[test]
-fn private_vss_share_envelope_verifier_refuses_missing_requested_transported_private_share_proof_material()
- {
-    let mut request =
-        proof_shaped_private_vss_share_envelope_request(PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE);
-    let mut transported_proof_material =
-        move_private_vss_share_proof_bytes_to_transport(&mut request);
-    transported_proof_material["proofMaterials"]
-        .as_array_mut()
-        .expect("transported proof materials")
-        .remove(0);
-    request["transportedPrivateVssShareProofMaterial"] = transported_proof_material;
-
-    assert_private_vss_share_proof_refusal_contains(
-        &request,
-        "missing the requested proofMaterialRoot",
-    );
 }
 
 #[test]
@@ -903,22 +883,6 @@ fn private_vss_share_envelope_request(ring_degree: usize) -> serde_json::Value {
                 "rnsPrime": rns_prime,
                 "shamirCoefficientIndex": shamir_coefficient_index,
                 "commitmentRoot": commitment_root.clone(),
-                "commitmentChunkRoot": derive_canonical_object_hash(
-                    &serde_json::json!({
-                        "objectType": "VssCoefficientCommitmentRoot",
-                        "fixture": "private-vss-commitment-chunk",
-                        "rnsLimbIndex": rns_limb_index,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                ).expect("commitment chunk root"),
-                "coefficientVectorHash512": derive_canonical_object_hash(
-                    &serde_json::json!({
-                        "objectType": "VssCoefficientCommitmentRoot",
-                        "fixture": "private-vss-coefficient-vector",
-                        "rnsLimbIndex": rns_limb_index,
-                        "shamirCoefficientIndex": shamir_coefficient_index,
-                    }),
-                ).expect("coefficient vector hash"),
             }));
             source_trustee_coefficient_commitment_material_records.push(serde_json::json!({
                 "objectType": "VssCoefficientCommitmentMaterial",

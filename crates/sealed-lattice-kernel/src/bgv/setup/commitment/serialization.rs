@@ -8,45 +8,6 @@ pub(in super::super) fn setup_commitment_root(
     derive_canonical_object_hash(&setup_commitment_root_payload(commitment))
 }
 
-pub(super) fn setup_commitment_chunk_root(
-    commitment: &SetupCommitmentValue,
-    commitment_root: &str,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": "VssCoefficientCommitmentChunkRoot",
-        "objectVersion": 1,
-        "commitmentRoot": commitment_root,
-        "commitmentLimbs": commitment.limbs.iter().map(|limb| {
-            json!({
-                "commitmentModulusIndex": limb.commitment_modulus_index,
-                "modulus": limb.modulus,
-                "rowCoefficientHash512": limb.rows.iter().map(|row| {
-                    coefficient_vector_hash512(
-                        row,
-                        "sealed-lattice-bdlop-commitment/row-coefficients-v1",
-                    )
-                }).collect::<Vec<_>>()
-            })
-        }).collect::<Vec<_>>()
-    }))
-}
-
-pub(super) fn public_commitment_coefficient_vector_hash512(
-    commitment: &SetupCommitmentValue,
-) -> String {
-    let coefficients = commitment
-        .limbs
-        .iter()
-        .flat_map(|limb| limb.rows.iter())
-        .flat_map(|row| row.iter().copied())
-        .collect::<Vec<_>>();
-
-    coefficient_vector_hash512(
-        &coefficients,
-        "sealed-lattice-bdlop-commitment/public-commitment-coefficients-v1",
-    )
-}
-
 pub(in super::super) fn setup_commitment_full_value(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",

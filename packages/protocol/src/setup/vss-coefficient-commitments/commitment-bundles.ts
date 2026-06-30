@@ -151,9 +151,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                 rnsPrime,
                 shamirCoefficientIndex,
                 commitmentRoot: commitmentComputation.commitmentRoot,
-                commitmentChunkRoot: commitmentComputation.commitmentChunkRoot,
-                coefficientVectorHash512:
-                    commitmentComputation.coefficientVectorHash512,
             });
             const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',

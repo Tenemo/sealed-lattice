@@ -540,12 +540,6 @@ export const createPublicKeyShareSuccinctProofSet = (
             input.publicKeyShareProofs.publicKeyShareProofSetRoot,
         publicKeyShareMaterialSetRoot:
             input.publicKeyShareMaterial.publicKeyShareMaterialSetRoot,
-        publicKeyShareSuccinctProofRoots: proofRecords.map((proofRecord) => ({
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            publicKeyShareSuccinctProofRoot:
-                proofRecord.publicKeyShareSuccinctProofRoot,
-        })),
         proofRecords,
     } as const satisfies Omit<
         PublicKeyShareSuccinctProofSet,

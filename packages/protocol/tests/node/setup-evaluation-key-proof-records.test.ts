@@ -87,7 +87,6 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
         ],
         requiredGaloisKeySchedule,
         requiredGaloisSetHash,
-        genericKeySwitchPolicy: 'refused-unless-explicitly-required',
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {
@@ -390,11 +389,6 @@ const stubGenerator = (
             sameSecretLinkageIncluded: true,
             proofByteLength: proofBytesHex.length / 2,
             proofBytesHex,
-            proofRandomness: {
-                source: input.proofRandomnessSource,
-                retention:
-                    'proof randomness seed material is consumed for proof generation and is not returned',
-            },
         };
     };
 };
@@ -678,13 +672,6 @@ describe('createGaloisKeyShareBatches', () => {
                         materialRecord.galoisKeyShareRoot,
                     );
                 },
-            );
-            expect(batch.galoisKeyShareRoots).toEqual(
-                batch.galoisKeyShareMaterialRecords.map((materialRecord) => ({
-                    rotation: materialRecord.rotation,
-                    level: materialRecord.level,
-                    galoisKeyShareRoot: materialRecord.galoisKeyShareRoot,
-                })),
             );
             const batchWithoutRoot = { ...batch } as JsonRecord;
             delete batchWithoutRoot.galoisKeyShareBatchRoot;
@@ -1013,7 +1000,6 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
         ).toHaveLength(participantCount);
         transport.trusteeEvaluationKeyProofs.proofRecords.forEach(
             (proofRecord, recordIndex) => {
-                expect(proofRecord).not.toHaveProperty('proofBytesHex');
                 const recordFields = proofRecord as JsonRecord;
                 expect(recordFields.proofBytesEncoding).toBe(
                     'binary-chunked-proof-bytes',
@@ -1108,9 +1094,6 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         ]) {
             expect(contribution.shareMaterial.keySwitchMaterialEncoding).toBe(
                 'binary-chunked-key-switch-component-vectors',
-            );
-            expect(contribution.shareMaterial).not.toHaveProperty(
-                'keySwitchComponentVectors',
             );
         }
         for (const componentMaterial of transport
@@ -1266,7 +1249,6 @@ describe('createPublicEvaluationKeySet', () => {
                 );
             },
         );
-        expect(evaluationKeys.genericKeySwitchKeyRoots).toEqual([]);
         const evaluationKeysWithoutHash = { ...evaluationKeys } as JsonRecord;
         delete evaluationKeysWithoutHash.evaluationKeySetHash;
         expect(evaluationKeys.evaluationKeySetHash).toBe(

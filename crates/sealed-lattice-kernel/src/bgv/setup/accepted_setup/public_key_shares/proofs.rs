@@ -143,7 +143,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
         )?));
     }
     let mut seen_roster_positions = BTreeSet::new();
-    let mut public_key_share_proof_roots = Vec::new();
     for proof_record in proof_records {
         if let Some(response) = verify_public_key_share_proof_record(
             proof_record,
@@ -155,20 +154,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
         )? {
             return Ok(Some(response));
         }
-        public_key_share_proof_roots.push(json!({
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "publicKeyShareProofRoot": value_string(proof_record, "publicKeyShareProofRoot")?,
-        }));
-    }
-    if proof_set.get("publicKeyShareProofRoots")
-        != Some(&Value::Array(public_key_share_proof_roots))
-    {
-        return Ok(Some(public_key_share_proof_refusal(
-            "publicKeyShareProofRootListMismatch",
-            "publicKeyShareProofs.publicKeyShareProofRoots must match the ordered proof records",
-            "setupPackage.publicKeyShareProofs.publicKeyShareProofRoots",
-        )?));
     }
 
     let Some(public_key_share_proof_set_root) = proof_set

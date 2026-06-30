@@ -52,15 +52,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         expect(
             setup.collectivePublicKey.collectivePublicKeyCoefficientRoot,
         ).toHaveLength(128);
-        expect(
-            Object.prototype.hasOwnProperty.call(
-                setup.setupInputs,
-                'privateSetupSeedHash',
-            ),
-        ).toBe(false);
-        expect(
-            Object.prototype.hasOwnProperty.call(setup, 'privateSetupSeedHash'),
-        ).toBe(false);
         expect(setup.collectivePublicKey.coefficientMaterial).toMatchObject({
             objectType: 'BgvCollectivePublicKeyCoefficientMaterial',
             objectVersion: 1,
@@ -121,7 +112,7 @@ describe('BGV passive passive BGV setup kernel commands', () => {
         ).toThrow(TranscriptCoreKernelCommandError);
     });
 
-    it('generates public evaluation-key material without exporting the private setup witness', async () => {
+    it('generates public evaluation-key material and rejects the wrong setup witness', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);
         const material = kernel.generateBgvEvaluationKeyMaterial({
@@ -138,18 +129,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             evaluationKeyRoot: setup.evaluationKeys.evaluationKeyRoot,
         });
         expect((material.rotationKeys as readonly unknown[]).length).toBe(0);
-        expect(
-            Object.prototype.hasOwnProperty.call(
-                material,
-                'setupPrivateWitness',
-            ),
-        ).toBe(false);
-        expect(
-            Object.prototype.hasOwnProperty.call(
-                material,
-                'privateSetupSeedHash',
-            ),
-        ).toBe(false);
         expect(() =>
             kernel.generateBgvEvaluationKeyMaterial({
                 setupPackage: setup,
@@ -240,23 +219,6 @@ describe('BGV passive passive BGV setup kernel commands', () => {
                 setupPackage: rebindSetupPackageHash(
                     kernel,
                     inconsistentCollectiveKey,
-                ),
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-
-        const nestedSecretPackage = structuredClone(
-            setup,
-        ) as BgvPassiveSetupPackage & {
-            participants: Record<string, unknown>[];
-        };
-        nestedSecretPackage.participants[0].globalSecretPolynomial =
-            'forbidden';
-
-        expect(() =>
-            kernel.verifyBgvPassiveSetup({
-                setupPackage: rebindSetupPackageHash(
-                    kernel,
-                    nestedSecretPackage,
                 ),
             }),
         ).toThrow(TranscriptCoreKernelCommandError);

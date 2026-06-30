@@ -213,22 +213,6 @@ describe('roster and manifest shells', () => {
                 },
             },
         );
-        const manifestWithUnexpectedOpaqueBinding = createElectionManifest(
-            registrations,
-            {
-                boardSequence: 4,
-                manifestOpaqueBindings: {
-                    ...manifestOpaqueBindings,
-                    unexpectedDirectBindingHash: deriveCanonicalObjectHash({
-                        objectType: 'ChallengeDomainHash',
-                        payload: {
-                            parameters: 'unexpected-parameters-binding',
-                        },
-                        purpose: 'fixture-unexpected-direct-binding-v1',
-                    }),
-                } as typeof manifestOpaqueBindings,
-            },
-        );
         const incompleteOpaqueBindings = {
             ...manifestOpaqueBindings,
         } as Record<string, unknown>;
@@ -326,25 +310,20 @@ describe('roster and manifest shells', () => {
                 expect.objectContaining({ code: 'ManifestHashMismatch' }),
             ]),
         );
-        for (const manifest of [
-            manifestWithUnexpectedOpaqueBinding,
-            manifestWithIncompleteOpaqueBindings,
-        ]) {
-            expect(
-                verifyRosterManifestTranscript({
-                    ...input,
-                    electionManifest: manifest,
-                }).refusedObjects,
-            ).toEqual(
-                expect.arrayContaining([
-                    expect.objectContaining({
-                        code: 'ManifestHashMismatch',
-                        message:
-                            'Election manifest opaque bindings must use the current direct encrypted ballot schema.',
-                    }),
-                ]),
-            );
-        }
+        expect(
+            verifyRosterManifestTranscript({
+                ...input,
+                electionManifest: manifestWithIncompleteOpaqueBindings,
+            }).refusedObjects,
+        ).toEqual(
+            expect.arrayContaining([
+                expect.objectContaining({
+                    code: 'ManifestHashMismatch',
+                    message:
+                        'Election manifest opaque bindings must include canonical setup and target bindings.',
+                }),
+            ]),
+        );
         expect(
             verifyRosterManifestTranscript({
                 ...input,

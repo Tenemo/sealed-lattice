@@ -68,11 +68,6 @@ export type MlDsaSignatureMode = 'PureMLDSA' | 'HashMLDSA' | 'ExternalMuMLDSA';
 export type MlDsaSignatureProfile = {
     readonly algorithm: 'ML-DSA-65';
     readonly mode: MlDsaSignatureMode;
-    readonly providerName: string;
-    readonly providerVersion: string;
-    readonly providerBuildHash: ProtocolHash;
-    readonly fips204Version: string;
-    readonly errataStatus: string;
     readonly contextString: string;
     readonly contextStringByteLength: number;
 };

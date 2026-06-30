@@ -865,33 +865,12 @@ fn verify_galois_key_share_batch(
             "Galois key share batch must bind the exact frozen RequiredGaloisSetHash and schedule",
         ));
     }
-    let key_roots = array_value(batch, "galoisKeyShareRoots")?;
     let expected_entries = expected_schedule.as_array().ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             "expected Galois key schedule must be an array",
         )
     })?;
-    if key_roots.len() != expected_entries.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "Galois key share batch must contain one share root per required schedule entry",
-        ));
-    }
-    for (root_entry, expected_entry) in key_roots.iter().zip(expected_entries) {
-        if root_entry.get("rotation") != expected_entry.get("rotation")
-            || root_entry.get("level") != expected_entry.get("level")
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "Galois key share roots must follow the frozen Galois key schedule order",
-            ));
-        }
-        validate_hash_string(
-            value_string(root_entry, "galoisKeyShareRoot")?,
-            "galoisKeyShareRoot",
-        )?;
-    }
     let material_records = array_value(batch, "galoisKeyShareMaterialRecords")?;
     if material_records.len() != expected_entries.len() {
         return Err(CanonicalError::new(
@@ -899,18 +878,8 @@ fn verify_galois_key_share_batch(
             "Galois key share batch must contain one material record per required schedule entry",
         ));
     }
-    for ((material_record, root_entry), expected_entry) in material_records
-        .iter()
-        .zip(key_roots.iter())
-        .zip(expected_entries)
-    {
-        verify_galois_key_share_material_record(
-            material_record,
-            batch,
-            binding,
-            root_entry,
-            expected_entry,
-        )?;
+    for (material_record, expected_entry) in material_records.iter().zip(expected_entries) {
+        verify_galois_key_share_material_record(material_record, batch, binding, expected_entry)?;
     }
     let supplied_root = value_string(batch, "galoisKeyShareBatchRoot")?;
     let mut root_input = batch.clone();
@@ -933,7 +902,6 @@ fn verify_galois_key_share_material_record(
     material_record: &Value,
     batch: &Value,
     binding: &EvaluationKeyProofCommonBinding,
-    root_entry: &Value,
     expected_schedule_entry: &Value,
 ) -> CanonicalResult<()> {
     if !material_record.is_object() {
@@ -964,13 +932,14 @@ fn verify_galois_key_share_material_record(
             ));
         }
     }
+    validate_hash_string(
+        value_string(material_record, "galoisKeyShareRoot")?,
+        "galoisKeyShareRoot",
+    )?;
     if material_record.get("rotation") != expected_schedule_entry.get("rotation")
         || material_record.get("level") != expected_schedule_entry.get("level")
-        || material_record.get("rotation") != root_entry.get("rotation")
-        || material_record.get("level") != root_entry.get("level")
-        || material_record.get("galoisKeyShareRoot") != root_entry.get("galoisKeyShareRoot")
         || material_record.get("keySwitchComponentVectorRoot")
-            != root_entry.get("galoisKeyShareRoot")
+            != material_record.get("galoisKeyShareRoot")
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::ComponentMismatch,

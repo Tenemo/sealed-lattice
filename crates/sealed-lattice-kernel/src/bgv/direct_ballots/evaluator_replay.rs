@@ -79,7 +79,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         DIRECT_BALLOT_OPTION_COUNT,
         &replay_seed,
     )?;
-    let packed_score_root = ciphertext_object_root(&packed_scores)?;
     drop(working_aggregate);
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
@@ -89,7 +88,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
         &replay_seed,
     )?;
     drop(packed_scores);
-    let rank_root = ciphertext_object_root(&rank_evaluation.packed_ranks)?;
 
     let mut evaluations = Vec::with_capacity(top_counts.len());
     for top_count in top_counts {
@@ -160,8 +158,6 @@ pub(super) fn run_direct_ballot_packed_batched_pair_evaluator_for_top_counts(
             "tiePolicy": TIE_POLICY,
             "workingLevel": context.working_level(),
             "evaluationKeyMaterialSource": evaluation_key_material_source,
-            "packedScoreRoot": packed_score_root.clone(),
-            "rankRoot": rank_root.clone(),
             "targetLayoutHash": target_layout_root,
             "targetIdRoot": target_id_root,
             "targetOrderRoot": target_order_root,
@@ -304,7 +300,7 @@ pub(super) fn direct_ballot_evaluator_replay_record_hash(
         "ceremonyId": required_string_path(setup_package, &["setupInputs", "ceremonyId"])?,
         "electionManifestHash": required_string_path(setup_package, &["setupInputs", "manifestHash"])?,
         "encryptedBallotAggregateHash": aggregate_ciphertext_root,
-        "evaluatorReplayParametersHash": bgv_parameters_hash()?,
+        "bgvParametersHash": bgv_parameters_hash()?,
         "evaluatorReplayContextHash": evaluator_replay_context_hash,
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,

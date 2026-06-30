@@ -112,8 +112,8 @@ mod tests {
     use super::root_parameters::moduli_bit_length_sum;
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        batch_layout_binding_value, bgv_parameters_hash, data_basis_modulus_bits,
-        extended_basis_modulus_bits, root_parameters_for_modulus,
+        batch_layout_binding_value, data_basis_modulus_bits, extended_basis_modulus_bits,
+        root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -309,22 +309,6 @@ mod tests {
             data_basis_modulus_bits()
                 + usize::try_from(u64::BITS - SPECIAL_PRIME.leading_zeros())
                     .expect("bit length fits usize")
-        );
-    }
-
-    #[test]
-    fn bgv_parameters_hash_is_a_lower_case_hex_root() {
-        let actual_hash = bgv_parameters_hash().expect("hash should derive");
-        assert_eq!(
-            actual_hash.len(),
-            128,
-            "BGV parameters hash should be a SHA-512 hex root"
-        );
-        assert!(
-            actual_hash
-                .bytes()
-                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()),
-            "BGV parameters hash should be lower-case hex"
         );
     }
 

@@ -176,7 +176,6 @@ describe('private VSS mailbox delivery', () => {
         )[0];
         const transportedProofRecord =
             limbOpening.privateVssShareProof as Record<string, unknown>;
-        expect(transportedProofRecord.proofBytesHex).toBeUndefined();
         expect(transportedProofRecord.proofBytesEncoding).toBe(
             'binary-chunked-proof-bytes',
         );

@@ -1,9 +1,7 @@
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::serialization::{
-        BgvObjectKind, canonical_bytes_hash, ciphertext_root, parse_bgv_object, plaintext_root,
-    },
+    bgv::serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object, plaintext_root},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     transcript_core::decode_hex,
 };
@@ -63,7 +61,6 @@ pub(crate) fn validate_plaintext_hex(
         "level": object.components[0].level,
         "coefficientCount": object.components[0].coefficient_count,
         "plaintextRoot": root,
-        "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
     }))
 }
 
@@ -111,7 +108,6 @@ pub(crate) fn validate_ciphertext_hex(
         "level": first.level,
         "coefficientCount": first.coefficient_count,
         "ciphertextRoot": root,
-        "canonicalBytesHash512": canonical_bytes_hash(&canonical_bytes),
     }))
 }
 

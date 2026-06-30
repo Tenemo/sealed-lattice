@@ -26,8 +26,6 @@ const sameSecretAnchorProofBytesHashDomain =
     'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
 export const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
-export const sameSecretAnchorArgument =
-    'one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values';
 export const sameSecretBoundProofFamilies = [
     'vss-constant-relation',
     'public-key-share',
@@ -35,22 +33,11 @@ export const sameSecretBoundProofFamilies = [
     'galois-key-share',
 ] as const;
 
-export const sameSecretGenericKeySwitchBindingPolicy =
-    'absent-unless-frozen-schedule-requires-proof-family';
-export const sameSecretTargetDecryptionBindingPolicy =
-    'later-target-share-must-bind-threshold-share-commitment';
-
 export type SameSecretConstantCoefficientCommitmentRoot = Readonly<{
     readonly rnsLimbIndex: number;
     readonly rnsPrime: number;
     readonly shamirCoefficientIndex: 0;
     readonly commitmentRoot: ProtocolHash;
-}>;
-
-export type TrusteeSecretCommitmentRootReference = Readonly<{
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly trusteeSecretCommitmentRoot: ProtocolHash;
 }>;
 
 export type SameSecretConsistencyStatementRecord = Readonly<
@@ -64,8 +51,6 @@ export type SameSecretConsistencyStatementRecord = Readonly<
         readonly constantCoefficientCommitmentRoots: readonly SameSecretConstantCoefficientCommitmentRoot[];
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly boundSecretDependentProofFamilies: typeof sameSecretBoundProofFamilies;
-        readonly genericKeySwitchBindingPolicy: typeof sameSecretGenericKeySwitchBindingPolicy;
-        readonly targetDecryptionBindingPolicy: typeof sameSecretTargetDecryptionBindingPolicy;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly sameSecretRelation: typeof sameSecretRelation;
         readonly sameSecretStatementRoot: ProtocolHash;
@@ -82,7 +67,6 @@ export type SameSecretConsistencyStatementSet = Readonly<
         readonly thresholdDegree: number;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoots: readonly TrusteeSecretCommitmentRootReference[];
         readonly statementRecords: readonly SameSecretConsistencyStatementRecord[];
         readonly sameSecretConsistencyRoot: ProtocolHash;
     }
@@ -137,12 +121,6 @@ export type SameSecretProofRecord = Readonly<
         }
 >;
 
-export type SameSecretProofRootReference = Readonly<{
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly sameSecretProofRoot: ProtocolHash;
-}>;
-
 export type SameSecretProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretProofSet';
@@ -153,7 +131,6 @@ export type SameSecretProofSet = Readonly<
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
-        readonly sameSecretProofRoots: readonly SameSecretProofRootReference[];
         readonly proofRecords: readonly SameSecretProofRecord[];
         readonly sameSecretProofSetRoot: ProtocolHash;
     }
@@ -527,10 +504,7 @@ const sameSecretProofFamilyBindingPayload = (): JsonRecord => ({
     objectVersion: 1,
     proofFamily: sameSecretProofFamily,
     sameSecretRelation,
-    anchorArgument: sameSecretAnchorArgument,
     boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-    genericKeySwitchBindingPolicy: sameSecretGenericKeySwitchBindingPolicy,
-    targetDecryptionBindingPolicy: sameSecretTargetDecryptionBindingPolicy,
 });
 
 const sameSecretProofFamilyBindingRoot = (): ProtocolHash =>
@@ -540,10 +514,7 @@ const createStatementRecord = (
     setupContext: CollectiveBgvSetupContext,
     sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord,
     constantRoots: readonly SameSecretConstantCoefficientCommitmentRoot[],
-): {
-    readonly statementRecord: SameSecretConsistencyStatementRecord;
-    readonly trusteeSecretCommitmentRootReference: TrusteeSecretCommitmentRootReference;
-} => {
+): SameSecretConsistencyStatementRecord => {
     const trusteeSecretCommitmentRoot = deriveCanonicalObjectHash(
         trusteeSecretCommitmentPayload(
             setupContext,
@@ -564,30 +535,19 @@ const createStatementRecord = (
         constantCoefficientCommitmentRoots: constantRoots,
         trusteeSecretCommitmentRoot,
         boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-        genericKeySwitchBindingPolicy: sameSecretGenericKeySwitchBindingPolicy,
-        targetDecryptionBindingPolicy: sameSecretTargetDecryptionBindingPolicy,
         sameSecretProofFamilyBindingRoot: proofFamilyBindingRoot,
         sameSecretRelation,
     } as const satisfies Omit<
         SameSecretConsistencyStatementRecord,
         'sameSecretStatementRoot'
     >;
-    const statementRecord = {
+
+    return {
         ...statementRecordWithoutRoot,
         sameSecretStatementRoot: deriveCanonicalObjectHash(
             statementRecordWithoutRoot,
         ),
     } satisfies SameSecretConsistencyStatementRecord;
-
-    return {
-        statementRecord,
-        trusteeSecretCommitmentRootReference: {
-            trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
-            trusteeRosterPosition:
-                sourceTrusteeRecord.sourceTrusteeRosterPosition,
-            trusteeSecretCommitmentRoot,
-        },
-    };
 };
 
 export const createSameSecretConsistencyStatementSet = (
@@ -595,7 +555,7 @@ export const createSameSecretConsistencyStatementSet = (
 ): SameSecretConsistencyStatementSet => {
     validateInput(input);
     const proofFamilyBindingRoot = sameSecretProofFamilyBindingRoot();
-    const statementOutputs = sortedSourceTrusteeRecords(input).map(
+    const statementRecords = sortedSourceTrusteeRecords(input).map(
         (sourceTrusteeRecord) =>
             createStatementRecord(
                 input.setupContext,
@@ -617,12 +577,7 @@ export const createSameSecretConsistencyStatementSet = (
         vssCoefficientCommitmentRoot:
             input.vssCoefficientCommitments.vssCoefficientCommitmentRoot,
         sameSecretProofFamilyBindingRoot: proofFamilyBindingRoot,
-        trusteeSecretCommitmentRoots: statementOutputs.map(
-            (output) => output.trusteeSecretCommitmentRootReference,
-        ),
-        statementRecords: statementOutputs.map(
-            (output) => output.statementRecord,
-        ),
+        statementRecords,
     } as const satisfies Omit<
         SameSecretConsistencyStatementSet,
         'sameSecretConsistencyRoot'
@@ -805,11 +760,6 @@ export const createSameSecretProofSet = (
         vssCoefficientCommitmentMaterialRoot:
             input.vssCoefficientCommitmentMaterial
                 .vssCoefficientCommitmentMaterialRoot,
-        sameSecretProofRoots: proofRecords.map((proofRecord) => ({
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            sameSecretProofRoot: proofRecord.sameSecretProofRoot,
-        })),
         proofRecords,
     } as const satisfies Omit<SameSecretProofSet, 'sameSecretProofSetRoot'>;
 

@@ -38,7 +38,6 @@ export type {
     EncryptedLocalTrusteeSetupState,
     LocalTrusteeSetupSealedMaterialEncryptionInput,
     LocalTrusteeSetupSealedMaterialEncryptionResult,
-    LocalTrusteeSetupStateSealedMaterialClass,
     LocalTrusteeSetupStateSealedMaterial,
     LocalTrusteeSetupStateSealedPayload,
     LocalTrusteeStateStorageDecryptionInput,

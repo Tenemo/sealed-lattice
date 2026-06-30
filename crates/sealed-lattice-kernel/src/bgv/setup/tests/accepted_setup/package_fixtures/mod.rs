@@ -298,7 +298,6 @@ fn build_collective_setup_package_fixture_parts(
                             .expect("phase payload length");
                     let phase_signature_context_hash = derive_canonical_object_hash(&serde_json::json!({
                             "objectType": "SetupPhaseSignatureContext",
-                            "purpose": "setup-phase-signature-context",
                             "phaseId": phase_identifier,
                             "phaseNumber": phase_number,
                             "ceremonyId": ceremony_id,

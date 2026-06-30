@@ -23,6 +23,19 @@ use super::relation::{
 use super::*;
 use crate::bgv::modular_arithmetic::inverse_mod;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rayon::prelude::*;
+
+#[cfg(test)]
+fn trustee_evaluation_key_verify_progress(message: impl FnOnce() -> String) {
+    if std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS").as_deref() == Ok("1") {
+        println!("sealed-lattice-trustee-proof-verify-progress {}", message());
+    }
+}
+
+#[cfg(not(test))]
+fn trustee_evaluation_key_verify_progress(_message: impl FnOnce() -> String) {}
+
 // Each logical length-N vector is committed as TRACE_SPLIT half-columns over a
 // half-size trace domain (2-adicity headroom), so it is interpolated as two
 // independent halves sharing the barycentric weights.
@@ -562,16 +575,65 @@ pub(crate) fn verify_evaluation_key_share(
         .collect::<Vec<_>>();
 
     verify_cross_limb_consistency(statement, proof)?;
-    for (limb_index, modulus) in limb_moduli.iter().enumerate() {
-        verify_limb(
-            statement,
-            limb_index,
-            *modulus,
-            &proof.limb_proofs[limb_index],
-            &consistency_vectors,
-            &transcript,
-        )?;
-    }
+    #[cfg(not(target_arch = "wasm32"))]
+    let limb_verifications: Vec<CanonicalResult<()>> = limb_moduli
+        .par_iter()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            trustee_evaluation_key_verify_progress(|| {
+                format!(
+                    "trustee={} limb-start limb={limb_index}",
+                    statement.context.trustee_roster_position
+                )
+            });
+            let result = verify_limb(
+                statement,
+                limb_index,
+                *modulus,
+                &proof.limb_proofs[limb_index],
+                &consistency_vectors,
+                &transcript,
+            );
+            trustee_evaluation_key_verify_progress(|| {
+                format!(
+                    "trustee={} limb-finish limb={limb_index}",
+                    statement.context.trustee_roster_position
+                )
+            });
+            result
+        })
+        .collect();
+    #[cfg(target_arch = "wasm32")]
+    let limb_verifications: Vec<CanonicalResult<()>> = limb_moduli
+        .iter()
+        .enumerate()
+        .map(|(limb_index, modulus)| {
+            trustee_evaluation_key_verify_progress(|| {
+                format!(
+                    "trustee={} limb-start limb={limb_index}",
+                    statement.context.trustee_roster_position
+                )
+            });
+            let result = verify_limb(
+                statement,
+                limb_index,
+                *modulus,
+                &proof.limb_proofs[limb_index],
+                &consistency_vectors,
+                &transcript,
+            );
+            trustee_evaluation_key_verify_progress(|| {
+                format!(
+                    "trustee={} limb-finish limb={limb_index}",
+                    statement.context.trustee_roster_position
+                )
+            });
+            result
+        })
+        .collect();
+    limb_verifications
+        .into_iter()
+        .collect::<CanonicalResult<Vec<()>>>()?;
 
     Ok(())
 }

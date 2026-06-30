@@ -1,15 +1,12 @@
 use serde_json::{Value, json};
 
-use super::proof_codec::{
-    decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
-};
+use super::proof_codec::encode_trustee_evaluation_key_proof;
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness,
 };
-use super::verifier::verify_evaluation_key_share;
 use super::*;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
@@ -52,15 +49,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
-    let proof_randomness_source = read_string(request, "proofRandomnessSource")?;
-    if !matches!(
-        proof_randomness_source,
-        "fresh-csprng" | "development-deterministic-fixture"
-    ) {
-        return Err(invalid_succinct_setup_proof(
-            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
-        ));
-    }
     let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
         &statement,
         proof_randomness_seed_hex,
@@ -78,12 +66,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
-        "proofRandomness": {
-            "source": proof_randomness_source,
-            "binding": "seed and nonce are bound to statement hash, proof family, trustee identity, roster position, and setup epoch before proof masking",
-            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
-            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
-        },
     }))
 }
 
@@ -114,38 +96,6 @@ fn statement_bound_proof_randomness_seed_hex(
         "setupEpoch": &statement.context.setup_epoch,
         "proofRandomnessNonceHex": proof_randomness_nonce_hex,
         "proofRandomnessSeedHex": to_hex(&seed_bytes),
-    }))
-}
-
-fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
-    let nonce_bytes = decode_exact_hex_bytes(
-        proof_randomness_nonce_hex,
-        PROOF_RANDOMNESS_NONCE_BYTES,
-        "proofRandomnessNonceHex",
-    )?;
-
-    derive_canonical_object_hash(&json!({
-        "objectType": "TrusteeEvaluationKeyProofRandomnessNonceHash",
-        "objectVersion": 1,
-        "nonceBytesHex": to_hex(&nonce_bytes),
-    }))
-}
-
-pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let statement = statement_from_request(request)?;
-    let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
-    let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
-    verify_evaluation_key_share(&statement, &proof)?;
-    Ok(json!({
-        "operation": "verifyTrusteeEvaluationKeyProof",
-        "proofFamily": statement.context.proof_family,
-        "statementHash": to_hex(&statement.statement_hash()),
-        "limbCount": statement.limb_count(),
-        "keyCount": statement.keys.len(),
-        "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
-        "proofByteLength": proof_bytes.len(),
     }))
 }
 

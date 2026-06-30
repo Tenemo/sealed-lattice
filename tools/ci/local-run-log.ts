@@ -4,13 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { performance } from 'node:perf_hooks';
 
-const noRunLogArgument = '--no-run-log';
-// Package managers forward a bare `--` separator ahead of script arguments
-// (for example CI runs `pnpm test:node:fast -- --no-run-log`, which reaches the
-// script as `--only fast -- --no-run-log`). Drop it so the run scripts validate
-// only meaningful tokens.
-const packageManagerArgumentSeparator = '--';
-
 export type CommandLogFiles = {
     readonly combinedPath: string;
     readonly stderrPath: string;
@@ -64,19 +57,6 @@ type LocalRunLogInput = {
     readonly rootDirectoryPath?: string;
     readonly scriptName: string;
 };
-
-export const removeRunLogArguments = (
-    commandLineArguments: readonly string[],
-): readonly string[] =>
-    commandLineArguments.filter(
-        (argument) =>
-            argument !== noRunLogArgument &&
-            argument !== packageManagerArgumentSeparator,
-    );
-
-export const runLogDisabledByArguments = (
-    commandLineArguments: readonly string[],
-): boolean => commandLineArguments.includes(noRunLogArgument);
 
 export const currentProcessExitCode = (): number => {
     if (process.exitCode === undefined) {

@@ -782,13 +782,6 @@ export const createGaloisKeyShareBatches = (
                 } as GaloisKeyShareMaterialRecord;
             },
         );
-        const galoisKeyShareRoots = contribution.galoisKeyShares.map(
-            (shareContribution) => ({
-                rotation: shareContribution.rotation,
-                level: shareContribution.level,
-                galoisKeyShareRoot: shareContribution.galoisKeyShareRoot,
-            }),
-        );
         const batchWithoutRoot = {
             objectType: 'GaloisKeyShareBatch',
             objectVersion: 1,
@@ -814,7 +807,6 @@ export const createGaloisKeyShareBatches = (
                 input.evaluatorKeySchedule.requiredGaloisSetHash,
             requiredGaloisKeySchedule:
                 input.evaluatorKeySchedule.requiredGaloisKeySchedule,
-            galoisKeyShareRoots,
             galoisKeyShareMaterialRecords,
         } as const satisfies Omit<
             GaloisKeyShareBatch,

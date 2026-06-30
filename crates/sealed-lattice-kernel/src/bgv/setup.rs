@@ -20,10 +20,7 @@ mod setup_proof;
 mod sharing;
 mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
-pub(crate) use trustee_evaluation_key_proof::{
-    generate_trustee_evaluation_key_proof_from_request,
-    verify_trustee_evaluation_key_proof_from_request,
-};
+pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_proof_from_request;
 mod validation;
 mod vss;
 
@@ -53,7 +50,6 @@ pub(crate) use setup_proof::{
     finish_setup_proof_material_transport_stream_request,
 };
 pub(crate) use threshold_share_commitments::{
-    abort_threshold_share_commitment_transport_derivation_stream_request,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,

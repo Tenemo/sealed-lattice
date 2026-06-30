@@ -57,29 +57,12 @@ export type ManifestPolicyHashes = {
 
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
-    readonly heParamHash: ProtocolHash;
-    readonly bgvPassiveSetupPackageHash: ProtocolHash;
     readonly bgvParametersHash: ProtocolHash;
-    readonly bgvPublicKeyRoot: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
-    readonly keySwitchDecompositionHash: ProtocolHash;
-    readonly ballotValidityProofParametersHash: ProtocolHash;
-    readonly comparisonInputDerivationCircuitHash: ProtocolHash;
-    readonly encryptedComparisonInputHash: ProtocolHash;
-    readonly encryptedSparseTargetProjectionHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly evaluatorReplayParametersHash: ProtocolHash;
-    readonly evaluationNoiseParametersHash: ProtocolHash;
-    readonly heEvaluationNoiseCertHash: ProtocolHash;
     readonly rotSetHash: ProtocolHash;
     readonly evaluationKeyRoot: ProtocolHash;
-    readonly evaluationKeySizeParametersHash: ProtocolHash;
     readonly thresholdShareVerificationKeyRoot: ProtocolHash;
-    readonly thresholdShareVerificationKeyHash: ProtocolHash;
-    readonly trusteeThresholdVerificationKeyHash: ProtocolHash;
-    readonly targetDecryptionParametersHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
-    readonly mobileRuntimeParametersHash: ProtocolHash;
 };
 
 /** Signed election manifest accepted after roster and setup checks. */
@@ -205,7 +188,6 @@ export type FirstValidOrderingInput = {
     readonly objects: readonly ValidatedFirstValidObject[];
     readonly requiredContextHash: ProtocolHash;
     readonly selectionPolicyHash: ProtocolHash;
-    readonly expectedSelectionPolicyHash: ProtocolHash;
     readonly currentRecoveryEpochMap: Readonly<
         Record<string, RecoveryEpochMapEntry>
     >;

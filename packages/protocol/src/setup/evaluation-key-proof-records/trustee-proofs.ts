@@ -692,7 +692,6 @@ export const createTrusteeEvaluationKeyProofs = (
             negativeIndicatorCoefficients:
                 witness.negativeIndicatorCoefficients,
             openingRandomnessByLimb: witness.openingRandomnessByLimb,
-            proofRandomnessSource: 'fresh-csprng',
             proofRandomnessSeedHex,
             proofRandomnessNonceHex,
         });

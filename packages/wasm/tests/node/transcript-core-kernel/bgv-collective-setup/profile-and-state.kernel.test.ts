@@ -68,7 +68,6 @@ describe('collective BGV setup kernel commands', () => {
         });
         expect(parameters.evaluatorKeySchedule).toMatchObject({
             objectType: 'EvaluatorKeySchedule',
-            genericKeySwitchPolicy: 'refused-unless-explicitly-required',
         });
         expect(
             parameters.evaluatorKeySchedule.relinearizationLevelSchedule,

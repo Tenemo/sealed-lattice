@@ -51,16 +51,6 @@ pub(in super::super) fn verify_public_key_shares(
             "setupPackage.publicKeyShares",
         )?));
     }
-    for (field_name, expected_value) in [("proofBindingStatus", "public-key-share-proof-required")]
-    {
-        if share_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_share_refusal(
-                "publicKeyShareSetParametersMismatch",
-                format!("publicKeyShares.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShares.{field_name}"),
-            )?));
-        }
-    }
     let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
@@ -115,7 +105,6 @@ pub(in super::super) fn verify_public_key_shares(
         )?));
     }
     let mut seen_roster_positions = BTreeSet::new();
-    let mut public_key_share_roots = Vec::new();
     for share_record in share_records {
         if let Some(response) = verify_public_key_share_record(
             share_record,
@@ -127,18 +116,6 @@ pub(in super::super) fn verify_public_key_shares(
         )? {
             return Ok(Some(response));
         }
-        public_key_share_roots.push(json!({
-            "trusteeIdentity": value_string(share_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(share_record, "trusteeRosterPosition")?,
-            "publicKeyShareRoot": value_string(share_record, "publicKeyShareRoot")?,
-        }));
-    }
-    if share_set.get("publicKeyShareRoots") != Some(&Value::Array(public_key_share_roots)) {
-        return Ok(Some(public_key_share_refusal(
-            "publicKeyShareRootListMismatch",
-            "publicKeyShares.publicKeyShareRoots must match the ordered share records",
-            "setupPackage.publicKeyShares.publicKeyShareRoots",
-        )?));
     }
 
     let Some(public_key_share_set_root) = share_set
@@ -210,10 +187,7 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("shareComponent", "component-zero-b_i"),
-        ("proofBindingStatus", "public-key-share-proof-required"),
-    ] {
+    for (field_name, expected_value) in [("shareComponent", "component-zero-b_i")] {
         if share_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_refusal(
                 "publicKeyShareParametersMismatch",

@@ -90,8 +90,8 @@ const createInstallArguments = (
     tarballPath: string,
 ): readonly string[] =>
     packageManager === 'npm'
-        ? ['install', '--ignore-scripts', '--silent', tarballPath]
-        : ['add', '--ignore-scripts', '--silent', tarballPath];
+        ? ['install', '--ignore-scripts', tarballPath]
+        : ['add', '--ignore-scripts', tarballPath];
 
 const isPackedFileMetadata = (value: unknown): value is PackedFileMetadata => {
     if (typeof value !== 'object' || value === null) {

@@ -34,7 +34,6 @@ export {
     publicKeyShareMaterialBinaryFormat,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareMaterialEncoding,
-    publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
     materialRecordsFromTransportedPublicKeyShareMaterial,
 } from './setup/public-key-share-records.js';
@@ -55,7 +54,6 @@ export {
     createEvaluatorKeySchedule,
     createRelinearizationLevelSchedule,
     createRequiredGaloisSet,
-    evaluatorKeyGenericSwitchPolicy,
 } from './setup/evaluator-key-schedule.js';
 export {
     acceptedBgvFullRingDegree,
@@ -108,12 +106,9 @@ export {
     createBinaryChunkedSameSecretProofMaterialTransport,
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
-    sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
-    sameSecretGenericKeySwitchBindingPolicy,
     sameSecretProofFamily,
     sameSecretRelation,
-    sameSecretTargetDecryptionBindingPolicy,
 } from './setup/same-secret-consistency-records.js';
 export {
     createVssComplaintSet,
@@ -209,7 +204,6 @@ export type {
     PublicKeyShareSuccinctProofByteMaterial,
     PublicKeyShareSuccinctProofMaterial,
     PublicKeyShareSuccinctProofRecord,
-    PublicKeyShareSuccinctProofRootReference,
     PublicKeyShareSuccinctProofSet,
     PublicKeyShareSuccinctProofSetInput,
     PublicKeyShareSuccinctTransportedProofBytes,
@@ -310,12 +304,10 @@ export type {
     SameSecretProofByteMaterial,
     SameSecretProofMaterial,
     SameSecretProofRecord,
-    SameSecretProofRootReference,
     SameSecretProofSet,
     SameSecretProofSetInput,
     SameSecretTransportedProofBytes,
     TransportedSameSecretProofMaterialSet,
-    TrusteeSecretCommitmentRootReference,
 } from './setup/same-secret-consistency-records.js';
 export type {
     VerifiedSetupProofMaterial,

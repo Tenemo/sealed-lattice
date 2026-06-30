@@ -1,6 +1,5 @@
 use super::proof_codec::{
-    FIELD_RESIDUE_BYTE_WIDTH, decode_trustee_evaluation_key_proof,
-    encode_trustee_evaluation_key_proof,
+    decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
 };
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
@@ -11,7 +10,7 @@ use super::relation::{
     round_one_aggregate_diagonal_from_components,
 };
 use super::verifier::verify_evaluation_key_share;
-use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::accepted_setup::describe_collective_bgv_setup_parameters;
 use crate::bgv::setup::commitment::{
     SETUP_COMMITMENT_MODULUS_LIMB_INDICES, SETUP_COMMITMENT_ROW_COUNT, SetupCommitmentLimb,
@@ -19,23 +18,9 @@ use crate::bgv::setup::commitment::{
 };
 use crate::hashing::derive_canonical_object_hash;
 
-use std::collections::BTreeSet;
-use std::time::Instant;
-
-use super::extension_field::CHALLENGE_EXTENSION_DEGREE;
-use super::merkle_commitment::LEAF_SALT_BYTES;
-use super::relation::{
-    EvaluationKeyShareDescriptor, LimbColumnLayout, PHASE_TWO_COLUMN_COUNT,
-    QUOTIENT_COLUMN_SUMCHECK_RESIDUAL, SameSecretLinkageStatement,
-};
+use super::relation::{LimbColumnLayout, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL};
 use super::{
-    COMMITMENT_BOUND_FACTOR, CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP,
-    LOW_DEGREE_FINAL_COEFFICIENT_COUNT, LOW_DEGREE_QUERY_COUNT,
-};
-use crate::bgv::evaluator::records::MAXIMUM_OPTION_COUNT;
-use crate::bgv::evaluator::top_k::{
-    SELECTED_EVALUATOR_WORKING_LEVEL, direct_score_packing_basis_galois_elements,
-    packed_rank_forward_basis_galois_elements, packed_rank_return_basis_galois_elements,
+    CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP, LOW_DEGREE_QUERY_COUNT,
 };
 
 // The trustee evaluation-key proof behavioral suite is split by behavior into
@@ -47,16 +32,12 @@ use crate::bgv::evaluator::top_k::{
 // `accounting`, `prover`, and the command/family items are re-exported here so
 // the sibling tests can keep referencing them through `super::` unchanged after
 // the move under this `tests/` directory.
-use super::{
-    TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
-    generate_trustee_evaluation_key_proof_from_request, prover,
-    verify_trustee_evaluation_key_proof_from_request,
-};
+use super::{accounting, generate_trustee_evaluation_key_proof_from_request, prover};
 
 mod command_surface;
 mod cross_language_vectors;
+mod low_degree_proof;
 mod masked_claim_zero_knowledge;
-mod profiling_and_benchmarks;
 mod proof_accounting;
 mod proof_codec;
 mod prove_verify_round_trip;
@@ -286,9 +267,34 @@ fn vector_context_base(binding_roots: serde_json::Value) -> serde_json::Value {
 }
 
 fn proof_randomness_fields(request: &mut serde_json::Value) {
-    request["proofRandomnessSource"] = serde_json::json!("development-deterministic-fixture");
     request["proofRandomnessSeedHex"] = serde_json::json!(PROOF_RANDOMNESS_SEED);
     request["proofRandomnessNonceHex"] = serde_json::json!(PROOF_RANDOMNESS_NONCE);
+}
+
+fn generated_proof_bytes(generated: &serde_json::Value) -> Vec<u8> {
+    crate::transcript_core::decode_hex(
+        generated["proofBytesHex"]
+            .as_str()
+            .expect("generated proof bytes"),
+    )
+    .expect("generated proof bytes must decode")
+}
+
+fn verify_proof_bytes(
+    statement: &TrusteeEvaluationKeyStatement,
+    proof_bytes: &[u8],
+) -> crate::encoding::CanonicalResult<()> {
+    let proof = decode_trustee_evaluation_key_proof(statement, proof_bytes)?;
+
+    verify_evaluation_key_share(statement, &proof)
+}
+
+fn verify_generated_proof(
+    statement: &TrusteeEvaluationKeyStatement,
+    generated: &serde_json::Value,
+) {
+    verify_proof_bytes(statement, &generated_proof_bytes(generated))
+        .expect("generated proof should verify");
 }
 
 fn same_secret_statement_hash_vector_request() -> serde_json::Value {

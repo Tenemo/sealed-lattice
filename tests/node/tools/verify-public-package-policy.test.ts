@@ -89,17 +89,12 @@ describe('public package policy', () => {
             );
         const failures = await validatePublicPackagePolicy(
             publicPackagePolicy,
-            [
-                ...requiredRuntimeExports,
-                'verifyTargetAcceptedRecord',
-                'verifyTopKDecryptionShareShell',
-            ],
+            [...requiredRuntimeExports, 'verifyTargetAcceptedRecord'],
             [],
         );
 
         expect(failures).toEqual([
             'Forbidden runtime export is public: verifyTargetAcceptedRecord',
-            'Forbidden runtime export is public: verifyTopKDecryptionShareShell',
         ]);
     });
 

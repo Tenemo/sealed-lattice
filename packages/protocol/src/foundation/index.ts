@@ -136,9 +136,7 @@ const collectCrossBindingRefusals = (
 
     if (
         input.firstValidOrdering.selectionPolicyHash !==
-            manifestPolicyHashes.firstValidPolicyHash ||
-        input.firstValidOrdering.expectedSelectionPolicyHash !==
-            manifestPolicyHashes.firstValidPolicyHash
+        manifestPolicyHashes.firstValidPolicyHash
     ) {
         refusedObjects.push(
             createRefusal(
@@ -196,14 +194,14 @@ const collectCrossBindingRefusals = (
         checkpoint.thresholdParametersHash !==
             input.rosterManifestTranscript.frozenRosterParameters
                 .thresholdParametersHash ||
-        checkpoint.evaluatorReplayParametersHash !==
-            manifestOpaqueBindings.evaluatorReplayParametersHash ||
+        checkpoint.bgvParametersHash !==
+            manifestOpaqueBindings.bgvParametersHash ||
         checkpoint.targetLayoutHash !== manifestOpaqueBindings.targetLayoutHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'TargetFinalityPolicyMismatch',
-                'Foundation target proposal must bind the accepted manifest, frozen roster parameters, evaluator replay parameters, and target layout.',
+                'Foundation target proposal must bind the accepted manifest, frozen roster parameters, BGV parameters, and target layout.',
                 checkpoint.targetFinalityCheckpointHash,
                 'TargetFinalityCheckpoint',
             ),

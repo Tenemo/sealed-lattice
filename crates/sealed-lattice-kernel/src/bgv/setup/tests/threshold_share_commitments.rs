@@ -279,60 +279,6 @@ fn threshold_share_commitment_stream_refuses_tampered_chunk_bytes() {
 }
 
 #[test]
-fn threshold_share_commitment_stream_abort_releases_derivation_id() {
-    let request = threshold_share_commitment_derivation_request(8);
-    let material_bytes = encode_transport_material_from_request(&request);
-    let transported_material = transported_material_value(&material_bytes);
-    let stream_template = transported_material_stream_template_value(&transported_material);
-    let derivation_id = "threshold-share-stream-abort-test";
-
-    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-        "derivationId": derivation_id,
-        "setupContext": request["setupContext"],
-        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
-        "transportedVssCoefficientCommitmentMaterial": stream_template,
-    }))
-    .expect("begin stream threshold derivation");
-
-    let abort_result =
-        abort_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-            "derivationId": derivation_id,
-        }))
-        .expect("abort stream threshold derivation");
-    assert_eq!(
-        abort_result["operation"],
-        "abortThresholdShareCommitmentsFromTransportStream"
-    );
-
-    let error = absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
-        &serde_json::json!({
-            "derivationId": derivation_id,
-            "chunkIndex": 0,
-            "bytesHex": transported_material["chunks"][0]["bytesHex"],
-        }),
-    )
-    .expect_err("aborted stream must not accept chunks");
-    assert!(
-        error
-            .message
-            .contains("transport derivationId is not active")
-    );
-
-    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-        "derivationId": derivation_id,
-        "setupContext": request["setupContext"],
-        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
-        "transportedVssCoefficientCommitmentMaterial": transported_material_stream_template_value(&transported_material),
-    }))
-    .expect("derivation id can be reused after abort");
-
-    abort_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-        "derivationId": derivation_id,
-    }))
-    .expect("cleanup reused stream threshold derivation");
-}
-
-#[test]
 fn threshold_share_commitment_stream_refuses_chunk_count_that_does_not_match_total_length() {
     let request = threshold_share_commitment_derivation_request(8);
     let material_bytes = encode_transport_material_from_request(&request);
@@ -482,22 +428,6 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "rnsPrime": rns_prime,
                     "shamirCoefficientIndex": shamir_coefficient_index,
                     "commitmentRoot": commitment_root,
-                    "commitmentChunkRoot": derive_canonical_object_hash(&serde_json::json!({
-                        "objectType": "VssCoefficientCommitmentRoot",
-                        "fixture": "threshold-share-commitment-chunk",
-                            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                            "rnsLimbIndex": rns_limb_index,
-                            "shamirCoefficientIndex": shamir_coefficient_index,
-                        }),
-                    ).expect("commitment chunk root"),
-                    "coefficientVectorHash512": derive_canonical_object_hash(&serde_json::json!({
-                        "objectType": "VssCoefficientCommitmentRoot",
-                        "fixture": "threshold-share-coefficient-vector",
-                            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                            "rnsLimbIndex": rns_limb_index,
-                            "shamirCoefficientIndex": shamir_coefficient_index,
-                        }),
-                    ).expect("coefficient vector hash"),
                 }));
                 coefficient_commitment_material.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitmentMaterial",

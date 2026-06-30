@@ -29,6 +29,16 @@ struct VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry {
     total_byte_length: u64,
 }
 
+#[cfg(test)]
+fn trustee_evaluation_key_verify_progress(message: impl FnOnce() -> String) {
+    if std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS").as_deref() == Ok("1") {
+        println!("sealed-lattice-trustee-proof-verify-progress {}", message());
+    }
+}
+
+#[cfg(not(test))]
+fn trustee_evaluation_key_verify_progress(_message: impl FnOnce() -> String) {}
+
 pub(super) fn verify_trustee_evaluation_key_proofs(
     setup_package: &Value,
     request: &Value,
@@ -268,7 +278,9 @@ fn verify_trustee_evaluation_key_proof_set(
         .as_object_mut()
         .expect("trustee evaluation-key proof set object was checked")
         .remove("trusteeEvaluationKeyProofSetRoot");
+    trustee_evaluation_key_verify_progress(|| "proof-set-root-start".to_string());
     let expected_root = derive_canonical_object_hash(&root_input)?;
+    trustee_evaluation_key_verify_progress(|| "proof-set-root-finish".to_string());
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -276,6 +288,7 @@ fn verify_trustee_evaluation_key_proof_set(
         ));
     }
 
+    trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
@@ -288,9 +301,13 @@ fn verify_trustee_evaluation_key_proof_set(
         setup_package,
         transported_key_switch_component_material,
     )?;
+    trustee_evaluation_key_verify_progress(|| "shared-inputs-finish".to_string());
 
     let verify_record = |record_position: usize, proof_record: &Value| -> CanonicalResult<()> {
         let trustee_roster_position = record_position as u64;
+        trustee_evaluation_key_verify_progress(|| {
+            format!("trustee={trustee_roster_position} statement-start")
+        });
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package,
@@ -299,6 +316,9 @@ fn verify_trustee_evaluation_key_proof_set(
                 round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
             })?;
+        trustee_evaluation_key_verify_progress(|| {
+            format!("trustee={trustee_roster_position} statement-finish")
+        });
         verify_trustee_evaluation_key_proof_record(
             proof_record,
             setup_context,
@@ -438,15 +458,33 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proofBytesHash must match supplied proof bytes",
         ));
     }
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} decode-start")
+    });
     let proof = decode_trustee_evaluation_key_proof(statement, &proof_bytes)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} decode-finish")
+    });
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} proof-verify-start")
+    });
     verify_evaluation_key_share(statement, &proof)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} proof-verify-finish")
+    });
     let supplied_root = value_string(proof_record, "trusteeEvaluationKeyProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
         .as_object_mut()
         .expect("trustee evaluation-key proof record object was checked")
         .remove("trusteeEvaluationKeyProofRoot");
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} record-root-start")
+    });
     let expected_root = derive_canonical_object_hash(&root_input)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} record-root-finish")
+    });
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

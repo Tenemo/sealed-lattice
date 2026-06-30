@@ -3,11 +3,9 @@
 // domain problem each part solves: shared vocabulary and types, low-level
 // encoding helpers, the share/proof statement families, embedded and binary
 // chunked share material, collective public-key aggregation, and the succinct
-// proof family. This file keeps the original import path and public surface
-// unchanged.
+// proof family. This file keeps the original import path available.
 export {
     publicKeyShareProofFamily,
-    publicKeyShareProofBindingStatus,
     publicKeyShareMaterialEncoding,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareMaterialBinaryFormat,
@@ -33,7 +31,6 @@ export {
     type PublicKeyShareSuccinctProofByteMaterial,
     type PublicKeyShareSuccinctProofMaterial,
     type PublicKeyShareSuccinctProofRecord,
-    type PublicKeyShareSuccinctProofRootReference,
     type PublicKeyShareSuccinctProofSet,
     type CollectivePublicKeySourceShareMaterialRoot,
     type CollectivePublicKeyCoefficientVectorMaterial,

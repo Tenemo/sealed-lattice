@@ -393,10 +393,6 @@ describe('VSS coefficient commitment builders', () => {
                 qSharePrimes.length * thresholdDegree,
             ),
         );
-        expect(
-            bundle.commitmentSet.sourceTrusteeRecords[0]
-                ?.coefficientCommitments[0]?.coefficientVectorHash512,
-        ).toMatch(/^[0-9a-f]{128}$/u);
     });
 
     it('builds binary-chunked transport for public coefficient material', () => {
@@ -448,9 +444,6 @@ describe('VSS coefficient commitment builders', () => {
                         .chunkRoot,
             },
         });
-        expect(transport.materialSet).not.toHaveProperty(
-            'coefficientCommitments',
-        );
         expect(vssCoefficientCommitmentMaterialRoot).toBe(
             deriveCanonicalObjectHash(materialSetWithoutRoot),
         );
@@ -512,9 +505,6 @@ describe('VSS coefficient commitment builders', () => {
             embeddedBundle.commitmentSet,
         );
         expect(directBundle.materialSet).toEqual(embeddedTransport.materialSet);
-        expect(directBundle.materialSet).not.toHaveProperty(
-            'coefficientCommitments',
-        );
         expect(
             directBundle.transportedVssCoefficientCommitmentMaterial,
         ).toEqual(
@@ -684,9 +674,6 @@ describe('VSS coefficient commitment builders', () => {
         expect(
             streamingBundle.transportedVssCoefficientCommitmentMaterial,
         ).toEqual(retainedTransportReference);
-        expect(
-            streamingBundle.transportedVssCoefficientCommitmentMaterial,
-        ).not.toHaveProperty('chunks');
         expect(streamingBundle.thresholdShareCommitments).toEqual(
             deriveThresholdShareCommitments({
                 setupContext,

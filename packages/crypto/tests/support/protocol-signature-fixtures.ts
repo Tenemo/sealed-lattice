@@ -72,17 +72,6 @@ export const createMlDsaSignatureProfileFixture = (
     return {
         algorithm: 'ML-DSA-65',
         mode: overrides.mode ?? 'PureMLDSA',
-        providerName: overrides.providerName ?? 'deterministic-fixture',
-        providerVersion: overrides.providerVersion ?? '1',
-        providerBuildHash:
-            overrides.providerBuildHash ??
-            deriveCanonicalObjectHash({
-                objectType: 'MlDsaProviderBuild',
-                providerName: 'deterministic-fixture',
-                providerVersion: '1',
-            }),
-        fips204Version: overrides.fips204Version ?? 'FIPS 204',
-        errataStatus: overrides.errataStatus ?? 'none',
         contextString,
         contextStringByteLength,
     };

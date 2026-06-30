@@ -162,14 +162,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys.requiredGaloisKeySchedule",
         )?));
     }
-    if evaluation_keys.get("genericKeySwitchKeyRoots") != Some(&Value::Array(Vec::new())) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysGenericKeySwitchOutsideParameters",
-            "evaluationKeys.genericKeySwitchKeyRoots must be empty for the first roster",
-            "setupPackage.evaluationKeys.genericKeySwitchKeyRoots",
-        )?));
-    }
-
     let expected_relinearization_key_roots =
         expected_relinearization_key_roots_for_evaluation_keys(setup_package, &binding)?;
     let supplied_relinearization_key_roots =

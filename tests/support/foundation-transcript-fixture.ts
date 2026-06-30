@@ -451,8 +451,7 @@ export const createFoundationTranscriptFixture =
                                 .electionManifestHash,
                     },
                 ),
-                evaluatorReplayParametersHash:
-                    manifestOpaqueBindings.evaluatorReplayParametersHash,
+                bgvParametersHash: manifestOpaqueBindings.bgvParametersHash,
                 targetCiphertextHash: deriveFixtureHash(
                     'foundation-target-ciphertext',
                     {
@@ -487,8 +486,6 @@ export const createFoundationTranscriptFixture =
             expectedTopOptionCount: foundationTopOptionCount,
             firstValidOrdering: {
                 currentRecoveryEpochMap,
-                expectedSelectionPolicyHash:
-                    manifestPolicyHashes.firstValidPolicyHash,
                 objects: [...firstValidObjects, duplicateFirstValidObject],
                 requiredContextHash: firstValidContextHash,
                 selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,

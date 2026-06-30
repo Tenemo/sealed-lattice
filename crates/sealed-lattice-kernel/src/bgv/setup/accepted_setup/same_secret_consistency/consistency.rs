@@ -134,36 +134,15 @@ pub(in super::super) fn verify_same_secret_consistency(
     }
 
     let mut seen_roster_positions = BTreeSet::new();
-    let mut trustee_secret_commitment_roots = Vec::new();
     for statement_record in statement_records {
-        let trustee_secret_commitment_root = match verify_same_secret_statement_record(
+        if let Some(response) = verify_same_secret_statement_record(
             statement_record,
             setup_context,
             &trustee_bindings,
             &mut seen_roster_positions,
         )? {
-            Some(response) => return Ok(Some(response)),
-            None => statement_record
-                .get("trusteeSecretCommitmentRoot")
-                .and_then(Value::as_str)
-                .expect("trustee secret commitment root was verified")
-                .to_string(),
-        };
-        trustee_secret_commitment_roots.push(json!({
-            "trusteeIdentity": value_string(statement_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(statement_record, "trusteeRosterPosition")?,
-            "trusteeSecretCommitmentRoot": trustee_secret_commitment_root,
-        }));
-    }
-
-    if statement_set.get("trusteeSecretCommitmentRoots")
-        != Some(&Value::Array(trustee_secret_commitment_roots))
-    {
-        return Ok(Some(same_secret_refusal(
-            "sameSecretTrusteeRootListMismatch",
-            "sameSecretConsistency.trusteeSecretCommitmentRoots must match the ordered statement records",
-            "setupPackage.sameSecretConsistency.trusteeSecretCommitmentRoots",
-        )?));
+            return Ok(Some(response));
+        }
     }
 
     let Some(same_secret_consistency_root) = statement_set

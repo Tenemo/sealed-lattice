@@ -57,15 +57,14 @@ use self::proof_record_fixtures::{
     trustee_evaluation_key_witness_for_fixture,
 };
 use self::record_rebinding::{
-    drift_all_occurrences, drift_hash, private_vss_envelope_commitment_record_root_input,
+    private_vss_envelope_commitment_record_root_input,
     private_vss_envelope_commitment_set_root_input, rebind_collective_evaluator_key_schedule_root,
     rebind_collective_phase_roots, rebind_collective_private_vss_envelope_commitment_root,
     rebind_collective_public_key_root, rebind_collective_public_key_share_proof_roots,
     rebind_collective_public_key_share_roots, rebind_collective_public_key_succinct_proof_roots,
-    rebind_collective_same_secret_consistency_root, rebind_collective_same_secret_proof_roots,
-    rebind_collective_same_secret_proof_set_root, rebind_collective_same_secret_statement_roots,
-    rebind_collective_setup_package_hash, rebind_collective_threshold_share_commitment_root,
-    rebind_collective_vss_acceptance_root,
+    rebind_collective_same_secret_consistency_root, rebind_collective_same_secret_proof_set_root,
+    rebind_collective_same_secret_statement_roots, rebind_collective_setup_package_hash,
+    rebind_collective_threshold_share_commitment_root, rebind_collective_vss_acceptance_root,
     rebind_collective_vss_coefficient_commitment_material_root,
     rebind_collective_vss_commitment_roots, rebind_collective_vss_complaint_root,
     rebind_first_private_vss_encrypted_envelope_hash,
@@ -113,7 +112,7 @@ use super::super::setup_proof::{
 use super::super::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
-    public_key_share_succinct_proof_bytes_hash, trustee_evaluation_key_proof_bytes_hash,
+    trustee_evaluation_key_proof_bytes_hash,
 };
 use super::*;
 use crate::bgv::coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_le_hex};
@@ -185,10 +184,6 @@ impl FirstLimbProofCodecLayout {
             total_error_columns,
             linkage_randomness_columns: statement.linkage_randomness_count(first_limb_index),
         }
-    }
-
-    fn public_key_share(ring_degree: usize) -> Self {
-        Self::with_same_secret_linkage(ring_degree, 1, 1)
     }
 
     fn same_secret_anchor(ring_degree: usize, linkage_commitment_count: usize) -> Self {

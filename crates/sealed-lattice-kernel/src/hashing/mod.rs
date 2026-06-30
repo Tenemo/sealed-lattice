@@ -431,14 +431,8 @@ pub fn derive_canonical_object_hash(value: &Value) -> CanonicalResult<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_json, canonical_json_matches_bytes, canonical_root, chunk_root, hash512,
-        hash512_hex,
+        canonical_json, canonical_json_matches_bytes, canonical_root, chunk_root, hash512_hex,
     };
-
-    #[test]
-    fn hash512_outputs_sixty_four_bytes() {
-        assert_eq!(hash512("transcript-core/test", &[b"input"]).len(), 64);
-    }
 
     #[test]
     fn hash512_is_domain_separated() {

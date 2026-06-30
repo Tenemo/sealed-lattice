@@ -17,45 +17,6 @@ pub(super) fn rebind_collective_setup_package_hash(package: &mut serde_json::Val
     package["setupPackageHash"] = serde_json::json!(setup_package_hash);
 }
 
-/// Flip the leading hex digit of a bound hash so the result stays valid
-/// lowercase hex but no longer equals the value the verifier recomputes.
-pub(super) fn drift_hash(hash: &str) -> String {
-    let mut characters: Vec<char> = hash.chars().collect();
-    if let Some(first) = characters.first_mut() {
-        *first = if *first == '0' { '1' } else { '0' };
-    }
-    characters.into_iter().collect()
-}
-
-/// Replace every string field equal to `target` with `replacement`, returning
-/// the number of substitutions. Drifting a bound root at every occurrence stops
-/// the verifier from falling back to an undrifted copy of the same value.
-pub(super) fn drift_all_occurrences(
-    value: &mut serde_json::Value,
-    target: &str,
-    replacement: &str,
-) -> usize {
-    match value {
-        serde_json::Value::String(text) => {
-            if text == target {
-                *text = replacement.to_string();
-                1
-            } else {
-                0
-            }
-        }
-        serde_json::Value::Array(items) => items
-            .iter_mut()
-            .map(|item| drift_all_occurrences(item, target, replacement))
-            .sum(),
-        serde_json::Value::Object(map) => map
-            .values_mut()
-            .map(|child| drift_all_occurrences(child, target, replacement))
-            .sum(),
-        _ => 0,
-    }
-}
-
 fn detach_private_vss_encrypted_envelopes(
     package: &mut serde_json::Value,
 ) -> Vec<(usize, serde_json::Value)> {
@@ -311,22 +272,6 @@ pub(super) fn rebind_same_secret_proof_record_root(
     );
 }
 
-pub(super) fn rebind_collective_same_secret_proof_roots(package: &mut serde_json::Value) {
-    let proof_roots = package["sameSecretProofs"]["proofRecords"]
-        .as_array()
-        .expect("same-secret proof records")
-        .iter()
-        .map(|proof_record| {
-            serde_json::json!({
-                "trusteeIdentity": proof_record["trusteeIdentity"],
-                "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-                "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
-            })
-        })
-        .collect::<Vec<_>>();
-    package["sameSecretProofs"]["sameSecretProofRoots"] = serde_json::json!(proof_roots);
-}
-
 pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_json::Value) {
     package["sameSecretProofs"]
         .as_object_mut()
@@ -342,7 +287,6 @@ pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut se
     let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()
         .expect("public-key succinct proof records");
-    let mut proof_roots = Vec::new();
     for proof_record in proof_records {
         proof_record
             .as_object_mut()
@@ -351,14 +295,7 @@ pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut se
         proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record).expect("public-key succinct proof root")
         );
-        proof_roots.push(serde_json::json!({
-            "trusteeIdentity": proof_record["trusteeIdentity"],
-            "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
-        }));
     }
-    package["publicKeyShareSuccinctProofs"]["publicKeyShareSuccinctProofRoots"] =
-        serde_json::json!(proof_roots);
     package["publicKeyShareSuccinctProofs"]
         .as_object_mut()
         .expect("public-key succinct proof set")
@@ -386,7 +323,6 @@ pub(super) fn rebind_collective_public_key_share_roots(package: &mut serde_json:
     let share_records = package["publicKeyShares"]["shareRecords"]
         .as_array_mut()
         .expect("public-key share records");
-    let mut public_key_share_roots = Vec::new();
     for share_record in share_records {
         share_record
             .as_object_mut()
@@ -395,13 +331,7 @@ pub(super) fn rebind_collective_public_key_share_roots(package: &mut serde_json:
         share_record["publicKeyShareRoot"] = serde_json::json!(
             derive_canonical_object_hash(share_record).expect("public-key share root")
         );
-        public_key_share_roots.push(serde_json::json!({
-            "trusteeIdentity": share_record["trusteeIdentity"],
-            "trusteeRosterPosition": share_record["trusteeRosterPosition"],
-            "publicKeyShareRoot": share_record["publicKeyShareRoot"],
-        }));
     }
-    package["publicKeyShares"]["publicKeyShareRoots"] = serde_json::json!(public_key_share_roots);
     package["publicKeyShares"]
         .as_object_mut()
         .expect("public-key share set")
@@ -416,7 +346,6 @@ pub(super) fn rebind_collective_public_key_share_proof_roots(package: &mut serde
     let proof_records = package["publicKeyShareProofs"]["proofRecords"]
         .as_array_mut()
         .expect("public-key share proof records");
-    let mut public_key_share_proof_roots = Vec::new();
     for proof_record in proof_records {
         proof_record
             .as_object_mut()
@@ -425,14 +354,7 @@ pub(super) fn rebind_collective_public_key_share_proof_roots(package: &mut serde
         proof_record["publicKeyShareProofRoot"] = serde_json::json!(
             derive_canonical_object_hash(proof_record).expect("public-key share proof root")
         );
-        public_key_share_proof_roots.push(serde_json::json!({
-            "trusteeIdentity": proof_record["trusteeIdentity"],
-            "trusteeRosterPosition": proof_record["trusteeRosterPosition"],
-            "publicKeyShareProofRoot": proof_record["publicKeyShareProofRoot"],
-        }));
     }
-    package["publicKeyShareProofs"]["publicKeyShareProofRoots"] =
-        serde_json::json!(public_key_share_proof_roots);
     package["publicKeyShareProofs"]
         .as_object_mut()
         .expect("public-key share proof set")

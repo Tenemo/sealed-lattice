@@ -223,12 +223,6 @@ fn verify_coefficient_record(
     }
     let commitment_root = hash_string_field(coefficient_record, "commitmentRoot")?;
     validate_hash_string(commitment_root, "coefficientCommitment.commitmentRoot")?;
-    for field_name in ["commitmentChunkRoot", "coefficientVectorHash512"] {
-        validate_hash_string(
-            hash_string_field(coefficient_record, field_name)?,
-            &format!("coefficientCommitment.{field_name}"),
-        )?;
-    }
 
     Ok((
         rns_limb_index,

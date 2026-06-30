@@ -23,10 +23,8 @@ import {
     type RelinearizationKeyShareRounds,
     type TransportedPublicEvaluationKeyMaterialSet,
     evaluationKeyShareComponentMaterialEncoding,
-    publicEvaluationKeyAssemblyStatus,
     publicEvaluationKeyMaterialEncoding,
     publicEvaluationKeyMaterialMagic,
-    publicEvaluationKeyMaterialSource,
     publicEvaluationKeyMaterialTransportObjectType,
     publicEvaluationKeyMaterialTransportSetObjectType,
     publicEvaluationKeyTransportMaterialEncoding,
@@ -286,9 +284,7 @@ export function createPublicEvaluationKeySet(
     const evaluationKeysWithoutHash = {
         objectType: 'PublicEvaluationKeySet',
         objectVersion: 1,
-        assemblyStatus: publicEvaluationKeyAssemblyStatus,
         materialEncoding: publicEvaluationKeyMaterialEncoding,
-        materialSource: publicEvaluationKeyMaterialSource,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -309,7 +305,6 @@ export function createPublicEvaluationKeySet(
             input.evaluatorKeySchedule.requiredGaloisKeySchedule,
         galoisKeyShareBatchRoots,
         galoisKeyRoots,
-        genericKeySwitchKeyRoots: [],
         ...(input.publicEvaluationKeyMaterialReference ?? {}),
     } as const satisfies Omit<PublicEvaluationKeySet, 'evaluationKeySetHash'>;
 
@@ -458,7 +453,6 @@ const publicEvaluationKeyMaterialManifest = (
     galoisShareMaterialRoots: galoisShareMaterialManifest(
         input.galoisKeyShareBatches,
     ),
-    genericKeySwitchKeyRoots: evaluationKeys.genericKeySwitchKeyRoots,
 });
 
 const encodePublicEvaluationKeyMaterialManifest = (

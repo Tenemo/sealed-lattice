@@ -146,9 +146,7 @@ pub(in super::super) fn public_evaluation_key_set_object(
     let mut evaluation_keys = serde_json::json!({
         "objectType": "PublicEvaluationKeySet",
         "objectVersion": 1,
-        "assemblyStatus": "assembled-from-proof-bearing-shares",
         "materialEncoding": "root-bound-public-key-switch-component-roots",
-        "materialSource": "verified-relinearization-and-galois-proof-records",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
@@ -166,7 +164,6 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "requiredGaloisKeySchedule": schedule["requiredGaloisKeySchedule"],
         "galoisKeyShareBatchRoots": galois_key_share_batch_roots,
         "galoisKeyRoots": galois_key_roots,
-        "genericKeySwitchKeyRoots": [],
     });
     evaluation_keys["evaluationKeySetHash"] = serde_json::json!(
         derive_canonical_object_hash(&evaluation_keys).expect("evaluation key set hash")

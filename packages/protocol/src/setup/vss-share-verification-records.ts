@@ -504,7 +504,6 @@ export const createVssShareComplaintRecordFromLocalVerification = async (
             input.privateVssEnvelopeCommitmentRoot,
             input.envelopeReference,
         ),
-        verificationStatus: 'failed-local-private-vss-opening',
         privateEnvelopeHashFromLocalVerification:
             input.localVerification.privateEnvelopeHash,
         localVerificationRoot: input.localVerification.localVerificationRoot,

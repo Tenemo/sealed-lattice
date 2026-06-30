@@ -18,7 +18,6 @@ import type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyProofVerification,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
@@ -41,7 +40,6 @@ import type {
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
-    BgvThresholdShareCommitmentTransportStreamAbort,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
@@ -60,7 +58,6 @@ export type {
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
-    BgvTrusteeEvaluationKeyProofVerification,
     BgvTrusteeEvaluationKeySameSecretLinkage,
     BgvTrusteeEvaluationKeyStatementContext,
     BgvTrusteeEvaluationKeyStatementKey,
@@ -83,7 +80,6 @@ export type {
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
     BgvThresholdShareCommitmentTransportDerivation,
-    BgvThresholdShareCommitmentTransportStreamAbort,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
@@ -124,7 +120,6 @@ export type TranscriptCoreKernel = {
         readonly sharePoints: readonly TranscriptCoreKernelSharePoint[];
     }): FieldElement;
     listCanonicalErrorCodes(): readonly string[];
-    listReservedRootNamespaces(): readonly string[];
     roundTripBytes(input: Uint8Array): Uint8Array;
     verifyFixture(
         fixture: TranscriptCoreFixture,
@@ -217,9 +212,6 @@ export type TranscriptCoreKernel = {
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
         readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSource?:
-            | 'fresh-csprng'
-            | 'development-deterministic-fixture';
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvPrivateVssShareProofGeneration;
@@ -232,17 +224,9 @@ export type TranscriptCoreKernel = {
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
         readonly negativeIndicatorCoefficients?: readonly number[];
         readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSource: string;
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }): BgvTrusteeEvaluationKeyProofGeneration;
-    verifyTrusteeEvaluationKeyProof(input: {
-        readonly context: BgvTrusteeEvaluationKeyStatementContext;
-        readonly ringDegree: number;
-        readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
-        readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
-        readonly proofBytesHex: string;
-    }): BgvTrusteeEvaluationKeyProofVerification;
     computeSetupCommitmentFromOpening(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly sourceRnsLimbIndex: number;
@@ -273,9 +257,6 @@ export type TranscriptCoreKernel = {
             | BgvTransportedVssCoefficientCommitmentMaterialReference
             | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
     }): BgvThresholdShareCommitmentTransportStreamBegin;
-    abortThresholdShareCommitmentsFromTransportStream(input: {
-        readonly derivationId: string;
-    }): BgvThresholdShareCommitmentTransportStreamAbort;
     absorbThresholdShareCommitmentsFromTransportStreamChunk(input: {
         readonly derivationId: string;
         readonly chunkIndex: number;
@@ -366,9 +347,6 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'ListCanonicalErrorCodes';
-      }
-    | {
-          readonly command: 'ListReservedRootNamespaces';
       }
     | {
           readonly command: 'VerifyFixture';
@@ -479,9 +457,6 @@ type TranscriptCoreKernelCommand =
           readonly coefficientCommitmentRoots: readonly ProtocolHash[];
           readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
           readonly openingRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
-          readonly proofRandomnessSource?:
-              | 'fresh-csprng'
-              | 'development-deterministic-fixture';
           readonly proofRandomnessSeedHex: string;
           readonly proofRandomnessNonceHex: string;
       }
@@ -495,17 +470,8 @@ type TranscriptCoreKernelCommand =
           readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
           readonly negativeIndicatorCoefficients?: readonly number[];
           readonly openingRandomnessByLimb?: readonly (readonly (readonly number[])[])[];
-          readonly proofRandomnessSource: string;
           readonly proofRandomnessSeedHex: string;
           readonly proofRandomnessNonceHex: string;
-      }
-    | {
-          readonly command: 'VerifyTrusteeEvaluationKeyProof';
-          readonly context: BgvTrusteeEvaluationKeyStatementContext;
-          readonly ringDegree: number;
-          readonly keys: readonly BgvTrusteeEvaluationKeyStatementKey[];
-          readonly sameSecretLinkage?: BgvTrusteeEvaluationKeySameSecretLinkage;
-          readonly proofBytesHex: string;
       }
     | {
           readonly command: 'ComputeSetupCommitmentFromOpening';
@@ -540,10 +506,6 @@ type TranscriptCoreKernelCommand =
           readonly transportedVssCoefficientCommitmentMaterial:
               | BgvTransportedVssCoefficientCommitmentMaterialReference
               | BgvTransportedVssCoefficientCommitmentMaterialTemplate;
-      }
-    | {
-          readonly command: 'AbortThresholdShareCommitmentsFromTransportStream';
-          readonly derivationId: string;
       }
     | {
           readonly command: 'AbsorbThresholdShareCommitmentsFromTransportStreamChunk';

@@ -4,12 +4,9 @@ import { describe, expect, it } from 'vitest';
 import {
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
-    sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
-    sameSecretGenericKeySwitchBindingPolicy,
     sameSecretProofFamily,
     sameSecretRelation,
-    sameSecretTargetDecryptionBindingPolicy,
     type SameSecretConsistencyStatementRecord,
     type VssCoefficientCommitmentSet,
     type VssCoefficientOpeningInput,
@@ -178,12 +175,7 @@ describe('same-secret consistency statement builders', () => {
                 objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
                 sameSecretRelation,
-                anchorArgument: sameSecretAnchorArgument,
                 boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-                genericKeySwitchBindingPolicy:
-                    sameSecretGenericKeySwitchBindingPolicy,
-                targetDecryptionBindingPolicy:
-                    sameSecretTargetDecryptionBindingPolicy,
             });
         const expectedTrusteeSecretCommitmentRoot = deriveCanonicalObjectHash({
             objectType: 'TrusteeSecretCommitment',
@@ -227,10 +219,6 @@ describe('same-secret consistency statement builders', () => {
         );
         expect(firstStatementRecord.sameSecretProofFamilyBindingRoot).toBe(
             expectedSameSecretProofFamilyBindingRoot,
-        );
-        expect(statementWithoutRoot.trusteeSecretCommitmentRoot).toBe(
-            sameSecretConsistency.trusteeSecretCommitmentRoots[0]
-                ?.trusteeSecretCommitmentRoot,
         );
         expect(sameSecretStatementRoot).toBe(
             deriveCanonicalObjectHash(statementWithoutRoot),

@@ -1,4 +1,7 @@
-use super::super::extension_field::{CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionTower};
+use super::super::evaluation_domain::EvaluationDomainPlan;
+use super::super::extension_field::{
+    CHALLENGE_EXTENSION_DEGREE, ChallengeExtensionElement, ChallengeExtensionTower,
+};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::low_degree_proof::{LowDegreeParameters, prove_low_degree};
 use super::super::merkle_commitment::sorted_unique_indices;
@@ -32,6 +35,19 @@ const TRUSTEE_PROOF_LIMB_BATCH_SIZE_ENVIRONMENT_VARIABLE: &str =
 fn normalize_limb_batch_size(requested_limb_batch_size: usize, limb_count: usize) -> usize {
     requested_limb_batch_size.max(1).min(limb_count.max(1))
 }
+
+#[cfg(test)]
+fn trustee_proof_progress(message: impl AsRef<str>) {
+    if matches!(
+        std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_PROGRESS").as_deref(),
+        Ok("1")
+    ) {
+        println!("sealed-lattice-trustee-proof-progress {}", message.as_ref());
+    }
+}
+
+#[cfg(not(test))]
+fn trustee_proof_progress(_message: impl AsRef<str>) {}
 
 #[cfg(not(target_arch = "wasm32"))]
 fn configured_limb_batch_size(limb_count: usize) -> usize {
@@ -414,8 +430,26 @@ fn prove_limb(
         initial_degree_bound: commitment_bound,
     };
     transcript.absorb("low-degree-purpose", MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE);
-    let (low_degree, query_positions) =
-        prove_low_degree(&mut transcript, &low_degree_parameters, &batch_codeword)?;
+    let (low_degree, query_positions) = match prove_low_degree(
+        &mut transcript,
+        &low_degree_parameters,
+        &batch_codeword,
+    ) {
+        Ok(proof_and_queries) => proof_and_queries,
+        Err(error)
+            if error
+                .message
+                .contains("low-degree final layer exceeds the final degree bound") =>
+        {
+            let actual_degree = extension_codeword_degree(plan, &batch_codeword)?
+                .map_or_else(|| "zero".to_string(), |degree| degree.to_string());
+            return Err(invalid_succinct_setup_proof(format!(
+                "limb {limb_index}: {}; DEEP-batched codeword degree {actual_degree}, claimed degree bound below {commitment_bound}",
+                error.message
+            )));
+        }
+        Err(error) => return Err(error),
+    };
 
     let sumcheck_residual_codeword = (0..extension_size)
         .map(|position| phase_two_logical_value(position, QUOTIENT_COLUMN_SUMCHECK_RESIDUAL))
@@ -508,6 +542,34 @@ fn prove_limb(
     })
 }
 
+fn extension_codeword_degree(
+    plan: &EvaluationDomainPlan,
+    codeword: &[ChallengeExtensionElement],
+) -> CanonicalResult<Option<usize>> {
+    if codeword.len() != plan.extension_size {
+        return Err(invalid_succinct_setup_proof(
+            "extension codeword length does not match the evaluation domain",
+        ));
+    }
+    let mut highest_nonzero_coefficient = None;
+    let mut coordinate_values = vec![0_u64; codeword.len()];
+    for coordinate in 0..CHALLENGE_EXTENSION_DEGREE {
+        for (slot, element) in coordinate_values.iter_mut().zip(codeword.iter()) {
+            *slot = element[coordinate];
+        }
+        let coefficients = plan.coefficients_from_extension_evaluations(&coordinate_values)?;
+        if let Some(coefficient_index) = coefficients.iter().rposition(|value| *value != 0) {
+            highest_nonzero_coefficient = Some(
+                highest_nonzero_coefficient.map_or(coefficient_index, |previous: usize| {
+                    previous.max(coefficient_index)
+                }),
+            );
+        }
+    }
+
+    Ok(highest_nonzero_coefficient)
+}
+
 pub(crate) fn prove_evaluation_key_share(
     statement: &TrusteeEvaluationKeyStatement,
     witness: &TrusteeEvaluationKeyWitness,
@@ -559,6 +621,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
             .enumerate()
             .map(|(batch_offset, modulus)| {
                 let limb_index = batch_start + batch_offset;
+                trustee_proof_progress(format!("commitment-start limb={limb_index}"));
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
@@ -566,6 +629,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     *modulus,
                     proof_randomness_seed_hex,
                 )?;
+                trustee_proof_progress(format!("commitment-finish limb={limb_index}"));
                 Ok(commitment.salted.tree.root())
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
@@ -575,6 +639,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
             .enumerate()
             .map(|(batch_offset, modulus)| {
                 let limb_index = batch_start + batch_offset;
+                trustee_proof_progress(format!("commitment-start limb={limb_index}"));
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
@@ -582,6 +647,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     *modulus,
                     proof_randomness_seed_hex,
                 )?;
+                trustee_proof_progress(format!("commitment-finish limb={limb_index}"));
                 Ok(commitment.salted.tree.root())
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
@@ -618,6 +684,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
             .enumerate()
             .map(|(batch_offset, modulus)| {
                 let limb_index = batch_start + batch_offset;
+                trustee_proof_progress(format!("prove-start limb={limb_index}"));
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
@@ -639,6 +706,10 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     proof_randomness_seed_hex,
                     &transcript,
                 )
+                .map(|proof| {
+                    trustee_proof_progress(format!("prove-finish limb={limb_index}"));
+                    proof
+                })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
         #[cfg(target_arch = "wasm32")]
@@ -647,6 +718,7 @@ fn prove_evaluation_key_share_with_limb_batch_size(
             .enumerate()
             .map(|(batch_offset, modulus)| {
                 let limb_index = batch_start + batch_offset;
+                trustee_proof_progress(format!("prove-start limb={limb_index}"));
                 let commitment = build_limb_witness_commitment(
                     statement,
                     witness,
@@ -668,6 +740,10 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     proof_randomness_seed_hex,
                     &transcript,
                 )
+                .map(|proof| {
+                    trustee_proof_progress(format!("prove-finish limb={limb_index}"));
+                    proof
+                })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
 

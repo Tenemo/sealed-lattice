@@ -37,7 +37,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "galoisKeyShareBatchRoots": evaluation_keys["galoisKeyShareBatchRoots"],
         "galoisKeyRoots": evaluation_keys["galoisKeyRoots"],
         "galoisShareMaterialRoots": galois_share_material_manifest(setup_package)?,
-        "genericKeySwitchKeyRoots": evaluation_keys["genericKeySwitchKeyRoots"],
     }))
 }
 

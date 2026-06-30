@@ -14,7 +14,7 @@ fn first_closure_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "cd507eb1c1c1d68b00a63125aed4c5262bbccee4911a2ed67ee75cf941163629e2ae9dbd65c8efc1d2d7e5b97a6a12ade1b1e4059eda0ca94695a59c8d3b45ff",
+        "97f1e1210bbbcffc86505edff3b2e76003184710b7edab49ae9440c93b4fdddea038153ec85815e8b11cf7aa5cd854788f2cecc440681cf7d507318f24128958",
     );
 }
 
@@ -110,10 +110,6 @@ fn collective_setup_parameters_expose_first_closure_state_machine() {
     assert_eq!(
         setup_parameters["evaluatorKeySchedule"]["objectType"],
         "EvaluatorKeySchedule"
-    );
-    assert_eq!(
-        setup_parameters["evaluatorKeySchedule"]["genericKeySwitchPolicy"],
-        "refused-unless-explicitly-required"
     );
     assert!(
         !setup_parameters["evaluatorKeySchedule"]["relinearizationLevelSchedule"]

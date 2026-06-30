@@ -209,20 +209,6 @@ mod tests {
                 .len(),
             128
         );
-        assert_eq!(
-            response["commitmentChunkRoot"]
-                .as_str()
-                .expect("commitment chunk root")
-                .len(),
-            128
-        );
-        assert_eq!(
-            response["coefficientVectorHash512"]
-                .as_str()
-                .expect("coefficient vector hash")
-                .len(),
-            128
-        );
 
         Ok(())
     }

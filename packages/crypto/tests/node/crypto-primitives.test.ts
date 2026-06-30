@@ -25,6 +25,12 @@ const contextHash = deriveCanonicalObjectHash({
     objectType: 'ActionContextHash',
     context: 'crypto-test',
 });
+const localTrusteeStateTextEncoder = new TextEncoder();
+
+const localTrusteeEnvelopeHash = (domain: string, value: unknown): string =>
+    hash512Hex(domain, [
+        localTrusteeStateTextEncoder.encode(canonicalJson(value)),
+    ]);
 
 const createSignedRoot = (
     objectRoot = deriveCanonicalObjectHash({
@@ -518,6 +524,70 @@ describe('crypto primitive boundary', () => {
             localStatePlaintextHash: encrypted.localStatePlaintextHash,
             storageAadHash: encrypted.storageAadHash,
         });
+        const wrongKeyCommitmentHash = deriveCanonicalObjectHash({
+            objectType: 'StorageKeyCommitmentHash',
+            key: 'wrong-storage-key',
+        });
+        const reboundLocalStateEnvelope = {
+            ...Object.fromEntries(
+                Object.entries(encrypted.encryptedLocalState).filter(
+                    ([fieldName]) => fieldName !== 'encryptedLocalStateHash',
+                ),
+            ),
+            keyCommitmentHash: wrongKeyCommitmentHash,
+        };
+
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: {
+                    ...reboundLocalStateEnvelope,
+                    encryptedLocalStateHash: localTrusteeEnvelopeHash(
+                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        reboundLocalStateEnvelope,
+                    ),
+                } as typeof encrypted.encryptedLocalState,
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow(/keyCommitmentHash/u);
+
+        const reboundSealedMaterialEnvelope = {
+            ...Object.fromEntries(
+                Object.entries(
+                    sealedAggregateThresholdShare.sealedMaterial
+                        .encryptedMaterial,
+                ).filter(
+                    ([fieldName]) => fieldName !== 'encryptedMaterialHash',
+                ),
+            ),
+            keyCommitmentHash: wrongKeyCommitmentHash,
+        };
+        const reboundEncryptedMaterial = {
+            ...reboundSealedMaterialEnvelope,
+            encryptedMaterialHash: localTrusteeEnvelopeHash(
+                'sealed-lattice-local-trustee-state/sealed-material-envelope-hash-v1',
+                reboundSealedMaterialEnvelope,
+            ),
+        } as typeof sealedAggregateThresholdShare.sealedMaterial.encryptedMaterial;
+
+        await expect(
+            encryptLocalTrusteeState({
+                localStatePlaintext: {
+                    ...localStatePlaintext,
+                    sealedAggregateThresholdShare: {
+                        ...localStatePlaintext.sealedAggregateThresholdShare,
+                        ciphertextReference:
+                            reboundEncryptedMaterial.encryptedMaterialHash,
+                        encryptedMaterial: reboundEncryptedMaterial,
+                    },
+                },
+                localStateCommitment,
+                setupContext,
+                storageKeyBytesHex,
+                aeadNonceBytesHex,
+            }),
+        ).rejects.toThrow(/keyCommitmentHash/u);
 
         await expect(
             encryptLocalTrusteeState({
@@ -593,24 +663,18 @@ describe('crypto primitive boundary', () => {
             secretKeyBytesHex: keyPair.secretKeyBytesHex,
             signedRoot,
         });
-        const tamperedProfilePayload = {
-            profile: {
-                ...signature.profile,
-                providerName: 'forged-provider',
-                providerVersion: '999',
-                providerBuildHash: deriveCanonicalObjectHash({
-                    objectType: 'ProviderBuildHash',
-                    forged: true,
-                }),
-            },
+        const tamperedSignedRootPayload = {
+            profile: signature.profile,
             publicKeyBytesHex: signature.publicKeyBytesHex,
             publicKeyHash: signature.publicKeyHash,
             signatureBytesHex: signature.signatureBytesHex,
-            signedRoot: signature.signedRoot,
+            signedRoot: { ...signature.signedRoot, recoveryEpoch: 999 },
         };
-        const tamperedProfileSignature = {
-            ...tamperedProfilePayload,
-            signatureHash: deriveProtocolSignatureHash(tamperedProfilePayload),
+        const tamperedSignedRootSignature = {
+            ...tamperedSignedRootPayload,
+            signatureHash: deriveProtocolSignatureHash(
+                tamperedSignedRootPayload,
+            ),
         };
         const uppercaseHexSignature = {
             ...signature,
@@ -619,7 +683,7 @@ describe('crypto primitive boundary', () => {
         };
 
         for (const rejectedSignature of [
-            tamperedProfileSignature,
+            tamperedSignedRootSignature,
             uppercaseHexSignature,
         ]) {
             expect(

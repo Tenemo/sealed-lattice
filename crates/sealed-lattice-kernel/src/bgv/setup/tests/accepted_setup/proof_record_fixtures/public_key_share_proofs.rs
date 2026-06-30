@@ -66,7 +66,6 @@ pub(in super::super) fn collective_public_key_object(
         "objectType": "CollectivePublicKey",
         "objectVersion": 1,
         "proofFamily": "public-key-share",
-        "aggregationStatus": "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
@@ -501,22 +500,15 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
-        let proof_root_entry = serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
-        });
         terminal_phase(&format!(
             "generated public-key share succinct proof trustee {trustee_roster_position}"
         ));
 
-        (proof_root_entry, proof_record)
+        proof_record
         })
         .collect::<Vec<_>>();
     let mut proof_records = Vec::new();
-    let mut proof_roots = Vec::new();
-    for (proof_root_entry, proof_record) in per_trustee_records {
-        proof_roots.push(proof_root_entry);
+    for proof_record in per_trustee_records {
         proof_records.push(proof_record);
     }
     let mut proof_set = serde_json::json!({
@@ -539,7 +531,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
-        "publicKeyShareSuccinctProofRoots": proof_roots,
         "proofRecords": proof_records,
     });
     proof_set["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(

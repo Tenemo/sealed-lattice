@@ -53,10 +53,7 @@ mod prover;
 mod relation;
 mod verifier;
 
-pub(crate) use commands::{
-    generate_trustee_evaluation_key_proof_from_request,
-    verify_trustee_evaluation_key_proof_from_request,
-};
+pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;

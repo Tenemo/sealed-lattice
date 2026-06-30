@@ -173,7 +173,6 @@ export type BgvObjectValidation = {
     readonly coefficientCount: number;
     readonly plaintextRoot?: ProtocolHash;
     readonly ciphertextRoot?: ProtocolHash;
-    readonly canonicalBytesHash512: string;
 };
 
 export type BgvCanonicalObjectAnalysis = {
@@ -215,7 +214,6 @@ export type BgvBatchPlaintextEncoding = {
     readonly suppliedSlotCount: number;
     readonly slotCount: number;
     readonly plaintextRoot: ProtocolHash;
-    readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
     readonly sampledSlots: readonly {
         readonly position: number;
@@ -232,7 +230,6 @@ export type BgvBatchPlaintextEncoding = {
 export type BgvCiphertextConventionFixture = {
     readonly bgvParametersHash: ProtocolHash;
     readonly ciphertextRoot: ProtocolHash;
-    readonly canonicalBytesHash512: string;
     readonly canonicalByteLength: number;
     readonly componentCount: number;
     readonly validation: BgvObjectValidation;
@@ -242,8 +239,6 @@ export type BgvCiphertextConventionFixture = {
 export type BgvBaseConversionFixture = {
     readonly sourcePlaintextRoot: ProtocolHash;
     readonly convertedPlaintextRoot: ProtocolHash;
-    readonly sourceCanonicalBytesHash512: string;
-    readonly convertedCanonicalBytesHash512: string;
     readonly sourceBasisId: string;
     readonly convertedBasisId: string;
     readonly convertedModulusCount: number;
@@ -413,7 +408,6 @@ export type BgvCollectiveSetupParametersDescription = {
             readonly proofFamily: 'galois-key-share';
         }[];
         readonly requiredGaloisSetHash: ProtocolHash;
-        readonly genericKeySwitchPolicy: 'refused-unless-explicitly-required';
     };
     readonly phaseOrder: readonly {
         readonly phaseId: string;
@@ -421,7 +415,6 @@ export type BgvCollectiveSetupParametersDescription = {
     }[];
     readonly phaseOrderHash: ProtocolHash;
     readonly requiredFinalObjects: readonly string[];
-    readonly genericKeySwitchPolicy: string;
     readonly transportSchemeId: string;
 };
 
@@ -578,13 +571,6 @@ export type BgvPrivateVssShareProofGeneration = {
     readonly ringDegree: number;
     readonly shareValuesHash: ProtocolHash;
     readonly privateVssShareProof: Record<string, unknown>;
-    readonly proofRandomness: {
-        readonly source: 'fresh-csprng' | 'development-deterministic-fixture';
-        readonly binding?: string;
-        readonly nonceHash?: ProtocolHash;
-        readonly seedBytes: 64;
-        readonly retention: string;
-    };
 };
 
 // One key share inside a trustee evaluation-key proof statement. The
@@ -652,25 +638,6 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
-    readonly proofRandomness: {
-        readonly source: string;
-        readonly binding?: string;
-        readonly nonceHash?: ProtocolHash;
-        readonly retention: string;
-    };
-};
-
-export type BgvTrusteeEvaluationKeyProofVerification = {
-    readonly operation: 'verifyTrusteeEvaluationKeyProof';
-    readonly proofFamily:
-        | 'trustee-evaluation-key'
-        | 'same-secret-linkage-anchor'
-        | 'public-key-share';
-    readonly statementHash: ProtocolHash;
-    readonly limbCount: number;
-    readonly keyCount: number;
-    readonly sameSecretLinkageIncluded: boolean;
-    readonly proofByteLength: number;
 };
 
 export type BgvThresholdShareCommitmentDerivation = {
@@ -689,8 +656,6 @@ export type BgvSetupCommitmentOpeningComputation = {
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
-    readonly commitmentChunkRoot: ProtocolHash;
-    readonly coefficientVectorHash512: string;
 };
 
 export type BgvThresholdShareCommitmentTransportDerivation = Omit<
@@ -710,11 +675,6 @@ export type BgvThresholdShareCommitmentTransportStreamBegin = {
     readonly derivationId: string;
     readonly materialBinaryFormat: string;
     readonly transport: Readonly<Record<string, unknown>>;
-};
-
-export type BgvThresholdShareCommitmentTransportStreamAbort = {
-    readonly operation: 'abortThresholdShareCommitmentsFromTransportStream';
-    readonly derivationId: string;
 };
 
 export type BgvThresholdShareCommitmentTransportStreamChunkAbsorption = {

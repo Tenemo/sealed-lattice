@@ -13,14 +13,10 @@ export type EvaluationKeyShareProofFamily =
     | 'galois-key-share';
 
 export const trusteeEvaluationKeyProofFamily = 'trustee-evaluation-key';
-export const publicEvaluationKeyAssemblyStatus =
-    'assembled-from-proof-bearing-shares';
 export const publicEvaluationKeyMaterialEncoding =
     'root-bound-public-key-switch-component-roots';
 export const publicEvaluationKeyTransportMaterialEncoding =
     'binary-chunked-public-evaluation-key-root-manifest';
-export const publicEvaluationKeyMaterialSource =
-    'verified-relinearization-and-galois-proof-records';
 export const publicEvaluationKeyMaterialTransportSetObjectType =
     'SetupTransportedPublicEvaluationKeyMaterialSet';
 export const publicEvaluationKeyMaterialTransportObjectType =
@@ -252,7 +248,6 @@ export type GaloisKeyShareBatch = Readonly<
         readonly galoisKeyCrpRoot: ProtocolHash;
         readonly requiredGaloisSetHash: ProtocolHash;
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
-        readonly galoisKeyShareRoots: readonly GaloisKeyShareRootReference[];
         readonly galoisKeyShareMaterialRecords: readonly GaloisKeyShareMaterialRecord[];
         readonly galoisKeyShareBatchRoot: ProtocolHash;
     }
@@ -362,12 +357,6 @@ export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
-    readonly proofRandomness: Readonly<{
-        readonly source: string;
-        readonly binding?: string;
-        readonly nonceHash?: ProtocolHash;
-        readonly retention: string;
-    }>;
 }>;
 
 export type TrusteeEvaluationKeyProofGenerator = (
@@ -383,7 +372,6 @@ export type TrusteeEvaluationKeyProofGenerator = (
         readonly errorCoefficientsByKey: readonly (readonly (readonly number[])[])[];
         readonly negativeIndicatorCoefficients: readonly number[];
         readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
-        readonly proofRandomnessSource: string;
         readonly proofRandomnessSeedHex: string;
         readonly proofRandomnessNonceHex: string;
     }>,
@@ -438,9 +426,7 @@ export type PublicEvaluationKeySet = Readonly<
     JsonRecord & {
         readonly objectType: 'PublicEvaluationKeySet';
         readonly objectVersion: 1;
-        readonly assemblyStatus: typeof publicEvaluationKeyAssemblyStatus;
         readonly materialEncoding: typeof publicEvaluationKeyMaterialEncoding;
-        readonly materialSource: typeof publicEvaluationKeyMaterialSource;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
@@ -453,7 +439,6 @@ export type PublicEvaluationKeySet = Readonly<
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly galoisKeyShareBatchRoots: readonly GaloisKeyShareBatchRootReference[];
         readonly galoisKeyRoots: readonly GaloisKeyRootReference[];
-        readonly genericKeySwitchKeyRoots: readonly ProtocolHash[];
         readonly publicEvaluationKeyMaterialEncoding?: typeof publicEvaluationKeyTransportMaterialEncoding;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
         readonly publicEvaluationKeyMaterialChunkSizeBytes?: number;

@@ -180,44 +180,6 @@ fn verify_transport_certificate_body(
         "transportChunkCountMismatch",
         "setupTransportCertificate.chunkCount must match the aggregate transported-object chunk count",
     ));
-    let full_object_hash = transport_canonical_try!(require_transport_hash(
-        transport_certificate,
-        "fullObjectHash",
-        "transportFullObjectHashMissing",
-        "setupTransportCertificate.fullObjectHash is required",
-    ));
-    if full_object_hash != aggregate.full_object_hash {
-        return Ok(Err(Refusal::new(
-            "transportFullObjectHashMismatch",
-            "setupTransportCertificate.fullObjectHash must match the aggregate transported-object set hash",
-            "setupPackage.setupTransportCertificate.fullObjectHash",
-        )));
-    }
-    let chunk_hashes = transport_canonical_try!(transport_chunk_hashes(
-        transport_certificate,
-        aggregate.chunk_count as usize
-    ));
-    if chunk_hashes != aggregate.chunk_hashes {
-        return Ok(Err(Refusal::new(
-            "transportChunkHashesMismatch",
-            "setupTransportCertificate.chunkHashes must concatenate the transported-object chunk hashes in order",
-            "setupPackage.setupTransportCertificate.chunkHashes",
-        )));
-    }
-    let chunk_root = transport_canonical_try!(require_transport_hash(
-        transport_certificate,
-        "chunkRoot",
-        "transportChunkRootMissing",
-        "setupTransportCertificate.chunkRoot is required",
-    ));
-    if chunk_root != aggregate.chunk_root {
-        return Ok(Err(Refusal::new(
-            "transportChunkRootMismatch",
-            "setupTransportCertificate.chunkRoot must match the aggregate transported-object chunk manifest",
-            "setupPackage.setupTransportCertificate.chunkRoot",
-        )));
-    }
-
     let certificate_hash = transport_canonical_try!(require_transport_hash(
         transport_certificate,
         "setupTransportCertificateHash",
@@ -322,24 +284,6 @@ fn verify_setup_transported_objects(
                         )
                     })
             })?;
-    let chunk_hashes = transported_objects
-        .iter()
-        .flat_map(|transported_object| transported_object.chunk_hashes.clone())
-        .collect::<Vec<_>>();
-    let full_object_hash = setup_transport_full_object_set_hash(
-        &transported_objects,
-        total_byte_length,
-        chunk_count,
-        &chunk_hashes,
-    )?;
-    let chunk_root = setup_transport_chunk_manifest_root(
-        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-        chunk_count,
-        total_byte_length,
-        &chunk_hashes,
-        &full_object_hash,
-    )?;
-
     let vss_material_root = package_nested_hash(
         setup_package,
         "vssCoefficientCommitmentMaterial",
@@ -410,9 +354,6 @@ fn verify_setup_transported_objects(
     Ok(Ok(SetupTransportAggregate {
         total_byte_length,
         chunk_count,
-        chunk_hashes,
-        chunk_root,
-        full_object_hash,
     }))
 }
 
@@ -422,7 +363,6 @@ pub(super) struct SetupTransportedObjectBinding {
     pub(super) object_role: String,
     pub(super) object_root: String,
     pub(super) byte_length: u64,
-    pub(super) chunk_start_index: u64,
     pub(super) chunk_count: u64,
     pub(super) chunk_root: String,
     pub(super) chunk_hashes: Vec<String>,
@@ -433,9 +373,6 @@ pub(super) struct SetupTransportedObjectBinding {
 struct SetupTransportAggregate {
     total_byte_length: u64,
     chunk_count: u64,
-    chunk_hashes: Vec<String>,
-    chunk_root: String,
-    full_object_hash: String,
 }
 
 fn setup_transported_object_binding(
@@ -598,7 +535,6 @@ fn setup_transported_object_binding(
         object_role,
         object_root,
         byte_length,
-        chunk_start_index,
         chunk_count,
         chunk_root,
         chunk_hashes,

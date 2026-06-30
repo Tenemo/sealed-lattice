@@ -40,16 +40,13 @@ export const runWorkspaceBuildThenParallelCommands = async <
     readonly commandLineArguments: readonly string[];
     readonly lanes: readonly Lane[];
     readonly scriptName: string;
-    readonly shouldCreateRunLog: boolean;
 }): Promise<void> => {
     const packageManagerRunner = resolvePackageManagerRunner();
-    const runLog = input.shouldCreateRunLog
-        ? await createLocalRunLog({
-              commandLineArguments: input.commandLineArguments,
-              lanes: input.lanes,
-              scriptName: input.scriptName,
-          })
-        : undefined;
+    const runLog = await createLocalRunLog({
+        commandLineArguments: input.commandLineArguments,
+        lanes: input.lanes,
+        scriptName: input.scriptName,
+    });
 
     try {
         process.exitCode = await runCommandsAfterSeriesGate(
@@ -62,6 +59,6 @@ export const runWorkspaceBuildThenParallelCommands = async <
             { runLog },
         );
     } finally {
-        await runLog?.finish({ exitCode: currentProcessExitCode() });
+        await runLog.finish({ exitCode: currentProcessExitCode() });
     }
 };

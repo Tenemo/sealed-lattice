@@ -80,40 +80,6 @@ export function acceptedSetupTransportCertificate(
         encoding: 'binary',
         loadingPolicy: 'stream-verified-before-object-use',
     };
-    // The certificate-level hashes are the verifier-recomputed aggregates over
-    // the transported-object set.
-    const fullObjectHash = kernel.deriveCanonicalObjectHash({
-        value: {
-            objectType: 'SetupTransportFullObjectSet',
-            objectVersion: 1,
-            transportedObjects: [
-                {
-                    objectName: transportedVssObject.objectName,
-                    objectRole: transportedVssObject.objectRole,
-                    objectRoot: transportedVssObject.objectRoot,
-                    byteLength: transportedVssObject.byteLength,
-                    chunkStartIndex: transportedVssObject.chunkStartIndex,
-                    chunkCount: transportedVssObject.chunkCount,
-                    chunkRoot: transportedVssObject.chunkRoot,
-                    fullObjectHash: transportedVssObject.fullObjectHash,
-                },
-            ],
-            totalByteLength: setupTransportTotalByteLength,
-            chunkCount: setupTransportChunkCount,
-            chunkHashes,
-        },
-    });
-    const chunkRoot = kernel.deriveCanonicalObjectHash({
-        value: {
-            objectType: 'SetupTransportChunkManifest',
-            objectVersion: 1,
-            chunkSizeBytes: setupTransportChunkSizeBytes,
-            chunkCount: setupTransportChunkCount,
-            totalByteLength: setupTransportTotalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        },
-    });
     const certificate = {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
@@ -131,9 +97,6 @@ export function acceptedSetupTransportCertificate(
         resumePolicy: 'chunk-index-checkpointed-by-hash',
         lazyLoadingPolicy: 'root-addressed-large-object-loading',
         transportedObjects: [transportedVssObject],
-        chunkHashes,
-        chunkRoot,
-        fullObjectHash,
     };
 
     return {

@@ -28,8 +28,6 @@ type SetupCommitmentOpeningComputation = Readonly<{
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: string;
-    readonly commitmentChunkRoot: string;
-    readonly coefficientVectorHash512: string;
 }>;
 
 type SetupCommitmentKernel = Readonly<{
@@ -335,8 +333,6 @@ describe('transcript-core kernel in Node', () => {
 
         expect(computation.operation).toBe('computeSetupCommitmentFromOpening');
         expect(computation.commitmentRoot).toHaveLength(128);
-        expect(computation.commitmentChunkRoot).toHaveLength(128);
-        expect(computation.coefficientVectorHash512).toHaveLength(128);
         expect(computation.commitment).toMatchObject({
             objectType: 'SetupCommitment',
             sourceRnsLimbIndex: 0,
@@ -536,8 +532,5 @@ describe('transcript-core kernel in Node', () => {
 
         expect(kernel.hashRaw('00')).toMatch(/^[a-f0-9]{128}$/u);
         expect(kernel.listCanonicalErrorCodes()).toContain('InvalidEnum');
-        expect(kernel.listReservedRootNamespaces()).toContain(
-            'sealed-lattice-root/canonical-object-v1',
-        );
     });
 });

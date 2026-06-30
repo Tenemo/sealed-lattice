@@ -149,9 +149,12 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         input.actionContext.deviceEpoch ===
             input.recoveryEpochState.currentDeviceEpoch
     ) {
+        const actionCurrent = refusedObjects.length === 0;
         return {
-            isValid: refusedObjects.length === 0,
-            acceptedHashes: [input.actionContext.actionContextHash],
+            isValid: actionCurrent,
+            acceptedHashes: actionCurrent
+                ? [input.actionContext.actionContextHash]
+                : [],
             refusedObjects,
         };
     }
@@ -164,9 +167,12 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         input.actionContext.deviceEpoch <
             input.recoveryEpochState.currentDeviceEpoch
     ) {
+        const actionCurrent = refusedObjects.length === 0;
         return {
-            isValid: refusedObjects.length === 0,
-            acceptedHashes: [input.actionContext.actionContextHash],
+            isValid: actionCurrent,
+            acceptedHashes: actionCurrent
+                ? [input.actionContext.actionContextHash]
+                : [],
             refusedObjects,
         };
     }

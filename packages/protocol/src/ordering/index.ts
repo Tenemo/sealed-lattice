@@ -146,16 +146,6 @@ const deriveValidatedFirstValidOrderUnchecked = (
     const seenObjectHashes = new Set<string>();
     const seenConflictKeys = new Map<string, ValidatedFirstValidObject>();
 
-    if (input.selectionPolicyHash !== input.expectedSelectionPolicyHash) {
-        refusedObjects.push(
-            createRefusal(
-                'FirstValidPolicyMismatch',
-                'First-valid ordering requires the manifest-bound selection policy hash.',
-                input.selectionPolicyHash,
-            ),
-        );
-    }
-
     for (const candidate of input.objects) {
         const candidateShapeRefusals = validateFirstValidObjectShape(candidate);
         if (candidateShapeRefusals.length > 0) {
@@ -269,10 +259,15 @@ const deriveValidatedFirstValidOrderUnchecked = (
 
     return {
         isValid: refusedObjects.length === 0,
-        acceptedHashes: uniqueStrings([
-            firstValidOrderHash,
-            ...orderedCandidates.map((candidate) => candidate.objectHash),
-        ]),
+        acceptedHashes:
+            refusedObjects.length === 0
+                ? uniqueStrings([
+                      firstValidOrderHash,
+                      ...orderedCandidates.map(
+                          (candidate) => candidate.objectHash,
+                      ),
+                  ])
+                : [],
         refusedObjects,
         firstValidOrderHash:
             refusedObjects.length === 0 ? firstValidOrderHash : undefined,

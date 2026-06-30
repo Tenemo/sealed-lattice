@@ -14,21 +14,17 @@ pub(super) fn same_secret_consistency_object(
 ) -> serde_json::Value {
     let decryption_threshold = participant_count / 3 + 1;
     let mut statement_records = Vec::new();
-    let mut trustee_secret_commitment_roots = Vec::new();
     let same_secret_proof_family_binding_root = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "SameSecretProofFamilyBinding",
             "objectVersion": 1,
             "proofFamily": "same-secret-linkage-anchor",
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
-            "anchorArgument": "one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values",
             "boundSecretDependentProofFamilies": [
                 "vss-constant-relation",
                 "public-key-share",
                 "relinearization-key-share",
                 "galois-key-share",
             ],
-            "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
-            "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
         }),
     )
     .expect("same-secret proof family binding root");
@@ -98,19 +94,12 @@ pub(super) fn same_secret_consistency_object(
                 "relinearization-key-share",
                 "galois-key-share",
             ],
-            "genericKeySwitchBindingPolicy": "absent-unless-frozen-schedule-requires-proof-family",
-            "targetDecryptionBindingPolicy": "later-target-share-must-bind-threshold-share-commitment",
             "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
             "sameSecretRelation": "vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs",
         });
         statement_record["sameSecretStatementRoot"] = serde_json::json!(
             derive_canonical_object_hash(&statement_record).expect("same-secret statement root")
         );
-        trustee_secret_commitment_roots.push(serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "trusteeSecretCommitmentRoot": trustee_secret_commitment_root,
-        }));
         statement_records.push(statement_record);
     }
     let mut same_secret_consistency = serde_json::json!({
@@ -127,7 +116,6 @@ pub(super) fn same_secret_consistency_object(
         "thresholdDegree": decryption_threshold,
         "vssCoefficientCommitmentRoot": vss_coefficient_commitments["vssCoefficientCommitmentRoot"],
         "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
-        "trusteeSecretCommitmentRoots": trustee_secret_commitment_roots,
         "statementRecords": statement_records,
     });
     same_secret_consistency["sameSecretConsistencyRoot"] = serde_json::json!(

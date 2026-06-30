@@ -112,10 +112,6 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(encoded.validation.isValid).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expectProtocolHash(encoded.plaintextRoot, 'encoded plaintext root');
-        expectProtocolHash(
-            encoded.canonicalBytesHash512,
-            'encoded plaintext canonical bytes hash',
-        );
         expect(encoded.canonicalByteLength).toBe(90_311);
         expect(encoded.bgvParametersHash).toBe(parameters.bgvParametersHash);
         expect(encoded.sampledSlots).toEqual(
@@ -141,7 +137,6 @@ describe('BGV-RNS backend kernel commands', () => {
             isValid: true,
             objectKind: 'plaintext',
             plaintextRoot: encoded.plaintextRoot,
-            canonicalBytesHash512: encoded.canonicalBytesHash512,
         });
         expect(analyzed).toMatchObject({
             objectKind: 'plaintext',
@@ -238,10 +233,6 @@ describe('BGV-RNS backend kernel commands', () => {
         >;
 
         expectProtocolHash(fixture.ciphertextRoot, 'ciphertext root');
-        expectProtocolHash(
-            fixture.canonicalBytesHash512,
-            'ciphertext canonical bytes hash',
-        );
         expect(fixture.canonicalByteLength).toBe(180_521);
         expect(fixture.validation).toMatchObject({
             isValid: true,
