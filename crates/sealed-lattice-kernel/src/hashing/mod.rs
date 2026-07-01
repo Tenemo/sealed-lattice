@@ -457,6 +457,56 @@ mod tests {
     }
 
     #[test]
+    fn canonical_object_hash_matches_typescript_known_answers() {
+        let cases = [
+            (
+                serde_json::json!({
+                    "objectType": "CanonicalHashParityCase",
+                    "objectVersion": 1,
+                    "b": [2, 1],
+                    "a": {
+                        "z": true
+                    }
+                }),
+                "{\"a\":{\"z\":true},\"b\":[2,1],\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
+                "2ed1fd2293f48e6b4f7b9d7d4b0f105d3d6a9c4c392f70a3b9c6cade53247ee5f286f9b565258ef1f29fd6416aa349ab0388ef719303242382979a27da5a3589",
+            ),
+            (
+                serde_json::json!({
+                    "objectType": "CanonicalHashParityCase",
+                    "objectVersion": 1,
+                    "10": "a",
+                    "2": "b"
+                }),
+                "{\"10\":\"a\",\"2\":\"b\",\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1}",
+                "629347ec581398f06eea18e87c00946ec8eefa12574725b41a42b0056b97ec744d79ef8ed6d9c8b8a38e064e2dbde92f517206c3a32727bbd606e4e0c45de6b8",
+            ),
+            (
+                serde_json::json!({
+                    "objectType": "CanonicalHashParityCase",
+                    "objectVersion": 1,
+                    "value": "\u{0065}\u{0301}",
+                    "supplementary": "\u{10000}"
+                }),
+                "{\"objectType\":\"CanonicalHashParityCase\",\"objectVersion\":1,\"supplementary\":\"\u{10000}\",\"value\":\"\u{00e9}\"}",
+                "4421299dcece175cc568f13535276189cf09949bc0e0babf88444a42584ce0e51306a8dc26329ec1be1f490589486a9bd1040589bfe0a21ec868ed413d7947a2",
+            ),
+        ];
+
+        for (value, expected_canonical_json, expected_hash) in cases {
+            assert_eq!(
+                canonical_json(&value).expect("canonical JSON should serialize"),
+                expected_canonical_json
+            );
+            assert_eq!(
+                super::derive_canonical_object_hash(&value)
+                    .expect("canonical object hash should compute"),
+                expected_hash
+            );
+        }
+    }
+
+    #[test]
     fn canonical_json_byte_comparison_matches_streamed_encoding() {
         let value = serde_json::json!({
             "z": [true, null, "plain-ascii"],

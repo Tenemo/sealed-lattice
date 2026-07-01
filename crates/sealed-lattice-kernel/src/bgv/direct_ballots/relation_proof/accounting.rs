@@ -12,7 +12,7 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_bytes_hash(
 }
 
 // Binds the operative shape of the internal direct-ballot validity relation proof: statement
-// version, encoding, challenge size and domain, proof-bytes domain, relation shape, ring
+// hash domain, encoding, challenge size and domain, proof-bytes domain, relation shape, ring
 // degree, and data prime count.
 //
 // Scope, kept in prose rather than a bound field: this is an internal relation-shape proof.
@@ -24,7 +24,7 @@ pub(in crate::bgv::direct_ballots) fn direct_ballot_relation_proof_parameters_ha
 -> CanonicalResult<String> {
     derive_canonical_object_hash(&json!({
         "objectType": "BallotValidityProofParameters",
-        "statementVersion": 3,
+        "statementHashDomain": DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN,
         "proofEncoding": "binary relation transcript",
         "challengeBits": DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS,
         "challengeDomain": "sealed-lattice/direct-encrypted-ballot/relation-challenge-v1",

@@ -9,28 +9,6 @@ export type PackageManagerRunner = {
     readonly kind: PackageManager;
 };
 
-export const parsePackageManagerOverride = (
-    commandLineArguments: readonly string[],
-): PackageManager | undefined => {
-    const packageManagerIndex =
-        commandLineArguments.indexOf('--package-manager');
-    if (packageManagerIndex === -1) {
-        return undefined;
-    }
-
-    const packageManager = commandLineArguments[packageManagerIndex + 1];
-    if (packageManager === undefined) {
-        throw new Error('--package-manager requires a value');
-    }
-    if (packageManager !== 'npm') {
-        throw new Error(
-            `Unsupported package manager override: ${packageManager}`,
-        );
-    }
-
-    return packageManager;
-};
-
 export const detectPackageManager = (
     packageManagerEntryPointPath: string,
 ): PackageManager => {
@@ -167,37 +145,5 @@ export const resolvePackageManagerRunnerForPackageManager = (
         command: nodeExecutablePath,
         commandArgumentsPrefix: [entryPointPath],
         kind: packageManager,
-    };
-};
-
-export const resolvePackageManagerRunnerFromArguments = (
-    commandLineArguments: readonly string[],
-    packageManagerEntryPointPath = process.env.npm_execpath,
-    pathEnvironment: string = process.env.PATH ?? '',
-    nodeExecutablePath: string = process.execPath,
-    pathExists: (candidatePath: string) => boolean = existsSync,
-): PackageManagerRunner => {
-    const packageManagerOverride =
-        parsePackageManagerOverride(commandLineArguments);
-    if (packageManagerOverride !== undefined) {
-        return resolvePackageManagerRunnerForPackageManager(
-            packageManagerOverride,
-            packageManagerEntryPointPath,
-            pathEnvironment,
-            nodeExecutablePath,
-            pathExists,
-        );
-    }
-
-    if (packageManagerEntryPointPath === undefined) {
-        throw new Error(
-            'npm_execpath is required to run package manager commands when --package-manager is not provided',
-        );
-    }
-
-    return {
-        command: nodeExecutablePath,
-        commandArgumentsPrefix: [packageManagerEntryPointPath],
-        kind: detectPackageManager(packageManagerEntryPointPath),
     };
 };

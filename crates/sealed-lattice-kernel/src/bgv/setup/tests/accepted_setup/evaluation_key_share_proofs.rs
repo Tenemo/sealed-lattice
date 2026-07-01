@@ -286,55 +286,51 @@ fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_final_package_collective_setup_public_galois_key_loader_refuses_reduced_ring_material()
+fn heavy_accepted_setup_final_package_collective_setup_public_key_loaders_refuse_reduced_ring_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_final_package_collective_setup_public_galois_key_loader_refuses_reduced_ring_material",
+        "heavy_accepted_setup_final_package_collective_setup_public_key_loaders_refuse_reduced_ring_material",
     );
-    let (package, companions) = reduced_ring_setup_package_with_transported_public_setup_companions(
-        10,
-        "public-galois-loader",
-    );
-    let request = transported_public_setup_verification_request(companions);
 
-    let error = match accepted_setup_public_galois_keys_from_transport(&package, &request) {
-        Ok(_) => panic!("reduced-ring material must not become runtime Galois keys"),
-        Err(error) => error,
-    };
+    enum PublicKeyLoader {
+        Galois,
+        Relinearization,
+    }
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("requires full-ring component vectors")
-    );
-}
+    let loader_cases = [
+        ("public-galois-loader", "Galois", PublicKeyLoader::Galois),
+        (
+            "public-relinearization-loader",
+            "relinearization",
+            PublicKeyLoader::Relinearization,
+        ),
+    ];
 
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_final_package_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_final_package_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material",
-    );
-    let (package, companions) = reduced_ring_setup_package_with_transported_public_setup_companions(
-        10,
-        "public-relinearization-loader",
-    );
-    let request = transported_public_setup_verification_request(companions);
+    for (fixture_label, loader_label, loader) in loader_cases {
+        let (package, companions) =
+            reduced_ring_setup_package_with_transported_public_setup_companions(10, fixture_label);
+        let request = transported_public_setup_verification_request(companions);
 
-    let error = match accepted_setup_public_relinearization_keys_from_transport(&package, &request)
-    {
-        Ok(_) => panic!("reduced-ring material must not become runtime relinearization keys"),
-        Err(error) => error,
-    };
+        let failure_message =
+            format!("reduced-ring material must not become runtime {loader_label} keys");
+        let error = match loader {
+            PublicKeyLoader::Galois => {
+                accepted_setup_public_galois_keys_from_transport(&package, &request).map(|_| ())
+            }
+            PublicKeyLoader::Relinearization => {
+                accepted_setup_public_relinearization_keys_from_transport(&package, &request)
+                    .map(|_| ())
+            }
+        }
+        .expect_err(&failure_message);
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("requires full-ring component vectors")
-    );
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error
+                .message
+                .contains("requires full-ring component vectors")
+        );
+    }
 }
 
 #[test]
@@ -691,9 +687,7 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
         proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
         proof_record["proofBytesHash"] =
             serde_json::json!(trustee_evaluation_key_proof_bytes_hash(&proof_bytes));
-        proof_record["proofSizeBytes"] = serde_json::json!(proof_bytes.len());
     } else {
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
         let chunks = proof_bytes_transport_chunks(proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
@@ -702,7 +696,6 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("trustee proof transport hashes");
-        proof_record["proofSizeBytes"] = serde_json::json!(proof_size_bytes);
         proof_record["proofBytesHash"] = serde_json::json!(proof_bytes_hash);
         proof_record["proofChunkSizeBytes"] =
             serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
@@ -887,7 +880,7 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_g
     );
 
     for participant_count in [3_u64, 20_u64] {
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "start reduced-ring terminal fixture for n={participant_count}"
         ));
         let stream_derivation_purpose = format!("dynamic-roster-{participant_count}");
@@ -950,7 +943,7 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_g
             "n={participant_count}: the full-ring claim gate refuses the reduced ring degree: {}",
             serde_json::to_string_pretty(&result).expect("verification result JSON")
         );
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "reduced-ring fixture for n={participant_count} reached the full-ring claim gate cleanly"
         ));
     }

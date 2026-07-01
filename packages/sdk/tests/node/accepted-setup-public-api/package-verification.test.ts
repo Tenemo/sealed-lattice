@@ -3,6 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { hash512Hex, publicSetupApi } from './support.js';
 
 type JsonRecord = Record<string, unknown>;
+const expectedManifestHash = '1'.repeat(128);
+const expectedRosterHash = '2'.repeat(128);
+const setupVerificationBindings = {
+    expectedManifestHash,
+    expectedRosterHash,
+} as const;
 
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
@@ -249,11 +255,16 @@ describe('accepted setup public package API in Node', () => {
         const verificationInput =
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
+                ...setupVerificationBindings,
                 transportedVssCoefficientCommitmentMaterial,
                 verifiedVssCoefficientCommitmentMaterial,
             });
 
         expect(verificationInput.setupPackage).toBe(setupPackage);
+        expect(verificationInput.expectedManifestHash).toBe(
+            expectedManifestHash,
+        );
+        expect(verificationInput.expectedRosterHash).toBe(expectedRosterHash);
         expect(verificationInput.verifiedVssCoefficientCommitmentMaterial).toBe(
             verifiedVssCoefficientCommitmentMaterial,
         );
@@ -266,6 +277,7 @@ describe('accepted setup public package API in Node', () => {
                 objectType: 'BgvPassiveSetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
         });
 
         expect(verification).toMatchObject({
@@ -288,6 +300,7 @@ describe('accepted setup public package API in Node', () => {
         const verificationInput =
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
+                ...setupVerificationBindings,
                 transportedSameSecretProofMaterial:
                     transportedSetupProofMaterialSet(
                         setupProofMaterialTransportCases[0],
@@ -305,6 +318,10 @@ describe('accepted setup public package API in Node', () => {
             });
 
         expect(verificationInput.setupPackage).toBe(setupPackage);
+        expect(verificationInput.expectedManifestHash).toBe(
+            expectedManifestHash,
+        );
+        expect(verificationInput.expectedRosterHash).toBe(expectedRosterHash);
         expect(verificationInput.transportedPublicKeyShareMaterial).toBe(
             publicCompanions.transportedPublicKeyShareMaterial,
         );
@@ -340,6 +357,7 @@ describe('accepted setup public package API in Node', () => {
         const verificationInput =
             publicSetupApi.createSetupPackageVerificationInput({
                 setupPackage,
+                ...setupVerificationBindings,
                 transportedSameSecretProofMaterial:
                     transportedSetupProofMaterialSet(
                         setupProofMaterialTransportCases[0],
@@ -378,5 +396,30 @@ describe('accepted setup public package API in Node', () => {
             });
             expect(materialSet?.proofMaterials[0]).toHaveProperty('chunks');
         }
+    });
+
+    it('requires expected manifest and roster hashes for public setup verification input construction', () => {
+        const setupPackage = {
+            objectType: 'SetupPackage',
+            objectVersion: 1,
+            setupPackageHash: hash512Hex(
+                'sealed-lattice/test/setup-package-hash-missing-bindings',
+                [new Uint8Array([13, 14, 15, 16])],
+            ),
+        };
+
+        expect(() =>
+            publicSetupApi.createSetupPackageVerificationInput({
+                setupPackage,
+                expectedManifestHash,
+            }),
+        ).toThrow(/expectedRosterHash/u);
+        expect(() =>
+            publicSetupApi.createSetupPackageVerificationInput({
+                setupPackage,
+                expectedManifestHash: 'not-a-protocol-hash',
+                expectedRosterHash,
+            }),
+        ).toThrow(/expectedManifestHash/u);
     });
 });

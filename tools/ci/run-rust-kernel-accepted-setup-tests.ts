@@ -4,49 +4,52 @@ import path from 'node:path';
 import { createHeavyTestProgressReporter } from './heavy-test-progress.js';
 import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
+import {
+    heavyAcceptedSetupFinalPackageTestPattern,
+    heavyAcceptedSetupTestPattern,
+    normalizeRustTestFilter,
+} from './rust-kernel-test-arguments.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
-// One runner for the heavy accepted-setup tests in two modes, selected by the
-// `--iterate` flag. The flag is the mode switch, so the two configurations stay
-// mutually exclusive and a half-and-half state (for example checkpoint resume in
-// the gate's shared target) cannot be assembled:
+// One shared implementation for the Rust accepted-setup proof-test lanes.
+// Authoritative lanes are selected by the package-script entrypoint; the main
+// accepted-setup entrypoint also accepts a single positional test or file-stem
+// filter for focused local mode. Keeping those modes mutually exclusive
+// prevents a half-and-half state, for example checkpoint resume in the gate's
+// shared target:
 //
-//   default (no --iterate): authoritative CI-style runs. They build the selected
-//     `heavy_accepted_setup` scope cleanly in the shared `target/`
+//   default (no positional filter): authoritative CI-style runs. They build the selected
+//     `heavy_accepted_setup` lane cleanly in the shared `target/`
 //     (CARGO_INCREMENTAL=0), prove every proof family fresh (no checkpoint
 //     resume), and size libtest/prover/rayon concurrency from available memory
-//     so a constrained runner does not exhaust RAM. Test-name filters are
-//     rejected here; the selected scope defines coverage.
+//     so a constrained runner does not exhaust RAM. The selected lane defines
+//     coverage.
 //
-//   --iterate [<filter>...]: the fast developer inner loop. It runs only the
-//     filtered tests in a separate pinned `target/heavy-iteration/`
+//   <filter>: the fast developer inner loop. It runs only the filtered test or
+//     module in a separate pinned `target/accepted-setup-focused/`
 //     (CARGO_INCREMENTAL=1) so an edit recompiles incrementally (measured ~16s
 //     versus ~44s for a full rebuild) without contending for the gate's build
-//     lock, and resumes the on-disk proof checkpoints so each family's corpus
-//     loads from `temp/test-checkpoints/` instead of being re-proved. That
-//     trades the authoritative prove-fresh guarantee for speed, which is why it
-//     is a separate, explicitly named mode rather than the default.
+//     lock, and resumes the
+//     on-disk proof checkpoints so each family's corpus loads from
+//     `temp/test-checkpoints/` instead of being re-proved. That trades the
+//     authoritative prove-fresh guarantee for speed.
 
-export const heavyAcceptedSetupTestPattern = 'heavy_accepted_setup';
-export const heavyAcceptedSetupFinalPackageTestPattern =
-    'heavy_accepted_setup_final_package';
-
-const rustKernelHeavyScopeValues = ['all', 'checks', 'final-package'] as const;
-
-export type RustKernelHeavyScope = (typeof rustKernelHeavyScopeValues)[number];
-type RustKernelHeavyCommandScope = Exclude<RustKernelHeavyScope, 'all'>;
-
-export type ParsedRustKernelHeavyArguments = {
-    readonly iterate: boolean;
-    readonly scope: RustKernelHeavyScope;
-    readonly testFilters: readonly string[];
+export {
+    heavyAcceptedSetupFinalPackageTestPattern,
+    heavyAcceptedSetupTestPattern,
 };
 
-const isRustKernelHeavyScope = (scope: string): scope is RustKernelHeavyScope =>
-    rustKernelHeavyScopeValues.some(
-        (supportedScope) => supportedScope === scope,
-    );
+export type RustKernelAcceptedSetupLane = 'all' | 'fast' | 'final-package';
+type RustKernelAcceptedSetupCommandLane = Exclude<
+    RustKernelAcceptedSetupLane,
+    'all'
+>;
+
+export type ParsedRustKernelAcceptedSetupArguments = {
+    readonly focused: boolean;
+    readonly testFilters: readonly string[];
+};
 
 // Shared libtest-thread budget. The heavy lane uses compact transported
 // proof/key material, but full-profile package construction and verification
@@ -55,8 +58,8 @@ const isRustKernelHeavyScope = (scope: string): scope is RustKernelHeavyScope =>
 // resident, most of it the shared fixture that concurrent tests reuse rather
 // than a per-test cost multiplied by the thread count. Size the thread pool from
 // currently available memory, capped by core count, so a constrained runner
-// stays serial while a workstation runs several tests; a single-test `--iterate`
-// filter simply runs one thread.
+// stays serial while a workstation runs several tests; a single focused filter
+// simply runs one thread.
 const approximateGigabytesPerHeavyTest = 15;
 const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
@@ -75,9 +78,11 @@ const heavyAcceptedSetupTestThreadCount = Math.min(
 // Final-package tests inflate the full accepted-setup package and then run
 // trustee evaluation-key proving with their own Rayon/prover concurrency. Letting
 // libtest start multiple such tests multiplies the fixture working set and can
-// overcommit even a 128 GiB workstation.
+// overcommit even a 128 GiB workstation; the full-ring trustee prover is also
+// already parallelized across limbs, so this lane serializes trustees and leaves
+// parallelism to the inner prover.
 const finalPackageMaximumLibtestThreadCount = 1;
-const finalPackageMaximumTrusteeProofBatchSize = 2;
+const finalPackageMaximumTrusteeProofBatchSize = 1;
 
 // Authoritative-mode per-prover RAM budgets. Each trustee evaluation-key prover,
 // the rayon par_iter phases (public-key share succinct proofs, relinearization
@@ -88,38 +93,21 @@ const approximateGigabytesPerTrusteeProver = 10;
 const approximateGigabytesPerRayonThread = 2;
 const approximateGigabytesPerTrusteeProofLimb = 5;
 
-// The pinned `--iterate` target directory. It lives under `target/` (already
-// git-ignored) but is distinct from the default `target/` the gate uses, so
-// iterating never blocks, and is never blocked by, a running gate.
-const heavyIterationTargetDirectory = path.resolve(
+// The pinned focused target directory. It lives under `target/` (already
+// git-ignored) but is distinct from the default `target/` the gate uses, so a
+// focused run never blocks, and is never blocked by, a running gate.
+const acceptedSetupFocusedTargetDirectory = path.resolve(
     process.cwd(),
     'target',
-    'heavy-iteration',
+    'accepted-setup-focused',
 );
-
-const parsePositiveIntegerEnvironmentOverride = (
-    variableName: string,
-    variableValue: string | undefined,
-): number | undefined => {
-    if (variableValue === undefined) {
-        return undefined;
-    }
-    if (!/^[1-9]\d*$/.test(variableValue)) {
-        throw new Error(`${variableName} must be a positive integer.`);
-    }
-    const parsedValue = Number.parseInt(variableValue, 10);
-    if (!Number.isSafeInteger(parsedValue)) {
-        throw new Error(`${variableName} must fit a safe integer.`);
-    }
-    return parsedValue;
-};
 
 export type ResolvedKnob = {
     readonly value: string;
     readonly source: string;
 };
 
-type BuiltRustKernelHeavyCommand = {
+type BuiltRustKernelAcceptedSetupCommand = {
     readonly command: CommandInvocation;
     readonly progressLabel: string;
     readonly testThreadCount: number;
@@ -134,12 +122,12 @@ const resolveKnob = (
         ? { value: String(automaticValue), source: automaticSource }
         : { value: override, source: 'environment override' };
 
-export const automaticTestThreadKnobForScope = (
-    scope: RustKernelHeavyScope,
+export const automaticTestThreadKnobForLane = (
+    lane: RustKernelAcceptedSetupLane,
     memoryBoundedTestThreadCount: number,
 ): ResolvedKnob => {
     if (
-        scope === 'final-package' &&
+        lane === 'final-package' &&
         memoryBoundedTestThreadCount > finalPackageMaximumLibtestThreadCount
     ) {
         return {
@@ -154,12 +142,12 @@ export const automaticTestThreadKnobForScope = (
     };
 };
 
-export const automaticTrusteeProofBatchKnobForScope = (
-    scope: RustKernelHeavyScope,
+export const automaticTrusteeProofBatchKnobForLane = (
+    lane: RustKernelAcceptedSetupLane,
     memoryBoundedTrusteeProofBatchSize: number,
 ): ResolvedKnob => {
     if (
-        scope === 'final-package' &&
+        lane === 'final-package' &&
         memoryBoundedTrusteeProofBatchSize >
             finalPackageMaximumTrusteeProofBatchSize
     ) {
@@ -175,16 +163,16 @@ export const automaticTrusteeProofBatchKnobForScope = (
     };
 };
 
-export const cargoTestArgumentsForScope = (
-    scope: RustKernelHeavyScope,
+export const cargoTestArgumentsForLane = (
+    lane: RustKernelAcceptedSetupLane,
     testThreadCount: string,
 ): readonly string[] => {
     const testFilter =
-        scope === 'final-package'
+        lane === 'final-package'
             ? heavyAcceptedSetupFinalPackageTestPattern
             : heavyAcceptedSetupTestPattern;
     const skippedTests =
-        scope === 'checks'
+        lane === 'fast'
             ? ['--skip', heavyAcceptedSetupFinalPackageTestPattern]
             : [];
 
@@ -202,81 +190,85 @@ export const cargoTestArgumentsForScope = (
     ];
 };
 
-const testFiltersForScope = (scope: RustKernelHeavyScope): readonly string[] =>
-    scope === 'final-package'
+const testFiltersForLane = (
+    lane: RustKernelAcceptedSetupLane,
+): readonly string[] =>
+    lane === 'final-package'
         ? [heavyAcceptedSetupFinalPackageTestPattern]
         : [heavyAcceptedSetupTestPattern];
 
-const laneNameForScope = (scope: RustKernelHeavyScope): string => {
-    if (scope === 'checks') {
-        return 'Rust accepted setup checks';
+const laneNameForLane = (lane: RustKernelAcceptedSetupLane): string => {
+    if (lane === 'fast') {
+        return 'Rust accepted setup fast';
     }
-    if (scope === 'final-package') {
+    if (lane === 'final-package') {
         return 'Rust accepted setup final package';
     }
 
-    return 'Rust kernel heavy';
+    return 'Rust accepted setup';
 };
 
-const scriptNameForScope = (scope: RustKernelHeavyScope): string => {
-    if (scope === 'checks') {
-        return 'test:rust:kernel:heavy:checks';
+const scriptNameForLane = (lane: RustKernelAcceptedSetupLane): string => {
+    if (lane === 'fast') {
+        return 'test:rust:kernel:accepted-setup:fast';
     }
-    if (scope === 'final-package') {
-        return 'test:rust:kernel:heavy:final-package';
+    if (lane === 'final-package') {
+        return 'test:rust:kernel:accepted-setup:final-package';
     }
 
-    return 'test:rust:kernel:heavy';
+    return 'test:rust:kernel:accepted-setup';
 };
 
-const progressLabelForScope = (scope: RustKernelHeavyScope): string => {
-    if (scope === 'checks') {
-        return 'heavy:checks';
+const progressLabelForLane = (lane: RustKernelAcceptedSetupLane): string => {
+    if (lane === 'fast') {
+        return 'accepted-setup:fast';
     }
-    if (scope === 'final-package') {
-        return 'heavy:final-package';
+    if (lane === 'final-package') {
+        return 'accepted-setup:final-package';
     }
 
-    return 'heavy';
+    return 'accepted-setup';
 };
 
-const logFileSlugForScope = (scope: RustKernelHeavyScope): string => {
-    if (scope === 'checks') {
-        return 'cargo-test-heavy-accepted-setup-checks';
+const logFileSlugForLane = (lane: RustKernelAcceptedSetupLane): string => {
+    if (lane === 'fast') {
+        return 'cargo-test-rust-accepted-setup-fast';
     }
-    if (scope === 'final-package') {
-        return 'cargo-test-heavy-accepted-setup-final-package';
+    if (lane === 'final-package') {
+        return 'cargo-test-rust-accepted-setup-final-package';
     }
 
-    return 'cargo-test-heavy-accepted-setup';
+    return 'cargo-test-rust-accepted-setup';
 };
 
-const commandDescriptionForScope = (scope: RustKernelHeavyScope): string => {
-    if (scope === 'checks') {
-        return 'cargo test heavy accepted setup checks';
+const commandDescriptionForLane = (
+    lane: RustKernelAcceptedSetupLane,
+): string => {
+    if (lane === 'fast') {
+        return 'cargo test Rust accepted setup fast proof checks';
     }
-    if (scope === 'final-package') {
-        return 'cargo test heavy accepted setup final package';
+    if (lane === 'final-package') {
+        return 'cargo test Rust accepted setup final package';
     }
 
-    return 'cargo test heavy accepted setup tests';
+    return 'cargo test Rust accepted setup proofs';
 };
 
 // Resolve the authoritative-lane concurrency knobs only for authoritative runs,
-// so an `--iterate` run neither validates nor depends on these overrides. The
+// so a focused run neither validates nor depends on these overrides. The
 // core-derived caps mirror the kernel's final-package proving concurrency; the
 // kernel treats the exported values as authoritative, so on a high-core but
 // low-memory runner the RAM bound (not the core count) wins.
 const resolveAuthoritativeKnobs = (
-    scope: RustKernelHeavyCommandScope,
+    lane: RustKernelAcceptedSetupCommandLane,
 ): {
     readonly testThreads: ResolvedKnob;
     readonly trusteeProofBatchSize: ResolvedKnob;
     readonly trusteeProofLimbBatchSize: ResolvedKnob;
     readonly rayonThreadCount: ResolvedKnob;
 } => {
-    const automaticTestThreads = automaticTestThreadKnobForScope(
-        scope,
+    const automaticTestThreads = automaticTestThreadKnobForLane(
+        lane,
         heavyAcceptedSetupTestThreadCount,
     );
     const coreDerivedTrusteeProverConcurrency = Math.max(
@@ -295,7 +287,7 @@ const resolveAuthoritativeKnobs = (
         memoryBoundedTrusteeProofBatchSize,
     );
     const automaticTrusteeProofBatchSize =
-        automaticTrusteeProofBatchKnobForScope(scope, trusteeProofBatchSize);
+        automaticTrusteeProofBatchKnobForLane(lane, trusteeProofBatchSize);
     const memoryBoundedRayonThreadCount = Math.max(
         1,
         Math.floor(
@@ -320,14 +312,7 @@ const resolveAuthoritativeKnobs = (
     );
 
     return {
-        testThreads: resolveKnob(
-            Number.parseInt(automaticTestThreads.value, 10),
-            automaticTestThreads.source,
-            parsePositiveIntegerEnvironmentOverride(
-                'SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT',
-                process.env.SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT,
-            )?.toString(),
-        ),
+        testThreads: automaticTestThreads,
         trusteeProofBatchSize: resolveKnob(
             Number.parseInt(automaticTrusteeProofBatchSize.value, 10),
             automaticTrusteeProofBatchSize.source,
@@ -347,35 +332,35 @@ const resolveAuthoritativeKnobs = (
 };
 
 const buildAuthoritativeCommand = (
-    scope: RustKernelHeavyCommandScope,
-): BuiltRustKernelHeavyCommand => {
-    const knobs = resolveAuthoritativeKnobs(scope);
+    lane: RustKernelAcceptedSetupCommandLane,
+): BuiltRustKernelAcceptedSetupCommand => {
+    const knobs = resolveAuthoritativeKnobs(lane);
     console.log(
-        `${laneNameForScope(scope)} lane: running with ${knobs.testThreads.value} test thread(s) ` +
+        `${laneNameForLane(lane)} lane: running with ${knobs.testThreads.value} test thread(s) ` +
             `(${knobs.testThreads.source}; ${availableGigabytes.toFixed(1)} GiB available, ` +
             `${approximateGigabytesPerHeavyTest} GiB automatically budgeted per test).`,
     );
     console.log(
-        `${laneNameForScope(scope)} lane: proving up to ${knobs.trusteeProofBatchSize.value} trustee evaluation-key ` +
+        `${laneNameForLane(lane)} lane: proving up to ${knobs.trusteeProofBatchSize.value} trustee evaluation-key ` +
             `proof(s) concurrently (${knobs.trusteeProofBatchSize.source}; automatic budget uses ` +
             `${approximateGigabytesPerTrusteeProver} GiB per prover).`,
     );
     console.log(
-        `${laneNameForScope(scope)} lane: proving up to ${knobs.trusteeProofLimbBatchSize.value} RNS limb(s) per ` +
+        `${laneNameForLane(lane)} lane: proving up to ${knobs.trusteeProofLimbBatchSize.value} RNS limb(s) per ` +
             `trustee evaluation-key prover (${knobs.trusteeProofLimbBatchSize.source}; automatic budget uses ` +
             `${approximateGigabytesPerTrusteeProofLimb} GiB per limb).`,
     );
     console.log(
-        `${laneNameForScope(scope)} lane: bounding the rayon pool to ${knobs.rayonThreadCount.value} thread(s) ` +
+        `${laneNameForLane(lane)} lane: bounding the rayon pool to ${knobs.rayonThreadCount.value} thread(s) ` +
             `(${knobs.rayonThreadCount.source}; automatic budget uses ` +
             `${approximateGigabytesPerRayonThread} GiB per rayon thread).`,
     );
 
     return {
         command: {
-            args: cargoTestArgumentsForScope(scope, knobs.testThreads.value),
+            args: cargoTestArgumentsForLane(lane, knobs.testThreads.value),
             command: 'cargo',
-            description: commandDescriptionForScope(scope),
+            description: commandDescriptionForLane(lane),
             env: {
                 ...process.env,
                 CARGO_INCREMENTAL: '0',
@@ -384,46 +369,61 @@ const buildAuthoritativeCommand = (
                     knobs.trusteeProofBatchSize.value,
                 SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
                     knobs.trusteeProofLimbBatchSize.value,
+                ...(lane === 'final-package'
+                    ? { SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS: '1' }
+                    : {}),
             },
-            logFileSlug: logFileSlugForScope(scope),
+            logFileSlug: logFileSlugForLane(lane),
         },
-        progressLabel: progressLabelForScope(scope),
+        progressLabel: progressLabelForLane(lane),
         testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
     };
 };
 
-const buildIterationCommand = (
-    testFilters: readonly string[],
-): BuiltRustKernelHeavyCommand => {
+export const normalizeFocusedTestFilter = (filter: string): string => {
+    return normalizeRustTestFilter(filter);
+};
+
+export const cargoTestArgumentsForFocusedFilter = (
+    testFilter: string,
+    testThreadCount: string,
+): readonly string[] => [
+    'test',
+    '-p',
+    'sealed-lattice-kernel',
+    testFilter,
+    '--',
+    '--ignored',
+    '--show-output',
+    '--test-threads',
+    testThreadCount,
+];
+
+const buildFocusedCommand = (
+    testFilter: string,
+): BuiltRustKernelAcceptedSetupCommand => {
     console.log(
-        `Rust kernel heavy iteration: filters [${testFilters.join(', ')}], ` +
+        `Rust accepted setup focused run: filter [${testFilter}], ` +
             `${heavyAcceptedSetupTestThreadCount} test thread(s) ` +
             `(${availableGigabytes.toFixed(1)} GiB available, ` +
             `${approximateGigabytesPerHeavyTest} GiB budgeted per test).`,
     );
     console.log(
-        `Pinned target directory: ${heavyIterationTargetDirectory}. ` +
+        `Pinned target directory: ${acceptedSetupFocusedTargetDirectory}. ` +
             `Incremental compilation: on. Checkpoint resume: on.`,
     );
 
     return {
         command: {
-            args: [
-                'test',
-                '-p',
-                'sealed-lattice-kernel',
-                ...testFilters,
-                '--',
-                '--ignored',
-                '--show-output',
-                '--test-threads',
+            args: cargoTestArgumentsForFocusedFilter(
+                testFilter,
                 String(heavyAcceptedSetupTestThreadCount),
-            ],
+            ),
             command: 'cargo',
-            description: `cargo test ${testFilters.join(' ')} (warm iteration)`,
+            description: `cargo test ${testFilter} (warm focused)`,
             env: {
                 ...process.env,
-                CARGO_TARGET_DIR: heavyIterationTargetDirectory,
+                CARGO_TARGET_DIR: acceptedSetupFocusedTargetDirectory,
                 // Force incremental compilation on (this mode's central per-edit
                 // saving) rather than relying on the cargo default, which an
                 // inherited environment or a cargo config could otherwise disable.
@@ -432,67 +432,36 @@ const buildIterationCommand = (
                 // of re-running the prover from a cold in-process fixture cache.
                 SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
             },
-            logFileSlug: 'cargo-test-heavy-accepted-setup-iteration',
+            logFileSlug: 'cargo-test-rust-accepted-setup-focused',
         },
-        progressLabel: 'heavy:iterate',
+        progressLabel: 'accepted-setup:focused',
         testThreadCount: heavyAcceptedSetupTestThreadCount,
     };
 };
 
-export const authoritativeCommandScopesForScope = (
-    scope: RustKernelHeavyScope,
-): readonly RustKernelHeavyCommandScope[] =>
-    scope === 'all' ? ['checks', 'final-package'] : [scope];
+export const authoritativeCommandLanesForLane = (
+    lane: RustKernelAcceptedSetupLane,
+): readonly RustKernelAcceptedSetupCommandLane[] =>
+    lane === 'all' ? ['fast', 'final-package'] : [lane];
 
 const buildAuthoritativeCommands = (
-    scope: RustKernelHeavyScope,
-): readonly BuiltRustKernelHeavyCommand[] =>
-    authoritativeCommandScopesForScope(scope).map((commandScope) =>
-        buildAuthoritativeCommand(commandScope),
+    lane: RustKernelAcceptedSetupLane,
+): readonly BuiltRustKernelAcceptedSetupCommand[] =>
+    authoritativeCommandLanesForLane(lane).map((commandLane) =>
+        buildAuthoritativeCommand(commandLane),
     );
 
 const usage =
-    'Usage: run-rust-kernel-heavy-tests.ts [--scope all|checks|final-package] [--iterate [<test name filter>...]]. ' +
-    'Test-name filters require --iterate; authoritative runs use the selected scope.';
+    'Usage: run-rust-kernel-accepted-setup-tests.ts [<test name, module name, or Rust file filter>]. ' +
+    'Use one positional filter for a focused local run, or no filter for the full authoritative accepted-setup lane.';
 
-export const parseRustKernelHeavyArguments = (
+export const parseRustKernelAcceptedSetupArguments = (
     commandArguments: readonly string[],
-): ParsedRustKernelHeavyArguments => {
-    let iterate = false;
-    let scope: RustKernelHeavyScope = 'all';
-    let scopeWasSet = false;
+): ParsedRustKernelAcceptedSetupArguments => {
     const positionalArguments: string[] = [];
 
-    for (let index = 0; index < commandArguments.length; index += 1) {
-        const argument = commandArguments[index];
-        if (argument === undefined) {
-            continue;
-        }
-
-        if (argument === '--iterate') {
-            iterate = true;
-            continue;
-        }
-        if (argument === '--scope') {
-            const scopeValue = commandArguments[index + 1];
-            if (
-                scopeValue === undefined ||
-                !isRustKernelHeavyScope(scopeValue)
-            ) {
-                throw new Error(usage);
-            }
-            scope = scopeValue;
-            scopeWasSet = true;
-            index += 1;
-            continue;
-        }
-        if (argument.startsWith('--scope=')) {
-            const scopeValue = argument.slice('--scope='.length);
-            if (!isRustKernelHeavyScope(scopeValue)) {
-                throw new Error(usage);
-            }
-            scope = scopeValue;
-            scopeWasSet = true;
+    for (const argument of commandArguments) {
+        if (argument === '--') {
             continue;
         }
         if (argument.startsWith('-')) {
@@ -502,44 +471,52 @@ export const parseRustKernelHeavyArguments = (
         positionalArguments.push(argument);
     }
 
-    if (!iterate && positionalArguments.length > 0) {
-        throw new Error(usage);
-    }
-    if (iterate && scopeWasSet) {
+    if (positionalArguments.length > 1) {
         throw new Error(
-            'Use explicit test-name filters with --iterate; --scope is for authoritative runs.',
+            `Focused accepted-setup runs accept one test or file filter. ${usage}`,
+        );
+    }
+
+    const focused = positionalArguments.length === 1;
+    const normalizedFocusedFilter = focused
+        ? normalizeFocusedTestFilter(positionalArguments[0] ?? '')
+        : undefined;
+    if (normalizedFocusedFilter === '') {
+        throw new Error(
+            `Focused accepted-setup runs require a non-empty filter. ${usage}`,
         );
     }
 
     return {
-        iterate,
-        scope,
+        focused,
         testFilters:
-            positionalArguments.length > 0
-                ? positionalArguments
-                : testFiltersForScope(scope),
+            normalizedFocusedFilter !== undefined
+                ? [normalizedFocusedFilter]
+                : testFiltersForLane('all'),
     };
 };
 
-const main = async (): Promise<void> => {
-    const rawArguments = process.argv.slice(2);
-    const parsedArguments = parseRustKernelHeavyArguments(rawArguments);
+export const runRustKernelAcceptedSetupTests = async (input: {
+    readonly lane: RustKernelAcceptedSetupLane;
+    readonly rawArguments?: readonly string[];
+    readonly scriptName?: string;
+}): Promise<void> => {
+    const rawArguments = input.rawArguments ?? process.argv.slice(2);
+    const parsedArguments = parseRustKernelAcceptedSetupArguments(rawArguments);
 
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
-        lanes: parsedArguments.iterate
-            ? ['Rust kernel heavy iteration']
-            : authoritativeCommandScopesForScope(parsedArguments.scope).map(
-                  (scope) => laneNameForScope(scope),
+        lanes: parsedArguments.focused
+            ? ['Rust accepted setup focused']
+            : authoritativeCommandLanesForLane(input.lane).map((lane) =>
+                  laneNameForLane(lane),
               ),
-        scriptName: parsedArguments.iterate
-            ? 'test:rust:kernel:heavy:iterate'
-            : scriptNameForScope(parsedArguments.scope),
+        scriptName: input.scriptName ?? scriptNameForLane(input.lane),
     });
 
-    const builtCommands = parsedArguments.iterate
-        ? [buildIterationCommand(parsedArguments.testFilters)]
-        : buildAuthoritativeCommands(parsedArguments.scope);
+    const builtCommands = parsedArguments.focused
+        ? [buildFocusedCommand(parsedArguments.testFilters[0] ?? '')]
+        : buildAuthoritativeCommands(input.lane);
 
     let exitCode: number | undefined;
     try {
@@ -573,5 +550,5 @@ const main = async (): Promise<void> => {
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {
-    void main();
+    void runRustKernelAcceptedSetupTests({ lane: 'all' });
 }

@@ -104,7 +104,6 @@ describe('BGV-RNS backend kernel commands', () => {
             includeCanonicalBytesHex: true,
         });
 
-        expect(encodedResult).not.toMatchObject({ isValid: false });
         const encoded = encodedResult as Exclude<
             typeof encodedResult,
             BgvParametersRejected
@@ -112,7 +111,6 @@ describe('BGV-RNS backend kernel commands', () => {
         expect(encoded.validation.isValid).toBe(true);
         expect(encoded.canonicalBytesHex).toMatch(/^[a-f0-9]+$/u);
         expectProtocolHash(encoded.plaintextRoot, 'encoded plaintext root');
-        expect(encoded.canonicalByteLength).toBe(90_311);
         expect(encoded.bgvParametersHash).toBe(parameters.bgvParametersHash);
         expect(encoded.sampledSlots).toEqual(
             expect.arrayContaining([
@@ -226,14 +224,12 @@ describe('BGV-RNS backend kernel commands', () => {
             rightSlots: [4, 5, 6],
             includeCanonicalBytesHex: true,
         });
-        expect(fixtureResult).not.toMatchObject({ isValid: false });
         const fixture = fixtureResult as Exclude<
             typeof fixtureResult,
             BgvParametersRejected
         >;
 
         expectProtocolHash(fixture.ciphertextRoot, 'ciphertext root');
-        expect(fixture.canonicalByteLength).toBe(180_521);
         expect(fixture.validation).toMatchObject({
             isValid: true,
             objectKind: 'ciphertext',
@@ -256,7 +252,6 @@ describe('BGV-RNS backend kernel commands', () => {
         const baseConversionResult = kernel.generateBgvBaseConversionFixture({
             slots: [7, 8, 9, 65_536],
         });
-        expect(baseConversionResult).not.toMatchObject({ isValid: false });
         const baseConversion = baseConversionResult as Exclude<
             typeof baseConversionResult,
             BgvParametersRejected

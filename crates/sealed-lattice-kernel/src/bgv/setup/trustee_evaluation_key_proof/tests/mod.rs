@@ -36,9 +36,6 @@ use super::{accounting, generate_trustee_evaluation_key_proof_from_request, prov
 
 mod command_surface;
 mod cross_language_vectors;
-mod low_degree_proof;
-mod masked_claim_zero_knowledge;
-mod proof_accounting;
 mod proof_codec;
 mod prove_verify_round_trip;
 mod public_key_share;
@@ -60,8 +57,8 @@ fn folded_layer_path_length(extension_size: usize, fold_index: usize) -> usize {
 // shared with the TS/WASM kernel test (bgv-succinct-setup-statement-hashes),
 // pinning byte-identical statement hashes across the Rust and TS provers. The
 // values live in test-vectors/succinct-setup-statement-hashes.json; after an
-// intended encoding change, regenerate them there and run
-// `pnpm run vectors:generate`, rather than editing copies in two languages.
+// intended encoding change, regenerate them there rather than editing copies in
+// two languages.
 fn expected_statement_hash_vectors() -> serde_json::Value {
     serde_json::from_str(include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),

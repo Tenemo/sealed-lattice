@@ -13,11 +13,8 @@ use self::material_transport_fixtures::{
     DIRECT_TRANSPORT_CERTIFICATE_FIELDS, SetupTransportCertificateObjectFixture,
     StreamingVssMaterialFixtureWriter, TerminalEvaluationKeyTransportSinks,
     TransportedPublicSetupCompanions, append_setup_transport_certificate_object,
-    append_transport_certificate_entries_from_material_set,
-    append_unreferenced_evaluation_key_component_transport_sidecar,
-    append_unreferenced_same_secret_transport_sidecar, append_unrequested_setup_transport_object,
-    append_vss_material_binary_header, append_vss_material_binary_record,
-    encode_transport_material_from_package,
+    append_transport_certificate_entries_from_material_set, append_vss_material_binary_header,
+    append_vss_material_binary_record, encode_transport_material_from_package,
     move_evaluation_key_share_component_vectors_to_compact_transport,
     move_public_key_share_material_to_transport,
     move_public_key_share_succinct_proof_bytes_to_transport,
@@ -38,7 +35,6 @@ use self::package_fixtures::{
     reduced_ring_streamed_collective_setup_package_fixture,
     same_secret_proof_bearing_collective_setup_package, setup_transport_certificate_fixture,
     setup_transport_certificate_for_transported_vss_material,
-    setup_transport_chunk_manifest_root_fixture,
     terminal_full_ring_minimal_collective_setup_package_fixture, vss_complaints_object,
 };
 use self::proof_record_fixtures::{
@@ -416,13 +412,13 @@ fn assert_minimal_collective_setup_package_refused_without_handoff(
     );
 }
 
-// Shared elapsed-clock logger for the terminal accepted-setup fixture phases.
-pub(super) fn terminal_phase(message: &str) {
-    static TERMINAL_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =
+// Shared elapsed-clock logger for final-package accepted-setup fixture phases.
+pub(super) fn final_package_phase(message: &str) {
+    static FINAL_PACKAGE_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =
         std::sync::OnceLock::new();
-    let started = TERMINAL_PHASE_CLOCK.get_or_init(std::time::Instant::now);
+    let started = FINAL_PACKAGE_PHASE_CLOCK.get_or_init(std::time::Instant::now);
     println!(
-        "terminal-accepted-setup-phase [+{}s] {message}",
+        "accepted-setup-final-package-phase [+{}s] {message}",
         started.elapsed().as_secs()
     );
 }

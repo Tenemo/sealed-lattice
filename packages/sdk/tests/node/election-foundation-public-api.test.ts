@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
 
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import {
     createFoundationTranscriptCoreFixture,
     createFoundationTranscriptFixture,
@@ -19,14 +20,27 @@ type VerifyFoundationTranscript = (
 type VerifyTranscriptCoreFixture = (
     fixture: TranscriptCoreFixture,
 ) => Promise<TranscriptCoreVerificationResult>;
+type DeriveCollectiveBgvSetupRosterHash = (
+    entries: readonly Readonly<{
+        readonly rosterPosition: number;
+        readonly trusteeIdentity: string;
+        readonly signingPublicKeyHash: string;
+    }>[],
+) => string;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const verifyFoundationTranscript =
     publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
 const verifyTranscriptCoreFixture =
     publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
+const deriveCollectiveBgvSetupRosterHash =
+    publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
 
 const requiredPublicFunctions = [
+    [
+        'deriveCollectiveBgvSetupRosterHash',
+        publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash,
+    ],
     [
         'deriveFrozenRosterParameters',
         publicApiRuntimeRecord.deriveFrozenRosterParameters,
@@ -149,6 +163,43 @@ describe('election foundation public package API in Node', () => {
                 }),
             ]),
         );
+    });
+
+    it('derives the setup roster hash used by setup package verification', () => {
+        const expectedSetupRosterHash = deriveCanonicalObjectHash({
+            objectType: 'CollectiveBgvSetupRoster',
+            rosterEntries: [
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 1,
+                    trusteeIdentity: 'trustee-1',
+                    signingPublicKeyHash: 'b'.repeat(128),
+                },
+            ],
+        });
+
+        expect(
+            deriveCollectiveBgvSetupRosterHash([
+                {
+                    rosterPosition: 1,
+                    trusteeIdentity: 'trustee-1',
+                    signingPublicKeyHash: 'b'.repeat(128),
+                },
+                {
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+            ]),
+        ).toBe(expectedSetupRosterHash);
     });
 
     it('matches foundation roots through the packaged transcript-core WASM verifier', async () => {

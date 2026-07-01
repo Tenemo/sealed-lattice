@@ -2,137 +2,6 @@ use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
-// One synthetic single-chunk transport object's hash triple, derived from a
-// fixture label so each unrequested or unreferenced transport sidecar reuses the
-// same derivation shape. The root field name varies per sidecar (object,
-// proof-material, or component-material root), so it is a parameter; the full
-// object and chunk hashes use fixed `full-object-hash` and `chunk-hash` field
-// labels exactly as the per-sidecar derivations did before.
-struct SyntheticTransportObjectHashes {
-    object_root: String,
-    full_object_hash: String,
-    chunk_hash: String,
-    chunk_root: String,
-}
-
-fn synthetic_transport_object_hashes(
-    fixture_label: &str,
-    root_field_name: &str,
-) -> SyntheticTransportObjectHashes {
-    let object_root = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportFullObjectSetHash",
-        "fixture": fixture_label,
-        "field": root_field_name,
-    }))
-    .expect("synthetic setup transport object root");
-    let full_object_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportFullObjectSetHash",
-        "fixture": fixture_label,
-        "field": "full-object-hash",
-    }))
-    .expect("synthetic setup transport full object hash");
-    let chunk_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportChunkManifestRoot",
-        "fixture": fixture_label,
-        "field": "chunk-hash",
-    }))
-    .expect("synthetic setup transport chunk hash");
-    let chunk_root = setup_transport_chunk_manifest_root_fixture(
-        1,
-        1,
-        std::slice::from_ref(&chunk_hash),
-        &full_object_hash,
-    );
-
-    SyntheticTransportObjectHashes {
-        object_root,
-        full_object_hash,
-        chunk_hash,
-        chunk_root,
-    }
-}
-
-pub(super) fn append_unrequested_setup_transport_object(package: &mut serde_json::Value) {
-    let hashes =
-        synthetic_transport_object_hashes("unrequested-setup-transport-object", "object-root");
-    append_setup_transport_certificate_object(
-        package,
-        SetupTransportCertificateObjectFixture {
-            object_name: "unrequestedSetupMaterial",
-            object_role: "unrequested-setup-material",
-            object_root: hashes.object_root,
-            byte_length: 1,
-            full_object_hash: hashes.full_object_hash,
-            chunk_root: hashes.chunk_root,
-            chunk_hashes: vec![hashes.chunk_hash],
-        },
-    );
-}
-
-pub(super) fn append_unreferenced_same_secret_transport_sidecar(
-    package: &mut serde_json::Value,
-) -> serde_json::Value {
-    let hashes = synthetic_transport_object_hashes(
-        "unreferenced-same-secret-proof-material",
-        "proof-material-root",
-    );
-
-    append_setup_transport_certificate_object(
-        package,
-        SetupTransportCertificateObjectFixture {
-            object_name: "sameSecretProofMaterial",
-            object_role: "same-secret-proof-material",
-            object_root: hashes.object_root.clone(),
-            byte_length: 1,
-            full_object_hash: hashes.full_object_hash.clone(),
-            chunk_root: hashes.chunk_root.clone(),
-            chunk_hashes: vec![hashes.chunk_hash.clone()],
-        },
-    );
-
-    serde_json::json!({
-        "proofMaterials": [{
-            "proofMaterialRoot": hashes.object_root,
-            "totalByteLength": 1_u64,
-            "fullObjectHash": hashes.full_object_hash,
-            "chunkRoot": hashes.chunk_root,
-            "chunkHashes": [hashes.chunk_hash],
-        }],
-    })
-}
-
-pub(super) fn append_unreferenced_evaluation_key_component_transport_sidecar(
-    package: &mut serde_json::Value,
-) -> serde_json::Value {
-    let hashes = synthetic_transport_object_hashes(
-        "unreferenced-evaluation-key-component-material",
-        "component-material-root",
-    );
-
-    append_setup_transport_certificate_object(
-        package,
-        SetupTransportCertificateObjectFixture {
-            object_name: "evaluationKeyShareComponentMaterial",
-            object_role: "evaluation-key-share-component-material",
-            object_root: hashes.object_root.clone(),
-            byte_length: 1,
-            full_object_hash: hashes.full_object_hash.clone(),
-            chunk_root: hashes.chunk_root.clone(),
-            chunk_hashes: vec![hashes.chunk_hash.clone()],
-        },
-    );
-
-    serde_json::json!({
-        "componentMaterials": [{
-            "keySwitchComponentMaterialRoot": hashes.object_root,
-            "totalByteLength": 1_u64,
-            "fullObjectHash": hashes.full_object_hash,
-            "chunkRoot": hashes.chunk_root,
-            "chunkHashes": [hashes.chunk_hash],
-        }],
-    })
-}
-
 pub(super) struct SetupTransportCertificateObjectFixture {
     pub(super) object_name: &'static str,
     pub(super) object_role: &'static str,
@@ -554,9 +423,9 @@ pub(super) fn setup_package_with_transported_public_setup_companions()
 
 fn build_setup_package_with_transported_public_setup_companions()
 -> (serde_json::Value, TransportedPublicSetupCompanions) {
-    terminal_phase("start full-ring package fixture");
+    final_package_phase("start full-ring package fixture");
     let terminal_full_ring_fixture = terminal_full_ring_minimal_collective_setup_package_fixture();
-    terminal_phase("built full-ring package fixture");
+    final_package_phase("built full-ring package fixture");
     assemble_transported_public_setup_companions(terminal_full_ring_fixture)
 }
 
@@ -565,18 +434,18 @@ fn build_setup_package_with_transported_public_setup_companions()
 /// evaluation-key records, and transported public companions as the full-ring
 /// terminal path, so the full accepted-setup verifier exercises every
 /// roster-dependent binding for any supported n without the heavy full ring.
-/// The terminal full-ring claim gate then refuses the reduced ring, so this
+/// The final-package full-ring claim gate then refuses the reduced ring, so this
 /// reaches that gate rather than `accepted`.
 pub(super) fn reduced_ring_setup_package_with_transported_public_setup_companions(
     participant_count: u64,
     stream_derivation_purpose: &str,
 ) -> (serde_json::Value, TransportedPublicSetupCompanions) {
-    terminal_phase("start reduced-ring package fixture");
+    final_package_phase("start reduced-ring package fixture");
     let reduced_ring_fixture = reduced_ring_streamed_collective_setup_package_fixture(
         participant_count,
         stream_derivation_purpose,
     );
-    terminal_phase("built reduced-ring package fixture");
+    final_package_phase("built reduced-ring package fixture");
     assemble_transported_public_setup_companions(reduced_ring_fixture)
 }
 
@@ -598,7 +467,7 @@ fn assemble_transported_public_setup_companions(
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
     package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    terminal_phase("generated same-secret proofs");
+    final_package_phase("generated same-secret proofs");
     let same_secret_proof_material = move_same_secret_proof_bytes_to_transport(&mut package);
     append_transport_certificate_entries_from_material_set(
         &mut package,
@@ -613,7 +482,7 @@ fn assemble_transported_public_setup_companions(
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
-    terminal_phase("generated public-key material and proofs");
+    final_package_phase("generated public-key material and proofs");
     let public_key_share_proof_material =
         move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
     append_transport_certificate_entries_from_material_set(
@@ -630,7 +499,7 @@ fn assemble_transported_public_setup_companions(
     package["collectivePublicKeyRoot"] =
         package["collectivePublicKey"]["collectivePublicKeyRoot"].clone();
     let public_key_share_material = move_public_key_share_material_to_transport(&mut package);
-    terminal_phase("transported public-key material");
+    final_package_phase("transported public-key material");
     let public_key_share_material_root =
         package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
             .as_str()
@@ -657,7 +526,7 @@ fn assemble_transported_public_setup_companions(
         &package,
         &mut evaluation_key_transport_sinks,
     );
-    terminal_phase("generated evaluation-key records");
+    final_package_phase("generated evaluation-key records");
     let evaluation_key_share_component_material = serde_json::json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
@@ -670,7 +539,7 @@ fn assemble_transported_public_setup_companions(
             &round_one_aggregate_diagonals_by_level,
             &mut evaluation_key_transport_sinks,
         );
-    terminal_phase("generated trustee evaluation-key proofs");
+    final_package_phase("generated trustee evaluation-key proofs");
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
     rebind_collective_setup_package_hash(&mut package);
     append_transport_certificate_entries_from_material_set(
@@ -700,10 +569,10 @@ fn assemble_transported_public_setup_companions(
     );
 
     let public_evaluation_key_material = add_public_evaluation_key_material_transport(&mut package);
-    terminal_phase("generated public evaluation-key material");
+    final_package_phase("generated public evaluation-key material");
 
     rebind_collective_setup_package_hash(&mut package);
-    terminal_phase("rebound terminal certificates and package hash");
+    final_package_phase("rebound final-package certificates and package hash");
 
     (
         package,

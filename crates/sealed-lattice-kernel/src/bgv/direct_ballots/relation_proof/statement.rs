@@ -22,7 +22,7 @@ pub(super) fn direct_ballot_relation_statement_hash(
     }))?;
 
     Ok(hash512(
-        "sealed-lattice/direct-encrypted-ballot/relation-statement-v4",
+        DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN,
         &[statement_json.as_bytes()],
     ))
 }

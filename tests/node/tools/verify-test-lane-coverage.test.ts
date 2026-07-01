@@ -16,7 +16,7 @@ describe('test lane coverage verification', () => {
             testLaneGroupsForRelativePath(
                 'packages/wasm/tests/node/transcript-core-kernel/core-kernel-and-fixtures.kernel.test.ts',
             ),
-        ).toEqual(['node-kernel']);
+        ).toEqual(['node-kernel-fast']);
         expect(
             testLaneGroupsForRelativePath(
                 'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/setup-package-verification.kernel.test.ts',

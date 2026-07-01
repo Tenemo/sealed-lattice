@@ -1,17 +1,6 @@
-// Setup-assembly builders relocated out of the public verifier-only SDK surface.
-//
-// The public `@sealed-lattice` package exposes only setup verifiers and verification-input
-// helpers. The setup-assembly `create*` builders and local-trustee-state assembly that the
-// accepted-setup tests still drive live here as thin adapters around the `@sealed-lattice/protocol`
-// builders, preserving the exact public names, signatures, and adaptation logic the SDK used to
-// expose so test callers change only their import source.
+// Test-only setup assembly adapters around the protocol builders.
 
 import {
-    createBinaryChunkedEvaluationKeyShareMaterialTransport as createBinaryChunkedEvaluationKeyShareMaterialTransportInternal,
-    createBinaryChunkedPublicEvaluationKeyMaterialTransport as createBinaryChunkedPublicEvaluationKeyMaterialTransportInternal,
-    createBinaryChunkedPublicKeyShareMaterialTransport as createBinaryChunkedPublicKeyShareMaterialTransportInternal,
-    createBinaryChunkedPublicKeyShareProofMaterialTransport as createBinaryChunkedPublicKeyShareProofMaterialTransportInternal,
-    createBinaryChunkedSameSecretProofMaterialTransport as createBinaryChunkedSameSecretProofMaterialTransportInternal,
     createCommonRandomnessCommit as createCommonRandomnessCommitInternal,
     createCommonRandomnessReveal as createCommonRandomnessRevealInternal,
     createEncryptedLocalTrusteeSetupStateFromVerifiedShares as exportEncryptedLocalTrusteeSetupStateInternal,
@@ -35,18 +24,12 @@ import {
     decryptLocalTrusteeSetupState as restoreEncryptedLocalTrusteeSetupStateInternal,
 } from '@sealed-lattice/protocol';
 import type {
-    BinaryChunkedEvaluationKeyShareMaterialTransport as ProtocolBinaryChunkedEvaluationKeyShareMaterialTransport,
-    BinaryChunkedPublicEvaluationKeyMaterialTransport as ProtocolBinaryChunkedPublicEvaluationKeyMaterialTransport,
     EvaluatorKeySchedule as ProtocolEvaluatorKeySchedule,
     EvaluatorKeyScheduleInput as ProtocolEvaluatorKeyScheduleInput,
     GaloisKeyShareBatch as ProtocolGaloisKeyShareBatch,
     GaloisKeyShareBatchContribution as ProtocolGaloisKeyShareBatchContribution,
-    EvaluationKeyShareMaterialTransportInput as ProtocolEvaluationKeyShareMaterialTransportInput,
     PublicEvaluationKeySet as ProtocolPublicEvaluationKeySet,
     PublicEvaluationKeySetInput as ProtocolPublicEvaluationKeySetInput,
-    BinaryChunkedSameSecretProofMaterialTransport as ProtocolBinaryChunkedSameSecretProofMaterialTransport,
-    BinaryChunkedPublicKeyShareMaterialTransport as ProtocolBinaryChunkedPublicKeyShareMaterialTransport,
-    BinaryChunkedPublicKeyShareProofMaterialTransport as ProtocolBinaryChunkedPublicKeyShareProofMaterialTransport,
     PublicKeyShareMaterialContributionInput as ProtocolPublicKeyShareMaterialContributionInput,
     PublicKeyShareMaterialSet as ProtocolPublicKeyShareMaterialSet,
     PublicKeyShareMaterialSetInput as ProtocolPublicKeyShareMaterialSetInput,
@@ -59,7 +42,6 @@ import type {
     PublicKeyShareProofSetInput as ProtocolPublicKeyShareProofSetInput,
     PublicKeyShareSet as ProtocolPublicKeyShareSet,
     PublicKeyShareSetInput as ProtocolPublicKeyShareSetInput,
-    PublicEvaluationKeyMaterialTransportInput as ProtocolPublicEvaluationKeyMaterialTransportInput,
     SetupPackageVssCoefficientCommitmentMaterialSet as ProtocolSetupPackageVssCoefficientCommitmentMaterialSet,
     SetupTransportedVssCoefficientCommitmentMaterial as ProtocolSetupTransportedVssCoefficientCommitmentMaterial,
     RelinearizationKeyShareRounds as ProtocolRelinearizationKeyShareRounds,
@@ -549,14 +531,6 @@ export type PublicKeyShareProofSetInput = ProtocolPublicKeyShareProofSetInput;
 export type PublicKeyShareMaterialSet = ProtocolPublicKeyShareMaterialSet;
 export type PublicKeyShareMaterialSetInput =
     ProtocolPublicKeyShareMaterialSetInput;
-export type BinaryChunkedSameSecretProofMaterialTransport =
-    ProtocolBinaryChunkedSameSecretProofMaterialTransport;
-export type BinaryChunkedPublicKeyShareMaterialTransport =
-    ProtocolBinaryChunkedPublicKeyShareMaterialTransport;
-export type BinaryChunkedPublicKeyShareProofMaterialTransport =
-    ProtocolBinaryChunkedPublicKeyShareProofMaterialTransport;
-export type BinaryChunkedEvaluationKeyShareMaterialTransport =
-    ProtocolBinaryChunkedEvaluationKeyShareMaterialTransport;
 export type PublicKeyShareSuccinctProofMaterial =
     ProtocolPublicKeyShareSuccinctProofMaterial;
 export type PublicKeyShareSuccinctProofSet =
@@ -585,8 +559,6 @@ export type GaloisKeyShareBatchesInput = PublicEvaluationKeyProofCommonInput &
     Readonly<{
         readonly batchContributions: readonly GaloisKeyShareBatchContribution[];
     }>;
-export type EvaluationKeyShareMaterialTransportInput =
-    ProtocolEvaluationKeyShareMaterialTransportInput;
 export type PublicEvaluationKeySet = ProtocolPublicEvaluationKeySet;
 export type PublicEvaluationKeySetInput = PublicEvaluationKeyProofCommonInput &
     Readonly<
@@ -597,18 +569,6 @@ export type PublicEvaluationKeySetInput = PublicEvaluationKeyProofCommonInput &
             | 'publicEvaluationKeyMaterialReference'
         >
     >;
-export type BinaryChunkedPublicEvaluationKeyMaterialTransport =
-    ProtocolBinaryChunkedPublicEvaluationKeyMaterialTransport;
-export type PublicEvaluationKeyMaterialTransportInput =
-    PublicEvaluationKeyProofCommonInput &
-        Readonly<
-            Pick<
-                ProtocolPublicEvaluationKeyMaterialTransportInput,
-                | 'relinearizationKeyShareRounds'
-                | 'galoisKeyShareBatches'
-                | 'transportedEvaluationKeyShareComponentMaterial'
-            >
-        >;
 export type PublicKeyShareMaterialContributionInput =
     ProtocolPublicKeyShareMaterialContributionInput;
 
@@ -847,42 +807,10 @@ export const createSameSecretProofSet = (
     input: SameSecretProofSetInput,
 ): SameSecretProofSet => createSameSecretProofSetInternal(input);
 
-/** Creates root-addressed binary transport for same-secret proof material. */
-export const createBinaryChunkedSameSecretProofMaterialTransport = (
-    proofMaterials: readonly SameSecretProofMaterial[],
-): BinaryChunkedSameSecretProofMaterialTransport =>
-    createBinaryChunkedSameSecretProofMaterialTransportInternal(proofMaterials);
-
 /** Creates root-bound public-key share material records from public coefficients. */
 export const createPublicKeyShareMaterialSet = (
     input: PublicKeyShareMaterialSetInput,
 ): PublicKeyShareMaterialSet => createPublicKeyShareMaterialSetInternal(input);
-
-/** Creates root-addressed binary transport for public-key share material. */
-export const createBinaryChunkedPublicKeyShareMaterialTransport = (
-    materialSet: PublicKeyShareMaterialSet,
-): BinaryChunkedPublicKeyShareMaterialTransport =>
-    createBinaryChunkedPublicKeyShareMaterialTransportInternal(materialSet);
-
-/** Creates root-addressed binary transport for public-key share proof material. */
-export const createBinaryChunkedPublicKeyShareProofMaterialTransport = (
-    proofMaterials: readonly PublicKeyShareSuccinctProofMaterial[],
-): BinaryChunkedPublicKeyShareProofMaterialTransport =>
-    createBinaryChunkedPublicKeyShareProofMaterialTransportInternal(
-        proofMaterials,
-    );
-
-/** Creates root-addressed binary transport for evaluation-key proof and component material. */
-export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
-    input: EvaluationKeyShareMaterialTransportInput,
-): BinaryChunkedEvaluationKeyShareMaterialTransport =>
-    createBinaryChunkedEvaluationKeyShareMaterialTransportInternal(input);
-
-/** Creates root-addressed binary transport for public evaluation-key runtime material. */
-export const createBinaryChunkedPublicEvaluationKeyMaterialTransport = (
-    input: PublicEvaluationKeyMaterialTransportInput,
-): BinaryChunkedPublicEvaluationKeyMaterialTransport =>
-    createBinaryChunkedPublicEvaluationKeyMaterialTransportInternal(input);
 
 /** Creates root-bound public-key succinct proof records from generated proof material. */
 export const createPublicKeyShareSuccinctProofSet = (

@@ -706,9 +706,8 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     proof_randomness_seed_hex,
                     &transcript,
                 )
-                .map(|proof| {
+                .inspect(|_| {
                     trustee_proof_progress(format!("prove-finish limb={limb_index}"));
-                    proof
                 })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;
@@ -740,9 +739,8 @@ fn prove_evaluation_key_share_with_limb_batch_size(
                     proof_randomness_seed_hex,
                     &transcript,
                 )
-                .map(|proof| {
+                .inspect(|_| {
                     trustee_proof_progress(format!("prove-finish limb={limb_index}"));
-                    proof
                 })
             })
             .collect::<CanonicalResult<Vec<_>>>()?;

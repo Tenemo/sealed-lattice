@@ -14,14 +14,9 @@ import {
     textEncoder,
 } from './constants-and-types.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 
-export const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
+export { assertProtocolHash } from '../common-fields.js';
 
 export const assertPositiveSafeInteger = (
     value: number,

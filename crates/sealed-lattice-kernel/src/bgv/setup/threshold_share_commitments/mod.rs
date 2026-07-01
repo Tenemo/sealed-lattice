@@ -20,6 +20,7 @@ use crate::{
 };
 
 use super::{
+    SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
     accepted_setup::{
         AcceptedRosterParameters, accepted_roster_from_setup_context,
         setup_parameters_hash_for_roster,
@@ -43,7 +44,6 @@ const THRESHOLD_SHARE_DERIVATION_RULE: &str =
     "sum-source-trustee-polynomial-commitments-at-trustee-point";
 const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
-const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 const VSS_MATERIAL_BINARY_OBJECT_TYPE: &str = "SetupTransportedVssCoefficientCommitmentMaterial";
 const VERIFIED_VSS_MATERIAL_OBJECT_TYPE: &str = "VerifiedVssCoefficientCommitmentMaterial";
 const VSS_MATERIAL_BINARY_FORMAT: &str =
@@ -331,22 +331,6 @@ pub(crate) fn finish_threshold_share_commitment_transport_derivation_stream_requ
         &vss_coefficient_commitment_root,
         &source_trustee_record_values,
     )
-}
-
-pub(crate) fn release_verified_transported_vss_material_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let verification_id = derivation_stream_id_field(request, "verificationId")?.to_string();
-    let verified_materials = vss_transport_verified_materials();
-    let mut verified_materials = verified_materials.lock().map_err(|_| {
-        invalid_threshold_commitment_input("verified material store is unavailable")
-    })?;
-    verified_materials.remove(&verification_id);
-
-    Ok(json!({
-        "operation": "releaseVerifiedTransportedVssMaterial",
-        "verificationId": verification_id,
-    }))
 }
 
 pub(crate) fn verify_constant_vss_commitments_from_transport_request(

@@ -7,6 +7,8 @@ import {
 } from '../evaluator-key-schedule.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
+export { setupContextFieldNames } from '../common-fields.js';
+
 export type JsonRecord = Record<string, unknown>;
 export type EvaluationKeyShareProofFamily =
     | 'relinearization-key-share'
@@ -47,14 +49,6 @@ export const publicEvaluationKeyMaterialMagic = new Uint8Array([
     0x53, 0x4c, 0x45, 0x4b, 0x50, 0x4d, 0x56, 0x31,
 ]);
 export const textEncoder = new TextEncoder();
-
-export const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 
 export type SameSecretProofReference = Readonly<{
     readonly trusteeIdentity: string;
@@ -279,8 +273,6 @@ export type TrusteeEvaluationKeyProofRecord = Readonly<
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly sameSecretProofRoot: ProtocolHash;
         readonly statementHash: ProtocolHash;
-        readonly keyCount: number;
-        readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
         readonly trusteeEvaluationKeyProofRoot: ProtocolHash;
     } & (
@@ -353,7 +345,6 @@ export type TrusteeEvaluationKeyProofGenerationOutput = Readonly<{
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly keyCount: number;
     readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;

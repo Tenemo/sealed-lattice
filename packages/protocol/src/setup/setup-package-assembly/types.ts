@@ -151,6 +151,8 @@ export type SetupPackage = Readonly<
 
 export type SetupPackageVerificationInputSource = Readonly<{
     readonly setupPackage: SetupPackage;
+    readonly expectedManifestHash: ProtocolHash;
+    readonly expectedRosterHash: ProtocolHash;
     readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
     readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;

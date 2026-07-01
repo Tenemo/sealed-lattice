@@ -8,7 +8,7 @@ import type {
 // Single source of truth shared with the Rust kernel test
 // (trustee_evaluation_key_proof::tests): byte-identical succinct-setup statement
 // hashes pinned across the TS/WASM and Rust provers. Edit the values in the JSON
-// and run `pnpm run vectors:generate` after an intended encoding change.
+// after an intended encoding change.
 import expectedStatementHashes from '#test-vectors/succinct-setup-statement-hashes.json';
 
 type JsonRecord = Record<string, unknown>;

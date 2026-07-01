@@ -22,9 +22,6 @@ export type MlDsaKeyPairFixture = {
     readonly secretKeyBytesHex: string;
 };
 
-const deriveMlDsaContextByteLength = (contextString: string): number =>
-    textEncoder.encode(contextString).byteLength;
-
 const isLowercaseHex = (value: string): boolean =>
     /^[0-9a-f]*$/u.test(value) && value.length % 2 === 0;
 
@@ -65,15 +62,11 @@ export const createMlDsaSignatureProfileFixture = (
     overrides: Partial<MlDsaSignatureProfile> = {},
 ): MlDsaSignatureProfile => {
     const contextString = overrides.contextString ?? 'sealed-lattice:v1';
-    const contextStringByteLength =
-        overrides.contextStringByteLength ??
-        deriveMlDsaContextByteLength(contextString);
 
     return {
         algorithm: 'ML-DSA-65',
         mode: overrides.mode ?? 'PureMLDSA',
         contextString,
-        contextStringByteLength,
     };
 };
 

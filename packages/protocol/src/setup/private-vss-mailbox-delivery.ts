@@ -6,6 +6,8 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { setupProofTransportChunkSizeBytes } from './setup-proof-material-transport.js';
+
 type JsonRecord = Record<string, unknown>;
 
 type PrivateVssSetupContext = Readonly<
@@ -266,7 +268,6 @@ const privateVssShareProofFamily = 'vss-opening-carry';
 const embeddedPrivateVssShareProofBytesEncoding =
     'embedded-binary-proof-bytes-hex';
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
-const setupProofTransportChunkSizeBytes = 1_048_576;
 const privateVssShareProofBytesHashDomain =
     'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1';
 const textEncoder = new TextEncoder();

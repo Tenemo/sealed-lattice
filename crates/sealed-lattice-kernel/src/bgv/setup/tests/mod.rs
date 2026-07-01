@@ -5,19 +5,18 @@ use super::sharing::{
     RnsShamirShare, canonical_trustee_point, evaluate_shamir_polynomial,
     interpolate_shamir_constant_with_threshold,
 };
+use super::threshold_share_commitments::derive_threshold_share_commitments_from_transport_request;
 use super::validation::{validate_setup_package_internal_bindings, validate_setup_package_shape};
 use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
     DATA_PRIMES, POLYNOMIAL_DEGREE,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
-    derive_threshold_share_commitments_from_request,
-    derive_threshold_share_commitments_from_transport_request,
-    describe_collective_bgv_setup_parameters, development_evaluator_key_from_passive_setup_package,
+    derive_threshold_share_commitments_from_request, describe_collective_bgv_setup_parameters,
+    development_evaluator_key_from_passive_setup_package,
     finish_threshold_share_commitment_transport_derivation_stream_request,
     generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
-    release_verified_transported_vss_material_request, sample_public_residues,
-    selected_public_evaluation_key_rotation_requests,
+    sample_public_residues, selected_public_evaluation_key_rotation_requests,
     verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
     verify_private_vss_share_envelope_from_request,
 };
@@ -59,8 +58,6 @@ mod threshold_share_commitments;
 mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
-
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "c8f82cfe9cc3a9a1c3c112a49897df5e9e9551c463db0e7a985fc5a456f2e7b3747dc9099ade104b9dd1118ff9b59b5278cb1267a9438bbbabec0609c769b83d";
 
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();

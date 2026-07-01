@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
     buildPackageManagerEntryPointCandidates,
     resolvePackageManagerRunnerForPackageManager,
-    resolvePackageManagerRunnerFromArguments,
 } from '#tools/ci/package-manager-runner';
 import {
     createAbortableCommandSpawnOptions,
@@ -34,39 +33,6 @@ describe('package manager runner resolution', () => {
 
         const runner = resolvePackageManagerRunnerForPackageManager(
             'npm',
-            path.resolve('toolchains', 'pnpm', 'bin', 'pnpm.cjs'),
-            '',
-            nodeExecutablePath,
-            (candidatePath) => candidatePath === expectedNpmEntryPoint,
-        );
-
-        expect(runner).toEqual({
-            command: nodeExecutablePath,
-            commandArgumentsPrefix: [expectedNpmEntryPoint],
-            kind: 'npm',
-        });
-    });
-
-    it('uses the same runner helper for command-line package manager overrides', () => {
-        const nodeExecutablePath = path.resolve(
-            'toolchains',
-            'node',
-            'bin',
-            'node',
-        );
-        const expectedNpmEntryPoint = buildPackageManagerEntryPointCandidates(
-            'npm',
-            '',
-            nodeExecutablePath,
-        )[0];
-        if (expectedNpmEntryPoint === undefined) {
-            throw new Error(
-                'Expected the npm candidate list to include an entry.',
-            );
-        }
-
-        const runner = resolvePackageManagerRunnerFromArguments(
-            ['--package-manager', 'npm'],
             path.resolve('toolchains', 'pnpm', 'bin', 'pnpm.cjs'),
             '',
             nodeExecutablePath,

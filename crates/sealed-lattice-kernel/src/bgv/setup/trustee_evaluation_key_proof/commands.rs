@@ -62,7 +62,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         "proofFamily": statement.context.proof_family,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
-        "keyCount": statement.keys.len(),
         "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),

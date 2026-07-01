@@ -6,4 +6,4 @@ The current release implements protocol hash derivation, canonical JSON normaliz
 
 Private mailbox encryption authenticates the encrypted envelope and associated data to the recipient; source provenance for protocol objects must still come from signed transcript roots where the protocol requires it.
 
-It is not a public API surface. The published `sealed-lattice` package vendors the required runtime internally and does not export raw hash, signing, mailbox encryption, or provider controls.
+It is not a public API surface. The published `sealed-lattice` package vendors the required runtime internally and does not export raw hash, signing, mailbox encryption, or low-level key-management controls.

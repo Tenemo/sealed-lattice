@@ -4,7 +4,29 @@ import {
     verifySetupPackage,
 } from '../../../dist/index.js';
 import { loadTranscriptCoreKernel } from '../../../dist/kernel.js';
-import * as internalSetupFlow from '../../support/internal-setup-flow.js';
+import {
+    createCommonRandomnessCommit,
+    createCommonRandomnessReveal,
+    createEvaluatorKeySchedule,
+    createGaloisKeyShareBatches,
+    createPublicEvaluationKeySet,
+    createPublicKeyShareMaterialSet,
+    createPublicKeyShareProofSet,
+    createPublicKeyShareSet,
+    createPublicKeyShareSuccinctProofSet,
+    createRelinearizationKeyShareRounds,
+    createSameSecretProofSet,
+    createSetupCertificates,
+    createSetupCommonRandomness,
+    createSetupContribution,
+    createSetupIntent,
+    createSetupPackage,
+    createSetupPhaseRecord,
+    createVssComplaint,
+    createVssShareAcceptance,
+    exportEncryptedLocalTrusteeSetupState,
+    restoreLocalTrusteeSetupState,
+} from '../../support/internal-setup-flow.js';
 
 import { hash512Hex } from '#packages/crypto/src/index';
 import {
@@ -17,6 +39,7 @@ import {
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     publicKeyShareCoefficientVectorHashDomain,
+    setupTransportChunkSizeBytes,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
@@ -106,8 +129,28 @@ export type PublicSetupApi = {
 // The test still builds a package through the relocated internal flow and verifies it through
 // the public verifier path.
 export const publicSetupApi = {
-    ...internalSetupFlow,
+    createCommonRandomnessCommit,
+    createCommonRandomnessReveal,
+    createEvaluatorKeySchedule,
+    createGaloisKeyShareBatches,
+    createPublicEvaluationKeySet,
+    createPublicKeyShareMaterialSet,
+    createPublicKeyShareProofSet,
+    createPublicKeyShareSet,
+    createPublicKeyShareSuccinctProofSet,
+    createRelinearizationKeyShareRounds,
+    createSameSecretProofSet,
+    createSetupCertificates,
+    createSetupCommonRandomness,
+    createSetupContribution,
+    createSetupIntent,
+    createSetupPackage,
     createSetupPackageVerificationInput,
+    createSetupPhaseRecord,
+    createVssComplaint,
+    createVssShareAcceptance,
+    exportEncryptedLocalTrusteeSetupState,
+    restoreLocalTrusteeSetupState,
     verifyPrivateVssShare,
     verifySetupPackage,
 } as unknown as PublicSetupApi;
@@ -173,7 +216,7 @@ export { qSharePrimes };
 export const participantCount = 2;
 export const vssFixtureRingDegree = 8;
 export const vssFixtureThresholdDegree = 2;
-export const setupTransportChunkSizeBytes = 1_048_576;
+export { setupTransportChunkSizeBytes };
 export const requiredGaloisKeySchedule = [
     {
         rotation: 3,

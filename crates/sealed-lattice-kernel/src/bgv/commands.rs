@@ -20,7 +20,6 @@ use crate::{
             compute_setup_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
-            derive_threshold_share_commitments_from_transport_request,
             describe_collective_bgv_setup_parameters,
             finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
@@ -28,7 +27,6 @@ use crate::{
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
-            release_verified_transported_vss_material_request,
             verify_collective_bgv_setup_package_from_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
@@ -145,12 +143,6 @@ pub(crate) fn derive_threshold_share_commitments(request: &Value) -> CanonicalRe
     derive_threshold_share_commitments_from_request(request)
 }
 
-pub(crate) fn derive_threshold_share_commitments_from_transport(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    derive_threshold_share_commitments_from_transport_request(request)
-}
-
 pub(crate) fn begin_threshold_share_commitments_from_transport_stream(
     request: &Value,
 ) -> CanonicalResult<Value> {
@@ -167,10 +159,6 @@ pub(crate) fn finish_threshold_share_commitments_from_transport_stream(
     request: &Value,
 ) -> CanonicalResult<Value> {
     finish_threshold_share_commitment_transport_derivation_stream_request(request)
-}
-
-pub(crate) fn release_verified_transported_vss_material(request: &Value) -> CanonicalResult<Value> {
-    release_verified_transported_vss_material_request(request)
 }
 
 pub(crate) fn begin_setup_proof_material_transport_stream(
@@ -245,7 +233,6 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
         "suppliedSlotCount": slots.len(),
         "slotCount": POLYNOMIAL_DEGREE,
         "plaintextRoot": plaintext_root,
-        "canonicalByteLength": canonical_bytes.len(),
         "sampledSlots": sample_positions(&encoded.slots),
         "sampledCoefficientsModPlaintext": sample_positions(&encoded.coefficients_mod_plaintext),
         "validation": validation,
@@ -307,7 +294,6 @@ pub(crate) fn generate_bgv_ciphertext_convention_fixture_from_request(
     let mut value = json!({
         "bgvParametersHash": bgv_parameters_hash()?,
         "ciphertextRoot": root,
-        "canonicalByteLength": canonical_bytes.len(),
         "componentCount": 2,
         "validation": validation,
     });

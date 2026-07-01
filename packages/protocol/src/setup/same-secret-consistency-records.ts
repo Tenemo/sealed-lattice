@@ -6,6 +6,11 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    assertContextMatches,
+    assertProtocolHash,
+    contextFields,
+} from './common-fields.js';
+import {
     setupProofChunkManifestRoot,
     setupProofMaterialChunkHash,
     setupProofTransportChunkSizeBytes,
@@ -165,15 +170,7 @@ export type BinaryChunkedSameSecretProofMaterialTransport = Readonly<{
     readonly transportedSameSecretProofMaterial: TransportedSameSecretProofMaterialSet;
 }>;
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
-const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 
 const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
@@ -189,12 +186,6 @@ const assertNonNegativeSafeInteger = (
         throw new TypeError(
             `${fieldName} must be a non-negative safe integer.`,
         );
-    }
-};
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 };
 
@@ -222,33 +213,6 @@ const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
 
 const bytesToHex = (bytes: Uint8Array): string =>
     Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
-    }
-};
 
 const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
     assertPositiveSafeInteger(input.participantCount, 'participantCount');

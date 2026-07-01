@@ -8,6 +8,7 @@ import {
     createRegistrationEntry,
     createRosterManifestTranscriptInput,
     createSignature,
+    deriveCollectiveBgvSetupRosterHash,
     deriveCanonicalObjectHash,
     deriveRosterHash,
     manifestOpaqueBindings,
@@ -15,6 +16,107 @@ import {
 } from './election-foundation-test-helpers';
 
 describe('roster and manifest shells', () => {
+    it('derives the collective setup roster hash from externally accepted roster entries', () => {
+        const entries = [
+            {
+                rosterPosition: 2,
+                trusteeIdentity: 'trustee-2',
+                signingPublicKeyHash: 'c'.repeat(128),
+            },
+            {
+                rosterPosition: 0,
+                trusteeIdentity: 'trustee-0',
+                signingPublicKeyHash: 'a'.repeat(128),
+            },
+            {
+                rosterPosition: 1,
+                trusteeIdentity: 'trustee-1',
+                signingPublicKeyHash: 'b'.repeat(128),
+            },
+        ] as const;
+        const expectedHash = deriveCanonicalObjectHash({
+            objectType: 'CollectiveBgvSetupRoster',
+            rosterEntries: [
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 1,
+                    trusteeIdentity: 'trustee-1',
+                    signingPublicKeyHash: 'b'.repeat(128),
+                },
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 2,
+                    trusteeIdentity: 'trustee-2',
+                    signingPublicKeyHash: 'c'.repeat(128),
+                },
+            ],
+        });
+
+        expect(deriveCollectiveBgvSetupRosterHash(entries)).toBe(expectedHash);
+        expect(deriveCollectiveBgvSetupRosterHash([...entries].reverse())).toBe(
+            expectedHash,
+        );
+    });
+
+    it('rejects malformed collective setup roster hash inputs', () => {
+        expect(() => deriveCollectiveBgvSetupRosterHash(null as never)).toThrow(
+            /must be an array/u,
+        );
+        expect(() =>
+            deriveCollectiveBgvSetupRosterHash([null as never]),
+        ).toThrow(/must be an object/u);
+        expect(() =>
+            deriveCollectiveBgvSetupRosterHash([
+                {
+                    rosterPosition: -1,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+            ]),
+        ).toThrow(/rosterPosition/u);
+        expect(() =>
+            deriveCollectiveBgvSetupRosterHash([
+                {
+                    rosterPosition: 0,
+                    trusteeIdentity: '',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+            ]),
+        ).toThrow(/trusteeIdentity/u);
+        expect(() =>
+            deriveCollectiveBgvSetupRosterHash([
+                {
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+                {
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-1',
+                    signingPublicKeyHash: 'b'.repeat(128),
+                },
+            ]),
+        ).toThrow(/distinct roster positions/u);
+        expect(() =>
+            deriveCollectiveBgvSetupRosterHash([
+                {
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'not-a-protocol-hash',
+                },
+            ]),
+        ).toThrow(/signingPublicKeyHash/u);
+    });
+
     it('accepts an honest registration to manifest transcript', () => {
         const registrations = [
             createRegistrationEntry('participant-1', 1, 0),

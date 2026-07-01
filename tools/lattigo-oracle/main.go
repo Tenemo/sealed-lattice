@@ -45,38 +45,30 @@ type sample struct {
 }
 
 type canonicalRnsFixture struct {
-	SchemaVersion                int      `json:"schemaVersion"`
-	FixtureID                    string   `json:"fixtureId"`
-	Source                       string   `json:"source"`
-	PolynomialDegree             int      `json:"polynomialDegree"`
-	Moduli                       []uint64 `json:"moduli"`
-	SamplePositions              []int    `json:"samplePositions"`
-	LeftCoefficientFormula       string   `json:"leftCoefficientFormula"`
-	RightCoefficientFormula      string   `json:"rightCoefficientFormula"`
-	ReferenceSerializationPolicy string   `json:"referenceSerializationPolicy"`
-	ProtocolEvidence             bool     `json:"protocolEvidence"`
+	SchemaVersion           int      `json:"schemaVersion"`
+	FixtureID               string   `json:"fixtureId"`
+	Source                  string   `json:"source"`
+	PolynomialDegree        int      `json:"polynomialDegree"`
+	Moduli                  []uint64 `json:"moduli"`
+	SamplePositions         []int    `json:"samplePositions"`
+	LeftCoefficientFormula  string   `json:"leftCoefficientFormula"`
+	RightCoefficientFormula string   `json:"rightCoefficientFormula"`
 }
 
 type oracleReport struct {
-	ArtifactKind                         string   `json:"artifactKind"`
-	PinnedCommit                         string   `json:"pinnedCommit"`
-	PolynomialDegree                     int      `json:"polynomialDegree"`
-	Moduli                               []uint64 `json:"moduli"`
-	ComparableOperations                 []string `json:"comparableOperations"`
-	ConventionDifferences                []string `json:"conventionDifferences"`
-	RoundTripMatched                     bool     `json:"roundTripMatched"`
-	AdditionMatched                      bool     `json:"additionMatched"`
-	SubtractionMatched                   bool     `json:"subtractionMatched"`
-	MultiplicationMatched                bool     `json:"multiplicationMatched"`
-	SealedLatticeCanonicalMaterialUsed   bool     `json:"sealedLatticeCanonicalMaterialUsed"`
-	CanonicalMaterialFixtureID           string   `json:"canonicalMaterialFixtureId"`
-	CanonicalMaterialFixtureHash       string   `json:"canonicalMaterialFixtureHash"`
-	CanonicalMaterialSerializationPolicy string   `json:"canonicalMaterialSerializationPolicy"`
-	ReferenceSerializationUsed           bool     `json:"referenceSerializationUsed"`
-	ProtocolEvidence                     bool     `json:"protocolEvidence"`
-	InputHash                          string   `json:"inputHash"`
-	RoundTripSamples                     []sample `json:"roundTripSamples"`
-	AdditionSamples                      []sample `json:"additionSamples"`
+	PinnedCommit                 string   `json:"pinnedCommit"`
+	PolynomialDegree             int      `json:"polynomialDegree"`
+	Moduli                       []uint64 `json:"moduli"`
+	ComparableOperations         []string `json:"comparableOperations"`
+	RoundTripMatched             bool     `json:"roundTripMatched"`
+	AdditionMatched              bool     `json:"additionMatched"`
+	SubtractionMatched           bool     `json:"subtractionMatched"`
+	MultiplicationMatched        bool     `json:"multiplicationMatched"`
+	CanonicalMaterialFixtureID   string   `json:"canonicalMaterialFixtureId"`
+	CanonicalMaterialFixtureHash string   `json:"canonicalMaterialFixtureHash"`
+	InputHash                    string   `json:"inputHash"`
+	RoundTripSamples             []sample `json:"roundTripSamples"`
+	AdditionSamples              []sample `json:"additionSamples"`
 }
 
 func main() {
@@ -148,25 +140,19 @@ func buildReport() (oracleReport, error) {
 	}
 
 	return oracleReport{
-		ArtifactKind:                         "lattigo-development-oracle-vector",
-		PinnedCommit:                         pinnedCommit,
-		PolynomialDegree:                     polynomialDegree,
-		Moduli:                               selectedModuli,
-		ComparableOperations:                 []string{"ring.NewRing", "NTTThenINTTRoundTrip", "CoefficientAddition", "CoefficientSubtraction", "CoefficientMultiplicationBarrett"},
-		ConventionDifferences:                []string{"coefficient-ordering-reviewed", "ntt-root-direction-reviewed", "automorphism-direction-not-used", "slot-ordering-not-accepted-as-protocol-evidence", "plaintext-encoding-convention-not-accepted-as-protocol-evidence", "key-switch-decomposition-not-covered", "ciphertext-component-order-not-covered"},
-		RoundTripMatched:                     roundTripMatched,
-		AdditionMatched:                      additionMatched,
-		SubtractionMatched:                   subtractionMatched,
-		MultiplicationMatched:                multiplicationMatched,
-		SealedLatticeCanonicalMaterialUsed:   true,
-		CanonicalMaterialFixtureID:           fixture.FixtureID,
-		CanonicalMaterialFixtureHash:       fixtureHash,
-		CanonicalMaterialSerializationPolicy: fixture.ReferenceSerializationPolicy,
-		ReferenceSerializationUsed:           false,
-		ProtocolEvidence:                     false,
-		InputHash:                          hashInputs(left),
-		RoundTripSamples:                     samples(recovered.Coeffs[0], fixture.SamplePositions),
-		AdditionSamples:                      samples(addition.Coeffs[0], fixture.SamplePositions),
+		PinnedCommit:                 pinnedCommit,
+		PolynomialDegree:             polynomialDegree,
+		Moduli:                       selectedModuli,
+		ComparableOperations:         []string{"ring.NewRing", "NTTThenINTTRoundTrip", "CoefficientAddition", "CoefficientSubtraction", "CoefficientMultiplicationBarrett"},
+		RoundTripMatched:             roundTripMatched,
+		AdditionMatched:              additionMatched,
+		SubtractionMatched:           subtractionMatched,
+		MultiplicationMatched:        multiplicationMatched,
+		CanonicalMaterialFixtureID:   fixture.FixtureID,
+		CanonicalMaterialFixtureHash: fixtureHash,
+		InputHash:                    hashInputs(left),
+		RoundTripSamples:             samples(recovered.Coeffs[0], fixture.SamplePositions),
+		AdditionSamples:              samples(addition.Coeffs[0], fixture.SamplePositions),
 	}, nil
 }
 
@@ -209,12 +195,6 @@ func validateCanonicalFixture(fixture canonicalRnsFixture) error {
 		if fixture.Moduli[modulusIndex] != modulus {
 			return fmt.Errorf("sealed-lattice canonical material fixture modulus %d is %d, expected %d", modulusIndex, fixture.Moduli[modulusIndex], modulus)
 		}
-	}
-	if fixture.ProtocolEvidence {
-		return fmt.Errorf("sealed-lattice canonical material fixture must not claim protocol evidence")
-	}
-	if fixture.ReferenceSerializationPolicy != "sealed-lattice-canonical-material-only-lattigo-serialization-rejected" {
-		return fmt.Errorf("sealed-lattice canonical material fixture has unexpected serialization policy %q", fixture.ReferenceSerializationPolicy)
 	}
 
 	// Fixed coefficient indices the Rust side also samples, for cross-impl comparison.

@@ -11,7 +11,7 @@ const heavyKernelNodeTestDirectory =
 type TestLaneGroup =
     | 'browser'
     | 'node-fast'
-    | 'node-kernel'
+    | 'node-kernel-fast'
     | 'node-kernel-heavy'
     | 'node-protocol';
 
@@ -47,12 +47,12 @@ export const testLaneGroupsForRelativePath = (
         relativePath.startsWith('packages/wasm/tests/node/') &&
         relativePath.endsWith('.kernel.test.ts')
     ) {
-        laneGroups.push('node-kernel');
+        laneGroups.push('node-kernel-fast');
     } else if (
         relativePath.startsWith('tests/node/') &&
         relativePath.endsWith('.kernel.test.ts')
     ) {
-        laneGroups.push('node-kernel');
+        laneGroups.push('node-kernel-fast');
     } else if (
         relativePath.startsWith('tests/node/') ||
         (relativePath.startsWith('packages/') &&

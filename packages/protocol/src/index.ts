@@ -14,9 +14,11 @@ export {
     verifyRecoveryEpochUpdate,
 } from './recovery/index.js';
 export {
+    deriveCollectiveBgvSetupRosterHash,
     verifyRosterExternalAcceptance,
     verifyRosterManifestTranscript,
 } from './roster/index.js';
+export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
 export {
     createPrivateVssMailboxSourceTrusteeDeliveryReferences,
     createPrivateVssMailboxDeliverySet,

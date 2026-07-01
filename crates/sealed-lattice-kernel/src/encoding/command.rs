@@ -26,11 +26,9 @@ enum TranscriptCoreCommand {
     GenerateTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
     DeriveThresholdShareCommitments,
-    DeriveThresholdShareCommitmentsFromTransport,
     BeginThresholdShareCommitmentsFromTransportStream,
     AbsorbThresholdShareCommitmentsFromTransportStreamChunk,
     FinishThresholdShareCommitmentsFromTransportStream,
-    ReleaseVerifiedTransportedVssMaterial,
     BeginSetupProofMaterialTransportStream,
     AbsorbSetupProofMaterialTransportStreamChunk,
     FinishSetupProofMaterialTransportStream,
@@ -207,11 +205,9 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
-        | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk
         | TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream
-        | TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial
         | TranscriptCoreCommand::BeginSetupProofMaterialTransportStream
         | TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk
         | TranscriptCoreCommand::FinishSetupProofMaterialTransportStream
@@ -272,9 +268,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::DeriveThresholdShareCommitments => {
             crate::bgv::commands::derive_threshold_share_commitments(request)
         }
-        TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport => {
-            crate::bgv::commands::derive_threshold_share_commitments_from_transport(request)
-        }
         TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::begin_threshold_share_commitments_from_transport_stream(request)
         }
@@ -285,9 +278,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::finish_threshold_share_commitments_from_transport_stream(request)
-        }
-        TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial => {
-            crate::bgv::commands::release_verified_transported_vss_material(request)
         }
         TranscriptCoreCommand::BeginSetupProofMaterialTransportStream => {
             crate::bgv::commands::begin_setup_proof_material_transport_stream(request)

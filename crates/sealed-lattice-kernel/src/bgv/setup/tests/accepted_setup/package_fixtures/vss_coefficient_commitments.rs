@@ -203,7 +203,7 @@ pub(super) fn streamed_vss_coefficient_commitments_object(
 
     let mut source_trustee_records = Vec::new();
     for source_trustee_roster_position in 0..participant_count {
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "streaming VSS source trustee {source_trustee_roster_position}"
         ));
         let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");

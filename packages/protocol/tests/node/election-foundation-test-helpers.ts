@@ -31,6 +31,7 @@ export {
     verifyCloseRecordShell,
 } from '#packages/protocol/src/closing/index';
 export {
+    deriveCollectiveBgvSetupRosterHash,
     deriveElectionManifestHash,
     deriveRegistrationEntryHash,
     deriveRosterHash,

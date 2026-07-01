@@ -4,14 +4,9 @@ import {
     publicPackagePolicy,
     type VendoredProtocolRuntimeEntryExport,
 } from '#tools/ci/public-package-policy';
-import {
-    collectEntryPointTypeExportNames,
-    validatePublicPackagePolicy,
-} from '#tools/ci/verify-public-package-policy';
+import { validatePublicPackagePolicy } from '#tools/ci/verify-public-package-policy';
 
 const emptyPackagePolicy = {
-    forbiddenRuntimeExports: [],
-    forbiddenTypeExports: [],
     vendoredCryptoRuntimeModules:
         publicPackagePolicy.vendoredCryptoRuntimeModules,
     vendoredProtocolRuntimeEntryExports: [],
@@ -23,78 +18,41 @@ const runtimeFacadeExportNamesForPolicyEntry = (
 ): readonly string[] => entry.runtimeFacadeExports ?? entry.exports;
 
 describe('public package policy', () => {
-    it('collects direct type exports from the package entry declaration', () => {
-        const typeExports = collectEntryPointTypeExportNames(`
-            export type { SafeType, UnsafeType as RenamedUnsafeType } from './internal/types.js';
-            export type InlineType = { readonly value: string };
-            export declare interface InlineInterface {
-                readonly value: string;
-            }
-        `);
-
-        expect(typeExports).toEqual([
-            'InlineInterface',
-            'InlineType',
-            'SafeType',
-            'UnsafeType',
-        ]);
-    });
-
-    it('rejects forbidden type exports as public package drift', async () => {
-        const failures = await validatePublicPackagePolicy(
-            {
-                ...emptyPackagePolicy,
-                forbiddenTypeExports: [
-                    'BgvPassiveSetupPackage',
-                    'TopKEvaluatorDirectAggregateInput',
-                ],
-            },
-            [],
-            [
-                'BgvPassiveSetupPackage',
-                'SafeVerificationInput',
-                'TopKEvaluatorDirectAggregateInput',
-            ],
-        );
-
-        expect(failures).toEqual([
-            'Forbidden type export is public: BgvPassiveSetupPackage',
-            'Forbidden type export is public: TopKEvaluatorDirectAggregateInput',
-        ]);
-    });
-
-    it('keeps verification input types and runtime exports on separate gates', async () => {
-        const failures = await validatePublicPackagePolicy(
-            {
-                ...emptyPackagePolicy,
-                forbiddenRuntimeExports: ['decryptIntermediateWire'],
-                forbiddenTypeExports: ['DirectEncryptedBallotWitness'],
-            },
-            ['decryptIntermediateWire', 'verifyDirectEncryptedBallotProof'],
-            [
-                'DirectEncryptedBallotVerificationInput',
-                'EvaluatorReplayVerificationInput',
-            ],
-        );
-
-        expect(failures).toEqual([
-            'Forbidden runtime export is public: decryptIntermediateWire',
-        ]);
-    });
-
-    it('rejects target-decryption implementation exports if they reach the SDK facade', async () => {
+    it('rejects missing protocol runtime entry exports from the SDK facade', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
                 runtimeFacadeExportNamesForPolicyEntry,
             );
         const failures = await validatePublicPackagePolicy(
             publicPackagePolicy,
-            [...requiredRuntimeExports, 'verifyTargetAcceptedRecord'],
-            [],
+            requiredRuntimeExports.filter(
+                (exportName) => exportName !== 'verifyBoardConsistency',
+            ),
         );
 
         expect(failures).toEqual([
-            'Forbidden runtime export is public: verifyTargetAcceptedRecord',
+            'vendoredProtocolRuntimeEntryExports board/index.js exposes "verifyBoardConsistency" outside the SDK runtime facade',
+        ]);
+    });
+
+    it('rejects unreachable vendored protocol runtime modules', async () => {
+        const requiredRuntimeExports =
+            publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
+                runtimeFacadeExportNamesForPolicyEntry,
+            );
+        const failures = await validatePublicPackagePolicy(
+            {
+                ...publicPackagePolicy,
+                vendoredProtocolRuntimeModules: [
+                    ...publicPackagePolicy.vendoredProtocolRuntimeModules,
+                    'setup/local-trustee-setup-state.ts',
+                ],
+            },
+            requiredRuntimeExports,
+        );
+
+        expect(failures).toEqual([
+            'vendoredProtocolRuntimeModules includes unreachable source "setup/local-trustee-setup-state.ts"',
         ]);
     });
 
@@ -104,7 +62,6 @@ describe('public package policy', () => {
                 ...emptyPackagePolicy,
                 vendoredCryptoRuntimeModules: ['index.ts'],
             },
-            [],
             [],
         );
 

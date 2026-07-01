@@ -24,6 +24,7 @@ import {
     runCommandsInSeries,
     type CommandInvocation,
 } from './run-command.js';
+import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
@@ -53,17 +54,6 @@ export type ParsedCheckArguments = {
 
 const checkUsage = 'Usage: run-check.ts [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
-const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
-
-const rustKernelFastTestArguments = [
-    'test',
-    '-p',
-    'sealed-lattice-kernel',
-    '--',
-    '--skip',
-    rustKernelHeavyTestPattern,
-    '--show-output',
-] as const;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -75,6 +65,10 @@ export const parseCheckArguments = (
     for (let index = 0; index < commandArguments.length; index += 1) {
         const argument = commandArguments[index];
         if (argument === undefined) {
+            continue;
+        }
+
+        if (argument === '--') {
             continue;
         }
 
@@ -174,13 +168,7 @@ const buildGatingLanes = (
         packageManagerRunner,
         'Smoke npm package',
         'smoke-pack-npm',
-        [
-            'exec',
-            'tsx',
-            './tools/ci/verify-packed-package.ts',
-            '--package-manager',
-            'npm',
-        ],
+        ['exec', 'tsx', './tools/ci/verify-packed-package.ts'],
     ),
 ];
 
@@ -206,7 +194,7 @@ const buildRustKernelLane = (): ValidationLane => ({
         ),
         createCargoCommand(
             'cargo test (optimized test profile, fast)',
-            rustKernelFastTestArguments,
+            cargoTestArgumentsForRustKernelFast(),
             'cargo-test',
         ),
     ],
@@ -214,9 +202,9 @@ const buildRustKernelLane = (): ValidationLane => ({
 });
 
 // Independent checks run concurrently against the built output. The commit gate
-// runs the fast Node test project, the non-heavy kernel Node project, and the
-// fast Rust kernel tests. The heavier protocol, kernel-heavy Node project,
-// ignored Rust kernel heavy tests, and the Playwright browser projects stay in
+// runs the fast Node test project, the kernel-fast Node project, and the fast
+// Rust kernel tests. The heavier protocol, kernel-heavy Node project, ignored
+// Rust accepted-setup proof tests, and the Playwright browser projects stay in
 // their standalone lanes for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
@@ -251,7 +239,6 @@ const buildParallelLanes = (
             'tsx',
             './tools/ci/check-package-boundaries.ts',
         ]),
-        lane('Verify test vectors', 'test-vectors', ['run', 'vectors']),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
         lane('Node tests (fast)', 'vitest-node', [
             'exec',
@@ -264,11 +251,11 @@ const buildParallelLanes = (
             '--reporter',
             './tools/ci/vitest-progress-reporter.ts',
         ]),
-        lane('Node tests (kernel)', 'vitest-node-kernel', [
+        lane('Node tests (kernel fast)', 'vitest-node-kernel-fast', [
             'exec',
             'vitest',
             '--project',
-            'node-kernel',
+            'node-kernel-fast',
             '--run',
             '--reporter',
             'default',
@@ -304,7 +291,7 @@ const buildProgressLanePlans = (
         }
         if (
             lane.name === 'Node tests (fast)' ||
-            lane.name === 'Node tests (kernel)'
+            lane.name === 'Node tests (kernel fast)'
         ) {
             return {
                 secondary:

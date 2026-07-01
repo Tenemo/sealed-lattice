@@ -240,3 +240,40 @@ fn direct_ballot_support_rejects_out_of_range_randomizer() {
         "direct encrypted ballot randomizer has a coefficient outside the expected support"
     ));
 }
+
+#[test]
+fn direct_ballot_support_rejects_out_of_range_error_polynomials() {
+    let setup_package = setup_package();
+    let evaluator_key = development_evaluator_key_from_passive_setup_package(
+        &setup_package,
+        DIRECT_BALLOT_TEST_SETUP_SEED,
+    )
+    .expect("evaluator key");
+    let encrypted_ballot =
+        encrypt_direct_ballot(&setup_package, &evaluator_key, valid_ballot_input())
+            .expect("encrypted ballot");
+
+    let mut first_error_ballot = encrypted_ballot.clone();
+    first_error_ballot
+        .encryption_witness
+        .error_zero_coefficients[0] = 3;
+    let first_error = validate_encryption_witness_support(&first_error_ballot.encryption_witness)
+        .expect_err("out-of-range first error coefficient must reject");
+
+    assert_eq!(first_error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(first_error.message.contains(
+        "direct encrypted ballot first error polynomial has a coefficient outside the expected support"
+    ));
+
+    let mut second_error_ballot = encrypted_ballot;
+    second_error_ballot
+        .encryption_witness
+        .error_one_coefficients[0] = -3;
+    let second_error = validate_encryption_witness_support(&second_error_ballot.encryption_witness)
+        .expect_err("out-of-range second error coefficient must reject");
+
+    assert_eq!(second_error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(second_error.message.contains(
+        "direct encrypted ballot second error polynomial has a coefficient outside the expected support"
+    ));
+}

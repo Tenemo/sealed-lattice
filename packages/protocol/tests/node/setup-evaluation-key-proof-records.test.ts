@@ -385,7 +385,6 @@ const stubGenerator = (
                 `statement-${String(input.context.trusteeRosterPosition)}`,
             ),
             limbCount: qSharePrimes.length,
-            keyCount: input.keys.length,
             sameSecretLinkageIncluded: true,
             proofByteLength: proofBytesHex.length / 2,
             proofBytesHex,
@@ -838,14 +837,10 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                 expect(proofRecord.trusteeRosterPosition).toBe(
                     trusteeRosterPosition,
                 );
-                expect(proofRecord.keyCount).toBe(statementKeyCount);
                 expect(proofRecord.statementHash).toBe(
                     fixtureHash(`statement-${String(trusteeRosterPosition)}`),
                 );
                 const proofBytesHex = stubProofBytesHex(trusteeRosterPosition);
-                expect(proofRecord.proofSizeBytes).toBe(
-                    proofBytesHex.length / 2,
-                );
                 expect(proofRecord.proofBytesHash).toBe(
                     trusteeEvaluationKeyProofBytesHash(proofBytesHex),
                 );
@@ -867,30 +862,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         expect(
             trusteeEvaluationKeyProofs.trusteeEvaluationKeyProofSetRoot,
         ).toBe(deriveCanonicalObjectHash(proofSetWithoutRoot));
-    });
-
-    it('rejects generators that return the wrong key count', () => {
-        const fixture = evaluationKeyFixture();
-        const { relinearizationKeyShareRounds, galoisKeyShareBatches } =
-            builtRoundsAndBatches(fixture);
-        const wrongKeyCountGenerator: TrusteeEvaluationKeyProofGenerator = (
-            input,
-        ) => ({
-            ...stubGenerator([])(input),
-            keyCount: input.keys.length + 1,
-        });
-        expect(() =>
-            createTrusteeEvaluationKeyProofs({
-                ...fixture.commonInput,
-                relinearizationKeyShareRounds,
-                galoisKeyShareBatches,
-                keySwitchDecompositionHash: fixtureHash(
-                    'key-switch-decomposition',
-                ),
-                trusteeWitnesses: trusteeWitnesses(),
-                trusteeEvaluationKeyProofGenerator: wrongKeyCountGenerator,
-            }),
-        ).toThrow('generatedProof.keyCount must match the frozen key schedule');
     });
 
     it('rejects witnesses that do not cover every statement key or participant', () => {
@@ -1005,9 +976,6 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
                     'binary-chunked-proof-bytes',
                 );
                 expect(recordFields.proofChunkCount).toBe(1);
-                expect(recordFields.proofTotalByteLength).toBe(
-                    proofRecord.proofSizeBytes,
-                );
                 const transportedMaterial =
                     transport.transportedEvaluationKeyShareProofMaterial
                         .proofMaterials[recordIndex];
@@ -1027,6 +995,9 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
                 expect(chunks).toHaveLength(1);
                 expect(chunks[0].bytesHex).toBe(
                     stubProofBytesHex(proofRecord.trusteeRosterPosition),
+                );
+                expect(recordFields.proofTotalByteLength).toBe(
+                    chunks[0].bytesHex.length / 2,
                 );
                 const recordWithoutRoot = { ...proofRecord } as JsonRecord;
                 delete recordWithoutRoot.trusteeEvaluationKeyProofRoot;

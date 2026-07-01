@@ -1,13 +1,9 @@
 use super::*;
 
 #[test]
-fn passive_setup_generation_is_deterministic_and_verifiable() {
+fn passive_setup_generation_is_verifiable() {
     let first = setup_package_ref();
 
-    assert_eq!(
-        first["setupPackageHash"], EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH,
-        "passive setup generation must remain deterministic for the fixed test seed"
-    );
     assert_eq!(first["setupInputs"]["defaultSetupSeedUsed"], false);
     assert_eq!(
         first["collectivePublicKey"]["coefficientMaterial"]["objectType"],

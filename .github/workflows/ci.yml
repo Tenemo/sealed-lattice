@@ -30,8 +30,8 @@ jobs:
             - name: Run Rust tests with optimized test profile
               run: cargo test --workspace
 
-    rust-accepted-setup-checks:
-        name: rust accepted setup checks
+    rust-accepted-setup-fast:
+        name: rust accepted setup fast
         runs-on: ubuntu-latest
         timeout-minutes: 360
         steps:
@@ -42,16 +42,16 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - name: Run Rust accepted setup checks
-              id: accepted-setup-checks
+            - name: Run Rust accepted setup fast proof checks
+              id: rust-accepted-setup-fast
               timeout-minutes: 350
-              run: pnpm run test:rust:kernel:heavy:checks
-            - name: Upload Rust accepted setup checks logs
-              if: ${{ failure() && steps['accepted-setup-checks'].outcome == 'failure' }}
+              run: pnpm run test:rust:kernel:accepted-setup:fast
+            - name: Upload Rust accepted setup fast logs
+              if: ${{ failure() && steps['rust-accepted-setup-fast'].outcome == 'failure' }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
               with:
                   if-no-files-found: error
-                  name: rust-accepted-setup-checks-logs
+                  name: rust-accepted-setup-fast-logs
                   retention-days: 7
                   path: logs
 
@@ -70,7 +70,7 @@ jobs:
             - name: Run Rust accepted setup final package
               id: accepted-setup-final-package
               timeout-minutes: 350
-              run: pnpm run test:rust:kernel:heavy:final-package
+              run: pnpm run test:rust:kernel:accepted-setup:final-package
             - name: Upload Rust accepted setup final package logs
               if: ${{ failure() && steps['accepted-setup-final-package'].outcome == 'failure' }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -113,7 +113,6 @@ jobs:
                   pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
                   pnpm exec tsx ./tools/ci/verify-test-lane-coverage.ts
                   pnpm exec tsx ./tools/ci/check-package-boundaries.ts
-                  pnpm run vectors
                   pnpm exec knip
 
     node-fast:
@@ -144,8 +143,8 @@ jobs:
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm run test:node:protocol
 
-    node-kernel:
-        name: node kernel
+    node-kernel-fast:
+        name: node kernel fast
         runs-on: ubuntu-latest
         timeout-minutes: 90
         steps:
@@ -156,7 +155,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel
+            - run: pnpm run test:node:kernel:fast
 
     node-kernel-heavy:
         name: node kernel heavy
@@ -178,13 +177,13 @@ jobs:
         timeout-minutes: 5
         needs:
             - rust
-            - rust-accepted-setup-checks
+            - rust-accepted-setup-fast
             - rust-accepted-setup-final-package
             - wasm
             - verify-static
             - node-fast
             - node-protocol
-            - node-kernel
+            - node-kernel-fast
             - node-kernel-heavy
             - browser
             - release-smoke

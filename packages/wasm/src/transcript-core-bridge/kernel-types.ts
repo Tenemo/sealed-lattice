@@ -14,7 +14,6 @@ import type {
     BgvCiphertextConventionFixture,
     BgvCollectiveSetupTransportCompanions,
     BgvCollectiveSetupParametersDescription,
-    BgvTransportedVssCoefficientCommitmentMaterial,
     BgvCollectiveSetupPublicDerivations,
     BgvCollectiveSetupVerification,
     BgvTrusteeEvaluationKeyProofGeneration,
@@ -39,13 +38,11 @@ import type {
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
-    BgvThresholdShareCommitmentTransportDerivation,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
     BgvTransportedVssCoefficientCommitmentMaterialReference,
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
-    BgvVerifiedTransportedVssMaterialRelease,
 } from './kernel-types/bgv.js';
 
 export type {
@@ -79,13 +76,11 @@ export type {
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
-    BgvThresholdShareCommitmentTransportDerivation,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
     BgvTransportedVssCoefficientCommitmentMaterialReference,
     BgvTransportedVssCoefficientCommitmentMaterialTemplate,
-    BgvVerifiedTransportedVssMaterialRelease,
 } from './kernel-types/bgv.js';
 export type TranscriptCoreKernelSharePoint = {
     readonly rosterPosition: number;
@@ -242,13 +237,6 @@ export type TranscriptCoreKernel = {
         readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
         readonly coefficientCommitments: readonly unknown[];
     }): BgvThresholdShareCommitmentDerivation;
-    deriveThresholdShareCommitmentsFromTransport(input: {
-        readonly setupContext: unknown;
-        readonly publicMatrixSeedHash: ProtocolHash;
-        readonly vssCoefficientCommitmentRoot: ProtocolHash;
-        readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-        readonly transportedVssCoefficientCommitmentMaterial: BgvTransportedVssCoefficientCommitmentMaterial;
-    }): BgvThresholdShareCommitmentTransportDerivation;
     beginThresholdShareCommitmentsFromTransportStream(input: {
         readonly derivationId: string;
         readonly setupContext: unknown;
@@ -267,9 +255,6 @@ export type TranscriptCoreKernel = {
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
     }): BgvThresholdShareCommitmentTransportStreamDerivation;
-    releaseVerifiedTransportedVssMaterial(input: {
-        readonly verificationId: string;
-    }): BgvVerifiedTransportedVssMaterialRelease;
     beginSetupProofMaterialTransportStream(input: {
         readonly verificationId: string;
         readonly transportedSetupProofMaterial: unknown;
@@ -491,14 +476,6 @@ type TranscriptCoreKernelCommand =
           readonly coefficientCommitments: readonly unknown[];
       }
     | {
-          readonly command: 'DeriveThresholdShareCommitmentsFromTransport';
-          readonly setupContext: unknown;
-          readonly publicMatrixSeedHash: ProtocolHash;
-          readonly vssCoefficientCommitmentRoot: ProtocolHash;
-          readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-          readonly transportedVssCoefficientCommitmentMaterial: BgvTransportedVssCoefficientCommitmentMaterial;
-      }
-    | {
           readonly command: 'BeginThresholdShareCommitmentsFromTransportStream';
           readonly derivationId: string;
           readonly setupContext: unknown;
@@ -518,10 +495,6 @@ type TranscriptCoreKernelCommand =
           readonly derivationId: string;
           readonly vssCoefficientCommitmentRoot: ProtocolHash;
           readonly sourceTrusteeCoefficientCommitmentRecords: readonly unknown[];
-      }
-    | {
-          readonly command: 'ReleaseVerifiedTransportedVssMaterial';
-          readonly verificationId: string;
       }
     | {
           readonly command: 'BeginSetupProofMaterialTransportStream';

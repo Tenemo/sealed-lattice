@@ -500,7 +500,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "generated public-key share succinct proof trustee {trustee_roster_position}"
         ));
 

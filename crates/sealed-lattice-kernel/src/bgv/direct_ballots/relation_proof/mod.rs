@@ -49,6 +49,8 @@ const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS: u32 = 192;
 const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES: usize = 24;
 const DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS: usize = 360;
 const DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
+const DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN: &str =
+    "sealed-lattice/direct-encrypted-ballot/relation-statement-v4";
 const DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
 

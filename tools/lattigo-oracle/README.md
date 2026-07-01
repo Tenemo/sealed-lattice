@@ -11,7 +11,7 @@ The oracle compares against Lattigo at a fixed upstream commit:
 
 The archive SHA-256 integrity check, the Go toolchain, and the base image digest all live in `Dockerfile`, which verifies the downloaded archive with `sha256sum -c` and resolves Go modules with `go mod verify` before building. That is the single source of truth; there is no separate metadata manifest to keep in sync.
 
-The oracle may compare behavior that is actually comparable across all selected BGV-RNS moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects.
+The oracle may compare behavior that is actually comparable across all selected BGV-RNS moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects. Coefficient ordering and NTT root direction are reviewed for parity; automorphism direction, key-switch decomposition, ciphertext component order, slot ordering, and plaintext encoding convention are out of scope and are never treated as protocol evidence.
 
 ## Running it
 

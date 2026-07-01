@@ -168,13 +168,6 @@ const validateProfile = (
             signature.signatureHash,
         );
     }
-    if (signature.profile.contextStringByteLength !== byteLength) {
-        return emptySignatureVerificationResult(
-            'InvalidMlDsaContext',
-            'ML-DSA context string byte length does not match the profile.',
-            signature.signatureHash,
-        );
-    }
     if (signature.profile.contextString !== supportedMlDsaContextString) {
         return emptySignatureVerificationResult(
             'InvalidMlDsaContext',

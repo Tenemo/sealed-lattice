@@ -17,19 +17,38 @@ export const buildWorkspaceBuildCommand = (
         packageManagerRunner,
     });
 
+export const buildVitestProjectsCommand = (input: {
+    readonly commandDescription: string;
+    readonly packageManagerRunner: PackageManagerRunner;
+    readonly projectNames: readonly string[];
+}): CommandInvocation =>
+    createPackageManagerCommand(
+        input.commandDescription,
+        [
+            'exec',
+            'vitest',
+            ...input.projectNames.flatMap((projectName) => [
+                '--project',
+                projectName,
+            ]),
+            '--run',
+        ],
+        {
+            logFileSlug: input.projectNames.join('-'),
+            packageManagerRunner: input.packageManagerRunner,
+        },
+    );
+
 export const buildVitestProjectCommand = (input: {
     readonly commandDescription: string;
     readonly packageManagerRunner: PackageManagerRunner;
     readonly projectName: string;
 }): CommandInvocation =>
-    createPackageManagerCommand(
-        input.commandDescription,
-        ['exec', 'vitest', '--project', input.projectName, '--run'],
-        {
-            logFileSlug: input.projectName,
-            packageManagerRunner: input.packageManagerRunner,
-        },
-    );
+    buildVitestProjectsCommand({
+        commandDescription: input.commandDescription,
+        packageManagerRunner: input.packageManagerRunner,
+        projectNames: [input.projectName],
+    });
 
 export const runWorkspaceBuildThenParallelCommands = async <
     Lane extends string,
@@ -38,6 +57,9 @@ export const runWorkspaceBuildThenParallelCommands = async <
         packageManagerRunner: PackageManagerRunner,
     ) => readonly CommandInvocation[];
     readonly commandLineArguments: readonly string[];
+    readonly extraGateCommands?: (
+        packageManagerRunner: PackageManagerRunner,
+    ) => readonly CommandInvocation[];
     readonly lanes: readonly Lane[];
     readonly scriptName: string;
 }): Promise<void> => {
@@ -49,10 +71,13 @@ export const runWorkspaceBuildThenParallelCommands = async <
     });
 
     try {
+        const extraGateCommands =
+            input.extraGateCommands?.(packageManagerRunner) ?? [];
         process.exitCode = await runCommandsAfterSeriesGate(
             {
                 gateCommands: [
                     buildWorkspaceBuildCommand(packageManagerRunner),
+                    ...extraGateCommands,
                 ],
                 parallelCommands: input.buildCommands(packageManagerRunner),
             },

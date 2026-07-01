@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { verifySetupPackage } from '#packages/sdk/src/index.js';
+
 type JsonRecord = Record<string, unknown>;
 
 const proofHash =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const alternateProofHash =
     'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
+const expectedManifestHash = '1'.repeat(128);
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
@@ -62,7 +65,14 @@ vi.mock('../../dist/kernel.js', () => ({
     loadTranscriptCoreKernel: () => Promise.resolve(mockKernel),
 }));
 
-const publicPackage = await import('../../dist/index.js');
+const publicPackage = (await import('../../dist/index.js')) as Readonly<{
+    readonly verifySetupPackage: typeof verifySetupPackage;
+}>;
+const expectedRosterHash = '2'.repeat(128);
+const setupVerificationBindings = {
+    expectedManifestHash,
+    expectedRosterHash,
+} as const;
 
 let streamedProofMaterialReferences: Map<string, JsonRecord>;
 
@@ -256,6 +266,7 @@ describe('setup proof material streaming in the public package', () => {
                 objectType: 'SetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
         });
 
         expect(result).toMatchObject({
@@ -271,7 +282,22 @@ describe('setup proof material streaming in the public package', () => {
                 objectType: 'SetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
         });
+    });
+
+    it('requires external manifest and roster hashes before calling the kernel verifier', async () => {
+        const inputWithoutExternalBindings = {
+            setupPackage: {
+                objectType: 'SetupPackage',
+                objectVersion: 1,
+            },
+        } as unknown as VerifySetupPackageInput;
+
+        await expect(
+            publicPackage.verifySetupPackage(inputWithoutExternalBindings),
+        ).rejects.toThrow(/expectedManifestHash/u);
+        expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
     });
 
     it.each(setupProofMaterialTransportCases)(
@@ -282,6 +308,7 @@ describe('setup proof material streaming in the public package', () => {
                     objectType: 'SetupPackage',
                     objectVersion: 1,
                 },
+                ...setupVerificationBindings,
                 [transportCase.fieldName]:
                     transportedSetupProofMaterialSet(transportCase),
             });
@@ -339,6 +366,7 @@ describe('setup proof material streaming in the public package', () => {
                 objectType: 'SetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
             transportedSameSecretProofMaterial:
                 transportedSameSecretProofMaterialSet(),
             transportedPublicKeyShareProofMaterial:
@@ -401,6 +429,7 @@ describe('setup proof material streaming in the public package', () => {
                     objectType: 'SetupPackage',
                     objectVersion: 1,
                 },
+                ...setupVerificationBindings,
                 [transportCase.fieldName]:
                     transportedSetupProofMaterialSet(transportCase),
                 verifiedSetupProofMaterials: suppliedHandles,

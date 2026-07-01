@@ -1,3 +1,4 @@
+import { hexToBytes } from '@noble/hashes/utils.js';
 import type { CanonicalSignedRootObject } from '@sealed-lattice/types';
 import { describe, expect, it } from 'vitest';
 
@@ -31,6 +32,24 @@ const localTrusteeEnvelopeHash = (domain: string, value: unknown): string =>
     hash512Hex(domain, [
         localTrusteeStateTextEncoder.encode(canonicalJson(value)),
     ]);
+
+const objectWithoutField = (
+    value: Readonly<Record<string, unknown>>,
+    fieldToRemove: string,
+): Record<string, unknown> =>
+    Object.fromEntries(
+        Object.entries(value).filter(
+            ([fieldName]) => fieldName !== fieldToRemove,
+        ),
+    );
+
+const changeLastHexByte = (hexEncodedBytes: string): string =>
+    `${hexEncodedBytes.slice(0, -2)}${
+        hexEncodedBytes.endsWith('00') ? '01' : '00'
+    }`;
+
+const hashHexEncodedBytes = (domain: string, hexEncodedBytes: string): string =>
+    hash512Hex(domain, [hexToBytes(hexEncodedBytes)]);
 
 const createSignedRoot = (
     objectRoot = deriveCanonicalObjectHash({
@@ -286,14 +305,66 @@ describe('crypto primitive boundary', () => {
             privateEnvelopeHash: encrypted.privateEnvelopeHash,
             privateEnvelopeAadHash: encrypted.privateEnvelopeAadHash,
         });
+        const wrongRecipientMailboxKeyPair = createPrivateVssMailboxKeyPair(
+            hash512Hex('test/private-vss-mailbox-key', [
+                new TextEncoder().encode('recipient-trustee-4'),
+            ]),
+        );
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: encrypted.encryptedEnvelope,
+                recipientMailboxSecretKeyBytesHex:
+                    wrongRecipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow();
+
+        const alternateEncrypted = await encryptPrivateVssMailboxEnvelope({
+            privateEnvelope,
+            privateEnvelopeAad,
+            recipientMailboxPublicKeyBytesHex:
+                recipientMailboxKeyPair.publicKeyBytesHex,
+            encapsulationRandomnessBytesHex: hash512Hex(
+                'test/private-vss-mailbox-encapsulation',
+                [
+                    new TextEncoder().encode(
+                        'source-trustee-2-to-recipient-3-alternate',
+                    ),
+                ],
+            ).slice(0, 64),
+            aeadNonceBytesHex: hash512Hex('test/private-vss-mailbox-nonce', [
+                new TextEncoder().encode(
+                    'source-trustee-2-to-recipient-3-alternate',
+                ),
+            ]).slice(0, 24),
+        });
+        const kemSwappedEnvelopeWithoutHash = {
+            ...objectWithoutField(
+                encrypted.encryptedEnvelope,
+                'encryptedEnvelopeHash',
+            ),
+            kemCiphertextBytesHex:
+                alternateEncrypted.encryptedEnvelope.kemCiphertextBytesHex,
+            kemCiphertextHash:
+                alternateEncrypted.encryptedEnvelope.kemCiphertextHash,
+        };
+        await expect(
+            decryptPrivateVssMailboxEnvelope({
+                encryptedEnvelope: {
+                    ...kemSwappedEnvelopeWithoutHash,
+                    encryptedEnvelopeHash: deriveCanonicalObjectHash(
+                        kemSwappedEnvelopeWithoutHash,
+                    ),
+                } as typeof encrypted.encryptedEnvelope,
+                recipientMailboxSecretKeyBytesHex:
+                    recipientMailboxKeyPair.secretKeyBytesHex,
+            }),
+        ).rejects.toThrow();
 
         const tamperedCiphertext = {
             ...encrypted.encryptedEnvelope,
-            ciphertextBytesHex: `${encrypted.encryptedEnvelope.ciphertextBytesHex.slice(0, -2)}${
-                encrypted.encryptedEnvelope.ciphertextBytesHex.endsWith('00')
-                    ? '01'
-                    : '00'
-            }`,
+            ciphertextBytesHex: changeLastHexByte(
+                encrypted.encryptedEnvelope.ciphertextBytesHex,
+            ),
         };
         await expect(
             decryptPrivateVssMailboxEnvelope({
@@ -524,6 +595,65 @@ describe('crypto primitive boundary', () => {
             localStatePlaintextHash: encrypted.localStatePlaintextHash,
             storageAadHash: encrypted.storageAadHash,
         });
+
+        const tamperedLocalStateCiphertextBytesHex = changeLastHexByte(
+            encrypted.encryptedLocalState.ciphertextBytesHex,
+        );
+        const tamperedLocalStateEnvelopeWithoutHash = {
+            ...objectWithoutField(
+                encrypted.encryptedLocalState,
+                'encryptedLocalStateHash',
+            ),
+            ciphertextBytesHex: tamperedLocalStateCiphertextBytesHex,
+            ciphertextBytesHash: hashHexEncodedBytes(
+                'sealed-lattice-local-trustee-state/ciphertext-bytes-v1',
+                tamperedLocalStateCiphertextBytesHex,
+            ),
+        };
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: {
+                    ...tamperedLocalStateEnvelopeWithoutHash,
+                    encryptedLocalStateHash: localTrusteeEnvelopeHash(
+                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        tamperedLocalStateEnvelopeWithoutHash,
+                    ),
+                } as typeof encrypted.encryptedLocalState,
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow();
+
+        const nonceSwapSource = await encryptLocalTrusteeState({
+            localStatePlaintext,
+            localStateCommitment,
+            setupContext,
+            storageKeyBytesHex,
+            aeadNonceBytesHex: '44'.repeat(12),
+        });
+        const nonceSwappedEnvelopeWithoutHash = {
+            ...objectWithoutField(
+                encrypted.encryptedLocalState,
+                'encryptedLocalStateHash',
+            ),
+            aeadNonceHex: nonceSwapSource.encryptedLocalState.aeadNonceHex,
+        };
+        await expect(
+            decryptLocalTrusteeState({
+                encryptedLocalState: {
+                    ...nonceSwappedEnvelopeWithoutHash,
+                    encryptedLocalStateHash: localTrusteeEnvelopeHash(
+                        'sealed-lattice-local-trustee-state/envelope-hash-v1',
+                        nonceSwappedEnvelopeWithoutHash,
+                    ),
+                } as typeof encrypted.encryptedLocalState,
+                expectedLocalStateRoot: localStateCommitment.localStateRoot,
+                setupContext,
+                storageKeyBytesHex,
+            }),
+        ).rejects.toThrow();
+
         const wrongKeyCommitmentHash = deriveCanonicalObjectHash({
             objectType: 'StorageKeyCommitmentHash',
             key: 'wrong-storage-key',

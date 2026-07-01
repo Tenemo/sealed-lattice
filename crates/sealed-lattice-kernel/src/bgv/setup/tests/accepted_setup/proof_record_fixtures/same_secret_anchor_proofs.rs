@@ -159,7 +159,9 @@ pub(in super::super) fn same_secret_proofs_object(
             derive_canonical_object_hash(&proof_record)
                 .expect("same-secret proof root")
         );
-        terminal_phase(&format!("generated same-secret proof trustee {trustee_roster_position}"));
+        final_package_phase(&format!(
+            "generated same-secret proof trustee {trustee_roster_position}"
+        ));
 
         proof_record
         })

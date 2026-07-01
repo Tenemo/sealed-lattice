@@ -431,25 +431,7 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
         ));
     }
-    if proof_record.get("keyCount").and_then(Value::as_u64) != Some(statement.keys.len() as u64) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "trustee evaluation-key proof keyCount must match the frozen key schedule",
-        ));
-    }
     let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "trustee evaluation-key proof byte length does not fit u64",
-        )
-    })?;
-    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proofSizeBytes must match supplied proof bytes",
-        ));
-    }
     if value_string(proof_record, "proofBytesHash")?
         != trustee_evaluation_key_proof_bytes_hash(&proof_bytes)
     {
@@ -950,7 +932,6 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
         "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
         "statementHash": value_string(proof_record, "statementHash")?,
-        "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
         "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
         "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
@@ -974,7 +955,6 @@ fn verify_trustee_evaluation_key_proof_transport_reference(
                 )
             })?
         || value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length
-        || value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length
         || value_string(proof_record, "proofFullObjectHash")? != transport_hashes.full_object_hash
         || value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root
     {
@@ -1209,7 +1189,7 @@ pub(in crate::bgv::setup) fn stored_verified_trustee_evaluation_key_proof_materi
 fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
     PathBuf::from("temp")
         .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
+        .join("accepted-setup-final-package-material-store")
         .join("trustee-evaluation-key-proof-material")
 }
 

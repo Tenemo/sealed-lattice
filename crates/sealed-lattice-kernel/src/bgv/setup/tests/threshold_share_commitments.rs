@@ -227,15 +227,6 @@ fn threshold_share_commitment_derivation_consumes_streamed_binary_material() {
         stream_result["verifiedVssCoefficientCommitmentMaterial"]["thresholdShareCommitmentRoot"],
         stream_result["thresholdShareCommitmentRoot"]
     );
-
-    let release_result = release_verified_transported_vss_material_request(&serde_json::json!({
-        "verificationId": derivation_id,
-    }))
-    .expect("release stream-verified material");
-    assert_eq!(
-        release_result["operation"],
-        "releaseVerifiedTransportedVssMaterial"
-    );
 }
 
 #[test]

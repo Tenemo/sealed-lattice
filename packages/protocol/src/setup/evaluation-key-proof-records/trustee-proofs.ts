@@ -704,11 +704,6 @@ export const createTrusteeEvaluationKeyProofs = (
             generatedProof.statementHash,
             'generatedProof.statementHash',
         );
-        if (generatedProof.keyCount !== statementKeys.length) {
-            throw new Error(
-                'generatedProof.keyCount must match the frozen key schedule.',
-            );
-        }
         if (generatedProof.sameSecretLinkageIncluded !== true) {
             throw new Error(
                 'generatedProof must include the same-secret linkage.',
@@ -746,8 +741,6 @@ export const createTrusteeEvaluationKeyProofs = (
                 proofReference.trusteeSecretCommitmentRoot,
             sameSecretProofRoot: proofReference.sameSecretProofRoot,
             statementHash: generatedProof.statementHash,
-            keyCount: statementKeys.length,
-            proofSizeBytes: proofBytes.byteLength,
             proofBytesHash: hash512Hex(
                 trusteeEvaluationKeyProofBytesHashDomain,
                 [proofBytes],
@@ -893,7 +886,6 @@ export const transportTrusteeEvaluationKeyProofSet = (
             trusteeIdentity: proofRecord.trusteeIdentity,
             trusteeRosterPosition: proofRecord.trusteeRosterPosition,
             statementHash: proofRecord.statementHash,
-            proofSizeBytes: proofRecord.proofSizeBytes,
             proofBytesHash: proofRecord.proofBytesHash,
             chunkSizeBytes: setupProofTransportChunkSizeBytes,
             chunkCount: chunkHashes.length,

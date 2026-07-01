@@ -2,24 +2,6 @@ use super::*;
 
 use crate::hashing::derive_canonical_object_hash;
 
-pub(in super::super) fn setup_transport_chunk_manifest_root_fixture(
-    chunk_count: u64,
-    total_byte_length: u64,
-    chunk_hashes: &[String],
-    full_object_hash: &str,
-) -> String {
-    derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "SetupTransportChunkManifest",
-        "objectVersion": 1,
-        "chunkSizeBytes": 1_048_576_u64,
-        "chunkCount": chunk_count,
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))
-    .expect("setup transport chunk manifest root")
-}
-
 pub(in super::super) fn setup_transport_certificate_fixture(
     _parameters: &serde_json::Value,
     vss_coefficient_commitment_material: &serde_json::Value,

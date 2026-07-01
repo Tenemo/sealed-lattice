@@ -367,6 +367,16 @@ const hashCanonicalValue = (domain: string, value: unknown): ProtocolHash =>
 const hashBytes = (domain: string, bytes: Uint8Array): ProtocolHash =>
     hash512Hex(domain, [bytes]);
 
+// Key commitment: AES-GCM is not key-committing, so a hash of the storage key is
+// bound into each sealed record to detect a wrong key and to defend against
+// partitioning-oracle attacks. This is a bare hash of the key, so it only hides
+// the key when the key is high-entropy. The caller must therefore supply
+// `storageKeyBytesHex` as uniformly-random 256-bit device key material (for
+// example from a platform keystore), never a password or other low-entropy
+// secret; otherwise the stored commitment becomes an offline brute-force oracle
+// for the storage key, and hence for the sealed threshold-share material. The
+// same requirement applies to `sealedMaterialStorageKeyCommitmentHash` below.
+// See SECURITY.md "Correct use".
 const localStateStorageKeyCommitmentHash = (
     storageKeyBytes: Uint8Array,
 ): ProtocolHash =>

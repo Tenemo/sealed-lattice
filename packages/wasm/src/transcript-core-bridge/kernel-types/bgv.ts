@@ -214,7 +214,6 @@ export type BgvBatchPlaintextEncoding = {
     readonly suppliedSlotCount: number;
     readonly slotCount: number;
     readonly plaintextRoot: ProtocolHash;
-    readonly canonicalByteLength: number;
     readonly sampledSlots: readonly {
         readonly position: number;
         readonly value: number;
@@ -230,7 +229,6 @@ export type BgvBatchPlaintextEncoding = {
 export type BgvCiphertextConventionFixture = {
     readonly bgvParametersHash: ProtocolHash;
     readonly ciphertextRoot: ProtocolHash;
-    readonly canonicalByteLength: number;
     readonly componentCount: number;
     readonly validation: BgvObjectValidation;
     readonly canonicalBytesHex?: string;
@@ -634,7 +632,6 @@ export type BgvTrusteeEvaluationKeyProofGeneration = {
         | 'public-key-share';
     readonly statementHash: ProtocolHash;
     readonly limbCount: number;
-    readonly keyCount: number;
     readonly sameSecretLinkageIncluded: boolean;
     readonly proofByteLength: number;
     readonly proofBytesHex: string;
@@ -718,11 +715,6 @@ export type BgvSetupProofMaterialTransportStreamVerification = {
     readonly proofBytesEncoding: string;
     readonly transport: Readonly<Record<string, unknown>>;
     readonly verifiedSetupProofMaterial: BgvVerifiedSetupProofMaterial;
-};
-
-export type BgvVerifiedTransportedVssMaterialRelease = {
-    readonly operation: 'releaseVerifiedTransportedVssMaterial';
-    readonly verificationId: string;
 };
 
 export type BgvLocalTrusteeSetupStateVerification = {

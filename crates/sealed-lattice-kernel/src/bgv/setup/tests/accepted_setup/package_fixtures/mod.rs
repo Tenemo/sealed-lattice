@@ -145,7 +145,7 @@ pub(super) fn terminal_full_ring_minimal_collective_setup_package_fixture()
 /// Reduced development-ring (128) collective setup package for roster size n,
 /// built through the streamed VSS coefficient commitment material path so it
 /// carries the transported and verified coefficient commitment material the
-/// terminal accepted-setup verifier streams. Used by the dynamic-roster fixture
+/// final-package accepted-setup verifier streams. Used by the dynamic-roster fixture
 /// to drive every roster-dependent binding for any supported n without the
 /// heavy full ring. At n = 10 the package shape matches the first-closure
 /// streamed path.

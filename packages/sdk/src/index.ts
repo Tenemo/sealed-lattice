@@ -1,5 +1,6 @@
 import {
     createSetupPackageVerificationInput as createSetupPackageVerificationInputInternal,
+    deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
     deriveFrozenRosterParameters as deriveFrozenRosterParametersInternal,
     derivePollSpecHash as derivePollSpecHashInternal,
@@ -31,6 +32,7 @@ import type {
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
     SetupPackage as ProtocolSetupPackage,
     SetupPackageVerificationInputSource as ProtocolSetupPackageVerificationInputSource,
+    CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
 } from '@sealed-lattice/protocol';
 import type {
     ActionCurrentForRecoveryEpochInput,
@@ -68,6 +70,24 @@ import type {
 import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
+
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
+
+function assertProtocolHash(
+    value: unknown,
+    fieldName: string,
+): asserts value is ProtocolHash {
+    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+        throw new TypeError(`${fieldName} must be a protocol hash.`);
+    }
+}
+
+const assertSetupPackageVerificationBindings = (
+    input: VerifySetupPackageInput,
+): void => {
+    assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
+    assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
+};
 
 export type {
     AcceptedTargetFinalityCheckpoint,
@@ -212,6 +232,8 @@ export type PrivateVssShareVerification = Readonly<{
 }>;
 
 export type SetupPackage = ProtocolSetupPackage;
+export type CollectiveBgvSetupRosterEntryInput =
+    ProtocolCollectiveBgvSetupRosterEntryInput;
 
 export type SetupTransportedVssCoefficientCommitmentMaterialLike =
     ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
@@ -236,8 +258,8 @@ export type TransportedPublicEvaluationKeyMaterialSet =
 export type VerifySetupPackageInput = Readonly<{
     readonly setupPackage: unknown;
     readonly expectedSetupPackageHash?: ProtocolHash;
-    readonly expectedManifestHash?: ProtocolHash;
-    readonly expectedRosterHash?: ProtocolHash;
+    readonly expectedManifestHash: ProtocolHash;
+    readonly expectedRosterHash: ProtocolHash;
     readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
     readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
@@ -308,6 +330,11 @@ export const deriveThresholdParameters = (
 /** Derives the concrete roster parameters after registration closes and the roster freezes. */
 export const deriveFrozenRosterParameters =
     deriveFrozenRosterParametersInternal;
+
+/** Derives the setup-roster hash consumed by collective BGV setup package verification. */
+export const deriveCollectiveBgvSetupRosterHash = (
+    entries: readonly CollectiveBgvSetupRosterEntryInput[],
+): ProtocolHash => deriveCollectiveBgvSetupRosterHashInternal(entries);
 
 /** Derives the canonical poll-spec hash including roster policy fields. */
 export const derivePollSpecHash = derivePollSpecHashInternal;
@@ -625,6 +652,8 @@ const prepareSetupPackageVerificationInputForKernel = (
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
+    assertSetupPackageVerificationBindings(input);
+
     const kernel = await loadTranscriptCoreKernel();
     const verificationInput = prepareSetupPackageVerificationInputForKernel(
         kernel,

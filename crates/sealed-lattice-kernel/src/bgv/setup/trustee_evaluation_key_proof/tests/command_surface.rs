@@ -113,7 +113,6 @@ fn anchor_proof_commands_round_trip_with_family_label() {
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate anchor command");
     assert_eq!(generated["proofFamily"], "same-secret-linkage-anchor");
-    assert_eq!(generated["keyCount"], 0);
 
     verify_generated_proof(&statement, &generated);
 
@@ -153,7 +152,6 @@ fn public_key_share_commands_round_trip_with_family_label() {
     let generated = super::generate_trustee_evaluation_key_proof_from_request(&generate_request)
         .expect("generate public-key share command");
     assert_eq!(generated["proofFamily"], "public-key-share");
-    assert_eq!(generated["keyCount"], 1);
     assert_eq!(generated["sameSecretLinkageIncluded"], true);
 
     verify_generated_proof(&statement, &generated);

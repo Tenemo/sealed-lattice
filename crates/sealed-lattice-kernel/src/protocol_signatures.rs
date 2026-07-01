@@ -114,17 +114,6 @@ fn validate_profile(signature: &Value) -> Option<ProtocolSignatureFailure> {
             Some(signature),
         ));
     };
-    let Some(context_string_byte_length) = profile
-        .get("contextStringByteLength")
-        .and_then(Value::as_u64)
-    else {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidMlDsaContext",
-            "Signature profile must bind the ML-DSA context byte length.",
-            Some(signature),
-        ));
-    };
-
     if profile.get("algorithm").and_then(Value::as_str) != Some(ML_DSA_65_ALGORITHM) {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignature",
@@ -144,13 +133,6 @@ fn validate_profile(signature: &Value) -> Option<ProtocolSignatureFailure> {
         return Some(ProtocolSignatureFailure::new(
             "InvalidMlDsaContext",
             "ML-DSA context strings must be at most 255 bytes.",
-            Some(signature),
-        ));
-    }
-    if context_string_byte_length != actual_context_byte_length as u64 {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidMlDsaContext",
-            "ML-DSA context string byte length does not match the profile.",
             Some(signature),
         ));
     }
@@ -660,7 +642,6 @@ fn create_ml_dsa_signature_profile_fixture() -> CanonicalResult<Value> {
         "algorithm": ML_DSA_65_ALGORITHM,
         "mode": PURE_ML_DSA_MODE,
         "contextString": SUPPORTED_ML_DSA_CONTEXT_STRING,
-        "contextStringByteLength": SUPPORTED_ML_DSA_CONTEXT_STRING.len(),
     }))
 }
 

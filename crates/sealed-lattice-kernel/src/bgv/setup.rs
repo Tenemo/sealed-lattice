@@ -24,6 +24,8 @@ pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_pro
 mod validation;
 mod vss;
 
+pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
+
 #[cfg(test)]
 mod tests;
 
@@ -53,9 +55,7 @@ pub(crate) use threshold_share_commitments::{
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,
-    derive_threshold_share_commitments_from_transport_request,
     finish_threshold_share_commitment_transport_derivation_stream_request,
-    release_verified_transported_vss_material_request,
 };
 
 use sampling::{

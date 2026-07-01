@@ -338,17 +338,10 @@ fn verify_setup_transported_objects(
         &vss_object.chunk_root,
         &vss_object.full_object_hash,
     ));
-    let mut expected_transported_object_roots = BTreeSet::new();
-    expected_transported_object_roots.insert(vss_material_root);
     transport_canonical_try!(verify_setup_transport_request_bindings(
         setup_package,
         request,
         &transported_objects,
-        &mut expected_transported_object_roots,
-    ));
-    transport_canonical_try!(refuse_unexpected_setup_transported_objects(
-        &transported_objects,
-        &expected_transported_object_roots,
     ));
 
     Ok(Ok(SetupTransportAggregate {
@@ -577,9 +570,6 @@ pub(super) const SETUP_TRANSPORT_DIRECT_HASH_FIELDS: SetupTransportHashFieldName
         chunk_hashes: "chunkHashes",
     };
 
-pub(super) const SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS: SetupTransportHashFieldNames =
-    SETUP_TRANSPORT_DIRECT_HASH_FIELDS;
-
 pub(super) const SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS: SetupTransportHashFieldNames =
     SetupTransportHashFieldNames {
         byte_length: "proofTotalByteLength",
@@ -587,25 +577,3 @@ pub(super) const SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS: SetupTransportHashF
         chunk_root: "proofChunkRoot",
         chunk_hashes: "proofChunkHashes",
     };
-
-fn refuse_unexpected_setup_transported_objects(
-    transported_objects: &[SetupTransportedObjectBinding],
-    expected_object_roots: &BTreeSet<String>,
-) -> CanonicalResult<Result<(), Refusal>> {
-    for transported_object in transported_objects {
-        if expected_object_roots.contains(&transported_object.object_root) {
-            continue;
-        }
-
-        return Ok(Err(Refusal::new(
-            "transportedObjectUnexpected",
-            format!(
-                "setupTransportCertificate.transportedObjects contains unrequested transported object {} with role {}",
-                transported_object.object_name, transported_object.object_role
-            ),
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    }
-
-    Ok(Ok(()))
-}

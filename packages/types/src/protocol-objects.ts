@@ -69,7 +69,6 @@ export type MlDsaSignatureProfile = {
     readonly algorithm: 'ML-DSA-65';
     readonly mode: MlDsaSignatureMode;
     readonly contextString: string;
-    readonly contextStringByteLength: number;
 };
 
 /** Canonical root object covered by a protocol signature. */

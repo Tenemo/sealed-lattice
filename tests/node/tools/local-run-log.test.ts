@@ -55,7 +55,7 @@ describe('local run logs', () => {
         const rootDirectoryPath = await createTemporaryLogRoot();
         try {
             const log = await createLocalRunLog({
-                commandLineArguments: ['--only', 'kernel'],
+                commandLineArguments: ['kernel'],
                 lanes: ['kernel'],
                 now: new Date('2026-05-29T18:12:28.884Z'),
                 rootDirectoryPath,
@@ -76,7 +76,7 @@ describe('local run logs', () => {
                 readonly scriptName: string;
             }>(path.join(log.runDirectoryPath, 'metadata.json'));
             expect(metadata).toMatchObject({
-                commandLineArguments: ['--only', 'kernel'],
+                commandLineArguments: ['kernel'],
                 lanes: ['kernel'],
                 objectVersion: 'sealed-lattice-local-run-log-metadata-v1',
                 scriptName: 'test:node:kernel',

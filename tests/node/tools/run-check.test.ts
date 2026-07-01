@@ -19,6 +19,9 @@ describe('check runner arguments', () => {
         expect(parseCheckArguments(['--progress', 'never'])).toEqual({
             progressMode: 'never',
         });
+        expect(parseCheckArguments(['--', '--progress=always'])).toEqual({
+            progressMode: 'always',
+        });
     });
 
     it('rejects unknown check arguments and progress modes', () => {

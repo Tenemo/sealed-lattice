@@ -30,11 +30,9 @@ import type {
     BgvTargetDecryptionResult,
     BgvTargetDecryptionShare,
     BgvThresholdShareCommitmentDerivation,
-    BgvThresholdShareCommitmentTransportDerivation,
     BgvThresholdShareCommitmentTransportStreamBegin,
     BgvThresholdShareCommitmentTransportStreamChunkAbsorption,
     BgvThresholdShareCommitmentTransportStreamDerivation,
-    BgvVerifiedTransportedVssMaterialRelease,
     TranscriptCoreKernel,
     TranscriptCoreKernelCommand,
     TranscriptCoreKernelExports,
@@ -455,23 +453,6 @@ export const createTranscriptCoreKernelLoader = (
                             input.sourceTrusteeCoefficientCommitmentRecords,
                         coefficientCommitments: input.coefficientCommitments,
                     }),
-                deriveThresholdShareCommitmentsFromTransport: (
-                    input,
-                ): BgvThresholdShareCommitmentTransportDerivation =>
-                    executeCommand<BgvThresholdShareCommitmentTransportDerivation>(
-                        {
-                            command:
-                                'DeriveThresholdShareCommitmentsFromTransport',
-                            setupContext: input.setupContext,
-                            publicMatrixSeedHash: input.publicMatrixSeedHash,
-                            vssCoefficientCommitmentRoot:
-                                input.vssCoefficientCommitmentRoot,
-                            sourceTrusteeCoefficientCommitmentRecords:
-                                input.sourceTrusteeCoefficientCommitmentRecords,
-                            transportedVssCoefficientCommitmentMaterial:
-                                input.transportedVssCoefficientCommitmentMaterial,
-                        },
-                    ),
                 beginThresholdShareCommitmentsFromTransportStream: (
                     input,
                 ): BgvThresholdShareCommitmentTransportStreamBegin =>
@@ -512,13 +493,6 @@ export const createTranscriptCoreKernelLoader = (
                                 input.sourceTrusteeCoefficientCommitmentRecords,
                         },
                     ),
-                releaseVerifiedTransportedVssMaterial: (
-                    input,
-                ): BgvVerifiedTransportedVssMaterialRelease =>
-                    executeCommand<BgvVerifiedTransportedVssMaterialRelease>({
-                        command: 'ReleaseVerifiedTransportedVssMaterial',
-                        verificationId: input.verificationId,
-                    }),
                 beginSetupProofMaterialTransportStream: (
                     input,
                 ): BgvSetupProofMaterialTransportStreamBegin =>
