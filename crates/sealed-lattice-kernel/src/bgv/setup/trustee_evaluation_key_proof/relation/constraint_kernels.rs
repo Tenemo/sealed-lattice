@@ -561,24 +561,17 @@ pub(crate) fn batched_sumcheck_value<Domain: CompositionColumnDomain>(
                 let alpha_value = &consistency_alpha[claim_alpha_index];
                 claim_alpha_index += 1;
                 for half in 0..TRACE_SPLIT {
-                    let witness_value = if consistency_vector
-                        < target_decryption_message_digit_vectors
-                    {
-                        let message_position = consistency_vector
-                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                        let digit_index = consistency_vector
-                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                        column_values[layout.physical_target_decryption_message_digit(
+                    debug_assert!(consistency_vector < target_decryption_message_digit_vectors);
+                    let message_position = consistency_vector
+                        / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                    let digit_index = consistency_vector
+                        % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                    let witness_value = column_values[layout
+                        .physical_target_decryption_message_digit(
                             message_position,
                             digit_index,
                             half,
-                        )]
-                    } else {
-                        column_values[layout.physical_target_decryption_randomness(
-                            consistency_vector - target_decryption_message_digit_vectors,
-                            half,
-                        )]
-                    };
+                        )];
                     let consistency_product =
                         domain.value_mul(&publics.consistency[repetition][half], &witness_value);
                     accumulated = tower.add(

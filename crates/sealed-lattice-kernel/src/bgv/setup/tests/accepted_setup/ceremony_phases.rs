@@ -132,7 +132,7 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["objectVersion"],
-        serde_json::json!(7_u64)
+        serde_json::json!(8_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["compactMaterialArtifactBoundary"]["artifactRole"],
@@ -245,12 +245,12 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["commitmentExposureRows"]
             [0]["totalCompactCommitments"],
-        serde_json::json!(1_450_u64)
+        serde_json::json!(1_230_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["commitmentExposureRows"]
             [0]["totalPublicCommitmentCoordinates"],
-        serde_json::json!(69_600_u64)
+        serde_json::json!(59_040_u64)
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["linearRelationRows"]
@@ -276,7 +276,6 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
             "compact-vss-same-secret-bridge-message-digit-claim",
             "compact-vss-target-decryption-aggregate-message-claim",
             "compact-vss-target-decryption-smudging-message-claim",
-            "compact-vss-target-decryption-randomness-claim",
         ]
     );
     assert_eq!(
@@ -297,20 +296,41 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
             [0]["rowId"],
         serde_json::json!("compact-vss-structured-ring-review-input")
     );
+    let compact_multi_opening_row = &profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]
+        ["multiOpeningRows"][0];
+    let maximum_non_reconstructing_recipient_count =
+        compact_multi_opening_row["maximumNonReconstructingRecipientCount"]
+            .as_u64()
+            .expect("maximum non-reconstructing recipient count");
+    let aggregate_threshold_commitments =
+        compact_multi_opening_row["aggregateThresholdCommitments"]
+            .as_u64()
+            .expect("aggregate threshold commitment count");
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["multiOpeningRows"]
-            [0]["corruptedRecipientOpeningCredentialCount"],
-        serde_json::json!(210_u64)
+        compact_multi_opening_row["corruptedRecipientOpeningCredentialCount"],
+        serde_json::json!(
+            maximum_non_reconstructing_recipient_count * aggregate_threshold_commitments
+        )
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["moduleSisBindingRows"]
             [0]["rowId"],
         serde_json::json!("compact-vss-covered-message-module-sis-binding-input")
     );
+    let compact_module_lwe_hiding_row = &profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]
+        ["moduleLweHidingRows"][0];
+    let total_compact_commitments = compact_multi_opening_row["totalCompactCommitments"]
+        .as_u64()
+        .expect("total compact commitment count");
+    let sampled_randomness_projection_indices_per_commitment =
+        compact_module_lwe_hiding_row["sampledRandomnessProjectionIndicesPerCommitment"]
+            .as_u64()
+            .expect("sampled randomness projection count per commitment");
     assert_eq!(
-        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]["moduleLweHidingRows"]
-            [0]["totalSampledRandomnessProjectionIndices"],
-        serde_json::json!(4_454_400_u64)
+        compact_module_lwe_hiding_row["totalSampledRandomnessProjectionIndices"],
+        serde_json::json!(
+            total_compact_commitments * sampled_randomness_projection_indices_per_commitment
+        )
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["estimatorInputRows"][0]["randomnessProjectionWeight"],
@@ -334,7 +354,10 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
             .as_array()
             .expect("compact parameter target RNS primes")
             .len(),
-        7
+        profile["compactVssParameterCertificateInputBinding"]["parameterReviewInputs"]
+            ["targetBasisReductionRows"][0]["targetRnsLimbCount"]
+            .as_u64()
+            .expect("target RNS limb count") as usize
     );
     assert_eq!(
         profile["compactVssParameterCertificateInputBinding"]["compactVssParameterCertificateInputBindingHash"],

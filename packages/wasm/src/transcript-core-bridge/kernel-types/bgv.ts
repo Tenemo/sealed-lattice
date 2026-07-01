@@ -1334,6 +1334,42 @@ export type BgvTargetDecryptionShareProofStatement = Readonly<
     }
 >;
 
+export type BgvTargetDecryptionShareProofLayoutMessage = Readonly<{
+    readonly localMessageIndex: number;
+    readonly globalMessageIndex: number;
+    readonly claimKind: 'aggregateOpening' | 'smudgingOpening';
+    readonly messageBound: number;
+    readonly encodingColumnCount: number;
+    readonly lowDigitTritCount: number;
+    readonly highDigitTritCount: number;
+    readonly totalTritCount: number;
+}>;
+
+export type BgvTargetDecryptionShareProofLayoutLimb = Readonly<{
+    readonly proofLimbIndex: number;
+    readonly traceSize: number;
+    readonly targetDecryptionMessageColumns: number;
+    readonly targetDecryptionRandomnessColumns: number;
+    readonly targetDecryptionMessageEncodingColumns: number;
+    readonly claimCount: number;
+    readonly maskColumnCount: number;
+    readonly phaseOnePhysicalColumnCount: number;
+    readonly totalColumnCount: number;
+    readonly messages: readonly BgvTargetDecryptionShareProofLayoutMessage[];
+}>;
+
+export type BgvTargetDecryptionShareProofLayoutDescription = Readonly<{
+    readonly objectType: 'BgvTargetDecryptionShareProofLayoutDescription';
+    readonly objectVersion: 1;
+    readonly ringDegree: number;
+    readonly proofLimbIndices: readonly number[];
+    readonly aggregateMessageCoefficientBound: number;
+    readonly smudgingMessageCoefficientBound: number;
+    readonly totalMessageCount: number;
+    readonly totalMessageDigitCount: number;
+    readonly limbs: readonly BgvTargetDecryptionShareProofLayoutLimb[];
+}>;
+
 export type BgvTargetDecryptionShareProofMaterial = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'BgvTargetDecryptionShareProofMaterial';
@@ -1386,9 +1422,39 @@ export type BgvTargetDecryptionShareProofStatementBindingVerification = {
     readonly refusalReason: 'TargetDecryptionProofUnavailable';
 };
 
+export type BgvTargetDecryptionReleaseSetupContext = Readonly<
+    Record<string, unknown>
+> & {
+    readonly objectType: 'BgvTargetDecryptionReleaseSetupContext';
+    readonly objectVersion: 1;
+    readonly setupPackageHash: ProtocolHash;
+    readonly releaseSetupContextHash: ProtocolHash;
+};
+
+export type BgvTargetDecryptionResultReleaseBegin = {
+    readonly ok: true;
+    readonly operation: 'beginBgvTargetDecryptionResultRelease';
+    readonly releaseVerificationId: string;
+    readonly setupPackageHash: ProtocolHash;
+    readonly targetAcceptedRecordHash: ProtocolHash;
+    readonly targetDecryptionCiphertextHash: ProtocolHash;
+    readonly targetShareProfileHash: ProtocolHash;
+    readonly requiredShareCount: number;
+};
+
+export type BgvTargetDecryptionResultReleaseShareAbsorption = {
+    readonly ok: true;
+    readonly operation: 'absorbBgvTargetDecryptionResultReleaseShare';
+    readonly absorbedShareCount: number;
+    readonly requiredShareCount: number;
+    readonly rosterPosition: number;
+    readonly targetDecryptionShareHash: ProtocolHash;
+    readonly proofMaterialRoot: ProtocolHash;
+};
+
 export type BgvTargetDecryptionResultRelease = {
     readonly ok: true;
-    readonly operation: 'verifyAndReleaseBgvTargetDecryptionResult';
+    readonly operation: 'finishBgvTargetDecryptionResultRelease';
     readonly targetResultHash: ProtocolHash;
     readonly targetIdByOption: readonly number[];
     readonly targetOrderByOption: readonly number[];

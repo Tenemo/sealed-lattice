@@ -198,7 +198,6 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
     COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS, COMPACT_VSS_CONSISTENCY_REPETITIONS,
     COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT, CONSISTENCY_COEFFICIENT_BITS,
     CONSISTENCY_REPETITIONS, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-    TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
     TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
 };
 use crate::bgv::target_decryption::TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND;
@@ -1321,8 +1320,6 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
         ring_degree,
         CONSISTENCY_COEFFICIENT_BITS,
     )?;
-    let target_randomness_clear_claim_bound_decimal =
-        masked_claim_clear_bound_decimal(1, ring_degree, CONSISTENCY_COEFFICIENT_BITS)?;
     let bridge_direct_digit_vector_count = target_rns_limb_count
         .checked_mul(message_column_count)
         .ok_or_else(|| static_accounting_error("bridge direct digit vector count overflowed"))?;
@@ -1715,7 +1712,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                         "compact-vss-share-linkage-carry-claim",
                         "compact-vss-share-linkage-message-digit-claim"
                     ],
-                    "rangeEvidenceRule": "message digit columns are verifier-decoded from 17 trits per digit and carry claims use masked consistency bounds",
+                    "rangeEvidenceRule": "message digit columns are verifier-decoded from statement-bound trit decoder columns and carry claims use masked consistency bounds",
                 },
                 {
                     "rowId": "compact-vss-same-secret-bridge-proof-extraction-input",
@@ -1734,10 +1731,9 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                     "proofFamily": "target-decryption-share",
                     "extractedMaskedClaimRows": [
                         "compact-vss-target-decryption-aggregate-message-claim",
-                        "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim"
+                        "compact-vss-target-decryption-smudging-message-claim"
                     ],
-                    "rangeEvidenceRule": "target proof rows bind aggregate opening digits, smudging opening digits, and ternary opening randomness before release",
+                    "rangeEvidenceRule": "target proof rows bind aggregate opening digits and smudging opening digits before release; opening randomness stays bound by compact-opening rows",
                 },
             ],
             "maskedClaimNormRows": [
@@ -1777,7 +1773,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                     "consistencyCoefficientMaximumDecimal": compact_vss_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns and verifier-side trit decoder columns",
+                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns and statement-bound verifier-side trit decoder columns",
                 },
                 {
                     "rowId": "compact-vss-same-secret-bridge-non-digit-claim",
@@ -1834,7 +1830,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                     "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
+                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit and statement-bound verifier-side trit decoder columns",
                 },
                 {
                     "rowId": "compact-vss-target-decryption-smudging-message-claim",
@@ -1853,23 +1849,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                     "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
                     "claimMaskRadix": CLAIM_MASK_RADIX,
                     "maskDigitCount": TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
-                },
-                {
-                    "rowId": "compact-vss-target-decryption-randomness-claim",
-                    "proofFamily": "target-decryption-share",
-                    "claimVectorClass": "target-opening-randomness",
-                    "appliesToRelations": [
-                        "target-decryption-share-proof"
-                    ],
-                    "witnessInfinityBound": 1_u64,
-                    "clearClaimBoundDecimal": target_randomness_clear_claim_bound_decimal,
-                    "consistencyRepetitions": CONSISTENCY_REPETITIONS,
-                    "consistencyCoefficientBits": CONSISTENCY_COEFFICIENT_BITS,
-                    "consistencyCoefficientMaximumDecimal": setup_consistency_coefficient_maximum.to_string(),
-                    "claimMaskRadix": CLAIM_MASK_RADIX,
-                    "maskDigitCount": TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
-                    "rangeEvidenceRule": "target opening randomness claims use ternary witness columns and the target randomness mask",
+                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit and statement-bound verifier-side trit decoder columns",
                 },
             ],
             "targetBasisReductionRows": [
@@ -1934,8 +1914,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                         "compact-vss-same-secret-bridge-non-digit-claim",
                         "compact-vss-same-secret-bridge-message-digit-claim",
                         "compact-vss-target-decryption-aggregate-message-claim",
-                        "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim"
+                        "compact-vss-target-decryption-smudging-message-claim"
                     ],
                     "proofExtractionRows": [
                         "compact-vss-share-linkage-proof-extraction-input",
@@ -1963,8 +1942,7 @@ fn compact_vss_parameter_certificate_input_binding_body_value_for_roster(
                         "compact-vss-same-secret-bridge-non-digit-claim",
                         "compact-vss-same-secret-bridge-message-digit-claim",
                         "compact-vss-target-decryption-aggregate-message-claim",
-                        "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim"
+                        "compact-vss-target-decryption-smudging-message-claim"
                     ],
                     "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
                     "sampledRandomnessProjectionIndicesPerCommitment": sampled_randomness_projection_indices_per_commitment,

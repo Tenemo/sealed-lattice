@@ -67,6 +67,8 @@ enum TranscriptCoreCommand {
     #[cfg(feature = "target-decryption-development-commands")]
     DeriveBgvTargetDecryptionShareProofStatement,
     #[cfg(feature = "target-decryption-development-commands")]
+    DescribeBgvTargetDecryptionShareProofLayout,
+    #[cfg(feature = "target-decryption-development-commands")]
     GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
     #[cfg(feature = "target-decryption-development-commands")]
     VerifyBgvTargetDecryptionShareProofMaterial,
@@ -74,8 +76,10 @@ enum TranscriptCoreCommand {
     VerifyBgvTargetDecryptionShareBinaryProofMaterial,
     #[cfg(feature = "target-decryption-development-commands")]
     VerifyBgvTargetDecryptionShareProofStatementBinding,
-    #[cfg(feature = "target-decryption-development-commands")]
-    VerifyAndReleaseBgvTargetDecryptionResult,
+    DeriveBgvTargetDecryptionResultReleaseSetupContext,
+    BeginBgvTargetDecryptionResultRelease,
+    AbsorbBgvTargetDecryptionResultReleaseShare,
+    FinishBgvTargetDecryptionResultRelease,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -280,15 +284,21 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RunDirectEncryptedBallot => run_bgv_command(command, &request),
+        TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext
+        | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
+        | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
+        | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease => {
+            run_bgv_command(command, &request)
+        }
         #[cfg(feature = "target-decryption-development-commands")]
         TranscriptCoreCommand::GenerateBgvTargetDecryptionDevelopmentFixture
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
         | TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement
+        | TranscriptCoreCommand::DescribeBgvTargetDecryptionShareProofLayout
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness
         | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofMaterial
         | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareBinaryProofMaterial
-        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding
-        | TranscriptCoreCommand::VerifyAndReleaseBgvTargetDecryptionResult => {
+        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding => {
             run_bgv_command(command, &request)
         }
     }
@@ -459,6 +469,12 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             )
         }
         #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::DescribeBgvTargetDecryptionShareProofLayout => {
+            crate::bgv::target_decryption::describe_bgv_target_decryption_share_proof_layout_from_request(
+                request,
+            )
+        }
+        #[cfg(feature = "target-decryption-development-commands")]
         TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
             crate::bgv::target_decryption::generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
                 request,
@@ -482,9 +498,23 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
                 request,
             )
         }
-        #[cfg(feature = "target-decryption-development-commands")]
-        TranscriptCoreCommand::VerifyAndReleaseBgvTargetDecryptionResult => {
-            crate::bgv::target_decryption::verify_and_release_bgv_target_decryption_result_from_request(
+        TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext => {
+            crate::bgv::target_decryption::derive_bgv_target_decryption_result_release_setup_context_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease => {
+            crate::bgv::target_decryption::begin_bgv_target_decryption_result_release_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare => {
+            crate::bgv::target_decryption::absorb_bgv_target_decryption_result_release_share_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease => {
+            crate::bgv::target_decryption::finish_bgv_target_decryption_result_release_from_request(
                 request,
             )
         }

@@ -193,7 +193,6 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
             "compact-vss-same-secret-bridge-message-digit-claim",
             "compact-vss-target-decryption-aggregate-message-claim",
             "compact-vss-target-decryption-smudging-message-claim",
-            "compact-vss-target-decryption-randomness-claim",
         ]
     );
     assert_eq!(
@@ -239,9 +238,19 @@ fn setup_commitment_security_certificate_binds_compact_vss_parameter_inputs() {
             ["source"],
         "malb/lattice-estimator SIS lattice row requires length_bound < (q - 1) / 2"
     );
+    let multi_opening_row = &compact_binding["parameterReviewInputs"]["multiOpeningRows"][0];
+    let maximum_non_reconstructing_recipient_count =
+        multi_opening_row["maximumNonReconstructingRecipientCount"]
+            .as_u64()
+            .expect("maximum non-reconstructing recipient count");
+    let aggregate_threshold_commitments = multi_opening_row["aggregateThresholdCommitments"]
+        .as_u64()
+        .expect("aggregate threshold commitment count");
+    let corrupted_recipient_opening_credential_count =
+        maximum_non_reconstructing_recipient_count * aggregate_threshold_commitments;
     assert_eq!(
         compact_binding["parameterReviewInputs"]["certificateConclusionRows"][1]["corruptedRecipientOpeningCredentialCount"],
-        serde_json::json!(210)
+        serde_json::json!(corrupted_recipient_opening_credential_count)
     );
     assert_eq!(
         compact_binding["estimatorInputRows"][0]["rowId"],

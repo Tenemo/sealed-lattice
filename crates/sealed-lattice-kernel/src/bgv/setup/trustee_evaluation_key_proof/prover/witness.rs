@@ -446,10 +446,8 @@ pub(super) fn build_limb_witness_commitment(
                         "target-decryption message bound is missing for the active message",
                     )
                 })?;
-            let message_encoding_layout =
-                crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
-                    message_bound,
-                )?;
+            let message_encoding_layout = statement
+                .target_decryption_message_encoding_layout(limb_index, global_message_index)?;
             for logical_vector in compact_vss_message_encoding_vectors_with_layout(
                 message_vector,
                 message_bound,

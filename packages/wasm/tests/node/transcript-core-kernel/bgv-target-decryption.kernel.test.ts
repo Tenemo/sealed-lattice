@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { acceptedBgvSetupQSharePrimes } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import {
     deriveTargetDecryptionSmudgingSeedHex,
     prepareLocalTargetDecryptionShareWitness,
@@ -118,7 +119,7 @@ describe('BGV target-decryption kernel commands', () => {
         ).not.toBe(derivedSmudgingSeedHex);
         const setupPackageWithWrongMatrixSeed = structuredClone(
             fixture.setupPackage,
-        ) as SetupPackageWithCommonRandomness;
+        ) as unknown as SetupPackageWithCommonRandomness;
         setupPackageWithWrongMatrixSeed.commonRandomness.publicMatrixSeedHash =
             '0'.repeat(128);
         expect(() =>
@@ -327,6 +328,57 @@ describe('BGV target-decryption kernel commands', () => {
                 trusteeIdentity: fixture.trusteeIdentity,
                 targetDecryptionShare: localShare,
             });
+        const proofLayout = kernel.describeBgvTargetDecryptionShareProofLayout({
+            setupPackage: fixture.setupPackage,
+            targetAcceptedRecord: fixture.targetAcceptedRecord,
+            targetCiphertextBinding: fixture.targetCiphertextBinding,
+            targetCiphertexts: fixture.targetCiphertexts,
+            targetShareProfile: fixture.targetShareProfile,
+            targetDecryptionShare: localShare,
+            proofStatement,
+        });
+        expect(proofLayout).toMatchObject({
+            objectType: 'BgvTargetDecryptionShareProofLayoutDescription',
+            objectVersion: 1,
+            ringDegree: 32_768,
+            proofLimbIndices: [0, 1, 2, 3, 4],
+            totalMessageCount: 15,
+            totalMessageDigitCount: 30,
+        });
+        expect(proofLayout.aggregateMessageCoefficientBound).toBe(
+            Math.max(
+                ...acceptedBgvSetupQSharePrimes
+                    .slice(0, 5)
+                    .map((targetPrime) => targetPrime * 3),
+            ),
+        );
+        expect(proofLayout.smudgingMessageCoefficientBound).toBe(33);
+        expect(proofLayout.limbs).toHaveLength(5);
+        expect(proofLayout.limbs[0]).toMatchObject({
+            proofLimbIndex: 0,
+            targetDecryptionMessageColumns: 15,
+            targetDecryptionRandomnessColumns: 30,
+            claimCount: 600,
+        });
+        expect(proofLayout.limbs[4]).toMatchObject({
+            proofLimbIndex: 4,
+            targetDecryptionMessageColumns: 7,
+            targetDecryptionRandomnessColumns: 0,
+            claimCount: 280,
+        });
+        expect(proofLayout.limbs[4]?.messages[0]).toMatchObject({
+            claimKind: 'aggregateOpening',
+            encodingColumnCount: 2,
+            lowDigitTritCount: 0,
+            highDigitTritCount: 0,
+        });
+        expect(proofLayout.limbs[4]?.messages[5]).toMatchObject({
+            claimKind: 'smudgingOpening',
+            messageBound: 33,
+            encodingColumnCount: 6,
+            lowDigitTritCount: 4,
+            highDigitTritCount: 0,
+        });
         const compactBinding =
             proofStatement.compactAggregateOpeningBinding as CompactAggregateOpeningBinding;
         const acceptedAggregateThresholdCommitmentRoot = (
@@ -361,12 +413,14 @@ describe('BGV target-decryption kernel commands', () => {
                 },
             }),
         });
-        expect(compactBinding.activeCredentialBindings).toHaveLength(7);
-        const activeCredentialBindings =
-            compactBinding.activeCredentialBindings as readonly CompactAggregateCredentialBinding[];
         const acceptedAggregateSet = (
             fixture.setupPackage as unknown as SetupPackageWithCompactAggregateSet
         ).compactVssAggregateThresholdCommitmentSet;
+        expect(compactBinding.activeCredentialBindings).toHaveLength(
+            acceptedAggregateSet.rnsLimbCount,
+        );
+        const activeCredentialBindings =
+            compactBinding.activeCredentialBindings as readonly CompactAggregateCredentialBinding[];
         activeCredentialBindings.forEach(
             (activeCredentialBinding, limbIndex) => {
                 const acceptedRecordIndex =
@@ -397,29 +451,48 @@ describe('BGV target-decryption kernel commands', () => {
             refusalReason: 'TargetDecryptionProofUnavailable',
         });
 
-        let targetResultReleaseError: unknown;
-        try {
-            kernel.verifyAndReleaseBgvTargetDecryptionResult({
+        const stagedReleaseVerificationId =
+            'bgv-target-decryption-empty-release-test';
+        const releaseSetupContext =
+            kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
                 setupPackage: fixture.setupPackage,
+            });
+        const stagedReleaseBegin = kernel.beginBgvTargetDecryptionResultRelease(
+            {
+                releaseVerificationId: stagedReleaseVerificationId,
+                releaseSetupContext,
                 targetAcceptedRecord: fixture.targetAcceptedRecord,
                 targetCiphertextBinding: fixture.targetCiphertextBinding,
                 targetCiphertexts: fixture.targetCiphertexts,
                 targetShareProfile: fixture.targetShareProfile,
-                targetShareProofs: [],
+            },
+        );
+        expect(stagedReleaseBegin).toMatchObject({
+            ok: true,
+            operation: 'beginBgvTargetDecryptionResultRelease',
+            releaseVerificationId: stagedReleaseVerificationId,
+            requiredShareCount: 2,
+        });
+
+        let stagedTargetResultReleaseError: unknown;
+        try {
+            kernel.finishBgvTargetDecryptionResultRelease({
+                releaseVerificationId: stagedReleaseVerificationId,
             });
         } catch (error: unknown) {
-            targetResultReleaseError = error;
+            stagedTargetResultReleaseError = error;
         }
-        expect(targetResultReleaseError).toBeInstanceOf(
+        expect(stagedTargetResultReleaseError).toBeInstanceOf(
             TranscriptCoreKernelCommandError,
         );
         expect(
-            (targetResultReleaseError as TranscriptCoreKernelCommandError).code,
-        ).toBe('InvalidProtocolObject');
+            (stagedTargetResultReleaseError as TranscriptCoreKernelCommandError)
+                .code,
+        ).toBe('MalformedLength');
         expect(
-            (targetResultReleaseError as TranscriptCoreKernelCommandError)
+            (stagedTargetResultReleaseError as TranscriptCoreKernelCommandError)
                 .message,
-        ).toContain('proof-backed target shares');
+        ).toContain('share quorum');
 
         let invalidProofMaterialGenerationError: unknown;
         try {

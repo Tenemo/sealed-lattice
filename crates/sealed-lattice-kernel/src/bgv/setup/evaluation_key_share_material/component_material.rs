@@ -289,11 +289,23 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
                 "verified evaluation-key component material store is unavailable",
             )
         })?;
-    let store_entry = stored_chunks.get(material_root).cloned().ok_or_else(|| {
-        invalid_evaluation_key_share_material(
-            "transported evaluation-key component material requires chunks or a live verified material handle",
-        )
-    })?;
+    let store_entry = if let Some(store_entry) = stored_chunks.get(material_root).cloned() {
+        store_entry
+    } else {
+        drop(stored_chunks);
+        #[cfg(test)]
+        {
+            return read_checkpointed_verified_evaluation_key_share_component_material_chunks(
+                material_root,
+            );
+        }
+        #[cfg(not(test))]
+        {
+            return Err(invalid_evaluation_key_share_material(
+                "transported evaluation-key component material requires chunks or a live verified material handle",
+            ));
+        }
+    };
     drop(stored_chunks);
 
     read_verified_evaluation_key_share_component_material_chunks(&store_entry)
@@ -305,6 +317,52 @@ fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf
         .join("test-checkpoints")
         .join("terminal-accepted-setup-material-store")
         .join("evaluation-key-component-material")
+}
+
+#[cfg(test)]
+fn read_checkpointed_verified_evaluation_key_share_component_material_chunks(
+    material_root: &str,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    validate_lowercase_hash(
+        material_root,
+        "verifiedEvaluationKeyShareComponentMaterial.keySwitchComponentMaterialRoot",
+    )?;
+    let path = verified_evaluation_key_share_component_material_store_directory()
+        .join(format!("{material_root}.bin"));
+    let metadata_path = path.with_extension("metadata.json");
+    let metadata_bytes = fs::read(&metadata_path).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata could not be read: {error}",
+        ))
+    })?;
+    let metadata: Value = serde_json::from_slice(&metadata_bytes).map_err(|error| {
+        invalid_evaluation_key_share_material(format!(
+            "verified evaluation-key component material store metadata could not be decoded: {error}",
+        ))
+    })?;
+    if metadata
+        .get("keySwitchComponentMaterialRoot")
+        .and_then(Value::as_str)
+        != Some(material_root)
+    {
+        return Err(invalid_evaluation_key_share_material(
+            "verified evaluation-key component material store metadata root does not match the requested material root",
+        ));
+    }
+    let total_byte_length = metadata
+        .get("totalByteLength")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            invalid_evaluation_key_share_material(
+                "verified evaluation-key component material store metadata is missing totalByteLength",
+            )
+        })?;
+    let store_entry = VerifiedEvaluationKeyShareComponentMaterialChunkStoreEntry {
+        path,
+        total_byte_length,
+    };
+
+    read_verified_evaluation_key_share_component_material_chunks(&store_entry)
 }
 
 #[cfg(test)]

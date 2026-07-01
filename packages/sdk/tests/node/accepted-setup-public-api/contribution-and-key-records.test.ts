@@ -651,8 +651,8 @@ describe('accepted setup public package API in Node', () => {
                 commitmentExposureRows: [
                     expect.objectContaining({
                         rowId: 'compact-vss-final-public-commitment-exposure',
-                        totalCompactCommitments: 1_450,
-                        totalPublicCommitmentCoordinates: 69_600,
+                        totalCompactCommitments: 1_230,
+                        totalPublicCommitmentCoordinates: 59_040,
                     }),
                 ],
                 linearRelationRows: [
@@ -673,7 +673,7 @@ describe('accepted setup public package API in Node', () => {
                     expect.objectContaining({
                         rowId: 'compact-vss-multi-opening-review-input',
                         maximumNonReconstructingRecipientCount: 3,
-                        corruptedRecipientOpeningCredentialCount: 210,
+                        corruptedRecipientOpeningCredentialCount: 150,
                     }),
                 ],
                 moduleSisBindingRows: [
@@ -694,14 +694,14 @@ describe('accepted setup public package API in Node', () => {
                     expect.objectContaining({
                         rowId: 'compact-vss-covered-message-module-lwe-hiding-conclusion',
                         problem: 'Module-LWE',
-                        corruptedRecipientOpeningCredentialCount: 210,
+                        corruptedRecipientOpeningCredentialCount: 150,
                     }),
                     expect.objectContaining({
                         rowId: 'compact-vss-structured-ring-review-conclusion',
                     }),
                     expect.objectContaining({
                         rowId: 'compact-vss-multi-opening-review-conclusion',
-                        totalCompactCommitments: 1_450,
+                        totalCompactCommitments: 1_230,
                     }),
                 ],
             },

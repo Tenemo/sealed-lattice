@@ -1,4 +1,7 @@
-﻿import { performance } from 'node:perf_hooks';
+﻿import { createHash } from 'node:crypto';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
 
 import {
     createPrivateVssMailboxKeyPair,
@@ -13,7 +16,6 @@ import {
     compactVssCommitmentMeasurement,
     compactVssMessageDigitCount,
     compactVssMessageDigitBase,
-    compactVssMessageDigitTritCount,
     computeCompactVssCommitmentFromOpening,
     createCompactVssCoefficientCommitmentSet,
     createCompactVssDerivedRecipientShareCommitmentBundle,
@@ -83,7 +85,7 @@ const privateStateBuildRunCount = 3;
 const firstProfileParticipantCount = 10;
 const firstProfileThresholdDegree = 4;
 const currentFullCoefficientTransportBytes = 1_604_341_697;
-const targetRnsLimbCount = 7;
+const targetRnsLimbCount = 5;
 const canonicalTargetCiphertextLevel = targetRnsLimbCount - 1;
 const selectedEvaluatorWorkingLevel = 15;
 const restrictedProofRingDegree = 128;
@@ -100,6 +102,7 @@ const maximumTargetProofMaterialBinaryFrameBytes = 8 * 1024 * 1024;
 const maximumTargetProofMaterialRawProofBytes = 12 * 1024 * 1024;
 const maximumTargetProofMaterialGenerationSeconds = 180;
 const maximumTargetProofMaterialVerificationSeconds = 30;
+const maximumTargetResultReleaseVerificationSeconds = 30;
 const maximumWarmWasmFullProfileGenerationSeconds = 30;
 const maximumWarmWasmFullProfileVerificationSeconds = 30;
 const maximumMeasuredDevelopmentArtifactJsonBytes = 16 * 1024 * 1024;
@@ -123,9 +126,12 @@ const proofSetupCommitmentLimbCount = 3;
 const maximumCompactShareLinkagePublicVerificationSeconds = 10;
 const targetDecryptionAggregateMessageClaimMaskDigitCount = 142;
 const targetDecryptionSmudgingMessageClaimMaskDigitCount = 114;
-const targetDecryptionRandomnessClaimMaskDigitCount = 114;
 const targetProofMaterialMeasurementRequested =
     process.env.SEALED_LATTICE_MEASURE_TARGET_PROOF_MATERIAL === '1';
+const publicTargetResultReleaseMeasurementRequested =
+    process.env.SEALED_LATTICE_MEASURE_PUBLIC_TARGET_RESULT_RELEASE === '1';
+const publicTargetResultInputOutputPath =
+    process.env.SEALED_LATTICE_WRITE_PUBLIC_TARGET_RESULT_INPUT;
 const fullShareLinkageBatchMeasurementRequested =
     process.env.SEALED_LATTICE_MEASURE_FULL_SHARE_LINKAGE_BATCH === '1';
 const fullSameSecretBridgeMeasurementRequested =
@@ -137,6 +143,7 @@ const isPowerOfTwo = (value: number): boolean =>
     Number.isInteger(Math.log2(value));
 
 type CompactVssMessageEncodingLayout = Readonly<{
+    readonly lowDigitTritCount: number;
     readonly highDigitTritCount: number;
     readonly encodingColumnCount: number;
     readonly totalTritCount: number;
@@ -174,20 +181,36 @@ const compactVssMessageEncodingLayoutForBound = (
         throw new Error('compact VSS message bound must be positive.');
     }
     const messageBoundExclusiveWide = BigInt(messageBoundExclusive);
+    const lowDigitBoundExclusive =
+        messageBoundExclusiveWide < compactVssMessageDigitBase
+            ? messageBoundExclusiveWide
+            : compactVssMessageDigitBase;
     const highDigitBoundExclusive =
         (messageBoundExclusiveWide + compactVssMessageDigitBase - 1n) /
         compactVssMessageDigitBase;
+    const lowDigitTritCount = compactVssTritCountForBound(
+        lowDigitBoundExclusive,
+    );
     const highDigitTritCount = compactVssTritCountForBound(
         highDigitBoundExclusive,
     );
-    const totalTritCount = compactVssMessageDigitTritCount + highDigitTritCount;
+    const totalTritCount = lowDigitTritCount + highDigitTritCount;
 
     return {
+        lowDigitTritCount,
         highDigitTritCount,
         totalTritCount,
         encodingColumnCount: compactVssMessageDigitCount + totalTritCount,
     };
 };
+
+const compactVssMessageDigitOnlyEncodingLayout =
+    (): CompactVssMessageEncodingLayout => ({
+        lowDigitTritCount: 0,
+        highDigitTritCount: 0,
+        totalTritCount: 0,
+        encodingColumnCount: compactVssMessageDigitCount,
+    });
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
@@ -465,8 +488,77 @@ type TargetDecryptionProofMaterialMeasurement = Readonly<{
     readonly proofMaterialBinaryVerificationJsonBytesByShare: readonly number[];
     readonly proofMaterialBinaryVerificationJsonBytesTotal: number;
     readonly proofMaterialBinaryVerificationMilliseconds: number;
+    readonly resultRelease: TargetDecryptionResultReleaseMeasurement;
     readonly largestSingleObjectJsonBytes: number;
 }>;
+
+type TargetDecryptionResultReleaseMeasurement = Readonly<{
+    readonly releaseSetupContextJsonBytes: number;
+    readonly releaseInputJsonBytes: number;
+    readonly targetShareProofsJsonBytes: number;
+    readonly legacyReleaseInputJsonBytes: number;
+    readonly legacyTargetShareProofsJsonBytes: number;
+    readonly releaseInputJsonSavingsBytes: number;
+    readonly releaseCommandInputJsonBytesByStep: readonly number[];
+    readonly largestReleaseCommandInputJsonBytes: number;
+    readonly largestWasmBoundaryCopySavingsBytes: number;
+    readonly releaseProofMaterialTransport: string;
+    readonly releaseResultJsonBytes: number;
+    readonly shareEvidenceJsonBytes: number;
+    readonly largestWasmBoundaryCopyBytes: number;
+    readonly verificationMilliseconds: number;
+    readonly targetResultHash: ProtocolHash;
+    readonly shareEvidenceCount: number;
+    readonly topCount: number;
+    readonly targetIdByOptionCount: number;
+    readonly targetOrderByOptionCount: number;
+    readonly wasmLinearMemoryBytesBeforeRelease: number;
+    readonly wasmLinearMemoryBytesAfterRelease: number;
+    readonly processRssBytesAfterRelease: number;
+    readonly publicTargetResultInputArtifact:
+        | PublicTargetResultInputArtifactWritten
+        | PublicTargetResultInputArtifactNotWritten;
+    readonly publicPackageBoundary:
+        | TargetDecryptionPublicPackageReleaseMeasurement
+        | TargetDecryptionPublicPackageReleaseNotMeasured;
+}>;
+
+type PublicTargetResultInputArtifactWritten = Readonly<{
+    readonly artifactMode: string;
+    readonly outputPath: string;
+    readonly jsonBytes: number;
+    readonly sha256Hex: string;
+}>;
+
+type PublicTargetResultInputArtifactNotWritten = Readonly<{
+    readonly artifactMode: string;
+}>;
+
+type TargetDecryptionPublicPackageReleaseMeasurement = Readonly<{
+    readonly measurementMode: string;
+    readonly packageEntryPoint: string;
+    readonly inputJsonBytes: number;
+    readonly verificationMilliseconds: number;
+    readonly acceptedResultJsonBytes: number;
+    readonly targetResultHash: ProtocolHash;
+    readonly shareEvidenceCount: number;
+    readonly topCount: number;
+    readonly targetIdByOptionCount: number;
+    readonly targetOrderByOptionCount: number;
+    readonly processRssBytesAfterRelease: number;
+}>;
+
+type TargetDecryptionPublicPackageReleaseNotMeasured = Readonly<{
+    readonly measurementMode: string;
+    readonly packageEntryPoint: string;
+}>;
+
+const publicPackageReleaseWasMeasured = (
+    measurement:
+        | TargetDecryptionPublicPackageReleaseMeasurement
+        | TargetDecryptionPublicPackageReleaseNotMeasured,
+): measurement is TargetDecryptionPublicPackageReleaseMeasurement =>
+    'verificationMilliseconds' in measurement;
 
 type TargetDecryptionProofMaterialNotMeasured = Readonly<{
     readonly measurementMode: string;
@@ -494,6 +586,9 @@ type TargetDecryptionShareMeasurementBundle = Readonly<{
     >;
     readonly proofStatement: ReturnType<
         TranscriptCoreKernel['deriveBgvTargetDecryptionShareProofStatement']
+    >;
+    readonly proofLayout: ReturnType<
+        TranscriptCoreKernel['describeBgvTargetDecryptionShareProofLayout']
     >;
 }>;
 
@@ -1477,6 +1572,45 @@ function jsonByteLength(value: unknown): number {
     );
 }
 
+function measurementJsonText(value: unknown): string {
+    return JSON.stringify(value, (_key, entry: unknown) =>
+        typeof entry === 'bigint' ? entry.toString() : entry,
+    );
+}
+
+function sha256Hex(value: string): string {
+    return createHash('sha256').update(value).digest('hex');
+}
+
+async function writePublicTargetResultInputArtifact(
+    value: JsonRecord,
+): Promise<
+    | PublicTargetResultInputArtifactWritten
+    | PublicTargetResultInputArtifactNotWritten
+> {
+    if (
+        publicTargetResultInputOutputPath === undefined ||
+        publicTargetResultInputOutputPath.trim().length === 0
+    ) {
+        return {
+            artifactMode:
+                'Set SEALED_LATTICE_WRITE_PUBLIC_TARGET_RESULT_INPUT to write the public target-result input JSON for the supported-runtime evidence harness.',
+        };
+    }
+
+    const outputPath = resolve(publicTargetResultInputOutputPath);
+    const jsonText = measurementJsonText(value);
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, jsonText, 'utf8');
+
+    return {
+        artifactMode: 'wrote public target-result input JSON',
+        outputPath,
+        jsonBytes: Buffer.byteLength(jsonText, 'utf8'),
+        sha256Hex: sha256Hex(jsonText),
+    };
+}
+
 function measurementHash(label: string): ProtocolHash {
     return deriveProtocolHash('SetupProofRecordBindingHash', {
         objectType: 'CompactVssManualMeasurementReference',
@@ -2340,8 +2474,24 @@ type TargetProofStatementLayout = Readonly<{
 
 type TargetProofLimbLayout = Readonly<{
     readonly traceSize: number;
+    readonly targetDecryptionMessageColumns: number;
+    readonly targetDecryptionRandomnessColumns: number;
+    readonly targetDecryptionMessageEncodingColumns: number;
     readonly claimCount: number;
+    readonly maskColumnCount: number;
     readonly phaseOnePhysicalColumnCount: number;
+    readonly messages: readonly TargetProofLimbMessageLayout[];
+}>;
+
+type TargetProofLimbMessageLayout = Readonly<{
+    readonly localMessageIndex: number;
+    readonly globalMessageIndex: number;
+    readonly claimKind: TargetProofMessageClaimKind;
+    readonly messageBound: number;
+    readonly encodingColumnCount: number;
+    readonly lowDigitTritCount: number;
+    readonly highDigitTritCount: number;
+    readonly totalTritCount: number;
 }>;
 
 type EncodedSetupProofLimbLayout = TargetProofLimbLayout;
@@ -2506,7 +2656,15 @@ const targetProofStatementLayout = (
     proofStatement: ReturnType<
         TranscriptCoreKernel['deriveBgvTargetDecryptionShareProofStatement']
     >,
+    setupPackage: unknown,
 ): TargetProofStatementLayout => {
+    const setupParticipantCount = arrayField(
+        setupPackage,
+        'participants',
+    ).length;
+    if (setupParticipantCount <= 0) {
+        throw new Error('target proof setup package has no participants.');
+    }
     const targetCiphertextLevel = positiveIntegerField(
         proofStatement,
         'targetCiphertextLevel',
@@ -2529,14 +2687,10 @@ const targetProofStatementLayout = (
             'target proof statement and smudging commitment set disagree on active limb count.',
         );
     }
-    const participantCount = positiveIntegerField(
-        proofStatement,
-        'decryptionShareQuorum',
-    );
     const aggregateMessageCoefficientBound = Math.max(
         ...acceptedBgvSetupQSharePrimes
             .slice(0, activeTargetRnsLimbCount)
-            .map((targetRnsPrime) => targetRnsPrime * participantCount),
+            .map((targetRnsPrime) => targetRnsPrime * setupParticipantCount),
     );
     if (!Number.isSafeInteger(aggregateMessageCoefficientBound)) {
         throw new Error(
@@ -2674,11 +2828,26 @@ const targetProofMessageGlobalIndicesForLimb = (
     return globalMessageIndices;
 };
 
+const targetProofMessageDecoderLimbIndex = (
+    layout: TargetProofStatementLayout,
+    globalMessageIndex: number,
+): number => {
+    const targetRnsLimbIndex =
+        layout.targetRnsLimbIndexByGlobalMessageIndex[globalMessageIndex];
+    if (targetRnsLimbIndex === undefined) {
+        throw new Error(
+            'target proof message index is outside the statement layout.',
+        );
+    }
+
+    return targetRnsLimbIndex;
+};
+
 const targetProofRandomnessColumnCountForLimb = (
     layout: TargetProofStatementLayout,
     proofLimbIndex: number,
 ): number =>
-    layout.proofLimbIndices.slice(0, 4).includes(proofLimbIndex)
+    proofLimbIndex < proofSetupCommitmentLimbCount
         ? layout.messageClaimKindByGlobalMessageIndex.length *
           compactVssCommitmentRandomnessColumnCount
         : 0;
@@ -2693,28 +2862,30 @@ const targetProofMaskDigitCountForClaim = (
     );
     const localMessageDigitVectorCount =
         localMessageGlobalIndices.length * compactVssMessageDigitCount;
-    if (vectorIndex < localMessageDigitVectorCount) {
-        const localMessageIndex = Math.floor(
-            vectorIndex / compactVssMessageDigitCount,
+    if (vectorIndex >= localMessageDigitVectorCount) {
+        throw new Error(
+            'target proof claim index is outside the message layout.',
         );
-        const globalMessageIndex = localMessageGlobalIndices[localMessageIndex];
-        if (globalMessageIndex === undefined) {
-            throw new Error(
-                'target proof local message index is outside the layout.',
-            );
-        }
-        const claimKind =
-            layout.messageClaimKindByGlobalMessageIndex[globalMessageIndex];
-        if (claimKind === 'aggregateOpening') {
-            return targetDecryptionAggregateMessageClaimMaskDigitCount;
-        }
-        if (claimKind === 'smudgingOpening') {
-            return targetDecryptionSmudgingMessageClaimMaskDigitCount;
-        }
-        throw new Error('target proof message claim kind is unknown.');
     }
 
-    return targetDecryptionRandomnessClaimMaskDigitCount;
+    const localMessageIndex = Math.floor(
+        vectorIndex / compactVssMessageDigitCount,
+    );
+    const globalMessageIndex = localMessageGlobalIndices[localMessageIndex];
+    if (globalMessageIndex === undefined) {
+        throw new Error(
+            'target proof local message index is outside the layout.',
+        );
+    }
+    const claimKind =
+        layout.messageClaimKindByGlobalMessageIndex[globalMessageIndex];
+    if (claimKind === 'aggregateOpening') {
+        return targetDecryptionAggregateMessageClaimMaskDigitCount;
+    }
+    if (claimKind === 'smudgingOpening') {
+        return targetDecryptionSmudgingMessageClaimMaskDigitCount;
+    }
+    throw new Error('target proof message claim kind is unknown.');
 };
 
 const targetProofLimbLayout = (
@@ -2729,30 +2900,51 @@ const targetProofLimbLayout = (
         statementLayout,
         proofLimbIndex,
     );
-    const messageEncodingColumnCount = localMessageGlobalIndices.reduce(
-        (totalColumns, globalMessageIndex) => {
+    const messageLayouts = localMessageGlobalIndices.map(
+        (globalMessageIndex, localMessageIndex) => {
             const claimKind =
                 statementLayout.messageClaimKindByGlobalMessageIndex[
                     globalMessageIndex
                 ];
+            if (claimKind === undefined) {
+                throw new Error(
+                    'target proof message index is outside the statement layout.',
+                );
+            }
             const messageBound =
                 claimKind === 'aggregateOpening'
                     ? statementLayout.aggregateMessageCoefficientBound
                     : statementLayout.smudgingMessageCoefficientBound;
+            const encodingLayout =
+                proofLimbIndex ===
+                targetProofMessageDecoderLimbIndex(
+                    statementLayout,
+                    globalMessageIndex,
+                )
+                    ? compactVssMessageEncodingLayoutForBound(messageBound)
+                    : compactVssMessageDigitOnlyEncodingLayout();
 
-            return (
-                totalColumns +
-                compactVssMessageEncodingLayoutForBound(messageBound)
-                    .encodingColumnCount
-            );
+            return {
+                localMessageIndex,
+                globalMessageIndex,
+                claimKind,
+                messageBound,
+                encodingColumnCount: encodingLayout.encodingColumnCount,
+                lowDigitTritCount: encodingLayout.lowDigitTritCount,
+                highDigitTritCount: encodingLayout.highDigitTritCount,
+                totalTritCount: encodingLayout.totalTritCount,
+            };
         },
+    );
+    const messageEncodingColumnCount = messageLayouts.reduce(
+        (totalColumns, messageLayout) =>
+            totalColumns + messageLayout.encodingColumnCount,
         0,
     );
     const logicalColumnCount =
         messageEncodingColumnCount + randomnessColumnCount;
     const claimVectorCount =
-        localMessageGlobalIndices.length * compactVssMessageDigitCount +
-        randomnessColumnCount;
+        localMessageGlobalIndices.length * compactVssMessageDigitCount;
     const claimCount = claimVectorCount * proofConsistencyRepetitions;
     let maskSlotCount = 0;
     for (
@@ -2776,10 +2968,201 @@ const targetProofLimbLayout = (
 
     return {
         traceSize,
+        targetDecryptionMessageColumns: localMessageGlobalIndices.length,
+        targetDecryptionRandomnessColumns: randomnessColumnCount,
+        targetDecryptionMessageEncodingColumns: messageEncodingColumnCount,
         claimCount,
+        maskColumnCount,
         phaseOnePhysicalColumnCount:
             proofTraceSplit * (logicalColumnCount + maskColumnCount),
+        messages: messageLayouts,
     };
+};
+
+const assertMatchingNumber = (
+    actual: number,
+    expected: number,
+    description: string,
+): void => {
+    if (actual !== expected) {
+        throw new Error(
+            `${description} mismatch: TypeScript=${String(actual)}, Rust=${String(expected)}.`,
+        );
+    }
+};
+
+const assertMatchingString = (
+    actual: string,
+    expected: string,
+    description: string,
+): void => {
+    if (actual !== expected) {
+        throw new Error(
+            `${description} mismatch: TypeScript=${actual}, Rust=${expected}.`,
+        );
+    }
+};
+
+const assertTargetProofLayoutMatchesRust = (
+    statementLayout: TargetProofStatementLayout,
+    rustLayout: ReturnType<
+        TranscriptCoreKernel['describeBgvTargetDecryptionShareProofLayout']
+    >,
+): void => {
+    assertMatchingString(
+        rustLayout.objectType,
+        'BgvTargetDecryptionShareProofLayoutDescription',
+        'target proof layout objectType',
+    );
+    assertMatchingNumber(
+        statementLayout.ringDegree,
+        rustLayout.ringDegree,
+        'target proof ring degree',
+    );
+    assertMatchingNumber(
+        statementLayout.aggregateMessageCoefficientBound,
+        rustLayout.aggregateMessageCoefficientBound,
+        'target proof aggregate message bound',
+    );
+    assertMatchingNumber(
+        statementLayout.smudgingMessageCoefficientBound,
+        rustLayout.smudgingMessageCoefficientBound,
+        'target proof smudging message bound',
+    );
+    assertMatchingNumber(
+        statementLayout.messageClaimKindByGlobalMessageIndex.length,
+        rustLayout.totalMessageCount,
+        'target proof total message count',
+    );
+    assertMatchingNumber(
+        statementLayout.messageClaimKindByGlobalMessageIndex.length *
+            compactVssMessageDigitCount,
+        rustLayout.totalMessageDigitCount,
+        'target proof total message digit count',
+    );
+    if (
+        JSON.stringify(statementLayout.proofLimbIndices) !==
+        JSON.stringify(rustLayout.proofLimbIndices)
+    ) {
+        throw new Error(
+            `target proof limb list mismatch: TypeScript=${JSON.stringify(statementLayout.proofLimbIndices)}, Rust=${JSON.stringify(rustLayout.proofLimbIndices)}.`,
+        );
+    }
+    assertMatchingNumber(
+        rustLayout.limbs.length,
+        statementLayout.proofLimbIndices.length,
+        'target proof layout limb count',
+    );
+    for (const [
+        limbPosition,
+        proofLimbIndex,
+    ] of statementLayout.proofLimbIndices.entries()) {
+        const typeScriptLimbLayout = targetProofLimbLayout(
+            statementLayout,
+            proofLimbIndex,
+        );
+        const rustLimbLayout = rustLayout.limbs[limbPosition];
+        if (rustLimbLayout === undefined) {
+            throw new Error('Rust target proof layout is missing a limb.');
+        }
+        assertMatchingNumber(
+            typeScriptLimbLayout.traceSize,
+            rustLimbLayout.traceSize,
+            `target proof limb ${String(proofLimbIndex)} trace size`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.targetDecryptionMessageColumns,
+            rustLimbLayout.targetDecryptionMessageColumns,
+            `target proof limb ${String(proofLimbIndex)} message columns`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.targetDecryptionRandomnessColumns,
+            rustLimbLayout.targetDecryptionRandomnessColumns,
+            `target proof limb ${String(proofLimbIndex)} randomness columns`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.targetDecryptionMessageEncodingColumns,
+            rustLimbLayout.targetDecryptionMessageEncodingColumns,
+            `target proof limb ${String(proofLimbIndex)} message encoding columns`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.claimCount,
+            rustLimbLayout.claimCount,
+            `target proof limb ${String(proofLimbIndex)} claim count`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.maskColumnCount,
+            rustLimbLayout.maskColumnCount,
+            `target proof limb ${String(proofLimbIndex)} mask columns`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.phaseOnePhysicalColumnCount,
+            rustLimbLayout.phaseOnePhysicalColumnCount,
+            `target proof limb ${String(proofLimbIndex)} phase-one columns`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.phaseOnePhysicalColumnCount +
+                proofPhaseTwoColumnCount,
+            rustLimbLayout.totalColumnCount,
+            `target proof limb ${String(proofLimbIndex)} total columns`,
+        );
+        assertMatchingNumber(
+            typeScriptLimbLayout.messages.length,
+            rustLimbLayout.messages.length,
+            `target proof limb ${String(proofLimbIndex)} message count`,
+        );
+        for (const [
+            messagePosition,
+            typeScriptMessage,
+        ] of typeScriptLimbLayout.messages.entries()) {
+            const rustMessage = rustLimbLayout.messages[messagePosition];
+            if (rustMessage === undefined) {
+                throw new Error(
+                    `Rust target proof layout is missing limb ${String(proofLimbIndex)} message ${String(messagePosition)}.`,
+                );
+            }
+            assertMatchingNumber(
+                typeScriptMessage.localMessageIndex,
+                rustMessage.localMessageIndex,
+                `target proof limb ${String(proofLimbIndex)} local message ${String(messagePosition)} index`,
+            );
+            assertMatchingNumber(
+                typeScriptMessage.globalMessageIndex,
+                rustMessage.globalMessageIndex,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} global index`,
+            );
+            assertMatchingString(
+                typeScriptMessage.claimKind,
+                rustMessage.claimKind,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} claim kind`,
+            );
+            assertMatchingNumber(
+                typeScriptMessage.messageBound,
+                rustMessage.messageBound,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} bound`,
+            );
+            assertMatchingNumber(
+                typeScriptMessage.encodingColumnCount,
+                rustMessage.encodingColumnCount,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} encoding columns`,
+            );
+            assertMatchingNumber(
+                typeScriptMessage.lowDigitTritCount,
+                rustMessage.lowDigitTritCount,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} low digit trits`,
+            );
+            assertMatchingNumber(
+                typeScriptMessage.highDigitTritCount,
+                rustMessage.highDigitTritCount,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} high digit trits`,
+            );
+            assertMatchingNumber(
+                typeScriptMessage.totalTritCount,
+                rustMessage.totalTritCount,
+                `target proof limb ${String(proofLimbIndex)} message ${String(messagePosition)} total trits`,
+            );
+        }
+    }
 };
 
 const lowDegreeFinalCoefficientCount = (initialDegreeBound: number): number => {
@@ -3098,8 +3481,16 @@ const targetProofByteBreakdown = (
     proofStatement: ReturnType<
         TranscriptCoreKernel['deriveBgvTargetDecryptionShareProofStatement']
     >,
+    setupPackage: unknown,
+    proofLayout: ReturnType<
+        TranscriptCoreKernel['describeBgvTargetDecryptionShareProofLayout']
+    >,
 ): EncodedTargetProofByteBreakdown => {
-    const statementLayout = targetProofStatementLayout(proofStatement);
+    const statementLayout = targetProofStatementLayout(
+        proofStatement,
+        setupPackage,
+    );
+    assertTargetProofLayoutMatchesRust(statementLayout, proofLayout);
     const proofRecordBreakdowns = targetProofRecords(proofMaterial).map(
         (proofRecord, proofRecordIndex) =>
             targetProofByteBreakdownForProofRecord(
@@ -3118,6 +3509,97 @@ const protocolRecord = (value: unknown, fieldName: string): JsonRecord => {
     }
 
     return value as JsonRecord;
+};
+
+const publicPackageEntryPointUrl = new URL(
+    '../../packages/sdk/dist/index.js',
+    import.meta.url,
+);
+
+const measurePublicPackageTargetResultRelease = async (input: {
+    readonly expectedShareEvidenceCount: number;
+    readonly expectedTargetResultHash: ProtocolHash;
+    readonly releaseInput: JsonRecord;
+}): Promise<
+    | TargetDecryptionPublicPackageReleaseMeasurement
+    | TargetDecryptionPublicPackageReleaseNotMeasured
+> => {
+    const packageEntryPoint = publicPackageEntryPointUrl.pathname;
+    if (!publicTargetResultReleaseMeasurementRequested) {
+        return {
+            measurementMode:
+                'Set SEALED_LATTICE_MEASURE_PUBLIC_TARGET_RESULT_RELEASE=1 with the heavy target-proof measurement to replay release through the published SDK wrapper.',
+            packageEntryPoint,
+        };
+    }
+
+    const publicPackage: unknown = await import(
+        publicPackageEntryPointUrl.href
+    );
+
+    const publicPackageRecord = protocolRecord(
+        publicPackage,
+        'public package module',
+    );
+    const verifyTargetDecryptionResult =
+        publicPackageRecord.verifyTargetDecryptionResult;
+    if (typeof verifyTargetDecryptionResult !== 'function') {
+        throw new Error(
+            'Built public package does not export verifyTargetDecryptionResult.',
+        );
+    }
+    const verifyPublicTargetDecryptionResult = verifyTargetDecryptionResult as (
+        targetResultInput: JsonRecord,
+    ) => Promise<unknown>;
+
+    const inputJsonBytes = jsonByteLength(input.releaseInput);
+    const verificationStartedAtMilliseconds = performance.now();
+    const verification = await verifyPublicTargetDecryptionResult(
+        input.releaseInput,
+    );
+    const verificationMilliseconds =
+        performance.now() - verificationStartedAtMilliseconds;
+    const verificationRecord = protocolRecord(
+        verification,
+        'public target-result verification',
+    );
+    if (verificationRecord.ok !== true) {
+        throw new Error(
+            'public target-result release measurement did not accept.',
+        );
+    }
+    const acceptedResult = objectField(verificationRecord, 'acceptedResult');
+    const targetResultHash = stringField(acceptedResult, 'targetResultHash');
+    if (targetResultHash !== input.expectedTargetResultHash) {
+        throw new Error(
+            'public target-result release measurement produced a different target result hash.',
+        );
+    }
+    const shareEvidence = arrayField(acceptedResult, 'shareEvidence');
+    if (shareEvidence.length !== input.expectedShareEvidenceCount) {
+        throw new Error(
+            'public target-result release measurement accepted a different share-evidence count.',
+        );
+    }
+
+    return {
+        measurementMode:
+            'published SDK verifyTargetDecryptionResult replay on the local measurement host',
+        packageEntryPoint,
+        inputJsonBytes,
+        verificationMilliseconds,
+        acceptedResultJsonBytes: jsonByteLength(acceptedResult),
+        targetResultHash,
+        shareEvidenceCount: shareEvidence.length,
+        topCount: numberField(acceptedResult, 'topCount'),
+        targetIdByOptionCount: arrayField(acceptedResult, 'targetIdByOption')
+            .length,
+        targetOrderByOptionCount: arrayField(
+            acceptedResult,
+            'targetOrderByOption',
+        ).length,
+        processRssBytesAfterRelease: process.memoryUsage().rss,
+    };
 };
 
 const measureTargetProofMaterialBinaryFrames = (input: {
@@ -3719,9 +4201,9 @@ const measurePrivateStateDevelopmentArtifacts = async (
     };
 };
 
-const measureTargetDecryptionDevelopmentArtifacts = (
+const measureTargetDecryptionDevelopmentArtifacts = async (
     kernel: TranscriptCoreKernel,
-): TargetDecryptionDevelopmentMeasurements => {
+): Promise<TargetDecryptionDevelopmentMeasurements> => {
     const fixture = kernel.generateBgvTargetDecryptionDevelopmentFixture();
     const minimumSharesForInterpolation = numberField(
         fixture.targetShareProfile,
@@ -3779,12 +4261,30 @@ const measureTargetDecryptionDevelopmentArtifacts = (
                     trusteeIdentity: quorumWitness.trusteeIdentity,
                     targetDecryptionShare: targetShare,
                 });
+            const proofLayout =
+                kernel.describeBgvTargetDecryptionShareProofLayout({
+                    setupPackage: fixture.setupPackage,
+                    targetAcceptedRecord: fixture.targetAcceptedRecord,
+                    targetCiphertextBinding: fixture.targetCiphertextBinding,
+                    targetCiphertexts: fixture.targetCiphertexts,
+                    targetShareProfile: fixture.targetShareProfile,
+                    targetDecryptionShare: targetShare,
+                    proofStatement,
+                });
+            assertTargetProofLayoutMatchesRust(
+                targetProofStatementLayout(
+                    proofStatement,
+                    fixture.setupPackage,
+                ),
+                proofLayout,
+            );
 
             return {
                 trusteeIdentity: quorumWitness.trusteeIdentity,
                 localTargetShareWitness: quorumWitness.localTargetShareWitness,
                 targetShare,
                 proofStatement,
+                proofLayout,
             };
         });
     const firstTargetShareBundle = targetShareBundles[0];
@@ -3952,6 +4452,99 @@ const measureTargetDecryptionDevelopmentArtifacts = (
     const proofMaterialBinaryVerificationMilliseconds =
         performance.now() -
         proofMaterialBinaryVerificationStartedAtMilliseconds;
+    const targetShareProofs = targetShareBundles.map(
+        (targetShareBundle, index) => {
+            const proofMaterial = proofMaterials[index];
+            if (proofMaterial === undefined) {
+                throw new Error(
+                    'target-decryption release input has no matching proof material.',
+                );
+            }
+
+            return {
+                targetDecryptionShare: targetShareBundle.targetShare,
+                proofStatement: targetShareBundle.proofStatement,
+                proofMaterial,
+            };
+        },
+    );
+    const legacyTargetResultReleaseInput = {
+        setupPackage: fixture.setupPackage,
+        targetAcceptedRecord: fixture.targetAcceptedRecord,
+        targetCiphertextBinding: fixture.targetCiphertextBinding,
+        targetCiphertexts: fixture.targetCiphertexts,
+        targetShareProfile: fixture.targetShareProfile,
+        targetShareProofs,
+    };
+    const legacyReleaseInputJsonBytes = jsonByteLength(
+        legacyTargetResultReleaseInput,
+    );
+    const legacyTargetShareProofsJsonBytes = jsonByteLength(targetShareProofs);
+    const releaseSetupContext =
+        kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
+            setupPackage: fixture.setupPackage,
+        });
+    const releaseSetupContextJsonBytes = jsonByteLength(releaseSetupContext);
+    const releaseVerificationId = 'compact-vss-target-release-measurement';
+    const releaseBeginInput = {
+        releaseVerificationId,
+        releaseSetupContext,
+        targetAcceptedRecord: fixture.targetAcceptedRecord,
+        targetCiphertextBinding: fixture.targetCiphertextBinding,
+        targetCiphertexts: fixture.targetCiphertexts,
+        targetShareProfile: fixture.targetShareProfile,
+    };
+    const releaseShareInputs = targetShareProofs.map((targetShareProof) => ({
+        releaseVerificationId,
+        targetShareProof,
+    }));
+    const releaseFinishInput = {
+        releaseVerificationId,
+    };
+    const releaseCommandInputJsonBytesByStep = [
+        jsonByteLength(releaseBeginInput),
+        ...releaseShareInputs.map(jsonByteLength),
+        jsonByteLength(releaseFinishInput),
+    ];
+    const largestReleaseCommandInputJsonBytes = Math.max(
+        ...releaseCommandInputJsonBytesByStep,
+    );
+    const releaseInputJsonBytes = releaseCommandInputJsonBytesByStep.reduce(
+        (totalBytes, inputBytes) => totalBytes + inputBytes,
+        0,
+    );
+    const targetShareProofsJsonBytes = releaseShareInputs.reduce(
+        (totalBytes, releaseShareInput) =>
+            totalBytes + jsonByteLength(releaseShareInput.targetShareProof),
+        0,
+    );
+    const wasmLinearMemoryBytesBeforeRelease = kernel.wasmMemoryByteLength();
+    const targetResultReleaseStartedAtMilliseconds = performance.now();
+    const releaseBegin =
+        kernel.beginBgvTargetDecryptionResultRelease(releaseBeginInput);
+    if (releaseBegin.requiredShareCount !== targetShareBundles.length) {
+        throw new Error(
+            'target-result release measurement session expects a different proof-backed share count.',
+        );
+    }
+    const releaseAbsorptions = releaseShareInputs.map((releaseShareInput) =>
+        kernel.absorbBgvTargetDecryptionResultReleaseShare(releaseShareInput),
+    );
+    const targetResultRelease =
+        kernel.finishBgvTargetDecryptionResultRelease(releaseFinishInput);
+    const targetResultReleaseVerificationMilliseconds =
+        performance.now() - targetResultReleaseStartedAtMilliseconds;
+    if (targetResultRelease.ok !== true) {
+        throw new Error('target-result release measurement did not accept.');
+    }
+    if (
+        targetResultRelease.shareEvidence.length !== targetShareBundles.length
+    ) {
+        throw new Error(
+            'target-result release measurement evidence count differs from the proof-backed share count.',
+        );
+    }
+    const releaseResultJsonBytes = jsonByteLength(targetResultRelease);
 
     const proofMaterialJsonBytesByShare = proofMaterials.map(jsonByteLength);
     const proofMaterialJsonBytesTotal = proofMaterialJsonBytesByShare.reduce(
@@ -3974,6 +4567,8 @@ const measureTargetDecryptionDevelopmentArtifacts = (
             return targetProofByteBreakdown(
                 proofMaterial,
                 targetShareBundle.proofStatement,
+                fixture.setupPackage,
+                targetShareBundle.proofLayout,
             );
         },
     );
@@ -3999,6 +4594,19 @@ const measureTargetDecryptionDevelopmentArtifacts = (
             'target-decryption proof byte attribution does not match the measured proof-byte total.',
         );
     }
+    const publicPackageBoundary = await measurePublicPackageTargetResultRelease(
+        {
+            releaseInput: legacyTargetResultReleaseInput,
+            expectedTargetResultHash: targetResultRelease.targetResultHash,
+            expectedShareEvidenceCount:
+                targetResultRelease.shareEvidence.length,
+        },
+    );
+    const publicTargetResultInputArtifact =
+        await writePublicTargetResultInputArtifact(
+            legacyTargetResultReleaseInput,
+        );
+
     const proofMaterialMeasurement: TargetDecryptionProofMaterialMeasurement = {
         measurementMode: 'heavy target-decryption proof-material measurement',
         shareCount: targetShareBundles.length,
@@ -4031,10 +4639,50 @@ const measureTargetDecryptionDevelopmentArtifacts = (
                 0,
             ),
         proofMaterialBinaryVerificationMilliseconds,
+        resultRelease: {
+            releaseSetupContextJsonBytes,
+            releaseInputJsonBytes,
+            targetShareProofsJsonBytes,
+            legacyReleaseInputJsonBytes,
+            legacyTargetShareProofsJsonBytes,
+            releaseInputJsonSavingsBytes:
+                legacyReleaseInputJsonBytes - releaseInputJsonBytes,
+            releaseCommandInputJsonBytesByStep,
+            largestReleaseCommandInputJsonBytes,
+            largestWasmBoundaryCopySavingsBytes:
+                legacyReleaseInputJsonBytes -
+                largestReleaseCommandInputJsonBytes,
+            releaseProofMaterialTransport: 'staged-json-proof-material',
+            releaseResultJsonBytes,
+            shareEvidenceJsonBytes: jsonByteLength(
+                targetResultRelease.shareEvidence,
+            ),
+            largestWasmBoundaryCopyBytes: Math.max(
+                largestReleaseCommandInputJsonBytes,
+                releaseResultJsonBytes,
+                jsonByteLength(releaseBegin),
+                ...releaseAbsorptions.map(jsonByteLength),
+            ),
+            verificationMilliseconds:
+                targetResultReleaseVerificationMilliseconds,
+            targetResultHash: targetResultRelease.targetResultHash,
+            shareEvidenceCount: targetResultRelease.shareEvidence.length,
+            topCount: targetResultRelease.topCount,
+            targetIdByOptionCount: targetResultRelease.targetIdByOption.length,
+            targetOrderByOptionCount:
+                targetResultRelease.targetOrderByOption.length,
+            wasmLinearMemoryBytesBeforeRelease,
+            wasmLinearMemoryBytesAfterRelease: kernel.wasmMemoryByteLength(),
+            processRssBytesAfterRelease: process.memoryUsage().rss,
+            publicTargetResultInputArtifact,
+            publicPackageBoundary,
+        },
         largestSingleObjectJsonBytes: Math.max(
             ...proofMaterialJsonBytesByShare,
             ...proofMaterialVerificationJsonBytesByShare,
             ...proofMaterialBinaryVerificationJsonBytesByShare,
+            largestReleaseCommandInputJsonBytes,
+            releaseResultJsonBytes,
         ),
     };
 
@@ -4321,6 +4969,23 @@ const enforceManualMeasurementBudgets = (input: {
             maximumTargetProofMaterialVerificationSeconds,
             'target-decryption binary proof-material verification',
         );
+        assertAtMost(
+            proofMaterial.resultRelease.verificationMilliseconds / 1_000,
+            maximumTargetResultReleaseVerificationSeconds,
+            'target-result release verification',
+        );
+        if (
+            publicPackageReleaseWasMeasured(
+                proofMaterial.resultRelease.publicPackageBoundary,
+            )
+        ) {
+            assertAtMost(
+                proofMaterial.resultRelease.publicPackageBoundary
+                    .verificationMilliseconds / 1_000,
+                maximumTargetResultReleaseVerificationSeconds,
+                'public package target-result release verification',
+            );
+        }
     }
 };
 
@@ -4400,7 +5065,7 @@ const main = async (): Promise<void> => {
     const privateStateDevelopmentArtifactMeasurement =
         await measurePrivateStateDevelopmentArtifacts(fullRingFixture);
     const targetDecryptionDevelopmentArtifactMeasurement =
-        measureTargetDecryptionDevelopmentArtifacts(kernel);
+        await measureTargetDecryptionDevelopmentArtifacts(kernel);
     if (
         typeScriptMeasurement.generation.lastResult.commitmentRoot !==
         wasmMeasurement.generation.lastResult.commitmentRoot
@@ -4493,6 +5158,7 @@ const main = async (): Promise<void> => {
                         maximumTargetProofMaterialRawProofBytes,
                         maximumTargetProofMaterialGenerationSeconds,
                         maximumTargetProofMaterialVerificationSeconds,
+                        maximumTargetResultReleaseVerificationSeconds,
                     },
                     wasm: {
                         generation: wasmMeasurement.generation.samples,
@@ -4578,6 +5244,7 @@ const main = async (): Promise<void> => {
                     maximumTargetProofMaterialRawProofBytes,
                     maximumTargetProofMaterialGenerationSeconds,
                     maximumTargetProofMaterialVerificationSeconds,
+                    maximumTargetResultReleaseVerificationSeconds,
                 },
                 byteReduction: measurement.byteReduction,
                 totalCompactPublicCommitmentBytes:

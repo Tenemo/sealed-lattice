@@ -3,6 +3,7 @@ use super::*;
 const COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: &str =
     "compactVssAggregateThresholdCommitmentSet";
 const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "compactVssShareLinkageStatement";
+const TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD: &str = "releaseSetupContextHash";
 
 pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<SetupBinding> {
     validate_passive_setup_package_for_encrypted_evaluation(setup_package)?;
@@ -114,6 +115,235 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     })
 }
 
+pub(super) fn target_result_release_setup_context_from_setup_package(
+    setup_package: &Value,
+) -> CanonicalResult<Value> {
+    let setup_binding = read_setup_binding(setup_package)?;
+    target_result_release_setup_context_from_binding(&setup_binding)
+}
+
+pub(super) fn read_target_result_release_setup_context(
+    context: &Value,
+) -> CanonicalResult<SetupBinding> {
+    if string_at_path(context, &["objectType"])? != "BgvTargetDecryptionReleaseSetupContext"
+        || unsigned_at_path(context, &["objectVersion"])? != 1
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            "release setup context must be a BgvTargetDecryptionReleaseSetupContext version 1 object",
+        ));
+    }
+    let expected_context_hash = target_result_release_setup_context_hash(context)?;
+    compare_hash_field(
+        context,
+        TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD,
+        &expected_context_hash,
+        "target result release setup context hash",
+    )?;
+
+    let public_matrix_seed_hash = hash_at_path(context, &["publicMatrixSeedHash"])?.to_string();
+    let participants = array_at_path(context, &["participants"])?
+        .iter()
+        .map(|participant| {
+            Ok(ParticipantBinding {
+                trustee_identity: string_at_path(participant, &["trusteeIdentity"])?.to_string(),
+                roster_position: usize_at_path(participant, &["rosterPosition"])?,
+                board_position: usize_at_path(participant, &["boardPosition"])?,
+                interpolation_point: unsigned_at_path(participant, &["interpolationPoint"])?,
+                recovery_epoch: unsigned_at_path(participant, &["recoveryEpoch"])?,
+                device_epoch: unsigned_at_path(participant, &["deviceEpoch"])?,
+                trustee_threshold_verification_key_hash: hash_at_path(
+                    participant,
+                    &["trusteeThresholdVerificationKeyHash"],
+                )?
+                .to_string(),
+            })
+        })
+        .collect::<CanonicalResult<Vec<_>>>()?;
+    for participant in &participants {
+        let expected_interpolation_point =
+            u64::try_from(participant.roster_position + 1).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "target decryption interpolation point does not fit u64",
+                )
+            })?;
+        if participant.interpolation_point != expected_interpolation_point {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "release setup context interpolation point does not match the roster position",
+            ));
+        }
+    }
+    let compact_aggregate_threshold_commitment_set = context
+        .get(COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD)
+        .filter(|value| !value.is_null())
+        .map(|aggregate_set| {
+            read_compact_aggregate_threshold_commitment_set_binding(
+                aggregate_set,
+                &public_matrix_seed_hash,
+                &participants,
+            )
+        })
+        .transpose()?;
+    let compact_share_linkage_statement_root = context
+        .get("compactShareLinkageStatementRoot")
+        .filter(|value| !value.is_null())
+        .map(|value| {
+            value.as_str().ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "compactShareLinkageStatementRoot must be a hash string",
+                )
+            })
+        })
+        .transpose()?
+        .map(str::to_string);
+
+    Ok(SetupBinding {
+        setup_package_hash: hash_at_path(context, &["setupPackageHash"])?.to_string(),
+        ceremony_id: string_at_path(context, &["ceremonyId"])?.to_string(),
+        election_manifest_hash: hash_at_path(context, &["electionManifestHash"])?.to_string(),
+        roster_hash: hash_at_path(context, &["rosterHash"])?.to_string(),
+        setup_profile_hash: hash_at_path(context, &["setupProfileHash"])?.to_string(),
+        q_share_hash: hash_at_path(context, &["qShareHash"])?.to_string(),
+        carry_aware_vss_share_relation_profile_hash: hash_at_path(
+            context,
+            &["carryAwareVssShareRelationProfileHash"],
+        )?
+        .to_string(),
+        commitment_profile_hash: hash_at_path(context, &["commitmentProfileHash"])?.to_string(),
+        threshold_profile_hash: hash_at_path(context, &["thresholdProfileHash"])?.to_string(),
+        target_decryption_profile_hash: hash_at_path(context, &["targetDecryptionProfileHash"])?
+            .to_string(),
+        target_decryption_profile_binding_hash: hash_at_path(
+            context,
+            &["targetDecryptionProfileBindingHash"],
+        )?
+        .to_string(),
+        public_matrix_seed_hash,
+        compact_share_linkage_statement_root,
+        participants,
+        threshold_verification: ThresholdVerificationBinding {
+            threshold_share_verification_key_root: hash_at_path(
+                context,
+                &["thresholdVerification", "thresholdShareVerificationKeyRoot"],
+            )?
+            .to_string(),
+            threshold_share_verification_key_hash: hash_at_path(
+                context,
+                &["thresholdVerification", "thresholdShareVerificationKeyHash"],
+            )?
+            .to_string(),
+        },
+        compact_aggregate_threshold_commitment_set,
+    })
+}
+
+fn target_result_release_setup_context_from_binding(
+    setup_binding: &SetupBinding,
+) -> CanonicalResult<Value> {
+    let mut context = json!({
+        "objectType": "BgvTargetDecryptionReleaseSetupContext",
+        "objectVersion": 1,
+        "setupPackageHash": setup_binding.setup_package_hash,
+        "ceremonyId": setup_binding.ceremony_id,
+        "electionManifestHash": setup_binding.election_manifest_hash,
+        "rosterHash": setup_binding.roster_hash,
+        "setupProfileHash": setup_binding.setup_profile_hash,
+        "qShareHash": setup_binding.q_share_hash,
+        "carryAwareVssShareRelationProfileHash": setup_binding.carry_aware_vss_share_relation_profile_hash,
+        "commitmentProfileHash": setup_binding.commitment_profile_hash,
+        "thresholdProfileHash": setup_binding.threshold_profile_hash,
+        "targetDecryptionProfileHash": setup_binding.target_decryption_profile_hash,
+        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
+        "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
+        "compactShareLinkageStatementRoot": setup_binding.compact_share_linkage_statement_root,
+        "participants": setup_binding.participants.iter().map(|participant| json!({
+            "trusteeIdentity": participant.trustee_identity,
+            "rosterPosition": participant.roster_position,
+            "boardPosition": participant.board_position,
+            "interpolationPoint": participant.interpolation_point,
+            "recoveryEpoch": participant.recovery_epoch,
+            "deviceEpoch": participant.device_epoch,
+            "trusteeThresholdVerificationKeyHash": participant.trustee_threshold_verification_key_hash,
+        })).collect::<Vec<_>>(),
+        "thresholdVerification": {
+            "thresholdShareVerificationKeyRoot": setup_binding.threshold_verification.threshold_share_verification_key_root,
+            "thresholdShareVerificationKeyHash": setup_binding.threshold_verification.threshold_share_verification_key_hash,
+        },
+        COMPACT_VSS_AGGREGATE_THRESHOLD_COMMITMENT_SET_FIELD: compact_aggregate_threshold_commitment_set_value(setup_binding)?,
+    });
+    let context_hash = target_result_release_setup_context_hash(&context)?;
+    context
+        .as_object_mut()
+        .expect("target result release setup context is a JSON object")
+        .insert(
+            TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD.to_string(),
+            json!(context_hash),
+        );
+
+    Ok(context)
+}
+
+fn compact_aggregate_threshold_commitment_set_value(
+    setup_binding: &SetupBinding,
+) -> CanonicalResult<Value> {
+    let Some(aggregate_set) = &setup_binding.compact_aggregate_threshold_commitment_set else {
+        return Ok(Value::Null);
+    };
+    let mut records = Vec::new();
+    for (recipient_index, limb_records) in aggregate_set.recipient_records.iter().enumerate() {
+        let participant = setup_binding
+            .participants
+            .get(recipient_index)
+            .ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact aggregate threshold commitment recipient has no setup participant",
+                )
+            })?;
+        for (rns_limb_index, record) in limb_records.iter().enumerate() {
+            records.push(json!({
+                "objectType": "CompactVssAggregateThresholdCommitment",
+                "objectVersion": 1,
+                "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+                "recipientIdentity": participant.trustee_identity,
+                "recipientRosterPosition": participant.roster_position,
+                "recipientTrusteePoint": participant.interpolation_point,
+                "rnsLimbIndex": rns_limb_index,
+                "rnsPrime": record.rns_prime,
+                "aggregateCommitmentRoot": record.aggregate_commitment_root,
+                "aggregateOpeningRoot": record.aggregate_opening_root,
+                "commitment": record.aggregate_commitment,
+                "sourceShareCommitmentRoots": record.source_share_commitment_roots,
+                "sourceShareOpeningRoots": record.source_share_opening_roots,
+            }));
+        }
+    }
+
+    Ok(json!({
+        "objectType": "CompactVssAggregateThresholdCommitmentSet",
+        "objectVersion": 1,
+        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
+        "profileId": COMPACT_VSS_COMMITMENT_PROFILE_ID,
+        "publicMatrixSeedHash": setup_binding.public_matrix_seed_hash,
+        "participantCount": setup_binding.participants.len(),
+        "rnsLimbCount": aggregate_set.rns_limb_count,
+        "ringDegree": POLYNOMIAL_DEGREE,
+        "aggregateThresholdCommitmentRoot": aggregate_set.aggregate_threshold_commitment_root,
+        "recipientRecords": records,
+    }))
+}
+
+fn target_result_release_setup_context_hash(context: &Value) -> CanonicalResult<String> {
+    let mut hash_input = context.clone();
+    if let Some(object) = hash_input.as_object_mut() {
+        object.remove(TARGET_RESULT_RELEASE_SETUP_CONTEXT_HASH_FIELD);
+    }
+    derive_protocol_hash("BgvTargetDecryptionReleaseSetupContextHash", &hash_input)
+}
+
 fn read_compact_aggregate_threshold_commitment_set_binding(
     aggregate_set: &Value,
     setup_public_matrix_seed_hash: &str,
@@ -212,6 +442,14 @@ fn read_compact_aggregate_threshold_commitment_set_binding(
                 aggregate_opening_root: hash_at_path(record, &["aggregateOpeningRoot"])?
                     .to_string(),
                 aggregate_commitment: value_at_path(record, &["commitment"])?.clone(),
+                source_share_commitment_roots: string_array_at_path(
+                    record,
+                    "sourceShareCommitmentRoots",
+                )?,
+                source_share_opening_roots: string_array_at_path(
+                    record,
+                    "sourceShareOpeningRoots",
+                )?,
             });
         }
         recipient_records.push(limb_records);
@@ -222,6 +460,21 @@ fn read_compact_aggregate_threshold_commitment_set_binding(
         rns_limb_count,
         recipient_records,
     })
+}
+
+fn string_array_at_path(value: &Value, field_name: &str) -> CanonicalResult<Vec<String>> {
+    array_at_path(value, &[field_name])?
+        .iter()
+        .enumerate()
+        .map(|(value_index, entry)| {
+            entry.as_str().map(str::to_string).ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    format!("{field_name}.{value_index} must be a string"),
+                )
+            })
+        })
+        .collect()
 }
 
 pub(super) fn read_target_accepted_binding(

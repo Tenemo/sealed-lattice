@@ -36,7 +36,6 @@ import {
     verifyCompactVssShareLinkageStatement,
     verifyCompactVssCommitmentOpening,
     targetDecryptionAggregateMessageClaimMaskDigitCount,
-    targetDecryptionRandomnessClaimMaskDigitCount,
     targetDecryptionSmudgingMessageClaimMaskDigitCount,
     type CompactVssAggregateThresholdCommitmentSet,
     type CompactVssCoefficientCommitmentSet,
@@ -994,12 +993,6 @@ describe('compact VSS development commitments', () => {
                     maskDigitCount:
                         targetDecryptionSmudgingMessageClaimMaskDigitCount,
                 }),
-                expect.objectContaining({
-                    rowId: 'compact-vss-target-decryption-randomness-claim',
-                    witnessInfinityBound: 1,
-                    maskDigitCount:
-                        targetDecryptionRandomnessClaimMaskDigitCount,
-                }),
             ],
             targetBasisReductionRows: [
                 expect.objectContaining({
@@ -1039,7 +1032,6 @@ describe('compact VSS development commitments', () => {
                         'compact-vss-same-secret-bridge-message-digit-claim',
                         'compact-vss-target-decryption-aggregate-message-claim',
                         'compact-vss-target-decryption-smudging-message-claim',
-                        'compact-vss-target-decryption-randomness-claim',
                     ],
                 }),
                 expect.objectContaining({
@@ -1066,8 +1058,9 @@ describe('compact VSS development commitments', () => {
                     estimatorSmallnessPrecondition: {
                         smallestCommitmentModulus: 65_537,
                         strictDifferenceUpperBoundDecimal: '32768',
-                        messageDigitDifferenceInfinityBoundDecimal:
-                            (compactVssMessageDigitBase - 1n).toString(),
+                        messageDigitDifferenceInfinityBoundDecimal: (
+                            compactVssMessageDigitBase - 1n
+                        ).toString(),
                         marginDecimal: '-129107394',
                     },
                 }),
@@ -1085,21 +1078,26 @@ describe('compact VSS development commitments', () => {
                 expect.objectContaining({
                     rowId: 'compact-vss-covered-message-module-sis-binding-conclusion',
                     problem: 'Module-SIS',
-                    sourceInputRows: expect.arrayContaining([
+                    sourceInputRows: [
                         'compact-vss-covered-message-module-sis-binding-input',
                         'compact-vss-message-coordinate-coverage',
+                        'compact-vss-fresh-opening-witness',
+                        'compact-vss-aggregate-opening-witness',
+                        'compact-vss-share-linkage-proof-extraction-input',
+                        'compact-vss-same-secret-bridge-proof-extraction-input',
+                        'compact-vss-target-decryption-proof-extraction-input',
                         'compact-vss-multi-opening-review-input',
-                    ]),
+                    ],
                     witnessDifferenceInfinityBoundDecimal: (
                         compactVssMessageDigitBase - 1n
                     ).toString(),
                     estimatorPrecondition: {
-                        source:
-                            'malb/lattice-estimator SIS lattice row requires length_bound < (q - 1) / 2',
+                        source: 'malb/lattice-estimator SIS lattice row requires length_bound < (q - 1) / 2',
                         smallestCommitmentModulus: 65_537,
                         strictDifferenceUpperBoundDecimal: '32768',
-                        witnessDifferenceInfinityBoundDecimal:
-                            (compactVssMessageDigitBase - 1n).toString(),
+                        witnessDifferenceInfinityBoundDecimal: (
+                            compactVssMessageDigitBase - 1n
+                        ).toString(),
                         marginDecimal: '-129107394',
                     },
                 }),
@@ -1184,7 +1182,7 @@ describe('compact VSS development commitments', () => {
         const measurement = compactVssCommitmentMeasurement({
             participantCount: 10,
             sourceRnsLimbCount: 17,
-            targetRnsLimbCount: 7,
+            targetRnsLimbCount: 5,
             thresholdDegree: 4,
             currentFullCoefficientTransportBytes: 1_604_341_697,
         });
@@ -1194,9 +1192,9 @@ describe('compact VSS development commitments', () => {
             profileId: compactVssCommitmentProfileId,
             singleCompactCommitmentBytes: 384,
             fullCoefficientCommitmentBytes: 261_120,
-            recipientShareCommitmentBytes: 268_800,
-            aggregateThresholdCommitmentBytes: 26_880,
-            totalCompactPublicCommitmentBytes: 556_800,
+            recipientShareCommitmentBytes: 192_000,
+            aggregateThresholdCommitmentBytes: 19_200,
+            totalCompactPublicCommitmentBytes: 472_320,
             largestSingleObjectBytes: 384,
             largestWasmBoundaryCopyBytes: 384,
             messageCoverageTermsPerCoordinate: 683,
@@ -1205,30 +1203,30 @@ describe('compact VSS development commitments', () => {
                 residueMultiplyAddsPerCommitment: 68_608,
                 messageResidueMultiplyAddsPerCommitment: 65_536,
                 randomnessResidueMultiplyAddsPerCommitment: 3_072,
-                totalCommitments: 1_450,
-                totalResidueMultiplyAdds: 99_481_600,
-                aggregatePublicSumResidueAdditions: 33_600,
-                totalResidueArithmeticOperations: 99_515_200,
+                totalCommitments: 1_230,
+                totalResidueMultiplyAdds: 84_387_840,
+                aggregatePublicSumResidueAdditions: 24_000,
+                totalResidueArithmeticOperations: 84_411_840,
             },
             budgetComparison: {
                 publicSetupDownloadBudgetBytes: 67_108_864,
                 sourceTrusteeUploadBudgetBytes: 268_435_456,
-                oneSourcePublicCommitmentUploadBytes: 52_992,
+                oneSourcePublicCommitmentUploadBytes: 45_312,
                 largestSingleObjectBudgetBytes: 16_777_216,
                 largestWasmBoundaryCopyBudgetBytes: 1_572_864,
             },
         });
         expect(
             measurement.cpuWorkModel.aggregatePublicSumFractionOfCommitmentWork,
-        ).toBeCloseTo(33_600 / 8_908_800);
+        ).toBeCloseTo(24_000 / 84_387_840);
         expect(
             measurement.budgetComparison
                 .totalCompactPublicCommitmentFractionOfDownloadBudget,
-        ).toBeCloseTo(556_800 / 67_108_864);
+        ).toBeCloseTo(472_320 / 67_108_864);
         expect(
             measurement.budgetComparison
                 .oneSourcePublicCommitmentUploadFractionOfBudget,
-        ).toBeCloseTo(52_992 / 268_435_456);
+        ).toBeCloseTo(45_312 / 268_435_456);
         expect(measurement.byteReduction.reductionFactor).toBeGreaterThan(
             2_800,
         );

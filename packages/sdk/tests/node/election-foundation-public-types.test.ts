@@ -89,6 +89,14 @@ type PublicSetupTypes = [
     publicTypes.VerifySetupPackageInput,
 ];
 
+type PublicTargetResultTypes = [
+    publicTypes.TargetDecryptionAcceptedResult,
+    publicTypes.TargetDecryptionResultVerification,
+    publicTypes.TargetDecryptionShareEvidence,
+    publicTypes.TargetDecryptionVerifiedShareEvidence,
+    publicTypes.VerifyTargetDecryptionResultInput,
+];
+
 type PublicTypeSurfaceProbe = {
     readonly blockedPlaintextOracleTypes: BlockedPlaintextOracleTypes;
     readonly blockedDirectInternalTypes: BlockedDirectInternalTypes;
@@ -96,6 +104,7 @@ type PublicTypeSurfaceProbe = {
     readonly blockedSetupWitnessTypes: BlockedSetupWitnessTypes;
     readonly publicFoundationTypes: PublicFoundationTypes;
     readonly publicSetupTypes: PublicSetupTypes;
+    readonly publicTargetResultTypes: PublicTargetResultTypes;
 };
 
 type OptionalInputField<Input, FieldName extends keyof Input> = Exclude<
@@ -211,6 +220,18 @@ const publicSetupTypeNames = [
     'VerifySetupPackageInput',
 ] as const satisfies PublicSetupTypeNames;
 
+type PublicTargetResultTypeNames = readonly string[] & {
+    readonly length: PublicTypeSurfaceProbe['publicTargetResultTypes']['length'];
+};
+
+const publicTargetResultTypeNames = [
+    'TargetDecryptionAcceptedResult',
+    'TargetDecryptionResultVerification',
+    'TargetDecryptionShareEvidence',
+    'TargetDecryptionVerifiedShareEvidence',
+    'VerifyTargetDecryptionResultInput',
+] as const satisfies PublicTargetResultTypeNames;
+
 describe('election foundation public type surface', () => {
     it('keeps safe election foundation types available', () => {
         expect(publicFoundationTypeNames).toHaveLength(16);
@@ -218,6 +239,10 @@ describe('election foundation public type surface', () => {
 
     it('keeps the verifier-only accepted setup type surface available', () => {
         expect(publicSetupTypeNames).toHaveLength(16);
+    });
+
+    it('keeps the target-result verification type surface available', () => {
+        expect(publicTargetResultTypeNames).toHaveLength(5);
     });
 
     it('keeps setup verifier transport companions on concrete public types', () => {

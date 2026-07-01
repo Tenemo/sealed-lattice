@@ -150,9 +150,7 @@ impl LimbColumnLayout {
                 &compact_same_secret_bridge_message_encoding_layouts,
             )?;
         let target_decryption_message_encoding_layouts =
-            compact_vss_message_encoding_layouts_for_bounds(
-                statement.target_decryption_message_bounds(limb_index),
-            )?;
+            statement.target_decryption_message_encoding_layouts(limb_index)?;
         if target_decryption_message_encoding_layouts.len() != target_decryption_message_columns {
             return Err(invalid_succinct_setup_proof(
                 "target-decryption statement bounds do not match the active message columns",
@@ -213,7 +211,6 @@ impl LimbColumnLayout {
             SuccinctSetupProofFamilyShape::TargetDecryptionShare => {
                 target_decryption_message_columns
                     * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                    + target_decryption_randomness_columns
             }
             _ => {
                 1 + total_error_columns
@@ -251,7 +248,7 @@ impl LimbColumnLayout {
                             }
                         }
                     } else {
-                        TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT
+                        unreachable!("target-decryption consistency vectors only carry message digits")
                     }
                 } else if family_shape == SuccinctSetupProofFamilyShape::CompactVssShareLinkage {
                     let vector_index = claim_index / consistency_repetitions;
@@ -452,12 +449,12 @@ impl LimbColumnLayout {
                 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
                 + self.linkage_randomness_columns
         } else if self.target_decryption_active() {
-            // Target-decryption claims every compact message digit directly,
-            // then every compact-opening randomness column. Decoder rows bind
-            // the digit columns to local ternary decomposition columns.
+            // Target-decryption claims every compact message digit directly.
+            // Compact-opening randomness remains a witness column where setup
+            // commitment fields consume it, but it carries no separate masked
+            // consistency claim.
             self.target_decryption_message_columns
                 * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                + self.target_decryption_randomness_columns
         } else {
             1 + self.total_error_columns + self.linkage_logical_columns()
         }

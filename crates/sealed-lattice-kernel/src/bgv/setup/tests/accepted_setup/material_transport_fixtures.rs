@@ -599,6 +599,7 @@ static TRANSPORTED_PUBLIC_SETUP_COMPANIONS_CACHE: OnceLock<(
 #[derive(Clone)]
 pub(super) struct TransportedPublicSetupCompanions {
     pub(super) vss_coefficient_commitment_material: serde_json::Value,
+    pub(super) chunked_vss_coefficient_commitment_material: serde_json::Value,
     pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
     pub(super) same_secret_proof_material: serde_json::Value,
     pub(super) public_key_share_material: serde_json::Value,
@@ -613,6 +614,16 @@ pub(super) struct TerminalEvaluationKeyTransportSinks {
     pub(super) component_materials: Vec<serde_json::Value>,
     pub(super) proof_materials: Vec<serde_json::Value>,
 }
+
+struct TerminalEvaluationKeyRecordFixture {
+    relinearization_key_share_rounds: serde_json::Value,
+    round_one_aggregate_diagonals_by_level: BTreeMap<u64, Vec<Vec<u64>>>,
+    galois_key_share_batches: serde_json::Value,
+    component_materials: Vec<serde_json::Value>,
+}
+
+const TERMINAL_EVALUATION_KEY_RECORD_CHECKPOINT_DIRECTORY: &str = "terminal-evaluation-key-records";
+const TERMINAL_EVALUATION_KEY_RECORD_CHECKPOINT_FILE: &str = "terminal-evaluation-key-records.json";
 
 pub(super) struct TransportedMaterialCertificateFields {
     byte_length: &'static str,
@@ -738,18 +749,15 @@ fn assemble_transported_public_setup_companions(
     );
 
     let mut evaluation_key_transport_sinks = TerminalEvaluationKeyTransportSinks::default();
-    let RelinearizationKeyShareRoundsFixture {
-        rounds: relinearization_key_share_rounds,
+    let TerminalEvaluationKeyRecordFixture {
+        relinearization_key_share_rounds,
         round_one_aggregate_diagonals_by_level,
-    } = relinearization_key_share_rounds_fixture_with_terminal_transport(
-        &package,
-        &mut evaluation_key_transport_sinks,
-    );
+        galois_key_share_batches,
+        component_materials,
+    } = terminal_evaluation_key_record_fixture(&mut package, &mut evaluation_key_transport_sinks);
     package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds;
-    package["galoisKeyShareBatches"] = galois_key_share_batches_object_with_terminal_transport(
-        &package,
-        &mut evaluation_key_transport_sinks,
-    );
+    package["galoisKeyShareBatches"] = galois_key_share_batches;
+    evaluation_key_transport_sinks.component_materials = component_materials;
     terminal_phase("generated evaluation-key records");
     let evaluation_key_share_component_material = serde_json::json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
@@ -810,6 +818,7 @@ fn assemble_transported_public_setup_companions(
             vss_coefficient_commitment_material: transported_material_reference_value(
                 &transported_vss_material,
             ),
+            chunked_vss_coefficient_commitment_material: transported_vss_material,
             verified_vss_coefficient_commitment_material: terminal_profile_ring_fixture
                 .verified_vss_coefficient_commitment_material,
             same_secret_proof_material,
@@ -820,6 +829,209 @@ fn assemble_transported_public_setup_companions(
             public_evaluation_key_material,
         },
     )
+}
+
+fn terminal_evaluation_key_record_checkpoint_path() -> std::path::PathBuf {
+    terminal_accepted_setup_checkpoint_path(
+        TERMINAL_EVALUATION_KEY_RECORD_CHECKPOINT_DIRECTORY,
+        TERMINAL_EVALUATION_KEY_RECORD_CHECKPOINT_FILE,
+    )
+}
+
+fn terminal_evaluation_key_record_fixture(
+    package: &mut serde_json::Value,
+    evaluation_key_transport_sinks: &mut TerminalEvaluationKeyTransportSinks,
+) -> TerminalEvaluationKeyRecordFixture {
+    if let Some(fixture) = terminal_evaluation_key_record_fixture_from_checkpoint(package) {
+        evaluation_key_transport_sinks.component_materials = fixture.component_materials.clone();
+        return fixture;
+    }
+
+    let RelinearizationKeyShareRoundsFixture {
+        rounds: relinearization_key_share_rounds,
+        round_one_aggregate_diagonals_by_level,
+    } = relinearization_key_share_rounds_fixture_with_terminal_transport(
+        package,
+        evaluation_key_transport_sinks,
+    );
+    package["relinearizationKeyShareRounds"] = relinearization_key_share_rounds.clone();
+    let galois_key_share_batches = galois_key_share_batches_object_with_terminal_transport(
+        package,
+        evaluation_key_transport_sinks,
+    );
+    let fixture = TerminalEvaluationKeyRecordFixture {
+        relinearization_key_share_rounds,
+        round_one_aggregate_diagonals_by_level,
+        galois_key_share_batches,
+        component_materials: evaluation_key_transport_sinks.component_materials.clone(),
+    };
+    persist_terminal_evaluation_key_record_fixture_checkpoint(package, &fixture);
+
+    fixture
+}
+
+fn terminal_evaluation_key_record_fixture_from_checkpoint(
+    package: &serde_json::Value,
+) -> Option<TerminalEvaluationKeyRecordFixture> {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return None;
+    }
+    let checkpoint_path = terminal_evaluation_key_record_checkpoint_path();
+    let checkpoint_bytes = std::fs::read(&checkpoint_path).ok()?;
+    let checkpoint: serde_json::Value = serde_json::from_slice(&checkpoint_bytes).ok()?;
+    let component_materials = checkpoint["componentMaterials"]
+        .as_array()?
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    let fixture = TerminalEvaluationKeyRecordFixture {
+        relinearization_key_share_rounds: checkpoint["relinearizationKeyShareRounds"].clone(),
+        round_one_aggregate_diagonals_by_level: round_one_aggregate_diagonals_from_checkpoint(
+            &checkpoint["roundOneAggregateDiagonalsByLevel"],
+        )?,
+        galois_key_share_batches: checkpoint["galoisKeyShareBatches"].clone(),
+        component_materials,
+    };
+    if !terminal_evaluation_key_record_fixture_recomputes_bindings(package, &fixture) {
+        terminal_phase(&format!(
+            "ignored evaluation-key record checkpoint with nonmatching bindings {}",
+            checkpoint_path.display()
+        ));
+        return None;
+    }
+    terminal_phase(&format!(
+        "resumed evaluation-key record checkpoint {}",
+        checkpoint_path.display()
+    ));
+
+    Some(fixture)
+}
+
+fn terminal_evaluation_key_record_fixture_recomputes_bindings(
+    package: &serde_json::Value,
+    fixture: &TerminalEvaluationKeyRecordFixture,
+) -> bool {
+    let rounds = &fixture.relinearization_key_share_rounds;
+    let Some(relinearization_rounds_root) = rounds["relinearizationKeyShareRoundsRoot"].as_str()
+    else {
+        return false;
+    };
+    let mut rounds_hash_input = rounds.clone();
+    rounds_hash_input
+        .as_object_mut()
+        .expect("relinearization rounds object")
+        .remove("relinearizationKeyShareRoundsRoot");
+    if derive_protocol_hash("RelinearizationKeyShareRoundsRoot", &rounds_hash_input).as_deref()
+        != Ok(relinearization_rounds_root)
+    {
+        return false;
+    }
+    let Some(galois_batches) = fixture.galois_key_share_batches.as_array() else {
+        return false;
+    };
+    if !galois_batches.iter().all(|batch| {
+        let Some(batch_root) = batch["galoisKeyShareBatchRoot"].as_str() else {
+            return false;
+        };
+        let mut batch_hash_input = batch.clone();
+        batch_hash_input
+            .as_object_mut()
+            .expect("Galois batch object")
+            .remove("galoisKeyShareBatchRoot");
+        derive_protocol_hash("GaloisKeyShareBatchRoot", &batch_hash_input).as_deref()
+            == Ok(batch_root)
+    }) {
+        return false;
+    }
+    if fixture.component_materials.is_empty()
+        || !fixture
+            .component_materials
+            .iter()
+            .all(component_material_checkpoint_exists)
+    {
+        return false;
+    }
+
+    let expected_schedule_root = &package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"];
+    let expected_same_secret_proof_set_root =
+        &package["sameSecretProofs"]["sameSecretProofSetRoot"];
+    rounds["evaluatorKeyScheduleRoot"] == *expected_schedule_root
+        && rounds["sameSecretProofSetRoot"] == *expected_same_secret_proof_set_root
+}
+
+fn component_material_checkpoint_exists(component_material: &serde_json::Value) -> bool {
+    let Some(material_root) = component_material["keySwitchComponentMaterialRoot"].as_str() else {
+        return false;
+    };
+    let path = terminal_accepted_setup_checkpoint_path(
+        "evaluation-key-component-material",
+        &format!("{material_root}.bin"),
+    );
+    path.exists() && path.with_extension("metadata.json").exists()
+}
+
+fn persist_terminal_evaluation_key_record_fixture_checkpoint(
+    package: &serde_json::Value,
+    fixture: &TerminalEvaluationKeyRecordFixture,
+) {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return;
+    }
+    let checkpoint_path = terminal_evaluation_key_record_checkpoint_path();
+    let Some(parent) = checkpoint_path.parent() else {
+        return;
+    };
+    std::fs::create_dir_all(parent).expect("evaluation-key record checkpoint directory");
+    let checkpoint = serde_json::json!({
+        "evaluatorKeyScheduleRoot": package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"],
+        "sameSecretProofSetRoot": package["sameSecretProofs"]["sameSecretProofSetRoot"],
+        "relinearizationKeyShareRounds": fixture.relinearization_key_share_rounds.clone(),
+        "roundOneAggregateDiagonalsByLevel": round_one_aggregate_diagonals_checkpoint_value(
+            &fixture.round_one_aggregate_diagonals_by_level,
+        ),
+        "galoisKeyShareBatches": fixture.galois_key_share_batches.clone(),
+        "componentMaterials": fixture.component_materials.clone(),
+    });
+    let json_text = canonical_json(&checkpoint).expect("evaluation-key record checkpoint JSON");
+    let temporary_path = parent.join(format!(
+        "{}.{}.partial",
+        TERMINAL_EVALUATION_KEY_RECORD_CHECKPOINT_FILE,
+        std::process::id()
+    ));
+    std::fs::write(&temporary_path, json_text.as_bytes())
+        .expect("evaluation-key record checkpoint write");
+    if std::fs::rename(&temporary_path, &checkpoint_path).is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+}
+
+fn round_one_aggregate_diagonals_checkpoint_value(
+    round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
+) -> serde_json::Value {
+    serde_json::Value::Array(
+        round_one_aggregate_diagonals_by_level
+            .iter()
+            .map(|(level, diagonals)| {
+                serde_json::json!({
+                    "level": level,
+                    "diagonals": diagonals,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn round_one_aggregate_diagonals_from_checkpoint(
+    value: &serde_json::Value,
+) -> Option<BTreeMap<u64, Vec<Vec<u64>>>> {
+    let mut round_one_aggregate_diagonals_by_level = BTreeMap::new();
+    for entry in value.as_array()? {
+        let level = entry["level"].as_u64()?;
+        let diagonals: Vec<Vec<u64>> = serde_json::from_value(entry["diagonals"].clone()).ok()?;
+        round_one_aggregate_diagonals_by_level.insert(level, diagonals);
+    }
+
+    Some(round_one_aggregate_diagonals_by_level)
 }
 
 fn append_direct_transport_certificate_entry(

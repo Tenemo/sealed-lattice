@@ -446,6 +446,121 @@ fn verify_share_proof_material(
     }))
 }
 
+fn proof_backed_target_share(
+    setup_package: &Value,
+    accepted_record: &Value,
+    target_ciphertext_binding: &Value,
+    target_ciphertexts: &Value,
+    target_share_profile: &Value,
+    trustee_identity: &str,
+    proof_seed_byte_hex: &str,
+    proof_nonce_byte_hex: &str,
+) -> Value {
+    let local_target_share_witness_value = local_target_share_witness(
+        setup_package,
+        accepted_record,
+        target_ciphertext_binding,
+        target_ciphertexts,
+        target_share_profile,
+        trustee_identity,
+    );
+    let target_decryption_share = generate_local_share(
+        setup_package,
+        accepted_record,
+        target_ciphertext_binding,
+        target_ciphertexts,
+        target_share_profile,
+        &local_target_share_witness_value,
+        trustee_identity,
+    );
+    let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package,
+        accepted_record,
+        target_ciphertext_binding,
+        target_ciphertexts,
+        target_share_profile,
+        local_target_share_witness_value: &local_target_share_witness_value,
+        target_decryption_share: &target_decryption_share,
+        trustee_identity,
+    })
+    .expect("target share proof statement");
+    let proof_material =
+        generate_bgv_target_decryption_share_proof_material_from_local_witness_request(&json!({
+            "setupPackage": setup_package,
+            "targetAcceptedRecord": accepted_record,
+            "targetCiphertextBinding": target_ciphertext_binding,
+            "targetCiphertexts": target_ciphertexts,
+            "targetShareProfile": target_share_profile,
+            "localTargetShareWitness": local_target_share_witness_value,
+            "targetDecryptionShare": target_decryption_share,
+            "proofStatement": proof_statement,
+            "trusteeIdentity": trustee_identity,
+            "proofRandomnessSeedHex": proof_seed_byte_hex.repeat(64),
+            "proofRandomnessNonceHex": proof_nonce_byte_hex.repeat(64),
+        }))
+        .expect("target share proof material");
+
+    json!({
+        "targetDecryptionShare": target_decryption_share,
+        "proofStatement": proof_statement,
+        "proofMaterial": proof_material,
+    })
+}
+
+fn statement_backed_target_share_with_malformed_proof_material(
+    setup_package: &Value,
+    accepted_record: &Value,
+    target_ciphertext_binding: &Value,
+    target_ciphertexts: &Value,
+    target_share_profile: &Value,
+    trustee_identity: &str,
+) -> Value {
+    let local_target_share_witness_value = local_target_share_witness(
+        setup_package,
+        accepted_record,
+        target_ciphertext_binding,
+        target_ciphertexts,
+        target_share_profile,
+        trustee_identity,
+    );
+    let target_decryption_share = generate_local_share(
+        setup_package,
+        accepted_record,
+        target_ciphertext_binding,
+        target_ciphertexts,
+        target_share_profile,
+        &local_target_share_witness_value,
+        trustee_identity,
+    );
+    let proof_statement = derive_share_proof_statement(TargetShareProofStatementInput {
+        setup_package,
+        accepted_record,
+        target_ciphertext_binding,
+        target_ciphertexts,
+        target_share_profile,
+        local_target_share_witness_value: &local_target_share_witness_value,
+        target_decryption_share: &target_decryption_share,
+        trustee_identity,
+    })
+    .expect("target share proof statement");
+
+    json!({
+        "targetDecryptionShare": target_decryption_share,
+        "proofStatement": proof_statement,
+        "proofMaterial": {
+            "objectType": "BgvTargetDecryptionShareProofMaterial",
+            "objectVersion": 8,
+            "proofRecords": [
+                {
+                    "objectType": "BgvTargetDecryptionShareProofRecord",
+                    "objectVersion": 7,
+                    "proofBytesBase64": "AQIDBAU=",
+                },
+            ],
+        },
+    })
+}
+
 fn rebind_share_proof_statement_root(statement: &mut Value) {
     let statement_object = statement
         .as_object_mut()
@@ -465,6 +580,17 @@ fn rebind_target_proof_material_root(proof_material: &mut Value) {
     proof_material["proofMaterialRoot"] = json!(
         derive_protocol_hash("TargetDecryptionShareProofMaterialRoot", proof_material)
             .expect("target proof material root")
+    );
+}
+
+fn rebind_target_accepted_record_hash(accepted_record: &mut Value) {
+    accepted_record
+        .as_object_mut()
+        .expect("target accepted record object")
+        .remove("targetAcceptedRecordHash");
+    accepted_record["targetAcceptedRecordHash"] = json!(
+        derive_protocol_hash("TargetAcceptedRecordHash", accepted_record)
+            .expect("target accepted record hash")
     );
 }
 
@@ -1188,22 +1314,274 @@ fn target_decryption_quorum_release_recovers_target_slots() {
 }
 
 #[test]
-fn target_result_release_refuses_current_compact_material() {
+fn target_result_release_requires_proof_backed_quorum() {
     let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
         target_fixture();
     let target_share_profile_value = target_share_profile(&setup_package);
-    let error = verify_and_release_bgv_target_decryption_result_from_request(&json!({
-        "setupPackage": setup_package,
+    let error = staged_target_result_release(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        Vec::new(),
+        "rust-target-release-empty",
+    )
+    .expect_err("target result release must require a quorum");
+
+    assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+    assert!(error.message.contains("share quorum"));
+
+    let raw_share = generate_share_from_fresh_local_witness(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-1",
+    );
+    let error = staged_target_result_release(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        vec![
+            json!({ "targetDecryptionShare": raw_share.clone() }),
+            json!({ "targetDecryptionShare": raw_share }),
+        ],
+        "rust-target-release-proofless",
+    )
+    .expect_err("target result release must reject proofless shares");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(error.message.contains("proofStatement"));
+}
+
+fn staged_target_result_release(
+    setup_package: &Value,
+    accepted_record: &Value,
+    target_ciphertext_binding: &Value,
+    target_ciphertexts: &Value,
+    target_share_profile_value: &Value,
+    target_share_proofs: Vec<Value>,
+    release_verification_id: &str,
+) -> CanonicalResult<Value> {
+    let release_setup_context =
+        derive_bgv_target_decryption_result_release_setup_context_from_request(&json!({
+            "setupPackage": setup_package,
+        }))?;
+    begin_bgv_target_decryption_result_release_from_request(&json!({
+        "releaseVerificationId": release_verification_id,
+        "releaseSetupContext": release_setup_context,
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
         "targetShareProfile": target_share_profile_value,
-        "targetShareProofs": [],
+    }))?;
+    for target_share_proof in target_share_proofs {
+        absorb_bgv_target_decryption_result_release_share_from_request(&json!({
+            "releaseVerificationId": release_verification_id,
+            "targetShareProof": target_share_proof,
+        }))?;
+    }
+    finish_bgv_target_decryption_result_release_from_request(&json!({
+        "releaseVerificationId": release_verification_id,
     }))
-    .expect_err("target result release must refuse current compact material");
+}
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidProtocolObject);
-    assert!(error.message.contains("proof-backed target shares"));
+#[test]
+fn target_result_release_rejects_wrong_target_context_before_proof_bytes() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile_value = target_share_profile(&setup_package);
+    let first_share_proof = statement_backed_target_share_with_malformed_proof_material(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-1",
+    );
+    let second_share_proof = statement_backed_target_share_with_malformed_proof_material(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-2",
+    );
+    let mut wrong_target_record = accepted_record.clone();
+    wrong_target_record["targetContextHash"] = json!("8".repeat(128));
+    rebind_target_accepted_record_hash(&mut wrong_target_record);
+
+    let error = staged_target_result_release(
+        &setup_package,
+        &wrong_target_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        vec![first_share_proof, second_share_proof],
+        "rust-target-release-wrong-context",
+    )
+    .expect_err("target result release must reject shares bound to another target context");
+
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(
+        error.message.contains("proof statement"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+fn target_result_release_rejects_malformed_proof_material_after_statement_binding() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile_value = target_share_profile(&setup_package);
+    let first_share_proof = statement_backed_target_share_with_malformed_proof_material(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-1",
+    );
+    let second_share_proof = statement_backed_target_share_with_malformed_proof_material(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-2",
+    );
+
+    let error = staged_target_result_release(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        vec![first_share_proof, second_share_proof],
+        "rust-target-release-malformed-proof-material",
+    )
+    .expect_err("target result release must reject malformed proof material");
+
+    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+    assert!(
+        error.message.contains("proofMaterialRoot"),
+        "{}",
+        error.message
+    );
+}
+
+#[test]
+#[ignore = "heavy target-decryption proof material test"]
+fn heavy_target_result_release_accepts_only_proof_backed_quorum() {
+    let (setup_package, accepted_record, target_ciphertext_binding, target_ciphertexts) =
+        target_fixture();
+    let target_share_profile_value = target_share_profile(&setup_package);
+    let first_share_proof = proof_backed_target_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-1",
+        "31",
+        "32",
+    );
+    let second_share_proof = proof_backed_target_share(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        "trustee-2",
+        "41",
+        "42",
+    );
+
+    let release = staged_target_result_release(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        vec![first_share_proof.clone(), second_share_proof.clone()],
+        "rust-target-release-proof-backed",
+    )
+    .expect("proof-backed target result release");
+
+    let mut expected_target_ids = vec![0_u64; MAXIMUM_OPTION_COUNT];
+    let mut expected_target_orders = vec![0_u64; MAXIMUM_OPTION_COUNT];
+    expected_target_ids[0] = 1;
+    expected_target_ids[2] = 3;
+    expected_target_orders[0] = 1;
+    expected_target_orders[2] = 2;
+    assert_eq!(release["ok"], true);
+    assert_eq!(
+        release["operation"],
+        json!("finishBgvTargetDecryptionResultRelease")
+    );
+    assert_eq!(release["topCount"], json!(2));
+    assert_eq!(release["targetIdByOption"], json!(expected_target_ids));
+    assert_eq!(
+        release["targetOrderByOption"],
+        json!(expected_target_orders)
+    );
+    assert_eq!(
+        release["targetResultHash"]
+            .as_str()
+            .expect("target result hash")
+            .len(),
+        128
+    );
+    assert_eq!(
+        release["shareEvidence"]
+            .as_array()
+            .expect("share evidence")
+            .len(),
+        2
+    );
+
+    let error = staged_target_result_release(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        vec![first_share_proof.clone(), first_share_proof.clone()],
+        "rust-target-release-duplicate-trustee",
+    )
+    .expect_err("duplicate proof-backed trustee must reject");
+    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert!(error.message.contains("repeats a trustee"));
+
+    let mut tampered_second_share_proof = second_share_proof.clone();
+    let proof_bytes_base64 =
+        tampered_second_share_proof["proofMaterial"]["proofRecords"][0]["proofBytesBase64"]
+            .as_str()
+            .expect("proof bytes base64")
+            .to_string();
+    let mut proof_bytes =
+        decode_standard_base64(&proof_bytes_base64, "target-decryption proofBytesBase64")
+            .expect("target proof bytes");
+    proof_bytes[0] ^= 1;
+    tampered_second_share_proof["proofMaterial"]["proofRecords"][0]["proofBytesBase64"] =
+        json!(encode_standard_base64(&proof_bytes));
+    rebind_target_proof_material_root(&mut tampered_second_share_proof["proofMaterial"]);
+    let error = staged_target_result_release(
+        &setup_package,
+        &accepted_record,
+        &target_ciphertext_binding,
+        &target_ciphertexts,
+        &target_share_profile_value,
+        vec![first_share_proof, tampered_second_share_proof],
+        "rust-target-release-wrong-proof-bytes",
+    )
+    .expect_err("target result release must reject wrong proof bytes");
+    assert_target_proof_verification_rejected(&error);
 }
 
 #[test]

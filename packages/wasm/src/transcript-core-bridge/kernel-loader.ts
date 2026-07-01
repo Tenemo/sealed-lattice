@@ -44,10 +44,14 @@ import type {
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseBegin,
+    BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultRelease,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
+    BgvTargetDecryptionShareProofLayoutDescription,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionShareProofMaterialVerification,
     BgvTargetDecryptionShareProofStatement,
@@ -403,6 +407,23 @@ export const createTranscriptCoreKernelLoader = (
                         trusteeIdentity: input.trusteeIdentity,
                         targetDecryptionShare: input.targetDecryptionShare,
                     }),
+                describeBgvTargetDecryptionShareProofLayout: (
+                    input,
+                ): BgvTargetDecryptionShareProofLayoutDescription =>
+                    executeCommand<BgvTargetDecryptionShareProofLayoutDescription>(
+                        {
+                            command:
+                                'DescribeBgvTargetDecryptionShareProofLayout',
+                            setupPackage: input.setupPackage,
+                            targetAcceptedRecord: input.targetAcceptedRecord,
+                            targetCiphertextBinding:
+                                input.targetCiphertextBinding,
+                            targetCiphertexts: input.targetCiphertexts,
+                            targetShareProfile: input.targetShareProfile,
+                            targetDecryptionShare: input.targetDecryptionShare,
+                            proofStatement: input.proofStatement,
+                        },
+                    ),
                 generateBgvTargetDecryptionShareProofMaterialFromLocalWitness: (
                     input,
                 ): BgvTargetDecryptionShareProofMaterial =>
@@ -477,17 +498,43 @@ export const createTranscriptCoreKernelLoader = (
                             proofStatement: input.proofStatement,
                         },
                     ),
-                verifyAndReleaseBgvTargetDecryptionResult: (
+                deriveBgvTargetDecryptionResultReleaseSetupContext: (
                     input,
-                ): BgvTargetDecryptionResultRelease =>
-                    executeCommand<BgvTargetDecryptionResultRelease>({
-                        command: 'VerifyAndReleaseBgvTargetDecryptionResult',
+                ): BgvTargetDecryptionReleaseSetupContext =>
+                    executeCommand<BgvTargetDecryptionReleaseSetupContext>({
+                        command:
+                            'DeriveBgvTargetDecryptionResultReleaseSetupContext',
                         setupPackage: input.setupPackage,
+                    }),
+                beginBgvTargetDecryptionResultRelease: (
+                    input,
+                ): BgvTargetDecryptionResultReleaseBegin =>
+                    executeCommand<BgvTargetDecryptionResultReleaseBegin>({
+                        command: 'BeginBgvTargetDecryptionResultRelease',
+                        releaseVerificationId: input.releaseVerificationId,
+                        releaseSetupContext: input.releaseSetupContext,
                         targetAcceptedRecord: input.targetAcceptedRecord,
                         targetCiphertextBinding: input.targetCiphertextBinding,
                         targetCiphertexts: input.targetCiphertexts,
                         targetShareProfile: input.targetShareProfile,
-                        targetShareProofs: input.targetShareProofs,
+                    }),
+                absorbBgvTargetDecryptionResultReleaseShare: (
+                    input,
+                ): BgvTargetDecryptionResultReleaseShareAbsorption =>
+                    executeCommand<BgvTargetDecryptionResultReleaseShareAbsorption>(
+                        {
+                            command:
+                                'AbsorbBgvTargetDecryptionResultReleaseShare',
+                            releaseVerificationId: input.releaseVerificationId,
+                            targetShareProof: input.targetShareProof,
+                        },
+                    ),
+                finishBgvTargetDecryptionResultRelease: (
+                    input,
+                ): BgvTargetDecryptionResultRelease =>
+                    executeCommand<BgvTargetDecryptionResultRelease>({
+                        command: 'FinishBgvTargetDecryptionResultRelease',
+                        releaseVerificationId: input.releaseVerificationId,
                     }),
                 verifyBgvPassiveSetup: (input): BgvPassiveSetupVerification =>
                     executeCommand<BgvPassiveSetupVerification>({

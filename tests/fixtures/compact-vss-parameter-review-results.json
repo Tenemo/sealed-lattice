@@ -1,7 +1,7 @@
 {
     "activationGate": {
-        "currentVerifierRule": "Absent compact VSS public material may remain optional, incomplete compact material must refuse as incomplete, malformed complete compact material must refuse as malformed, and proof-verified compact setup material may proceed to later setup phases; public target-result acceptance remains unavailable.",
-        "finding": "Public target-result activation must stay closed until accepted compact setup, target proof material, production smudging evidence, final measurement, and supported-runtime evidence are complete.",
+        "currentVerifierRule": "Absent compact VSS public material may remain optional, incomplete compact material must refuse as incomplete, malformed complete compact material must refuse as malformed, and proof-verified compact setup material may proceed to later setup phases; public target-result acceptance is available only through the proof-backed SDK wrapper as development evidence.",
+        "finding": "Public target-result activation remains scoped to development evidence until supported-runtime evidence is complete.",
         "requiredReplacementEvidence": [
             "accepted-setup verification over compact public material and compact same-secret bridge material",
             "recipient-owned restored witness verification against the accepted compact artifact",
@@ -21,20 +21,20 @@
         ],
         "aggregateDecodedRangeSlackDecimal": "15269806826599039",
         "commitmentBodyBytes": {
-            "activeReductionFactor": 2881.360806393678,
+            "activeReductionFactor": 3396.726153878726,
             "activeSingleCommitmentBodyBytes": 384,
-            "activeTotalPublicCommitmentBytes": 556800,
-            "currentReductionFactor": 2881.360806393678,
+            "activeTotalPublicCommitmentBytes": 472320,
+            "currentReductionFactor": 3396.726153878726,
             "currentSingleCommitmentBodyBytes": 384,
-            "currentTotalPublicCommitmentBytes": 556800,
-            "publicSetupDownloadFraction": 0.008296966552734375
+            "currentTotalPublicCommitmentBytes": 472320,
+            "publicSetupDownloadFraction": 0.007038116455078125
         },
         "cpuWorkModel": {
             "activeResidueMultiplyAddsPerCommitment": 68608,
-            "activeTotalResidueArithmeticOperations": 99515200,
-            "aggregatePublicSumResidueAdditions": 33600,
+            "activeTotalResidueArithmeticOperations": 84411840,
+            "aggregatePublicSumResidueAdditions": 24000,
             "currentResidueMultiplyAddsPerCommitment": 68608,
-            "currentTotalResidueArithmeticOperations": 99515200,
+            "currentTotalResidueArithmeticOperations": 84411840,
             "perCommitmentMultiplyAddFactor": 1,
             "totalResidueArithmeticFactor": 1
         },
@@ -51,7 +51,7 @@
         "implementationWorkRequired": [
             "keep the reviewed conclusion rows source-derived and recomputed by accepted setup when the compact relation or witness bounds change",
             "measure proof-material byte size, proof generation time, and proof verification time on the final compact proof path",
-            "keep target-result release unpublished and development-only until accepted compact setup, target proof material, production smudging evidence, final measurement, supported-runtime evidence, and the release boundary are regenerated from source constants"
+            "keep target-result release development-only until supported-runtime evidence is measured through the public package boundary from source constants"
         ],
         "largestAggregateMessageCoefficientExclusive": 1407374873067530,
         "largestFreshMessageCoefficientExclusive": 140737487306753,
@@ -78,7 +78,6 @@
                     "target-decryption share"
                 ],
                 "digitBoundMechanism": "target-decryption message digits are committed as digit columns, each digit column is bound by a masked consistency claim, and verifier-side trit decoder columns bind each digit to its base-3 decomposition",
-                "randomnessClaimMaskDigitCount": 114,
                 "smudgingMessageClaimMaskDigitCount": 114
             }
         },
@@ -112,9 +111,9 @@
         ],
         "countingInterpretation": "This counting row proves non-injectivity of the full-message map at fixed randomness, not an efficient short-collision attack by itself. A computational binding claim still needs a reviewed short-SIS reduction for the actual witness-difference bounds.",
         "currentOutputCoordinateCount": 16,
-        "currentReductionFactor": 2881.360806393678,
+        "currentReductionFactor": 3396.726153878726,
         "currentSingleCommitmentBodyBytes": 384,
-        "currentTotalPublicCommitmentBytes": 556800,
+        "currentTotalPublicCommitmentBytes": 472320,
         "finding": "The current covered compact linear body still needs a certificate-grade binding argument for arbitrary coefficient-vector messages: after fixing the opening randomness, the full message domain is far larger than the compact commitment image.",
         "largestCountingGapRow": {
             "commitmentImageLog2": 2255.9999992583253,
@@ -340,7 +339,7 @@
             },
             {
                 "construction": "covered-message compact Ajtai-style commitment with two balanced-ternary randomness columns",
-                "corruptedRecipientOpeningCredentialCount": 210,
+                "corruptedRecipientOpeningCredentialCount": 150,
                 "leakageScope": "hiding review covers the joint public commitment view plus delivered openings for a non-reconstructing corrupted-recipient set",
                 "literatureBasis": [
                     "HSS24 modified Ajtai commitment: hiding under MLWE for the small randomness part",
@@ -349,9 +348,9 @@
                 "problem": "Module-LWE",
                 "publicSampleRows": {
                     "sampledRandomnessProjectionIndicesPerCommitment": 3072,
-                    "totalCompactCommitments": 1450,
-                    "totalPublicCommitmentCoordinates": 69600,
-                    "totalSampledRandomnessProjectionIndices": 4454400
+                    "totalCompactCommitments": 1230,
+                    "totalPublicCommitmentCoordinates": 59040,
+                    "totalSampledRandomnessProjectionIndices": 3778560
                 },
                 "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
                 "reduction": "public compact commitments are interpreted as Module-LWE samples hiding the message shift under the final public sample count and corrupted-recipient opening view",
@@ -389,17 +388,17 @@
                 ]
             },
             {
-                "aggregateThresholdCommitments": 70,
-                "corruptedRecipientOpeningCredentialCount": 210,
+                "aggregateThresholdCommitments": 50,
+                "corruptedRecipientOpeningCredentialCount": 150,
                 "exposureScope": "multi-opening loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
                 "maximumNonReconstructingRecipientCount": 3,
-                "recipientShareCommitments": 700,
+                "recipientShareCommitments": 500,
                 "rowId": "compact-vss-multi-opening-review-conclusion",
                 "sourceCoefficientCommitments": 680,
                 "sourceInputRows": [
                     "compact-vss-multi-opening-review-input"
                 ],
-                "totalCompactCommitments": 1450
+                "totalCompactCommitments": 1230
             }
         ]
     },
@@ -411,25 +410,25 @@
             "target-decryption share proofs consume message projections, released-share relations, and masked consistency claims on each committed message digit",
             "prover-side witness validation and opening-input range checks remain input hygiene; load-bearing range evidence comes from verifier-checked direct digit claim bounds"
         ],
-        "finding": "The compact commitment profile is active in the commitment computation and compact proof relations, and the source-derived certificate conclusion rows are now bound by the parameter review. Public target-result release stays closed until accepted compact setup, target proof material, production smudging evidence, final measurement, and the release verifier are complete.",
-        "implementationConsequence": "Accepted setup rejects incomplete compact material as incomplete, rejects malformed complete compact material as malformed, and lets proof-verified complete compact material proceed to later setup phases; target-result release must remain unavailable until accepted compact setup, target proof material, production smudging evidence, final measurement, supported-runtime evidence, and the public release boundary are regenerated from the final constants.",
+        "finding": "The compact commitment profile is active in the commitment computation and compact proof relations, and the source-derived certificate conclusion rows are now bound by the parameter review. Public target-result release is exposed only as development evidence until supported-runtime evidence is measured through the public package boundary.",
+        "implementationConsequence": "Accepted setup rejects incomplete compact material as incomplete, rejects malformed complete compact material as malformed, and lets proof-verified complete compact material proceed to later setup phases; target-result release remains development evidence until supported-runtime evidence is measured through the public package boundary.",
         "requiredProofChanges": [
             "review the exact final relation, including correlated multi-opening exposure and the final range-evidence cost",
             "measure the converted source-batch proof-material byte size and proof generation and verification times",
-            "connect any public target-result release to regenerated certificate input bindings instead of the current unpublished development command"
+            "keep public target-result release connected to regenerated certificate input bindings through the published SDK wrapper"
         ],
         "unsafeShortcut": "Do not promote the active compact profile to target-result release by relying on honest-prover range checks, private opening validation, or documentation-only range bounds."
     },
     "countingSafeLowerBound": {
         "finding": "If this linear construction kept unrestricted coefficient-vector messages and sought injectivity by output dimension alone, it would need this many output coordinates before the image is even large enough; this lower bound alone breaks the compact public-body budget.",
-        "minimumCountingReductionFactor": 4.220614565805992,
+        "minimumCountingReductionFactor": 4.975521236112755,
         "minimumOutputCoordinateCountByCounting": 10923,
         "minimumPublicCommitmentReductionFactor": 2800,
         "minimumSingleCommitmentBodyBytesByCounting": 262152,
-        "minimumTotalPublicCommitmentBytesByCounting": 380120400,
+        "minimumTotalPublicCommitmentBytesByCounting": 322446960,
         "publicSetupDownloadBudgetBytes": 67108864,
-        "publicSetupDownloadFractionAtCountingLowerBound": 5.664235353469849,
-        "totalCommitments": 1450
+        "publicSetupDownloadFractionAtCountingLowerBound": 4.8048341274261475,
+        "totalCommitments": 1230
     },
     "exactInputRows": {
         "estimatorInputRows": [
@@ -535,7 +534,7 @@
                 },
                 {
                     "construction": "covered-message compact Ajtai-style commitment with two balanced-ternary randomness columns",
-                    "corruptedRecipientOpeningCredentialCount": 210,
+                    "corruptedRecipientOpeningCredentialCount": 150,
                     "leakageScope": "hiding review covers the joint public commitment view plus delivered openings for a non-reconstructing corrupted-recipient set",
                     "literatureBasis": [
                         "HSS24 modified Ajtai commitment: hiding under MLWE for the small randomness part",
@@ -544,9 +543,9 @@
                     "problem": "Module-LWE",
                     "publicSampleRows": {
                         "sampledRandomnessProjectionIndicesPerCommitment": 3072,
-                        "totalCompactCommitments": 1450,
-                        "totalPublicCommitmentCoordinates": 69600,
-                        "totalSampledRandomnessProjectionIndices": 4454400
+                        "totalCompactCommitments": 1230,
+                        "totalPublicCommitmentCoordinates": 59040,
+                        "totalSampledRandomnessProjectionIndices": 3778560
                     },
                     "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
                     "reduction": "public compact commitments are interpreted as Module-LWE samples hiding the message shift under the final public sample count and corrupted-recipient opening view",
@@ -584,17 +583,17 @@
                     ]
                 },
                 {
-                    "aggregateThresholdCommitments": 70,
-                    "corruptedRecipientOpeningCredentialCount": 210,
+                    "aggregateThresholdCommitments": 50,
+                    "corruptedRecipientOpeningCredentialCount": 150,
                     "exposureScope": "multi-opening loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
                     "maximumNonReconstructingRecipientCount": 3,
-                    "recipientShareCommitments": 700,
+                    "recipientShareCommitments": 500,
                     "rowId": "compact-vss-multi-opening-review-conclusion",
                     "sourceCoefficientCommitments": 680,
                     "sourceInputRows": [
                         "compact-vss-multi-opening-review-input"
                     ],
-                    "totalCompactCommitments": 1450
+                    "totalCompactCommitments": 1230
                 }
             ],
             "coefficientRing": {
@@ -622,19 +621,19 @@
             },
             "commitmentExposureRows": [
                 {
-                    "aggregateThresholdCommitments": 70,
+                    "aggregateThresholdCommitments": 50,
                     "coordinateCountPerCommitment": 48,
-                    "recipientShareCommitments": 700,
+                    "recipientShareCommitments": 500,
                     "rowId": "compact-vss-final-public-commitment-exposure",
                     "sampledMatrixResiduesPerCommitment": 68608,
                     "sampledMessageMatrixResiduesPerCommitment": 65536,
                     "sampledRandomnessProjectionIndicesPerCommitment": 3072,
                     "sourceCoefficientCommitments": 680,
-                    "totalCompactCommitments": 1450,
-                    "totalPublicCommitmentCoordinates": 69600,
-                    "totalSampledMatrixResidues": 99481600,
-                    "totalSampledMessageMatrixResidues": 95027200,
-                    "totalSampledRandomnessProjectionIndices": 4454400
+                    "totalCompactCommitments": 1230,
+                    "totalPublicCommitmentCoordinates": 59040,
+                    "totalSampledMatrixResidues": 84387840,
+                    "totalSampledMessageMatrixResidues": 80609280,
+                    "totalSampledRandomnessProjectionIndices": 3778560
                 }
             ],
             "inputVersion": 1,
@@ -717,7 +716,7 @@
                     "messageDigitBaseDecimal": "129140163",
                     "messageDigitCount": 2,
                     "proofFamily": "compact-vss-share-linkage",
-                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns and verifier-side trit decoder columns",
+                    "rangeEvidenceRule": "direct masked claims bind committed base-3^17 digit columns and statement-bound verifier-side trit decoder columns",
                     "rowId": "compact-vss-share-linkage-message-digit-claim",
                     "witnessInfinityBoundDecimal": "129140162"
                 },
@@ -747,14 +746,14 @@
                     "consistencyCoefficientBits": 8,
                     "consistencyCoefficientMaximumDecimal": "255",
                     "consistencyRepetitions": 20,
-                    "directDigitVectorCount": 14,
+                    "directDigitVectorCount": 10,
                     "maskDigitCount": 87,
                     "messageDigitBaseDecimal": "129140163",
                     "messageDigitCount": 2,
                     "proofFamily": "compact-same-secret-bridge",
                     "rangeEvidenceRule": "bridge target messages use direct digit claims and verifier-side trit decoder columns",
                     "rowId": "compact-vss-same-secret-bridge-message-digit-claim",
-                    "targetRnsLimbCount": 7,
+                    "targetRnsLimbCount": 5,
                     "witnessInfinityBoundDecimal": "129140162"
                 },
                 {
@@ -773,9 +772,9 @@
                     "messageDigitBaseDecimal": "129140163",
                     "messageDigitCount": 2,
                     "proofFamily": "target-decryption-share",
-                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
+                    "rangeEvidenceRule": "target aggregate messages use direct masked claims for each committed base-3^17 digit and statement-bound verifier-side trit decoder columns",
                     "rowId": "compact-vss-target-decryption-aggregate-message-claim",
-                    "targetRnsLimbCount": 7,
+                    "targetRnsLimbCount": 5,
                     "witnessInfinityBoundDecimal": "129140162"
                 },
                 {
@@ -792,26 +791,10 @@
                     "messageDigitBaseDecimal": "129140163",
                     "messageDigitCount": 2,
                     "proofFamily": "target-decryption-share",
-                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
+                    "rangeEvidenceRule": "target smudging messages use direct masked claims for each committed base-3^17 digit and statement-bound verifier-side trit decoder columns",
                     "rowId": "compact-vss-target-decryption-smudging-message-claim",
                     "smudgingMessageCoefficientBound": 33,
                     "witnessInfinityBoundDecimal": "32"
-                },
-                {
-                    "appliesToRelations": [
-                        "target-decryption-share-proof"
-                    ],
-                    "claimMaskRadix": 3,
-                    "claimVectorClass": "target-opening-randomness",
-                    "clearClaimBoundDecimal": "8355840",
-                    "consistencyCoefficientBits": 8,
-                    "consistencyCoefficientMaximumDecimal": "255",
-                    "consistencyRepetitions": 20,
-                    "maskDigitCount": 114,
-                    "proofFamily": "target-decryption-share",
-                    "rangeEvidenceRule": "target opening randomness claims use ternary witness columns and the target randomness mask",
-                    "rowId": "compact-vss-target-decryption-randomness-claim",
-                    "witnessInfinityBound": 1
                 }
             ],
             "messageCoordinateCoverageReview": {
@@ -849,7 +832,7 @@
                     ],
                     "coordinateCountPerCommitment": 48,
                     "corruptedRecipientLeakageModel": "corrupted recipients learn their delivered shares and opening credentials; hiding must cover all other coefficient openings under the same compact key",
-                    "corruptedRecipientOpeningCredentialCount": 210,
+                    "corruptedRecipientOpeningCredentialCount": 150,
                     "maximumNonReconstructingRecipientCount": 3,
                     "multiOpeningRows": [
                         "compact-vss-multi-opening-review-input"
@@ -866,8 +849,8 @@
                     "structuredRingRows": [
                         "compact-vss-structured-ring-review-input"
                     ],
-                    "totalPublicCommitmentCoordinates": 69600,
-                    "totalSampledRandomnessProjectionIndices": 4454400
+                    "totalPublicCommitmentCoordinates": 59040,
+                    "totalSampledRandomnessProjectionIndices": 3778560
                 }
             ],
             "moduleSisBindingRows": [
@@ -928,16 +911,16 @@
             ],
             "multiOpeningRows": [
                 {
-                    "aggregateThresholdCommitments": 70,
+                    "aggregateThresholdCommitments": 50,
                     "correlatedOpeningModel": "recipient-share and aggregate openings are public linear combinations under the same compact commitment key; the hiding row must account for the joint view",
-                    "corruptedRecipientOpeningCredentialCount": 210,
+                    "corruptedRecipientOpeningCredentialCount": 150,
                     "maximumNonReconstructingRecipientCount": 3,
                     "multiOpeningLossScope": "loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
                     "publicCommitmentExposureRow": "compact-vss-final-public-commitment-exposure",
-                    "recipientShareCommitments": 700,
+                    "recipientShareCommitments": 500,
                     "rowId": "compact-vss-multi-opening-review-input",
                     "sourceCoefficientCommitments": 680,
-                    "totalCompactCommitments": 1450
+                    "totalCompactCommitments": 1230
                 }
             ],
             "openingWitnessRows": [
@@ -991,7 +974,7 @@
                         "compact-vss-one-recipient-aggregate-from-source-coefficients"
                     ],
                     "proofFamily": "compact-vss-share-linkage",
-                    "rangeEvidenceRule": "message digit columns are verifier-decoded from 17 trits per digit and carry claims use masked consistency bounds",
+                    "rangeEvidenceRule": "message digit columns are verifier-decoded from statement-bound trit decoder columns and carry claims use masked consistency bounds",
                     "rowId": "compact-vss-share-linkage-proof-extraction-input"
                 },
                 {
@@ -1009,11 +992,10 @@
                 {
                     "extractedMaskedClaimRows": [
                         "compact-vss-target-decryption-aggregate-message-claim",
-                        "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim"
+                        "compact-vss-target-decryption-smudging-message-claim"
                     ],
                     "proofFamily": "target-decryption-share",
-                    "rangeEvidenceRule": "target proof rows bind aggregate opening digits, smudging opening digits, and ternary opening randomness before release",
+                    "rangeEvidenceRule": "target proof rows bind aggregate opening digits and smudging opening digits before release; opening randomness stays bound by compact-opening rows",
                     "rowId": "compact-vss-target-decryption-proof-extraction-input"
                 }
             ],
@@ -1034,8 +1016,7 @@
                         "compact-vss-same-secret-bridge-non-digit-claim",
                         "compact-vss-same-secret-bridge-message-digit-claim",
                         "compact-vss-target-decryption-aggregate-message-claim",
-                        "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim"
+                        "compact-vss-target-decryption-smudging-message-claim"
                     ],
                     "multiOpeningRows": [
                         "compact-vss-multi-opening-review-input"
@@ -1062,8 +1043,7 @@
                         "compact-vss-same-secret-bridge-non-digit-claim",
                         "compact-vss-same-secret-bridge-message-digit-claim",
                         "compact-vss-target-decryption-aggregate-message-claim",
-                        "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim"
+                        "compact-vss-target-decryption-smudging-message-claim"
                     ],
                     "multiOpeningRows": [
                         "compact-vss-multi-opening-review-input"
@@ -1111,17 +1091,15 @@
                     "sameSecretProofFamilyBindingRoot": "21c1d17c118aa39145865a714647ddef27c4832d54ab4c9da06cb26f0ec1da1afae2746b2b95e12186e8bad216b1ec5f9f116c146ad4c14828d87579ce07885d",
                     "sourceSecretDistribution": "standard-ternary",
                     "sourceSignedRepresentativeInfinityBound": 1,
-                    "targetBasisHash": "07cb87a5f9fcb36b0950a55f58b412149edc094a6ca06d8545f9375efcb3fcd998af7c332be6e629078e04a9ce8e2bfe5a6060c7969655959139a5f62fe9efe6",
+                    "targetBasisHash": "d9c54fdf35d0be65559b6f78a57de4ea6031fe174c85fec40eafe041d032a94120fea6bf27b2e0288fe2874a562bb9d5835e1eb277da9a982aa5ccd5b28d2f14",
                     "targetBasisLimbOrder": "profile-order-prefix",
-                    "targetRnsLimbCount": 7,
+                    "targetRnsLimbCount": 5,
                     "targetRnsPrimes": [
                         140737487306753,
                         140737486716929,
                         140737486520321,
                         140737485864961,
-                        140737484685313,
-                        140737483898881,
-                        140737482981377
+                        140737484685313
                     ]
                 }
             ]
@@ -1147,7 +1125,7 @@
         "conclusionRows": [
             {
                 "construction": "covered-message compact Ajtai-style commitment with two balanced-ternary randomness columns",
-                "corruptedRecipientOpeningCredentialCount": 210,
+                "corruptedRecipientOpeningCredentialCount": 150,
                 "leakageScope": "hiding review covers the joint public commitment view plus delivered openings for a non-reconstructing corrupted-recipient set",
                 "literatureBasis": [
                     "HSS24 modified Ajtai commitment: hiding under MLWE for the small randomness part",
@@ -1156,9 +1134,9 @@
                 "problem": "Module-LWE",
                 "publicSampleRows": {
                     "sampledRandomnessProjectionIndicesPerCommitment": 3072,
-                    "totalCompactCommitments": 1450,
-                    "totalPublicCommitmentCoordinates": 69600,
-                    "totalSampledRandomnessProjectionIndices": 4454400
+                    "totalCompactCommitments": 1230,
+                    "totalPublicCommitmentCoordinates": 59040,
+                    "totalSampledRandomnessProjectionIndices": 3778560
                 },
                 "randomnessSource": "balanced-ternary opening columns before public linear aggregation",
                 "reduction": "public compact commitments are interpreted as Module-LWE samples hiding the message shift under the final public sample count and corrupted-recipient opening view",
@@ -1194,7 +1172,7 @@
                 ],
                 "coordinateCountPerCommitment": 48,
                 "corruptedRecipientLeakageModel": "corrupted recipients learn their delivered shares and opening credentials; hiding must cover all other coefficient openings under the same compact key",
-                "corruptedRecipientOpeningCredentialCount": 210,
+                "corruptedRecipientOpeningCredentialCount": 150,
                 "maximumNonReconstructingRecipientCount": 3,
                 "multiOpeningRows": [
                     "compact-vss-multi-opening-review-input"
@@ -1211,8 +1189,8 @@
                 "structuredRingRows": [
                     "compact-vss-structured-ring-review-input"
                 ],
-                "totalPublicCommitmentCoordinates": 69600,
-                "totalSampledRandomnessProjectionIndices": 4454400
+                "totalPublicCommitmentCoordinates": 59040,
+                "totalSampledRandomnessProjectionIndices": 3778560
             }
         ]
     },
@@ -1258,16 +1236,16 @@
         "finding": "The source binding now carries exact Module-SIS review input rows for the covered-message relation, including digit bounds, randomness bounds, proof-extracted rows, and multi-opening exposure. This is input evidence, not a final binding certificate.",
         "multiOpeningRows": [
             {
-                "aggregateThresholdCommitments": 70,
+                "aggregateThresholdCommitments": 50,
                 "correlatedOpeningModel": "recipient-share and aggregate openings are public linear combinations under the same compact commitment key; the hiding row must account for the joint view",
-                "corruptedRecipientOpeningCredentialCount": 210,
+                "corruptedRecipientOpeningCredentialCount": 150,
                 "maximumNonReconstructingRecipientCount": 3,
                 "multiOpeningLossScope": "loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
                 "publicCommitmentExposureRow": "compact-vss-final-public-commitment-exposure",
-                "recipientShareCommitments": 700,
+                "recipientShareCommitments": 500,
                 "rowId": "compact-vss-multi-opening-review-input",
                 "sourceCoefficientCommitments": 680,
-                "totalCompactCommitments": 1450
+                "totalCompactCommitments": 1230
             }
         ],
         "proofExtractionRows": [
@@ -1286,7 +1264,7 @@
                     "compact-vss-one-recipient-aggregate-from-source-coefficients"
                 ],
                 "proofFamily": "compact-vss-share-linkage",
-                "rangeEvidenceRule": "message digit columns are verifier-decoded from 17 trits per digit and carry claims use masked consistency bounds",
+                "rangeEvidenceRule": "message digit columns are verifier-decoded from statement-bound trit decoder columns and carry claims use masked consistency bounds",
                 "rowId": "compact-vss-share-linkage-proof-extraction-input"
             },
             {
@@ -1304,11 +1282,10 @@
             {
                 "extractedMaskedClaimRows": [
                     "compact-vss-target-decryption-aggregate-message-claim",
-                    "compact-vss-target-decryption-smudging-message-claim",
-                    "compact-vss-target-decryption-randomness-claim"
+                    "compact-vss-target-decryption-smudging-message-claim"
                 ],
                 "proofFamily": "target-decryption-share",
-                "rangeEvidenceRule": "target proof rows bind aggregate opening digits, smudging opening digits, and ternary opening randomness before release",
+                "rangeEvidenceRule": "target proof rows bind aggregate opening digits and smudging opening digits before release; opening randomness stays bound by compact-opening rows",
                 "rowId": "compact-vss-target-decryption-proof-extraction-input"
             }
         ],
@@ -1373,16 +1350,16 @@
         "finding": "The source binding now counts the final commitment and opening exposure used by the multi-opening loss and corrupted-recipient hiding review.",
         "rows": [
             {
-                "aggregateThresholdCommitments": 70,
+                "aggregateThresholdCommitments": 50,
                 "correlatedOpeningModel": "recipient-share and aggregate openings are public linear combinations under the same compact commitment key; the hiding row must account for the joint view",
-                "corruptedRecipientOpeningCredentialCount": 210,
+                "corruptedRecipientOpeningCredentialCount": 150,
                 "maximumNonReconstructingRecipientCount": 3,
                 "multiOpeningLossScope": "loss is counted across coefficient, recipient-share, aggregate, same-secret bridge, and target-decryption openings sharing the final compact parameter set",
                 "publicCommitmentExposureRow": "compact-vss-final-public-commitment-exposure",
-                "recipientShareCommitments": 700,
+                "recipientShareCommitments": 500,
                 "rowId": "compact-vss-multi-opening-review-input",
                 "sourceCoefficientCommitments": 680,
-                "totalCompactCommitments": 1450
+                "totalCompactCommitments": 1230
             }
         ]
     },
@@ -1394,7 +1371,7 @@
             "messageCoverageTermsPerCoordinate": 683,
             "randomnessProjectionWeight": 32,
             "residueMultiplyAddsPerCommitment": 68608,
-            "totalResidueArithmeticOperations": 99515200
+            "totalResidueArithmeticOperations": 84411840
         },
         "decision": "Keep the covered-message relation for measurement and review unless the final certificate review demands a different relation; do not switch to a dense all-column relation without accepting its measured CPU cost.",
         "finding": "A naive dense all-column linear replacement is still rejected because it would cover message and randomness columns by multiplying compact commitment work up to the full ring degree.",
@@ -1402,8 +1379,8 @@
             "candidateProjectionWeight": 32768,
             "perCommitmentMultiplyAddFactor": 91.70149253731343,
             "residueMultiplyAddsPerCommitment": 6291456,
-            "totalResidueArithmeticFactor": 91.67086836985706,
-            "totalResidueArithmeticOperations": 9122644800
+            "totalResidueArithmeticFactor": 91.67570426139271,
+            "totalResidueArithmeticOperations": 7738514880
         },
         "requiredReplacementShape": "Any replacement must cover every verifier-accepted message coordinate and retain measured CPU within the compact path budget; acceptable candidates need a reviewed covered linear relation, a structured vector commitment, or a shorter proof-bound accepted message object with measured proof costs."
     },
@@ -1500,13 +1477,13 @@
             ],
             "targetResultReleaseBoundary": "target-result release consumes compact material only through proof-bound aggregate and smudging openings tied to these commitment and opening roots"
         },
-        "compactVssParameterCertificateInputBindingHash": "d7d36a5c665b279ef146018372ddcde8f5a1d6a8b1150c0980f870e83c5ca46b3988ea01eaebf289616bed1230fa00616c7b31be05d5875e9c8dd26fab606484",
+        "compactVssParameterCertificateInputBindingHash": "9cf6fba89ddc97b93076ff7dcb545556f7fca17568770d0f49cdf30b219524891431a4d9a43fbbeaec0e2ee4d6abe25b450362829f3a7aa826338a619a773dd4",
         "objectType": "CompactVssParameterCertificateInputBinding",
         "objectVersion": 8,
         "profileId": "sealed-lattice-compact-vss-development-covered-linear-v1",
         "sameSecretProofFamilyBindingRoot": "21c1d17c118aa39145865a714647ddef27c4832d54ab4c9da06cb26f0ec1da1afae2746b2b95e12186e8bad216b1ec5f9f116c146ad4c14828d87579ce07885d",
         "setupProfileId": "CollectiveBgvSetup-v1",
-        "targetBasisHash": "07cb87a5f9fcb36b0950a55f58b412149edc094a6ca06d8545f9375efcb3fcd998af7c332be6e629078e04a9ce8e2bfe5a6060c7969655959139a5f62fe9efe6"
+        "targetBasisHash": "d9c54fdf35d0be65559b6f78a57de4ea6031fe174c85fec40eafe041d032a94120fea6bf27b2e0288fe2874a562bb9d5835e1eb277da9a982aa5ccd5b28d2f14"
     },
     "structuredRingInputReview": {
         "finding": "The source binding now names the final negacyclic module ring and matrix derivation domains that any binding and hiding estimate must cover.",

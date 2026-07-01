@@ -278,7 +278,7 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
                 }
             }
         } else {
-            TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT
+            unreachable!("target-decryption global claims only carry message digits")
         }
     } else if statement.compact_vss_share_linkage.is_some() {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
@@ -393,7 +393,7 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                             .expect("target-decryption digit claim id is in range");
                         i128::from(digit_bound.saturating_sub(1))
                     } else {
-                        1
+                        unreachable!("target-decryption global claims only carry message digits")
                     }
                 } else {
                     2

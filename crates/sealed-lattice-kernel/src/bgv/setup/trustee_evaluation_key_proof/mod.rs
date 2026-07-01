@@ -53,6 +53,12 @@ mod prover;
 mod relation;
 mod verifier;
 
+pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use commands::{
+    describe_target_decryption_share_proof_layout_from_request,
+    generate_target_decryption_share_proof_bytes_from_request,
+};
 pub(crate) use commands::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
@@ -62,13 +68,7 @@ pub(crate) use commands::{
     verify_compact_vss_share_linkage_proof_material_set_from_request,
     verify_trustee_evaluation_key_proof_from_request,
 };
-#[cfg(any(feature = "target-decryption-development-commands", test))]
-pub(crate) use commands::{
-    generate_target_decryption_share_proof_bytes_from_request,
-    verify_target_decryption_share_proof_bytes_from_request,
-};
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use accounting::succinct_target_decryption_share_accounting_hash;
 pub(in crate::bgv::setup) use accounting::{
     succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
@@ -197,8 +197,8 @@ pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 
 // use 58 base-3 digits, which preserves the existing two-field lift window
 // while cutting mask columns. Target-decryption message claims need wider masks
 // because lifted aggregate messages have a much larger clear range. Target
-// smudging-message claims and opening-randomness claims have smaller witness
-// ranges and use the shorter target-specific masks below.
+// smudging-message claims have smaller witness ranges and use the shorter
+// target-specific mask below.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(in crate::bgv::setup) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
@@ -211,7 +211,6 @@ pub(in crate::bgv::setup) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_D
     142;
 pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
     114;
-pub(in crate::bgv::setup) const TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT: usize = 114;
 // FRI query count at rate 1/2. CHANGE (2026, Option B): the per-query
 // soundness is no longer the disproved one-bit (1 - rho) up-to-capacity bound
 // but the CS25 entropy-capacity bound (about 0.938 bit per query for the prime

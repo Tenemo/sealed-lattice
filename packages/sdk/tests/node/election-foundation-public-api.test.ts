@@ -25,6 +25,17 @@ type VerifyTranscript = () => {
         readonly code: string;
     }[];
 };
+type VerifyTargetDecryptionResult = (
+    input: Record<string, unknown>,
+) => Promise<{
+    readonly ok: boolean;
+    readonly operation: string;
+    readonly verifierStatus: string;
+    readonly refusedObjects?: readonly {
+        readonly reasonCode: string;
+        readonly message: string;
+    }[];
+}>;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const verifyFoundationTranscript =
@@ -33,6 +44,8 @@ const verifyTranscriptCoreFixture =
     publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
 const verifyTranscript =
     publicApiRuntimeRecord.verifyTranscript as VerifyTranscript;
+const verifyTargetDecryptionResult =
+    publicApiRuntimeRecord.verifyTargetDecryptionResult as VerifyTargetDecryptionResult;
 
 const requiredPublicFunctions = [
     [
@@ -83,6 +96,7 @@ const requiredPublicFunctions = [
     ],
     ['verifyFoundationTranscript', verifyFoundationTranscript],
     ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
+    ['verifyTargetDecryptionResult', verifyTargetDecryptionResult],
     ['verifyTranscript', verifyTranscript],
     [
         'verifyTranscriptCoreFixture',
@@ -124,6 +138,46 @@ describe('election foundation public package API in Node', () => {
                 expect.objectContaining({ code: 'OperationUnavailable' }),
             ],
         });
+    });
+
+    it('refuses malformed target-result release input through the public package', async () => {
+        await expect(
+            verifyTargetDecryptionResult({
+                setupPackage: { objectType: 'BgvPassiveSetupPackage' },
+                targetAcceptedRecord: {},
+                targetCiphertextBinding: {},
+                targetCiphertexts: {},
+                targetShareProfile: {},
+                targetShareProofs: null,
+            }),
+        ).resolves.toMatchObject({
+            ok: false,
+            operation: 'verifyTargetDecryptionResult',
+            verifierStatus: 'refused',
+            refusedObjects: [
+                expect.objectContaining({
+                    reasonCode: 'InvalidProtocolObject',
+                }),
+            ],
+        });
+
+        const verification = await verifyTargetDecryptionResult({
+            setupPackage: { objectType: 'BgvPassiveSetupPackage' },
+            targetAcceptedRecord: {},
+            targetCiphertextBinding: {},
+            targetCiphertexts: {},
+            targetShareProfile: {},
+            targetShareProofs: [],
+        });
+
+        expect(verification).toMatchObject({
+            ok: false,
+            operation: 'verifyTargetDecryptionResult',
+            verifierStatus: 'refused',
+        });
+        expect(verification.refusedObjects?.[0]?.reasonCode).toEqual(
+            expect.any(String),
+        );
     });
 
     it('verifies the deterministic foundation transcript through the public package', () => {

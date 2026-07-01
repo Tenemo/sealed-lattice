@@ -89,16 +89,16 @@ describe('collective BGV setup kernel commands', () => {
         expect(profile.commitmentProfileHash).toHaveLength(128);
         expect(profile.canonicalTargetBasis).toMatchObject({
             objectType: 'CanonicalTargetBasis',
-            targetLevel: 6,
+            targetLevel: 4,
             primeOrder: 'profile-order-prefix',
             modulusSwitchSchedule: {
                 sourceWorkingLevel: 15,
-                terminalLevel: 6,
+                terminalLevel: 4,
             },
             targetCiphertextRule:
                 'target id and target order ciphertexts must both use the canonical target level',
         });
-        expect(profile.canonicalTargetBasis.targetPrimes).toHaveLength(7);
+        expect(profile.canonicalTargetBasis.targetPrimes).toHaveLength(5);
         expect(profile.canonicalTargetBasisHash).toHaveLength(128);
         expect(profile.compactVssMatrixExpansionProfile).toMatchObject({
             objectType: 'CompactVssMatrixExpansionProfile',
@@ -147,7 +147,7 @@ describe('collective BGV setup kernel commands', () => {
                 'sealed-lattice-compact-vss-development-covered-linear-v1',
             participantCount: 10,
             sourceRnsLimbCount: 17,
-            targetRnsLimbCount: 7,
+            targetRnsLimbCount: 5,
             thresholdDegree: 4,
             ringDegree: 32_768,
             commitmentRelation: {
@@ -231,10 +231,10 @@ describe('collective BGV setup kernel commands', () => {
                 expect.objectContaining({
                     rowId: 'compact-vss-final-public-commitment-exposure',
                     sourceCoefficientCommitments: 680,
-                    recipientShareCommitments: 700,
-                    aggregateThresholdCommitments: 70,
-                    totalCompactCommitments: 1_450,
-                    totalPublicCommitmentCoordinates: 69_600,
+                    recipientShareCommitments: 500,
+                    aggregateThresholdCommitments: 50,
+                    totalCompactCommitments: 1_230,
+                    totalPublicCommitmentCoordinates: 59_040,
                 }),
             ],
             linearRelationRows: [
@@ -267,9 +267,9 @@ describe('collective BGV setup kernel commands', () => {
             multiOpeningRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-multi-opening-review-input',
-                    totalCompactCommitments: 1_450,
+                    totalCompactCommitments: 1_230,
                     maximumNonReconstructingRecipientCount: 3,
-                    corruptedRecipientOpeningCredentialCount: 210,
+                    corruptedRecipientOpeningCredentialCount: 150,
                 }),
             ],
             moduleSisBindingRows: [
@@ -281,8 +281,8 @@ describe('collective BGV setup kernel commands', () => {
             moduleLweHidingRows: [
                 expect.objectContaining({
                     rowId: 'compact-vss-covered-message-module-lwe-hiding-input',
-                    totalPublicCommitmentCoordinates: 69_600,
-                    totalSampledRandomnessProjectionIndices: 4_454_400,
+                    totalPublicCommitmentCoordinates: 59_040,
+                    totalSampledRandomnessProjectionIndices: 3_778_560,
                 }),
             ],
             certificateConclusionRows: [
@@ -293,14 +293,14 @@ describe('collective BGV setup kernel commands', () => {
                 expect.objectContaining({
                     rowId: 'compact-vss-covered-message-module-lwe-hiding-conclusion',
                     problem: 'Module-LWE',
-                    corruptedRecipientOpeningCredentialCount: 210,
+                    corruptedRecipientOpeningCredentialCount: 150,
                 }),
                 expect.objectContaining({
                     rowId: 'compact-vss-structured-ring-review-conclusion',
                 }),
                 expect.objectContaining({
                     rowId: 'compact-vss-multi-opening-review-conclusion',
-                    totalCompactCommitments: 1_450,
+                    totalCompactCommitments: 1_230,
                 }),
             ],
         });
@@ -327,7 +327,7 @@ describe('collective BGV setup kernel commands', () => {
         const sameSecretBridgeInput = expectRecord(
             certificateInputBinding.sameSecretBridgeInput,
         );
-        expect(sameSecretBridgeInput.targetRnsPrimes).toHaveLength(7);
+        expect(sameSecretBridgeInput.targetRnsPrimes).toHaveLength(5);
         const {
             compactVssParameterCertificateInputBindingHash: bindingHash,
             ...certificateInputBindingBody

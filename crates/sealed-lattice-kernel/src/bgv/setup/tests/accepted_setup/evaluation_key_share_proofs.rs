@@ -62,7 +62,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_container_roots",
     );
-    let (package, request) = transported_public_setup_package_and_request();
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+    let request = transported_public_setup_verification_request(companions.clone());
     let relinearization_root =
         package["relinearizationKeyShareRounds"]["relinearizationKeyShareRoundsRoot"].clone();
     let first_galois_batch_root =
@@ -141,7 +142,8 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_transported_public_eval
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "heavy_accepted_setup_collective_setup_verifier_checks_transported_public_evaluation_key_material",
     );
-    let (package, request) = transported_public_setup_package_and_request();
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+    let request = transported_public_setup_verification_request(companions.clone());
     let evaluation_key_set_hash = package["evaluationKeys"]["evaluationKeySetHash"]
         .as_str()
         .expect("evaluation-key set hash")
@@ -213,6 +215,7 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
         result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
         "accepted terminal setup response must carry a handoff root"
     );
+    write_public_setup_verification_input_if_requested(&package, &companions);
 }
 
 #[test]

@@ -13,5 +13,14 @@ export {
     validatePollSpec,
     verifyBoardConsistency,
     verifyTargetFinality,
+    verifyTargetDecryptionResult,
     verifyTranscriptCoreFixture,
+} from '#packages/sdk/src/index.js';
+
+export type {
+    TargetDecryptionAcceptedResult,
+    TargetDecryptionResultVerification,
+    TargetDecryptionShareEvidence,
+    TargetDecryptionVerifiedShareEvidence,
+    VerifyTargetDecryptionResultInput,
 } from '#packages/sdk/src/index.js';

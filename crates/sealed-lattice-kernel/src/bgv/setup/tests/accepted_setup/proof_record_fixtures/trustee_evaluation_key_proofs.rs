@@ -248,6 +248,12 @@ fn trustee_evaluation_key_proofs_object_inner(
     proof_set
 }
 
+struct TerminalTrusteeProofMaterialCheckpointMetadata {
+    proof_size_bytes: u64,
+    proof_bytes_hash: String,
+    transport_hashes: crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes,
+}
+
 fn build_trustee_evaluation_key_proof_record(
     work_item: TrusteeEvaluationKeyProofWorkItem,
     resumed_records: &BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord>,
@@ -366,6 +372,12 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
         transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
     register_verified_trustee_evaluation_key_proof_material_chunks(&proof_material_root, chunks)
         .expect("verified trustee evaluation-key proof material chunks");
+    persist_terminal_trustee_proof_material_checkpoint_metadata(
+        &proof_material_root,
+        proof_size_bytes,
+        &proof_bytes_hash,
+        &transport_hashes,
+    );
 
     BuiltTrusteeEvaluationKeyProofRecord {
         record,
@@ -400,16 +412,11 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
         {
             continue;
         }
-        let proof_bytes = std::fs::read(&path).expect("terminal trustee proof checkpoint bytes");
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-        let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-        let chunks = proof_bytes_transport_chunks(proof_bytes);
-        let transport_hashes = setup_proof_material_transport_hashes(
-            TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &chunks,
-            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-        )
-        .expect("checkpointed trustee proof transport hashes");
+        let Some(metadata) =
+            terminal_trustee_proof_material_checkpoint_metadata(&path, stored_material_root)
+        else {
+            continue;
+        };
         let mut matched_trustee = None;
         for work_item in work_items {
             if resumed_records.contains_key(&work_item.trustee_roster_position) {
@@ -418,23 +425,34 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
             let mut record = work_item.record.clone();
             apply_trustee_evaluation_key_proof_transport_fields(
                 &mut record,
-                proof_size_bytes,
-                &proof_bytes_hash,
-                &transport_hashes,
+                metadata.proof_size_bytes,
+                &metadata.proof_bytes_hash,
+                &metadata.transport_hashes,
             );
             let proof_material_root =
-                trustee_evaluation_key_proof_material_root(&record, &transport_hashes)
+                trustee_evaluation_key_proof_material_root(&record, &metadata.transport_hashes)
                     .expect("checkpointed trustee proof material root");
             if proof_material_root != stored_material_root {
                 continue;
             }
+            let proof_bytes =
+                std::fs::read(&path).expect("terminal trustee proof checkpoint bytes");
+            if !terminal_trustee_proof_material_checkpoint_bytes_match_metadata(
+                &proof_bytes,
+                &metadata,
+            ) {
+                break;
+            }
+            let chunks = proof_bytes_transport_chunks(proof_bytes);
             record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
             record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
                 derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
                     .expect("transported trustee evaluation-key proof root")
             );
-            let proof_material =
-                transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
+            let proof_material = transported_trustee_evaluation_key_proof_material(
+                &record,
+                &metadata.transport_hashes,
+            );
             register_verified_trustee_evaluation_key_proof_material_chunks(
                 &proof_material_root,
                 chunks,
@@ -458,6 +476,101 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
     }
 
     resumed_records
+}
+
+fn terminal_trustee_proof_material_checkpoint_metadata_path(
+    proof_material_path: &std::path::Path,
+) -> std::path::PathBuf {
+    proof_material_path.with_extension("metadata.json")
+}
+
+fn terminal_trustee_proof_material_checkpoint_metadata(
+    proof_material_path: &std::path::Path,
+    stored_material_root: &str,
+) -> Option<TerminalTrusteeProofMaterialCheckpointMetadata> {
+    let metadata_path =
+        terminal_trustee_proof_material_checkpoint_metadata_path(proof_material_path);
+    let metadata_bytes = std::fs::read(metadata_path).ok()?;
+    let metadata: serde_json::Value = serde_json::from_slice(&metadata_bytes).ok()?;
+    if metadata["proofMaterialRoot"].as_str() != Some(stored_material_root)
+        || metadata["proofFamily"].as_str() != Some(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)
+    {
+        return None;
+    }
+    let proof_size_bytes = metadata["proofSizeBytes"].as_u64()?;
+    let proof_bytes_hash = metadata["proofBytesHash"].as_str()?.to_string();
+    let transport_hashes = crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes {
+        full_object_hash: metadata["proofFullObjectHash"].as_str()?.to_string(),
+        chunk_hashes: metadata["proofChunkHashes"]
+            .as_array()?
+            .iter()
+            .map(|chunk_hash| chunk_hash.as_str().map(str::to_string))
+            .collect::<Option<Vec<_>>>()?,
+        chunk_root: metadata["proofChunkRoot"].as_str()?.to_string(),
+        total_byte_length: metadata["proofTotalByteLength"].as_u64()?,
+    };
+
+    Some(TerminalTrusteeProofMaterialCheckpointMetadata {
+        proof_size_bytes,
+        proof_bytes_hash,
+        transport_hashes,
+    })
+}
+
+fn terminal_trustee_proof_material_checkpoint_bytes_match_metadata(
+    proof_bytes: &[u8],
+    metadata: &TerminalTrusteeProofMaterialCheckpointMetadata,
+) -> bool {
+    let chunks = proof_bytes_transport_chunks(proof_bytes.to_vec());
+    let Ok(transport_hashes) = setup_proof_material_transport_hashes(
+        TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        &chunks,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    ) else {
+        return false;
+    };
+    u64::try_from(proof_bytes.len()).ok() == Some(metadata.proof_size_bytes)
+        && trustee_evaluation_key_proof_bytes_hash(proof_bytes) == metadata.proof_bytes_hash
+        && transport_hashes.full_object_hash == metadata.transport_hashes.full_object_hash
+        && transport_hashes.chunk_root == metadata.transport_hashes.chunk_root
+        && transport_hashes.chunk_hashes == metadata.transport_hashes.chunk_hashes
+        && transport_hashes.total_byte_length == metadata.transport_hashes.total_byte_length
+}
+
+fn persist_terminal_trustee_proof_material_checkpoint_metadata(
+    proof_material_root: &str,
+    proof_size_bytes: u64,
+    proof_bytes_hash: &str,
+    transport_hashes: &crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes,
+) {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return;
+    }
+    let proof_material_path = std::path::PathBuf::from("temp")
+        .join("test-checkpoints")
+        .join("terminal-accepted-setup-material-store")
+        .join("trustee-evaluation-key-proof-material")
+        .join(format!("{proof_material_root}.bin"));
+    let metadata_path =
+        terminal_trustee_proof_material_checkpoint_metadata_path(&proof_material_path);
+    let metadata = serde_json::json!({
+        "objectType": "TerminalTrusteeEvaluationKeyProofMaterialCheckpoint",
+        "objectVersion": 1,
+        "setupProfileId": "CollectiveBgvSetup-v1",
+        "setupProofProfileId": "SealedLattice-SetupProof-v1",
+        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        "proofMaterialRoot": proof_material_root,
+        "proofSizeBytes": proof_size_bytes,
+        "proofBytesHash": proof_bytes_hash,
+        "proofTotalByteLength": transport_hashes.total_byte_length,
+        "proofFullObjectHash": transport_hashes.full_object_hash,
+        "proofChunkRoot": transport_hashes.chunk_root,
+        "proofChunkHashes": transport_hashes.chunk_hashes,
+    });
+    let metadata_text =
+        canonical_json(&metadata).expect("trustee proof material checkpoint metadata JSON");
+    std::fs::write(metadata_path, metadata_text.as_bytes())
+        .expect("trustee proof material checkpoint metadata write");
 }
 
 fn apply_trustee_evaluation_key_proof_transport_fields(

@@ -16,6 +16,7 @@ const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_BINARY_MAGIC: &[u8] =
 const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_VERSION: u64 = 8;
 const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_VERSION: u64 = 7;
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) struct TargetDecryptionShareProofMaterialGenerationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
@@ -70,6 +71,7 @@ struct TargetDecryptionShareBinaryProofMaterialDecode {
     total_proof_byte_length: u64,
 }
 
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(super) fn generate_target_decryption_share_proof_material_from_local_witness(
     input: TargetDecryptionShareProofMaterialGenerationInput<'_>,
 ) -> CanonicalResult<Value> {

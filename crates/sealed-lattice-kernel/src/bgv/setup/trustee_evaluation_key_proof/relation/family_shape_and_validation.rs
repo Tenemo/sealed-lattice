@@ -4,6 +4,7 @@ use super::*;
 const STATEMENT_HASH_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/statement-v2";
 const PROTOCOL_HASH_HEX_LENGTH: usize = 128;
 const MAX_CONTEXT_TOKEN_BYTES: usize = 512;
+const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
 pub(crate) const SAME_SECRET_LINKAGE_ANCHOR_BINDING_LABELS: [&str; 1] =
     ["vssCoefficientCommitmentMaterialRoot"];
@@ -914,26 +915,6 @@ fn validate_masked_claim_lift_window(
                 ));
             }
         }
-        let first_randomness_global_claim_id = (statement
-            .target_decryption_total_message_digit_count()
-            * CONSISTENCY_REPETITIONS) as u64;
-        let (randomness_lower_bound, randomness_upper_bound) =
-            masked_claim_bounds_for_global_claim(statement, first_randomness_global_claim_id)?;
-        let required_randomness_residue_count = masked_claim_lift_residue_count_for_moduli(
-            proof_limb_indices
-                .iter()
-                .take(TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT)
-                .map(|limb_index| DATA_PRIMES[*limb_index]),
-            &randomness_lower_bound,
-            &randomness_upper_bound,
-        );
-        if required_randomness_residue_count
-            > TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT
-        {
-            return Err(invalid_succinct_setup_proof(
-                "target-decryption opening-randomness masked consistency claims need more carried limb fields",
-            ));
-        }
     }
 
     Ok(())
@@ -1388,12 +1369,24 @@ fn validate_target_decryption_share_statement(
                 "target-decryption share limb statement must include at least one target role",
             ));
         }
+        if limb_statement.role_statements.len() != TARGET_DECRYPTION_PROOF_TARGET_ROLES.len() {
+            return Err(invalid_succinct_setup_proof(
+                "target-decryption share limb statement must cover the canonical target roles",
+            ));
+        }
         let mut seen_roles = std::collections::BTreeSet::new();
-        for role_statement in &limb_statement.role_statements {
+        for (target_role_index, role_statement) in limb_statement.role_statements.iter().enumerate()
+        {
             validate_context_token(
                 "targetDecryptionShare.targetRole",
                 &role_statement.target_role,
             )?;
+            if role_statement.target_role != TARGET_DECRYPTION_PROOF_TARGET_ROLES[target_role_index]
+            {
+                return Err(invalid_succinct_setup_proof(
+                    "target-decryption share target roles must be in canonical order",
+                ));
+            }
             if !seen_roles.insert(role_statement.target_role.as_str()) {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption share statement repeats a target role",

@@ -5,7 +5,6 @@ use crate::bgv::setup::compact_vss_commitment::{
     COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactProjectionTermsInput,
     CompactVssMessageEncodingLayout, compact_projection_terms,
     compact_vss_message_digit_column_label, compact_vss_message_digit_weight,
-    compact_vss_message_encoding_layout,
 };
 
 fn compact_vss_message_encoding_offsets(
@@ -125,13 +124,7 @@ pub(crate) fn build_target_decryption_share_public_vectors(
         .map(|global_message_index| {
             input
                 .proof_statement
-                .target_decryption_message_bound(*global_message_index)
-                .ok_or_else(|| {
-                    invalid_succinct_setup_proof(
-                        "target-decryption message bound is missing from the statement layout",
-                    )
-                })
-                .and_then(compact_vss_message_encoding_layout)
+                .target_decryption_message_encoding_layout(input.limb_index, *global_message_index)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
     let message_encoding_offsets = compact_vss_message_encoding_offsets(&message_encoding_layouts)?;

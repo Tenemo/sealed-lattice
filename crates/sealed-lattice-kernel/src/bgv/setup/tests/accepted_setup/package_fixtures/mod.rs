@@ -12,6 +12,11 @@ static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: O
 static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
 
+const TERMINAL_PROFILE_RING_SETUP_FIXTURE_CHECKPOINT_DIRECTORY: &str =
+    "terminal-profile-ring-setup-fixture";
+const TERMINAL_PROFILE_RING_SETUP_FIXTURE_CHECKPOINT_FILE: &str =
+    "terminal-profile-ring-setup-fixture.json";
+
 #[derive(Clone)]
 pub(super) struct TerminalProfileRingSetupPackageFixture {
     pub(super) package: serde_json::Value,
@@ -117,12 +122,15 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
 -> TerminalProfileRingSetupPackageFixture {
     TERMINAL_PROFILE_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
+            if let Some(fixture) = terminal_profile_ring_setup_fixture_from_checkpoint() {
+                return fixture;
+            }
             let package_fixture = build_collective_setup_package_fixture_parts(
                 POLYNOMIAL_DEGREE,
                 FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
                 None,
             );
-            TerminalProfileRingSetupPackageFixture {
+            let fixture = TerminalProfileRingSetupPackageFixture {
                 package: package_fixture.package,
                 transported_vss_coefficient_commitment_material: package_fixture
                     .transported_vss_coefficient_commitment_material
@@ -130,9 +138,99 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
                 verified_vss_coefficient_commitment_material: package_fixture
                     .verified_vss_coefficient_commitment_material
                     .expect("profile-ring verified VSS material reference"),
-            }
+            };
+            persist_terminal_profile_ring_setup_fixture_checkpoint(&fixture);
+            fixture
         })
         .clone()
+}
+
+fn terminal_profile_ring_setup_fixture_checkpoint_path() -> std::path::PathBuf {
+    terminal_accepted_setup_checkpoint_path(
+        TERMINAL_PROFILE_RING_SETUP_FIXTURE_CHECKPOINT_DIRECTORY,
+        TERMINAL_PROFILE_RING_SETUP_FIXTURE_CHECKPOINT_FILE,
+    )
+}
+
+fn terminal_profile_ring_setup_fixture_from_checkpoint()
+-> Option<TerminalProfileRingSetupPackageFixture> {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return None;
+    }
+    let checkpoint_path = terminal_profile_ring_setup_fixture_checkpoint_path();
+    let bytes = std::fs::read(&checkpoint_path).ok()?;
+    let checkpoint: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let fixture = TerminalProfileRingSetupPackageFixture {
+        package: checkpoint.get("package")?.clone(),
+        transported_vss_coefficient_commitment_material: checkpoint
+            .get("transportedVssCoefficientCommitmentMaterial")?
+            .clone(),
+        verified_vss_coefficient_commitment_material: checkpoint
+            .get("verifiedVssCoefficientCommitmentMaterial")?
+            .clone(),
+    };
+    if !terminal_profile_ring_setup_fixture_recomputes_bindings(&fixture) {
+        terminal_phase(&format!(
+            "ignored terminal setup fixture checkpoint with nonmatching bindings {}",
+            checkpoint_path.display()
+        ));
+        return None;
+    }
+    terminal_phase(&format!(
+        "resumed terminal setup fixture checkpoint {}",
+        checkpoint_path.display()
+    ));
+    Some(fixture)
+}
+
+fn terminal_profile_ring_setup_fixture_recomputes_bindings(
+    fixture: &TerminalProfileRingSetupPackageFixture,
+) -> bool {
+    let package = &fixture.package;
+    let transported_material = &fixture.transported_vss_coefficient_commitment_material;
+    let verified_material = &fixture.verified_vss_coefficient_commitment_material;
+    let setup_context = &package["setupContext"];
+
+    setup_context["participantCount"].as_u64() == Some(FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT)
+        && setup_context["manifestHash"].is_string()
+        && setup_context["rosterHash"].is_string()
+        && package["vssCoefficientCommitmentMaterial"]["vssCoefficientCommitmentMaterialRoot"]
+            .is_string()
+        && transported_material["chunkRoot"].is_string()
+        && transported_material["fullObjectHash"].is_string()
+        && transported_material["totalByteLength"].is_number()
+        && verified_material["thresholdShareCommitmentRoot"]
+            == package["thresholdShareCommitments"]["thresholdShareCommitmentRoot"]
+        && recomputed_setup_package_hash_matches(package)
+}
+
+fn persist_terminal_profile_ring_setup_fixture_checkpoint(
+    fixture: &TerminalProfileRingSetupPackageFixture,
+) {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return;
+    }
+    let checkpoint_path = terminal_profile_ring_setup_fixture_checkpoint_path();
+    let Some(parent) = checkpoint_path.parent() else {
+        return;
+    };
+    std::fs::create_dir_all(parent).expect("terminal setup fixture checkpoint directory");
+    let checkpoint = serde_json::json!({
+        "package": fixture.package.clone(),
+        "transportedVssCoefficientCommitmentMaterial": fixture.transported_vss_coefficient_commitment_material.clone(),
+        "verifiedVssCoefficientCommitmentMaterial": fixture.verified_vss_coefficient_commitment_material.clone(),
+    });
+    let json_text = canonical_json(&checkpoint).expect("terminal setup fixture checkpoint JSON");
+    let temporary_path = parent.join(format!(
+        "{}.{}.partial",
+        TERMINAL_PROFILE_RING_SETUP_FIXTURE_CHECKPOINT_FILE,
+        std::process::id()
+    ));
+    std::fs::write(&temporary_path, json_text.as_bytes())
+        .expect("terminal setup fixture checkpoint write");
+    if std::fs::rename(&temporary_path, &checkpoint_path).is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
 }
 
 /// Reduced development-ring (128) collective setup package for roster size n,

@@ -37,7 +37,6 @@ use super::{
     CLAIM_MASK_RADIX, COMMITMENT_BOUND_FACTOR, CONSISTENCY_COEFFICIENT_BITS,
     CONSISTENCY_REPETITIONS, DEEP_EVALUATION_POINT_COUNT, DOMAIN_BLOWUP, LINCHECK_REPETITIONS,
     LOW_DEGREE_QUERY_COUNT, TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT,
-    TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
     TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT, low_degree_final_coefficient_count,
 };
 use crate::bgv::evaluator::records::MAXIMUM_OPTION_COUNT;
@@ -58,6 +57,7 @@ use crate::bgv::evaluator::top_k::{
 use super::{
     COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY, TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
     TRUSTEE_EVALUATION_KEY_PROOF_FAMILY, accounting,
+    describe_target_decryption_share_proof_layout_from_request,
     generate_target_decryption_share_proof_bytes_from_request,
     generate_trustee_evaluation_key_proof_from_request, prover,
     verify_target_decryption_share_proof_bytes_from_request,

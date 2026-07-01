@@ -80,11 +80,11 @@ describe('BGV passive passive BGV setup kernel commands', () => {
             certificates.setupParameterCertificate.qTargetBits,
         ).toBeGreaterThan(0);
         expect(certificates.setupParameterCertificate).toMatchObject({
-            qTargetPrimeCount: 7,
-            targetCiphertextLevel: 6,
+            qTargetPrimeCount: 5,
+            targetCiphertextLevel: 4,
             canonicalTargetBasis: {
                 objectType: 'CanonicalTargetBasis',
-                targetLevel: 6,
+                targetLevel: 4,
             },
         });
         expect(

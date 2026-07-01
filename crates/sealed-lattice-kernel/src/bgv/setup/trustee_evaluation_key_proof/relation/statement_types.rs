@@ -589,7 +589,6 @@ impl CompactVssShareLinkageStatement {
 impl TrusteeEvaluationKeyStatement {
     pub(crate) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 5;
     pub(crate) const TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT: usize = 4;
-    pub(crate) const TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT: usize = 4;
 
     // The number of active limb fields: one past the highest key level. The
     // keyless same-secret linkage anchor statement is active exactly on the
@@ -836,24 +835,37 @@ impl TrusteeEvaluationKeyStatement {
         None
     }
 
-    pub(crate) fn target_decryption_message_claim_limb_indices(
+    fn target_decryption_message_target_limb_index(
         &self,
         global_message_index: usize,
-    ) -> Vec<usize> {
-        let Some(statement) = self.target_decryption_share.as_ref() else {
-            return Vec::new();
-        };
-        let mut target_rns_limb_index = None;
+    ) -> Option<usize> {
+        let statement = self.target_decryption_share.as_ref()?;
         let mut offset = 0_usize;
         for limb_statement in &statement.limb_statements {
             let limb_message_count = Self::target_decryption_limb_message_count(limb_statement);
             if global_message_index < offset + limb_message_count {
-                target_rns_limb_index = Some(limb_statement.target_rns_limb_index);
-                break;
+                return Some(limb_statement.target_rns_limb_index);
             }
             offset += limb_message_count;
         }
-        let Some(target_rns_limb_index) = target_rns_limb_index else {
+
+        None
+    }
+
+    pub(crate) fn target_decryption_message_decoder_limb_index(
+        &self,
+        global_message_index: usize,
+    ) -> Option<usize> {
+        self.target_decryption_message_target_limb_index(global_message_index)
+    }
+
+    pub(crate) fn target_decryption_message_claim_limb_indices(
+        &self,
+        global_message_index: usize,
+    ) -> Vec<usize> {
+        let Some(target_rns_limb_index) =
+            self.target_decryption_message_target_limb_index(global_message_index)
+        else {
             return Vec::new();
         };
         let field_count = match self.target_decryption_message_claim_kind(global_message_index) {
@@ -886,13 +898,6 @@ impl TrusteeEvaluationKeyStatement {
         }
 
         selected
-    }
-
-    fn target_decryption_randomness_claim_limb_indices(&self) -> Vec<usize> {
-        self.proof_limb_indices()
-            .into_iter()
-            .take(Self::TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT)
-            .collect()
     }
 
     fn target_decryption_message_indices(&self, proof_limb_index: usize) -> Vec<usize> {
@@ -939,11 +944,47 @@ impl TrusteeEvaluationKeyStatement {
         self.target_decryption_message_indices(limb_index).len()
     }
 
-    pub(crate) fn target_decryption_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+    pub(crate) fn target_decryption_message_encoding_layout(
+        &self,
+        proof_limb_index: usize,
+        global_message_index: usize,
+    ) -> CanonicalResult<crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout>
+    {
+        let message_bound = self
+            .target_decryption_message_bound(global_message_index)
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "target-decryption message bound is missing from the statement layout",
+                )
+            })?;
+        let decoder_limb_index = self
+            .target_decryption_message_decoder_limb_index(global_message_index)
+            .ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "target-decryption message decoder limb is missing from the statement layout",
+                )
+            })?;
+        if proof_limb_index == decoder_limb_index {
+            crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                message_bound,
+            )
+        } else {
+            Ok(
+                crate::bgv::setup::compact_vss_commitment::compact_vss_message_digit_only_encoding_layout(),
+            )
+        }
+    }
+
+    pub(crate) fn target_decryption_message_encoding_layouts(
+        &self,
+        limb_index: usize,
+    ) -> CanonicalResult<
+        Vec<crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout>,
+    > {
         self.target_decryption_message_indices(limb_index)
             .into_iter()
-            .filter_map(|global_message_index| {
-                self.target_decryption_message_bound(global_message_index)
+            .map(|global_message_index| {
+                self.target_decryption_message_encoding_layout(limb_index, global_message_index)
             })
             .collect()
     }
@@ -951,10 +992,7 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn target_decryption_randomness_count(&self, limb_index: usize) -> usize {
         self.target_decryption_share
             .as_ref()
-            .filter(|_| {
-                self.target_decryption_randomness_claim_limb_indices()
-                    .contains(&limb_index)
-            })
+            .filter(|_| limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len())
             .map(|_| {
                 self.target_decryption_total_message_count()
                     * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
@@ -962,14 +1000,9 @@ impl TrusteeEvaluationKeyStatement {
             .unwrap_or(0)
     }
 
-    fn target_decryption_decoder_digit_count_for_bound(message_bound: u64) -> usize {
-        let Ok(layout) =
-            crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
-                message_bound,
-            )
-        else {
-            return 0;
-        };
+    fn target_decryption_decoder_digit_count_for_layout(
+        layout: crate::bgv::setup::compact_vss_commitment::CompactVssMessageEncodingLayout,
+    ) -> usize {
         (0..crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT)
             .filter(|digit_index| layout.digit_trit_count(*digit_index).unwrap_or(0) > 0)
             .count()
@@ -999,9 +1032,10 @@ impl TrusteeEvaluationKeyStatement {
                     })
                     .unwrap_or(0);
                 let decoder_relation_count = self
-                    .target_decryption_message_bounds(limb_index)
+                    .target_decryption_message_encoding_layouts(limb_index)
+                    .unwrap_or_default()
                     .into_iter()
-                    .map(Self::target_decryption_decoder_digit_count_for_bound)
+                    .map(Self::target_decryption_decoder_digit_count_for_layout)
                     .sum::<usize>()
                     * LINCHECK_REPETITIONS;
                 commitment_relation_count + target_relation_count + decoder_relation_count

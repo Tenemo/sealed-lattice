@@ -202,7 +202,7 @@ const compactVssThresholdDegree = 2;
 const compactVssRingDegree = 8;
 
 const compactVssPublicMatrixSeedHash = (): string => '7'.repeat(128);
-const canonicalTargetCiphertextLevel = 6;
+const canonicalTargetCiphertextLevel = 4;
 const selectedEvaluatorWorkingLevel = 15;
 const canonicalTargetBasisHash = (): string =>
     deriveProtocolHash('TargetBasisHash', {

@@ -27,6 +27,7 @@ const COMPACT_VSS_SHARE_LINKAGE_COMMON_KEY_RULE: &str = "coefficient, recipient-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::bgv::setup) struct CompactVssMessageEncodingLayout {
+    low_digit_trit_count: usize,
     high_digit_trit_count: usize,
 }
 
@@ -36,7 +37,7 @@ impl CompactVssMessageEncodingLayout {
         digit_index: usize,
     ) -> CanonicalResult<usize> {
         match digit_index {
-            0 => Ok(COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT),
+            0 => Ok(self.low_digit_trit_count),
             1 => Ok(self.high_digit_trit_count),
             _ => Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -46,7 +47,7 @@ impl CompactVssMessageEncodingLayout {
     }
 
     pub(in crate::bgv::setup) fn total_trit_count(self) -> usize {
-        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT + self.high_digit_trit_count
+        self.low_digit_trit_count + self.high_digit_trit_count
     }
 
     pub(in crate::bgv::setup) fn encoding_column_count(self) -> usize {
@@ -92,6 +93,14 @@ impl CompactVssMessageEncodingLayout {
             })?;
 
         Ok(COMPACT_VSS_MESSAGE_DIGIT_COUNT + previous_trit_count + trit_index)
+    }
+}
+
+pub(in crate::bgv::setup) fn compact_vss_message_digit_only_encoding_layout()
+-> CompactVssMessageEncodingLayout {
+    CompactVssMessageEncodingLayout {
+        low_digit_trit_count: 0,
+        high_digit_trit_count: 0,
     }
 }
 
@@ -2993,10 +3002,14 @@ pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(
             "compact VSS message coefficient bound exceeds the two-digit message range",
         ));
     }
+    let low_digit_bound =
+        u128::from(message_bound_exclusive).min(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
     let high_digit_bound =
         u128::from(message_bound_exclusive).div_ceil(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
+    let low_digit_trit_count = compact_vss_trit_count_for_bound(low_digit_bound)?;
     let high_digit_trit_count = compact_vss_trit_count_for_bound(high_digit_bound)?;
     Ok(CompactVssMessageEncodingLayout {
+        low_digit_trit_count,
         high_digit_trit_count,
     })
 }
@@ -3450,9 +3463,10 @@ pub(in crate::bgv::setup) mod tests {
 
     use super::{
         COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_COMMITMENT_PROFILE_ID,
-        COMPACT_VSS_MESSAGE_DIGIT_BASE, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentComputation,
-        CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
+        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT, COMPACT_VSS_MESSAGE_DIGIT_BASE,
+        COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        CompactVssCommitmentComputation, CompactVssCommitmentOpeningInput,
+        compact_vss_canonical_message_digit_columns, compact_vss_message_encoding_layout,
         compute_compact_vss_commitment_from_opening,
         compute_compact_vss_commitment_from_opening_request,
         decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
@@ -3463,6 +3477,28 @@ pub(in crate::bgv::setup) mod tests {
         verify_compact_vss_share_linkage_statement_request,
     };
     use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
+
+    #[test]
+    fn compact_message_encoding_layout_uses_digit_bounds_for_trit_columns() -> CanonicalResult<()> {
+        let small_layout = compact_vss_message_encoding_layout(33)?;
+        assert_eq!(small_layout.digit_trit_count(0)?, 4);
+        assert_eq!(small_layout.digit_trit_count(1)?, 0);
+        assert_eq!(small_layout.encoding_column_count(), 6);
+
+        let full_low_digit_layout = compact_vss_message_encoding_layout(
+            COMPACT_VSS_MESSAGE_DIGIT_BASE
+                .checked_mul(2)
+                .and_then(|value| value.checked_add(1))
+                .expect("test bound fits u64"),
+        )?;
+        assert_eq!(
+            full_low_digit_layout.digit_trit_count(0)?,
+            COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT
+        );
+        assert_eq!(full_low_digit_layout.digit_trit_count(1)?, 1);
+
+        Ok(())
+    }
 
     #[test]
     fn compact_commitment_command_verifies_and_rejects_tampering() -> CanonicalResult<()> {

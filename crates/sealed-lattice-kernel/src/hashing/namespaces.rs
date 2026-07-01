@@ -173,6 +173,7 @@ reserved_root_namespaces! {
     TARGET_DECRYPTION_PROFILE_BINDING_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-profile-binding-hash-v1",
     TARGET_DECRYPTION_CIPHERTEXT_BINDING_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-ciphertext-binding-hash-v1",
     TARGET_DECRYPTION_SHARE_PROFILE_HASH_NAMESPACE => "sealed-lattice-root/target-decryption-share-profile-hash-v1",
+    BGV_TARGET_DECRYPTION_RELEASE_SETUP_CONTEXT_HASH_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-release-setup-context-hash-v1",
     BGV_TARGET_DECRYPTION_SHARE_ROOT_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-share-root-v1",
     BGV_TARGET_DECRYPTION_SHARE_HASH_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-share-hash-v1",
     BGV_TARGET_DECRYPTION_SHARE_PROOF_STATEMENT_ROOT_NAMESPACE => "sealed-lattice-root/bgv-target-decryption-share-proof-statement-root-v1",

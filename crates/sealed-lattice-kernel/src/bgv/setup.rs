@@ -24,11 +24,12 @@ mod setup_proof;
 mod sharing;
 mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
+#[cfg(feature = "target-decryption-development-commands")]
+pub(crate) use trustee_evaluation_key_proof::describe_target_decryption_share_proof_layout_from_request;
 #[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::{
-    TARGET_DECRYPTION_SHARE_PROOF_FAMILY,
-    generate_target_decryption_share_proof_bytes_from_request,
-    succinct_target_decryption_share_accounting_hash,
+    TARGET_DECRYPTION_SHARE_PROOF_FAMILY, succinct_target_decryption_share_accounting_hash,
     verify_target_decryption_share_proof_bytes_from_request,
 };
 pub(crate) use trustee_evaluation_key_proof::{
@@ -55,11 +56,14 @@ pub(crate) use compact_same_secret_bridge::{
     verify_compact_vss_same_secret_bridge_proof_material_set_request,
     verify_compact_vss_same_secret_bridge_statement_set_request,
 };
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use compact_vss_commitment::{
     COMPACT_VSS_COMMITMENT_PROFILE_ID, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentOpeningInput,
-    compact_vss_canonical_message_digit_columns, compute_compact_vss_commitment_from_opening,
+    COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use compact_vss_commitment::{
+    CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
+    compute_compact_vss_commitment_from_opening,
 };
 pub(crate) use compact_vss_commitment::{
     compute_compact_vss_commitment_from_opening_request,
@@ -194,7 +198,6 @@ struct PassiveSetupInput {
     participants: Vec<SetupParticipant>,
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) struct CollectiveBgvSetupContextHashes {
     pub(crate) roster_hash: String,
     pub(crate) setup_profile_hash: String,
@@ -203,7 +206,6 @@ pub(crate) struct CollectiveBgvSetupContextHashes {
     pub(crate) commitment_profile_hash: String,
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) fn collective_bgv_setup_context_hashes_from_package(
     setup_package: &Value,
 ) -> CanonicalResult<CollectiveBgvSetupContextHashes> {

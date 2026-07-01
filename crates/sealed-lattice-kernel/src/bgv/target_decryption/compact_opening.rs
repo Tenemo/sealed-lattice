@@ -141,31 +141,6 @@ pub(super) fn compute_compact_aggregate_opening(
     })
 }
 
-pub(super) fn compact_aggregate_message_coefficient_bound(
-    rns_prime: u64,
-    participant_count: usize,
-) -> CanonicalResult<u64> {
-    if participant_count == 0 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact aggregate opening participant count must be positive",
-        ));
-    }
-    rns_prime
-        .checked_mul(u64::try_from(participant_count).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact aggregate opening participant count does not fit u64",
-            )
-        })?)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "compact aggregate opening message coefficient bound overflowed",
-            )
-        })
-}
-
 pub(super) fn read_compact_aggregate_u64_vector_le_hex(
     credential: &Value,
     field_name: &str,

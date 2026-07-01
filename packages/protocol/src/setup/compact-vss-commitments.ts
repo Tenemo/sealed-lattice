@@ -30,7 +30,6 @@ export const compactVssCarryClaimMaskDigitCount = 75;
 export const compactVssDigitClaimMaskDigitCount = 87;
 export const targetDecryptionAggregateMessageClaimMaskDigitCount = 142;
 export const targetDecryptionSmudgingMessageClaimMaskDigitCount = 114;
-export const targetDecryptionRandomnessClaimMaskDigitCount = 114;
 const setupConsistencyRepetitions = 20;
 const setupConsistencyCoefficientBits = 8;
 const compactVssConsistencyRepetitions = 4;
@@ -6018,13 +6017,6 @@ export const compactVssParameterCertificateInputBinding = (input: {
             ringDegree,
             consistencyCoefficientBits: setupConsistencyCoefficientBits,
         });
-    const targetRandomnessClearClaimBoundDecimal = maskedClaimClearBoundDecimal(
-        {
-            witnessInfinityBound: 1n,
-            ringDegree,
-            consistencyCoefficientBits: setupConsistencyCoefficientBits,
-        },
-    );
     const commitmentModulusLimbs = compactVssCommitmentModulusLimbIndices.map(
         (commitmentModulusIndex) => ({
             commitmentModulusIndex,
@@ -6419,7 +6411,7 @@ export const compactVssParameterCertificateInputBinding = (input: {
                         "compact-vss-share-linkage-message-digit-claim",
                     ],
                     rangeEvidenceRule:
-                        "message digit columns are verifier-decoded from 17 trits per digit and carry claims use masked consistency bounds",
+                        "message digit columns are verifier-decoded from statement-bound trit decoder columns and carry claims use masked consistency bounds",
                 },
                 {
                     rowId: "compact-vss-same-secret-bridge-proof-extraction-input",
@@ -6440,10 +6432,9 @@ export const compactVssParameterCertificateInputBinding = (input: {
                     extractedMaskedClaimRows: [
                         "compact-vss-target-decryption-aggregate-message-claim",
                         "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim",
                     ],
                     rangeEvidenceRule:
-                        "target proof rows bind aggregate opening digits, smudging opening digits, and ternary opening randomness before release",
+                        "target proof rows bind aggregate opening digits and smudging opening digits before release; opening randomness stays bound by compact-opening rows",
                 },
             ],
             maskedClaimNormRows: [
@@ -6493,7 +6484,7 @@ export const compactVssParameterCertificateInputBinding = (input: {
                     claimMaskRadix: compactVssClaimMaskRadix,
                     maskDigitCount: compactVssDigitClaimMaskDigitCount,
                     rangeEvidenceRule:
-                        "direct masked claims bind committed base-3^17 digit columns and verifier-side trit decoder columns",
+                        "direct masked claims bind committed base-3^17 digit columns and statement-bound verifier-side trit decoder columns",
                 },
                 {
                     rowId: "compact-vss-same-secret-bridge-non-digit-claim",
@@ -6564,7 +6555,7 @@ export const compactVssParameterCertificateInputBinding = (input: {
                     maskDigitCount:
                         targetDecryptionAggregateMessageClaimMaskDigitCount,
                     rangeEvidenceRule:
-                        "target aggregate messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
+                        "target aggregate messages use direct masked claims for each committed base-3^17 digit and statement-bound verifier-side trit decoder columns",
                 },
                 {
                     rowId: "compact-vss-target-decryption-smudging-message-claim",
@@ -6588,25 +6579,7 @@ export const compactVssParameterCertificateInputBinding = (input: {
                     maskDigitCount:
                         targetDecryptionSmudgingMessageClaimMaskDigitCount,
                     rangeEvidenceRule:
-                        "target smudging messages use direct masked claims for each committed base-3^17 digit and verifier-side trit decoder columns",
-                },
-                {
-                    rowId: "compact-vss-target-decryption-randomness-claim",
-                    proofFamily: "target-decryption-share",
-                    claimVectorClass: "target-opening-randomness",
-                    appliesToRelations: ["target-decryption-share-proof"],
-                    witnessInfinityBound: 1,
-                    clearClaimBoundDecimal:
-                        targetRandomnessClearClaimBoundDecimal,
-                    consistencyRepetitions: setupConsistencyRepetitions,
-                    consistencyCoefficientBits: setupConsistencyCoefficientBits,
-                    consistencyCoefficientMaximumDecimal:
-                        setupConsistencyCoefficientMaximum.toString(),
-                    claimMaskRadix: compactVssClaimMaskRadix,
-                    maskDigitCount:
-                        targetDecryptionRandomnessClaimMaskDigitCount,
-                    rangeEvidenceRule:
-                        "target opening randomness claims use ternary witness columns and the target randomness mask",
+                        "target smudging messages use direct masked claims for each committed base-3^17 digit and statement-bound verifier-side trit decoder columns",
                 },
             ],
             targetBasisReductionRows: [
@@ -6679,7 +6652,6 @@ export const compactVssParameterCertificateInputBinding = (input: {
                         "compact-vss-same-secret-bridge-message-digit-claim",
                         "compact-vss-target-decryption-aggregate-message-claim",
                         "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim",
                     ],
                     proofExtractionRows: [
                         "compact-vss-share-linkage-proof-extraction-input",
@@ -6709,7 +6681,6 @@ export const compactVssParameterCertificateInputBinding = (input: {
                         "compact-vss-same-secret-bridge-message-digit-claim",
                         "compact-vss-target-decryption-aggregate-message-claim",
                         "compact-vss-target-decryption-smudging-message-claim",
-                        "compact-vss-target-decryption-randomness-claim",
                     ],
                     randomnessSource:
                         "balanced-ternary opening columns before public linear aggregation",

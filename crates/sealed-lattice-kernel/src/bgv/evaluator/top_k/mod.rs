@@ -48,10 +48,10 @@ pub(crate) const TIE_POLICY: &str = "higher-sum-first-then-lower-option-index";
 // the packing/forward rotation keys are generated here (lower levels use the
 // same keys through CRT-idempotent truncation).
 pub(crate) const SELECTED_EVALUATOR_WORKING_LEVEL: usize = 15;
-// Level 15 of 17 leaves headroom for packing plus comparison depth (down to
-// level 6) plus rank lookup; baby-step 5 is about sqrt of the rank-lookup
-// degree; generator 3 generates the order-N/2 subgroup of odd residues mod 2N.
-pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 6;
+// Level 15 of 17 leaves headroom for packing plus comparison depth and target
+// release; baby-step 5 is about sqrt of the rank-lookup degree; generator 3
+// generates the order-N/2 subgroup of odd residues mod 2N.
+pub(crate) const DIRECT_COMPARISON_OUTPUT_LEVEL: usize = 4;
 pub(crate) const CANONICAL_TARGET_CIPHERTEXT_LEVEL: usize = DIRECT_COMPARISON_OUTPUT_LEVEL;
 pub(crate) const RANK_LOOKUP_BABY_STEP_COUNT: usize = 5;
 const PACKED_SCORE_GALOIS_GENERATOR: usize = 3;

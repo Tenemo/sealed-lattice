@@ -22,6 +22,7 @@ use super::relation::{
     TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
 };
 #[cfg(any(feature = "target-decryption-development-commands", test))]
+use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TargetDecryptionMessageClaimKind};
 use super::relation::{
     TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
     TargetDecryptionShareStatement,
@@ -43,9 +44,9 @@ const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 const COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/compact-vss-share-linkage/proof-bytes-v1";
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
     "target-decryption-smudging-polynomial-coefficient";
+const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 #[derive(Debug)]
@@ -1115,7 +1116,6 @@ pub(crate) fn generate_target_decryption_share_proof_bytes_from_request(
     })
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) fn verify_target_decryption_share_proof_bytes_from_request(
     request: &Value,
     proof_bytes: &[u8],
@@ -1505,7 +1505,6 @@ fn compact_same_secret_bridge_witness_from_request(
     })
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_share_statement_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
@@ -1566,9 +1565,8 @@ fn target_decryption_share_statement_from_request(
         read_i64(smudging_commitment_set, "signedCoefficientOffset")?;
     let smudging_message_coefficient_bound =
         read_u64(smudging_commitment_set, "messageCoefficientBound")?;
-    let active_credential_binding_root = read_string(target_value, "activeCredentialBindingRoot")
-        .or_else(|_| read_string(target_value, "aggregateCommitmentRoot"))?
-        .to_string();
+    let active_credential_binding_root =
+        read_string(target_value, "activeCredentialBindingRoot")?.to_string();
     if context.binding_roots[1].1 != active_credential_binding_root {
         return Err(invalid_succinct_setup_proof(
             "target-decryption share context root must match the active aggregate credential binding root",
@@ -1581,12 +1579,16 @@ fn target_decryption_share_statement_from_request(
         ring_degree,
         smudging_polynomial_degree,
     )?;
-    if limb_statements
-        .iter()
-        .any(|limb_statement| smudging_active_limb_count <= limb_statement.target_rns_limb_index)
+    if limb_statements.len() != smudging_active_limb_count
+        || limb_statements
+            .iter()
+            .enumerate()
+            .any(|(expected_limb_index, limb_statement)| {
+                limb_statement.target_rns_limb_index != expected_limb_index
+            })
     {
         return Err(invalid_succinct_setup_proof(
-            "smudging commitment set must cover the requested target limbs",
+            "target-decryption proof must cover every active target limb in canonical order",
         ));
     }
 
@@ -1624,6 +1626,86 @@ fn target_decryption_share_statement_from_request(
 }
 
 #[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) fn describe_target_decryption_share_proof_layout_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let statement = target_decryption_share_statement_from_request(request)?;
+    let target_statement = statement.target_decryption_share.as_ref().ok_or_else(|| {
+        invalid_succinct_setup_proof("target-decryption share statement must be present")
+    })?;
+    let proof_limb_indices = statement.proof_limb_indices();
+    let mut limb_summaries = Vec::with_capacity(proof_limb_indices.len());
+    for proof_limb_index in &proof_limb_indices {
+        let layout = LimbColumnLayout::new(&statement, *proof_limb_index)?;
+        let mut message_summaries = Vec::with_capacity(layout.target_decryption_message_columns);
+        for local_message_index in 0..layout.target_decryption_message_columns {
+            let global_message_index = statement
+                .target_decryption_message_global_index(*proof_limb_index, local_message_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption layout message index is outside the statement",
+                    )
+                })?;
+            let claim_kind = match statement
+                .target_decryption_message_claim_kind(global_message_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption layout message claim kind is missing",
+                    )
+                })? {
+                TargetDecryptionMessageClaimKind::AggregateOpening => "aggregateOpening",
+                TargetDecryptionMessageClaimKind::SmudgingOpening => "smudgingOpening",
+            };
+            let message_bound = statement
+                .target_decryption_message_bound(global_message_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption layout message bound is missing",
+                    )
+                })?;
+            let low_digit_trit_count =
+                layout.target_decryption_message_trit_count(local_message_index, 0);
+            let high_digit_trit_count =
+                layout.target_decryption_message_trit_count(local_message_index, 1);
+            let total_trit_count = low_digit_trit_count + high_digit_trit_count;
+            message_summaries.push(json!({
+                "localMessageIndex": local_message_index,
+                "globalMessageIndex": global_message_index,
+                "claimKind": claim_kind,
+                "messageBound": message_bound,
+                "encodingColumnCount": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT + total_trit_count,
+                "lowDigitTritCount": low_digit_trit_count,
+                "highDigitTritCount": high_digit_trit_count,
+                "totalTritCount": total_trit_count,
+            }));
+        }
+        limb_summaries.push(json!({
+            "proofLimbIndex": proof_limb_index,
+            "traceSize": layout.trace_size,
+            "targetDecryptionMessageColumns": layout.target_decryption_message_columns,
+            "targetDecryptionRandomnessColumns": layout.target_decryption_randomness_columns,
+            "targetDecryptionMessageEncodingColumns": layout.target_decryption_message_encoding_columns(),
+            "claimCount": layout.claim_count(),
+            "maskColumnCount": layout.mask_column_count,
+            "phaseOnePhysicalColumnCount": layout.phase_one_physical_count(),
+            "totalColumnCount": layout.phase_one_physical_count() + PHASE_TWO_COLUMN_COUNT,
+            "messages": message_summaries,
+        }));
+    }
+
+    Ok(json!({
+        "objectType": "BgvTargetDecryptionShareProofLayoutDescription",
+        "objectVersion": 1,
+        "ringDegree": statement.ring_degree,
+        "proofLimbIndices": proof_limb_indices,
+        "aggregateMessageCoefficientBound": target_statement.aggregate_message_coefficient_bound,
+        "smudgingMessageCoefficientBound": target_statement.smudging_message_coefficient_bound,
+        "totalMessageCount": statement.target_decryption_total_message_count(),
+        "totalMessageDigitCount": statement.target_decryption_total_message_digit_count(),
+        "limbs": limb_summaries,
+    }))
+}
+
 fn target_decryption_share_limb_statements_from_request(
     target_value: &Value,
     smudging_commitment_set: &Value,
@@ -1631,39 +1713,31 @@ fn target_decryption_share_limb_statements_from_request(
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<Vec<TargetDecryptionShareLimbStatement>> {
-    if let Some(limb_statement_values) = target_value.get("targetRnsLimbStatements") {
-        let limb_statement_values = limb_statement_values.as_array().ok_or_else(|| {
-            invalid_succinct_setup_proof("targetRnsLimbStatements must be an array")
-        })?;
-        if limb_statement_values.is_empty() {
-            return Err(invalid_succinct_setup_proof(
-                "targetRnsLimbStatements must not be empty",
-            ));
-        }
-        return limb_statement_values
-            .iter()
-            .map(|limb_statement_value| {
-                target_decryption_share_limb_statement_from_value(
-                    limb_statement_value,
-                    smudging_commitment_set,
-                    public_matrix_seed_hash,
-                    ring_degree,
-                    smudging_polynomial_degree,
-                )
-            })
-            .collect();
+    let limb_statement_values = target_value
+        .get("targetRnsLimbStatements")
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRnsLimbStatements must be present"))?
+        .as_array()
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRnsLimbStatements must be an array"))?;
+    if limb_statement_values.is_empty() {
+        return Err(invalid_succinct_setup_proof(
+            "targetRnsLimbStatements must not be empty",
+        ));
     }
 
-    Ok(vec![target_decryption_share_limb_statement_from_value(
-        target_value,
-        smudging_commitment_set,
-        public_matrix_seed_hash,
-        ring_degree,
-        smudging_polynomial_degree,
-    )?])
+    limb_statement_values
+        .iter()
+        .map(|limb_statement_value| {
+            target_decryption_share_limb_statement_from_value(
+                limb_statement_value,
+                smudging_commitment_set,
+                public_matrix_seed_hash,
+                ring_degree,
+                smudging_polynomial_degree,
+            )
+        })
+        .collect()
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_share_limb_statement_from_value(
     limb_statement_value: &Value,
     smudging_commitment_set: &Value,
@@ -1714,7 +1788,6 @@ fn target_decryption_share_limb_statement_from_value(
     })
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_share_role_statements_from_request(
     target_value: &Value,
     smudging_commitment_set: &Value,
@@ -1724,43 +1797,40 @@ fn target_decryption_share_role_statements_from_request(
     ring_degree: usize,
     smudging_polynomial_degree: usize,
 ) -> CanonicalResult<Vec<TargetDecryptionShareRoleStatement>> {
-    if let Some(role_statement_values) = target_value.get("targetRoleStatements") {
-        let role_statement_values = role_statement_values
-            .as_array()
-            .ok_or_else(|| invalid_succinct_setup_proof("targetRoleStatements must be an array"))?;
-        if role_statement_values.is_empty() {
-            return Err(invalid_succinct_setup_proof(
-                "targetRoleStatements must not be empty",
-            ));
-        }
-        return role_statement_values
-            .iter()
-            .map(|role_statement_value| {
-                target_decryption_share_role_statement_from_value(
-                    role_statement_value,
-                    smudging_commitment_set,
-                    target_rns_limb_index,
-                    target_rns_prime,
-                    public_matrix_seed_hash,
-                    ring_degree,
-                    smudging_polynomial_degree,
-                )
-            })
-            .collect();
+    let role_statement_values = target_value
+        .get("targetRoleStatements")
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRoleStatements must be present"))?
+        .as_array()
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRoleStatements must be an array"))?;
+    if role_statement_values.len() != TARGET_DECRYPTION_PROOF_TARGET_ROLES.len() {
+        return Err(invalid_succinct_setup_proof(
+            "targetRoleStatements must cover the canonical target roles",
+        ));
     }
 
-    Ok(vec![target_decryption_share_role_statement_from_value(
-        target_value,
-        smudging_commitment_set,
-        target_rns_limb_index,
-        target_rns_prime,
-        public_matrix_seed_hash,
-        ring_degree,
-        smudging_polynomial_degree,
-    )?])
+    role_statement_values
+        .iter()
+        .enumerate()
+        .map(|(target_role_index, role_statement_value)| {
+            let expected_target_role = TARGET_DECRYPTION_PROOF_TARGET_ROLES[target_role_index];
+            if read_string(role_statement_value, "targetRole")? != expected_target_role {
+                return Err(invalid_succinct_setup_proof(
+                    "targetRoleStatements must be in canonical target-role order",
+                ));
+            }
+            target_decryption_share_role_statement_from_value(
+                role_statement_value,
+                smudging_commitment_set,
+                target_rns_limb_index,
+                target_rns_prime,
+                public_matrix_seed_hash,
+                ring_degree,
+                smudging_polynomial_degree,
+            )
+        })
+        .collect()
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_share_role_statement_from_value(
     role_statement_value: &Value,
     smudging_commitment_set: &Value,
@@ -1797,7 +1867,6 @@ fn target_decryption_share_role_statement_from_value(
     })
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn validated_target_decryption_smudging_commitment_set_root(
     smudging_commitment_set: &Value,
 ) -> CanonicalResult<String> {
@@ -1829,7 +1898,6 @@ fn validated_target_decryption_smudging_commitment_set_root(
     Ok(root.to_string())
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_smudging_commitments_from_set(
     smudging_commitment_set: &Value,
     target_role: &str,
@@ -2292,7 +2360,6 @@ fn read_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
         })
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn read_i64(value: &Value, field_name: &str) -> CanonicalResult<i64> {
     value
         .get(field_name)

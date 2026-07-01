@@ -54,6 +54,7 @@ use self::proof_record_fixtures::{
     replace_public_key_share_hashes_with_material_hashes,
     round_one_aggregate_diagonals_from_fixture_package,
     same_secret_constant_commitments_from_fixture_package, same_secret_proofs_object,
+    terminal_accepted_setup_checkpoint_resume_enabled,
     trustee_evaluation_key_proofs_object_with_terminal_transport,
     trustee_evaluation_key_witness_for_fixture,
 };
@@ -132,13 +133,21 @@ use crate::hashing::{hash512_hex, to_hex};
 use crate::protocol_signatures::{
     create_ml_dsa_public_key_hash_fixture, create_protocol_signature_fixture,
 };
-use crate::transcript_core::decode_hex;
+use crate::transcript_core::{decode_hex, decode_standard_base64};
 use num_bigint::BigUint;
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::sync::OnceLock;
 use std::time::Instant;
 
 const SETUP_TRANSPORT_CHUNK_SIZE_BYTES_FOR_TESTS: u64 = 1_048_576;
+const PUBLIC_SETUP_VERIFICATION_INPUT_OUTPUT_PATH_ENV: &str =
+    "SEALED_LATTICE_WRITE_PUBLIC_SETUP_INPUT";
+const TERMINAL_ACCEPTED_SETUP_CHECKPOINT_DIRECTORY: &str = "terminal-accepted-setup-material-store";
+const PUBLIC_SETUP_VERIFICATION_INPUT_CHECKPOINT_DIRECTORY: &str =
+    "public-setup-verification-input";
+const PUBLIC_SETUP_VERIFICATION_INPUT_CHECKPOINT_FILE: &str =
+    "terminal-public-setup-verification-input.json";
 
 struct AcceptedSetupTestTiming {
     started_at: Instant,
@@ -215,6 +224,415 @@ fn transported_public_setup_package_and_request() -> (serde_json::Value, serde_j
         package,
         transported_public_setup_verification_request(companions),
     )
+}
+
+fn normalize_setup_proof_material_chunks_for_public_sdk(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Array(entries) => {
+            for entry in entries {
+                normalize_setup_proof_material_chunks_for_public_sdk(entry);
+            }
+        }
+        serde_json::Value::Object(object) => {
+            if let Some(bytes_base64_value) = object.remove("bytesBase64") {
+                let bytes_base64 = bytes_base64_value
+                    .as_str()
+                    .expect("setup proof chunk bytesBase64 must be a string");
+                let proof_bytes =
+                    decode_standard_base64(bytes_base64, "setup proof material chunk bytesBase64")
+                        .expect("setup proof chunk bytesBase64 must be canonical standard base64");
+                object.insert(
+                    "bytesHex".to_string(),
+                    serde_json::json!(to_hex(&proof_bytes)),
+                );
+            }
+            for entry in object.values_mut() {
+                normalize_setup_proof_material_chunks_for_public_sdk(entry);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn public_setup_verification_input_from_package_and_request(
+    package: &serde_json::Value,
+    request: &serde_json::Value,
+) -> serde_json::Value {
+    let mut input = request.clone();
+    normalize_setup_proof_material_chunks_for_public_sdk(&mut input);
+    let input_object = input
+        .as_object_mut()
+        .expect("public setup verification input must be an object");
+    input_object.insert("setupPackage".to_string(), package.clone());
+    input_object.insert(
+        "expectedSetupPackageHash".to_string(),
+        package["setupPackageHash"].clone(),
+    );
+    input_object.insert(
+        "expectedManifestHash".to_string(),
+        package["setupContext"]["manifestHash"].clone(),
+    );
+    input_object.insert(
+        "expectedRosterHash".to_string(),
+        package["setupContext"]["rosterHash"].clone(),
+    );
+
+    input
+}
+
+fn public_setup_verification_input_from_package_and_companions(
+    package: &serde_json::Value,
+    companions: &TransportedPublicSetupCompanions,
+) -> serde_json::Value {
+    let request = serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": companions.chunked_vss_coefficient_commitment_material.clone(),
+        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material.clone(),
+        "transportedSameSecretProofMaterial": companions.same_secret_proof_material.clone(),
+        "transportedPublicKeyShareMaterial": companions.public_key_share_material.clone(),
+        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material.clone(),
+        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material.clone(),
+        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material.clone(),
+        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material.clone(),
+    });
+    public_setup_verification_input_from_package_and_request(package, &request)
+}
+
+fn terminal_accepted_setup_checkpoint_path(
+    directory_name: &str,
+    file_name: &str,
+) -> std::path::PathBuf {
+    std::path::PathBuf::from("temp")
+        .join("test-checkpoints")
+        .join(TERMINAL_ACCEPTED_SETUP_CHECKPOINT_DIRECTORY)
+        .join(directory_name)
+        .join(file_name)
+}
+
+pub(super) fn recomputed_setup_package_hash_matches(package: &serde_json::Value) -> bool {
+    let Some(setup_package_hash) = package
+        .get("setupPackageHash")
+        .and_then(serde_json::Value::as_str)
+    else {
+        return false;
+    };
+    let mut recomputed_package = package.clone();
+    rebind_collective_setup_package_hash(&mut recomputed_package);
+    recomputed_package
+        .get("setupPackageHash")
+        .and_then(serde_json::Value::as_str)
+        == Some(setup_package_hash)
+}
+
+fn public_setup_verification_input_recomputes_expected_bindings(input: &serde_json::Value) -> bool {
+    let Some(setup_package) = input.get("setupPackage") else {
+        return false;
+    };
+    let Some(setup_context) = setup_package.get("setupContext") else {
+        return false;
+    };
+    let setup_package_hash = setup_package
+        .get("setupPackageHash")
+        .and_then(serde_json::Value::as_str);
+    let expected_setup_package_hash = input
+        .get("expectedSetupPackageHash")
+        .and_then(serde_json::Value::as_str);
+    let manifest_hash = setup_context
+        .get("manifestHash")
+        .and_then(serde_json::Value::as_str);
+    let expected_manifest_hash = input
+        .get("expectedManifestHash")
+        .and_then(serde_json::Value::as_str);
+    let roster_hash = setup_context
+        .get("rosterHash")
+        .and_then(serde_json::Value::as_str);
+    let expected_roster_hash = input
+        .get("expectedRosterHash")
+        .and_then(serde_json::Value::as_str);
+
+    setup_package_hash.is_some()
+        && setup_package_hash == expected_setup_package_hash
+        && manifest_hash.is_some()
+        && manifest_hash == expected_manifest_hash
+        && roster_hash.is_some()
+        && roster_hash == expected_roster_hash
+        && recomputed_setup_package_hash_matches(setup_package)
+}
+
+fn public_setup_verification_input_carries_streamable_vss_material(
+    input: &serde_json::Value,
+) -> bool {
+    match input
+        .get("transportedVssCoefficientCommitmentMaterial")
+        .and_then(|transported_material| transported_material.get("chunks"))
+        .and_then(serde_json::Value::as_array)
+    {
+        Some(chunks) => !chunks.is_empty(),
+        None => false,
+    }
+}
+
+fn public_setup_verification_input_checkpoint_is_current(input: &serde_json::Value) -> bool {
+    public_setup_verification_input_recomputes_expected_bindings(input)
+        && public_setup_verification_input_carries_streamable_vss_material(input)
+}
+
+fn public_setup_verification_input_checkpoint_path() -> std::path::PathBuf {
+    terminal_accepted_setup_checkpoint_path(
+        PUBLIC_SETUP_VERIFICATION_INPUT_CHECKPOINT_DIRECTORY,
+        PUBLIC_SETUP_VERIFICATION_INPUT_CHECKPOINT_FILE,
+    )
+}
+
+fn write_public_setup_verification_input_value(
+    output_path: &std::path::Path,
+    input: &serde_json::Value,
+) {
+    if let Some(parent) = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent).expect("create public setup input output directory");
+    }
+
+    let json_text = canonical_json(input).expect("public setup verification input JSON");
+    std::fs::write(output_path, json_text.as_bytes())
+        .expect("write public setup verification input JSON");
+    println!(
+        concat!(
+            "sealed-lattice-public-setup-input ",
+            "{{\"path\":\"{}\",\"jsonBytes\":{}}}"
+        ),
+        output_path.display(),
+        json_text.len()
+    );
+}
+
+fn persist_public_setup_verification_input_checkpoint(input: &serde_json::Value) {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return;
+    }
+    let checkpoint_path = public_setup_verification_input_checkpoint_path();
+    let Some(parent) = checkpoint_path.parent() else {
+        return;
+    };
+    std::fs::create_dir_all(parent).expect("public setup input checkpoint directory");
+    let json_text = canonical_json(input).expect("public setup verification input checkpoint JSON");
+    let temporary_path = parent.join(format!(
+        "{}.{}.partial",
+        PUBLIC_SETUP_VERIFICATION_INPUT_CHECKPOINT_FILE,
+        std::process::id()
+    ));
+    std::fs::write(&temporary_path, json_text.as_bytes())
+        .expect("public setup input checkpoint write");
+    if std::fs::rename(&temporary_path, &checkpoint_path).is_err() {
+        let _ = std::fs::remove_file(&temporary_path);
+    }
+}
+
+fn public_setup_verification_input_from_checkpoint() -> Option<serde_json::Value> {
+    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+        return None;
+    }
+    let checkpoint_path = public_setup_verification_input_checkpoint_path();
+    let bytes = std::fs::read(&checkpoint_path).ok()?;
+    let input: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    if !public_setup_verification_input_checkpoint_is_current(&input) {
+        terminal_phase(&format!(
+            "ignored public setup input checkpoint with stale public SDK transport shape {}",
+            checkpoint_path.display()
+        ));
+        return None;
+    }
+    terminal_phase(&format!(
+        "resumed public setup input checkpoint {}",
+        checkpoint_path.display()
+    ));
+    Some(input)
+}
+
+fn write_public_setup_verification_input_if_requested(
+    package: &serde_json::Value,
+    companions: &TransportedPublicSetupCompanions,
+) {
+    let Some(output_path) = std::env::var_os(PUBLIC_SETUP_VERIFICATION_INPUT_OUTPUT_PATH_ENV)
+    else {
+        return;
+    };
+    if output_path.is_empty() {
+        return;
+    }
+
+    let output_path = std::path::PathBuf::from(output_path);
+    let input = public_setup_verification_input_from_package_and_companions(package, companions);
+    write_public_setup_verification_input_value(&output_path, &input);
+    persist_public_setup_verification_input_checkpoint(&input);
+}
+
+#[test]
+#[ignore = "manual public setup verification input export"]
+fn manual_public_setup_verification_input_export_from_transported_companions() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "manual_public_setup_verification_input_export_from_transported_companions",
+    );
+    terminal_phase("start public setup input export diagnostic");
+    let output_path = std::env::var_os(PUBLIC_SETUP_VERIFICATION_INPUT_OUTPUT_PATH_ENV)
+        .expect("set SEALED_LATTICE_WRITE_PUBLIC_SETUP_INPUT to the output JSON path");
+    assert!(
+        !output_path.as_os_str().is_empty(),
+        "SEALED_LATTICE_WRITE_PUBLIC_SETUP_INPUT must not be empty"
+    );
+
+    if let Some(input) = public_setup_verification_input_from_checkpoint() {
+        write_public_setup_verification_input_value(&std::path::PathBuf::from(output_path), &input);
+        return;
+    }
+
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+    write_public_setup_verification_input_if_requested(&package, &companions);
+}
+
+#[test]
+fn public_setup_verification_input_export_normalizes_base64_chunks_to_hex() {
+    let package = serde_json::json!({
+        "setupPackageHash": valid_hash('a'),
+        "setupContext": {
+            "manifestHash": valid_hash('b'),
+            "rosterHash": valid_hash('c'),
+        },
+    });
+    let request = serde_json::json!({
+        "transportedSameSecretProofMaterial": {
+            "proofMaterials": [
+                {
+                    "chunks": [
+                        {
+                            "chunkIndex": 0,
+                            "bytesBase64": "AQID",
+                        },
+                        {
+                            "chunkIndex": 1,
+                            "bytesHex": "0405",
+                        },
+                    ],
+                },
+            ],
+        },
+        "transportedPublicKeyShareProofMaterial": {
+            "proofMaterials": [
+                {
+                    "chunks": [
+                        {
+                            "chunkIndex": 0,
+                            "bytesBase64": "Bgc=",
+                        },
+                    ],
+                },
+            ],
+        },
+    });
+
+    let input = public_setup_verification_input_from_package_and_request(&package, &request);
+
+    assert_eq!(input["setupPackage"], package);
+    assert_eq!(input["expectedSetupPackageHash"], valid_hash('a'));
+    assert_eq!(input["expectedManifestHash"], valid_hash('b'));
+    assert_eq!(input["expectedRosterHash"], valid_hash('c'));
+    let same_secret_chunks =
+        &input["transportedSameSecretProofMaterial"]["proofMaterials"][0]["chunks"];
+    assert_eq!(same_secret_chunks[0]["bytesHex"], "010203");
+    assert!(same_secret_chunks[0]["bytesBase64"].is_null());
+    assert_eq!(same_secret_chunks[1]["bytesHex"], "0405");
+    let public_key_chunks =
+        &input["transportedPublicKeyShareProofMaterial"]["proofMaterials"][0]["chunks"];
+    assert_eq!(public_key_chunks[0]["bytesHex"], "0607");
+    assert!(public_key_chunks[0]["bytesBase64"].is_null());
+    assert_eq!(
+        request["transportedSameSecretProofMaterial"]["proofMaterials"][0]["chunks"][0]["bytesBase64"],
+        "AQID",
+        "export must not mutate the source request"
+    );
+}
+
+#[test]
+fn public_setup_verification_input_export_keeps_streamable_vss_chunks() {
+    let package = serde_json::json!({
+        "setupPackageHash": valid_hash('a'),
+        "setupContext": {
+            "manifestHash": valid_hash('b'),
+            "rosterHash": valid_hash('c'),
+        },
+    });
+    let companions = TransportedPublicSetupCompanions {
+        vss_coefficient_commitment_material: serde_json::json!({
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "chunkCount": 1,
+        }),
+        chunked_vss_coefficient_commitment_material: serde_json::json!({
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "chunkCount": 1,
+            "chunks": [
+                {
+                    "chunkIndex": 0,
+                    "bytesHex": "0102",
+                },
+            ],
+        }),
+        verified_vss_coefficient_commitment_material: serde_json::json!({
+            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+        }),
+        same_secret_proof_material: serde_json::json!({}),
+        public_key_share_material: serde_json::json!({}),
+        public_key_share_proof_material: serde_json::json!({}),
+        evaluation_key_share_component_material: serde_json::json!({}),
+        evaluation_key_share_proof_material: serde_json::json!({}),
+        public_evaluation_key_material: serde_json::json!({}),
+    };
+    let terminal_request = transported_public_setup_verification_request(companions.clone());
+    let public_sdk_input =
+        public_setup_verification_input_from_package_and_companions(&package, &companions);
+
+    assert!(
+        terminal_request["transportedVssCoefficientCommitmentMaterial"]["chunks"].is_null(),
+        "terminal setup request must stay reference-only"
+    );
+    assert_eq!(
+        public_sdk_input["transportedVssCoefficientCommitmentMaterial"]["chunks"][0]["bytesHex"],
+        "0102"
+    );
+    assert!(public_setup_verification_input_carries_streamable_vss_material(
+        &public_sdk_input
+    ));
+}
+
+#[test]
+fn public_setup_verification_input_checkpoint_validation_recomputes_package_bindings() {
+    let mut package = serde_json::json!({
+        "objectType": "SetupPackage",
+        "objectVersion": 1,
+        "setupContext": {
+            "manifestHash": valid_hash('1'),
+            "rosterHash": valid_hash('2'),
+        },
+        "payloadRoot": valid_hash('3'),
+    });
+    rebind_collective_setup_package_hash(&mut package);
+    let input =
+        public_setup_verification_input_from_package_and_request(&package, &serde_json::json!({}));
+
+    assert!(public_setup_verification_input_recomputes_expected_bindings(&input));
+
+    let mut drifted_expected_hash = input.clone();
+    drifted_expected_hash["expectedSetupPackageHash"] = serde_json::json!(valid_hash('4'));
+    assert!(!public_setup_verification_input_recomputes_expected_bindings(&drifted_expected_hash));
+
+    let mut drifted_package_payload = input;
+    drifted_package_payload["setupPackage"]["payloadRoot"] = serde_json::json!(valid_hash('5'));
+    assert!(
+        !public_setup_verification_input_recomputes_expected_bindings(&drifted_package_payload)
+    );
 }
 
 // Runs the collective BGV setup verifier over a setup package and returns the
@@ -308,8 +726,20 @@ pub(super) fn terminal_phase(message: &str) {
     static TERMINAL_PHASE_CLOCK: std::sync::OnceLock<std::time::Instant> =
         std::sync::OnceLock::new();
     let started = TERMINAL_PHASE_CLOCK.get_or_init(std::time::Instant::now);
-    println!(
+    let line = format!(
         "terminal-accepted-setup-phase [+{}s] {message}",
         started.elapsed().as_secs()
     );
+    println!("{line}");
+    let log_path =
+        terminal_accepted_setup_checkpoint_path("phase-log", "terminal-accepted-setup-phases.log");
+    if let Some(parent) = log_path.parent() {
+        std::fs::create_dir_all(parent).expect("terminal phase log directory");
+    }
+    let mut log_file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .expect("terminal phase log file");
+    writeln!(log_file, "{line}").expect("terminal phase log write");
 }

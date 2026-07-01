@@ -13,7 +13,6 @@ import {
     compactVssMessageDigitTritCount,
     compactVssParameterCertificateInputBinding,
     targetDecryptionAggregateMessageClaimMaskDigitCount,
-    targetDecryptionRandomnessClaimMaskDigitCount,
     targetDecryptionSmudgingMessageClaimMaskDigitCount,
 } from '#packages/protocol/src/setup/compact-vss-commitments.js';
 import {
@@ -46,11 +45,11 @@ const artifactPath = path.resolve(
         'tests/fixtures/compact-vss-parameter-review-results.json',
 );
 const expectedArtifactCanonicalSha256 =
-    '479e3492fb1e6685a2108cfbf53b86b45079c398b2abd40d37726b1dbd03a11d';
+    'd99367759b76f8e6d5cf01bc6284bdc7a8a201791da4a06899f95580026854c1';
 
 const participantCount = 10;
 const thresholdDegree = 4;
-const canonicalTargetCiphertextLevel = 6;
+const canonicalTargetCiphertextLevel = 4;
 const selectedEvaluatorWorkingLevel = 15;
 const currentFullCoefficientTransportBytes = 1_604_341_697;
 const targetRnsPrimes = acceptedBgvSetupQSharePrimes.slice(
@@ -348,8 +347,6 @@ const activeCompactMessageColumnReview = (input: {
                     targetDecryptionAggregateMessageClaimMaskDigitCount,
                 smudgingMessageClaimMaskDigitCount:
                     targetDecryptionSmudgingMessageClaimMaskDigitCount,
-                randomnessClaimMaskDigitCount:
-                    targetDecryptionRandomnessClaimMaskDigitCount,
             },
             interpretation:
                 'Direct digit claims are proof evidence, not extra compact public commitment body columns. They must stay measured before activation, but they keep the public commitment body at two message columns plus two randomness columns.',
@@ -357,7 +354,7 @@ const activeCompactMessageColumnReview = (input: {
         implementationWorkRequired: [
             'keep the reviewed conclusion rows source-derived and recomputed by accepted setup when the compact relation or witness bounds change',
             'measure proof-material byte size, proof generation time, and proof verification time on the final compact proof path',
-            'keep target-result release unpublished and development-only until accepted compact setup, target proof material, production smudging evidence, final measurement, supported-runtime evidence, and the release boundary are regenerated from source constants',
+            'keep target-result release development-only until supported-runtime evidence is measured through the public package boundary from source constants',
         ],
         sampledMatrixResiduesPerCoordinate,
         sampledMatrixResiduesPerCommitment,
@@ -428,7 +425,7 @@ const replacementCpuBudgetReview = (input: {
 
 const compactProofActivationReview = (): JsonRecord => ({
     finding:
-        'The compact commitment profile is active in the commitment computation and compact proof relations, and the source-derived certificate conclusion rows are now bound by the parameter review. Public target-result release stays closed until accepted compact setup, target proof material, production smudging evidence, final measurement, and the release verifier are complete.',
+        'The compact commitment profile is active in the commitment computation and compact proof relations, and the source-derived certificate conclusion rows are now bound by the parameter review. Public target-result release is exposed only as development evidence until supported-runtime evidence is measured through the public package boundary.',
     currentVerifierFacts: [
         'compact share-linkage row checks cover compact opening randomness plus direct message-digit, carry consistency, and verifier-side trit decoder claims',
         'compact same-secret bridge vectors consume message projections, direct digit consistency claims, and verifier-side trit decoder rows tying target messages to secret + target_prime * negative_indicator',
@@ -440,10 +437,10 @@ const compactProofActivationReview = (): JsonRecord => ({
     requiredProofChanges: [
         'review the exact final relation, including correlated multi-opening exposure and the final range-evidence cost',
         'measure the converted source-batch proof-material byte size and proof generation and verification times',
-        'connect any public target-result release to regenerated certificate input bindings instead of the current unpublished development command',
+        'keep public target-result release connected to regenerated certificate input bindings through the published SDK wrapper',
     ],
     implementationConsequence:
-        'Accepted setup rejects incomplete compact material as incomplete, rejects malformed complete compact material as malformed, and lets proof-verified complete compact material proceed to later setup phases; target-result release must remain unavailable until accepted compact setup, target proof material, production smudging evidence, final measurement, supported-runtime evidence, and the public release boundary are regenerated from the final constants.',
+        'Accepted setup rejects incomplete compact material as incomplete, rejects malformed complete compact material as malformed, and lets proof-verified complete compact material proceed to later setup phases; target-result release remains development evidence until supported-runtime evidence is measured through the public package boundary.',
 });
 
 const artifact = (): JsonRecord => {
@@ -756,9 +753,9 @@ const artifact = (): JsonRecord => {
         },
         activationGate: {
             finding:
-                'Public target-result activation must stay closed until accepted compact setup, target proof material, production smudging evidence, final measurement, and supported-runtime evidence are complete.',
+                'Public target-result activation remains scoped to development evidence until supported-runtime evidence is complete.',
             currentVerifierRule:
-                'Absent compact VSS public material may remain optional, incomplete compact material must refuse as incomplete, malformed complete compact material must refuse as malformed, and proof-verified compact setup material may proceed to later setup phases; public target-result acceptance remains unavailable.',
+                'Absent compact VSS public material may remain optional, incomplete compact material must refuse as incomplete, malformed complete compact material must refuse as malformed, and proof-verified compact setup material may proceed to later setup phases; public target-result acceptance is available only through the proof-backed SDK wrapper as development evidence.',
             requiredReplacementEvidence: [
                 'accepted-setup verification over compact public material and compact same-secret bridge material',
                 'recipient-owned restored witness verification against the accepted compact artifact',

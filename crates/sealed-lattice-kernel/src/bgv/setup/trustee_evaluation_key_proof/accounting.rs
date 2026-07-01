@@ -7,8 +7,7 @@ use super::*;
 use crate::bgv::evaluator::top_k::CANONICAL_TARGET_CIPHERTEXT_LEVEL;
 use crate::bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE};
 use crate::bgv::setup::compact_vss_commitment::{
-    COMPACT_VSS_MESSAGE_DIGIT_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-    compact_vss_message_digit_bound,
+    COMPACT_VSS_MESSAGE_DIGIT_COUNT, compact_vss_message_digit_bound,
 };
 use crate::hashing::derive_protocol_hash;
 
@@ -678,7 +677,7 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
             "statementShape": "one proof statement spans every active target RNS limb for both target roles: lifted compact aggregate-threshold-share openings, target-bound smudging commitment openings, the released-partial equations, and masked cross-field consistency claims",
             "aggregateOpeningRows": "aggregate share messages are lifted compact-opening coefficients below the active-limb aggregate bound, committed over the setup commitment fields, and reduced modulo each target prime inside the released-partial equation",
             "smudgingRows": "target-bound smudging messages use the signed coefficient offset from the target smudging commitment set; every smudging commitment opening is bound to the same target ciphertext, target context, target-share profile, and public matrix seed",
-            "coverage": "the all-active-limb proof material carries one lower-level proof for one target share; target-result release remains fail-closed until the compact commitment and quorum-result verifier are ready",
+            "coverage": "the all-active-limb proof material carries one lower-level proof for one target share; the unpublished target-result release command verifies a proof-backed quorum before interpolation, while public release exposure waits for final byte and runtime evidence",
             "privacyBoundary": "target-share masked consistency uses a wider smudging mask and a wider CRT lift so the first-profile interpolation view keeps a 128-bit-class hiding margin",
         }),
         pending_desktop_browser_measurement(),
@@ -693,7 +692,7 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         argument_shape.insert(
             "limbFields".to_string(),
             Value::String(
-                "one statement covers every canonical target active limb plus the setup commitment fields; commitment fields carry every compact-opening relation, lifted aggregate-message consistency claims use a five-field CRT lift, and target smudging-message plus opening-randomness consistency claims use a four-field lift with shorter masks"
+                "one statement covers every canonical target active limb plus the setup commitment fields; commitment fields carry every compact-opening relation, lifted aggregate-message consistency claims use a five-field CRT lift, and target smudging-message consistency claims use a four-field lift with a shorter mask"
                     .to_string(),
             ),
         );
@@ -711,11 +710,6 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         .checked_mul(target_messages_per_limb)
         .ok_or_else(|| {
             invalid_succinct_setup_proof("target accounting message count overflowed")
-        })?;
-    let target_randomness_vector_count = target_message_vector_count
-        .checked_mul(COMPACT_VSS_RANDOMNESS_COLUMN_COUNT)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("target accounting randomness count overflowed")
         })?;
     let target_aggregate_message_vector_count = active_target_limb_count;
     let target_smudging_message_vector_count = target_message_vector_count
@@ -749,17 +743,8 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
                 "target accounting smudging message claim count overflowed",
             )
         })?;
-    let target_randomness_claims_per_share = target_randomness_vector_count
-        .checked_mul(
-            TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_RANDOMNESS_MASKED_CLAIM_FIELD_COUNT,
-        )
-        .and_then(|count| count.checked_mul(CONSISTENCY_REPETITIONS))
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("target accounting randomness claim count overflowed")
-        })?;
     let claims_per_target_share = target_aggregate_message_claims_per_share
         .checked_add(target_smudging_message_claims_per_share)
-        .and_then(|count| count.checked_add(target_randomness_claims_per_share))
         .ok_or_else(|| invalid_succinct_setup_proof("target accounting claim count overflowed"))?;
     let adversary_view_claim_count = FIRST_PROFILE_TARGET_SHARE_COUNT
         .checked_mul(claims_per_target_share as u128)
@@ -783,13 +768,6 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         })?;
     let smudging_message_claim_budget_log2 =
         i64::from(smudging_message_adversary_view_claim_count.ilog2()) + 1;
-    let randomness_adversary_view_claim_count = FIRST_PROFILE_TARGET_SHARE_COUNT
-        .checked_mul(target_randomness_claims_per_share as u128)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("target accounting randomness claim budget overflowed")
-        })?;
-    let randomness_claim_budget_log2 = i64::from(randomness_adversary_view_claim_count.ilog2()) + 1;
-
     let maximum_active_target_prime = DATA_PRIMES
         .iter()
         .take(active_target_limb_count)
@@ -865,24 +843,8 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
         smudging_message_clear_claim_bound_bits - smudging_message_mask_entropy_bits_floor;
     let smudging_message_total_leakage_log2 =
         smudging_message_per_claim_leakage_log2 + smudging_message_claim_budget_log2;
-    let randomness_clear_claim_bound = (POLYNOMIAL_DEGREE as u128)
-        .checked_mul(consistency_coefficient_bound)
-        .ok_or_else(|| {
-            invalid_succinct_setup_proof("target accounting randomness clear bound overflowed")
-        })?;
-    let randomness_clear_claim_bound_bits = i64::from(randomness_clear_claim_bound.ilog2()) + 1;
-    let randomness_mask_bound =
-        claim_mask_bound_biguint(TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT)?;
-    let randomness_mask_entropy_bits_floor =
-        claim_mask_entropy_bits_floor(TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT)?;
-    let randomness_per_claim_leakage_log2 =
-        randomness_clear_claim_bound_bits - randomness_mask_entropy_bits_floor;
-    let randomness_total_leakage_log2 =
-        randomness_per_claim_leakage_log2 + randomness_claim_budget_log2;
-    let total_leakage_log2 = aggregate_message_total_leakage_log2
-        .max(smudging_message_total_leakage_log2)
-        .max(randomness_total_leakage_log2)
-        + 2;
+    let total_leakage_log2 =
+        aggregate_message_total_leakage_log2.max(smudging_message_total_leakage_log2) + 2;
 
     if let Some(zero_knowledge) = accounting_fields
         .get_mut("zeroKnowledge")
@@ -909,12 +871,6 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
                 "smudgingMessageClaimsPerTargetShare": target_smudging_message_claims_per_share,
                 "smudgingMessageClaimBudgetLog2Approximate": smudging_message_claim_budget_log2,
                 "smudgingMessageTotalLeakageLog2Approximate": smudging_message_total_leakage_log2,
-                "randomnessPerClaimStatisticalDistanceLog2": randomness_per_claim_leakage_log2,
-                "randomnessClearClaimBoundBits": randomness_clear_claim_bound_bits,
-                "randomnessMaskDigitCount": TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT,
-                "randomnessClaimsPerTargetShare": target_randomness_claims_per_share,
-                "randomnessClaimBudgetLog2Approximate": randomness_claim_budget_log2,
-                "randomnessTotalLeakageLog2Approximate": randomness_total_leakage_log2,
                 "claimsPerTargetShare": claims_per_target_share,
                 "firstProfileTargetShareCount": FIRST_PROFILE_TARGET_SHARE_COUNT,
                 "claimBudgetLog2Approximate": claim_budget_log2,
@@ -942,13 +898,9 @@ pub(crate) fn succinct_target_decryption_share_accounting_value() -> CanonicalRe
             Value::String(smudging_message_mask_bound.to_string()),
         );
         integer_binding.insert(
-            "randomnessMaskBound".to_string(),
-            Value::String(randomness_mask_bound.to_string()),
-        );
-        integer_binding.insert(
             "crtWindowRule".to_string(),
             Value::String(
-                "the target-share proof carries direct digit claims: the aggregate-message digit clear claim bound is about two to the fifty; each aggregate-message digit consistency claim is carried by five proof fields whose product exceeds twice the 142-digit base-3 mask-plus-clear window, while smudging-message digit and ternary opening-randomness consistency claims use a 114-digit base-3 mask and four proof fields; statements with too few active fields are refused before proving"
+                "the target-share proof carries direct digit claims: the aggregate-message digit clear claim bound is about two to the fifty; each aggregate-message digit consistency claim is carried by five proof fields whose product exceeds twice the 142-digit base-3 mask-plus-clear window, while smudging-message digit consistency claims use a 114-digit base-3 mask and four proof fields; statements with too few active fields are refused before proving"
                     .to_string(),
             ),
         );

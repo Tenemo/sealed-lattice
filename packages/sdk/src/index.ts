@@ -66,7 +66,10 @@ import type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
 } from '@sealed-lattice/types';
-import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
+import {
+    TranscriptCoreKernelCommandError,
+    type TranscriptCoreKernel,
+} from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 
@@ -326,6 +329,61 @@ export type SetupPackageVerification = Readonly<{
     }>[];
 }>;
 
+/** Proof-backed target-decryption share evidence supplied to target-result verification. */
+export type TargetDecryptionShareEvidence = Readonly<{
+    readonly targetDecryptionShare: unknown;
+    readonly proofStatement: unknown;
+    readonly proofMaterial: unknown;
+}>;
+
+/** Public input for verifying proof-backed target shares and releasing the target result. */
+export type VerifyTargetDecryptionResultInput = Readonly<{
+    readonly setupPackage: SetupPackage;
+    readonly targetAcceptedRecord: unknown;
+    readonly targetCiphertextBinding: unknown;
+    readonly targetCiphertexts: unknown;
+    readonly targetShareProfile: unknown;
+    readonly targetShareProofs: readonly TargetDecryptionShareEvidence[];
+}>;
+
+/** Minimal evidence for one share accepted by target-result verification. */
+export type TargetDecryptionVerifiedShareEvidence = Readonly<{
+    readonly trusteeIdentity: string;
+    readonly rosterPosition: number;
+    readonly interpolationPoint: number;
+    readonly targetDecryptionShareHash: ProtocolHash;
+    readonly proofStatementRoot: ProtocolHash;
+    readonly proofMaterialRoot: ProtocolHash;
+}>;
+
+/** Target result released after the packaged verifier accepts a proof-backed share quorum. */
+export type TargetDecryptionAcceptedResult = Readonly<{
+    readonly targetResultHash: ProtocolHash;
+    readonly targetIdByOption: readonly number[];
+    readonly targetOrderByOption: readonly number[];
+    readonly topCount: number;
+    readonly shareEvidence: readonly TargetDecryptionVerifiedShareEvidence[];
+}>;
+
+/** Structured result returned by public target-result verification. */
+export type TargetDecryptionResultVerification = Readonly<
+    | {
+          readonly ok: true;
+          readonly operation: 'verifyTargetDecryptionResult';
+          readonly verifierStatus: 'accepted';
+          readonly acceptedResult: TargetDecryptionAcceptedResult;
+      }
+    | {
+          readonly ok: false;
+          readonly operation: 'verifyTargetDecryptionResult';
+          readonly verifierStatus: 'refused';
+          readonly refusedObjects: readonly Readonly<{
+              readonly reasonCode: string;
+              readonly message: string;
+          }>[];
+      }
+>;
+
 /** Derives threshold, quorum, and warning parameters for a roster profile. */
 export const deriveThresholdProfile = (
     input: ThresholdProfileInput,
@@ -484,6 +542,8 @@ const setupProofMaterialTransportFieldNames = [
 ] as const satisfies readonly SetupProofMaterialTransportFieldName[];
 
 let setupProofMaterialVerificationSequence = 0;
+let setupVssMaterialVerificationSequence = 0;
+let targetResultReleaseVerificationSequence = 0;
 
 // Verification ids are process-local kernel stream handles, not security bindings; the cryptographic binding is the full proof material root.
 const setupProofMaterialVerificationId = (
@@ -511,6 +571,55 @@ const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
     void omittedChunks;
 
     return reference;
+};
+
+const setupVssMaterialReference = (
+    transportedMaterial: JsonRecord,
+): JsonRecord => {
+    const { chunks: omittedChunks, ...reference } = transportedMaterial;
+    void omittedChunks;
+
+    return reference;
+};
+
+const setupVssMaterialVerificationId = (
+    transportedMaterial: JsonRecord,
+): string => {
+    setupVssMaterialVerificationSequence += 1;
+    const materialHash =
+        typeof transportedMaterial.fullObjectHash === 'string'
+            ? transportedMaterial.fullObjectHash.slice(0, 24)
+            : 'unbound';
+
+    return [
+        'sdk-vss-material',
+        String(setupVssMaterialVerificationSequence),
+        materialHash,
+    ].join('-');
+};
+
+const targetResultReleaseRefusal = (
+    reasonCode: string,
+    message: string,
+): TargetDecryptionResultVerification => ({
+    ok: false,
+    operation: 'verifyTargetDecryptionResult',
+    verifierStatus: 'refused',
+    refusedObjects: [
+        {
+            reasonCode,
+            message,
+        },
+    ],
+});
+
+const nextTargetResultReleaseVerificationId = (): string => {
+    targetResultReleaseVerificationSequence += 1;
+
+    return [
+        'sdk-target-result-release',
+        String(targetResultReleaseVerificationSequence),
+    ].join('-');
 };
 
 // Safe only because proofMaterialRoot is the collision-resistant commitment the kernel rebinds; chunks are dropped only after that root is in the verified set.
@@ -576,6 +685,102 @@ const setupProofMaterialChunks = (
         : undefined;
 };
 
+const setupPackageRecordForVssTransport = (
+    setupPackage: unknown,
+): JsonRecord | undefined =>
+    setupPackage !== null && typeof setupPackage === 'object'
+        ? (setupPackage as JsonRecord)
+        : undefined;
+
+const setupPackageNestedRecord = (
+    setupPackage: JsonRecord,
+    fieldName: string,
+): JsonRecord | undefined => {
+    const value = setupPackage[fieldName];
+
+    return value !== null && typeof value === 'object'
+        ? (value as JsonRecord)
+        : undefined;
+};
+
+const streamTransportedVssMaterial = (
+    kernel: TranscriptCoreKernel,
+    input: VerifySetupPackageInput,
+):
+    | Readonly<{
+          readonly verificationId: string;
+          readonly transportedVssCoefficientCommitmentMaterial: SetupTransportedVssCoefficientCommitmentMaterialLike;
+          readonly verifiedVssCoefficientCommitmentMaterial: ProtocolVerifiedVssCoefficientCommitmentMaterial;
+      }>
+    | undefined => {
+    const chunks = setupProofMaterialChunks(
+        input.transportedVssCoefficientCommitmentMaterial,
+    );
+    if (chunks === undefined) {
+        return undefined;
+    }
+    const setupPackage = setupPackageRecordForVssTransport(input.setupPackage);
+    if (setupPackage === undefined) {
+        return undefined;
+    }
+    const setupContext = setupPackage.setupContext;
+    const commonRandomness = setupPackageNestedRecord(
+        setupPackage,
+        'commonRandomness',
+    );
+    const vssCoefficientCommitments = setupPackageNestedRecord(
+        setupPackage,
+        'vssCoefficientCommitments',
+    );
+    const publicMatrixSeedHash = commonRandomness?.publicMatrixSeedHash;
+    const vssCoefficientCommitmentRoot =
+        vssCoefficientCommitments?.vssCoefficientCommitmentRoot;
+    const sourceTrusteeCoefficientCommitmentRecords =
+        vssCoefficientCommitments?.sourceTrusteeRecords;
+    if (
+        setupContext === undefined ||
+        typeof publicMatrixSeedHash !== 'string' ||
+        typeof vssCoefficientCommitmentRoot !== 'string' ||
+        !Array.isArray(sourceTrusteeCoefficientCommitmentRecords)
+    ) {
+        return undefined;
+    }
+
+    const transportedMaterial =
+        input.transportedVssCoefficientCommitmentMaterial as JsonRecord;
+    const transportedVssCoefficientCommitmentMaterial =
+        setupVssMaterialReference(
+            transportedMaterial,
+        ) as SetupTransportedVssCoefficientCommitmentMaterialLike;
+    const verificationId = setupVssMaterialVerificationId(transportedMaterial);
+    kernel.beginThresholdShareCommitmentsFromTransportStream({
+        derivationId: verificationId,
+        setupContext,
+        publicMatrixSeedHash,
+        transportedVssCoefficientCommitmentMaterial,
+    });
+    chunks.forEach((chunk) => {
+        kernel.absorbThresholdShareCommitmentsFromTransportStreamChunk({
+            derivationId: verificationId,
+            chunkIndex: chunk.chunkIndex,
+            bytesHex: chunk.bytesHex,
+        });
+    });
+    const streamDerivation =
+        kernel.finishThresholdShareCommitmentsFromTransportStream({
+            derivationId: verificationId,
+            vssCoefficientCommitmentRoot,
+            sourceTrusteeCoefficientCommitmentRecords,
+        });
+
+    return {
+        verificationId,
+        transportedVssCoefficientCommitmentMaterial,
+        verifiedVssCoefficientCommitmentMaterial:
+            streamDerivation.verifiedVssCoefficientCommitmentMaterial as ProtocolVerifiedVssCoefficientCommitmentMaterial,
+    };
+};
+
 const streamSetupProofMaterialSet = (
     kernel: TranscriptCoreKernel,
     fieldName: SetupProofMaterialTransportFieldName,
@@ -627,19 +832,39 @@ const streamSetupProofMaterialSet = (
 const prepareSetupPackageVerificationInputForKernel = (
     kernel: TranscriptCoreKernel,
     input: VerifySetupPackageInput,
-): VerifySetupPackageInput &
-    Readonly<{
-        readonly verifiedSetupProofMaterials?: ProtocolVerifiedSetupProofMaterialSet;
-    }> => {
+): Readonly<{
+    readonly verificationInput: VerifySetupPackageInput &
+        Readonly<{
+            readonly verifiedSetupProofMaterials?: ProtocolVerifiedSetupProofMaterialSet;
+        }>;
+    readonly liveVssMaterialVerificationId?: string;
+}> => {
     const {
         verifiedSetupProofMaterials: omittedCallerProofHandles,
+        verifiedVssCoefficientCommitmentMaterial: omittedCallerVssHandle,
         ...inputWithoutCallerProofHandles
     } = input as VerifySetupPackageInput &
         Readonly<{
             readonly verifiedSetupProofMaterials?: unknown;
+            readonly verifiedVssCoefficientCommitmentMaterial?: unknown;
         }>;
     void omittedCallerProofHandles;
-    const verificationInput = inputWithoutCallerProofHandles;
+    void omittedCallerVssHandle;
+
+    const streamVerifiedVssMaterial = streamTransportedVssMaterial(
+        kernel,
+        inputWithoutCallerProofHandles,
+    );
+    const verificationInput =
+        streamVerifiedVssMaterial === undefined
+            ? inputWithoutCallerProofHandles
+            : {
+                  ...inputWithoutCallerProofHandles,
+                  transportedVssCoefficientCommitmentMaterial:
+                      streamVerifiedVssMaterial.transportedVssCoefficientCommitmentMaterial,
+                  verifiedVssCoefficientCommitmentMaterial:
+                      streamVerifiedVssMaterial.verifiedVssCoefficientCommitmentMaterial,
+              };
     const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
         (fieldName) =>
             streamSetupProofMaterialSet(
@@ -649,7 +874,11 @@ const prepareSetupPackageVerificationInputForKernel = (
             ),
     );
     if (verifiedMaterials.length === 0) {
-        return verificationInput;
+        return {
+            verificationInput,
+            liveVssMaterialVerificationId:
+                streamVerifiedVssMaterial?.verificationId,
+        };
     }
 
     const verifiedSetupProofMaterials = {
@@ -661,21 +890,24 @@ const prepareSetupPackageVerificationInputForKernel = (
     } as const satisfies ProtocolVerifiedSetupProofMaterialSet;
 
     return {
-        ...verificationInput,
-        transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-            verificationInput.transportedSameSecretProofMaterial,
-            verifiedSetupProofMaterials,
-        ),
-        transportedPublicKeyShareProofMaterial: compactSetupProofMaterialSet(
-            verificationInput.transportedPublicKeyShareProofMaterial,
-            verifiedSetupProofMaterials,
-        ),
-        transportedEvaluationKeyShareProofMaterial:
-            compactSetupProofMaterialSet(
+        verificationInput: {
+            ...verificationInput,
+            transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
+                verificationInput.transportedSameSecretProofMaterial,
+                verifiedSetupProofMaterials,
+            ),
+            transportedPublicKeyShareProofMaterial:
+                compactSetupProofMaterialSet(
+                    verificationInput.transportedPublicKeyShareProofMaterial,
+                    verifiedSetupProofMaterials,
+                ),
+            transportedEvaluationKeyShareProofMaterial: compactSetupProofMaterialSet(
                 verificationInput.transportedEvaluationKeyShareProofMaterial,
                 verifiedSetupProofMaterials,
             ),
-        verifiedSetupProofMaterials,
+            verifiedSetupProofMaterials,
+        },
+        liveVssMaterialVerificationId: streamVerifiedVssMaterial?.verificationId,
     };
 };
 
@@ -684,12 +916,97 @@ export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
     const kernel = await loadTranscriptCoreKernel();
-    const verificationInput = prepareSetupPackageVerificationInputForKernel(
-        kernel,
-        input,
-    );
+    const { verificationInput, liveVssMaterialVerificationId } =
+        prepareSetupPackageVerificationInputForKernel(kernel, input);
 
-    return kernel.verifyCollectiveBgvSetup(verificationInput);
+    try {
+        const verification = kernel.verifyCollectiveBgvSetup(verificationInput);
+        if (liveVssMaterialVerificationId !== undefined) {
+            kernel.releaseVerifiedTransportedVssMaterial({
+                verificationId: liveVssMaterialVerificationId,
+            });
+        }
+
+        return verification;
+    } catch (error) {
+        if (liveVssMaterialVerificationId !== undefined) {
+            kernel.releaseVerifiedTransportedVssMaterial({
+                verificationId: liveVssMaterialVerificationId,
+            });
+        }
+        throw error;
+    }
+};
+
+/** Verifies proof-backed target decryption shares and releases the target result. */
+export const verifyTargetDecryptionResult = async (
+    input: VerifyTargetDecryptionResultInput,
+): Promise<TargetDecryptionResultVerification> => {
+    const targetShareProofCandidate: unknown = input.targetShareProofs;
+    if (!Array.isArray(targetShareProofCandidate)) {
+        return targetResultReleaseRefusal(
+            'InvalidProtocolObject',
+            'targetShareProofs must be an array.',
+        );
+    }
+
+    const kernel = await loadTranscriptCoreKernel();
+    const releaseVerificationId = nextTargetResultReleaseVerificationId();
+
+    try {
+        type ReleaseSetupContextInput = Parameters<
+            TranscriptCoreKernel['deriveBgvTargetDecryptionResultReleaseSetupContext']
+        >[0];
+        const releaseSetupContext =
+            kernel.deriveBgvTargetDecryptionResultReleaseSetupContext({
+                setupPackage:
+                    input.setupPackage as unknown as ReleaseSetupContextInput['setupPackage'],
+            });
+        type ReleaseBeginInput = Parameters<
+            TranscriptCoreKernel['beginBgvTargetDecryptionResultRelease']
+        >[0];
+        type ReleaseShareInput = Parameters<
+            TranscriptCoreKernel['absorbBgvTargetDecryptionResultReleaseShare']
+        >[0];
+        kernel.beginBgvTargetDecryptionResultRelease({
+            releaseVerificationId,
+            releaseSetupContext,
+            targetAcceptedRecord: input.targetAcceptedRecord,
+            targetCiphertextBinding: input.targetCiphertextBinding,
+            targetCiphertexts:
+                input.targetCiphertexts as ReleaseBeginInput['targetCiphertexts'],
+            targetShareProfile: input.targetShareProfile,
+        });
+        for (const targetShareProof of input.targetShareProofs) {
+            kernel.absorbBgvTargetDecryptionResultReleaseShare({
+                releaseVerificationId,
+                targetShareProof:
+                    targetShareProof as unknown as ReleaseShareInput['targetShareProof'],
+            });
+        }
+        const releasedResult = kernel.finishBgvTargetDecryptionResultRelease({
+            releaseVerificationId,
+        });
+
+        return {
+            ok: true,
+            operation: 'verifyTargetDecryptionResult',
+            verifierStatus: 'accepted',
+            acceptedResult: {
+                targetResultHash: releasedResult.targetResultHash,
+                targetIdByOption: releasedResult.targetIdByOption,
+                targetOrderByOption: releasedResult.targetOrderByOption,
+                topCount: releasedResult.topCount,
+                shareEvidence: releasedResult.shareEvidence,
+            },
+        };
+    } catch (error) {
+        if (error instanceof TranscriptCoreKernelCommandError) {
+            return targetResultReleaseRefusal(error.code, error.message);
+        }
+
+        throw error;
+    }
 };
 
 /** Verifies a transcript-core fixture with the packaged WASM kernel. */

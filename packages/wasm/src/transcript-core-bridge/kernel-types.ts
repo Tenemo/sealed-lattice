@@ -57,10 +57,14 @@ import type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseBegin,
+    BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultRelease,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
+    BgvTargetDecryptionShareProofLayoutDescription,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionShareProofMaterialVerification,
     BgvTargetDecryptionShareProofStatement,
@@ -125,10 +129,14 @@ export type {
     BgvSetupProofMaterialTransportStreamVerification,
     BgvTargetCiphertextPairInput,
     BgvTargetDecryptionDevelopmentFixture,
+    BgvTargetDecryptionReleaseSetupContext,
+    BgvTargetDecryptionResultReleaseBegin,
+    BgvTargetDecryptionResultReleaseShareAbsorption,
     BgvTargetDecryptionResultRelease,
     BgvTargetDecryptionShare,
     BgvTargetDecryptionShareBinaryProofMaterialTransport,
     BgvTargetDecryptionShareBinaryProofMaterialVerification,
+    BgvTargetDecryptionShareProofLayoutDescription,
     BgvTargetDecryptionShareProofMaterial,
     BgvTargetDecryptionShareProofMaterialVerification,
     BgvTargetDecryptionShareProofStatement,
@@ -230,6 +238,15 @@ export type TranscriptCoreKernel = {
         readonly trusteeIdentity: string;
         readonly targetDecryptionShare: BgvTargetDecryptionShare;
     }): BgvTargetDecryptionShareProofStatement;
+    describeBgvTargetDecryptionShareProofLayout(input: {
+        readonly setupPackage: BgvPassiveSetupPackage;
+        readonly targetAcceptedRecord: unknown;
+        readonly targetCiphertextBinding: unknown;
+        readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+        readonly targetShareProfile: unknown;
+        readonly targetDecryptionShare: BgvTargetDecryptionShare;
+        readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+    }): BgvTargetDecryptionShareProofLayoutDescription;
     generateBgvTargetDecryptionShareProofMaterialFromLocalWitness(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
         readonly localTargetShareWitness: unknown;
@@ -272,17 +289,27 @@ export type TranscriptCoreKernel = {
         readonly targetDecryptionShare: BgvTargetDecryptionShare;
         readonly proofStatement: BgvTargetDecryptionShareProofStatement;
     }): BgvTargetDecryptionShareProofStatementBindingVerification;
-    verifyAndReleaseBgvTargetDecryptionResult(input: {
+    deriveBgvTargetDecryptionResultReleaseSetupContext(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
+    }): BgvTargetDecryptionReleaseSetupContext;
+    beginBgvTargetDecryptionResultRelease(input: {
+        readonly releaseVerificationId: string;
+        readonly releaseSetupContext: BgvTargetDecryptionReleaseSetupContext;
         readonly targetAcceptedRecord: unknown;
         readonly targetCiphertextBinding: unknown;
         readonly targetCiphertexts: BgvTargetCiphertextPairInput;
         readonly targetShareProfile: unknown;
-        readonly targetShareProofs: readonly {
+    }): BgvTargetDecryptionResultReleaseBegin;
+    absorbBgvTargetDecryptionResultReleaseShare(input: {
+        readonly releaseVerificationId: string;
+        readonly targetShareProof: {
             readonly targetDecryptionShare: BgvTargetDecryptionShare;
             readonly proofStatement: BgvTargetDecryptionShareProofStatement;
             readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
-        }[];
+        };
+    }): BgvTargetDecryptionResultReleaseShareAbsorption;
+    finishBgvTargetDecryptionResultRelease(input: {
+        readonly releaseVerificationId: string;
     }): BgvTargetDecryptionResultRelease;
     verifyBgvPassiveSetup(input: {
         readonly setupPackage: BgvPassiveSetupPackage;
@@ -645,6 +672,16 @@ type TranscriptCoreKernelCommand =
           readonly targetDecryptionShare: BgvTargetDecryptionShare;
       }
     | {
+          readonly command: 'DescribeBgvTargetDecryptionShareProofLayout';
+          readonly setupPackage: BgvPassiveSetupPackage;
+          readonly targetAcceptedRecord: unknown;
+          readonly targetCiphertextBinding: unknown;
+          readonly targetCiphertexts: BgvTargetCiphertextPairInput;
+          readonly targetShareProfile: unknown;
+          readonly targetDecryptionShare: BgvTargetDecryptionShare;
+          readonly proofStatement: BgvTargetDecryptionShareProofStatement;
+      }
+    | {
           readonly command: 'GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness';
           readonly setupPackage: BgvPassiveSetupPackage;
           readonly localTargetShareWitness: unknown;
@@ -691,17 +728,30 @@ type TranscriptCoreKernelCommand =
           readonly proofStatement: BgvTargetDecryptionShareProofStatement;
       }
     | {
-          readonly command: 'VerifyAndReleaseBgvTargetDecryptionResult';
+          readonly command: 'DeriveBgvTargetDecryptionResultReleaseSetupContext';
           readonly setupPackage: BgvPassiveSetupPackage;
+      }
+    | {
+          readonly command: 'BeginBgvTargetDecryptionResultRelease';
+          readonly releaseVerificationId: string;
+          readonly releaseSetupContext: BgvTargetDecryptionReleaseSetupContext;
           readonly targetAcceptedRecord: unknown;
           readonly targetCiphertextBinding: unknown;
           readonly targetCiphertexts: BgvTargetCiphertextPairInput;
           readonly targetShareProfile: unknown;
-          readonly targetShareProofs: readonly {
+      }
+    | {
+          readonly command: 'AbsorbBgvTargetDecryptionResultReleaseShare';
+          readonly releaseVerificationId: string;
+          readonly targetShareProof: {
               readonly targetDecryptionShare: BgvTargetDecryptionShare;
               readonly proofStatement: BgvTargetDecryptionShareProofStatement;
               readonly proofMaterial: BgvTargetDecryptionShareProofMaterial;
-          }[];
+          };
+      }
+    | {
+          readonly command: 'FinishBgvTargetDecryptionResultRelease';
+          readonly releaseVerificationId: string;
       }
     | {
           readonly command: 'VerifyBgvPassiveSetup';

@@ -20,6 +20,7 @@ const requiredPublicFunctionNames = [
     'deriveValidatedFirstValidOrder',
     'verifyBoardConsistency',
     'verifyFoundationTranscript',
+    'verifyTargetDecryptionResult',
 ] as const;
 
 describe('election foundation public package API in browsers', () => {

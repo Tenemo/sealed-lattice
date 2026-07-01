@@ -194,12 +194,12 @@ fn target_decryption_share_accounting_discloses_lifted_aggregate_leakage() {
         "target accounting must describe proof-material share coverage"
     );
     assert!(
-        coverage.contains("target-result release remains fail-closed"),
-        "target accounting must keep result release outside the current proof-material claim"
+        coverage.contains("verifies a proof-backed quorum before interpolation"),
+        "target accounting must describe the private proof-backed release boundary"
     );
     assert!(
-        !coverage.contains("recombination verifies"),
-        "target accounting must not claim a recombination verifier while target-result release is fail-closed"
+        coverage.contains("public release exposure waits"),
+        "target accounting must keep public release outside the current proof-material claim"
     );
 
     let target_smudging = &target_accounting["zeroKnowledge"]["smudgingBudget"];
@@ -221,15 +221,15 @@ fn target_decryption_share_accounting_discloses_lifted_aggregate_leakage() {
     );
     assert_eq!(
         target_smudging["aggregateMessageClaimsPerTargetShare"],
-        serde_json::json!(1_400)
+        serde_json::json!(1_000)
     );
     assert_eq!(
         target_smudging["aggregateMessageClaimBudgetLog2Approximate"],
-        serde_json::json!(14)
+        serde_json::json!(13)
     );
     assert_eq!(
         target_smudging["aggregateMessageTotalLeakageLog2Approximate"],
-        serde_json::json!(-161)
+        serde_json::json!(-162)
     );
     assert_eq!(
         target_smudging["smudgingMessageClearClaimBoundBits"],
@@ -241,7 +241,7 @@ fn target_decryption_share_accounting_discloses_lifted_aggregate_leakage() {
     );
     assert_eq!(
         target_smudging["smudgingMessageClaimsPerTargetShare"],
-        serde_json::json!(13_440)
+        serde_json::json!(9_600)
     );
     assert_eq!(
         target_smudging["smudgingMessageClaimBudgetLog2Approximate"],
@@ -252,28 +252,8 @@ fn target_decryption_share_accounting_discloses_lifted_aggregate_leakage() {
         serde_json::json!(-135)
     );
     assert_eq!(
-        target_smudging["randomnessClearClaimBoundBits"],
-        serde_json::json!(23)
-    );
-    assert_eq!(
-        target_smudging["randomnessMaskDigitCount"],
-        serde_json::json!(super::TARGET_DECRYPTION_RANDOMNESS_CLAIM_MASK_DIGIT_COUNT)
-    );
-    assert_eq!(
-        target_smudging["randomnessClaimsPerTargetShare"],
-        serde_json::json!(14_560)
-    );
-    assert_eq!(
-        target_smudging["randomnessClaimBudgetLog2Approximate"],
-        serde_json::json!(17)
-    );
-    assert_eq!(
-        target_smudging["randomnessTotalLeakageLog2Approximate"],
-        serde_json::json!(-140)
-    );
-    assert_eq!(
         target_smudging["claimsPerTargetShare"],
-        serde_json::json!(29_400)
+        serde_json::json!(10_600)
     );
     assert_eq!(
         target_smudging["firstProfileTargetShareCount"],
@@ -281,7 +261,7 @@ fn target_decryption_share_accounting_discloses_lifted_aggregate_leakage() {
     );
     assert_eq!(
         target_smudging["claimBudgetLog2Approximate"],
-        serde_json::json!(18)
+        serde_json::json!(17)
     );
     assert_eq!(
         target_smudging["totalLeakageLog2Approximate"],
@@ -297,7 +277,7 @@ fn target_decryption_share_accounting_discloses_lifted_aggregate_leakage() {
         target_accounting["crossLimbConsistency"]["integerBinding"]["crtWindowRule"]
             .as_str()
             .is_some_and(|text| text.contains(
-                "smudging-message digit and ternary opening-randomness consistency claims use a 114-digit base-3 mask and four proof fields"
+                "smudging-message digit consistency claims use a 114-digit base-3 mask and four proof fields"
             )),
         "target accounting must disclose the split CRT lift"
     );
