@@ -64,7 +64,6 @@ export type SetupContributionAssembly = Readonly<
         readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
         readonly publicKeyShareProofRoot: ProtocolHash | null;
-        readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
         readonly setupContributionRoot: ProtocolHash;
     }
 >;
@@ -394,7 +393,6 @@ export const createSetupContributionAssembly = (
             input.publicKeyShareRecord?.publicKeyShareRoot ?? null,
         publicKeyShareProofRoot:
             input.publicKeyShareProofRecord?.publicKeyShareProofRoot ?? null,
-        exportPolicy: 'roots-only-no-raw-share-or-opening-export',
     } as const satisfies Omit<
         SetupContributionAssembly,
         'setupContributionRoot'

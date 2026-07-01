@@ -136,21 +136,9 @@ describe('sparse target decoder oracle', () => {
             },
         },
         {
-            caseName: 'nonzero forbidden semantic slot',
+            caseName: 'target slot length mismatch',
             overrides: {
-                forbiddenSemanticSlots: [0, 1, 0, 0],
-            },
-        },
-        {
-            caseName: 'missing forbidden semantic slots',
-            overrides: {
-                forbiddenSemanticSlots: [],
-            },
-        },
-        {
-            caseName: 'extra forbidden semantic slot',
-            overrides: {
-                forbiddenSemanticSlots: [0, 0, 0, 0, 0],
+                targetIdSlots: [1],
             },
         },
     ])('rejects malformed sparse target: $caseName', ({ overrides }) => {

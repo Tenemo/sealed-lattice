@@ -16,10 +16,6 @@ import type {
 
 type JsonRecord = Record<string, unknown>;
 
-export const localTrusteeSetupStateExportPolicy =
-    'roots-only-no-raw-share-or-opening-export';
-export const localTrusteeSetupStateStorageRequirement =
-    'encrypted-local-device-state-required';
 export const localTrusteeSetupStateDeletionBoundary =
     'after-private-vss-aggregation';
 
@@ -125,8 +121,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly deletionReceiptRoot: ProtocolHash;
         readonly deletionReceipt: LocalTrusteeSetupStateDeletionReceipt;
-        readonly exportPolicy: typeof localTrusteeSetupStateExportPolicy;
-        readonly storageRequirement: typeof localTrusteeSetupStateStorageRequirement;
         readonly localStateRoot: ProtocolHash;
     }
 >;
@@ -339,8 +333,6 @@ export const createLocalTrusteeSetupStateCommitment = (
         issuedVssComplaintRoots: input.issuedVssComplaintRoots,
         deletionReceiptRoot: deletionReceipt.deletionReceiptRoot,
         deletionReceipt,
-        exportPolicy: localTrusteeSetupStateExportPolicy,
-        storageRequirement: localTrusteeSetupStateStorageRequirement,
     } as const satisfies JsonRecord;
 
     return {

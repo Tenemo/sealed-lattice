@@ -85,7 +85,7 @@
       0
     ],
     "tallyHash": "3c3aa36b7d7040e2d98eaf0df6eb471a79156b0e811dd7888db9ba6a57ced05d239f3646f4254df227430fc026e6b8ec177b8d6d0ea6c9ca60f3023e8a060dd3",
-    "oracleHash": "63a2eb1e3d2653c7f10985010c398e119dc3f9ca3e03d83ac60fd4a5c3cd039be2dfd977ed2d9712be4f34319b6ae8fd3b9f38276f54f4d61c55aba542b6a5f2"
+    "oracleHash": "ec7a4b0bfda11c83f71af2689cf8e144d6c2641cf2eff19a77a04da1e953558fd7de78414c22695471eb6495452a4a12ad205accfa4cb406cf077c7c66aaccee"
   },
   "fullTieCase": {
     "pollSpecInput": {
@@ -129,7 +129,7 @@
       2,
       3
     ],
-    "expectedOracleHash": "cfee04e008c8161157ece84c805e6dff1f1894f4c1b3c976a6938017e2fc012f07d5fd89237daabdac432b28968ce3c7312a0c88402257507a916fb08bbdeeba"
+    "expectedOracleHash": "abb9b922982161605be34f1d55e6f90ec7bb64bca28d9102228c0b780dac1e3fdf768fa6ea81d964c7f71bfe08a96b55cd4d8b549f9d54afe3d980239bad76d7"
   },
   "topOneClearWinnerCase": {
     "pollSpecInput": {
@@ -197,7 +197,7 @@
       0
     ],
     "expectedTallyHash": "d06cf0dc5eda03e8c30fd66ae936ff545067bef5e409dfdae6a6e220771dc5a8e3413b08734b0e51c03b88fc12e6da08cc03e1c713fe1b09b883d9a4d511198f",
-    "expectedOracleHash": "ca2b3218f877c5cef0abfc30cbeeea3d22dc29aba03dfdd5bf3329a3415c33bebb0b864ac4e4a859e7d26aa8e13de952ca3eec7ccc0c2f6692e88f597cedf3d7"
+    "expectedOracleHash": "d1a053540004696d90656bbf663e5caeafc8ba10943b003357ff3ce093c8266736f049a3726d8c3ed042f2abb9ca7abdf109e242fce49d1ac62e33b133af3d67"
   },
   "maximumNoWrapCase": {
     "pollSpecInput": {
@@ -297,6 +297,6 @@
       20
     ],
     "expectedTallyHash": "b8d08ed106e99859756d030a5ba64b9e8b4299ad8f3715b68bd3d3e04d3cf8c6d2077746aa479ccfe833852f876a0b77940f48a29facca2207879352b0521819",
-    "expectedOracleHash": "8b88d3e23192dd6c534683f18331b35a0ce9fa655884bea28a502144f100f7255c41ec2cd344a3fb176ccf52d1dda9752650750f9556749a52f894ca3de53139"
+    "expectedOracleHash": "38d409bfa0ab71adc32a81f434f43da59c99003574f24c978c3634be67a4963f3ff6bdcd79df232c27c40f8d4cfa7c158b6bd0ae2d4279f7d3a80496a43a8ca6"
   }
 }

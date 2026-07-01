@@ -149,6 +149,8 @@ pnpm run smoke:pack:npm
 
 `pnpm run test:rust:kernel` runs the ordinary fast Rust kernel tests and skips the accepted-setup proof-test filter. Pass one test name, module name, Rust file name, or Rust file stem for a focused run.
 
+Accepted-setup proof lanes default to accelerated local mode: warm target directory, incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode.
+
 Accepted-setup proof lanes are maintainer evidence for setup/proof changes. They do not change the public boundary in [SECURITY.md](SECURITY.md).
 
 Keep default and release gates focused on the selected direct path and shared substrate. Long proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.

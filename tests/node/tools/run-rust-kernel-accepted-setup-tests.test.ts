@@ -16,6 +16,15 @@ describe('Rust accepted setup runner arguments', () => {
     it('runs the full accepted setup lane by default', () => {
         expect(parseRustKernelAcceptedSetupArguments([])).toEqual({
             focused: false,
+            mode: 'accelerated',
+            testFilters: [heavyAcceptedSetupTestPattern],
+        });
+    });
+
+    it('accepts an explicit CI prove-fresh mode', () => {
+        expect(parseRustKernelAcceptedSetupArguments(['--ci'])).toEqual({
+            focused: false,
+            mode: 'ci',
             testFilters: [heavyAcceptedSetupTestPattern],
         });
     });
@@ -44,6 +53,12 @@ describe('Rust accepted setup runner arguments', () => {
             source: 'memory-bounded',
             value: '1',
         });
+        expect(
+            automaticTestThreadKnobForLane('final-package', 3, 'accelerated'),
+        ).toEqual({
+            source: 'memory-bounded',
+            value: '3',
+        });
     });
 
     it('caps final package prover concurrency without slowing the fast lane', () => {
@@ -63,11 +78,22 @@ describe('Rust accepted setup runner arguments', () => {
             source: 'memory-bounded',
             value: '1',
         });
+        expect(
+            automaticTrusteeProofBatchKnobForLane(
+                'final-package',
+                5,
+                'accelerated',
+            ),
+        ).toEqual({
+            source: 'local final-package workstation cap',
+            value: '3',
+        });
     });
 
     it('treats one positional filter as a focused local run', () => {
         expect(parseRustKernelAcceptedSetupArguments(['one_test'])).toEqual({
             focused: true,
+            mode: 'accelerated',
             testFilters: ['one_test'],
         });
     });
@@ -91,6 +117,7 @@ describe('Rust accepted setup runner arguments', () => {
     it('ignores the package-manager argument separator', () => {
         expect(parseRustKernelAcceptedSetupArguments(['--'])).toEqual({
             focused: false,
+            mode: 'accelerated',
             testFilters: [heavyAcceptedSetupTestPattern],
         });
     });

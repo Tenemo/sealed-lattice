@@ -53,7 +53,6 @@ pub(crate) fn bgv_parameters_value() -> Value {
         "coordinatesPerOption": 11,
         "slotCount": POLYNOMIAL_DEGREE,
         "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
-        "forbiddenOperations": FORBIDDEN_EVALUATOR_OPERATIONS,
     })
 }
 
@@ -87,23 +86,10 @@ const ALLOWED_EVALUATOR_OPERATIONS: &[&str] = &[
     "canonicalTargetCiphertextSelection",
 ];
 
-const FORBIDDEN_EVALUATOR_OPERATIONS: &[&str] = &[
-    "rawDecrypt",
-    "rawThresholdDecrypt",
-    "rawRnsLimbAccess",
-    "rawNttTranscriptRoot",
-    "scalarDegree360Comparator",
-    "uncertifiedComparisonInputDerivationOperation",
-    "lattigoRuntimeObjectImport",
-    "referenceOracleVectorAcceptance",
-    "genericFheApiSurface",
-];
-
 // Operations-list data only. Used by validate_bgv_evaluator_operation.
 pub(crate) fn allowed_operation_registry_value() -> CanonicalResult<Value> {
     Ok(json!({
         "allowedOperations": ALLOWED_EVALUATOR_OPERATIONS,
-        "forbiddenOperations": FORBIDDEN_EVALUATOR_OPERATIONS,
     }))
 }
 

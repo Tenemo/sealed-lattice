@@ -13,7 +13,7 @@
         "packages/sdk/dist/internal/transcript-core.d.ts",
         "packages/sdk/dist/internal/types.d.ts"
     ],
-    "reachableDeclarationHash": "ac64e9cb2b4b0ea58285635668eb62609dfd2c83d75e03519ecadab47c9db52f",
+    "reachableDeclarationHash": "b4c4091fd58361b096aa06c5e27cae7a9cad8094aea85a6d7ca53f06627d0535",
     "runtimeExports": [
         "createSetupPackageVerificationInput",
         "deriveCollectiveBgvSetupRosterHash",

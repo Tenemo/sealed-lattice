@@ -81,19 +81,7 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
 
     Ok(bgv_operation_rejection(
         "validateBgvEvaluatorOperation",
-        if registry
-            .get("forbiddenOperations")
-            .and_then(Value::as_array)
-            .is_some_and(|forbidden_operations| {
-                forbidden_operations
-                    .iter()
-                    .any(|operation| operation.as_str() == Some(operation_name))
-            })
-        {
-            "ForbiddenEvaluatorOperation"
-        } else {
-            "UncertifiedEvaluatorOperation"
-        },
+        "UncertifiedEvaluatorOperation",
         format!(
             "BGV evaluator operation {operation_name} is not part of the selected BGV-RNS/evaluator operation registry"
         ),
@@ -464,7 +452,7 @@ mod tests {
 
         assert_eq!(
             encoded["plaintextRoot"],
-            "e5d8f3f60bdf809eafd51ae4e6992b51451196aa3f9a31effdf4622a93fa101c74a0fcdcb098ff9444fb2eba6cd7ffe75213a061a513f0f24d04b19f5673e3ac"
+            "bf291374550011a80ac717065a03e5b8a4c19a0bc9a43c2bf5c7dc2efa11b44fb7f7ae27cb587b64597ccacf5215811ce148cc08dc929d81ac997b4114a395c4"
         );
 
         let ciphertext =
@@ -475,7 +463,7 @@ mod tests {
             .expect("ciphertext fixture");
         assert_eq!(
             ciphertext["ciphertextRoot"],
-            "acd57d646cf4f044a0442f5e5ccc82163b119d1e9ca0e133957a4ad59d376f0f3badb56bcf8e1d51ff4d48c62350499a7ca0bd0c0a405aba88d64e9bee1c542b"
+            "3c687b8049b3e12747a829993c88fe8a50fd39c64e7111a58781a1e1a699b07887feb6049364e841ab161e3b3d83044f94d383bda0a0dadf5a05422f3859131a"
         );
 
         let base_conversion =
@@ -485,11 +473,11 @@ mod tests {
             .expect("base conversion fixture");
         assert_eq!(
             base_conversion["sourcePlaintextRoot"],
-            "76ce2f1da7d1ab3b2e3678f303547a87de7768e60e65279ca1fd9603cb5d2605927b32c289208bc38a3d9fd00816fbdfba6853d9c17f8e7c652ca72ef7eb756b"
+            "6163e4c740720f19b10dd005fcd5a1b7b53294ec1d05d84c997b439dc6cad02e338923021138c521f9849a4f02904b776599334ae03ed9f9c35cb1951a573b30"
         );
         assert_eq!(
             base_conversion["convertedPlaintextRoot"],
-            "fcb46f1e37b689314bec81be9aec0ad25c4de119ea982a74e266c25b04382badf58d6f7fc276e49d9256997af1ba66de54cc22f5ad3e5827c11dade0f5de2bfe"
+            "b2dea4160315d3ffb5ac81f7bb89d14e8cd611411eae77d7637d98146fadd1ab61c3892d61e64823766762b4776061e35751188ab703f048702e86b7c0b56e05"
         );
     }
 

@@ -81,7 +81,7 @@ jobs:
             - name: Run Rust accepted setup fast proof checks
               id: rust-accepted-setup-fast
               timeout-minutes: 350
-              run: pnpm run test:rust:kernel:accepted-setup:fast
+              run: pnpm run test:rust:kernel:accepted-setup:fast -- --ci
             - name: Upload Rust accepted setup fast logs
               if: ${{ failure() && steps['rust-accepted-setup-fast'].outcome == 'failure' }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -110,7 +110,7 @@ jobs:
             - name: Run Rust accepted setup final package
               id: accepted-setup-final-package
               timeout-minutes: 350
-              run: pnpm run test:rust:kernel:accepted-setup:final-package
+              run: pnpm run test:rust:kernel:accepted-setup:final-package -- --ci
             - name: Upload Rust accepted setup final package logs
               if: ${{ failure() && steps['accepted-setup-final-package'].outcome == 'failure' }}
               uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

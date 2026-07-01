@@ -369,8 +369,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
         readonly issuedVssComplaintRoots: readonly ProtocolHash[];
         readonly deletionReceiptRoot: ProtocolHash;
         readonly deletionReceipt: LocalTrusteeSetupStateDeletionReceipt;
-        readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-        readonly storageRequirement: 'encrypted-local-device-state-required';
         readonly localStateRoot: ProtocolHash;
     }
 >;
@@ -464,7 +462,6 @@ export type SetupContribution = Readonly<
         readonly localStateDeletionReceiptRoot: ProtocolHash | null;
         readonly publicKeyShareRoot: ProtocolHash | null;
         readonly publicKeyShareProofRoot: ProtocolHash | null;
-        readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
         readonly setupContributionRoot: ProtocolHash;
     }
 >;
@@ -617,8 +614,6 @@ export type LocalTrusteeSetupStateVerification = Readonly<{
     readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
-    readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-    readonly storageRequirement: 'encrypted-local-device-state-required';
     readonly deletionBoundary: 'after-private-vss-aggregation';
 }>;
 

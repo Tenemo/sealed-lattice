@@ -14,7 +14,7 @@ fn first_closure_setup_parameters_hash_is_byte_stable() {
         setup_parameters["setupParametersHash"]
             .as_str()
             .expect("setup parameters hash"),
-        "97f1e1210bbbcffc86505edff3b2e76003184710b7edab49ae9440c93b4fdddea038153ec85815e8b11cf7aa5cd854788f2cecc440681cf7d507318f24128958",
+        "94755b4efddbab07d4072a2f65543f3eebc6e06dbd6f386a62c41d506432a86fa79a24d2fb1a268bca288ca3a4ddc2f60c8a6179dfef8b0f83a5b53350d12b68",
     );
 }
 

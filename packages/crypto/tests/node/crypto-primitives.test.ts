@@ -537,8 +537,6 @@ describe('crypto primitive boundary', () => {
             manifestHash: setupContext.manifestHash,
             rosterHash: setupContext.rosterHash,
             setupEpoch: setupContext.setupEpoch,
-            storageRequirement: 'encrypted-local-device-state-required',
-            exportPolicy: 'roots-only-no-raw-share-or-opening-export',
             localStateRoot: deriveCanonicalObjectHash({
                 objectType: 'LocalTrusteeSetupStateRoot',
                 trustee: 'trustee-3',

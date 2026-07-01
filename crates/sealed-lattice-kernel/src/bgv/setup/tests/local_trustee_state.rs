@@ -13,10 +13,6 @@ fn local_trustee_setup_state_verifier_accepts_roots_only_commitment() {
     assert_eq!(result["trusteeIdentity"], "trustee-3");
     assert_eq!(result["trusteeRosterPosition"], 3);
     assert_eq!(result["trusteePoint"], 4);
-    assert_eq!(
-        result["exportPolicy"],
-        "roots-only-no-raw-share-or-opening-export"
-    );
     assert_eq!(result["deletionBoundary"], "after-private-vss-aggregation");
     assert!(
         result["localStateRoot"]
@@ -116,8 +112,6 @@ fn local_trustee_setup_state_request() -> serde_json::Value {
         "issuedVssComplaintRoots": [valid_hash('5')],
         "deletionReceiptRoot": deletion_receipt["deletionReceiptRoot"],
         "deletionReceipt": deletion_receipt,
-        "exportPolicy": "roots-only-no-raw-share-or-opening-export",
-        "storageRequirement": "encrypted-local-device-state-required",
     });
     local_state["localStateRoot"] =
         serde_json::json!(derive_canonical_object_hash(&local_state).expect("local state root"));

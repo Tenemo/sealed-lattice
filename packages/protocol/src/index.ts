@@ -83,8 +83,6 @@ export {
     decryptLocalTrusteeSetupState,
     encryptLocalTrusteeSetupState,
     localTrusteeSetupStateDeletionBoundary,
-    localTrusteeSetupStateExportPolicy,
-    localTrusteeSetupStateStorageRequirement,
     retainedLocalTrusteeSetupMaterialClasses,
 } from './setup/local-trustee-setup-state.js';
 export {

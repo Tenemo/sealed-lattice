@@ -3,7 +3,6 @@ import type { ProtocolHash } from './protocol-hash.js';
 
 /** Plain sparse target expected from the later homomorphic top-k evaluator. */
 export type SparseTopKTarget = {
-    readonly forbiddenSemanticSlots: readonly FieldElement[];
     readonly layoutHash: ProtocolHash;
     readonly optionCount: number;
     readonly targetHash: ProtocolHash;

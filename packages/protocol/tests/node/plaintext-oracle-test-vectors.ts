@@ -243,8 +243,6 @@ export const mutateSparseTarget = (
     overrides: Partial<Omit<SparseTopKTarget, 'targetHash'>>,
 ): SparseTopKTarget => {
     const targetWithoutHash = {
-        forbiddenSemanticSlots:
-            overrides.forbiddenSemanticSlots ?? target.forbiddenSemanticSlots,
         layoutHash: overrides.layoutHash ?? target.layoutHash,
         optionCount: overrides.optionCount ?? target.optionCount,
         targetIdSlots: overrides.targetIdSlots ?? target.targetIdSlots,

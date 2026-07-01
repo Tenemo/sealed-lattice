@@ -118,8 +118,6 @@ const localStateCommitment = {
     issuedVssComplaintRoots: [],
     deletionReceiptRoot: fixtureHash('deletion-receipt'),
     deletionReceipt: {},
-    exportPolicy: 'roots-only-no-raw-share-or-opening-export',
-    storageRequirement: 'encrypted-local-device-state-required',
     localStateRoot: fixtureHash('local-state'),
 } as unknown as LocalTrusteeSetupStateCommitment;
 

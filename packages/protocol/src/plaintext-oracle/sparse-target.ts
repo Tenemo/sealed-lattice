@@ -15,15 +15,12 @@ import {
 
 import { assertCanonicalFieldElement } from './field.js';
 
-const forbiddenSemanticSlotCount = 4;
-
 const deriveSparseTopKTargetLayoutHash = (input: {
     readonly optionCount: number;
     readonly topOptionCount: number;
 }): string =>
     deriveCanonicalObjectHash({
         objectType: 'SparseTopKTargetLayout',
-        forbiddenSemanticSlotCount,
         optionCount: input.optionCount,
         optionOrdinalEncoding: 'one-based',
         targetIdSlotRule: 'optionOrdinalWhenRankLessThanTopOptionCountElseZero',
@@ -38,7 +35,6 @@ export const deriveSparseTopKTargetHash = (
 ): string =>
     deriveCanonicalObjectHash({
         objectType: 'SparseTopKTarget',
-        forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutHash: target.layoutHash,
         optionCount: target.optionCount,
         targetIdSlots: target.targetIdSlots,
@@ -169,10 +165,6 @@ export const deriveSparseTopKTarget = (input: {
         topOptionCount: input.topOptionCount,
     });
     const targetWithoutHash = {
-        forbiddenSemanticSlots: Array.from(
-            { length: forbiddenSemanticSlotCount },
-            () => 0,
-        ),
         layoutHash,
         optionCount: input.optionCount,
         targetIdSlots,
@@ -238,7 +230,6 @@ const decodeSparseTopKTargetUnchecked = (input: {
     const { target } = input;
     const refusedObjects: RefusalRecord[] = [];
     const recomputedHash = deriveSparseTopKTargetHash({
-        forbiddenSemanticSlots: target.forbiddenSemanticSlots,
         layoutHash: target.layoutHash,
         optionCount: target.optionCount,
         targetIdSlots: target.targetIdSlots,
@@ -284,35 +275,10 @@ const decodeSparseTopKTargetUnchecked = (input: {
             target.targetHash,
         );
     }
-    if (target.forbiddenSemanticSlots.length !== forbiddenSemanticSlotCount) {
-        addSparseTargetRefusal(
-            refusedObjects,
-            'Sparse target forbidden semantic slot count must match the layout.',
-            target.targetHash,
-        );
-    }
 
     const decodedSelections: DecodedSparseTopKSelection[] = [];
     const seenOptionOrdinals = new Set<number>();
     const seenOrderPositions = new Set<number>();
-
-    target.forbiddenSemanticSlots.forEach((value) => {
-        if (
-            validateSlotElement(
-                refusedObjects,
-                value,
-                'forbidden semantic slot',
-                target.targetHash,
-            ) &&
-            value !== 0
-        ) {
-            addSparseTargetRefusal(
-                refusedObjects,
-                'Sparse target forbidden semantic slots must be zero.',
-                target.targetHash,
-            );
-        }
-    });
 
     for (
         let optionIndex = 0;

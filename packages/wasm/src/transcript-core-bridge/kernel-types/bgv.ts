@@ -149,7 +149,6 @@ export type BgvRnsParametersDescription = {
         readonly coordinatesPerOption: number;
         readonly slotCount: number;
         readonly allowedOperations: readonly string[];
-        readonly forbiddenOperations: readonly string[];
     };
     readonly bgvParametersHash: ProtocolHash;
     readonly batchLayoutBinding: {
@@ -724,8 +723,6 @@ export type BgvLocalTrusteeSetupStateVerification = {
     readonly trusteePoint: number;
     readonly localStateRoot: ProtocolHash;
     readonly deletionReceiptRoot: ProtocolHash;
-    readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
-    readonly storageRequirement: 'encrypted-local-device-state-required';
     readonly deletionBoundary: 'after-private-vss-aggregation';
 };
 

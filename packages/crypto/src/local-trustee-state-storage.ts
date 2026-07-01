@@ -88,8 +88,6 @@ export type LocalTrusteeStateStorageEncryptionInput = {
             readonly issuedVssAcceptanceRoot: ProtocolHash;
             readonly issuedVssComplaintRoots: readonly ProtocolHash[];
             readonly localStateRoot: ProtocolHash;
-            readonly storageRequirement: 'encrypted-local-device-state-required';
-            readonly exportPolicy: 'roots-only-no-raw-share-or-opening-export';
         }
     >;
     readonly setupContext: unknown;
@@ -516,22 +514,6 @@ const assertCommitmentHeader = (
     }
     if (localStateCommitment.objectVersion !== 1) {
         throw new TypeError('localStateCommitment.objectVersion must be 1.');
-    }
-    if (
-        localStateCommitment.storageRequirement !==
-        'encrypted-local-device-state-required'
-    ) {
-        throw new TypeError(
-            'localStateCommitment.storageRequirement must require encrypted local device state.',
-        );
-    }
-    if (
-        localStateCommitment.exportPolicy !==
-        'roots-only-no-raw-share-or-opening-export'
-    ) {
-        throw new TypeError(
-            'localStateCommitment.exportPolicy must forbid raw share and opening export.',
-        );
     }
     assertProtocolHash(
         localStateCommitment.localStateRoot,

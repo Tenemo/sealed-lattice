@@ -40,7 +40,7 @@ export const ceremonyId = 'ceremony-main';
 // fixture pins the kernel-computed hash rather than re-deriving the large
 // parameter value object here.
 export const bgvParametersHash =
-    '7cf571a7d33b4d60410ad58ce7545a50b71f501a6f8d2e15ad31c3e646ba2cc5419daf36ce22413d31e1318474188f69ac90e300f71a9d5b90648d265f30deb0';
+    '9bbab6a0f732f34acc013c999b79b7e857245e223ca348a910f9228eb4ac9ec1a21e52b6b5058ef24d92c23db72f11f58c4fa52728dbb6262d60d17725ff4165';
 export const boardPolicyHash = deriveFixtureHash('fixture-board-policy-v1', {
     policy: 'signed-head-chain-v1',
 });

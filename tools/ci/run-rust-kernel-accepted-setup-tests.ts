@@ -13,13 +13,19 @@ import {
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
 // One shared implementation for the Rust accepted-setup proof-test lanes.
-// Authoritative lanes are selected by the package-script entrypoint; the main
-// accepted-setup entrypoint also accepts a single positional test or file-stem
-// filter for focused local mode. Keeping those modes mutually exclusive
-// prevents a half-and-half state, for example checkpoint resume in the gate's
-// shared target:
+// Lanes are selected by the package-script entrypoint; the main accepted-setup
+// entrypoint also accepts a single positional test or file-stem filter for a
+// focused local run. The default mode is accelerated local execution. GitHub CI
+// passes `--ci` to request the conservative prove-fresh lane:
 //
-//   default (no positional filter): authoritative CI-style runs. They build the selected
+//   default (no positional filter): accelerated local runs. They build the
+//     selected `heavy_accepted_setup` lane in a pinned warm target directory
+//     (`target/accepted-setup-accelerated/`), keep incremental compilation on,
+//     resume deterministic proof checkpoints from `temp/test-checkpoints/`, and
+//     size libtest/prover/Rayon concurrency from available memory. Run logs stay
+//     under `logs/`; proof checkpoints stay under `temp/test-checkpoints/`.
+//
+//   --ci: authoritative CI-style runs. They build the selected
 //     `heavy_accepted_setup` lane cleanly in the shared `target/`
 //     (CARGO_INCREMENTAL=0), prove every proof family fresh (no checkpoint
 //     resume), and size libtest/prover/rayon concurrency from available memory
@@ -45,9 +51,11 @@ type RustKernelAcceptedSetupCommandLane = Exclude<
     RustKernelAcceptedSetupLane,
     'all'
 >;
+export type RustKernelAcceptedSetupRunMode = 'accelerated' | 'ci';
 
 export type ParsedRustKernelAcceptedSetupArguments = {
     readonly focused: boolean;
+    readonly mode: RustKernelAcceptedSetupRunMode;
     readonly testFilters: readonly string[];
 };
 
@@ -61,20 +69,36 @@ export type ParsedRustKernelAcceptedSetupArguments = {
 // stays serial while a workstation runs several tests; a single focused filter
 // simply runs one thread.
 const approximateGigabytesPerHeavyTest = 15;
+const approximateGigabytesPerFinalPackageTest = 57;
 const heavyTestMemoryBudgetFraction = 0.7;
 const gigabyte = 1024 ** 3;
 const availableGigabytes = os.freemem() / gigabyte;
-const memoryBoundedHeavyTestThreadCount = Math.max(
-    1,
-    Math.floor(
-        (availableGigabytes * heavyTestMemoryBudgetFraction) /
-            approximateGigabytesPerHeavyTest,
-    ),
-);
-const heavyAcceptedSetupTestThreadCount = Math.min(
-    os.cpus().length,
-    memoryBoundedHeavyTestThreadCount,
-);
+const logicalProcessorCount = os.cpus().length;
+
+const memoryBoundedTestThreadCount = (
+    lane: RustKernelAcceptedSetupCommandLane,
+    mode: RustKernelAcceptedSetupRunMode,
+): number => {
+    const approximateGigabytesPerTest =
+        lane === 'final-package' && mode === 'accelerated'
+            ? approximateGigabytesPerFinalPackageTest
+            : approximateGigabytesPerHeavyTest;
+
+    return Math.max(
+        1,
+        Math.floor(
+            (availableGigabytes * heavyTestMemoryBudgetFraction) /
+                approximateGigabytesPerTest,
+        ),
+    );
+};
+
+const automaticTestThreadCountForLane = (
+    lane: RustKernelAcceptedSetupCommandLane,
+    mode: RustKernelAcceptedSetupRunMode,
+): number =>
+    Math.min(logicalProcessorCount, memoryBoundedTestThreadCount(lane, mode));
+
 // Final-package tests inflate the full accepted-setup package and then run
 // trustee evaluation-key proving with their own Rayon/prover concurrency. Letting
 // libtest start multiple such tests multiplies the fixture working set and can
@@ -83,6 +107,7 @@ const heavyAcceptedSetupTestThreadCount = Math.min(
 // parallelism to the inner prover.
 const finalPackageMaximumLibtestThreadCount = 1;
 const finalPackageMaximumTrusteeProofBatchSize = 1;
+const acceleratedFinalPackageMaximumTrusteeProofBatchSize = 3;
 
 // Authoritative-mode per-prover RAM budgets. Each trustee evaluation-key prover,
 // the rayon par_iter phases (public-key share succinct proofs, relinearization
@@ -100,6 +125,17 @@ const acceptedSetupFocusedTargetDirectory = path.resolve(
     process.cwd(),
     'target',
     'accepted-setup-focused',
+);
+const acceptedSetupAcceleratedTargetDirectory = path.resolve(
+    process.cwd(),
+    'target',
+    'accepted-setup-accelerated',
+);
+const acceptedSetupCheckpointDirectory = path.resolve(
+    process.cwd(),
+    'temp',
+    'test-checkpoints',
+    'accepted-setup-final-package-material-store',
 );
 
 export type ResolvedKnob = {
@@ -124,11 +160,13 @@ const resolveKnob = (
 
 export const automaticTestThreadKnobForLane = (
     lane: RustKernelAcceptedSetupLane,
-    memoryBoundedTestThreadCount: number,
+    memoryBoundedThreadCount: number,
+    mode: RustKernelAcceptedSetupRunMode = 'ci',
 ): ResolvedKnob => {
     if (
+        mode === 'ci' &&
         lane === 'final-package' &&
-        memoryBoundedTestThreadCount > finalPackageMaximumLibtestThreadCount
+        memoryBoundedThreadCount > finalPackageMaximumLibtestThreadCount
     ) {
         return {
             value: String(finalPackageMaximumLibtestThreadCount),
@@ -137,7 +175,7 @@ export const automaticTestThreadKnobForLane = (
     }
 
     return {
-        value: String(memoryBoundedTestThreadCount),
+        value: String(memoryBoundedThreadCount),
         source: 'memory-bounded',
     };
 };
@@ -145,8 +183,10 @@ export const automaticTestThreadKnobForLane = (
 export const automaticTrusteeProofBatchKnobForLane = (
     lane: RustKernelAcceptedSetupLane,
     memoryBoundedTrusteeProofBatchSize: number,
+    mode: RustKernelAcceptedSetupRunMode = 'ci',
 ): ResolvedKnob => {
     if (
+        mode === 'ci' &&
         lane === 'final-package' &&
         memoryBoundedTrusteeProofBatchSize >
             finalPackageMaximumTrusteeProofBatchSize
@@ -154,6 +194,17 @@ export const automaticTrusteeProofBatchKnobForLane = (
         return {
             value: String(finalPackageMaximumTrusteeProofBatchSize),
             source: 'final-package prover cap',
+        };
+    }
+    if (
+        mode === 'accelerated' &&
+        lane === 'final-package' &&
+        memoryBoundedTrusteeProofBatchSize >
+            acceleratedFinalPackageMaximumTrusteeProofBatchSize
+    ) {
+        return {
+            value: String(acceleratedFinalPackageMaximumTrusteeProofBatchSize),
+            source: 'local final-package workstation cap',
         };
     }
 
@@ -243,24 +294,26 @@ const logFileSlugForLane = (lane: RustKernelAcceptedSetupLane): string => {
 
 const commandDescriptionForLane = (
     lane: RustKernelAcceptedSetupLane,
+    mode: RustKernelAcceptedSetupRunMode,
 ): string => {
+    const suffix = mode === 'accelerated' ? ' (accelerated local)' : '';
     if (lane === 'fast') {
-        return 'cargo test Rust accepted setup fast proof checks';
+        return `cargo test Rust accepted setup fast proof checks${suffix}`;
     }
     if (lane === 'final-package') {
-        return 'cargo test Rust accepted setup final package';
+        return `cargo test Rust accepted setup final package${suffix}`;
     }
 
-    return 'cargo test Rust accepted setup proofs';
+    return `cargo test Rust accepted setup proofs${suffix}`;
 };
 
-// Resolve the authoritative-lane concurrency knobs only for authoritative runs,
-// so a focused run neither validates nor depends on these overrides. The
-// core-derived caps mirror the kernel's final-package proving concurrency; the
-// kernel treats the exported values as authoritative, so on a high-core but
-// low-memory runner the RAM bound (not the core count) wins.
-const resolveAuthoritativeKnobs = (
+// Resolve per-lane concurrency knobs. The core-derived caps mirror the kernel's
+// final-package proving concurrency; the kernel treats the exported values as
+// authoritative, so on a high-core but low-memory runner the RAM bound (not the
+// core count) wins.
+const resolveRunKnobs = (
     lane: RustKernelAcceptedSetupCommandLane,
+    mode: RustKernelAcceptedSetupRunMode,
 ): {
     readonly testThreads: ResolvedKnob;
     readonly trusteeProofBatchSize: ResolvedKnob;
@@ -269,11 +322,12 @@ const resolveAuthoritativeKnobs = (
 } => {
     const automaticTestThreads = automaticTestThreadKnobForLane(
         lane,
-        heavyAcceptedSetupTestThreadCount,
+        automaticTestThreadCountForLane(lane, mode),
+        mode,
     );
     const coreDerivedTrusteeProverConcurrency = Math.max(
         1,
-        Math.floor(os.cpus().length / 4),
+        Math.floor(logicalProcessorCount / 4),
     );
     const memoryBoundedTrusteeProofBatchSize = Math.max(
         1,
@@ -287,7 +341,23 @@ const resolveAuthoritativeKnobs = (
         memoryBoundedTrusteeProofBatchSize,
     );
     const automaticTrusteeProofBatchSize =
-        automaticTrusteeProofBatchKnobForLane(lane, trusteeProofBatchSize);
+        automaticTrusteeProofBatchKnobForLane(
+            lane,
+            trusteeProofBatchSize,
+            mode,
+        );
+    const resolvedTrusteeProofBatchSize = resolveKnob(
+        Number.parseInt(automaticTrusteeProofBatchSize.value, 10),
+        automaticTrusteeProofBatchSize.source,
+        process.env.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE,
+    );
+    const limbMemoryBudgetDivisor =
+        lane === 'final-package' && mode === 'accelerated'
+            ? Math.max(
+                  1,
+                  Number.parseInt(resolvedTrusteeProofBatchSize.value, 10),
+              )
+            : 1;
     const memoryBoundedRayonThreadCount = Math.max(
         1,
         Math.floor(
@@ -296,14 +366,15 @@ const resolveAuthoritativeKnobs = (
         ),
     );
     const rayonThreadCount = Math.min(
-        os.cpus().length,
+        logicalProcessorCount,
         memoryBoundedRayonThreadCount,
     );
     const memoryBoundedTrusteeProofLimbBatchSize = Math.max(
         1,
         Math.floor(
             (availableGigabytes * heavyTestMemoryBudgetFraction) /
-                approximateGigabytesPerTrusteeProofLimb,
+                (approximateGigabytesPerTrusteeProofLimb *
+                    limbMemoryBudgetDivisor),
         ),
     );
     const trusteeProofLimbBatchSize = Math.min(
@@ -313,11 +384,7 @@ const resolveAuthoritativeKnobs = (
 
     return {
         testThreads: automaticTestThreads,
-        trusteeProofBatchSize: resolveKnob(
-            Number.parseInt(automaticTrusteeProofBatchSize.value, 10),
-            automaticTrusteeProofBatchSize.source,
-            process.env.SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE,
-        ),
+        trusteeProofBatchSize: resolvedTrusteeProofBatchSize,
         trusteeProofLimbBatchSize: resolveKnob(
             trusteeProofLimbBatchSize,
             'memory-bounded',
@@ -331,39 +398,55 @@ const resolveAuthoritativeKnobs = (
     };
 };
 
-const buildAuthoritativeCommand = (
+const buildLaneCommand = (
     lane: RustKernelAcceptedSetupCommandLane,
+    mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
-    const knobs = resolveAuthoritativeKnobs(lane);
+    const knobs = resolveRunKnobs(lane, mode);
+    const modeLabel =
+        mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
     console.log(
-        `${laneNameForLane(lane)} lane: running with ${knobs.testThreads.value} test thread(s) ` +
+        `${laneNameForLane(lane)} lane (${modeLabel}): running with ${knobs.testThreads.value} test thread(s) ` +
             `(${knobs.testThreads.source}; ${availableGigabytes.toFixed(1)} GiB available, ` +
-            `${approximateGigabytesPerHeavyTest} GiB automatically budgeted per test).`,
+            `${lane === 'final-package' && mode === 'accelerated' ? approximateGigabytesPerFinalPackageTest : approximateGigabytesPerHeavyTest} GiB automatically budgeted per test).`,
     );
     console.log(
-        `${laneNameForLane(lane)} lane: proving up to ${knobs.trusteeProofBatchSize.value} trustee evaluation-key ` +
+        `${laneNameForLane(lane)} lane (${modeLabel}): proving up to ${knobs.trusteeProofBatchSize.value} trustee evaluation-key ` +
             `proof(s) concurrently (${knobs.trusteeProofBatchSize.source}; automatic budget uses ` +
             `${approximateGigabytesPerTrusteeProver} GiB per prover).`,
     );
     console.log(
-        `${laneNameForLane(lane)} lane: proving up to ${knobs.trusteeProofLimbBatchSize.value} RNS limb(s) per ` +
+        `${laneNameForLane(lane)} lane (${modeLabel}): proving up to ${knobs.trusteeProofLimbBatchSize.value} RNS limb(s) per ` +
             `trustee evaluation-key prover (${knobs.trusteeProofLimbBatchSize.source}; automatic budget uses ` +
             `${approximateGigabytesPerTrusteeProofLimb} GiB per limb).`,
     );
     console.log(
-        `${laneNameForLane(lane)} lane: bounding the rayon pool to ${knobs.rayonThreadCount.value} thread(s) ` +
+        `${laneNameForLane(lane)} lane (${modeLabel}): bounding the rayon pool to ${knobs.rayonThreadCount.value} thread(s) ` +
             `(${knobs.rayonThreadCount.source}; automatic budget uses ` +
             `${approximateGigabytesPerRayonThread} GiB per rayon thread).`,
     );
+    if (mode === 'accelerated') {
+        console.log(
+            `${laneNameForLane(lane)} lane (${modeLabel}): incremental compilation on; ` +
+                `target directory ${acceptedSetupAcceleratedTargetDirectory}; proof checkpoints ${acceptedSetupCheckpointDirectory}; run logs stay under logs/.`,
+        );
+    }
 
     return {
         command: {
             args: cargoTestArgumentsForLane(lane, knobs.testThreads.value),
             command: 'cargo',
-            description: commandDescriptionForLane(lane),
+            description: commandDescriptionForLane(lane, mode),
             env: {
                 ...process.env,
-                CARGO_INCREMENTAL: '0',
+                ...(mode === 'accelerated'
+                    ? {
+                          CARGO_INCREMENTAL: '1',
+                          CARGO_TARGET_DIR:
+                              acceptedSetupAcceleratedTargetDirectory,
+                          SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
+                      }
+                    : { CARGO_INCREMENTAL: '0' }),
                 RAYON_NUM_THREADS: knobs.rayonThreadCount.value,
                 SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
                     knobs.trusteeProofBatchSize.value,
@@ -373,7 +456,10 @@ const buildAuthoritativeCommand = (
                     ? { SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS: '1' }
                     : {}),
             },
-            logFileSlug: logFileSlugForLane(lane),
+            logFileSlug:
+                mode === 'accelerated'
+                    ? `${logFileSlugForLane(lane)}-accelerated`
+                    : logFileSlugForLane(lane),
         },
         progressLabel: progressLabelForLane(lane),
         testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
@@ -399,25 +485,41 @@ export const cargoTestArgumentsForFocusedFilter = (
     testThreadCount,
 ];
 
+const focusedLaneForFilter = (
+    selectedLane: RustKernelAcceptedSetupLane,
+    testFilter: string,
+): RustKernelAcceptedSetupCommandLane => {
+    if (
+        selectedLane === 'final-package' ||
+        testFilter.includes(heavyAcceptedSetupFinalPackageTestPattern)
+    ) {
+        return 'final-package';
+    }
+
+    return 'fast';
+};
+
 const buildFocusedCommand = (
     testFilter: string,
+    selectedLane: RustKernelAcceptedSetupLane,
 ): BuiltRustKernelAcceptedSetupCommand => {
+    const lane = focusedLaneForFilter(selectedLane, testFilter);
+    const knobs = resolveRunKnobs(lane, 'accelerated');
     console.log(
         `Rust accepted setup focused run: filter [${testFilter}], ` +
-            `${heavyAcceptedSetupTestThreadCount} test thread(s) ` +
-            `(${availableGigabytes.toFixed(1)} GiB available, ` +
-            `${approximateGigabytesPerHeavyTest} GiB budgeted per test).`,
+            `${knobs.testThreads.value} test thread(s) ` +
+            `(${knobs.testThreads.source}; ${availableGigabytes.toFixed(1)} GiB available).`,
     );
     console.log(
         `Pinned target directory: ${acceptedSetupFocusedTargetDirectory}. ` +
-            `Incremental compilation: on. Checkpoint resume: on.`,
+            `Incremental compilation: on. Proof checkpoint resume: on. Proof checkpoints ${acceptedSetupCheckpointDirectory}; run logs stay under logs/.`,
     );
 
     return {
         command: {
             args: cargoTestArgumentsForFocusedFilter(
                 testFilter,
-                String(heavyAcceptedSetupTestThreadCount),
+                knobs.testThreads.value,
             ),
             command: 'cargo',
             description: `cargo test ${testFilter} (warm focused)`,
@@ -431,11 +533,19 @@ const buildFocusedCommand = (
                 // Resume each proof family's corpus from on-disk checkpoints instead
                 // of re-running the prover from a cold in-process fixture cache.
                 SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
+                RAYON_NUM_THREADS: knobs.rayonThreadCount.value,
+                SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
+                    knobs.trusteeProofBatchSize.value,
+                SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
+                    knobs.trusteeProofLimbBatchSize.value,
+                ...(lane === 'final-package'
+                    ? { SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS: '1' }
+                    : {}),
             },
             logFileSlug: 'cargo-test-rust-accepted-setup-focused',
         },
         progressLabel: 'accepted-setup:focused',
-        testThreadCount: heavyAcceptedSetupTestThreadCount,
+        testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
     };
 };
 
@@ -446,22 +556,28 @@ export const authoritativeCommandLanesForLane = (
 
 const buildAuthoritativeCommands = (
     lane: RustKernelAcceptedSetupLane,
+    mode: RustKernelAcceptedSetupRunMode,
 ): readonly BuiltRustKernelAcceptedSetupCommand[] =>
     authoritativeCommandLanesForLane(lane).map((commandLane) =>
-        buildAuthoritativeCommand(commandLane),
+        buildLaneCommand(commandLane, mode),
     );
 
 const usage =
-    'Usage: run-rust-kernel-accepted-setup-tests.ts [<test name, module name, or Rust file filter>]. ' +
-    'Use one positional filter for a focused local run, or no filter for the full authoritative accepted-setup lane.';
+    'Usage: run-rust-kernel-accepted-setup-tests.ts [--ci] [<test name, module name, or Rust file filter>]. ' +
+    'Default mode is accelerated local execution with checkpoint resume. Pass --ci for the conservative prove-fresh CI lane.';
 
 export const parseRustKernelAcceptedSetupArguments = (
     commandArguments: readonly string[],
 ): ParsedRustKernelAcceptedSetupArguments => {
     const positionalArguments: string[] = [];
+    let mode: RustKernelAcceptedSetupRunMode = 'accelerated';
 
     for (const argument of commandArguments) {
         if (argument === '--') {
+            continue;
+        }
+        if (argument === '--ci') {
+            mode = 'ci';
             continue;
         }
         if (argument.startsWith('-')) {
@@ -489,6 +605,7 @@ export const parseRustKernelAcceptedSetupArguments = (
 
     return {
         focused,
+        mode,
         testFilters:
             normalizedFocusedFilter !== undefined
                 ? [normalizedFocusedFilter]
@@ -507,16 +624,22 @@ export const runRustKernelAcceptedSetupTests = async (input: {
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
         lanes: parsedArguments.focused
-            ? ['Rust accepted setup focused']
-            : authoritativeCommandLanesForLane(input.lane).map((lane) =>
-                  laneNameForLane(lane),
+            ? [`Rust accepted setup focused (${parsedArguments.mode})`]
+            : authoritativeCommandLanesForLane(input.lane).map(
+                  (lane) =>
+                      `${laneNameForLane(lane)} (${parsedArguments.mode})`,
               ),
         scriptName: input.scriptName ?? scriptNameForLane(input.lane),
     });
 
     const builtCommands = parsedArguments.focused
-        ? [buildFocusedCommand(parsedArguments.testFilters[0] ?? '')]
-        : buildAuthoritativeCommands(input.lane);
+        ? [
+              buildFocusedCommand(
+                  parsedArguments.testFilters[0] ?? '',
+                  input.lane,
+              ),
+          ]
+        : buildAuthoritativeCommands(input.lane, parsedArguments.mode);
 
     let exitCode: number | undefined;
     try {

@@ -13,8 +13,6 @@ use super::{
 
 const LOCAL_STATE_OBJECT_TYPE: &str = "LocalTrusteeSetupStateCommitment";
 const LOCAL_STATE_DELETION_RECEIPT_OBJECT_TYPE: &str = "LocalTrusteeSetupStateDeletionReceipt";
-const LOCAL_STATE_EXPORT_POLICY: &str = "roots-only-no-raw-share-or-opening-export";
-const LOCAL_STATE_STORAGE_REQUIREMENT: &str = "encrypted-local-device-state-required";
 const DELETION_BOUNDARY: &str = "after-private-vss-aggregation";
 
 const DELETED_MATERIAL_CLASSES: &[&str] = &[
@@ -93,8 +91,6 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
         "trusteePoint": trustee_point,
         "localStateRoot": local_state_root,
         "deletionReceiptRoot": deletion_receipt_root,
-        "exportPolicy": LOCAL_STATE_EXPORT_POLICY,
-        "storageRequirement": LOCAL_STATE_STORAGE_REQUIREMENT,
         "deletionBoundary": DELETION_BOUNDARY,
     }))
 }
@@ -145,20 +141,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
         ));
     }
     compare_context_fields(local_state, setup_context, "localStateCommitment")?;
-    if local_state.get("exportPolicy").and_then(Value::as_str) != Some(LOCAL_STATE_EXPORT_POLICY) {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.exportPolicy must forbid raw share and opening export",
-        ));
-    }
-    if local_state
-        .get("storageRequirement")
-        .and_then(Value::as_str)
-        != Some(LOCAL_STATE_STORAGE_REQUIREMENT)
-    {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.storageRequirement must require encrypted local device state",
-        ));
-    }
     string_field(local_state, "trusteeIdentity")?;
 
     Ok(())

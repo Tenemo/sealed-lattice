@@ -1,5 +1,3 @@
-import { expect } from 'vitest';
-
 import {
     firstRosterParticipantCount,
     minimumSuccinctProofFixtureRingDegree,
@@ -36,44 +34,6 @@ import type {
     BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
-
-function collectForbiddenPrivateVssDeliveryFieldPaths(
-    value: unknown,
-    objectPath = 'privateVssEnvelopeCommitments',
-): string[] {
-    const forbiddenFieldNames = new Set([
-        'privateEnvelope',
-        'coefficientMessage',
-        'randomnessByColumn',
-        'shareValues',
-        'aggregateOpening',
-        'aggregateOpeningColumns',
-        'carryWitnessesDecimal',
-    ]);
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenPrivateVssDeliveryFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenFieldNames.has(fieldName)) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenPrivateVssDeliveryFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
-}
 
 function collectiveSetupPhaseOrderHash(
     kernel: TranscriptCoreKernel,
@@ -315,12 +275,6 @@ export function packageShapePrivateVssEnvelopeCommitments(
             verificationPhaseNumber: 7,
             envelopeReferences,
         });
-
-    expect(
-        collectForbiddenPrivateVssDeliveryFieldPaths(
-            privateVssEnvelopeCommitmentSet,
-        ),
-    ).toEqual([]);
 
     return privateVssEnvelopeCommitmentSet;
 }

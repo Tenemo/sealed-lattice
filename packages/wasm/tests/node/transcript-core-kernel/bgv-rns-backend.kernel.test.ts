@@ -63,7 +63,6 @@ describe('BGV-RNS backend kernel commands', () => {
         const operationRegistry = kernel.describeBgvOperationRegistry() as {
             readonly registry: {
                 readonly allowedOperations: readonly string[];
-                readonly forbiddenOperations: readonly string[];
             };
             readonly bgvParametersHash: string;
         };
@@ -88,9 +87,6 @@ describe('BGV-RNS backend kernel commands', () => {
         );
         expect(operationRegistry.registry.allowedOperations).toContain(
             'homomorphicEncryptedBallotAggregation',
-        );
-        expect(operationRegistry.registry.forbiddenOperations).toContain(
-            'scalarDegree360Comparator',
         );
     });
 
@@ -201,7 +197,7 @@ describe('BGV-RNS backend kernel commands', () => {
             kernel.validateBgvEvaluatorOperation({
                 operation: 'scalarDegree360Comparator',
             }),
-            'ForbiddenEvaluatorOperation',
+            'UncertifiedEvaluatorOperation',
         );
         expectBgvParametersRejected(
             kernel.validateBgvEvaluatorOperation({
