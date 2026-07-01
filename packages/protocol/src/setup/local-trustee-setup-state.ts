@@ -9,12 +9,21 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    assertContextFieldPathsMatch,
+    assertJsonRecord as jsonRecord,
+    assertJsonRecordArray as jsonRecordArray,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertProtocolHash,
+    contextFields,
+    setupContextFieldNames,
+    type JsonRecord,
+} from './common-fields.js';
 import type {
     CollectiveBgvSetupContext,
     PrivateVssEnvelopeVerificationReference,
 } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 export const localTrusteeSetupStateDeletionBoundary =
     'after-private-vss-aggregation';
@@ -125,63 +134,6 @@ export type LocalTrusteeSetupStateCommitment = Readonly<
     }
 >;
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
-const contextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const isJsonRecord = (value: unknown): value is JsonRecord =>
-    typeof value === 'object' && value !== null && !Array.isArray(value);
-
-const jsonRecord = (value: unknown, fieldName: string): JsonRecord => {
-    if (!isJsonRecord(value)) {
-        throw new TypeError(`${fieldName} must be an object.`);
-    }
-
-    return value;
-};
-
-const jsonRecordArray = (
-    value: unknown,
-    fieldName: string,
-): readonly JsonRecord[] => {
-    if (!Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an array.`);
-    }
-
-    return value.map((entry, entryIndex) =>
-        jsonRecord(entry, `${fieldName}.${String(entryIndex)}`),
-    );
-};
-
 const stringField = (
     value: JsonRecord,
     fieldName: string,
@@ -230,30 +182,6 @@ const nonNegativeIntegerField = (
     return fieldValue;
 };
 
-const assertSetupContextBinding = (
-    setupContext: CollectiveBgvSetupContext,
-    value: JsonRecord,
-    objectPath: string,
-): void => {
-    for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
-
-const setupContextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<CollectiveBgvSetupContext, (typeof contextFieldNames)[number]> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
 const validateInput = (input: LocalTrusteeSetupStateCommitmentInput): void => {
     assertNonEmptyString(
         input.setupContext.ceremonyId,
@@ -263,7 +191,7 @@ const validateInput = (input: LocalTrusteeSetupStateCommitmentInput): void => {
         input.setupContext.setupEpoch,
         'setupContext.setupEpoch',
     );
-    for (const fieldName of contextFieldNames) {
+    for (const fieldName of setupContextFieldNames) {
         if (fieldName !== 'ceremonyId' && fieldName !== 'setupEpoch') {
             assertProtocolHash(
                 input.setupContext[fieldName],
@@ -305,7 +233,7 @@ export const createLocalTrusteeSetupStateCommitment = (
     const deletionReceiptWithoutRoot = {
         objectType: 'LocalTrusteeSetupStateDeletionReceipt',
         objectVersion: 1,
-        ...setupContextFields(input.setupContext),
+        ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         trusteePoint,
@@ -322,7 +250,7 @@ export const createLocalTrusteeSetupStateCommitment = (
     const localStateWithoutRoot = {
         objectType: 'LocalTrusteeSetupStateCommitment',
         objectVersion: 1,
-        ...setupContextFields(input.setupContext),
+        ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         trusteePoint,
@@ -348,7 +276,7 @@ const thresholdShareCommitmentRecipientRoot = (
         input.thresholdShareCommitments,
         'thresholdShareCommitments',
     );
-    assertSetupContextBinding(
+    assertContextFieldPathsMatch(
         input.setupContext,
         thresholdShareCommitments,
         'thresholdShareCommitments',
@@ -386,7 +314,7 @@ const recipientEnvelopeReferences = (
         input.privateVssEnvelopeCommitments,
         'privateVssEnvelopeCommitments',
     );
-    assertSetupContextBinding(
+    assertContextFieldPathsMatch(
         input.setupContext,
         privateVssEnvelopeCommitments,
         'privateVssEnvelopeCommitments',
@@ -422,7 +350,7 @@ const recipientEnvelopeReferences = (
     }
     envelopeReferences.forEach((reference, referenceIndex) => {
         const objectPath = `privateVssEnvelopeCommitments.envelopeReferences.${String(referenceIndex)}`;
-        assertSetupContextBinding(input.setupContext, reference, objectPath);
+        assertContextFieldPathsMatch(input.setupContext, reference, objectPath);
         if (reference.sourceTrusteeRosterPosition !== referenceIndex) {
             throw new Error(
                 'private VSS envelope references for a trustee must cover contiguous source trustee roster positions.',
@@ -455,7 +383,7 @@ const issuedVssAcceptanceRoot = (
         input.vssShareAcceptances,
         'vssShareAcceptances',
     );
-    assertSetupContextBinding(
+    assertContextFieldPathsMatch(
         input.setupContext,
         vssShareAcceptances,
         'vssShareAcceptances',
@@ -475,7 +403,11 @@ const issuedVssAcceptanceRoot = (
         )
         .map((record, recordIndex) => {
             const objectPath = `vssShareAcceptances.acceptanceRecords.${String(recordIndex)}`;
-            assertSetupContextBinding(input.setupContext, record, objectPath);
+            assertContextFieldPathsMatch(
+                input.setupContext,
+                record,
+                objectPath,
+            );
             if (record.recipientIdentity !== input.trusteeIdentity) {
                 throw new Error(
                     `${objectPath}.recipientIdentity must match the trustee identity.`,
@@ -501,7 +433,7 @@ const issuedVssAcceptanceRoot = (
     return deriveCanonicalObjectHash({
         objectType: 'LocalTrusteeIssuedVssAcceptanceSet',
         objectVersion: 1,
-        ...setupContextFields(input.setupContext),
+        ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         privateVssEnvelopeCommitmentRoot,
@@ -517,7 +449,7 @@ const issuedVssComplaintRoots = (
         return [];
     }
     const vssComplaints = jsonRecord(input.vssComplaints, 'vssComplaints');
-    assertSetupContextBinding(
+    assertContextFieldPathsMatch(
         input.setupContext,
         vssComplaints,
         'vssComplaints',
@@ -538,7 +470,11 @@ const issuedVssComplaintRoots = (
         )
         .map((record, recordIndex) => {
             const objectPath = `vssComplaints.complaintRecords.${String(recordIndex)}`;
-            assertSetupContextBinding(input.setupContext, record, objectPath);
+            assertContextFieldPathsMatch(
+                input.setupContext,
+                record,
+                objectPath,
+            );
             if (record.recipientIdentity !== input.trusteeIdentity) {
                 throw new Error(
                     `${objectPath}.recipientIdentity must match the trustee identity.`,
@@ -601,7 +537,11 @@ const assertPrivateEnvelopeMatchesReference = (
     privateEnvelopeHash: ProtocolHash,
     envelopeReference: PrivateVssEnvelopeVerificationReference,
 ): void => {
-    assertSetupContextBinding(setupContext, privateEnvelope, 'privateEnvelope');
+    assertContextFieldPathsMatch(
+        setupContext,
+        privateEnvelope,
+        'privateEnvelope',
+    );
     if (privateEnvelopeHash !== envelopeReference.privateEnvelopeHash) {
         throw new Error(
             'verified private VSS envelope hash must match the public envelope reference.',
@@ -726,7 +666,7 @@ const aggregateVerifiedPrivateVssMaterial = (
     const localEnvelopeReferences =
         sourcePrivateEnvelopeReferences(envelopeReferences);
     const materialCommonFields = {
-        ...setupContextFields(input.setupContext),
+        ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         thresholdShareCommitmentRecipientRoot:

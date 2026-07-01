@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::hashing::derive_canonical_object_hash;
+use crate::bgv::setup_helpers::setup_transport_chunk_manifest_root;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SetupVssMaterialTransportHashes {
@@ -778,22 +778,4 @@ pub(super) fn finalize_streaming_hash512_hex(hasher: Shake256) -> String {
     reader.read(&mut output);
 
     to_hex(&output)
-}
-
-pub(super) fn setup_transport_chunk_manifest_root(
-    chunk_size_bytes: u64,
-    chunk_count: u64,
-    total_byte_length: u64,
-    chunk_hashes: &[String],
-    full_object_hash: &str,
-) -> CanonicalResult<String> {
-    derive_canonical_object_hash(&json!({
-        "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
-        "objectVersion": 1,
-        "chunkSizeBytes": chunk_size_bytes,
-        "chunkCount": chunk_count,
-        "totalByteLength": total_byte_length,
-        "chunkHashes": chunk_hashes,
-        "fullObjectHash": full_object_hash,
-    }))
 }

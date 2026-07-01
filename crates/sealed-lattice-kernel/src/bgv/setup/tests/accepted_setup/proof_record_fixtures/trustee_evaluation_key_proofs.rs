@@ -69,8 +69,6 @@ fn trustee_evaluation_key_proofs_object_inner(
         };
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
-    let checkpoint_resume_enabled =
-        terminal_transport.is_some() && final_package_checkpoint_resume_enabled();
     let compact_terminal_proof_transport = terminal_transport.is_some();
     let trustee_proof_batch_size = if terminal_transport.is_some() {
         // Full-ring final-package proving. An explicit
@@ -140,17 +138,20 @@ fn trustee_evaluation_key_proofs_object_inner(
                 }
             })
             .collect::<Vec<_>>();
-        let resumed_records = if checkpoint_resume_enabled {
-            final_package_trustee_evaluation_key_proof_records_from_checkpoints(&work_item_batch)
-        } else {
-            BTreeMap::new()
-        };
+        let transported_checkpoint_proof_bytes =
+            if terminal_transport.is_some() && final_package_checkpoint_resume_enabled() {
+                final_package_trustee_evaluation_key_proof_bytes_from_transport_checkpoints(
+                    &work_item_batch,
+                )
+            } else {
+                BTreeMap::new()
+            };
         let built_record_batch: Vec<BuiltTrusteeEvaluationKeyProofRecord> = work_item_batch
             .into_par_iter()
             .map(|work_item| {
                 build_trustee_evaluation_key_proof_record(
                     work_item,
-                    &resumed_records,
+                    &transported_checkpoint_proof_bytes,
                     ring_degree,
                     compact_terminal_proof_transport,
                 )
@@ -237,22 +238,28 @@ fn trustee_evaluation_key_proofs_object_inner(
 
 fn build_trustee_evaluation_key_proof_record(
     work_item: TrusteeEvaluationKeyProofWorkItem,
-    resumed_records: &BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord>,
+    transported_checkpoint_proof_bytes: &BTreeMap<u64, Vec<u8>>,
     ring_degree: usize,
     compact_terminal_proof_transport: bool,
 ) -> BuiltTrusteeEvaluationKeyProofRecord {
-    if let Some(resumed_record) = resumed_records.get(&work_item.trustee_roster_position) {
-        final_package_phase(&format!(
-            "resumed trustee evaluation-key proof trustee {} from checkpoint",
-            work_item.trustee_roster_position
-        ));
-        return resumed_record.clone();
-    }
-
     final_package_phase(&format!(
-        "generating trustee evaluation-key proof trustee {}",
+        "loading or generating trustee evaluation-key proof trustee {}",
         work_item.trustee_roster_position
     ));
+    if let Some(proof_bytes) =
+        transported_checkpoint_proof_bytes.get(&work_item.trustee_roster_position)
+    {
+        final_package_phase(&format!(
+            "loaded trustee evaluation-key proof trustee {} from transported checkpoint backfill",
+            work_item.trustee_roster_position
+        ));
+        return trustee_evaluation_key_record_from_proof_bytes(
+            work_item.record,
+            proof_bytes,
+            compact_terminal_proof_transport,
+        );
+    }
+
     let witness = trustee_evaluation_key_witness_for_fixture(
         work_item.trustee_roster_position,
         ring_degree,
@@ -289,18 +296,29 @@ fn build_trustee_evaluation_key_proof_record(
         },
     );
     final_package_phase(&format!(
-        "generated trustee evaluation-key proof trustee {} ({} bytes)",
+        "prepared trustee evaluation-key proof trustee {} ({} bytes)",
         work_item.trustee_roster_position,
         proof_bytes.len(),
     ));
+    trustee_evaluation_key_record_from_proof_bytes(
+        work_item.record,
+        &proof_bytes,
+        compact_terminal_proof_transport,
+    )
+}
+
+fn trustee_evaluation_key_record_from_proof_bytes(
+    record: serde_json::Value,
+    proof_bytes: &[u8],
+    compact_terminal_proof_transport: bool,
+) -> BuiltTrusteeEvaluationKeyProofRecord {
     if compact_terminal_proof_transport {
         return trustee_evaluation_key_record_with_compact_transported_proof_bytes(
-            work_item.record,
+            record,
             proof_bytes,
         );
     }
-    let record =
-        trustee_evaluation_key_record_with_embedded_proof_bytes(work_item.record, &proof_bytes);
+    let record = trustee_evaluation_key_record_with_embedded_proof_bytes(record, proof_bytes);
     BuiltTrusteeEvaluationKeyProofRecord {
         record,
         transported_proof_material: None,
@@ -320,10 +338,10 @@ fn trustee_evaluation_key_record_with_embedded_proof_bytes(
 
 fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
     mut record: serde_json::Value,
-    proof_bytes: Vec<u8>,
+    proof_bytes: &[u8],
 ) -> BuiltTrusteeEvaluationKeyProofRecord {
-    let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-    let chunks = proof_bytes_transport_chunks(proof_bytes);
+    let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(proof_bytes);
+    let chunks = proof_bytes_transport_chunks_from_slice(proof_bytes);
     let transport_hashes = setup_proof_material_transport_hashes(
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         &chunks,
@@ -354,16 +372,49 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
     }
 }
 
-fn final_package_trustee_evaluation_key_proof_records_from_checkpoints(
+struct MissingTrusteeEvaluationKeyAnchorCheckpoint<'a> {
+    trustee_roster_position: u64,
+    statement_hash_hex: String,
+    record: &'a serde_json::Value,
+}
+
+fn final_package_trustee_evaluation_key_proof_bytes_from_transport_checkpoints(
     work_items: &[TrusteeEvaluationKeyProofWorkItem],
-) -> BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord> {
+) -> BTreeMap<u64, Vec<u8>> {
+    let missing_anchor_checkpoints = work_items
+        .iter()
+        .filter_map(|work_item| {
+            let statement_hash_hex = to_hex(&work_item.statement.statement_hash());
+            if anchor_proof_checkpoint_exists(
+                TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
+                &statement_hash_hex,
+            ) {
+                return None;
+            }
+
+            Some(MissingTrusteeEvaluationKeyAnchorCheckpoint {
+                trustee_roster_position: work_item.trustee_roster_position,
+                statement_hash_hex,
+                record: &work_item.record,
+            })
+        })
+        .collect::<Vec<_>>();
+    if missing_anchor_checkpoints.is_empty() {
+        return BTreeMap::new();
+    }
+
     let directory =
         crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
             .join("trustee-evaluation-key-proof-material");
     let Ok(entries) = std::fs::read_dir(&directory) else {
         return BTreeMap::new();
     };
-    let mut resumed_records = BTreeMap::new();
+    final_package_phase(&format!(
+        "scanning transported trustee evaluation-key proof material for {} missing statement-keyed checkpoint(s)",
+        missing_anchor_checkpoints.len()
+    ));
+    let mut backfilled_proof_bytes = BTreeMap::new();
+    let mut scanned_transport_checkpoint_count = 0usize;
     for entry in entries {
         let entry = entry.expect("final-package proof checkpoint directory entry");
         let path = entry.path();
@@ -380,22 +431,25 @@ fn final_package_trustee_evaluation_key_proof_records_from_checkpoints(
         {
             continue;
         }
+        scanned_transport_checkpoint_count += 1;
         let proof_bytes =
             std::fs::read(&path).expect("final-package trustee proof checkpoint bytes");
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
-        let chunks = proof_bytes_transport_chunks(proof_bytes);
+        let chunks = proof_bytes_transport_chunks_from_slice(&proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
             &chunks,
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("checkpointed trustee proof transport hashes");
-        let mut matched_trustee = None;
-        for work_item in work_items {
-            if resumed_records.contains_key(&work_item.trustee_roster_position) {
+        let mut matched_checkpoint = None;
+        for missing_anchor_checkpoint in &missing_anchor_checkpoints {
+            if backfilled_proof_bytes
+                .contains_key(&missing_anchor_checkpoint.trustee_roster_position)
+            {
                 continue;
             }
-            let mut record = work_item.record.clone();
+            let mut record = missing_anchor_checkpoint.record.clone();
             apply_trustee_evaluation_key_proof_transport_fields(
                 &mut record,
                 &proof_bytes_hash,
@@ -407,36 +461,35 @@ fn final_package_trustee_evaluation_key_proof_records_from_checkpoints(
             if proof_material_root != stored_material_root {
                 continue;
             }
-            record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
-            record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-                derive_canonical_object_hash(&record)
-                    .expect("transported trustee evaluation-key proof root")
-            );
-            let proof_material =
-                transported_trustee_evaluation_key_proof_material(&record, &transport_hashes);
-            register_verified_trustee_evaluation_key_proof_material_chunks(
-                &proof_material_root,
-                chunks,
-            )
-            .expect("verified trustee evaluation-key proof material chunks");
-            resumed_records.insert(
-                work_item.trustee_roster_position,
-                BuiltTrusteeEvaluationKeyProofRecord {
-                    record,
-                    transported_proof_material: Some(proof_material),
-                },
-            );
-            matched_trustee = Some(work_item.trustee_roster_position);
+            matched_checkpoint = Some((
+                missing_anchor_checkpoint.trustee_roster_position,
+                missing_anchor_checkpoint.statement_hash_hex.clone(),
+            ));
             break;
         }
-        if let Some(trustee_roster_position) = matched_trustee {
+        if let Some((trustee_roster_position, statement_hash_hex)) = matched_checkpoint {
+            persist_checkpointed_anchor_proof_bytes(
+                TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY,
+                &statement_hash_hex,
+                &proof_bytes,
+            );
             final_package_phase(&format!(
-                "matched trustee evaluation-key proof checkpoint for trustee {trustee_roster_position}"
+                "backfilled trustee evaluation-key anchor checkpoint for trustee {trustee_roster_position}"
             ));
+            backfilled_proof_bytes.insert(trustee_roster_position, proof_bytes);
+            if backfilled_proof_bytes.len() == missing_anchor_checkpoints.len() {
+                break;
+            }
         }
     }
+    final_package_phase(&format!(
+        "transported trustee evaluation-key proof material scan matched {} of {} missing checkpoint(s) across {} candidate file(s)",
+        backfilled_proof_bytes.len(),
+        missing_anchor_checkpoints.len(),
+        scanned_transport_checkpoint_count
+    ));
 
-    resumed_records
+    backfilled_proof_bytes
 }
 
 fn apply_trustee_evaluation_key_proof_transport_fields(

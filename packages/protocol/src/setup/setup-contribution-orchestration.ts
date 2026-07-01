@@ -1,6 +1,15 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    assertContextFieldPathsMatch,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertProtocolHash,
+    contextFields,
+    setupContextFieldNames,
+    type JsonRecord,
+} from './common-fields.js';
 import type { LocalTrusteeSetupStateCommitment } from './local-trustee-setup-state.js';
 import type {
     PublicKeyShareProofRecord,
@@ -14,8 +23,6 @@ import type {
     VssShareAcceptanceRecord,
     VssShareComplaintRecord,
 } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 export type SetupContributionAssemblyInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
@@ -67,63 +74,6 @@ export type SetupContributionAssembly = Readonly<
         readonly setupContributionRoot: ProtocolHash;
     }
 >;
-
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-
-const contextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
-const setupContextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<CollectiveBgvSetupContext, (typeof contextFieldNames)[number]> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    objectPath: string,
-): void => {
-    for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
 
 const assertTrusteeMatches = (
     input: Pick<
@@ -187,7 +137,11 @@ const privateVssEnvelopeRootReferences = (
         )
         .map((reference, referenceIndex) => {
             const objectPath = `privateVssEnvelopeReferences.${String(referenceIndex)}`;
-            assertContextMatches(input.setupContext, reference, objectPath);
+            assertContextFieldPathsMatch(
+                input.setupContext,
+                reference,
+                objectPath,
+            );
             assertTrusteeMatches(
                 input,
                 reference,
@@ -234,7 +188,11 @@ const issuedAcceptanceRoots = (
         )
         .map((acceptance, acceptanceIndex) => {
             const objectPath = `vssShareAcceptanceRecords.${String(acceptanceIndex)}`;
-            assertContextMatches(input.setupContext, acceptance, objectPath);
+            assertContextFieldPathsMatch(
+                input.setupContext,
+                acceptance,
+                objectPath,
+            );
             assertTrusteeMatches(
                 input,
                 acceptance,
@@ -261,7 +219,11 @@ const issuedComplaintRoots = (
         )
         .map((complaint, complaintIndex) => {
             const objectPath = `vssShareComplaintRecords.${String(complaintIndex)}`;
-            assertContextMatches(input.setupContext, complaint, objectPath);
+            assertContextFieldPathsMatch(
+                input.setupContext,
+                complaint,
+                objectPath,
+            );
             assertTrusteeMatches(
                 input,
                 complaint,
@@ -285,7 +247,7 @@ export const createSetupContributionAssembly = (
         input.trusteeRosterPosition,
         'trusteeRosterPosition',
     );
-    for (const fieldName of contextFieldNames) {
+    for (const fieldName of setupContextFieldNames) {
         const value = input.setupContext[fieldName];
         if (typeof value !== 'string' || value.length === 0) {
             throw new TypeError(`setupContext.${fieldName} must be non-empty.`);
@@ -308,7 +270,7 @@ export const createSetupContributionAssembly = (
             ? null
             : input.vssSourceTrusteeRecord.sourceTrusteeCommitmentRoot;
     if (input.vssSourceTrusteeRecord !== undefined) {
-        assertContextMatches(
+        assertContextFieldPathsMatch(
             input.setupContext,
             input.vssSourceTrusteeRecord,
             'vssSourceTrusteeRecord',
@@ -326,7 +288,7 @@ export const createSetupContributionAssembly = (
         );
     }
     if (input.localStateCommitment !== undefined) {
-        assertContextMatches(
+        assertContextFieldPathsMatch(
             input.setupContext,
             input.localStateCommitment,
             'localStateCommitment',
@@ -340,7 +302,7 @@ export const createSetupContributionAssembly = (
         );
     }
     if (input.publicKeyShareRecord !== undefined) {
-        assertContextMatches(
+        assertContextFieldPathsMatch(
             input.setupContext,
             input.publicKeyShareRecord,
             'publicKeyShareRecord',
@@ -354,7 +316,7 @@ export const createSetupContributionAssembly = (
         );
     }
     if (input.publicKeyShareProofRecord !== undefined) {
-        assertContextMatches(
+        assertContextFieldPathsMatch(
             input.setupContext,
             input.publicKeyShareProofRecord,
             'publicKeyShareProofRecord',
@@ -371,7 +333,7 @@ export const createSetupContributionAssembly = (
     const assemblyWithoutRoot = {
         objectType: 'SetupContributionAssembly',
         objectVersion: 1,
-        ...setupContextFields(input.setupContext),
+        ...contextFields(input.setupContext),
         trusteeIdentity: input.trusteeIdentity,
         trusteeRosterPosition: input.trusteeRosterPosition,
         phaseObjectRoots: phaseObjectRoots(input),

@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::bgv::setup_helpers::setup_transport_chunk_manifest_root;
 use crate::hashing::derive_canonical_object_hash;
 
 static VSS_TRANSPORT_THRESHOLD_DERIVATION_SESSIONS: OnceLock<

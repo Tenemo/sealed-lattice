@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{Value, json};
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
@@ -35,6 +35,73 @@ pub(super) fn read_hash_field<'a>(value: &'a Value, field_name: &str) -> Canonic
     Ok(hash)
 }
 
+pub(super) fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
+    value
+        .get(field_name)
+        .filter(|field| field.is_object())
+        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be an object")))
+}
+
+pub(super) fn array_field<'a>(
+    value: &'a Value,
+    field_name: &str,
+) -> CanonicalResult<&'a Vec<Value>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be an array")))
+}
+
+pub(super) fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    value
+        .get(field_name)
+        .and_then(Value::as_str)
+        .filter(|field| !field.is_empty())
+        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be a non-empty string")))
+}
+
+pub(super) fn hash_string_field<'a>(
+    value: &'a Value,
+    field_name: &str,
+) -> CanonicalResult<&'a str> {
+    value
+        .get(field_name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| invalid_setup_fixture(format!("{field_name} must be a protocol hash")))
+}
+
+pub(super) fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
+    value
+        .get(field_name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            invalid_setup_fixture(format!("{field_name} must be a non-negative integer"))
+        })
+}
+
+pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
+    usize::try_from(u64_field(value, field_name)?)
+        .map_err(|_| invalid_setup_fixture(format!("{field_name} does not fit usize")))
+}
+
+pub(super) fn setup_transport_chunk_manifest_root(
+    chunk_size_bytes: u64,
+    chunk_count: u64,
+    total_byte_length: u64,
+    chunk_hashes: &[String],
+    full_object_hash: &str,
+) -> CanonicalResult<String> {
+    derive_canonical_object_hash(&json!({
+        "objectType": "SetupTransportChunkManifest",
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
+}
+
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
     if !is_lowercase_protocol_hash(hash) {
         return Err(CanonicalError::new(
@@ -44,6 +111,10 @@ pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalRes
     }
 
     Ok(())
+}
+
+fn invalid_setup_fixture(message: impl Into<String>) -> CanonicalError {
+    CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
 }
 
 pub(super) fn is_lowercase_protocol_hash(hash: &str) -> bool {

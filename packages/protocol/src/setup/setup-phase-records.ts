@@ -9,12 +9,16 @@ import type {
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
 
+import {
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    type JsonRecord,
+} from './common-fields.js';
 import type {
     CollectiveBgvSetupContext,
     ProtocolRootSigner,
 } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 export type SetupPhaseDescription = {
     readonly phaseId: string;
@@ -87,29 +91,6 @@ type SetupPhasePayload = Readonly<{
 }>;
 
 const textEncoder = new TextEncoder();
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
-const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
 
 const canonicalByteLength = (value: unknown): number =>
     textEncoder.encode(canonicalJson(value)).byteLength;

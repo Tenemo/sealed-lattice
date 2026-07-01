@@ -3,8 +3,12 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertContextMatches,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
     assertProtocolHash,
     contextFields,
+    type JsonRecord,
 } from './common-fields.js';
 import {
     setupProofMaterialRecordTransportFields,
@@ -21,8 +25,6 @@ import {
     type VssSourceTrusteeCoefficientCommitmentRecord,
 } from './vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 export const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretAnchorProofBytesHashDomain =
@@ -168,32 +170,9 @@ export type BinaryChunkedSameSecretProofMaterialTransport = Readonly<{
 
 const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
 
-const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
 const assertLowercaseHexBytes = (value: string, fieldName: string): void => {
     if (!lowercaseHexPattern.test(value)) {
         throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
     }
 };
 

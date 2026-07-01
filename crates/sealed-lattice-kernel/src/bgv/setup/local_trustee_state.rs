@@ -2,6 +2,10 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::parameters::DATA_PRIMES,
+    bgv::setup_helpers::{
+        array_field, hash_string_field, is_lowercase_protocol_hash, object_field, string_field,
+        u64_field, usize_field,
+    },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
     hashing::derive_canonical_object_hash,
 };
@@ -249,51 +253,6 @@ fn setup_context_field_names() -> [&'static str; 5] {
     ]
 }
 
-fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
-    value
-        .get(field_name)
-        .filter(|field| field.is_object())
-        .ok_or_else(|| invalid_local_state_input(format!("{field_name} must be an object")))
-}
-
-fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
-    value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_local_state_input(format!("{field_name} must be an array")))
-}
-
-fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .filter(|field| !field.is_empty())
-        .ok_or_else(|| {
-            invalid_local_state_input(format!("{field_name} must be a non-empty string"))
-        })
-}
-
-fn hash_string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| invalid_local_state_input(format!("{field_name} must be a protocol hash")))
-}
-
-fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
-    value
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            invalid_local_state_input(format!("{field_name} must be a non-negative integer"))
-        })
-}
-
-fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
-    usize::try_from(u64_field(value, field_name)?)
-        .map_err(|_| invalid_local_state_input(format!("{field_name} does not fit usize")))
-}
-
 fn string_array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<Vec<&'a str>> {
     array_field(value, field_name)?
         .iter()
@@ -306,11 +265,7 @@ fn string_array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult
 }
 
 fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() == 128
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if is_lowercase_protocol_hash(hash) {
         return Ok(());
     }
 

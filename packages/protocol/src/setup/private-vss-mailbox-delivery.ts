@@ -1,14 +1,17 @@
 import {
     encryptPrivateVssMailboxEnvelope,
     hash512Hex,
-    setupProofMaterialFullObjectHashHex,
     type PrivateVssEncryptedEnvelope,
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    setupProofMaterialRecordTransportMetadataFields,
+    setupProofMaterialRecordTransportFields,
+    setupProofMaterialTransportChunks,
+    setupProofMaterialTransportMetadata,
     setupProofTransportChunkSizeBytes,
-    splitProofBytesIntoChunks,
+    setupTransportedProofMaterialFields,
 } from './setup-proof-material-transport.js';
 
 type JsonRecord = Record<string, unknown>;
@@ -273,7 +276,6 @@ const embeddedPrivateVssShareProofBytesEncoding =
 const transportedSetupProofMaterialEncoding = 'binary-chunked-proof-bytes';
 const privateVssShareProofBytesHashDomain =
     'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1';
-const textEncoder = new TextEncoder();
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
@@ -386,57 +388,28 @@ const freshProofRandomnessHex = (): string => {
     return bytesToHex(bytes);
 };
 
-const varUintBytes = (value: number, fieldName: string): Uint8Array => {
-    assertNonNegativeSafeInteger(value, fieldName);
-    const bytes: number[] = [];
-    let remainingValue = value;
-    for (;;) {
-        let byte = remainingValue & 0x7f;
-        remainingValue = Math.floor(remainingValue / 128);
-        if (remainingValue !== 0) {
-            byte |= 0x80;
-        }
-        bytes.push(byte);
-        if (remainingValue === 0) {
-            break;
-        }
-    }
-
-    return Uint8Array.from(bytes);
-};
-
-const setupProofMaterialChunkHash = (
-    proofFamily: string,
-    fullObjectHash: ProtocolHash,
-    chunkIndex: number,
-    chunk: Uint8Array,
-): ProtocolHash =>
-    hash512Hex('sealed-lattice/setup/proof-material/chunk-v1', [
-        textEncoder.encode(proofFamily),
-        textEncoder.encode(fullObjectHash),
-        varUintBytes(chunkIndex, 'chunkIndex'),
-        chunk,
-    ]);
-
-const setupProofChunkManifestRoot = (
+const privateVssProofChunkManifestRoot = (
     kernel: PrivateVssMailboxDeliveryKernel,
-    proofFamily: string,
-    chunkHashes: readonly ProtocolHash[],
-    fullObjectHash: ProtocolHash,
-    totalByteLength: number,
-): ProtocolHash =>
-    kernel.deriveCanonicalObjectHash({
-        value: {
-            objectType: 'SetupProofMaterialChunkManifest',
-            objectVersion: 1,
-            proofFamily,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        },
-    });
+): Parameters<typeof setupProofMaterialTransportMetadata>[3] => ({
+    deriveChunkManifestRoot: ({
+        proofFamily,
+        chunkHashes,
+        fullObjectHash,
+        totalByteLength,
+    }) =>
+        kernel.deriveCanonicalObjectHash({
+            value: {
+                objectType: 'SetupProofMaterialChunkManifest',
+                objectVersion: 1,
+                proofFamily,
+                chunkSizeBytes: setupProofTransportChunkSizeBytes,
+                chunkCount: chunkHashes.length,
+                totalByteLength,
+                chunkHashes,
+                fullObjectHash,
+            },
+        }),
+});
 
 const sortedByRosterPosition = <Entry>(
     entries: readonly Entry[],
@@ -675,35 +648,11 @@ const transportPrivateVssShareProofMaterial = (
             'privateVssShareProof.proofBytesHash must match proofBytesHex before transport.',
         );
     }
-    const chunks = splitProofBytesIntoChunks(proofBytes);
-    if (chunks.length === 0) {
-        throw new Error(
-            'privateVssShareProof proofBytesHex must produce at least one transported chunk.',
-        );
-    }
-    const totalByteLength = chunks.reduce(
-        (accumulatedLength, chunk) => accumulatedLength + chunk.byteLength,
-        0,
-    );
-    const fullObjectHash = setupProofMaterialFullObjectHashHex(
+    const proofMaterialTransport = setupProofMaterialTransportMetadata(
         privateVssShareProofFamily,
-        totalByteLength,
-        chunks,
-    );
-    const chunkHashes = chunks.map((chunk, chunkIndex) =>
-        setupProofMaterialChunkHash(
-            privateVssShareProofFamily,
-            fullObjectHash,
-            chunkIndex,
-            chunk,
-        ),
-    );
-    const chunkRoot = setupProofChunkManifestRoot(
-        kernel,
-        privateVssShareProofFamily,
-        chunkHashes,
-        fullObjectHash,
-        totalByteLength,
+        proofBytes,
+        'privateVssShareProof proofBytesHex must produce at least one transported chunk.',
+        privateVssProofChunkManifestRoot(kernel),
     );
     const statementHash = assertProtocolHash(
         proofRecord.statementHash,
@@ -717,26 +666,21 @@ const transportPrivateVssShareProofMaterial = (
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
             statementHash,
             proofBytesHash,
-            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-            proofChunkCount: chunkHashes.length,
-            proofTotalByteLength: totalByteLength,
-            proofFullObjectHash: fullObjectHash,
-            proofChunkRoot: chunkRoot,
-            proofChunkHashes: chunkHashes,
+            ...setupProofMaterialRecordTransportMetadataFields(
+                proofMaterialTransport,
+            ),
         },
     });
     const transportedProofRecord = { ...proofRecord };
     delete transportedProofRecord.proofBytesHex;
-    transportedProofRecord.proofBytesEncoding =
-        transportedSetupProofMaterialEncoding;
-    transportedProofRecord.proofMaterialRoot = proofMaterialRoot;
-    transportedProofRecord.proofChunkSizeBytes =
-        setupProofTransportChunkSizeBytes;
-    transportedProofRecord.proofChunkCount = chunkHashes.length;
-    transportedProofRecord.proofTotalByteLength = totalByteLength;
-    transportedProofRecord.proofFullObjectHash = fullObjectHash;
-    transportedProofRecord.proofChunkRoot = chunkRoot;
-    transportedProofRecord.proofChunkHashes = chunkHashes;
+    Object.assign(
+        transportedProofRecord,
+        setupProofMaterialRecordTransportFields(
+            proofMaterialTransport,
+            proofMaterialRoot,
+            transportedSetupProofMaterialEncoding,
+        ),
+    );
 
     return {
         proofRecord: transportedProofRecord,
@@ -744,17 +688,11 @@ const transportPrivateVssShareProofMaterial = (
             objectType: 'SetupTransportedPrivateVssShareProofMaterial',
             objectVersion: 1,
             proofFamily: privateVssShareProofFamily,
-            proofMaterialRoot,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            fullObjectHash,
-            chunkHashes,
-            chunkRoot,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
+            ...setupTransportedProofMaterialFields(
+                proofMaterialTransport,
+                proofMaterialRoot,
+            ),
+            chunks: setupProofMaterialTransportChunks(proofMaterialTransport),
         },
     };
 };

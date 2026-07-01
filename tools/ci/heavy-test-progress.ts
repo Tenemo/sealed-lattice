@@ -29,7 +29,7 @@ const formatElapsed = (milliseconds: number): string => {
     return `${minutes}m${seconds.toString().padStart(2, '0')}s`;
 };
 
-export type HeavyTestProgressReporter = {
+type HeavyTestProgressReporter = {
     readonly observer: CommandRunObserver;
     readonly stop: () => void;
     readonly terminalOutputFilter: (line: string) => boolean;

@@ -20,7 +20,7 @@ export type CommandInvocation = {
     readonly logFileSlug?: string;
 };
 
-export type CommandOutputMode = 'capture' | 'inherit';
+type CommandOutputMode = 'capture' | 'inherit';
 
 export type CommandOutputStreamName = 'stderr' | 'stdout';
 
@@ -50,7 +50,7 @@ export type CommandRunObserver = {
     readonly onCommandStart?: (event: CommandStartEvent) => void;
 };
 
-export type PackageManagerSpawnCommand = {
+type PackageManagerSpawnCommand = {
     readonly args: readonly string[];
     readonly command: string;
     readonly description: string;
@@ -80,7 +80,7 @@ export const createPackageManagerCommand = (
     };
 };
 
-export const createPackageManagerSpawnCommand = (
+const createPackageManagerSpawnCommand = (
     runner: PackageManagerRunner,
     commandArguments: readonly string[],
 ): PackageManagerSpawnCommand => {
@@ -149,6 +149,19 @@ type WindowsTaskKiller = (
     options: { readonly stdio: 'ignore' },
 ) => unknown;
 
+type ProcessSignalName = 'SIGINT' | 'SIGTERM';
+
+type ProcessSignalEventSource = {
+    off: (
+        signal: ProcessSignalName,
+        listener: () => void,
+    ) => ProcessSignalEventSource;
+    on: (
+        signal: ProcessSignalName,
+        listener: () => void,
+    ) => ProcessSignalEventSource;
+};
+
 export const createAbortableCommandSpawnOptions = (
     env: NodeJS.ProcessEnv,
     stdio: SpawnOptions['stdio'],
@@ -191,6 +204,62 @@ export const killProcessTree = (
     }
 };
 
+export const installProcessSignalChildCleanup = (input: {
+    readonly activeChildProcesses: ReadonlySet<KillableChildProcess>;
+    readonly killChildProcess?: (childProcess: KillableChildProcess) => void;
+    readonly processEvents?: ProcessSignalEventSource;
+}): (() => void) => {
+    const processEvents = input.processEvents ?? process;
+    const killChildProcess =
+        input.killChildProcess ??
+        ((childProcess: KillableChildProcess): void => {
+            killProcessTree(childProcess);
+        });
+    const signalHandlers = new Map<ProcessSignalName, () => void>();
+
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+        const signalHandler = (): void => {
+            process.exitCode = process.exitCode ?? 1;
+            for (const childProcess of input.activeChildProcesses) {
+                killChildProcess(childProcess);
+            }
+        };
+        signalHandlers.set(signal, signalHandler);
+        processEvents.on(signal, signalHandler);
+    }
+
+    return (): void => {
+        for (const [signal, signalHandler] of signalHandlers) {
+            processEvents.off(signal, signalHandler);
+        }
+    };
+};
+
+const activeChildProcesses = new Set<KillableChildProcess>();
+let uninstallProcessSignalChildCleanup: (() => void) | undefined;
+
+const trackChildProcessForSignalCleanup = (
+    childProcess: KillableChildProcess,
+): (() => void) => {
+    activeChildProcesses.add(childProcess);
+    uninstallProcessSignalChildCleanup ??= installProcessSignalChildCleanup({
+        activeChildProcesses,
+    });
+
+    let isTracked = true;
+    return (): void => {
+        if (!isTracked) {
+            return;
+        }
+        isTracked = false;
+        activeChildProcesses.delete(childProcess);
+        if (activeChildProcesses.size === 0) {
+            uninstallProcessSignalChildCleanup?.();
+            uninstallProcessSignalChildCleanup = undefined;
+        }
+    };
+};
+
 const runCommandWithInheritedOutput = (
     invocation: CommandInvocation,
     signal?: AbortSignal,
@@ -215,6 +284,8 @@ const runCommandWithInheritedOutput = (
                 'inherit',
             ),
         );
+        const untrackChildProcess =
+            trackChildProcessForSignalCleanup(childProcess);
         const onAbort = (): void => {
             killProcessTree(childProcess);
         };
@@ -225,6 +296,7 @@ const runCommandWithInheritedOutput = (
                 return;
             }
             settled = true;
+            untrackChildProcess();
             signal?.removeEventListener('abort', onAbort);
             observer?.onCommandExit?.({
                 durationMilliseconds: Math.round(
@@ -242,6 +314,7 @@ const runCommandWithInheritedOutput = (
                 return;
             }
             settled = true;
+            untrackChildProcess();
             signal?.removeEventListener('abort', onAbort);
             const resolvedExitCode =
                 terminationSignal === null ? (exitCode ?? 1) : 1;
@@ -366,10 +439,13 @@ const runCommandWithOptionalLog = async (
                 'pipe',
             ]),
         );
+        const untrackChildProcess =
+            trackChildProcessForSignalCleanup(childProcess);
         const childStandardOutput = childProcess.stdout;
         const childStandardError = childProcess.stderr;
         if (childStandardOutput === null || childStandardError === null) {
             killProcessTree(childProcess);
+            untrackChildProcess();
             void (async () => {
                 try {
                     await closeOptionalCommandLogStreams(commandLogStreams);
@@ -455,6 +531,7 @@ const runCommandWithOptionalLog = async (
                 return;
             }
             settled = true;
+            untrackChildProcess();
             input.signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
@@ -480,6 +557,7 @@ const runCommandWithOptionalLog = async (
                 return;
             }
             settled = true;
+            untrackChildProcess();
             input.signal?.removeEventListener('abort', onAbort);
             void (async () => {
                 try {
@@ -522,7 +600,7 @@ const runCommandWithOptionalLog = async (
     });
 };
 
-export const runCommandsInParallel = async (
+const runCommandsInParallel = async (
     invocations: readonly CommandInvocation[],
     input: {
         readonly observer?: CommandRunObserver;

@@ -16,6 +16,9 @@ const createTemporaryLogRoot = (): Promise<string> =>
 const readJsonFile = async <Value>(filePath: string): Promise<Value> =>
     JSON.parse(await readFile(filePath, 'utf8')) as Value;
 
+const combinedLogPathForRun = (runDirectoryPath: string): string =>
+    path.join(runDirectoryPath, 'combined.log');
+
 const captureProcessOutput = async <Result>(
     action: () => Promise<Result>,
 ): Promise<{
@@ -167,7 +170,10 @@ describe('local run logs', () => {
             );
             expect(commandLog).toContain('stdout-line');
             expect(commandLog).toContain('stderr-line');
-            const combinedLog = await readFile(log.combinedLogPath, 'utf8');
+            const combinedLog = await readFile(
+                combinedLogPathForRun(log.runDirectoryPath),
+                'utf8',
+            );
             expect(combinedLog).toContain('Exercise output capture');
             expect(combinedLog).toContain('stdout-line');
             expect(combinedLog).toContain('stderr-line');
@@ -238,7 +244,7 @@ describe('local run logs', () => {
                 ),
             ).resolves.toContain('captured stdout');
             await expect(
-                readFile(log.combinedLogPath, 'utf8'),
+                readFile(combinedLogPathForRun(log.runDirectoryPath), 'utf8'),
             ).resolves.toContain('captured stderr');
         } finally {
             await rm(rootDirectoryPath, { force: true, recursive: true });

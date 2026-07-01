@@ -39,6 +39,43 @@ const wasmOptimizerScriptFilePath = path.resolve(
     'wasm-opt',
 );
 
+const runCheckedCommand = (input: {
+    readonly args: readonly string[];
+    readonly command: string;
+    readonly description: string;
+    readonly env?: NodeJS.ProcessEnv;
+}): void => {
+    const result = spawnSync(input.command, input.args, {
+        cwd: repoRoot,
+        env: input.env,
+        encoding: 'utf8',
+        maxBuffer: 100 * 1024 * 1024,
+    });
+
+    if (result.error !== undefined) {
+        throw new Error(
+            `Failed to start ${input.description}: ${result.error.message}`,
+        );
+    }
+    if (result.signal !== null) {
+        throw new Error(
+            `${input.description} terminated by signal ${result.signal}`,
+        );
+    }
+    if (result.status !== 0) {
+        const stdout = result.stdout?.trim();
+        const stderr = result.stderr?.trim();
+        const formattedOutput =
+            stdout !== '' || stderr !== ''
+                ? `\n${[stdout, stderr].filter(Boolean).join('\n')}`
+                : '';
+
+        throw new Error(
+            `${input.description} exited with status ${result.status ?? 'null'}${formattedOutput}`,
+        );
+    }
+};
+
 export const resolveOutputFilePath = (
     commandLineArguments: readonly string[],
     projectRoot: string = repoRoot,
@@ -84,9 +121,9 @@ const runCargoBuild = (): void => {
         '--remap-path-prefix',
         `${cargoHome}=/cargo`,
     ];
-    const result = spawnSync(
-        'cargo',
-        [
+    runCheckedCommand({
+        command: 'cargo',
+        args: [
             'build',
             '--package',
             'sealed-lattice-kernel',
@@ -95,78 +132,32 @@ const runCargoBuild = (): void => {
             'wasm32-unknown-unknown',
             '--release',
         ],
-        {
-            cwd: repoRoot,
-            env: {
-                ...process.env,
-                CARGO_ENCODED_RUSTFLAGS: deterministicRustflags.join(
-                    encodedRustflagSeparator,
-                ),
-                CARGO_TARGET_DIR: cargoTargetDirectory,
-            },
-            encoding: 'utf8',
-            maxBuffer: 100 * 1024 * 1024,
+        description: 'cargo build',
+        env: {
+            ...process.env,
+            CARGO_ENCODED_RUSTFLAGS: deterministicRustflags.join(
+                encodedRustflagSeparator,
+            ),
+            CARGO_TARGET_DIR: cargoTargetDirectory,
         },
-    );
-
-    if (result.error !== undefined) {
-        throw new Error(`Failed to start cargo build: ${result.error.message}`);
-    }
-    if (result.signal !== null) {
-        throw new Error(`cargo build terminated by signal ${result.signal}`);
-    }
-    if (result.status !== 0) {
-        const stdout = result.stdout?.trim();
-        const stderr = result.stderr?.trim();
-        const formattedOutput =
-            stdout !== '' || stderr !== ''
-                ? `\n${[stdout, stderr].filter(Boolean).join('\n')}`
-                : '';
-
-        throw new Error(
-            `cargo build exited with status ${result.status ?? 'null'}${formattedOutput}`,
-        );
-    }
+    });
 };
 
 const runWasmOptimizer = (
     inputFilePath: string,
     outputFilePath: string,
 ): void => {
-    const result = spawnSync(
-        process.execPath,
-        [
+    runCheckedCommand({
+        command: process.execPath,
+        args: [
             wasmOptimizerScriptFilePath,
             '-O3',
             inputFilePath,
             '-o',
             outputFilePath,
         ],
-        {
-            cwd: repoRoot,
-            encoding: 'utf8',
-            maxBuffer: 100 * 1024 * 1024,
-        },
-    );
-
-    if (result.error !== undefined) {
-        throw new Error(`Failed to start wasm-opt: ${result.error.message}`);
-    }
-    if (result.signal !== null) {
-        throw new Error(`wasm-opt terminated by signal ${result.signal}`);
-    }
-    if (result.status !== 0) {
-        const stdout = result.stdout?.trim();
-        const stderr = result.stderr?.trim();
-        const formattedOutput =
-            stdout !== '' || stderr !== ''
-                ? `\n${[stdout, stderr].filter(Boolean).join('\n')}`
-                : '';
-
-        throw new Error(
-            `wasm-opt exited with status ${result.status ?? 'null'}${formattedOutput}`,
-        );
-    }
+        description: 'wasm-opt',
+    });
 };
 
 const resolveSourceFilePath = (): string =>

@@ -1,6 +1,6 @@
-export const nodeTestTimeoutMs = 60_000;
-export const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
-export const nodeKernelVeryHeavyTestTimeoutMs = 60 * 60_000;
+const nodeTestTimeoutMs = 60_000;
+const nodeKernelHeavyTestTimeoutMs = 15 * 60_000;
+const nodeKernelVeryHeavyTestTimeoutMs = 60 * 60_000;
 export const nodeHookTimeoutMs = 240_000;
 
 export const nodeTestLaneValues = [
@@ -11,6 +11,12 @@ export const nodeTestLaneValues = [
 ] as const;
 
 export type NodeTestLane = (typeof nodeTestLaneValues)[number];
+type TestLaneGroup =
+    | 'browser'
+    | 'node-fast'
+    | 'node-kernel-fast'
+    | 'node-kernel-heavy'
+    | 'node-protocol';
 
 type NodeTestProjectDefinition = {
     readonly commandDescription?: string;
@@ -69,22 +75,14 @@ export const nodeTestLaneDefinitions = {
 } as const satisfies Record<NodeTestLane, NodeTestProjectDefinition>;
 
 export const nodeTestProjectDefinitions = [
-    nodeTestLaneDefinitions.fast,
-    nodeTestLaneDefinitions.protocol,
-    nodeTestLaneDefinitions['kernel-fast'],
-    nodeTestLaneDefinitions['kernel-heavy'],
+    ...nodeTestLaneValues.map((lane) => nodeTestLaneDefinitions[lane]),
 ] as const;
 
 export const defaultNodeTestLanes = [
-    'fast',
-    'protocol',
-    'kernel-fast',
-    'kernel-heavy',
+    ...nodeTestLaneValues,
 ] as const satisfies readonly NodeTestLane[];
 
-export const browserTestLaneValues = ['desktop', 'mobile'] as const;
-
-export type BrowserTestLane = (typeof browserTestLaneValues)[number];
+type BrowserTestLane = 'desktop' | 'mobile';
 
 type BrowserTestLaneDefinition = {
     readonly include: readonly string[];
@@ -101,3 +99,54 @@ export const browserTestLaneDefinitions = {
         projectName: 'browser-mobile',
     },
 } as const satisfies Record<BrowserTestLane, BrowserTestLaneDefinition>;
+
+const normalizeRelativeTestPath = (filePath: string): string =>
+    filePath.replace(/\\/gu, '/');
+
+export const testLaneGroupsForRelativePath = (
+    filePath: string,
+): readonly TestLaneGroup[] => {
+    const relativePath = normalizeRelativeTestPath(filePath);
+    const laneGroups: TestLaneGroup[] = [];
+
+    if (!relativePath.endsWith('.test.ts')) {
+        return laneGroups;
+    }
+
+    if (
+        relativePath.startsWith('packages/') &&
+        relativePath.includes('/tests/browser/') &&
+        relativePath.endsWith('.browser.test.ts')
+    ) {
+        laneGroups.push('browser');
+    }
+
+    if (relativePath.startsWith('packages/protocol/tests/node/')) {
+        laneGroups.push('node-protocol');
+    } else if (
+        relativePath.startsWith(
+            'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/',
+        ) &&
+        relativePath.endsWith('.kernel.test.ts')
+    ) {
+        laneGroups.push('node-kernel-heavy');
+    } else if (
+        relativePath.startsWith('packages/wasm/tests/node/') &&
+        relativePath.endsWith('.kernel.test.ts')
+    ) {
+        laneGroups.push('node-kernel-fast');
+    } else if (
+        relativePath.startsWith('tests/node/') &&
+        relativePath.endsWith('.kernel.test.ts')
+    ) {
+        laneGroups.push('node-kernel-fast');
+    } else if (
+        relativePath.startsWith('tests/node/') ||
+        (relativePath.startsWith('packages/') &&
+            relativePath.includes('/tests/node/'))
+    ) {
+        laneGroups.push('node-fast');
+    }
+
+    return laneGroups;
+};

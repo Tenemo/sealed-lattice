@@ -1,18 +1,15 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    assertContextFieldPathsMatch,
+    setupContextFieldNames,
+} from '../common-fields.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import type { JsonRecord } from './types.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
-const contextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 export const requiredSetupPhases = [
     ['rosterFreeze', 1],
     ['setupIntent', 2],
@@ -65,7 +62,7 @@ export const assertObjectRecord = (
 export const assertContext = (
     setupContext: CollectiveBgvSetupContext,
 ): void => {
-    for (const fieldName of contextFieldNames) {
+    for (const fieldName of setupContextFieldNames) {
         assertNonEmptyString(
             setupContext[fieldName],
             `setupContext.${fieldName}`,
@@ -93,15 +90,7 @@ export const assertContextMatches = (
     setupContext: CollectiveBgvSetupContext,
     value: Readonly<Record<string, unknown>>,
     objectPath: string,
-): void => {
-    for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
+): void => assertContextFieldPathsMatch(setupContext, value, objectPath);
 
 const objectTypeAt = (
     value: Readonly<Record<string, unknown>>,

@@ -9,9 +9,13 @@ import type {
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
 
+import {
+    assertContextFieldPathsMatch,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    type JsonRecord,
+} from './common-fields.js';
 import type { PrivateVssEnvelopeCommitment } from './private-vss-mailbox-delivery.js';
-
-type JsonRecord = Record<string, unknown>;
 
 export type CollectiveBgvSetupContext = Readonly<
     JsonRecord & {
@@ -161,44 +165,6 @@ type VssShareVerificationPayloadFields = Readonly<{
 
 const textEncoder = new TextEncoder();
 
-const contextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const assertEnvelopeMatchesContext = (
-    setupContext: CollectiveBgvSetupContext,
-    envelopeReference: PrivateVssEnvelopeVerificationReference,
-): void => {
-    for (const fieldName of contextFieldNames) {
-        if (envelopeReference[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `envelopeReference.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
-
 const canonicalByteLength = (value: unknown): number =>
     textEncoder.encode(canonicalJson(value)).byteLength;
 
@@ -306,7 +272,11 @@ const assertDistinctSourceTrusteeRecipientPairs = (
 export const createVssShareAcceptanceRecord = async (
     input: VssShareAcceptanceRecordInput,
 ): Promise<VssShareAcceptanceRecord> => {
-    assertEnvelopeMatchesContext(input.setupContext, input.envelopeReference);
+    assertContextFieldPathsMatch(
+        input.setupContext,
+        input.envelopeReference,
+        'envelopeReference',
+    );
     assertNonNegativeSafeInteger(input.recoveryEpoch, 'recoveryEpoch');
     assertNonNegativeSafeInteger(input.deviceEpoch, 'deviceEpoch');
 
@@ -406,7 +376,11 @@ export const createVssShareAcceptanceSet = (input: {
 export const createVssShareComplaintRecord = async (
     input: VssShareComplaintRecordInput,
 ): Promise<VssShareComplaintRecord> => {
-    assertEnvelopeMatchesContext(input.setupContext, input.envelopeReference);
+    assertContextFieldPathsMatch(
+        input.setupContext,
+        input.envelopeReference,
+        'envelopeReference',
+    );
     assertNonEmptyString(input.complaintReasonCode, 'complaintReasonCode');
     assertNonNegativeSafeInteger(input.recoveryEpoch, 'recoveryEpoch');
     assertNonNegativeSafeInteger(input.deviceEpoch, 'deviceEpoch');
@@ -474,7 +448,11 @@ export const createVssShareComplaintRecord = async (
 export const createVssShareComplaintRecordFromLocalVerification = async (
     input: VssShareComplaintFromLocalVerificationInput,
 ): Promise<VssShareComplaintRecord> => {
-    assertEnvelopeMatchesContext(input.setupContext, input.envelopeReference);
+    assertContextFieldPathsMatch(
+        input.setupContext,
+        input.envelopeReference,
+        'envelopeReference',
+    );
     const firstRefusal = input.localVerification.refusedObjects[0];
     if (firstRefusal === undefined) {
         throw new Error(

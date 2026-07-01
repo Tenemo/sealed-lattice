@@ -183,7 +183,7 @@ output = {
     "estimatorDefaultCostModel": "RC.MATZOV",
     "sageRuntime": "SageMath 10.9",
     "dockerImage": "sagemath/sagemath:latest",
-    "command": "pnpm exec tsx ./tools/ci/run-he-lattice-estimator.ts",
+    "command": "pnpm run he:lattice-estimator",
     "inputParameters": {
         "polynomialDegree": 32768,
         "dataPrimes": DATA_PRIMES,

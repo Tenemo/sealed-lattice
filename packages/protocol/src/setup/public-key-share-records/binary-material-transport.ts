@@ -1,6 +1,7 @@
 import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { ChunkedBinaryReader } from '../chunked-binary-reader.js';
 import {
     setupTransportChunkSizeBytes,
     setupTransportSchemeId,
@@ -312,62 +313,18 @@ export const createBinaryChunkedPublicKeyShareMaterialBundle = (
 };
 
 class PublicKeyShareMaterialReader {
-    private chunkIndex = 0;
-
-    private chunkOffset = 0;
-
-    private consumedByteLength = 0;
-
-    private readonly totalByteLength: number;
+    private readonly reader: ChunkedBinaryReader;
 
     public constructor(chunks: readonly Uint8Array[]) {
-        this.chunks = chunks;
-        this.totalByteLength = chunks.reduce(
-            (accumulatedLength, chunk) => accumulatedLength + chunk.byteLength,
-            0,
-        );
+        this.reader = new ChunkedBinaryReader(chunks);
     }
 
-    private readonly chunks: readonly Uint8Array[];
-
     public isFinished(): boolean {
-        return this.consumedByteLength === this.totalByteLength;
+        return this.reader.isFinished();
     }
 
     public readBytes(length: number, fieldName: string): Uint8Array {
-        if (
-            length < 0 ||
-            this.consumedByteLength + length > this.totalByteLength
-        ) {
-            throw new Error(
-                `${fieldName} ended before the binary object was complete.`,
-            );
-        }
-        const bytes = new Uint8Array(length);
-        let outputOffset = 0;
-        while (outputOffset < length) {
-            const chunk = this.chunks[this.chunkIndex];
-            if (chunk === undefined) {
-                throw new Error(
-                    `${fieldName} ended before the binary object was complete.`,
-                );
-            }
-            const availableLength = chunk.byteLength - this.chunkOffset;
-            const copyLength = Math.min(length - outputOffset, availableLength);
-            bytes.set(
-                chunk.subarray(this.chunkOffset, this.chunkOffset + copyLength),
-                outputOffset,
-            );
-            outputOffset += copyLength;
-            this.chunkOffset += copyLength;
-            this.consumedByteLength += copyLength;
-            if (this.chunkOffset === chunk.byteLength) {
-                this.chunkIndex += 1;
-                this.chunkOffset = 0;
-            }
-        }
-
-        return bytes;
+        return this.reader.readBytes(length, fieldName);
     }
 
     public readVaruint(fieldName: string): number {

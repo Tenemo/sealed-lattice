@@ -2,10 +2,12 @@ import {
     createPrivateVssMailboxKeyPair,
     deriveCanonicalObjectHash,
     hash512Hex,
+    setupProofMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import { createPrivateVssMailboxDeliverySet } from '#packages/protocol/src/index';
+import { setupProofTransportChunkSizeBytes } from '#packages/protocol/src/setup/setup-proof-material-transport';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -78,6 +80,45 @@ describe('private VSS mailbox delivery', () => {
             'sealed-lattice/setup/private-vss-share/succinct-proof-bytes-v1',
             [proofBytes],
         );
+        const textEncoder = new TextEncoder();
+        const expectedFullObjectHash = setupProofMaterialFullObjectHashHex(
+            'vss-opening-carry',
+            proofBytes.byteLength,
+            [proofBytes],
+        );
+        const expectedChunkHash = hash512Hex(
+            'sealed-lattice/setup/proof-material/chunk-v1',
+            [
+                textEncoder.encode('vss-opening-carry'),
+                textEncoder.encode(expectedFullObjectHash),
+                Uint8Array.of(0),
+                proofBytes,
+            ],
+        );
+        const expectedChunkRoot = deriveCanonicalObjectHash({
+            objectType: 'SetupProofMaterialChunkManifest',
+            objectVersion: 1,
+            proofFamily: 'vss-opening-carry',
+            chunkSizeBytes: setupProofTransportChunkSizeBytes,
+            chunkCount: 1,
+            totalByteLength: proofBytes.byteLength,
+            chunkHashes: [expectedChunkHash],
+            fullObjectHash: expectedFullObjectHash,
+        });
+        const expectedTransportedMaterialRoot = deriveCanonicalObjectHash({
+            objectType: 'PrivateVssShareTransportedSuccinctProofMaterial',
+            objectVersion: 1,
+            proofFamily: 'vss-opening-carry',
+            proofBytesEncoding: 'binary-chunked-proof-bytes',
+            statementHash: fixtureHash('statement-hash'),
+            proofBytesHash,
+            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
+            proofChunkCount: 1,
+            proofTotalByteLength: proofBytes.byteLength,
+            proofFullObjectHash: expectedFullObjectHash,
+            proofChunkRoot: expectedChunkRoot,
+            proofChunkHashes: [expectedChunkHash],
+        });
         let observedPrivateEnvelope: Record<string, unknown> | undefined;
         let observedTransportedProofMaterial:
             | Record<string, unknown>
@@ -178,6 +219,16 @@ describe('private VSS mailbox delivery', () => {
         expect(transportedProofRecord.proofBytesEncoding).toBe(
             'binary-chunked-proof-bytes',
         );
+        expect(transportedProofRecord.proofMaterialRoot).toBe(
+            expectedTransportedMaterialRoot,
+        );
+        expect(transportedProofRecord.proofFullObjectHash).toBe(
+            expectedFullObjectHash,
+        );
+        expect(transportedProofRecord.proofChunkRoot).toBe(expectedChunkRoot);
+        expect(transportedProofRecord.proofChunkHashes).toEqual([
+            expectedChunkHash,
+        ]);
         expect(observedTransportedProofMaterial).toBeDefined();
         expect(observedTransportedProofMaterial?.objectType).toBe(
             'SetupTransportedPrivateVssShareProofMaterialSet',
@@ -191,6 +242,9 @@ describe('private VSS mailbox delivery', () => {
         expect(proofMaterials[0].proofMaterialRoot).toBe(
             transportedProofRecord.proofMaterialRoot,
         );
+        expect(proofMaterials[0].fullObjectHash).toBe(expectedFullObjectHash);
+        expect(proofMaterials[0].chunkRoot).toBe(expectedChunkRoot);
+        expect(proofMaterials[0].chunkHashes).toEqual([expectedChunkHash]);
         expect(
             (proofMaterials[0].chunks as Record<string, unknown>[])[0]
                 .bytesHex as string,
