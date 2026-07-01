@@ -278,7 +278,6 @@ fn mutate_first_same_secret_proof_bytes_and_rebind(
             &proof_bytes
         )
     );
-    proof_record["proofSizeBytes"] = serde_json::json!(proof_bytes.len());
     rebind_same_secret_proof_record_root(package, 0);
     rebind_collective_same_secret_proof_set_root(package);
     rebind_collective_setup_package_hash(package);

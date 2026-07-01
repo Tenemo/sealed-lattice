@@ -357,10 +357,9 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
 fn final_package_trustee_evaluation_key_proof_records_from_checkpoints(
     work_items: &[TrusteeEvaluationKeyProofWorkItem],
 ) -> BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord> {
-    let directory = std::path::PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("accepted-setup-final-package-material-store")
-        .join("trustee-evaluation-key-proof-material");
+    let directory =
+        crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
+            .join("trustee-evaluation-key-proof-material");
     let Ok(entries) = std::fs::read_dir(&directory) else {
         return BTreeMap::new();
     };

@@ -132,7 +132,6 @@ describe('private VSS mailbox delivery', () => {
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),
-                proofSizeBytes: proofBytes.byteLength,
                 proofBytesHash,
                 proofMaterialRoot: fixtureHash('embedded-material-root'),
                 proofBytesHex,
@@ -253,7 +252,6 @@ describe('private VSS mailbox delivery', () => {
                             rnsLimbIndex,
                         )}`,
                     ),
-                    proofSizeBytes: 4,
                     proofBytesHash: fixtureHash(
                         `short-proof-count-proof-bytes-${String(rnsLimbIndex)}`,
                     ),

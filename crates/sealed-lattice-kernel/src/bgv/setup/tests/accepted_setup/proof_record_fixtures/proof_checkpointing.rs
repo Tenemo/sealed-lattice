@@ -20,9 +20,7 @@ fn anchor_proof_checkpoint_path(
     family_directory: &str,
     statement_hash_hex: &str,
 ) -> std::path::PathBuf {
-    std::path::PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("accepted-setup-final-package-material-store")
+    crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
         .join(family_directory)
         .join(format!("{statement_hash_hex}.bin"))
 }

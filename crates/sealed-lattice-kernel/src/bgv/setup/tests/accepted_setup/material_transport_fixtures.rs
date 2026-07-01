@@ -796,7 +796,6 @@ fn move_evaluation_key_share_component_vectors_to_transport_with_chunk_policy(
         proof_record_object.remove("relationCommitmentHash");
         proof_record_object.remove("tboxCommitmentPrefixHash");
         proof_record_object.remove("challenge");
-        proof_record_object.remove("proofSizeBytes");
         proof_record_object.remove("proofBytesHash");
         proof_record_object.remove("proofBytesHex");
     }

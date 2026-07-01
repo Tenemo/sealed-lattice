@@ -293,9 +293,7 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
 
 #[cfg(test)]
 fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf {
-    PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("accepted-setup-final-package-material-store")
+    super::super::accepted_setup_final_package_material_store_checkpoint_directory()
         .join("evaluation-key-component-material")
 }
 

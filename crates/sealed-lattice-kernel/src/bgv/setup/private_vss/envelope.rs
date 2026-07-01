@@ -400,7 +400,6 @@ fn verify_private_envelope_limb(
         "proofStatementRoot": proof_verification.proof_statement_root,
         "proofMaterialRoot": proof_verification.proof_material_root,
         "statementHash": proof_verification.statement_hash_hex,
-        "proofSizeBytes": proof_verification.proof_size_bytes,
     });
     let limb_verification_root = derive_canonical_object_hash(&limb_verification_record)?;
 

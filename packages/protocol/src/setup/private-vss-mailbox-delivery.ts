@@ -6,7 +6,10 @@ import {
 } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofTransportChunkSizeBytes } from './setup-proof-material-transport.js';
+import {
+    setupProofTransportChunkSizeBytes,
+    splitProofBytesIntoChunks,
+} from './setup-proof-material-transport.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -402,29 +405,6 @@ const varUintBytes = (value: number, fieldName: string): Uint8Array => {
     return Uint8Array.from(bytes);
 };
 
-const splitProofBytesIntoChunks = (
-    proofBytes: Uint8Array,
-): readonly Uint8Array[] => {
-    const chunks: Uint8Array[] = [];
-    for (
-        let chunkStart = 0;
-        chunkStart < proofBytes.byteLength;
-        chunkStart += setupProofTransportChunkSizeBytes
-    ) {
-        chunks.push(
-            proofBytes.slice(
-                chunkStart,
-                Math.min(
-                    chunkStart + setupProofTransportChunkSizeBytes,
-                    proofBytes.byteLength,
-                ),
-            ),
-        );
-    }
-
-    return chunks;
-};
-
 const setupProofMaterialChunkHash = (
     proofFamily: string,
     fullObjectHash: ProtocolHash,
@@ -682,15 +662,6 @@ const transportPrivateVssShareProofMaterial = (
         proofBytesHex,
         'privateVssShareProof.proofBytesHex',
     );
-    const proofSizeBytes = assertNonNegativeSafeInteger(
-        proofRecord.proofSizeBytes,
-        'privateVssShareProof.proofSizeBytes',
-    );
-    if (proofSizeBytes !== proofBytes.byteLength) {
-        throw new Error(
-            'privateVssShareProof.proofSizeBytes must match proofBytesHex.',
-        );
-    }
     const proofBytesHash = assertProtocolHash(
         proofRecord.proofBytesHash,
         'privateVssShareProof.proofBytesHash',
@@ -745,7 +716,6 @@ const transportPrivateVssShareProofMaterial = (
             proofFamily: privateVssShareProofFamily,
             proofBytesEncoding: transportedSetupProofMaterialEncoding,
             statementHash,
-            proofSizeBytes,
             proofBytesHash,
             proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
             proofChunkCount: chunkHashes.length,

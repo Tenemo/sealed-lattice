@@ -470,7 +470,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                 encode_trustee_evaluation_key_proof(&proof)
             },
         );
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
@@ -492,7 +491,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             "sameSecretProofFamilyBindingRoot": same_secret_proof_record["sameSecretProofFamilyBindingRoot"],
             "sameSecretProofRoot": same_secret_proof_record["sameSecretProofRoot"],
             "statementHash": statement_hash_hex,
-            "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
         });

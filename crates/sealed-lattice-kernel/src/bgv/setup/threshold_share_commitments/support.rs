@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::bgv::setup_helpers::is_lowercase_protocol_hash;
+
 pub(super) fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
     for field_name in setup_context_field_names() {
         if setup_context.get(field_name).is_none() {
@@ -156,11 +158,7 @@ pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<us
 }
 
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() == 128
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if is_lowercase_protocol_hash(hash) {
         return Ok(());
     }
 

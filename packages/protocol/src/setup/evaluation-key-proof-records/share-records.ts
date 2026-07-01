@@ -1,8 +1,8 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { assertContextMatches, contextFields } from '../common-fields.js';
 import { type EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
-import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
     type EvaluationKeyProofCommonInput,
@@ -19,7 +19,6 @@ import {
     type RelinearizationKeyShareRoundsInput,
     type SameSecretProofReference,
     evaluationKeyShareComponentMaterialEncoding,
-    setupContextFieldNames,
 } from './constants-and-types.js';
 import {
     assertLowercaseHex,
@@ -191,33 +190,6 @@ const shareMaterialRecordFields = (
                   shareMaterial.keySwitchComponentChunkHashes,
           }),
 });
-
-const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
-    }
-};
 
 const contributionKey = (
     level: number,

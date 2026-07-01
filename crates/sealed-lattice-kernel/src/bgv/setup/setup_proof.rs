@@ -7,6 +7,10 @@ pub(crate) use self::material_transport::{
     begin_setup_proof_material_transport_stream_request,
     finish_setup_proof_material_transport_stream_request, setup_proof_material_transport_hashes,
 };
+pub(in crate::bgv::setup) use self::material_transport::{
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
+};
 
 use serde_json::{Value, json};
 use sha3::{

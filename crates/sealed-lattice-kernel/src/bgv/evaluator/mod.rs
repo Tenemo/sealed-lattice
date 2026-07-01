@@ -10,6 +10,20 @@
 //! only to drive and check the evaluator against the plaintext top-k oracle.
 //! They are never exported through the public package surface.
 
+#[cfg(not(target_arch = "wasm32"))]
+macro_rules! evaluator_parallel_iterator {
+    ($parallel:expr, $sequential:expr) => {
+        $parallel
+    };
+}
+
+#[cfg(target_arch = "wasm32")]
+macro_rules! evaluator_parallel_iterator {
+    ($parallel:expr, $sequential:expr) => {
+        $sequential
+    };
+}
+
 pub(crate) mod prg;
 
 pub(crate) mod circuit;

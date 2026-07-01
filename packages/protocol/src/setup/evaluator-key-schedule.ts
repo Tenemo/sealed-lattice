@@ -1,6 +1,11 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    assertContextMatches,
+    assertProtocolHash,
+    contextFields,
+} from './common-fields.js';
 import type {
     PublicKeyShareProofSet,
     PublicKeyShareSet,
@@ -66,21 +71,6 @@ export type EvaluatorKeyScheduleInput = {
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
 };
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
-
 const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
         throw new TypeError(`${fieldName} must be a positive safe integer.`);
@@ -101,33 +91,6 @@ const assertNonNegativeSafeInteger = (
 const assertNonEmptyString = (value: string, fieldName: string): void => {
     if (value.length === 0) {
         throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
     }
 };
 

@@ -1,8 +1,4 @@
-import {
-    deriveCanonicalObjectHash,
-    hash512Hex,
-    setupProofMaterialFullObjectHashHex,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
@@ -11,9 +7,11 @@ import {
     contextFields,
 } from './common-fields.js';
 import {
-    setupProofChunkManifestRoot,
-    setupProofMaterialChunkHash,
-    setupProofTransportChunkSizeBytes,
+    setupProofMaterialRecordTransportFields,
+    setupProofMaterialReferenceFields,
+    setupProofMaterialTransportChunks,
+    setupProofMaterialTransportMetadata,
+    setupTransportedProofMaterialFields,
     type TransportedSetupProofMaterialSet,
 } from './setup-proof-material-transport.js';
 import {
@@ -102,7 +100,6 @@ export type SameSecretProofMaterial = Readonly<
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly statementHash: ProtocolHash;
-        readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
     }
 >;
@@ -120,7 +117,6 @@ export type SameSecretProofRecord = Readonly<
             readonly trusteeSecretCommitmentRoot: ProtocolHash;
             readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
-            readonly proofSizeBytes: number;
             readonly proofBytesHash: ProtocolHash;
             readonly sameSecretProofRoot: ProtocolHash;
         }
@@ -211,9 +207,6 @@ const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
     return bytes;
 };
 
-const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
 const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
     assertPositiveSafeInteger(input.participantCount, 'participantCount');
     assertPositiveSafeInteger(input.thresholdDegree, 'thresholdDegree');
@@ -252,10 +245,6 @@ const validateSameSecretProofMaterial = (
         `${fieldName}.trusteeRosterPosition`,
     );
     assertProtocolHash(material.statementHash, `${fieldName}.statementHash`);
-    assertPositiveSafeInteger(
-        material.proofSizeBytes,
-        `${fieldName}.proofSizeBytes`,
-    );
     assertProtocolHash(material.proofBytesHash, `${fieldName}.proofBytesHash`);
     const proofBytesHex = (material as JsonRecord).proofBytesHex;
     if (proofBytesHex !== undefined) {
@@ -263,11 +252,6 @@ const validateSameSecretProofMaterial = (
             throw new TypeError(`${fieldName}.proofBytesHex must be a string.`);
         }
         assertLowercaseHexBytes(proofBytesHex, `${fieldName}.proofBytesHex`);
-        if (proofBytesHex.length / 2 !== material.proofSizeBytes) {
-            throw new Error(
-                `${fieldName}.proofBytesHex must match proofSizeBytes.`,
-            );
-        }
     } else {
         const transportedMaterial = material as SameSecretTransportedProofBytes;
         if (
@@ -294,13 +278,6 @@ const validateSameSecretProofMaterial = (
             transportedMaterial.proofTotalByteLength,
             `${fieldName}.proofTotalByteLength`,
         );
-        if (
-            transportedMaterial.proofTotalByteLength !== material.proofSizeBytes
-        ) {
-            throw new Error(
-                `${fieldName}.proofTotalByteLength must match proofSizeBytes.`,
-            );
-        }
         assertProtocolHash(
             transportedMaterial.proofFullObjectHash,
             `${fieldName}.proofFullObjectHash`,
@@ -694,7 +671,6 @@ export const createSameSecretProofSet = (
                 sameSecretProofFamilyBindingRoot:
                     statementRecord.sameSecretProofFamilyBindingRoot,
                 statementHash: proofMaterial.statementHash,
-                proofSizeBytes: proofMaterial.proofSizeBytes,
                 proofBytesHash: proofMaterial.proofBytesHash,
                 ...sameSecretProofByteMaterial(proofMaterial),
             } as const satisfies Omit<
@@ -757,11 +733,6 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                 proofBytesHex,
                 `proofMaterials.${String(proofIndex)}.proofBytesHex`,
             );
-            if (proofMaterial.proofSizeBytes !== proofBytes.byteLength) {
-                throw new Error(
-                    `proofMaterials.${String(proofIndex)}.proofSizeBytes must match proofBytesHex.`,
-                );
-            }
             const expectedProofBytesHash = hash512Hex(
                 sameSecretAnchorProofBytesHashDomain,
                 [proofBytes],
@@ -771,46 +742,10 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                     `proofMaterials.${String(proofIndex)}.proofBytesHash must match proofBytesHex before transport.`,
                 );
             }
-            const chunks: Uint8Array[] = [];
-            for (
-                let chunkStart = 0;
-                chunkStart < proofBytes.byteLength;
-                chunkStart += setupProofTransportChunkSizeBytes
-            ) {
-                chunks.push(
-                    proofBytes.slice(
-                        chunkStart,
-                        Math.min(
-                            chunkStart + setupProofTransportChunkSizeBytes,
-                            proofBytes.byteLength,
-                        ),
-                    ),
-                );
-            }
-            if (chunks.length === 0) {
-                throw new Error(
-                    `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
-                );
-            }
-            const totalByteLength = proofBytes.byteLength;
-            const fullObjectHash = setupProofMaterialFullObjectHashHex(
+            const proofMaterialTransport = setupProofMaterialTransportMetadata(
                 sameSecretProofFamily,
-                totalByteLength,
-                chunks,
-            );
-            const chunkHashes = chunks.map((chunk, chunkIndex) =>
-                setupProofMaterialChunkHash(
-                    sameSecretProofFamily,
-                    fullObjectHash,
-                    chunkIndex,
-                    chunk,
-                ),
-            );
-            const chunkRoot = setupProofChunkManifestRoot(
-                sameSecretProofFamily,
-                chunkHashes,
-                fullObjectHash,
-                totalByteLength,
+                proofBytes,
+                `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
             );
             const proofMaterialRoot = deriveCanonicalObjectHash({
                 objectType: 'SameSecretLinkageAnchorProofMaterialReference',
@@ -819,41 +754,28 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                 trusteeIdentity: proofMaterial.trusteeIdentity,
                 trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
                 statementHash: proofMaterial.statementHash,
-                proofSizeBytes: proofMaterial.proofSizeBytes,
                 proofBytesHash: proofMaterial.proofBytesHash,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: chunkHashes.length,
-                totalByteLength,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes,
+                ...setupProofMaterialReferenceFields(proofMaterialTransport),
             });
             transportedProofMaterials.push({
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
                 proofFamily: sameSecretProofFamily,
-                proofMaterialRoot,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: chunkHashes.length,
-                totalByteLength,
-                fullObjectHash,
-                chunkHashes,
-                chunkRoot,
-                chunks: chunks.map((chunk, chunkIndex) => ({
-                    chunkIndex,
-                    bytesHex: bytesToHex(chunk),
-                })),
+                ...setupTransportedProofMaterialFields(
+                    proofMaterialTransport,
+                    proofMaterialRoot,
+                ),
+                chunks: setupProofMaterialTransportChunks(
+                    proofMaterialTransport,
+                ),
             });
             const transportedMaterial = {
                 ...materialRecord,
-                proofBytesEncoding: 'binary-chunked-proof-bytes',
-                proofMaterialRoot,
-                proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-                proofChunkCount: chunkHashes.length,
-                proofTotalByteLength: totalByteLength,
-                proofFullObjectHash: fullObjectHash,
-                proofChunkRoot: chunkRoot,
-                proofChunkHashes: chunkHashes,
+                ...setupProofMaterialRecordTransportFields(
+                    proofMaterialTransport,
+                    proofMaterialRoot,
+                    'binary-chunked-proof-bytes',
+                ),
             } as JsonRecord;
             delete transportedMaterial.proofBytesHex;
 

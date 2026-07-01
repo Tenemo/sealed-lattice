@@ -252,7 +252,6 @@ export type PublicKeyShareSuccinctProofMaterial = Readonly<
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly statementHash: ProtocolHash;
-        readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
     }
 >;
@@ -274,7 +273,6 @@ export type PublicKeyShareSuccinctProofRecord = Readonly<
             readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
             readonly sameSecretProofRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
-            readonly proofSizeBytes: number;
             readonly proofBytesHash: ProtocolHash;
             readonly publicKeyShareSuccinctProofRoot: ProtocolHash;
         }

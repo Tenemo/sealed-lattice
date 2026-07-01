@@ -63,7 +63,6 @@ export function sameSecretProofsWithDriftedStatementHashes(
             trusteeIdentity: statementRecord.trusteeIdentity,
             trusteeRosterPosition: statementRecord.trusteeRosterPosition,
             statementHash: validHash('7'),
-            proofSizeBytes: 1,
             proofBytesHash: sameSecretProofBytesHash(proofBytesHex),
             proofBytesHex,
         }));
@@ -228,7 +227,6 @@ export function sameSecretProofsWithGeneratedProofs(
                     trusteeRosterPosition:
                         sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
                     statementHash: generatedProof.statementHash,
-                    proofSizeBytes: generatedProof.proofByteLength,
                     proofBytesHash: sameSecretProofBytesHash(
                         generatedProof.proofBytesHex,
                     ),

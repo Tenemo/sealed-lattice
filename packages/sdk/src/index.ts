@@ -482,49 +482,6 @@ const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
     return reference;
 };
 
-// Safe only because proofMaterialRoot is the collision-resistant commitment the kernel rebinds; chunks are dropped only after that root is in the verified set.
-const compactSetupProofMaterialSet = <
-    MaterialSet extends SetupProofMaterialTransportSet | undefined,
->(
-    materialSet: MaterialSet,
-    verifiedSetupProofMaterials: VerifiedSetupProofMaterialSet | undefined,
-): MaterialSet => {
-    if (
-        materialSet === undefined ||
-        verifiedSetupProofMaterials === undefined
-    ) {
-        return materialSet;
-    }
-
-    const verifiedProofMaterialRoots = new Set(
-        verifiedSetupProofMaterials.proofMaterials.map(
-            (proofMaterial) => proofMaterial.proofMaterialRoot,
-        ),
-    );
-    let strippedAnyChunks = false;
-    const proofMaterials = materialSet.proofMaterials.map((proofMaterial) => {
-        if (
-            !Object.prototype.hasOwnProperty.call(proofMaterial, 'chunks') ||
-            typeof proofMaterial.proofMaterialRoot !== 'string' ||
-            !verifiedProofMaterialRoots.has(proofMaterial.proofMaterialRoot)
-        ) {
-            return proofMaterial;
-        }
-        strippedAnyChunks = true;
-
-        return setupProofMaterialReference(proofMaterial);
-    });
-
-    if (!strippedAnyChunks) {
-        return materialSet;
-    }
-
-    return {
-        ...materialSet,
-        proofMaterials,
-    };
-};
-
 const setupProofMaterialChunks = (
     proofMaterial: unknown,
 ): readonly SetupProofMaterialChunk[] | undefined => {
@@ -591,28 +548,27 @@ const streamSetupProofMaterialSet = (
     return verifiedMaterials;
 };
 
+const compactSetupPackageVerificationInput = (
+    input: VerifySetupPackageInput,
+): VerifySetupPackageInput => {
+    const verificationInput = createSetupPackageVerificationInputInternal(
+        input as unknown as SetupPackageVerificationInputSource,
+    ) as VerifySetupPackageInput;
+
+    return input.expectedSetupPackageHash === undefined
+        ? verificationInput
+        : {
+              ...verificationInput,
+              expectedSetupPackageHash: input.expectedSetupPackageHash,
+          };
+};
+
 const prepareSetupPackageVerificationInputForKernel = (
     kernel: TranscriptCoreKernel,
     input: VerifySetupPackageInput,
 ): VerifySetupPackageInput => {
     if (input.verifiedSetupProofMaterials !== undefined) {
-        return {
-            ...input,
-            transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-                input.transportedSameSecretProofMaterial,
-                input.verifiedSetupProofMaterials,
-            ),
-            transportedPublicKeyShareProofMaterial:
-                compactSetupProofMaterialSet(
-                    input.transportedPublicKeyShareProofMaterial,
-                    input.verifiedSetupProofMaterials,
-                ),
-            transportedEvaluationKeyShareProofMaterial:
-                compactSetupProofMaterialSet(
-                    input.transportedEvaluationKeyShareProofMaterial,
-                    input.verifiedSetupProofMaterials,
-                ),
-        };
+        return compactSetupPackageVerificationInput(input);
     }
 
     const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
@@ -629,23 +585,10 @@ const prepareSetupPackageVerificationInputForKernel = (
         proofMaterials: verifiedMaterials,
     } as const satisfies VerifiedSetupProofMaterialSet;
 
-    return {
+    return compactSetupPackageVerificationInput({
         ...input,
-        transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-            input.transportedSameSecretProofMaterial,
-            verifiedSetupProofMaterials,
-        ),
-        transportedPublicKeyShareProofMaterial: compactSetupProofMaterialSet(
-            input.transportedPublicKeyShareProofMaterial,
-            verifiedSetupProofMaterials,
-        ),
-        transportedEvaluationKeyShareProofMaterial:
-            compactSetupProofMaterialSet(
-                input.transportedEvaluationKeyShareProofMaterial,
-                verifiedSetupProofMaterials,
-            ),
         verifiedSetupProofMaterials,
-    };
+    });
 };
 
 /** Verifies an accepted setup package with the packaged Rust/WASM kernel. */

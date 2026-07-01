@@ -1,5 +1,9 @@
 use super::*;
 
+use crate::bgv::setup::setup_proof::{
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
+};
 use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::PUBLIC_KEY_SHARE_PROOF_FAMILY;
@@ -9,18 +13,7 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
     request: &Value,
 ) -> CanonicalResult<Vec<u8>> {
     let has_embedded_proof_bytes = proof_record.get("proofBytesHex").is_some();
-    let has_transport_reference = [
-        "proofBytesEncoding",
-        "proofMaterialRoot",
-        "proofChunkSizeBytes",
-        "proofChunkCount",
-        "proofTotalByteLength",
-        "proofFullObjectHash",
-        "proofChunkRoot",
-        "proofChunkHashes",
-    ]
-    .iter()
-    .any(|field_name| proof_record.get(*field_name).is_some());
+    let has_transport_reference = setup_proof_record_has_transport_reference(proof_record);
 
     // Embedded and transported proof bytes are mutually exclusive so a record cannot present one byte string for verification and bind a different one through the transport manifest.
     if has_embedded_proof_bytes && has_transport_reference {
@@ -97,7 +90,6 @@ pub(in crate::bgv::setup) fn public_key_share_succinct_proof_material_root(
         "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
         "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
         "statementHash": value_string(proof_record, "statementHash")?,
-        "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
         "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
         "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         "chunkCount": transport_hashes.chunk_hashes.len(),
@@ -112,93 +104,13 @@ fn verify_public_key_share_succinct_proof_transport_reference(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share proofChunkSizeBytes must match the setup proof transport parameters",
-        ));
-    }
-    let expected_chunk_count =
-        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key proof material chunk count does not fit u64",
-            )
-        })?;
-    if value_u64(proof_record, "proofChunkCount")? != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofChunkCount must match transported proof chunks",
-        ));
-    }
-    if value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofTotalByteLength must match transported proof chunks",
-        ));
-    }
-    // proofSizeBytes is bound both here and inside the material root, so it must equal the chunk-manifest total or the two commitments could diverge.
-    if value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofSizeBytes must match transported proof byte length",
-        ));
-    }
-    if value_string(proof_record, "proofFullObjectHash")?
-        != transport_hashes.full_object_hash.as_str()
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofFullObjectHash must match transported proof chunks",
-        ));
-    }
-    if value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofChunkRoot must match the canonical proof chunk manifest",
-        ));
-    }
-    let Some(chunk_hash_values) = proof_record
-        .get("proofChunkHashes")
-        .and_then(Value::as_array)
-    else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofChunkHashes must list every transported proof chunk",
-        ));
-    };
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofChunkHashes length must match transported proof chunks",
-        ));
-    }
-    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-        .enumerate()
-    {
-        let Some(chunk_hash) = chunk_hash_value.as_str() else {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "public-key share succinct proofChunkHashes[{chunk_index}] must be a hash string"
-                ),
-            ));
-        };
-        validate_hash_string(
-            chunk_hash,
-            &format!("publicKeyShareSuccinctProof.proofChunkHashes[{chunk_index}]"),
-        )?;
-        if chunk_hash != expected_chunk_hash {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "public-key share succinct proofChunkHashes must match transported proof chunks",
-            ));
-        }
-    }
-
-    Ok(())
+    verify_setup_proof_record_transport_reference(
+        proof_record,
+        transport_hashes,
+        "public-key share",
+        "public-key share succinct",
+        "publicKeyShareSuccinctProof",
+    )
 }
 
 fn transported_public_key_share_proof_material_chunks(
@@ -322,90 +234,20 @@ fn verify_transported_public_key_share_proof_material_header(value: &Value) -> C
 }
 
 fn transported_public_key_share_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof material chunkSizeBytes must match the setup proof transport parameters",
-        ));
-    }
-    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported public-key share succinct proof material chunkCount does not fit usize",
-        )
-    })?;
-    let Some(chunk_values) = value.get("chunks").and_then(Value::as_array) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof material chunks are required",
-        ));
-    };
-    if chunk_values.len() != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof material chunks length must match chunkCount",
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
-        if observed_chunk_index != expected_chunk_index as u64 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported public-key share succinct proof chunks must be supplied in ascending chunk-index order",
-            ));
-        }
-        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
-    }
-
-    Ok(chunks)
+    transported_setup_proof_material_chunks(
+        value,
+        "transported public-key share succinct proof material",
+        "transported public-key share succinct proof",
+    )
 }
 
 fn verify_transported_public_key_share_proof_material_hashes(
     value: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    if value_u64(value, "totalByteLength")? != transport_hashes.total_byte_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof totalByteLength must match supplied chunks",
-        ));
-    }
-    if value_string(value, "fullObjectHash")? != transport_hashes.full_object_hash.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof fullObjectHash must match supplied chunks",
-        ));
-    }
-    if value_string(value, "chunkRoot")? != transport_hashes.chunk_root.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof chunkRoot must match supplied chunks",
-        ));
-    }
-    let Some(chunk_hash_values) = value.get("chunkHashes").and_then(Value::as_array) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof chunkHashes are required",
-        ));
-    };
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported public-key share succinct proof chunkHashes length must match supplied chunks",
-        ));
-    }
-    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-    {
-        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported public-key share succinct proof chunkHashes must match supplied chunks",
-            ));
-        }
-    }
-
-    Ok(())
+    verify_transported_setup_proof_material_hashes(
+        value,
+        transport_hashes,
+        "transported public-key share succinct proof",
+    )
 }

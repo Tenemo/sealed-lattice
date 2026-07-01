@@ -1,13 +1,10 @@
-import {
-    deriveCanonicalObjectHash,
-    hash512Hex,
-    setupProofMaterialFullObjectHashHex,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 
 import {
-    setupProofChunkManifestRoot,
-    setupProofMaterialChunkHash,
-    setupProofTransportChunkSizeBytes,
+    setupProofMaterialRecordTransportFields,
+    setupProofMaterialReferenceFields,
+    setupProofMaterialTransportChunks,
+    setupProofMaterialTransportMetadata,
 } from '../setup-proof-material-transport.js';
 
 import {
@@ -36,7 +33,6 @@ import {
     assertProtocolHash,
     assertJsonRecord,
     bytesFromHex,
-    bytesToHex,
     coefficientVectorFromLittleEndianHex,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
@@ -838,46 +834,10 @@ export const transportTrusteeEvaluationKeyProofSet = (
                 'proofRecords.proofBytesHash must match proofBytesHex before transport.',
             );
         }
-        const chunks: Uint8Array[] = [];
-        for (
-            let chunkStart = 0;
-            chunkStart < proofBytes.byteLength;
-            chunkStart += setupProofTransportChunkSizeBytes
-        ) {
-            chunks.push(
-                proofBytes.slice(
-                    chunkStart,
-                    Math.min(
-                        chunkStart + setupProofTransportChunkSizeBytes,
-                        proofBytes.byteLength,
-                    ),
-                ),
-            );
-        }
-        if (chunks.length === 0) {
-            throw new Error(
-                'proofRecords.proofBytesHex must produce at least one transported chunk.',
-            );
-        }
-        const totalByteLength = proofBytes.byteLength;
-        const fullObjectHash = setupProofMaterialFullObjectHashHex(
+        const proofMaterialTransport = setupProofMaterialTransportMetadata(
             trusteeEvaluationKeyProofFamily,
-            totalByteLength,
-            chunks,
-        );
-        const chunkHashes = chunks.map((chunk, chunkIndex) =>
-            setupProofMaterialChunkHash(
-                trusteeEvaluationKeyProofFamily,
-                fullObjectHash,
-                chunkIndex,
-                chunk,
-            ),
-        );
-        const chunkRoot = setupProofChunkManifestRoot(
-            trusteeEvaluationKeyProofFamily,
-            chunkHashes,
-            fullObjectHash,
-            totalByteLength,
+            proofBytes,
+            'proofRecords.proofBytesHex must produce at least one transported chunk.',
         );
         const proofMaterialRoot = deriveCanonicalObjectHash({
             objectType: 'TrusteeEvaluationKeyProofMaterialReference',
@@ -887,40 +847,26 @@ export const transportTrusteeEvaluationKeyProofSet = (
             trusteeRosterPosition: proofRecord.trusteeRosterPosition,
             statementHash: proofRecord.statementHash,
             proofBytesHash: proofRecord.proofBytesHash,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            fullObjectHash,
-            chunkRoot,
-            chunkHashes,
+            ...setupProofMaterialReferenceFields(proofMaterialTransport),
         });
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
             objectVersion: 1,
             proofFamily: trusteeEvaluationKeyProofFamily,
-            proofBytesEncoding: setupProofMaterialTransportEncoding,
-            proofMaterialRoot,
-            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-            proofChunkCount: chunkHashes.length,
-            proofTotalByteLength: totalByteLength,
-            proofFullObjectHash: fullObjectHash,
-            proofChunkRoot: chunkRoot,
-            proofChunkHashes: chunkHashes,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
+            ...setupProofMaterialRecordTransportFields(
+                proofMaterialTransport,
+                proofMaterialRoot,
+                setupProofMaterialTransportEncoding,
+            ),
+            chunks: setupProofMaterialTransportChunks(proofMaterialTransport),
         });
         const transportedRecordWithoutRoot = {
             ...recordFields,
-            proofBytesEncoding: setupProofMaterialTransportEncoding,
-            proofMaterialRoot,
-            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-            proofChunkCount: chunkHashes.length,
-            proofTotalByteLength: totalByteLength,
-            proofFullObjectHash: fullObjectHash,
-            proofChunkRoot: chunkRoot,
-            proofChunkHashes: chunkHashes,
+            ...setupProofMaterialRecordTransportFields(
+                proofMaterialTransport,
+                proofMaterialRoot,
+                setupProofMaterialTransportEncoding,
+            ),
         } as JsonRecord;
         delete transportedRecordWithoutRoot.proofBytesHex;
         delete transportedRecordWithoutRoot.trusteeEvaluationKeyProofRoot;

@@ -129,7 +129,6 @@ pub(in super::super) fn same_secret_proofs_object(
                 encode_trustee_evaluation_key_proof(&proof)
             },
         );
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash =
             crate::bgv::setup::trustee_evaluation_key_proof::same_secret_anchor_proof_bytes_hash(
                 &proof_bytes,
@@ -151,7 +150,6 @@ pub(in super::super) fn same_secret_proofs_object(
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": statement_record["sameSecretProofFamilyBindingRoot"],
             "statementHash": statement_hash_hex,
-            "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
         });

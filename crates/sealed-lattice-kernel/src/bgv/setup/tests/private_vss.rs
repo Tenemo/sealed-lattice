@@ -1147,7 +1147,6 @@ fn move_private_vss_share_proof_bytes_to_transport(
                 "proofFamily": "vss-opening-carry",
                 "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
                 "statementHash": proof_record["statementHash"],
-                "proofSizeBytes": proof_record["proofSizeBytes"],
                 "proofBytesHash": proof_record["proofBytesHash"],
                 "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
                 "proofChunkCount": transport_hashes.chunk_hashes.len(),

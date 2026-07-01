@@ -402,8 +402,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
             &proof_bytes
         )
     );
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofSizeBytes"] =
-        serde_json::json!(proof_bytes.len());
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 

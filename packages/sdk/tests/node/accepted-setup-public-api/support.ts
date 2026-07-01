@@ -387,7 +387,6 @@ export const sameSecretProofMaterial = (
             kernel,
             `same-secret-proof-statement-${String(proofRosterPosition)}`,
         ),
-        proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
             `same-secret-proof-bytes-${String(proofRosterPosition)}`,
@@ -425,7 +424,6 @@ export const publicKeyShareSuccinctProofMaterial = (
             kernel,
             `public-key-succinct-statement-${String(proofRosterPosition)}`,
         ),
-        proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
             `public-key-succinct-proof-bytes-${String(proofRosterPosition)}`,

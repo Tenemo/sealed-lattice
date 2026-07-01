@@ -36,11 +36,7 @@ pub(super) fn read_hash_field<'a>(value: &'a Value, field_name: &str) -> Canonic
 }
 
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() != 128
-        || !hash
-            .chars()
-            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
-    {
+    if !is_lowercase_protocol_hash(hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{field_name} must be a 128-character lowercase hexadecimal protocol hash"),
@@ -48,6 +44,13 @@ pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalRes
     }
 
     Ok(())
+}
+
+pub(super) fn is_lowercase_protocol_hash(hash: &str) -> bool {
+    hash.len() == 128
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub(super) fn read_optional_u64(value: &Value, field_name: &str) -> CanonicalResult<Option<u64>> {

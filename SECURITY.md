@@ -2,7 +2,7 @@
 
 `sealed-lattice` is under active implementation. It has not been independently audited, certified, or approved for production elections. The published package is a development verification package, not a complete voting system, and must not be used for real ballots or real ballot secrecy.
 
-This file is the canonical public security posture for the repository. Detailed mathematical derivations, implementation progress, and proof notes live in the implementation documentation; they are maintainer evidence, not a separate public security policy.
+This file is the canonical public security posture for the repository. Detailed mathematical derivations, implementation progress, and proof notes are maintainer evidence, not a separate public security policy.
 
 ## Report a vulnerability
 
@@ -64,7 +64,7 @@ Severity rubric:
 | `SEC-010` | `P2`     | Profiles outside the first target profile have no security or runtime claim.             | The setup and target-decryption code derive roster parameters for `3 <= n <= 20`, but only the first target profile has current benchmark and evidence work.                                                                                              |
 | `SEC-011` | `P1/P2`  | Secret-dependent evaluation-key material depends on an HE KDM/circular-security assumption. | Current setup/evaluator evidence treats this as part of the selected HE construction's assumption set. A future construction theorem can replace the assumption only if it is explicitly cited and bound into the security evidence.                      |
 
-The first setup/evaluator boundary is implemented as maintainer evidence for the first profile. It is accepted because the public setup verifier requires external manifest and setup-roster hashes, verifies active-static setup phase ordering, recipient-verified VSS acceptances, public-key and evaluation-key proof families, binary/root-bound proof and key transport, HE setup/evaluator evidence, and returns an accepted setup handoff only from the verified package path. This statement is scoped to setup/evaluator development evidence; it does not close ballot proofs, aggregation, bounded evaluator replay, target decryption, result decoding, supported-phone evidence, audit, or production use.
+The first setup/evaluator boundary is implemented as maintainer evidence for the first profile. It is accepted because the public setup verifier requires external manifest and setup-roster hashes, verifies active-static setup phase ordering, recipient-verified VSS acceptances, public-key and evaluation-key proof families, binary/root-bound proof and key transport, HE setup/evaluator evidence, and returns an accepted setup handoff only from the verified package path. This statement is scoped to setup/evaluator development evidence; the open items table above owns the public list of missing security boundaries.
 
 Public setup verification requires caller-supplied expected manifest and setup-roster hashes, and the kernel verifier compares them to the setup package. The public SDK exposes a setup-roster hash derivation helper for the `CollectiveBgvSetupRoster` object consumed by setup verification; callers must derive that hash from the externally accepted roster positions, identities, and signing-key hashes, not from an untrusted setup package. Current protocol signature checks bind signer identity, signer role, public-key hash, context, object roots, board head, and manifest hashes, and the current canonical JSON/roster paths normalize strings and reject duplicate normalized identities.
 

@@ -1,5 +1,6 @@
 use super::*;
 
+use crate::bgv::setup::setup_proof::setup_proof_record_has_transport_reference;
 use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -851,18 +852,7 @@ fn trustee_evaluation_key_proof_bytes_from_record(
     request: &Value,
 ) -> CanonicalResult<Vec<u8>> {
     let has_embedded_proof_bytes = proof_record.get("proofBytesHex").is_some();
-    let has_transport_reference = [
-        "proofBytesEncoding",
-        "proofMaterialRoot",
-        "proofChunkSizeBytes",
-        "proofChunkCount",
-        "proofTotalByteLength",
-        "proofFullObjectHash",
-        "proofChunkRoot",
-        "proofChunkHashes",
-    ]
-    .iter()
-    .any(|field_name| proof_record.get(*field_name).is_some());
+    let has_transport_reference = setup_proof_record_has_transport_reference(proof_record);
 
     if has_embedded_proof_bytes && has_transport_reference {
         return Err(CanonicalError::new(
@@ -1187,9 +1177,7 @@ pub(in crate::bgv::setup) fn stored_verified_trustee_evaluation_key_proof_materi
 
 #[cfg(test)]
 fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
-    PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("accepted-setup-final-package-material-store")
+    super::super::accepted_setup_final_package_material_store_checkpoint_directory()
         .join("trustee-evaluation-key-proof-material")
 }
 

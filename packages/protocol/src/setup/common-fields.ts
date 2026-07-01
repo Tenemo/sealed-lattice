@@ -2,7 +2,7 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 export const protocolHashPattern = /^[0-9a-f]{128}$/u;
 
-export const setupContextFieldNames = [
+const setupContextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',

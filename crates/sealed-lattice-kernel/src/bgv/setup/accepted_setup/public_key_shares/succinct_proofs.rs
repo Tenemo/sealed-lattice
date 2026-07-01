@@ -524,18 +524,6 @@ fn verify_public_key_share_succinct_proof_record(
     }
     let proof_bytes =
         public_key_share_succinct_proof_bytes_from_record(proof_record, context.request)?;
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "public-key share succinct proof byte length does not fit u64",
-        )
-    })?;
-    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofSizeBytes must match supplied proof bytes",
-        ));
-    }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     if proof_bytes_hash != public_key_share_succinct_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(

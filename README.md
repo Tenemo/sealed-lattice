@@ -30,7 +30,7 @@ The public package currently exposes helpers for poll validation, threshold deri
 
 Threshold derivation is a helper, not a security certificate. The first target profile above is the only current setup/evaluator evidence profile; other roster sizes returned by helper APIs need their own profile evidence, runtime measurements, and security review before they carry a security or mobile claim.
 
-The first setup/evaluator boundary is implemented as development verification evidence for the first profile. Its public verifier requires externally supplied manifest and setup-roster hashes, verifies the active-static setup package, VSS acceptances, public key, evaluation keys, proof/key transport, and setup/evaluator HE boundary, and returns an accepted setup handoff for downstream development work. This does not publish a complete voting workflow, supported-phone evidence, ballot proof acceptance, encrypted aggregation, target decryption, recombination, decoded result validation, audit approval, or production readiness.
+The first setup/evaluator boundary is implemented as development verification evidence for the first profile. Its public verifier requires externally supplied manifest and setup-roster hashes, verifies the active-static setup package, VSS acceptances, public key, evaluation keys, proof/key transport, and setup/evaluator HE boundary, and returns an accepted setup handoff for downstream development work. The missing public workflow pieces are listed below; security caveats and audit status live in [SECURITY.md](SECURITY.md).
 
 Package tests are development evidence. Read [SECURITY.md](SECURITY.md) before treating any result as security evidence.
 
@@ -93,7 +93,7 @@ The public package must not expose raw BGV decryption, arbitrary threshold decry
 
 ## Security
 
-Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, and cryptographic caveats.
+Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, unsupported-evidence rules, and cryptographic caveats.
 
 ## Repository layout
 
@@ -129,31 +129,23 @@ pnpm run check
 
 For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
-Run focused verification:
+Common focused verification commands:
 
 ```bash
 pnpm run test:rust:kernel
 pnpm run test:rust:kernel:accepted-setup
-pnpm run test:rust:kernel:accepted-setup:fast
-pnpm run test:rust:kernel:accepted-setup:final-package
 pnpm run test:node:fast
 pnpm run test:node:protocol
 pnpm run test:node:kernel
-pnpm run test:node:kernel:fast
-pnpm run test:node:kernel:heavy
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
 pnpm run smoke:pack:npm
 ```
 
-`pnpm run test:rust:kernel` runs the ordinary fast Rust kernel tests and skips the accepted-setup proof-test filter. Pass one test name, module name, Rust file name, or Rust file stem for a focused run.
+Use the narrower command that matches the component being changed. Accepted-setup proof lanes are maintainer evidence for setup/proof changes; they do not change the public boundary in [SECURITY.md](SECURITY.md).
 
-Accepted-setup proof lanes default to accelerated local mode: warm target directory, incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode.
-
-Accepted-setup proof lanes are maintainer evidence for setup/proof changes. They do not change the public boundary in [SECURITY.md](SECURITY.md).
-
-Keep default and release gates focused on the selected direct path and shared substrate. Long proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
+Accepted-setup proof lanes default to accelerated local mode: incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode.
 
 Build and package-smoke the published SDK:
 

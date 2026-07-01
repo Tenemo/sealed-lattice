@@ -198,7 +198,6 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
             trusteeIdentity: shareRecord.trusteeIdentity,
             trusteeRosterPosition: shareRecord.trusteeRosterPosition,
             statementHash: validHash('8'),
-            proofSizeBytes: 1,
             proofBytesHash: publicKeyShareSuccinctProofBytesHash(proofBytesHex),
             proofBytesHex,
         }));

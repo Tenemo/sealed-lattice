@@ -58,6 +58,24 @@ pub(crate) use threshold_share_commitments::{
     finish_threshold_share_commitment_transport_derivation_stream_request,
 };
 
+#[cfg(test)]
+pub(in crate::bgv::setup) const TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_TEST_CHECKPOINT_ROOT";
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn accepted_setup_test_checkpoint_root_directory() -> std::path::PathBuf {
+    std::env::var_os(TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("temp").join("test-checkpoints"))
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn accepted_setup_final_package_material_store_checkpoint_directory()
+-> std::path::PathBuf {
+    accepted_setup_test_checkpoint_root_directory()
+        .join("accepted-setup-final-package-material-store")
+}
+
 use sampling::{
     dense_public_residues, negacyclic_product_mod,
     sample_bounded_collective_error_share_distribution,

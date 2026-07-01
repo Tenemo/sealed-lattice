@@ -293,18 +293,6 @@ fn verify_same_secret_anchor_proof_record(
     }
 
     let proof_bytes = same_secret_proof_bytes_from_record(proof_record, context.request)?;
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret proof byte length does not fit u64",
-        )
-    })?;
-    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofSizeBytes must match proofBytesHex",
-        ));
-    }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     if proof_bytes_hash != same_secret_anchor_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(

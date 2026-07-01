@@ -7,8 +7,6 @@ import {
 } from '../evaluator-key-schedule.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
-export { setupContextFieldNames } from '../common-fields.js';
-
 export type JsonRecord = Record<string, unknown>;
 export type EvaluationKeyShareProofFamily =
     | 'relinearization-key-share'
