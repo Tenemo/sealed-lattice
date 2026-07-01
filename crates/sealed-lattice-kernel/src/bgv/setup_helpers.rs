@@ -2,7 +2,7 @@ use serde_json::Value;
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 pub(super) fn read_non_empty_string<'a>(
@@ -36,11 +36,7 @@ pub(super) fn read_hash_field<'a>(value: &'a Value, field_name: &str) -> Canonic
 }
 
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() != 128
-        || !hash
-            .chars()
-            .all(|character| character.is_ascii_digit() || ('a'..='f').contains(&character))
-    {
+    if !is_lowercase_protocol_hash(hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{field_name} must be a 128-character lowercase hexadecimal protocol hash"),
@@ -48,6 +44,13 @@ pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalRes
     }
 
     Ok(())
+}
+
+pub(super) fn is_lowercase_protocol_hash(hash: &str) -> bool {
+    hash.len() == 128
+        && hash
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 pub(super) fn read_optional_u64(value: &Value, field_name: &str) -> CanonicalResult<Option<u64>> {
@@ -100,7 +103,7 @@ pub(super) fn compare_expected_string(
         validate_hash_string(expected, expected_field_name)?;
         if expected != actual {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("BGV passive setup {description} does not match {expected_field_name}"),
             ));
         }
@@ -201,7 +204,7 @@ pub(super) fn compare_required_string(
 ) -> CanonicalResult<()> {
     if actual != expected {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("passive BGV setup package {description} does not match its canonical binding"),
         ));
     }
@@ -228,15 +231,14 @@ pub(super) fn compare_hash_at_path(
 }
 
 pub(super) fn compare_derived_hash(
-    namespace: &str,
     value: &Value,
     actual_hash: &str,
     description: &str,
 ) -> CanonicalResult<()> {
-    let expected_hash = derive_protocol_hash(namespace, value)?;
+    let expected_hash = derive_canonical_object_hash(value)?;
     if actual_hash != expected_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("passive BGV setup package {description} does not match its canonical payload"),
         ));
     }

@@ -109,7 +109,6 @@ pub(super) fn public_key_share_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("publicKeyShareProofs"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -123,7 +122,6 @@ pub(in super::super) fn public_key_share_proof_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("publicKeyShareProofs"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -137,7 +135,6 @@ pub(super) fn public_key_share_succinct_proof_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("publicKeyShareProofs"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

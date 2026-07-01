@@ -7,20 +7,12 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
     Ok(json!({
         "objectType": "PublicEvaluationKeyMaterialManifest",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "materialEncoding": PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING,
         "materialTransportEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
         "manifestHash": value_string(evaluation_keys, "manifestHash")?,
         "rosterHash": value_string(evaluation_keys, "rosterHash")?,
-        "setupProfileHash": value_string(evaluation_keys, "setupProfileHash")?,
-        "qShareHash": value_string(evaluation_keys, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(
-            evaluation_keys,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": value_string(evaluation_keys, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
         "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
         "participantCount": value_u64(evaluation_keys, "participantCount")?,
         "rnsLimbCount": value_u64(evaluation_keys, "rnsLimbCount")?,
@@ -45,7 +37,6 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_manifest(
         "galoisKeyShareBatchRoots": evaluation_keys["galoisKeyShareBatchRoots"],
         "galoisKeyRoots": evaluation_keys["galoisKeyRoots"],
         "galoisShareMaterialRoots": galois_share_material_manifest(setup_package)?,
-        "genericKeySwitchKeyRoots": evaluation_keys["genericKeySwitchKeyRoots"],
     }))
 }
 

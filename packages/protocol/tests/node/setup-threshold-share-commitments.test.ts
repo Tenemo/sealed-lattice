@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -23,7 +23,7 @@ const thresholdDegree = 2;
 
 const fixtureHash = makeSetupFixtureHash('setup-threshold-share-commitments');
 
-const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
+const setupContext = makeSetupContext(fixtureHash);
 
 const coefficientVectorBytes = (
     coefficients: readonly number[],
@@ -207,7 +207,6 @@ describe('threshold-share commitment derivation', () => {
 
         expect(thresholdShareCommitments).toMatchObject({
             objectType: 'ThresholdShareCommitmentSet',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             participantCount,
             thresholdDegree,
             rnsLimbCount: qSharePrimes.length,
@@ -246,10 +245,7 @@ describe('threshold-share commitment derivation', () => {
         const { recipientCommitmentRoot, ...firstRecipientWithoutRoot } =
             firstRecipient;
         expect(recipientCommitmentRoot).toBe(
-            deriveProtocolHash(
-                'ThresholdShareCommitmentRoot',
-                firstRecipientWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(firstRecipientWithoutRoot),
         );
     });
 

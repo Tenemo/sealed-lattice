@@ -1,13 +1,15 @@
 use super::*;
 
+use crate::bgv::setup::setup_proof::setup_proof_record_has_transport_reference;
+use crate::hashing::derive_canonical_object_hash;
+
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    succinct_evaluation_key_proof_accounting_hash, trustee_evaluation_key_proof_bytes_hash,
-    verify_evaluation_key_share,
+    trustee_evaluation_key_proof_bytes_hash, verify_evaluation_key_share,
 };
 use crate::hashing::to_hex;
 
@@ -27,6 +29,16 @@ struct VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry {
     path: PathBuf,
     total_byte_length: u64,
 }
+
+#[cfg(test)]
+fn trustee_evaluation_key_verify_progress(message: impl FnOnce() -> String) {
+    if std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS").as_deref() == Ok("1") {
+        println!("sealed-lattice-trustee-proof-verify-progress {}", message());
+    }
+}
+
+#[cfg(not(test))]
+fn trustee_evaluation_key_verify_progress(_message: impl FnOnce() -> String) {}
 
 pub(super) fn verify_trustee_evaluation_key_proofs(
     setup_package: &Value,
@@ -64,7 +76,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
         }
 
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("trusteeEvaluationKeyProofs"),
             vec!["trusteeEvaluationKeyProofs".to_string()],
             Vec::new(),
@@ -91,12 +102,6 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
 
 fn trustee_evaluation_key_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
     setup_package.get("evaluationKeys").is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificate")
-            .is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificateHash")
-            .is_some()
 }
 
 fn verify_trustee_evaluation_key_proof_set(
@@ -110,7 +115,7 @@ fn verify_trustee_evaluation_key_proof_set(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trusteeEvaluationKeyProofs objectType and objectVersion must match the accepted profile",
+            "trusteeEvaluationKeyProofs objectType and objectVersion must match the accepted parameters",
         ));
     }
     let setup_context = setup_package.get("setupContext").ok_or_else(|| {
@@ -121,26 +126,13 @@ fn verify_trustee_evaluation_key_proof_set(
     })?;
     let roster = super::accepted_roster_from_package(setup_package);
     verify_context_fields_match(proof_set, setup_context, "trusteeEvaluationKeyProofs")?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
             ));
         }
-    }
-    let expected_accounting_hash = succinct_evaluation_key_proof_accounting_hash()?;
-    if proof_set.get("proofAccountingHash").and_then(Value::as_str)
-        != Some(expected_accounting_hash.as_str())
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "trusteeEvaluationKeyProofs.proofAccountingHash must pin the repo-owned succinct evaluation-key proof accounting",
-        ));
     }
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
@@ -148,7 +140,7 @@ fn verify_trustee_evaluation_key_proof_set(
     ] {
         if proof_set.get(field_name).and_then(Value::as_u64) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("trusteeEvaluationKeyProofs.{field_name} must be {expected_value}"),
             ));
         }
@@ -207,7 +199,7 @@ fn verify_trustee_evaluation_key_proof_set(
     ] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "trusteeEvaluationKeyProofs.{field_name} must match the accepted setup binding"
                 ),
@@ -225,7 +217,7 @@ fn verify_trustee_evaluation_key_proof_set(
             .and_then(Value::as_str)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot must bind the verified share-record container",
         ));
     }
@@ -256,7 +248,7 @@ fn verify_trustee_evaluation_key_proof_set(
             )?)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "trusteeEvaluationKeyProofs.galoisKeyShareBatchRoots must match the verified Galois batches",
             ));
         }
@@ -287,7 +279,9 @@ fn verify_trustee_evaluation_key_proof_set(
         .as_object_mut()
         .expect("trustee evaluation-key proof set object was checked")
         .remove("trusteeEvaluationKeyProofSetRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &root_input)?;
+    trustee_evaluation_key_verify_progress(|| "proof-set-root-start".to_string());
+    let expected_root = derive_canonical_object_hash(&root_input)?;
+    trustee_evaluation_key_verify_progress(|| "proof-set-root-finish".to_string());
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -295,6 +289,7 @@ fn verify_trustee_evaluation_key_proof_set(
         ));
     }
 
+    trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
     let transported_constant_commitments =
         same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
@@ -307,9 +302,13 @@ fn verify_trustee_evaluation_key_proof_set(
         setup_package,
         transported_key_switch_component_material,
     )?;
+    trustee_evaluation_key_verify_progress(|| "shared-inputs-finish".to_string());
 
     let verify_record = |record_position: usize, proof_record: &Value| -> CanonicalResult<()> {
         let trustee_roster_position = record_position as u64;
+        trustee_evaluation_key_verify_progress(|| {
+            format!("trustee={trustee_roster_position} statement-start")
+        });
         let statement =
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package,
@@ -318,6 +317,9 @@ fn verify_trustee_evaluation_key_proof_set(
                 round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
             })?;
+        trustee_evaluation_key_verify_progress(|| {
+            format!("trustee={trustee_roster_position} statement-finish")
+        });
         verify_trustee_evaluation_key_proof_record(
             proof_record,
             setup_context,
@@ -375,18 +377,14 @@ fn verify_trustee_evaluation_key_proof_record(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proof objectType and objectVersion must match the accepted profile",
+            "trustee evaluation-key proof objectType and objectVersion must match the accepted parameters",
         ));
     }
     verify_context_fields_match(proof_record, setup_context, "trusteeEvaluationKeyProof")?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", TRUSTEE_EVALUATION_KEY_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("trustee evaluation-key proof {field_name} must be {expected_value}"),
             ));
         }
@@ -394,7 +392,7 @@ fn verify_trustee_evaluation_key_proof_record(
     let trustee_roster_position = value_u64(proof_record, "trusteeRosterPosition")?;
     let Some(same_secret_binding) = same_secret_proof_bindings.get(&trustee_roster_position) else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key proof trusteeRosterPosition must reference an accepted same-secret proof",
         ));
     };
@@ -418,7 +416,7 @@ fn verify_trustee_evaluation_key_proof_record(
     ] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "trustee evaluation-key proof {field_name} must match the accepted trustee secret binding"
                 ),
@@ -430,29 +428,11 @@ fn verify_trustee_evaluation_key_proof_record(
         != Some(expected_statement_hash.as_str())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key proof statementHash must match the statement rebuilt from the verified share records",
         ));
     }
-    if proof_record.get("keyCount").and_then(Value::as_u64) != Some(statement.keys.len() as u64) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "trustee evaluation-key proof keyCount must match the frozen key schedule",
-        ));
-    }
     let proof_bytes = trustee_evaluation_key_proof_bytes_from_record(proof_record, request)?;
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "trustee evaluation-key proof byte length does not fit u64",
-        )
-    })?;
-    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "trustee evaluation-key proofSizeBytes must match supplied proof bytes",
-        ));
-    }
     if value_string(proof_record, "proofBytesHash")?
         != trustee_evaluation_key_proof_bytes_hash(&proof_bytes)
     {
@@ -461,15 +441,33 @@ fn verify_trustee_evaluation_key_proof_record(
             "trustee evaluation-key proofBytesHash must match supplied proof bytes",
         ));
     }
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} decode-start")
+    });
     let proof = decode_trustee_evaluation_key_proof(statement, &proof_bytes)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} decode-finish")
+    });
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} proof-verify-start")
+    });
     verify_evaluation_key_share(statement, &proof)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} proof-verify-finish")
+    });
     let supplied_root = value_string(proof_record, "trusteeEvaluationKeyProofRoot")?;
     let mut root_input = proof_record.clone();
     root_input
         .as_object_mut()
         .expect("trustee evaluation-key proof record object was checked")
         .remove("trusteeEvaluationKeyProofRoot");
-    let expected_root = derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &root_input)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} record-root-start")
+    });
+    let expected_root = derive_canonical_object_hash(&root_input)?;
+    trustee_evaluation_key_verify_progress(|| {
+        format!("trustee={trustee_roster_position} record-root-finish")
+    });
     if supplied_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -480,13 +478,12 @@ fn verify_trustee_evaluation_key_proof_record(
     Ok(())
 }
 
-// The accepted key-switch decomposition profile hash the proof context binds:
-// recomputed from the repo-owned decomposition profile, never read from the
+// The accepted key-switch decomposition hash the proof context binds:
+// recomputed from the repo-owned decomposition parameters, never read from the
 // package.
 pub(in crate::bgv::setup) fn accepted_key_switch_decomposition_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "KeySwitchDecompositionHash",
-        &crate::bgv::setup::certificates::key_switch_decomposition_profile()?,
+    derive_canonical_object_hash(
+        &crate::bgv::setup::certificates::key_switch_decomposition_parameters()?,
     )
 }
 
@@ -515,7 +512,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
     let Some(same_secret_binding) = same_secret_proof_bindings.get(&inputs.trustee_roster_position)
     else {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "trustee evaluation-key statement requires an accepted same-secret proof binding",
         ));
     };
@@ -724,7 +721,7 @@ fn evaluation_key_descriptor_from_record(
     match ring_degree {
         Some(existing_ring_degree) if *existing_ring_degree != record_ring_degree => {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "evaluation-key share records must agree on one ring degree",
             ));
         }
@@ -855,18 +852,7 @@ fn trustee_evaluation_key_proof_bytes_from_record(
     request: &Value,
 ) -> CanonicalResult<Vec<u8>> {
     let has_embedded_proof_bytes = proof_record.get("proofBytesHex").is_some();
-    let has_transport_reference = [
-        "proofBytesEncoding",
-        "proofMaterialRoot",
-        "proofChunkSizeBytes",
-        "proofChunkCount",
-        "proofTotalByteLength",
-        "proofFullObjectHash",
-        "proofChunkRoot",
-        "proofChunkHashes",
-    ]
-    .iter()
-    .any(|field_name| proof_record.get(*field_name).is_some());
+    let has_transport_reference = setup_proof_record_has_transport_reference(proof_record);
 
     if has_embedded_proof_bytes && has_transport_reference {
         return Err(CanonicalError::new(
@@ -929,27 +915,21 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_proof_material_root(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofMaterialRoot",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofMaterialReference",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "statementHash": value_string(proof_record, "statementHash")?,
-            "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
-            "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "TrusteeEvaluationKeyProofMaterialReference",
+        "objectVersion": 1,
+        "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
+        "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
+        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+        "statementHash": value_string(proof_record, "statementHash")?,
+        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
+        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    }))
 }
 
 fn verify_trustee_evaluation_key_proof_transport_reference(
@@ -965,7 +945,6 @@ fn verify_trustee_evaluation_key_proof_transport_reference(
                 )
             })?
         || value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length
-        || value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length
         || value_string(proof_record, "proofFullObjectHash")? != transport_hashes.full_object_hash
         || value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root
     {
@@ -1021,12 +1000,6 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
         || material_set_proof_family == Some(TRUSTEE_EVALUATION_KEY_PROOF_FAMILY);
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE)
-        || material_set.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || !material_set_family_matches
     {
         return Err(CanonicalError::new(
@@ -1047,12 +1020,6 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
     for proof_material in proof_materials {
         if proof_material.get("objectType").and_then(Value::as_str)
             != Some(EVALUATION_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE)
-            || proof_material.get("setupProfileId").and_then(Value::as_str)
-                != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-            || proof_material
-                .get("setupProofProfileId")
-                .and_then(Value::as_str)
-                != Some(SETUP_PROOF_PROFILE_ID)
             || proof_material
                 .get("proofBytesEncoding")
                 .and_then(Value::as_str)
@@ -1210,9 +1177,7 @@ pub(in crate::bgv::setup) fn stored_verified_trustee_evaluation_key_proof_materi
 
 #[cfg(test)]
 fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
-    PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
+    super::super::accepted_setup_final_package_material_store_checkpoint_directory()
         .join("trustee-evaluation-key-proof-material")
 }
 

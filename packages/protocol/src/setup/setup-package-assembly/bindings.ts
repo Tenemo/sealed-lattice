@@ -1,4 +1,4 @@
-import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
+import { canonicalJson } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { RequiredGaloisKeyScheduleEntry } from '../evaluator-key-schedule.js';
@@ -10,14 +10,12 @@ import {
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
-    assertCommonRandomnessContextMatches,
     assertContext,
     assertContextMatches,
     assertObjectRecord,
     assertObjectType,
     hashField,
     requiredSetupPhases,
-    setupProfileId,
 } from './constants-and-assertions.js';
 import type {
     SetupPackageCertificateRecords,
@@ -59,19 +57,13 @@ const assertPhaseTranscript = (
 const assertCommonBindings = (input: SetupPackageInput): void => {
     assertContext(input.setupContext);
     assertObjectType(input.qShare, 'qShare', 'QSharePrimeList');
-    if (
-        deriveProtocolHash('QSharePrimeListHash', input.qShare) !==
-        input.setupContext.qShareHash
-    ) {
-        throw new Error('qShare must match setupContext.qShareHash.');
-    }
     assertPhaseTranscript(input.setupContext, input.phaseTranscript);
     assertObjectType(
         input.commonRandomness,
         'commonRandomness',
         'SetupCommonRandomness',
     );
-    assertCommonRandomnessContextMatches(
+    assertContextMatches(
         input.setupContext,
         input.commonRandomness,
         'commonRandomness',
@@ -268,11 +260,10 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
     if (
         publicDerivations.objectType !== 'SetupPublicDerivations' ||
         publicDerivations.objectVersion !== 1 ||
-        publicDerivations.setupProfileId !== setupProfileId ||
         publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            'commonRandomness.publicDerivations must match the accepted setup public derivation profile.',
+            'commonRandomness.publicDerivations must match the accepted setup public derivation parameters.',
         );
     }
 
@@ -377,16 +368,6 @@ const assertCertificateBindings = (
     certificates: SetupPackageCertificateRecords,
 ): void => {
     assertObjectType(
-        certificates.setupCommitmentSecurityCertificate,
-        'setupCommitmentSecurityCertificate',
-        'SetupCommitmentSecurityCertificate',
-    );
-    hashField(
-        certificates.setupCommitmentSecurityCertificate,
-        'setupCommitmentSecurityCertificateHash',
-        'setupCommitmentSecurityCertificate',
-    );
-    assertObjectType(
         certificates.setupTransportCertificate,
         'setupTransportCertificate',
         'SetupTransportCertificate',
@@ -395,26 +376,6 @@ const assertCertificateBindings = (
         certificates.setupTransportCertificate,
         'setupTransportCertificateHash',
         'setupTransportCertificate',
-    );
-    assertObjectType(
-        certificates.setupProofAccountingCertificate,
-        'setupProofAccountingCertificate',
-        'SetupProofAccountingCertificate',
-    );
-    hashField(
-        certificates.setupProofAccountingCertificate,
-        'setupProofAccountingCertificateHash',
-        'setupProofAccountingCertificate',
-    );
-    assertObjectType(
-        certificates.heSecurityCertificate,
-        'heSecurityCertificate',
-        'BgvHeSecurityCertificate',
-    );
-    hashField(
-        certificates.heSecurityCertificate,
-        'heSecurityCertificateHash',
-        'heSecurityCertificate',
     );
 };
 

@@ -1,16 +1,13 @@
 // Shared vocabulary and types for the VSS coefficient-commitment record
-// builders: profile and transport constants, the BDLOP commitment shape, the
+// builders: parameter and transport constants, the BDLOP commitment shape, the
 // per-source-trustee opening-state and commitment record families, the binary
 // transport object shapes, and the bundle input/output contracts. This is the
 // leaf module the other parts build on.
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 export type JsonRecord = Record<string, unknown>;
-
-export const setupCommitmentProfileId = 'SealedLattice-BDLOP-Commitment-v1';
 
 const setupCommitmentModuleRank = 2;
 
@@ -20,7 +17,7 @@ export const setupCommitmentRowCount = setupCommitmentModuleRank + 1;
 
 export const setupCommitmentModulusLimbIndices = [0, 1, 2] as const;
 
-export const acceptedBgvProfileRingDegree = 32_768;
+export const acceptedBgvFullRingDegree = 32_768;
 
 export const acceptedBgvSetupQSharePrimes = [
     140_737_487_306_753, 140_737_486_716_929, 140_737_486_520_321,
@@ -34,18 +31,10 @@ export const acceptedBgvSetupQSharePrimes = [
 export const acceptedBgvSetupQShare = {
     objectType: 'QSharePrimeList',
     objectVersion: 1,
-    sharingDomain: 'per-rns-prime',
-    primeOrder: 'profile-order',
-    targetDecryptionReadiness: 'refused-until-q-target-certificate-closes',
     primes: acceptedBgvSetupQSharePrimes,
 } as const;
 
-export const acceptedBgvSetupQShareHash = deriveProtocolHash(
-    'QSharePrimeListHash',
-    acceptedBgvSetupQShare,
-);
-
-export const setupTransportProfileId =
+export const setupTransportSchemeId =
     'sealed-lattice-setup-binary-chunked-transport-v1';
 
 export const setupTransportChunkSizeBytes = 1_048_576;
@@ -136,8 +125,6 @@ export type VssCoefficientCommitmentRecord = Readonly<
         readonly rnsPrime: number;
         readonly shamirCoefficientIndex: number;
         readonly commitmentRoot: ProtocolHash;
-        readonly commitmentChunkRoot: ProtocolHash;
-        readonly coefficientVectorHash512: string;
     }
 >;
 
@@ -182,7 +169,6 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
         readonly objectVersion: 1;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly materialEncoding: 'full-public-setup-commitment-values';
@@ -190,7 +176,7 @@ export type VssCoefficientCommitmentMaterialSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
+        readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
         readonly materialRecordCount: number;
         readonly coefficientCommitments: readonly VssCoefficientCommitmentMaterialRecord[];
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
@@ -253,9 +239,6 @@ export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
     JsonRecord & {
         readonly objectType: 'VssCoefficientCommitmentMaterialSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly commitmentProfileHash: ProtocolHash;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly materialEncoding: 'binary-chunked-full-public-setup-commitment-values';
@@ -264,11 +247,10 @@ export type BinaryChunkedVssCoefficientCommitmentMaterialSet = Readonly<
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
+        readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
         readonly materialRecordCount: number;
         readonly transport: Readonly<
             JsonRecord & {
-                readonly transportProfileId: typeof setupTransportProfileId;
                 readonly chunkSizeBytes: typeof setupTransportChunkSizeBytes;
                 readonly chunkCount: number;
                 readonly totalByteLength: number;
@@ -301,14 +283,13 @@ export type VerifiedVssCoefficientCommitmentMaterial = Readonly<
     JsonRecord & {
         readonly objectType: 'VerifiedVssCoefficientCommitmentMaterial';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly verificationId: string;
         readonly materialBinaryFormat: typeof vssCoefficientCommitmentMaterialBinaryFormat;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
         readonly thresholdShareCommitmentRoot: ProtocolHash;
-        readonly transportProfileId: typeof setupTransportProfileId;
+        readonly transportSchemeId: typeof setupTransportSchemeId;
         readonly transportChunkSizeBytes: typeof setupTransportChunkSizeBytes;
         readonly transportChunkCount: number;
         readonly transportTotalByteLength: number;
@@ -420,8 +401,6 @@ export type VssSourceTrusteeCoefficientCommitmentContributionOptions =
 export type SetupCommitmentOpeningComputation = Readonly<{
     readonly commitment: JsonRecord;
     readonly commitmentRoot: ProtocolHash;
-    readonly commitmentChunkRoot: ProtocolHash;
-    readonly coefficientVectorHash512: string;
 }>;
 
 export type SetupCommitmentOpeningComputer = (

@@ -6,7 +6,6 @@ pub(super) fn verify_setup_transport_request_bindings(
     setup_package: &Value,
     request: &Value,
     transported_objects: &[SetupTransportedObjectBinding],
-    expected_object_roots: &mut BTreeSet<String>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     macro_rules! transport_try {
         ($expression:expr) => {
@@ -40,7 +39,6 @@ pub(super) fn verify_setup_transport_request_bindings(
                 SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
                 "transportedVssCoefficientCommitmentMaterial",
             )?,
-            expected_object_roots,
         ));
     }
     if let Some(transported_material) = request.get("transportedPublicKeyShareMaterial") {
@@ -69,7 +67,6 @@ pub(super) fn verify_setup_transport_request_bindings(
                 SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
                 "transportedPublicKeyShareMaterial",
             )?,
-            expected_object_roots,
         ));
     }
     if let Some(material_set) = request.get("transportedSameSecretProofMaterial") {
@@ -87,10 +84,9 @@ pub(super) fn verify_setup_transport_request_bindings(
                 object_name: SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_NAME,
                 object_role: SETUP_TRANSPORTED_SAME_SECRET_PROOF_MATERIAL_ROLE,
                 object_root: "proofMaterialRoot",
-                hash_fields: SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS,
+                hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
             },
             &referenced_material_roots,
-            expected_object_roots,
         ));
     }
     if let Some(material_set) = request.get("transportedPublicKeyShareProofMaterial") {
@@ -108,10 +104,9 @@ pub(super) fn verify_setup_transport_request_bindings(
                 object_name: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_NAME,
                 object_role: SETUP_TRANSPORTED_PUBLIC_KEY_SHARE_PROOF_MATERIAL_ROLE,
                 object_root: "proofMaterialRoot",
-                hash_fields: SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS,
+                hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
             },
             &referenced_material_roots,
-            expected_object_roots,
         ));
     }
     if let Some(material_set) = request.get("transportedEvaluationKeyShareProofMaterial") {
@@ -132,7 +127,6 @@ pub(super) fn verify_setup_transport_request_bindings(
                 hash_fields: SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS,
             },
             &referenced_material_roots,
-            expected_object_roots,
         ));
     }
     if let Some(material_set) = request.get("transportedEvaluationKeyShareComponentMaterial") {
@@ -152,7 +146,6 @@ pub(super) fn verify_setup_transport_request_bindings(
                 hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
             },
             &referenced_material_roots,
-            expected_object_roots,
         ));
     }
     if let Some(material_set) = request.get("transportedPublicEvaluationKeyMaterial") {
@@ -170,7 +163,6 @@ pub(super) fn verify_setup_transport_request_bindings(
                 hash_fields: SETUP_TRANSPORT_DIRECT_HASH_FIELDS,
             },
             &referenced_material_roots,
-            expected_object_roots,
         ));
     }
 
@@ -287,7 +279,6 @@ fn require_setup_transport_proof_material_entries(
     material_set_path: &'static str,
     descriptor: SetupTransportMaterialDescriptor,
     referenced_material_roots: &BTreeSet<String>,
-    expected_object_roots: &mut BTreeSet<String>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     let Some(proof_materials) = material_set.get("proofMaterials").and_then(Value::as_array) else {
         return Ok(Err(Refusal::new(
@@ -300,22 +291,25 @@ fn require_setup_transport_proof_material_entries(
     };
     for (material_index, proof_material) in proof_materials.iter().enumerate() {
         let object_path = format!("{material_set_path}.proofMaterials[{material_index}]");
-        let expected_material =
-            setup_transport_expected_material(proof_material, descriptor, object_path)?;
-        if !referenced_material_roots.contains(&expected_material.object_root) {
-            return Ok(Err(Refusal::new(
-                "transportedObjectUnreferenced",
-                format!(
-                    "{material_set_path}.proofMaterials contains transported material not referenced by setupPackage records"
-                ),
-                expected_material.object_path,
-            )));
-        }
-        if let Err(refusal) = require_setup_transport_entry(
-            transported_objects,
-            &expected_material,
-            expected_object_roots,
-        ) {
+        let Some(object_root) = referenced_material_root(
+            proof_material,
+            descriptor.object_root,
+            &object_path,
+            referenced_material_roots,
+        )?
+        else {
+            continue;
+        };
+        let expected_material = setup_transport_expected_material_with_root(
+            proof_material,
+            object_root,
+            descriptor.object_name,
+            descriptor.object_role,
+            descriptor.hash_fields,
+            object_path,
+        )?;
+        if let Err(refusal) = require_setup_transport_entry(transported_objects, &expected_material)
+        {
             return Ok(Err(refusal));
         }
     }
@@ -330,7 +324,6 @@ fn require_setup_transport_material_entries(
     material_array_field_name: &'static str,
     descriptor: SetupTransportMaterialDescriptor,
     referenced_material_roots: &BTreeSet<String>,
-    expected_object_roots: &mut BTreeSet<String>,
 ) -> CanonicalResult<Result<(), Refusal>> {
     let Some(materials) = material_set
         .get(material_array_field_name)
@@ -347,22 +340,25 @@ fn require_setup_transport_material_entries(
     for (material_index, material) in materials.iter().enumerate() {
         let object_path =
             format!("{material_set_path}.{material_array_field_name}[{material_index}]");
-        let expected_material =
-            setup_transport_expected_material(material, descriptor, object_path)?;
-        if !referenced_material_roots.contains(&expected_material.object_root) {
-            return Ok(Err(Refusal::new(
-                "transportedObjectUnreferenced",
-                format!(
-                    "{material_set_path}.{material_array_field_name} contains transported material not referenced by setupPackage records"
-                ),
-                expected_material.object_path,
-            )));
-        }
-        if let Err(refusal) = require_setup_transport_entry(
-            transported_objects,
-            &expected_material,
-            expected_object_roots,
-        ) {
+        let Some(object_root) = referenced_material_root(
+            material,
+            descriptor.object_root,
+            &object_path,
+            referenced_material_roots,
+        )?
+        else {
+            continue;
+        };
+        let expected_material = setup_transport_expected_material_with_root(
+            material,
+            object_root,
+            descriptor.object_name,
+            descriptor.object_role,
+            descriptor.hash_fields,
+            object_path,
+        )?;
+        if let Err(refusal) = require_setup_transport_entry(transported_objects, &expected_material)
+        {
             return Ok(Err(refusal));
         }
     }
@@ -388,25 +384,21 @@ fn setup_transport_expected_direct_material(
     )
 }
 
-fn setup_transport_expected_material(
+fn referenced_material_root(
     material: &Value,
-    descriptor: SetupTransportMaterialDescriptor,
-    object_path: String,
-) -> CanonicalResult<SetupTransportExpectedObject> {
-    let object_root = value_string(material, descriptor.object_root)?.to_string();
-    validate_hash_string(
-        &object_root,
-        &format!("{object_path}.{}", descriptor.object_root),
-    )?;
+    root_field_name: &str,
+    object_path: &str,
+    referenced_material_roots: &BTreeSet<String>,
+) -> CanonicalResult<Option<String>> {
+    let Some(object_root) = material.get(root_field_name).and_then(Value::as_str) else {
+        return Ok(None);
+    };
+    if !referenced_material_roots.contains(object_root) {
+        return Ok(None);
+    }
+    validate_hash_string(object_root, &format!("{object_path}.{root_field_name}"))?;
 
-    setup_transport_expected_material_with_root(
-        material,
-        object_root,
-        descriptor.object_name,
-        descriptor.object_role,
-        descriptor.hash_fields,
-        object_path,
-    )
+    Ok(Some(object_root.to_string()))
 }
 
 fn setup_transport_expected_material_with_root(
@@ -446,9 +438,7 @@ fn setup_transport_expected_material_with_root(
 fn require_setup_transport_entry(
     transported_objects: &[SetupTransportedObjectBinding],
     expected: &SetupTransportExpectedObject,
-    expected_object_roots: &mut BTreeSet<String>,
 ) -> Result<(), Refusal> {
-    expected_object_roots.insert(expected.object_root.clone());
     let Some(transported_object) = transported_objects
         .iter()
         .find(|transported_object| transported_object.object_root == expected.object_root)

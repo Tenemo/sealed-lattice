@@ -34,33 +34,12 @@ pub(super) fn local_verification_record(
             "setupContextHashMissing",
             "setupContext.rosterHash is required",
         ).map_err(refusal_to_error)?,
-        "setupProfileHash": string_field(
+        "setupParametersHash": string_field(
             setup_context,
-            "setupProfileHash",
-            "setupContext.setupProfileHash",
+            "setupParametersHash",
+            "setupContext.setupParametersHash",
             "setupContextHashMissing",
-            "setupContext.setupProfileHash is required",
-        ).map_err(refusal_to_error)?,
-        "qShareHash": string_field(
-            setup_context,
-            "qShareHash",
-            "setupContext.qShareHash",
-            "setupContextHashMissing",
-            "setupContext.qShareHash is required",
-        ).map_err(refusal_to_error)?,
-        "carryAwareVssShareRelationProfileHash": string_field(
-            setup_context,
-            "carryAwareVssShareRelationProfileHash",
-            "setupContext.carryAwareVssShareRelationProfileHash",
-            "setupContextHashMissing",
-            "setupContext.carryAwareVssShareRelationProfileHash is required",
-        ).map_err(refusal_to_error)?,
-        "commitmentProfileHash": string_field(
-            setup_context,
-            "commitmentProfileHash",
-            "setupContext.commitmentProfileHash",
-            "setupContextHashMissing",
-            "setupContext.commitmentProfileHash is required",
+            "setupContext.setupParametersHash is required",
         ).map_err(refusal_to_error)?,
         "setupEpoch": string_field(
             setup_context,
@@ -103,18 +82,15 @@ pub(super) fn limb_verification_value(verification: LimbVerification) -> Value {
 }
 
 pub(super) fn verification_response(
-    ok: bool,
-    verifier_status: &str,
+    is_valid: bool,
     private_envelope_hash: Option<String>,
     local_verification_root: Option<String>,
     limb_verifications: Vec<Value>,
     refused_objects: Vec<PrivateVssRefusal>,
 ) -> Value {
     json!({
-        "ok": ok,
+        "isValid": is_valid,
         "operation": "verifyPrivateVssShareEnvelope",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "verifierStatus": verifier_status,
         "privateEnvelopeHash": private_envelope_hash,
         "localVerificationRoot": local_verification_root,
         "limbVerifications": limb_verifications,

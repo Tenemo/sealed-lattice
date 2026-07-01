@@ -14,8 +14,8 @@ pub(crate) fn generate_bgv_target_decryption_share_from_request(
         value_at_path(request, &["targetCiphertextBinding"])?,
         &target_accepted,
     )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
+    let target_share_parameters = read_target_share_parameters(
+        value_at_path(request, &["targetShareParameters"])?,
         &setup_binding,
     )?;
     let trustee_identity = required_string_field(request, "trusteeIdentity")?;
@@ -37,7 +37,7 @@ pub(crate) fn generate_bgv_target_decryption_share_from_request(
         &setup_binding,
         &target_accepted,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         participant,
         &evaluator_key,
         private_setup_seed,
@@ -58,8 +58,8 @@ pub(crate) fn recombine_bgv_target_decryption_shares_from_request(
         value_at_path(request, &["targetCiphertextBinding"])?,
         &target_accepted,
     )?;
-    let target_share_profile = read_target_share_profile(
-        value_at_path(request, &["targetShareProfile"])?,
+    let target_share_parameters = read_target_share_parameters(
+        value_at_path(request, &["targetShareParameters"])?,
         &setup_binding,
     )?;
     let share_records = request
@@ -79,7 +79,7 @@ pub(crate) fn recombine_bgv_target_decryption_shares_from_request(
                 &setup_binding,
                 &target_accepted,
                 &target_ciphertexts,
-                &target_share_profile,
+                &target_share_parameters,
             )
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -88,7 +88,7 @@ pub(crate) fn recombine_bgv_target_decryption_shares_from_request(
         &setup_binding,
         &target_accepted,
         &target_ciphertexts,
-        &target_share_profile,
+        &target_share_parameters,
         shares,
     )
 }

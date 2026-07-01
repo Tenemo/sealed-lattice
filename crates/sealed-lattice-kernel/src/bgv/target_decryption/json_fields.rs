@@ -43,7 +43,7 @@ pub(super) fn compare_hash_field(
     let actual = hash_at_path(value, &[field_name])?;
     if actual != expected {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("{description} does not match its target decryption binding"),
         ));
     }
@@ -60,7 +60,7 @@ pub(super) fn compare_string_field(
     let actual = string_at_path(value, &[field_name])?;
     if actual != expected {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("{description} does not match its target decryption binding"),
         ));
     }
@@ -77,7 +77,7 @@ pub(super) fn compare_unsigned_field(
     let actual = unsigned_at_path(value, &[field_name])?;
     if actual != expected {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             format!("{description} does not match its target decryption binding"),
         ));
     }

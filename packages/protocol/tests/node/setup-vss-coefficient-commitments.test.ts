@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -364,16 +364,10 @@ describe('VSS coefficient commitment builders', () => {
             participantCount * qSharePrimes.length * thresholdDegree,
         );
         expect(vssCoefficientCommitmentRoot).toBe(
-            deriveProtocolHash(
-                'VssCoefficientCommitmentRoot',
-                commitmentSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(commitmentSetWithoutRoot),
         );
         expect(vssCoefficientCommitmentMaterialRoot).toBe(
-            deriveProtocolHash(
-                'VssCoefficientCommitmentMaterialRoot',
-                materialSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(materialSetWithoutRoot),
         );
         expect(firstMaterialRecord?.commitmentRoot).toBe(
             setupCommitmentComputer({
@@ -399,10 +393,6 @@ describe('VSS coefficient commitment builders', () => {
                 qSharePrimes.length * thresholdDegree,
             ),
         );
-        expect(
-            bundle.commitmentSet.sourceTrusteeRecords[0]
-                ?.coefficientCommitments[0]?.coefficientVectorHash512,
-        ).toMatch(/^[0-9a-f]{128}$/u);
     });
 
     it('builds binary-chunked transport for public coefficient material', () => {
@@ -437,14 +427,11 @@ describe('VSS coefficient commitment builders', () => {
 
         expect(transport.materialSet).toMatchObject({
             objectType: 'VssCoefficientCommitmentMaterialSet',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             materialEncoding:
                 'binary-chunked-full-public-setup-commitment-values',
             binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
             materialRecordCount: bundle.materialSet.materialRecordCount,
             transport: {
-                transportProfileId:
-                    'sealed-lattice-setup-binary-chunked-transport-v1',
                 chunkSizeBytes: setupTransportChunkSizeBytes,
                 chunkCount:
                     transport.transportedVssCoefficientCommitmentMaterial
@@ -457,14 +444,8 @@ describe('VSS coefficient commitment builders', () => {
                         .chunkRoot,
             },
         });
-        expect(transport.materialSet).not.toHaveProperty(
-            'coefficientCommitments',
-        );
         expect(vssCoefficientCommitmentMaterialRoot).toBe(
-            deriveProtocolHash(
-                'VssCoefficientCommitmentMaterialRoot',
-                materialSetWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(materialSetWithoutRoot),
         );
         expect(
             transport.transportedVssCoefficientCommitmentMaterial,
@@ -524,9 +505,6 @@ describe('VSS coefficient commitment builders', () => {
             embeddedBundle.commitmentSet,
         );
         expect(directBundle.materialSet).toEqual(embeddedTransport.materialSet);
-        expect(directBundle.materialSet).not.toHaveProperty(
-            'coefficientCommitments',
-        );
         expect(
             directBundle.transportedVssCoefficientCommitmentMaterial,
         ).toEqual(
@@ -599,7 +577,7 @@ describe('VSS coefficient commitment builders', () => {
                         .totalByteLength,
                 );
 
-                return { ok: true };
+                return {};
             },
             absorbThresholdShareCommitmentsFromTransportStreamChunk: (input: {
                 readonly chunkIndex: number;
@@ -610,7 +588,7 @@ describe('VSS coefficient commitment builders', () => {
                     bytesHex: input.bytesHex,
                 });
 
-                return { ok: true };
+                return {};
             },
             finishThresholdShareCommitmentsFromTransportStream: () => {
                 expect(capturedChunks).toEqual(
@@ -638,7 +616,6 @@ describe('VSS coefficient commitment builders', () => {
                     verifiedVssCoefficientCommitmentMaterial: {
                         objectType: 'VerifiedVssCoefficientCommitmentMaterial',
                         objectVersion: 1,
-                        setupProfileId: 'CollectiveBgvSetup-v1',
                         verificationId: 'vss-transport-1',
                         materialBinaryFormat:
                             'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
@@ -652,7 +629,7 @@ describe('VSS coefficient commitment builders', () => {
                                 .vssCoefficientCommitmentMaterialRoot,
                         thresholdShareCommitmentRoot:
                             thresholdShareCommitments.thresholdShareCommitmentRoot,
-                        transportProfileId:
+                        transportSchemeId:
                             'sealed-lattice-setup-binary-chunked-transport-v1',
                         transportChunkSizeBytes: 1_048_576,
                         transportChunkCount:
@@ -697,9 +674,6 @@ describe('VSS coefficient commitment builders', () => {
         expect(
             streamingBundle.transportedVssCoefficientCommitmentMaterial,
         ).toEqual(retainedTransportReference);
-        expect(
-            streamingBundle.transportedVssCoefficientCommitmentMaterial,
-        ).not.toHaveProperty('chunks');
         expect(streamingBundle.thresholdShareCommitments).toEqual(
             deriveThresholdShareCommitments({
                 setupContext,

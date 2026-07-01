@@ -1,5 +1,7 @@
 use super::super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn public_evaluation_key_set_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -32,17 +34,13 @@ pub(in super::super) fn public_evaluation_key_set_object(
                 .expect("round-two aggregate root");
             // The hash preimage must match the verifier's recompute in
             // accepted_setup::evaluation_key_material_transport::expected_roots
-            // exactly: object type/version, profile ids, the material encoding
+            // exactly: object type/version, parameter ids, the material encoding
             // constant, the three binding roots, the rounds root, the level, the
             // digit/limb counts, and the two aggregate roots. No extra narration
             // fields are bound.
-            let relinearization_key_root = derive_protocol_hash(
-                "RelinearizationKeyRoot",
-                &serde_json::json!({
+            let relinearization_key_root = derive_canonical_object_hash(&serde_json::json!({
                     "objectType": "RelinearizationKeyAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
@@ -117,13 +115,9 @@ pub(in super::super) fn public_evaluation_key_set_object(
             // The hash preimage must match the verifier's recompute in
             // expected_galois_key_roots_for_evaluation_keys exactly; no extra
             // narration fields are bound.
-            let galois_key_root = derive_protocol_hash(
-                "RotationKeyRoot",
-                &serde_json::json!({
+            let galois_key_root = derive_canonical_object_hash(&serde_json::json!({
                     "objectType": "GaloisKeyAggregate",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "materialEncoding": "root-bound-public-key-switch-component-roots",
                     "evaluatorKeyScheduleRoot": schedule["evaluatorKeyScheduleRoot"],
                     "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
@@ -152,18 +146,11 @@ pub(in super::super) fn public_evaluation_key_set_object(
     let mut evaluation_keys = serde_json::json!({
         "objectType": "PublicEvaluationKeySet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
-        "assemblyStatus": "assembled-from-proof-bearing-shares-and-accepted-key-correctness-certificate",
         "materialEncoding": "root-bound-public-key-switch-component-roots",
-        "materialSource": "verified-relinearization-and-galois-proof-records",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": super::participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -177,13 +164,9 @@ pub(in super::super) fn public_evaluation_key_set_object(
         "requiredGaloisKeySchedule": schedule["requiredGaloisKeySchedule"],
         "galoisKeyShareBatchRoots": galois_key_share_batch_roots,
         "galoisKeyRoots": galois_key_roots,
-        "genericKeySwitchKeyRoots": [],
-        "rawKeyBytesEmbedded": false,
-        "verifierGeneratedKeyMaterial": false,
     });
     evaluation_keys["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &evaluation_keys)
-            .expect("evaluation key set hash")
+        derive_canonical_object_hash(&evaluation_keys).expect("evaluation key set hash")
     );
 
     evaluation_keys
@@ -225,8 +208,7 @@ pub(in super::super) fn add_public_evaluation_key_material_transport(
         .expect("evaluation key set")
         .remove("evaluationKeySetHash");
     package["evaluationKeys"]["evaluationKeySetHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", &package["evaluationKeys"])
-            .expect("evaluation key set hash")
+        derive_canonical_object_hash(&package["evaluationKeys"]).expect("evaluation key set hash")
     );
     append_setup_transport_certificate_object(
         package,
@@ -240,28 +222,20 @@ pub(in super::super) fn add_public_evaluation_key_material_transport(
             chunk_hashes: transport_hashes.chunk_hashes.clone(),
         },
     );
-    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 
     serde_json::json!({
         "objectType": PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
         "publicEvaluationKeyMaterials": [{
             "objectType": PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
             "ceremonyId": package["evaluationKeys"]["ceremonyId"],
             "manifestHash": package["evaluationKeys"]["manifestHash"],
             "rosterHash": package["evaluationKeys"]["rosterHash"],
-            "setupProfileHash": package["evaluationKeys"]["setupProfileHash"],
-            "qShareHash": package["evaluationKeys"]["qShareHash"],
-            "carryAwareVssShareRelationProfileHash": package["evaluationKeys"]["carryAwareVssShareRelationProfileHash"],
-            "commitmentProfileHash": package["evaluationKeys"]["commitmentProfileHash"],
+            "setupParametersHash": package["evaluationKeys"]["setupParametersHash"],
             "setupEpoch": package["evaluationKeys"]["setupEpoch"],
             "evaluationKeySetHash": package["evaluationKeys"]["evaluationKeySetHash"],
             "publicEvaluationKeyMaterialRoot": package["evaluationKeys"]["publicEvaluationKeyMaterialRoot"],

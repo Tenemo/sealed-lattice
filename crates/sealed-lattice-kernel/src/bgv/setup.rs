@@ -6,7 +6,6 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
-mod development_fixtures;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
@@ -21,19 +20,18 @@ mod setup_proof;
 mod sharing;
 mod threshold_share_commitments;
 mod trustee_evaluation_key_proof;
-pub(crate) use trustee_evaluation_key_proof::{
-    generate_trustee_evaluation_key_proof_from_request,
-    verify_trustee_evaluation_key_proof_from_request,
-};
+pub(crate) use trustee_evaluation_key_proof::generate_trustee_evaluation_key_proof_from_request;
 mod validation;
 mod vss;
+
+pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 
 #[cfg(test)]
 mod tests;
 
 pub(crate) use accepted_setup::{
     derive_collective_bgv_setup_public_derivations_from_request,
-    describe_collective_bgv_setup_profile, verify_collective_bgv_setup_package_from_request,
+    describe_collective_bgv_setup_parameters, verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
@@ -54,21 +52,35 @@ pub(crate) use setup_proof::{
     finish_setup_proof_material_transport_stream_request,
 };
 pub(crate) use threshold_share_commitments::{
-    abort_threshold_share_commitment_transport_derivation_stream_request,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,
-    derive_threshold_share_commitments_from_transport_request,
     finish_threshold_share_commitment_transport_derivation_stream_request,
-    release_verified_transported_vss_material_request,
 };
 
+#[cfg(test)]
+pub(in crate::bgv::setup) const TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE: &str =
+    "SEALED_LATTICE_TEST_CHECKPOINT_ROOT";
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn accepted_setup_test_checkpoint_root_directory() -> std::path::PathBuf {
+    std::env::var_os(TEST_CHECKPOINT_ROOT_ENVIRONMENT_VARIABLE)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("temp").join("test-checkpoints"))
+}
+
+#[cfg(test)]
+pub(in crate::bgv::setup) fn accepted_setup_final_package_material_store_checkpoint_directory()
+-> std::path::PathBuf {
+    accepted_setup_test_checkpoint_root_directory()
+        .join("accepted-setup-final-package-material-store")
+}
+
 use sampling::{
-    dense_centered_binomial_coefficients, dense_public_residues, dense_small_coefficients,
-    negacyclic_product_mod, sample_bounded_collective_error_share_distribution,
+    dense_public_residues, negacyclic_product_mod,
+    sample_bounded_collective_error_share_distribution,
     sample_bounded_collective_secret_share_distribution, sample_positions, sample_public_residues,
-    sample_signed_values, sample_values, signed_to_modulus_residue,
-    signed_to_plaintext_scaled_residue,
+    signed_to_modulus_residue, signed_to_plaintext_scaled_residue,
 };
 
 use crate::bgv::evaluator::key_switch::key_switch_key_from_public_component_b;
@@ -77,7 +89,6 @@ use crate::{
         coefficient_codec::{
             coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
         },
-        encoding::encode_batch_plaintext_slots,
         evaluator::{
             engine::{BgvPublicKey, DevelopmentBgvKey},
             key_switch::{KeySwitchKey, generate_galois_key, generate_relinearization_key},
@@ -85,20 +96,9 @@ use crate::{
         },
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
         ntt::{forward_negacyclic_ntt_in_place, inverse_negacyclic_ntt_in_place},
-        profile::{
-            BACKEND_PROFILE_ID, BATCH_ENCODER_ID, BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS,
-            POLYNOMIAL_DEGREE, PROFILE_ID, allowed_operation_registry_hash, backend_profile_hash,
-            ballot_score_encoding_profile_hash, batch_encoder_hash, batch_layout_binding_hash,
-            canonical_ciphertext_convention_hash, data_basis_modulus_bits,
-            direct_aggregate_layout_hash, direct_comparison_profile_hash,
-            encrypted_ballot_aggregate_layout_hash, encrypted_ballot_aggregate_profile_hash,
-            encrypted_ballot_layout_hash, extended_basis_modulus_bits, profile_hash,
-            security_estimator_input_hash,
-        },
-        rns::RnsPolynomial,
-        serialization::{
-            BgvObjectKind, canonical_bytes_hash, ciphertext_root, plaintext_root,
-            serialize_bgv_object,
+        parameters::{
+            BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash,
+            data_basis_modulus_bits, extended_basis_modulus_bits,
         },
         setup_helpers::{
             array_at_path, compare_derived_hash, compare_expected_string, compare_hash_at_path,
@@ -108,21 +108,11 @@ use crate::{
         },
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, chunk_root, derive_protocol_hash, hash512, hash512_hex},
+    hashing::{canonical_json, chunk_root, derive_canonical_object_hash, hash512, hash512_hex},
 };
 
-pub(crate) const PASSIVE_SETUP_PROFILE_ID: &str =
-    "sealed-lattice-bgv-rns-passive-full-roster-setup-v1";
-pub(crate) const TARGET_DECRYPTION_PROFILE_ID: &str = "BGV-RNS-AsyncTargetDecryption-v1";
-pub(crate) const KEY_SWITCH_DECOMPOSITION_PROFILE_ID: &str =
-    "sealed-lattice-bgv-rns-key-switch-decomposition-v1";
-pub(crate) const SELECTED_ROT_SET_ID: &str = "compact-generator-basis-packed-rank-rot-set-v1";
 const MAXIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 50;
 const MINIMUM_PASSIVE_SETUP_ROSTER_SIZE: usize = 3;
-const DEVELOPMENT_ENCRYPTION_FIXTURE_ID: &str =
-    "sealed-lattice-passive-bgv-setup-development-encryption-fixture-v1";
-const EVALUATION_KEY_STREAMING_COMMITMENT_ID: &str =
-    "sealed-lattice-passive-bgv-setup-evaluation-key-streaming-commitment-v1";
 const EVALUATION_KEY_CHUNK_SIZE_BYTES: usize = 262_144;
 
 #[derive(Clone)]
@@ -139,7 +129,7 @@ struct PassiveSetupInput {
     ceremony_id: String,
     manifest_hash: String,
     roster_hash: String,
-    threshold_profile_hash: String,
+    threshold_parameters_hash: String,
     setup_seed_provided: bool,
     setup_seed_hash: String,
     private_setup_seed_hash: String,
@@ -161,67 +151,6 @@ struct VerifiedParticipantSetupBinding {
     public_key_share_root: String,
     participant_setup_record_hash: String,
     trustee_threshold_verification_key_hash: String,
-}
-
-pub(crate) fn describe_passive_setup_object_model() -> CanonicalResult<Value> {
-    Ok(json!({
-        "objectModelId": "sealed-lattice-passive-bgv-setup-object-model-v1",
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "keySwitchDecompositionProfileId": KEY_SWITCH_DECOMPOSITION_PROFILE_ID,
-        "selectedRotSetId": SELECTED_ROT_SET_ID,
-        "canonicalObjects": [
-            "BgvPassiveSetupPackage",
-            "ParticipantBgvSetupRecord",
-            "BgvPublicKeyShare",
-            "BgvCollectivePublicKey",
-            "BgvCollectivePublicKeyCoefficientMaterial",
-            "ThresholdShareVerificationKeySet",
-            "TrusteeThresholdVerificationKey",
-            "BgvRelinearizationKey",
-            "BgvRotationKey",
-            "BgvKeySwitchKey",
-            "BgvEvaluationKeySet",
-            "BgvEvaluationKeyMaterialCommitment",
-            "BgvPublicEvaluationKeyMaterial",
-            "BgvEvaluationKeyStreamingCommitment",
-            "BgvSetupParameterCertificate",
-            "CollectiveSecretDistributionCertificate",
-            "ErrorDistributionCertificate",
-            "EvaluationKeySizeCertificate",
-            "BgvDevelopmentEncryptionFixture"
-        ],
-        "reservedRootsAndHashes": [
-            "BGVPassiveSetupPackageHash",
-            "ParticipantBgvSetupRecordHash",
-            "PublicKeyShareRoot",
-            "BGVPublicCommonRandomPolynomialRoot",
-            "BGVPublicKeyRoot",
-            "CollectivePublicKeyRoot",
-            "ThresholdShareVerificationKeyRoot",
-            "ThresholdShareVerificationKeyHash",
-            "TrusteeThresholdVerificationKeyHash",
-            "RelinearizationKeyRoot",
-            "RotationKeyRoot",
-            "KeySwitchKeyRoot",
-            "KeySwitchDecompositionHash",
-            "EvalKeyRoot",
-            "EvaluationKeySetHash",
-            "EvaluationKeySizeProfileHash",
-            "CollectiveSecretDistributionCertificateHash",
-            "ErrorDistributionCertificateHash",
-            "BGVHeSecurityCertificateHash",
-            "BGVSetupParameterCertificateHash",
-            "SetupProofRecordBindingHash",
-            "SetupProofAccountingCertificateHash",
-            "SetupKeyCorrectnessCertificateHash",
-            "BGVDevelopmentEncryptionFixtureHash",
-            "RotSetHash",
-            "ComparisonInputDerivationCircuitHash",
-            "EncryptedComparisonInputHash",
-            "EncryptedSparseTargetProjectionHash"
-        ],
-    }))
 }
 
 pub(crate) fn generate_passive_setup_package_from_request(
@@ -256,10 +185,10 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
         )
     })?;
     hash_object.remove("setupPackageHash");
-    let expected_hash = derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)?;
+    let expected_hash = derive_canonical_object_hash(&hash_input)?;
     if setup_package_hash != expected_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "BGV passive setup package hash does not match its canonical payload",
         ));
     }
@@ -308,7 +237,6 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
     validation::validate_setup_package_internal_bindings(setup_package)?;
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyBgvPassiveSetupPackage",
         "acceptedHashes": [
             setup_package_hash,
@@ -319,8 +247,6 @@ pub(crate) fn verify_passive_setup_package_from_request(request: &Value) -> Cano
             string_at_path(setup_package, &["evaluationKeys", "evaluationKeyRoot"])?,
             string_at_path(setup_package, &["evaluationKeys", "rotSetHash"])?,
         ],
-        "refusedObjects": [],
-        "unresolvedReason": null,
     }))
 }
 

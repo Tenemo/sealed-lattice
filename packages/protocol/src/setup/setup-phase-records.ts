@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -74,8 +74,7 @@ type SetupPhasePayload = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly signerRole: 'Trustee';
     readonly trusteeIdentity: string;
@@ -126,8 +125,7 @@ const phasePayload = (
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         signerRole: 'Trustee',
         trusteeIdentity: input.trusteeIdentity,
@@ -158,18 +156,14 @@ const phaseSignatureContextHash = (
     input: Omit<SetupPhaseParticipantObjectInput, 'signRoot'>,
     phaseObjectRoot: ProtocolHash,
 ): ProtocolHash =>
-    deriveProtocolHash('SetupPhaseObjectHash', {
-        purpose: 'setup-phase-signature-context',
+    deriveCanonicalObjectHash({
+        objectType: 'SetupPhaseSignatureContext',
         phaseId: input.phaseId,
         phaseNumber: input.phaseNumber,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         trusteeIdentity: input.trusteeIdentity,
         rosterPosition: input.rosterPosition,
@@ -197,7 +191,7 @@ const verifyGeneratedSignatureEnvelope = (
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
-    if (!result.ok) {
+    if (!result.isValid) {
         const refusedObject = result.refusedObjects[0];
         throw new Error(
             refusedObject === undefined
@@ -253,7 +247,7 @@ export const createSetupPhaseParticipantObject = async (
     }
 
     const payload = phasePayload(input);
-    const phaseObjectRoot = deriveProtocolHash('SetupPhaseObjectHash', payload);
+    const phaseObjectRoot = deriveCanonicalObjectHash(payload);
     const phaseObjectByteLength = canonicalByteLength(payload);
     const phaseSignatureContext = phaseSignatureContextHash(
         input,
@@ -310,11 +304,7 @@ export const createSetupPhaseRecord = (input: {
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         previousPhaseRoot: input.previousPhaseRoot,
         participantPhaseObjects,
@@ -322,6 +312,9 @@ export const createSetupPhaseRecord = (input: {
 
     return {
         ...phaseRecordWithoutRoot,
-        phaseRoot: deriveProtocolHash('SetupPhaseRoot', phaseRecordWithoutRoot),
+        phaseRoot: deriveCanonicalObjectHash({
+            objectType: 'SetupPhaseRecord',
+            ...phaseRecordWithoutRoot,
+        }),
     } satisfies SetupPhaseRecord;
 };

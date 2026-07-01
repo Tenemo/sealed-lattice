@@ -1,7 +1,9 @@
 use super::expected_roots::*;
+
 use super::manifest::*;
 use super::public_key_reconstruction::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn transported_evaluation_key_share_component_material_from_request(
     request: &Value,
@@ -30,8 +32,6 @@ pub(in super::super) fn transported_evaluation_key_share_component_material_from
     Ok(Some(json!({
         "objectType": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "componentMaterials": component_materials,
     })))
 }
@@ -77,7 +77,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
     let Some(transported_material_set) = request.get("transportedPublicEvaluationKeyMaterial")
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["transportedPublicEvaluationKeyMaterial".to_string()],
             Vec::new(),
@@ -92,14 +91,6 @@ pub(super) fn verify_public_evaluation_key_material_transport(
             .get("objectVersion")
             .and_then(Value::as_u64)
             != Some(1)
-        || transported_material_set
-            .get("setupProfileId")
-            .and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || transported_material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || transported_material_set
             .get("materialEncoding")
             .and_then(Value::as_str)
@@ -227,7 +218,7 @@ pub(super) fn verify_public_evaluation_key_material_transport(
             "transportedPublicEvaluationKeyMaterial.publicEvaluationKeyMaterials",
         )?));
     }
-    if accepted_setup_evaluation_key_records_use_profile_ring(setup_package)? {
+    if accepted_setup_evaluation_key_records_use_full_ring(setup_package)? {
         if let Err(error) =
             accepted_setup_public_relinearization_keys_from_transport(setup_package, request)
         {
@@ -324,12 +315,6 @@ fn transported_evaluation_key_share_component_material_roots_from_request(
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
         || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || material_set.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -426,12 +411,6 @@ fn verify_public_evaluation_key_material_entry_header(
     if material_entry.get("objectType").and_then(Value::as_str)
         != Some(PUBLIC_EVALUATION_KEY_MATERIAL_TRANSPORT_OBJECT_TYPE)
         || material_entry.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || material_entry.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_entry
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
         || material_entry
             .get("materialEncoding")
             .and_then(Value::as_str)
@@ -446,17 +425,14 @@ fn verify_public_evaluation_key_material_entry_header(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
         "evaluationKeySetHash",
         "publicEvaluationKeyMaterialRoot",
     ] {
         if material_entry.get(field_name) != evaluation_keys.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "transported public evaluation-key material {field_name} must match evaluationKeys"
                 ),
@@ -471,7 +447,7 @@ fn public_evaluation_key_material_chunks(value: &Value) -> CanonicalResult<Vec<V
     if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "transported public evaluation-key material chunkSizeBytes must match the setup transport profile",
+            "transported public evaluation-key material chunkSizeBytes must match the setup transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
@@ -569,21 +545,16 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_transport_hashes(
             public_evaluation_key_material_chunk_hash(&full_object_hash, chunk_index, chunk)
         })
         .collect::<CanonicalResult<Vec<_>>>()?;
-    let chunk_root = derive_protocol_hash(
-        "PublicEvaluationKeyMaterialChunkRoot",
-        &json!({
-            "objectType": "PublicEvaluationKeyMaterialChunkManifest",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": chunk_hashes.len(),
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )?;
+    let chunk_root = derive_canonical_object_hash(&json!({
+        "objectType": "PublicEvaluationKeyMaterialChunkManifest",
+        "objectVersion": 1,
+        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": chunk_hashes.len(),
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))?;
 
     Ok(PublicEvaluationKeyMaterialTransportHashes {
         full_object_hash,
@@ -699,49 +670,38 @@ pub(in crate::bgv::setup) fn public_evaluation_key_material_reference_root(
     expected_manifest: &Value,
     transport_hashes: &PublicEvaluationKeyMaterialTransportHashes,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "PublicEvaluationKeyMaterialRoot",
-        &json!({
-            "objectType": "PublicEvaluationKeyMaterialReference",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
-            "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
-            "manifestHash": value_string(evaluation_keys, "manifestHash")?,
-            "rosterHash": value_string(evaluation_keys, "rosterHash")?,
-            "setupProfileHash": value_string(evaluation_keys, "setupProfileHash")?,
-            "qShareHash": value_string(evaluation_keys, "qShareHash")?,
-            "carryAwareVssShareRelationProfileHash": value_string(
-                evaluation_keys,
-                "carryAwareVssShareRelationProfileHash",
-            )?,
-            "commitmentProfileHash": value_string(evaluation_keys, "commitmentProfileHash")?,
-            "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
-            "evaluatorKeyScheduleRoot": value_string(
-                evaluation_keys,
-                "evaluatorKeyScheduleRoot",
-            )?,
-            "sameSecretProofFamilyBindingRoot": value_string(
-                evaluation_keys,
-                "sameSecretProofFamilyBindingRoot",
-            )?,
-            "publicKeyShareSuccinctProofSetRoot": value_string(
-                evaluation_keys,
-                "publicKeyShareSuccinctProofSetRoot",
-            )?,
-            "relinearizationKeyShareRoundsRoot": value_string(
-                evaluation_keys,
-                "relinearizationKeyShareRoundsRoot",
-            )?,
-            "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
-            "expectedMaterialManifest": expected_manifest,
-            "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "PublicEvaluationKeyMaterialReference",
+        "objectVersion": 1,
+        "materialEncoding": PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING,
+        "ceremonyId": value_string(evaluation_keys, "ceremonyId")?,
+        "manifestHash": value_string(evaluation_keys, "manifestHash")?,
+        "rosterHash": value_string(evaluation_keys, "rosterHash")?,
+        "setupParametersHash": value_string(evaluation_keys, "setupParametersHash")?,
+        "setupEpoch": value_string(evaluation_keys, "setupEpoch")?,
+        "evaluatorKeyScheduleRoot": value_string(
+            evaluation_keys,
+            "evaluatorKeyScheduleRoot",
+        )?,
+        "sameSecretProofFamilyBindingRoot": value_string(
+            evaluation_keys,
+            "sameSecretProofFamilyBindingRoot",
+        )?,
+        "publicKeyShareSuccinctProofSetRoot": value_string(
+            evaluation_keys,
+            "publicKeyShareSuccinctProofSetRoot",
+        )?,
+        "relinearizationKeyShareRoundsRoot": value_string(
+            evaluation_keys,
+            "relinearizationKeyShareRoundsRoot",
+        )?,
+        "requiredGaloisSetHash": value_string(evaluation_keys, "requiredGaloisSetHash")?,
+        "expectedMaterialManifest": expected_manifest,
+        "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    }))
 }

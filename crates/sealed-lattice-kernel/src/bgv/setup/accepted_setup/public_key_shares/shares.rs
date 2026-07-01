@@ -1,13 +1,14 @@
 use super::common::*;
+
 use super::proofs::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_public_key_shares(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(share_set) = setup_package.get("publicKeyShares") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares".to_string()],
             Vec::new(),
@@ -50,19 +51,6 @@ pub(in super::super) fn verify_public_key_shares(
             "setupPackage.publicKeyShares",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofBindingStatus", "public-key-share-proof-required"),
-    ] {
-        if share_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(public_key_share_refusal(
-                "publicKeyShareSetProfileMismatch",
-                format!("publicKeyShares.{field_name} must be {expected_value}"),
-                format!("setupPackage.publicKeyShares.{field_name}"),
-            )?));
-        }
-    }
     let roster = super::accepted_roster_from_package(setup_package);
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
@@ -103,7 +91,6 @@ pub(in super::super) fn verify_public_key_shares(
     let same_secret_bindings = same_secret_statement_bindings_from_package(setup_package)?;
     let Some(share_records) = share_set.get("shareRecords").and_then(Value::as_array) else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords".to_string()],
             Vec::new(),
@@ -118,7 +105,6 @@ pub(in super::super) fn verify_public_key_shares(
         )?));
     }
     let mut seen_roster_positions = BTreeSet::new();
-    let mut public_key_share_roots = Vec::new();
     for share_record in share_records {
         if let Some(response) = verify_public_key_share_record(
             share_record,
@@ -130,18 +116,6 @@ pub(in super::super) fn verify_public_key_shares(
         )? {
             return Ok(Some(response));
         }
-        public_key_share_roots.push(json!({
-            "trusteeIdentity": value_string(share_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(share_record, "trusteeRosterPosition")?,
-            "publicKeyShareRoot": value_string(share_record, "publicKeyShareRoot")?,
-        }));
-    }
-    if share_set.get("publicKeyShareRoots") != Some(&Value::Array(public_key_share_roots)) {
-        return Ok(Some(public_key_share_refusal(
-            "publicKeyShareRootListMismatch",
-            "publicKeyShares.publicKeyShareRoots must match the ordered share records",
-            "setupPackage.publicKeyShares.publicKeyShareRoots",
-        )?));
     }
 
     let Some(public_key_share_set_root) = share_set
@@ -149,7 +123,6 @@ pub(in super::super) fn verify_public_key_shares(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.publicKeyShareSetRoot".to_string()],
             Vec::new(),
@@ -165,7 +138,7 @@ pub(in super::super) fn verify_public_key_shares(
         .as_object_mut()
         .expect("public-key share set object was checked")
         .remove("publicKeyShareSetRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_set_root != expected_root {
         return Ok(Some(public_key_share_refusal(
             "publicKeyShareSetRootMismatch",
@@ -214,15 +187,10 @@ fn verify_public_key_share_record(
             "setupPackage.publicKeyShares.shareRecords",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("shareComponent", "component-zero-b_i"),
-        ("proofBindingStatus", "public-key-share-proof-required"),
-    ] {
+    for (field_name, expected_value) in [("shareComponent", "component-zero-b_i")] {
         if share_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_refusal(
-                "publicKeyShareProfileMismatch",
+                "publicKeyShareParametersMismatch",
                 format!("public-key share {field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShares.shareRecords.{field_name}"),
             )?));
@@ -306,7 +274,6 @@ fn verify_public_key_share_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords.publicKeyShareRoot".to_string()],
             Vec::new(),
@@ -322,7 +289,7 @@ fn verify_public_key_share_record(
         .as_object_mut()
         .expect("public-key share object was checked")
         .remove("publicKeyShareRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_root != expected_root {
         return Ok(Some(public_key_share_refusal(
             "publicKeyShareRootMismatch",

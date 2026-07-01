@@ -1,8 +1,7 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    setupCommitmentProfileId,
     setupCommitmentRootPayload,
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
@@ -28,16 +27,11 @@ export type ThresholdShareCommitmentLimb = Readonly<
     JsonRecord & {
         readonly objectType: 'ThresholdShareCommitment';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly derivationRule: typeof thresholdShareDerivationRule;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly recipientIdentity: string;
@@ -46,7 +40,7 @@ export type ThresholdShareCommitmentLimb = Readonly<
         readonly rnsLimbIndex: number;
         readonly rnsPrime: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
+        readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
         readonly shamirCoefficientScalarsDecimal: readonly string[];
         readonly coefficientCommitmentRoots: readonly ProtocolHash[];
         readonly commitmentLimbs: readonly ThresholdCommitmentRowHash[];
@@ -58,23 +52,18 @@ export type ThresholdShareCommitmentRecipient = Readonly<
     JsonRecord & {
         readonly objectType: 'TrusteeThresholdShareCommitments';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly derivationRule: typeof thresholdShareDerivationRule;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly recipientIdentity: string;
         readonly recipientRosterPosition: number;
         readonly trusteePoint: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
+        readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
         readonly limbCommitments: readonly ThresholdShareCommitmentLimb[];
         readonly recipientCommitmentRoot: ProtocolHash;
     }
@@ -84,23 +73,18 @@ export type ThresholdShareCommitmentSet = Readonly<
     JsonRecord & {
         readonly objectType: 'ThresholdShareCommitmentSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
         readonly derivationRule: typeof thresholdShareDerivationRule;
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly participantCount: number;
         readonly thresholdDegree: number;
         readonly rnsLimbCount: number;
         readonly ringDegree: number;
-        readonly ringDegreeStatus: 'profile-ring' | 'development-reduced-ring';
+        readonly ringDegreeStatus: 'full-ring' | 'development-reduced-ring';
         readonly recipientRecords: readonly ThresholdShareCommitmentRecipient[];
         readonly thresholdShareCommitmentRoot: ProtocolHash;
     }
@@ -134,7 +118,6 @@ type ParsedCommitmentMaterial = Readonly<{
     readonly commitment: SetupCommitmentValue;
 }>;
 
-const setupProfileId = 'CollectiveBgvSetup-v1';
 const thresholdShareDerivationRule =
     'sum-source-trustee-polynomial-commitments-at-trustee-point';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -142,10 +125,7 @@ const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -277,11 +257,7 @@ const setupContextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -348,11 +324,6 @@ const parseCommitmentValue = (
 ): SetupCommitmentValue => {
     const commitment = assertJsonRecord(commitmentValue, objectPath);
     assertObjectType(commitment, objectPath, 'SetupCommitment');
-    if (commitment.profileId !== setupCommitmentProfileId) {
-        throw new Error(
-            `${objectPath}.profileId must be ${setupCommitmentProfileId}.`,
-        );
-    }
     const sourceRnsLimbIndex = assertNonNegativeSafeInteger(
         commitment.sourceRnsLimbIndex,
         `${objectPath}.sourceRnsLimbIndex`,
@@ -454,11 +425,6 @@ const parseMaterialSet = (
         materialSet,
         'vssCoefficientCommitmentMaterial',
     );
-    if (materialSet.commitmentProfileId !== setupCommitmentProfileId) {
-        throw new Error(
-            `vssCoefficientCommitmentMaterial.commitmentProfileId must be ${setupCommitmentProfileId}.`,
-        );
-    }
     assertProtocolHash(
         materialSet.publicMatrixSeedHash,
         'vssCoefficientCommitmentMaterial.publicMatrixSeedHash',
@@ -488,11 +454,11 @@ const parseMaterialSet = (
         'vssCoefficientCommitmentMaterial.ringDegree',
     );
     if (
-        materialSet.ringDegreeStatus !== 'profile-ring' &&
+        materialSet.ringDegreeStatus !== 'full-ring' &&
         materialSet.ringDegreeStatus !== 'development-reduced-ring'
     ) {
         throw new Error(
-            'vssCoefficientCommitmentMaterial.ringDegreeStatus must be profile-ring or development-reduced-ring.',
+            'vssCoefficientCommitmentMaterial.ringDegreeStatus must be full-ring or development-reduced-ring.',
         );
     }
     if (
@@ -590,8 +556,7 @@ const parseMaterialRecordsByCoordinate = (
                     `${objectPath}.commitment coordinate must match the material record coordinate.`,
                 );
             }
-            const recomputedCommitmentRoot = deriveProtocolHash(
-                'SetupCommitmentRoot',
+            const recomputedCommitmentRoot = deriveCanonicalObjectHash(
                 setupCommitmentRootPayload(commitment),
             );
             if (materialRecord.commitmentRoot !== recomputedCommitmentRoot) {
@@ -731,7 +696,7 @@ const aggregateThresholdCommitmentLimb = (
     rnsPrime: number,
     thresholdDegree: number,
     ringDegree: number,
-    ringDegreeStatus: 'profile-ring' | 'development-reduced-ring',
+    ringDegreeStatus: 'full-ring' | 'development-reduced-ring',
     trusteePoint: number,
 ): ThresholdShareCommitmentLimb => {
     if (trusteePoint >= rnsPrime) {
@@ -826,9 +791,7 @@ const aggregateThresholdCommitmentLimb = (
     const limbWithoutRoot = {
         objectType: 'ThresholdShareCommitment',
         objectVersion: 1,
-        setupProfileId,
         ...setupContextFields(setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash,
         recipientIdentity,
@@ -850,10 +813,8 @@ const aggregateThresholdCommitmentLimb = (
 
     return {
         ...limbWithoutRoot,
-        thresholdShareCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
-            limbWithoutRoot,
-        ),
+        thresholdShareCommitmentRoot:
+            deriveCanonicalObjectHash(limbWithoutRoot),
     };
 };
 
@@ -866,16 +827,14 @@ const deriveRecipientCommitment = (
     rnsPrimes: readonly number[],
     thresholdDegree: number,
     ringDegree: number,
-    ringDegreeStatus: 'profile-ring' | 'development-reduced-ring',
+    ringDegreeStatus: 'full-ring' | 'development-reduced-ring',
 ): ThresholdShareCommitmentRecipient => {
     // Shamir evaluation point = rosterPosition + 1 (point 0 holds the secret); scalars [1, x, x^2, ...] evaluate the committed polynomial at x via the additive homomorphism, so points must be nonzero and distinct mod every Q_share prime.
     const trusteePoint = recipientRecord.sourceTrusteeRosterPosition + 1;
     const recipientWithoutRoot = {
         objectType: 'TrusteeThresholdShareCommitments',
         objectVersion: 1,
-        setupProfileId,
         ...setupContextFields(setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash,
         recipientIdentity: recipientRecord.sourceTrusteeIdentity,
@@ -906,10 +865,8 @@ const deriveRecipientCommitment = (
 
     return {
         ...recipientWithoutRoot,
-        recipientCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
-            recipientWithoutRoot,
-        ),
+        recipientCommitmentRoot:
+            deriveCanonicalObjectHash(recipientWithoutRoot),
     };
 };
 
@@ -1042,9 +999,7 @@ export const deriveThresholdShareCommitments = (
     const thresholdShareCommitmentsWithoutRoot = {
         objectType: 'ThresholdShareCommitmentSet',
         objectVersion: 1,
-        setupProfileId,
         ...setupContextFields(input.setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash:
             input.vssCoefficientCommitments.publicMatrixSeedHash,
@@ -1061,8 +1016,7 @@ export const deriveThresholdShareCommitments = (
 
     return {
         ...thresholdShareCommitmentsWithoutRoot,
-        thresholdShareCommitmentRoot: deriveProtocolHash(
-            'ThresholdShareCommitmentRoot',
+        thresholdShareCommitmentRoot: deriveCanonicalObjectHash(
             thresholdShareCommitmentsWithoutRoot,
         ),
     };

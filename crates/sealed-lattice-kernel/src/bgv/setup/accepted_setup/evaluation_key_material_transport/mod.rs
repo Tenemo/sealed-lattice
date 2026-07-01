@@ -39,7 +39,6 @@ pub(super) fn evaluation_key_material_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("relinearizationRoundOne"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

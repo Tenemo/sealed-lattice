@@ -1,7 +1,9 @@
 use super::binary_material::*;
+
 use super::field_access::*;
 use super::request_bindings::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_transport_certificate(
     setup_package: &Value,
@@ -9,7 +11,6 @@ pub(in super::super) fn verify_transport_certificate(
 ) -> CanonicalResult<Option<Value>> {
     let Some(transport_certificate) = setup_package.get("setupTransportCertificate") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageVerification"),
             vec!["setupTransportCertificate".to_string()],
             Vec::new(),
@@ -69,18 +70,6 @@ fn verify_transport_certificate_body(
             "setupTransportCertificate.objectType must be SetupTransportCertificate",
         ),
         (
-            "setupProfileId",
-            COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportSetupProfileMismatch",
-            "setupTransportCertificate.setupProfileId must match CollectiveBgvSetup-v1",
-        ),
-        (
-            "transportProfileId",
-            SETUP_TRANSPORT_PROFILE_ID,
-            "transportProfileMismatch",
-            "setupTransportCertificate must use verifier-enforced binary/chunked transport",
-        ),
-        (
             "largeObjectEncoding",
             "binary",
             "transportEncodingMismatch",
@@ -96,19 +85,19 @@ fn verify_transport_certificate_body(
             "streamVerificationOrder",
             SETUP_TRANSPORT_STREAM_ORDER,
             "transportStreamOrderMismatch",
-            "setupTransportCertificate.streamVerificationOrder must match the setup transport profile",
+            "setupTransportCertificate.streamVerificationOrder must match the setup transport parameters",
         ),
         (
             "resumePolicy",
             SETUP_TRANSPORT_RESUME_POLICY,
             "transportResumePolicyMismatch",
-            "setupTransportCertificate.resumePolicy must match the setup transport profile",
+            "setupTransportCertificate.resumePolicy must match the setup transport parameters",
         ),
         (
             "lazyLoadingPolicy",
             SETUP_TRANSPORT_LAZY_LOADING_POLICY,
             "transportLazyLoadingPolicyMismatch",
-            "setupTransportCertificate.lazyLoadingPolicy must match the setup transport profile",
+            "setupTransportCertificate.lazyLoadingPolicy must match the setup transport parameters",
         ),
     ] {
         transport_try!(expect_transport_string(
@@ -131,41 +120,44 @@ fn verify_transport_certificate_body(
         "chunkSizeBytes",
         SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
         "transportChunkSizeMismatch",
-        "setupTransportCertificate.chunkSizeBytes must match the setup transport profile",
+        "setupTransportCertificate.chunkSizeBytes must match the setup transport parameters",
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
         "storageQuotaBytes",
         SETUP_TRANSPORT_STORAGE_QUOTA_BYTES,
         "transportStorageQuotaMismatch",
-        "setupTransportCertificate.storageQuotaBytes must match the setup transport profile",
+        "setupTransportCertificate.storageQuotaBytes must match the setup transport parameters",
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
         "largestSingleBufferBytes",
         SETUP_TRANSPORT_LARGEST_SINGLE_BUFFER_BYTES,
         "transportLargestBufferMismatch",
-        "setupTransportCertificate.largestSingleBufferBytes must match the setup transport profile",
+        "setupTransportCertificate.largestSingleBufferBytes must match the setup transport parameters",
     ));
     transport_try!(expect_transport_u64(
         transport_certificate,
         "copyCountLimit",
         SETUP_TRANSPORT_COPY_COUNT_LIMIT,
         "transportCopyCountMismatch",
-        "setupTransportCertificate.copyCountLimit must match the setup transport profile",
+        "setupTransportCertificate.copyCountLimit must match the setup transport parameters",
     ));
 
-    let setup_transport_profile_hash_value = transport_canonical_try!(require_transport_hash(
+    let setup_parameters_hash_value = transport_canonical_try!(require_transport_hash(
         transport_certificate,
-        "setupTransportProfileHash",
-        "transportProfileHashMissing",
-        "setupTransportCertificate.setupTransportProfileHash is required",
+        "setupParametersHash",
+        "transportSetupParametersHashMissing",
+        "setupTransportCertificate.setupParametersHash is required",
     ));
-    if setup_transport_profile_hash_value != setup_transport_profile_hash()?.as_str() {
+    let roster = super::super::accepted_roster_from_package(setup_package);
+    if setup_parameters_hash_value
+        != super::super::setup_parameters_hash_for_roster(&roster)?.as_str()
+    {
         return Ok(Err(Refusal::new(
-            "transportProfileHashMismatch",
-            "setupTransportCertificate.setupTransportProfileHash must match the accepted setup transport profile",
-            "setupPackage.setupTransportCertificate.setupTransportProfileHash",
+            "transportSetupParametersHashMismatch",
+            "setupTransportCertificate.setupParametersHash must match the roster-derived setup parameters",
+            "setupPackage.setupTransportCertificate.setupParametersHash",
         )));
     }
 
@@ -188,44 +180,6 @@ fn verify_transport_certificate_body(
         "transportChunkCountMismatch",
         "setupTransportCertificate.chunkCount must match the aggregate transported-object chunk count",
     ));
-    let full_object_hash = transport_canonical_try!(require_transport_hash(
-        transport_certificate,
-        "fullObjectHash",
-        "transportFullObjectHashMissing",
-        "setupTransportCertificate.fullObjectHash is required",
-    ));
-    if full_object_hash != aggregate.full_object_hash {
-        return Ok(Err(Refusal::new(
-            "transportFullObjectHashMismatch",
-            "setupTransportCertificate.fullObjectHash must match the aggregate transported-object set hash",
-            "setupPackage.setupTransportCertificate.fullObjectHash",
-        )));
-    }
-    let chunk_hashes = transport_canonical_try!(transport_chunk_hashes(
-        transport_certificate,
-        aggregate.chunk_count as usize
-    ));
-    if chunk_hashes != aggregate.chunk_hashes {
-        return Ok(Err(Refusal::new(
-            "transportChunkHashesMismatch",
-            "setupTransportCertificate.chunkHashes must concatenate the transported-object chunk hashes in order",
-            "setupPackage.setupTransportCertificate.chunkHashes",
-        )));
-    }
-    let chunk_root = transport_canonical_try!(require_transport_hash(
-        transport_certificate,
-        "chunkRoot",
-        "transportChunkRootMissing",
-        "setupTransportCertificate.chunkRoot is required",
-    ));
-    if chunk_root != aggregate.chunk_root {
-        return Ok(Err(Refusal::new(
-            "transportChunkRootMismatch",
-            "setupTransportCertificate.chunkRoot must match the aggregate transported-object chunk manifest",
-            "setupPackage.setupTransportCertificate.chunkRoot",
-        )));
-    }
-
     let certificate_hash = transport_canonical_try!(require_transport_hash(
         transport_certificate,
         "setupTransportCertificateHash",
@@ -237,8 +191,7 @@ fn verify_transport_certificate_body(
         .as_object_mut()
         .expect("transport certificate object was checked")
         .remove("setupTransportCertificateHash");
-    let expected_certificate_hash =
-        derive_protocol_hash("SetupTransportCertificateHash", &certificate_hash_input)?;
+    let expected_certificate_hash = derive_canonical_object_hash(&certificate_hash_input)?;
     if certificate_hash != expected_certificate_hash {
         return Ok(Err(Refusal::new(
             "transportCertificateHashMismatch",
@@ -331,24 +284,6 @@ fn verify_setup_transported_objects(
                         )
                     })
             })?;
-    let chunk_hashes = transported_objects
-        .iter()
-        .flat_map(|transported_object| transported_object.chunk_hashes.clone())
-        .collect::<Vec<_>>();
-    let full_object_hash = setup_transport_full_object_set_hash(
-        &transported_objects,
-        total_byte_length,
-        chunk_count,
-        &chunk_hashes,
-    )?;
-    let chunk_root = setup_transport_chunk_manifest_root(
-        SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
-        chunk_count,
-        total_byte_length,
-        &chunk_hashes,
-        &full_object_hash,
-    )?;
-
     let vss_material_root = package_nested_hash(
         setup_package,
         "vssCoefficientCommitmentMaterial",
@@ -392,7 +327,7 @@ fn verify_setup_transported_objects(
     {
         return Ok(Err(Refusal::new(
             "transportedVssObjectMetadataMismatch",
-            "vssCoefficientCommitmentMaterial transported object metadata must match the accepted setup profile",
+            "vssCoefficientCommitmentMaterial transported object metadata must match the accepted setup parameters",
             "setupPackage.setupTransportCertificate.transportedObjects",
         )));
     }
@@ -403,25 +338,15 @@ fn verify_setup_transported_objects(
         &vss_object.chunk_root,
         &vss_object.full_object_hash,
     ));
-    let mut expected_transported_object_roots = BTreeSet::new();
-    expected_transported_object_roots.insert(vss_material_root);
     transport_canonical_try!(verify_setup_transport_request_bindings(
         setup_package,
         request,
         &transported_objects,
-        &mut expected_transported_object_roots,
-    ));
-    transport_canonical_try!(refuse_unexpected_setup_transported_objects(
-        &transported_objects,
-        &expected_transported_object_roots,
     ));
 
     Ok(Ok(SetupTransportAggregate {
         total_byte_length,
         chunk_count,
-        chunk_hashes,
-        chunk_root,
-        full_object_hash,
     }))
 }
 
@@ -431,7 +356,6 @@ pub(super) struct SetupTransportedObjectBinding {
     pub(super) object_role: String,
     pub(super) object_root: String,
     pub(super) byte_length: u64,
-    pub(super) chunk_start_index: u64,
     pub(super) chunk_count: u64,
     pub(super) chunk_root: String,
     pub(super) chunk_hashes: Vec<String>,
@@ -442,9 +366,6 @@ pub(super) struct SetupTransportedObjectBinding {
 struct SetupTransportAggregate {
     total_byte_length: u64,
     chunk_count: u64,
-    chunk_hashes: Vec<String>,
-    chunk_root: String,
-    full_object_hash: String,
 }
 
 fn setup_transported_object_binding(
@@ -508,7 +429,7 @@ fn setup_transported_object_binding(
         "loadingPolicy",
         SETUP_TRANSPORTED_OBJECT_LOADING_POLICY,
         "transportedObjectLoadingPolicyMismatch",
-        "transported object loading policy must match the setup transport profile",
+        "transported object loading policy must match the setup transport parameters",
         &object_path,
     ));
     let object_name = transport_try!(require_transport_non_empty_string_at(
@@ -607,7 +528,6 @@ fn setup_transported_object_binding(
         object_role,
         object_root,
         byte_length,
-        chunk_start_index,
         chunk_count,
         chunk_root,
         chunk_hashes,
@@ -650,9 +570,6 @@ pub(super) const SETUP_TRANSPORT_DIRECT_HASH_FIELDS: SetupTransportHashFieldName
         chunk_hashes: "chunkHashes",
     };
 
-pub(super) const SETUP_TRANSPORT_PLAIN_PROOF_HASH_FIELDS: SetupTransportHashFieldNames =
-    SETUP_TRANSPORT_DIRECT_HASH_FIELDS;
-
 pub(super) const SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS: SetupTransportHashFieldNames =
     SetupTransportHashFieldNames {
         byte_length: "proofTotalByteLength",
@@ -660,25 +577,3 @@ pub(super) const SETUP_TRANSPORT_PROOF_PREFIXED_HASH_FIELDS: SetupTransportHashF
         chunk_root: "proofChunkRoot",
         chunk_hashes: "proofChunkHashes",
     };
-
-fn refuse_unexpected_setup_transported_objects(
-    transported_objects: &[SetupTransportedObjectBinding],
-    expected_object_roots: &BTreeSet<String>,
-) -> CanonicalResult<Result<(), Refusal>> {
-    for transported_object in transported_objects {
-        if expected_object_roots.contains(&transported_object.object_root) {
-            continue;
-        }
-
-        return Ok(Err(Refusal::new(
-            "transportedObjectUnexpected",
-            format!(
-                "setupTransportCertificate.transportedObjects contains unrequested transported object {} with role {}",
-                transported_object.object_name, transported_object.object_role
-            ),
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    }
-
-    Ok(Ok(()))
-}

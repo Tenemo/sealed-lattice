@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 use crate::bgv::coefficient_codec::coefficient_vector_hash512;
 
 // Canonical per-limb hash of a public-key share coefficient vector, bound into
@@ -103,8 +105,6 @@ pub(super) fn verify_collective_public_key_material(
         )?));
     }
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
         (
             "materialEncoding",
@@ -113,7 +113,7 @@ pub(super) fn verify_collective_public_key_material(
     ] {
         if aggregate_object.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
-                "collectivePublicKeyProfileMismatch",
+                "collectivePublicKeyParametersMismatch",
                 format!("collectivePublicKey.{field_name} must be {expected_value}"),
                 format!("setupPackage.collectivePublicKey.{field_name}"),
             )?));
@@ -137,7 +137,6 @@ pub(super) fn verify_collective_public_key_material(
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["transportedPublicKeyShareMaterial".to_string()],
             Vec::new(),
@@ -183,8 +182,8 @@ pub(super) fn verify_collective_public_key_material(
             != Some(DATA_PRIMES.len() as u64)
     {
         return Ok(Some(public_key_share_proof_refusal(
-            "collectivePublicKeyProfileCountMismatch",
-            "collectivePublicKey participant count, limb count, and ring degree must match the selected setup profile",
+            "collectivePublicKeyParametersCountMismatch",
+            "collectivePublicKey participant count, limb count, and ring degree must match the selected setup parameters",
             "setupPackage.collectivePublicKey",
         )?));
     }
@@ -286,7 +285,7 @@ pub(super) fn verify_collective_public_key_material(
         .as_object_mut()
         .expect("collective public-key object was checked")
         .remove("collectivePublicKeyRoot");
-    let expected_root = derive_protocol_hash("CollectivePublicKeyRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if collective_public_key_root != expected_root {
         return Ok(Some(public_key_share_proof_refusal(
             "collectivePublicKeyRootMismatch",
@@ -325,7 +324,7 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
     let public_matrix_seed_hash = value_string(common_randomness, "publicMatrixSeedHash")?;
     if value_string(aggregate_object, "publicMatrixSeedHash")? != public_matrix_seed_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key must bind the accepted public matrix seed",
         ));
     }
@@ -336,7 +335,7 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
     )?;
     if common_randomness.get("publicDerivations") != Some(&expected_public_derivations) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "accepted public-key runtime loading requires canonical public derivations",
         ));
     }
@@ -345,14 +344,14 @@ pub(in crate::bgv::setup) fn accepted_setup_collective_public_key_from_package(
         != value_string(&expected_public_a, "publicPolynomialRoot")?
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key must bind the accepted BGV public a polynomial",
         ));
     }
     if value_u64(aggregate_object, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "accepted collective public-key runtime material requires profile-ring aggregate coefficients",
+            "accepted collective public-key runtime material requires full-ring aggregate coefficients",
         ));
     }
     let public_b = collective_public_key_component_b_from_aggregate_object(aggregate_object)?;
@@ -397,14 +396,14 @@ fn collective_public_key_component_b_from_aggregate_object(
                 != Some((POLYNOMIAL_DEGREE * 8) as u64)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "collective public-key runtime limb metadata must follow Q_share order",
             ));
         }
         let coefficients = coefficient_vector_from_le_hex(
             value_string(aggregate_limb, "coefficientsLeHex")?,
             POLYNOMIAL_DEGREE,
-            "collective public-key runtime coefficient vector width must match the profile ring degree",
+            "collective public-key runtime coefficient vector width must match the full ring degree",
         )?;
         if coefficients
             .iter()
@@ -422,7 +421,7 @@ fn collective_public_key_component_b_from_aggregate_object(
             != Some(coefficient_hash.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "collective public-key runtime component hash must match the aggregate coefficients",
             ));
         }
@@ -474,7 +473,7 @@ fn verify_collective_public_key_coefficients(
         != Some(&Value::Array(expected_share_material_roots))
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "collective public key must bind the ordered verified share material roots",
         ));
     }
@@ -489,7 +488,7 @@ fn verify_collective_public_key_coefficients(
                 != Some((ring_degree * 8) as u64)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "collective public-key aggregate limb metadata must follow Q_share order",
             ));
         }
@@ -527,7 +526,7 @@ fn verify_collective_public_key_coefficients(
         }
         if coefficients != expected_coefficients {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "collective public-key aggregate coefficients must equal the sum of verified public-key shares",
             ));
         }
@@ -538,7 +537,7 @@ fn verify_collective_public_key_coefficients(
             != Some(coefficient_hash.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "collective public-key aggregate coefficient hash must match the aggregate coefficients",
             ));
         }
@@ -802,7 +801,7 @@ fn public_key_share_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8
     if value_u64(value, "chunkSizeBytes")? != SETUP_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "transported public-key share material chunkSizeBytes must match the setup transport profile",
+            "transported public-key share material chunkSizeBytes must match the setup transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
@@ -1033,14 +1032,6 @@ fn verify_public_key_share_material_set_transport_reference(
             "publicKeyShareMaterial.transport must be an object",
         ));
     }
-    if transport.get("transportProfileId").and_then(Value::as_str)
-        != Some(SETUP_TRANSPORT_PROFILE_ID)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "publicKeyShareMaterial.transport.transportProfileId must match the setup transport profile",
-        ));
-    }
     verify_public_key_share_material_transport_hash_fields(
         transport,
         transport_hashes,
@@ -1073,13 +1064,13 @@ fn decode_public_key_share_material_bindings(
     let roster = super::accepted_roster_from_setup_context(setup_context);
     if reader.read_varuint("participantCount")? != roster.participant_count {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "transported public-key share material participant count does not match the accepted profile",
+            CanonicalErrorCode::ComponentMismatch,
+            "transported public-key share material participant count does not match the accepted roster",
         ));
     }
     if reader.read_varuint("rnsLimbCount")? != DATA_PRIMES.len() as u64 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "transported public-key share material RNS limb count does not match Q_share",
         ));
     }
@@ -1091,7 +1082,7 @@ fn decode_public_key_share_material_bindings(
     })? != ring_degree
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "transported public-key share material ring degree must match the material set",
         ));
     }
@@ -1135,7 +1126,7 @@ fn decode_public_key_share_material_bindings(
             }
             if reader.read_u64_le("rnsPrime")? != modulus {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "transported public-key share material RNS prime does not match Q_share",
                 ));
             }
@@ -1144,7 +1135,7 @@ fn decode_public_key_share_material_bindings(
                 let coefficient = reader.read_u64_le("public-key share coefficient")?;
                 if coefficient >= modulus {
                     return Err(CanonicalError::new(
-                        CanonicalErrorCode::ProfileComponentMismatch,
+                        CanonicalErrorCode::ComponentMismatch,
                         "transported public-key share coefficient is not a canonical residue",
                     ));
                 }
@@ -1173,7 +1164,7 @@ fn decode_public_key_share_material_bindings(
                     != Some(coefficient_hash.as_str())
             {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "transported public-key share coefficient hash must match the accepted share record",
                 ));
             }
@@ -1190,20 +1181,12 @@ fn decode_public_key_share_material_bindings(
         let material_record = json!({
             "objectType": PUBLIC_KEY_SHARE_MATERIAL_OBJECT_TYPE,
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": "public-key-share",
             "materialEncoding": PUBLIC_KEY_SHARE_MATERIAL_EMBEDDED_ENCODING,
             "ceremonyId": value_string(setup_context, "ceremonyId")?,
             "manifestHash": value_string(setup_context, "manifestHash")?,
             "rosterHash": value_string(setup_context, "rosterHash")?,
-            "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
-            "qShareHash": value_string(setup_context, "qShareHash")?,
-            "carryAwareVssShareRelationProfileHash": value_string(
-                setup_context,
-                "carryAwareVssShareRelationProfileHash",
-            )?,
-            "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+            "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
             "setupEpoch": value_string(setup_context, "setupEpoch")?,
             "trusteeIdentity": trustee_identity,
             "trusteeRosterPosition": expected_roster_position,
@@ -1215,8 +1198,7 @@ fn decode_public_key_share_material_bindings(
             "publicKeyShareRoot": public_key_share_root,
             "shareCoefficientVectorsByLimb": limb_records,
         });
-        let public_key_share_material_root =
-            derive_protocol_hash("PublicKeyShareRoot", &material_record)?;
+        let public_key_share_material_root = derive_canonical_object_hash(&material_record)?;
         let binding = PublicKeyShareMaterialBinding {
             trustee_identity: value_string(&material_record, "trusteeIdentity")?.to_string(),
             trustee_roster_position: expected_roster_position,
@@ -1275,11 +1257,7 @@ pub(super) fn verify_public_key_share_material_set(
         ));
     }
     verify_same_secret_context(material_set, setup_context)?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "public-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if material_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -1319,8 +1297,8 @@ pub(super) fn verify_public_key_share_material_set(
     })?;
     if ring_degree == 0 || ring_degree > POLYNOMIAL_DEGREE {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "publicKeyShareMaterial.ringDegree is outside the selected profile",
+            CanonicalErrorCode::ComponentMismatch,
+            "publicKeyShareMaterial.ringDegree is outside the selected parameters",
         ));
     }
     if material_set
@@ -1339,7 +1317,7 @@ pub(super) fn verify_public_key_share_material_set(
             != Some(public_key_share_set_root)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "publicKeyShareMaterial must bind accepted public randomness and public-key share set root",
         ));
     }
@@ -1364,7 +1342,7 @@ pub(super) fn verify_public_key_share_material_set(
         };
     if material_set.get("publicKeyShareMaterialRoots") != Some(&Value::Array(material_roots)) {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "publicKeyShareMaterial.publicKeyShareMaterialRoots must match the ordered material records",
         ));
     }
@@ -1378,7 +1356,7 @@ pub(super) fn verify_public_key_share_material_set(
         .as_object_mut()
         .expect("public-key share material set object was checked")
         .remove("publicKeyShareMaterialSetRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if material_set_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
@@ -1418,8 +1396,6 @@ fn verify_public_key_share_material_record(
     }
     verify_same_secret_context(material_record, setup_context)?;
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", "public-key-share"),
         (
             "materialEncoding",
@@ -1438,7 +1414,7 @@ fn verify_public_key_share_material_record(
             != Some(DATA_PRIMES.len() as u64)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share material ring degree and limb count must match the material set",
         ));
     }
@@ -1456,7 +1432,7 @@ fn verify_public_key_share_material_record(
             != Some(common_binding.public_a_polynomial_root.as_str())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share material must bind accepted public randomness",
         ));
     }
@@ -1478,7 +1454,7 @@ fn verify_public_key_share_material_record(
                 .and_then(Value::as_str)
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share material trustee and share root must match the accepted share record",
         ));
     }
@@ -1515,7 +1491,7 @@ fn verify_public_key_share_material_record(
                 != Some((ring_degree * 8) as u64)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public-key share material limb metadata must follow Q_share order",
             ));
         }
@@ -1529,7 +1505,7 @@ fn verify_public_key_share_material_record(
             .any(|coefficient| *coefficient >= DATA_PRIMES[rns_limb_index])
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public-key share coefficient vector contains a non-canonical residue",
             ));
         }
@@ -1543,7 +1519,7 @@ fn verify_public_key_share_material_record(
                 != Some(coefficient_hash.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public-key share material coefficient hash must match the accepted share record",
             ));
         }
@@ -1560,7 +1536,7 @@ fn verify_public_key_share_material_record(
         .as_object_mut()
         .expect("public-key share material record object was checked")
         .remove("publicKeyShareMaterialRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_material_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

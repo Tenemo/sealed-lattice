@@ -1,103 +1,76 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
-fn first_profile_setup_profile_hash_is_byte_stable() {
-    // Byte-identity guard for the current n=10 closure profile. This pin tracks
-    // the full n=10 binding, including proof-accounting sub-hashes and profile
-    // certificate roots; if those binding inputs intentionally change, re-pin to
-    // the new n=10 value and treat stale proof corpora as invalid.
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+fn first_closure_setup_parameters_hash_is_byte_stable() {
+    // Byte-identity guard for the current n=10 closure setup parameters. This
+    // pin tracks the full n=10 binding, including the inlined sub-configuration
+    // values and the BGV parameters; if those
+    // binding inputs intentionally change, re-pin to the new n=10 value and
+    // treat stale proof corpora as invalid.
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     assert_eq!(
-        profile["setupProfileHash"]
+        setup_parameters["setupParametersHash"]
             .as_str()
-            .expect("setup profile hash"),
-        "65468c7fa358d8d9acbb86e1986daf009ab11f0f01ad0078eb22c9c4aeac4fba0cd3fcd5d0539d323c26258d0dae8fa50e4cc87f660b6348b4fd4c96aaf8d3a9",
+            .expect("setup parameters hash"),
+        "94755b4efddbab07d4072a2f65543f3eebc6e06dbd6f386a62c41d506432a86fa79a24d2fb1a268bca288ca3a4ddc2f60c8a6179dfef8b0f83a5b53350d12b68",
     );
 }
 
 #[test]
-fn collective_setup_profile_exposes_first_profile_state_machine() {
-    let _accepted_setup_test_timing =
-        accepted_setup_test_timing("collective_setup_profile_exposes_first_profile_state_machine");
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
+fn collective_setup_parameters_expose_first_closure_state_machine() {
+    let _accepted_setup_test_timing = accepted_setup_test_timing(
+        "collective_setup_parameters_expose_first_closure_state_machine",
+    );
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
 
-    assert_eq!(profile["setupProfileId"], "CollectiveBgvSetup-v1");
-    assert_eq!(profile["objectType"], "SetupPackage");
-    assert_eq!(profile["participantCount"], 10);
-    assert_eq!(profile["qSetupComplete"], 10);
-    assert_eq!(profile["qBallotRelease"], 10);
-    assert_eq!(profile["qFinal"], 10);
-    assert_eq!(profile["qDec"], 4);
-    assert_eq!(profile["qShare"]["objectType"], "QSharePrimeList");
+    assert_eq!(setup_parameters["objectType"], "SetupPackage");
+    assert_eq!(setup_parameters["participantCount"], 10);
+    assert_eq!(setup_parameters["qSetupComplete"], 10);
+    assert_eq!(setup_parameters["qBallotRelease"], 10);
+    assert_eq!(setup_parameters["qFinal"], 10);
+    assert_eq!(setup_parameters["qDec"], 4);
+    assert_eq!(setup_parameters["qShare"]["objectType"], "QSharePrimeList");
     assert_eq!(
-        profile["qShare"]["primes"]
+        setup_parameters["qShare"]["primes"]
             .as_array()
             .expect("Q_share primes")
             .len(),
         DATA_PRIMES.len()
     );
-    assert!(profile["qShareHash"].as_str().is_some());
     assert_eq!(
-        profile["carryAwareVssShareRelationProfile"]["objectType"],
-        "CarryAwareVssShareRelationProfile"
-    );
-    assert!(
-        profile["carryAwareVssShareRelationProfileHash"]
-            .as_str()
-            .is_some()
+        setup_parameters["carryAwareVssShareRelation"]["objectType"],
+        "CarryAwareVssShareRelation"
     );
     assert_eq!(
-        profile["commitmentProfile"]["objectType"],
-        "BdlopCommitmentProfile"
+        setup_parameters["commitment"]["objectType"],
+        "BdlopCommitment"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["hiding"],
+        setup_parameters["commitment"]["assumptions"]["hiding"],
         "Module-LWE over the selected commitment modulus limbs with short centered-ternary openings"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["binding"],
+        setup_parameters["commitment"]["assumptions"]["binding"],
         "Module-SIS over the selected commitment modulus limbs for the published BDLOP matrix"
     );
     assert_eq!(
-        profile["commitmentProfile"]["assumptions"]["requiredCertificates"],
-        serde_json::json!([
-            "SetupCommitmentSecurityCertificate",
-            "SetupProofAccountingCertificate"
-        ])
-    );
-    assert!(profile["commitmentProfileHash"].as_str().is_some());
-    assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["objectType"],
-        "PublicVssCommitmentMaterialSizeProfile"
+        setup_parameters["publicVssCommitmentMaterialSize"]["objectType"],
+        "PublicVssCommitmentMaterialSize"
     );
     assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["ringDegree"],
+        setup_parameters["publicVssCommitmentMaterialSize"]["ringDegree"],
         POLYNOMIAL_DEGREE
     );
     assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["fullMaterialCoefficientBytes"],
+        setup_parameters["publicVssCommitmentMaterialSize"]["fullMaterialCoefficientBytes"],
         serde_json::json!(1_604_321_280_u64)
     );
-    assert_eq!(
-        profile["publicVssCommitmentMaterialSizeProfile"]["fullMaterialCoefficientMebibytes"],
-        1_530
-    );
-    assert!(
-        profile["publicVssCommitmentMaterialSizeProfileHash"]
-            .as_str()
-            .is_some()
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["objectType"],
-        "SetupProofProfile"
-    );
-    assert_eq!(
-        profile["setupProofProfile"]["profileId"],
-        "SealedLattice-SetupProof-v1"
-    );
-    let setup_proof_families = profile["setupProofProfile"]["proofFamilies"]
+    assert_eq!(setup_parameters["setupProof"]["objectType"], "SetupProof");
+    let setup_proof_families = setup_parameters["setupProof"]["proofFamilies"]
         .as_array()
-        .expect("setup proof family profiles");
+        .expect("setup proof family parameters");
     assert_eq!(setup_proof_families.len(), 4);
     for expected_family in [
         "same-secret-linkage-anchor",
@@ -106,90 +79,71 @@ fn collective_setup_profile_exposes_first_profile_state_machine() {
         "trustee-evaluation-key",
     ] {
         assert!(
-            setup_proof_families.iter().any(|family_profile| {
-                family_profile["proofFamily"]
+            setup_proof_families.iter().any(|family_parameters| {
+                family_parameters["proofFamily"]
                     .as_str()
                     .is_some_and(|proof_family| proof_family == expected_family)
             }),
-            "setup proof profile must list {expected_family}"
+            "setup proof parameters must list {expected_family}"
         );
     }
-    assert!(profile["setupProofProfileHash"].as_str().is_some());
     assert_eq!(
-        profile["setupTransportProfile"]["objectType"],
-        "SetupTransportProfile"
+        setup_parameters["setupTransport"]["objectType"],
+        "SetupTransport"
     );
     assert_eq!(
-        profile["setupTransportProfile"]["chunkSizeBytes"],
+        setup_parameters["setupTransport"]["chunkSizeBytes"],
         1_048_576
     );
     assert_eq!(
-        profile["setupTransportProfile"]["storageQuotaBytes"],
+        setup_parameters["setupTransport"]["storageQuotaBytes"],
         2_147_483_648_u64
     );
     assert_eq!(
-        profile["setupTransportProfile"]["streamVerificationOrder"],
+        setup_parameters["setupTransport"]["streamVerificationOrder"],
         "ascending-chunk-index"
     );
     assert_eq!(
-        profile["setupTransportProfile"]["lazyLoadingPolicy"],
+        setup_parameters["setupTransport"]["lazyLoadingPolicy"],
         "root-addressed-large-object-loading"
     );
-    assert!(profile["setupTransportProfileHash"].as_str().is_some());
     assert_eq!(
-        profile["evaluatorKeyScheduleProfile"]["objectType"],
-        "EvaluatorKeyScheduleProfile"
-    );
-    assert_eq!(
-        profile["evaluatorKeyScheduleProfile"]["genericKeySwitchPolicy"],
-        "refused-unless-explicitly-required"
+        setup_parameters["evaluatorKeySchedule"]["objectType"],
+        "EvaluatorKeySchedule"
     );
     assert!(
-        !profile["evaluatorKeyScheduleProfile"]["relinearizationLevelSchedule"]
+        !setup_parameters["evaluatorKeySchedule"]["relinearizationLevelSchedule"]
             .as_array()
             .expect("relinearization schedule")
             .is_empty()
     );
     assert!(
-        !profile["evaluatorKeyScheduleProfile"]["requiredGaloisKeySchedule"]
+        !setup_parameters["evaluatorKeySchedule"]["requiredGaloisKeySchedule"]
             .as_array()
             .expect("required Galois schedule")
             .is_empty()
     );
     assert!(
-        profile["evaluatorKeyScheduleProfile"]["requiredGaloisSetHash"]
-            .as_str()
-            .is_some()
-    );
-    assert!(
-        profile["evaluatorKeyScheduleProfileHash"]
+        setup_parameters["evaluatorKeySchedule"]["requiredGaloisSetHash"]
             .as_str()
             .is_some()
     );
     assert_eq!(
-        profile["verifierStatuses"],
-        serde_json::json!([
-            "accepted",
-            "pending",
-            "refused",
-            "aborted",
-            "forkDetected",
-            "outsideProfile"
-        ])
-    );
-    assert_eq!(
-        profile["phaseOrder"].as_array().expect("phase order").len(),
+        setup_parameters["phaseOrder"]
+            .as_array()
+            .expect("phase order")
+            .len(),
         15
     );
     assert!(
-        profile["phaseOrder"]
+        setup_parameters["phaseOrder"]
             .as_array()
             .expect("phase order")
             .iter()
             .any(|phase| phase["phaseId"] == "trusteeEvaluationKeyProofs")
     );
-    assert!(profile["setupProfileHash"].as_str().is_some());
-    assert!(profile["phaseOrderHash"].as_str().is_some());
+    assert!(setup_parameters["setupParametersHash"].as_str().is_some());
+    assert!(setup_parameters["phaseOrderHash"].as_str().is_some());
 }
 
 #[test]
@@ -200,11 +154,10 @@ fn collective_setup_verifier_refuses_passive_setup_packages() {
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "outsideCollectiveBgvSetupProfile"
+        "outsideCollectiveBgvSetupParameters"
     );
 }
 
@@ -222,8 +175,7 @@ fn collective_setup_verifier_reports_missing_phase_as_pending() {
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "rosterFreeze");
     assert_eq!(
         result["missingObjects"],
@@ -260,7 +212,7 @@ fn collective_setup_verifier_refuses_malformed_setup_context_tokens_before_later
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(
             result["refusedObjects"][0]["reasonCode"],
             "setupContextTokenMalformed"
@@ -292,7 +244,7 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
         verify_collective_bgv_setup_package(&forked_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(forked_result["verifierStatus"], "forkDetected");
+    assert_eq!(forked_result["isValid"], false);
     assert_eq!(
         forked_result["refusedObjects"][0]["reasonCode"],
         "phaseForkDetected"
@@ -307,7 +259,7 @@ fn collective_setup_verifier_detects_phase_forks_and_wrong_order() {
         verify_collective_bgv_setup_package(&wrong_order_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_order_result["verifierStatus"], "refused");
+    assert_eq!(wrong_order_result["isValid"], false);
     assert_eq!(
         wrong_order_result["refusedObjects"][0]["reasonCode"],
         "phaseOrderMismatch"
@@ -327,7 +279,7 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
         verify_collective_bgv_setup_package(&stale_epoch_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(stale_epoch_result["verifierStatus"], "refused");
+    assert_eq!(stale_epoch_result["isValid"], false);
     assert_eq!(
         stale_epoch_result["refusedObjects"][0]["reasonCode"],
         "phaseContextMismatch"
@@ -341,7 +293,7 @@ fn collective_setup_verifier_refuses_stale_phase_epoch_and_bad_phase_roots() {
         verify_collective_bgv_setup_package(&bad_root_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(bad_root_result["verifierStatus"], "refused");
+    assert_eq!(bad_root_result["isValid"], false);
     assert_eq!(
         bad_root_result["refusedObjects"][0]["reasonCode"],
         "phaseRootMismatch"
@@ -370,16 +322,14 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
     let mut tampered_signature_bytes_hex = signature_bytes_hex;
     tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
     signature_envelope["signatureBytesHex"] = serde_json::json!(tampered_signature_bytes_hex);
-    let signature_envelope_hash = derive_protocol_hash(
-        "ProtocolSignatureEnvelopeHash",
-        &serde_json::json!({
-            "profile": signature_envelope["profile"],
-            "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-            "publicKeyHash": signature_envelope["publicKeyHash"],
-            "signatureBytesHex": signature_envelope["signatureBytesHex"],
-            "signedRoot": signature_envelope["signedRoot"],
-        }),
-    )
+    let signature_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "ProtocolSignatureEnvelope",
+        "profile": signature_envelope["profile"],
+        "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+        "publicKeyHash": signature_envelope["publicKeyHash"],
+        "signatureBytesHex": signature_envelope["signatureBytesHex"],
+        "signedRoot": signature_envelope["signedRoot"],
+    }))
     .expect("signature envelope hash");
     signature_envelope["signatureHash"] = serde_json::json!(signature_envelope_hash.clone());
     participant["signatureEnvelopeHash"] = serde_json::json!(signature_envelope_hash);
@@ -388,7 +338,7 @@ fn collective_setup_verifier_refuses_tampered_phase_signature_after_rebinding() 
 
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "InvalidSignature"
@@ -410,7 +360,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&missing_reveal_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(missing_reveal_result["verifierStatus"], "refused");
+    assert_eq!(missing_reveal_result["isValid"], false);
     assert_eq!(
         missing_reveal_result["refusedObjects"][0]["reasonCode"],
         "commonRandomnessRevealCountMismatch"
@@ -425,7 +375,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&wrong_seed_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_seed_result["verifierStatus"], "refused");
+    assert_eq!(wrong_seed_result["isValid"], false);
     assert_eq!(
         wrong_seed_result["refusedObjects"][0]["reasonCode"],
         "commonRandomnessPublicMatrixSeedMismatch"
@@ -440,7 +390,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&wrong_derivation_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_derivation_result["verifierStatus"], "refused");
+    assert_eq!(wrong_derivation_result["isValid"], false);
     assert_eq!(
         wrong_derivation_result["refusedObjects"][0]["reasonCode"],
         "setupPublicDerivationsMismatch"
@@ -455,7 +405,7 @@ fn collective_setup_verifier_refuses_bad_common_randomness() {
         verify_collective_bgv_setup_package(&wrong_matrix_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(wrong_matrix_result["verifierStatus"], "refused");
+    assert_eq!(wrong_matrix_result["isValid"], false);
     assert_eq!(
         wrong_matrix_result["refusedObjects"][0]["reasonCode"],
         "setupPublicDerivationsMismatch"

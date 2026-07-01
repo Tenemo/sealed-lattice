@@ -1,6 +1,8 @@
 use super::expected_roots::*;
+
 use super::material_transport::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_required_public_evaluation_key_set(
     setup_package: &Value,
@@ -19,7 +21,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             return Ok(None);
         }
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["evaluationKeys".to_string()],
             Vec::new(),
@@ -41,7 +42,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             return Ok(None);
         }
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["evaluationKeys".to_string()],
             Vec::new(),
@@ -80,14 +80,12 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING),
-    ] {
+    for (field_name, expected_value) in
+        [("materialEncoding", PUBLIC_EVALUATION_KEY_MATERIAL_ENCODING)]
+    {
         if evaluation_keys.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(evaluation_key_material_refusal(
-                "evaluationKeysProfileMismatch",
+                "evaluationKeysParametersMismatch",
                 format!("evaluationKeys.{field_name} must be {expected_value}"),
                 format!("setupPackage.evaluationKeys.{field_name}"),
             )?));
@@ -164,14 +162,6 @@ pub(in super::super) fn verify_public_evaluation_key_set(
             "setupPackage.evaluationKeys.requiredGaloisKeySchedule",
         )?));
     }
-    if evaluation_keys.get("genericKeySwitchKeyRoots") != Some(&Value::Array(Vec::new())) {
-        return Ok(Some(evaluation_key_material_refusal(
-            "evaluationKeysGenericKeySwitchOutsideProfile",
-            "evaluationKeys.genericKeySwitchKeyRoots must be empty for the first profile",
-            "setupPackage.evaluationKeys.genericKeySwitchKeyRoots",
-        )?));
-    }
-
     let expected_relinearization_key_roots =
         expected_relinearization_key_roots_for_evaluation_keys(setup_package, &binding)?;
     let supplied_relinearization_key_roots =
@@ -233,8 +223,7 @@ pub(in super::super) fn verify_public_evaluation_key_set(
         .as_object_mut()
         .expect("evaluationKeys object was checked")
         .remove("evaluationKeySetHash");
-    let expected_evaluation_key_set_hash =
-        derive_protocol_hash("EvaluationKeySetHash", &root_input)?;
+    let expected_evaluation_key_set_hash = derive_canonical_object_hash(&root_input)?;
     if supplied_evaluation_key_set_hash != expected_evaluation_key_set_hash {
         return Ok(Some(evaluation_key_material_refusal(
             "evaluationKeySetHashMismatch",

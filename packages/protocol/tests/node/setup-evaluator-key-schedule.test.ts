@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -140,7 +140,7 @@ const requiredGaloisKeySchedule = [
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
 describe('evaluator key schedule builder', () => {
-    it('creates a deterministic root-bound first-profile schedule', () => {
+    it('creates a deterministic root-bound first-parameters schedule', () => {
         const sameSecretStatements = sameSecretConsistency();
         const { publicKeyShares, publicKeyShareProofs } =
             publicKeyShareObjects(sameSecretStatements);
@@ -172,8 +172,7 @@ describe('evaluator key schedule builder', () => {
             },
         ]);
         expect(evaluatorKeySchedule.requiredGaloisSetHash).toBe(
-            deriveProtocolHash(
-                'RequiredGaloisSetHash',
+            deriveCanonicalObjectHash(
                 createRequiredGaloisSet(
                     qSharePrimes.length,
                     requiredGaloisKeySchedule,
@@ -181,7 +180,7 @@ describe('evaluator key schedule builder', () => {
             ),
         );
         expect(evaluatorKeyScheduleRoot).toBe(
-            deriveProtocolHash('EvaluatorKeyScheduleRoot', scheduleWithoutRoot),
+            deriveCanonicalObjectHash(scheduleWithoutRoot),
         );
     });
 

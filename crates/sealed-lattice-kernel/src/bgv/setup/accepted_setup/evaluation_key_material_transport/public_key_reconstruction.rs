@@ -88,7 +88,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_relinearization_keys_from_tra
             if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "accepted public relinearization key runtime material requires profile-ring component vectors",
+                    "accepted public relinearization key runtime material requires full-ring component vectors",
                 ));
             }
             let component_b = component_b_vectors_from_record(
@@ -192,7 +192,7 @@ pub(in crate::bgv::setup) fn accepted_setup_public_galois_keys_from_transport(
             if value_u64(proof_record, "ringDegree")? != POLYNOMIAL_DEGREE as u64 {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "accepted public Galois key runtime material requires profile-ring component vectors",
+                    "accepted public Galois key runtime material requires full-ring component vectors",
                 ));
             }
             let component_b = component_b_vectors_from_record(
@@ -271,7 +271,7 @@ fn add_accepted_key_switch_component_b(
                     {
                         return Err(CanonicalError::new(
                             CanonicalErrorCode::MalformedLength,
-                            "key-switch component aggregation requires profile-ring coefficient vectors",
+                            "key-switch component aggregation requires full-ring coefficient vectors",
                         ));
                     }
                     let modulus = primes[rns_limb_index];
@@ -316,7 +316,7 @@ fn validate_key_switch_component_shape(
             if coefficients.len() != POLYNOMIAL_DEGREE {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::MalformedLength,
-                    "key-switch component coefficient count must match the profile ring degree",
+                    "key-switch component coefficient count must match the full ring degree",
                 ));
             }
             if coefficients

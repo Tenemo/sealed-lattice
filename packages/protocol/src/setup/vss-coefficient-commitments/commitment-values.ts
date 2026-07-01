@@ -4,7 +4,6 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    setupCommitmentProfileId,
     type JsonRecord,
     type SetupCommitmentOpeningComputation,
     type SetupCommitmentOpeningComputer,
@@ -24,7 +23,6 @@ export const setupCommitmentFullValue = (
 ): JsonRecord => ({
     objectType: 'SetupCommitment',
     objectVersion: 1,
-    profileId: setupCommitmentProfileId,
     sourceRnsLimbIndex: commitment.sourceRnsLimbIndex,
     sourceMessageModulus: commitment.sourceMessageModulus,
     shamirCoefficientIndex: commitment.shamirCoefficientIndex,
@@ -41,7 +39,6 @@ export const setupCommitmentRootPayload = (
 ): JsonRecord => ({
     objectType: 'SetupCommitment',
     objectVersion: 1,
-    profileId: setupCommitmentProfileId,
     sourceRnsLimbIndex: commitment.sourceRnsLimbIndex,
     sourceMessageModulus: commitment.sourceMessageModulus,
     shamirCoefficientIndex: commitment.shamirCoefficientIndex,
@@ -88,11 +85,6 @@ export const parseSetupCommitmentValue = (
     }
     if (commitment.objectVersion !== 1) {
         throw new Error(`${objectPath}.objectVersion must be 1.`);
-    }
-    if (commitment.profileId !== setupCommitmentProfileId) {
-        throw new Error(
-            `${objectPath}.profileId must be ${setupCommitmentProfileId}.`,
-        );
     }
     const sourceRnsLimbIndex = nonNegativeSafeIntegerField(
         commitment.sourceRnsLimbIndex,

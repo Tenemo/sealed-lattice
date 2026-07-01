@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
 fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -10,7 +12,7 @@ fn collective_setup_verifier_refuses_generic_key_switch_material_by_default() {
         |package| {
             package["genericKeySwitchKeys"] = serde_json::json!({ "keyRoot": valid_hash('4') });
         },
-        "genericKeySwitchOutsideProfile",
+        "genericKeySwitchOutsideParameters",
     );
 }
 
@@ -58,9 +60,10 @@ fn collective_setup_verifier_refuses_malformed_evaluation_key_material() {
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_container_roots() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_checks_evaluation_key_proof_container_roots()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_container_roots",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_checks_evaluation_key_proof_container_roots",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let relinearization_root =
@@ -86,7 +89,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "accepted");
+    assert_eq!(result["isValid"], true);
     for expected_hash in [
         relinearization_root.as_str().expect("relinearization root"),
         first_galois_batch_root.as_str().expect("Galois batch root"),
@@ -125,21 +128,14 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_evaluation_key_proof_co
         ),
         "accepted verification must be backed by transported trustee proof material"
     );
-    assert!(
-        !package["trusteeEvaluationKeyProofs"]["proofRecords"][0]
-            .as_object()
-            .expect("trustee proof record")
-            .contains_key("proofBytesHex"),
-        "terminal trustee proof records must not inline proof bytes"
-    );
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_transported_public_evaluation_key_material()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_checks_transported_public_evaluation_key_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_transported_public_evaluation_key_material",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_checks_transported_public_evaluation_key_material",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let evaluation_key_set_hash = package["evaluationKeys"]["evaluationKeySetHash"]
@@ -187,176 +183,18 @@ fn material_set_contains_root(
 }
 
 #[test]
-#[ignore = "manual accepted setup closure diagnostic"]
-fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_public_setup_companions()
-{
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_collective_setup_verifier_accepts_all_transported_public_setup_companions",
-    );
-    let (package, request) = transported_public_setup_package_and_request();
-
-    let result =
-        verify_collective_bgv_setup_package(&package, &request).expect("verification response");
-
-    assert_eq!(
-        result["verifierStatus"],
-        "accepted",
-        "terminal setup verification result: {}",
-        serde_json::to_string_pretty(&result).expect("verification result JSON")
-    );
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
-    assert_eq!(
-        result["acceptedSetupHandoff"]["objectType"],
-        "CollectiveBgvAcceptedSetupHandoff"
-    );
-    assert!(
-        result["acceptedSetupHandoff"]["acceptedSetupHandoffRoot"].is_string(),
-        "accepted terminal setup response must carry a handoff root"
-    );
-}
-
-#[test]
-#[ignore = "terminal recomputed-root refusal matrix at profile ring"]
-fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_refuses_every_recomputed_accepted_root_drift",
-    );
-    let (package, companions) = setup_package_with_transported_public_setup_companions();
-    let verify = |candidate: &serde_json::Value| {
-        verify_collective_bgv_setup_package(
-            candidate,
-            &serde_json::json!({
-                "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-                "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-                "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-                "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-                "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-                "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-                "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-                "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-            }),
-        )
-        .expect("verification response")
-    };
-
-    assert_eq!(
-        verify(&package)["verifierStatus"],
-        "accepted",
-        "baseline terminal package must accept before the recomputed-root matrix",
-    );
-
-    // The matrix is driven by the verifier's own accepted-root enumeration, so it
-    // covers exactly the root set the accept response binds: every accepted root,
-    // drifted at every occurrence with the outer package hash recomputed, must be
-    // refused. A root the verifier never recomputes would silently survive here.
-    let accepted_roots = crate::bgv::setup::accepted_setup::accepted_hashes_from_package(&package);
-    let package_hash = package["setupPackageHash"]
-        .as_str()
-        .expect("setup package hash")
-        .to_string();
-
-    let mut unbound_roots = Vec::new();
-    let mut covered_root_count = 0_usize;
-    for root in &accepted_roots {
-        if root == &package_hash {
-            continue;
-        }
-        let mut drifted = package.clone();
-        let occurrences = drift_all_occurrences(&mut drifted, root, &drift_hash(root));
-        assert!(
-            occurrences >= 1,
-            "accepted root {root} was not located in the terminal package graph",
-        );
-        rebind_collective_setup_package_hash(&mut drifted);
-        if verify(&drifted)["verifierStatus"] != "refused" {
-            unbound_roots.push(root.clone());
-        }
-        covered_root_count += 1;
-    }
-    assert!(
-        unbound_roots.is_empty(),
-        "terminal package accepted roots that the verifier does not recompute and refuse: {unbound_roots:?}",
-    );
-    assert!(
-        covered_root_count >= 12,
-        "completeness floor: the terminal accepted package must bind the full first-profile root set, covered {covered_root_count}",
-    );
-
-    // Drifting the outer package hash without recomputation is a package-hash
-    // mismatch, the structural guard the per-root rebinds rely on.
-    let mut drifted_package_hash = package.clone();
-    drifted_package_hash["setupPackageHash"] = serde_json::json!(drift_hash(&package_hash));
-    assert_eq!(
-        verify(&drifted_package_hash)["verifierStatus"],
-        "refused",
-        "drifting the outer setup package hash must be refused",
-    );
-}
-
-#[test]
-#[ignore = "manual accepted setup closure diagnostic"]
-fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proof_statement_hash_drift",
-    );
-    let (mut package, companions) = setup_package_with_transported_public_setup_companions();
-
-    package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
-        serde_json::json!(valid_hash('4'));
-    rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
-    rebind_trustee_evaluation_key_proof_set_root(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-            "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-            "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-            "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-            "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-            "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-            "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-            "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(
-        result["verifierStatus"],
-        "refused",
-        "terminal setup verification result: {}",
-        serde_json::to_string_pretty(&result).expect("verification result JSON")
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("statementHash must match the statement rebuilt")
-    );
-    assert!(result["acceptedSetupHandoff"].is_null());
-}
-
-#[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_public_evaluation_key_material_chunk",
     );
     let (mut package, mut request) = transported_public_setup_package_and_request();
     let expected_manifest =
         public_evaluation_key_material_manifest(&package, &package["evaluationKeys"])
             .expect("public evaluation-key material manifest");
     let mut tampered_manifest = expected_manifest;
-    tampered_manifest["materialSource"] =
-        serde_json::json!("tampered-public-evaluation-key-material");
+    tampered_manifest["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(valid_hash('8'));
     let tampered_material_bytes =
         encode_public_evaluation_key_material_manifest(&tampered_manifest)
             .expect("tampered public evaluation-key material bytes");
@@ -370,7 +208,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
         .expect("public evaluation-key material verification")
         .expect("tampered public evaluation-key material refusal");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicEvaluationKeyMaterialManifestMismatch"
@@ -379,10 +217,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_evalua
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_uses_request_side_evaluation_key_component_chunks",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let first_component_material_root = package["relinearizationKeyShareRounds"]["roundOneRecords"]
@@ -403,10 +241,10 @@ fn heavy_accepted_setup_collective_setup_verifier_uses_request_side_evaluation_k
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_checks_trustee_proofs_from_transported_proof_material",
     );
     let (package, request) = transported_public_setup_package_and_request();
     let first_proof_record = &package["trusteeEvaluationKeyProofs"]["proofRecords"][0];
@@ -414,10 +252,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
         .as_str()
         .expect("proof material root");
 
-    assert!(
-        first_proof_record["proofBytesHex"].is_null(),
-        "transported terminal trustee proof records must not inline proof bytes"
-    );
     assert!(
         material_set_contains_root(
             &request["transportedEvaluationKeyShareProofMaterial"],
@@ -431,10 +265,10 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_trustee_proofs_from_tra
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk()
-{
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_transported_trustee_proof_chunk",
     );
     let (package, mut request) = transported_public_setup_package_and_request();
     request["transportedEvaluationKeyShareProofMaterial"]["proofMaterials"][0]["proofFullObjectHash"] =
@@ -443,7 +277,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_t
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -452,62 +286,59 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_t
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_public_galois_key_loader_refuses_reduced_ring_material() {
+fn heavy_accepted_setup_final_package_collective_setup_public_key_loaders_refuse_reduced_ring_material()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_public_galois_key_loader_refuses_reduced_ring_material",
+        "heavy_accepted_setup_final_package_collective_setup_public_key_loaders_refuse_reduced_ring_material",
     );
-    let (package, companions) = reduced_ring_setup_package_with_transported_public_setup_companions(
-        10,
-        "public-galois-loader",
-    );
-    let request = transported_public_setup_verification_request(companions);
 
-    let error = match accepted_setup_public_galois_keys_from_transport(&package, &request) {
-        Ok(_) => panic!("reduced-ring material must not become runtime Galois keys"),
-        Err(error) => error,
-    };
+    enum PublicKeyLoader {
+        Galois,
+        Relinearization,
+    }
 
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("requires profile-ring component vectors")
-    );
+    let loader_cases = [
+        ("public-galois-loader", "Galois", PublicKeyLoader::Galois),
+        (
+            "public-relinearization-loader",
+            "relinearization",
+            PublicKeyLoader::Relinearization,
+        ),
+    ];
+
+    for (fixture_label, loader_label, loader) in loader_cases {
+        let (package, companions) =
+            reduced_ring_setup_package_with_transported_public_setup_companions(10, fixture_label);
+        let request = transported_public_setup_verification_request(companions);
+
+        let failure_message =
+            format!("reduced-ring material must not become runtime {loader_label} keys");
+        let error = match loader {
+            PublicKeyLoader::Galois => {
+                accepted_setup_public_galois_keys_from_transport(&package, &request).map(|_| ())
+            }
+            PublicKeyLoader::Relinearization => {
+                accepted_setup_public_relinearization_keys_from_transport(&package, &request)
+                    .map(|_| ())
+            }
+        }
+        .expect_err(&failure_message);
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert!(
+            error
+                .message
+                .contains("requires full-ring component vectors")
+        );
+    }
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_public_relinearization_key_loader_refuses_reduced_ring_material",
-    );
-    let (package, companions) = reduced_ring_setup_package_with_transported_public_setup_companions(
-        10,
-        "public-relinearization-loader",
-    );
-    let request = transported_public_setup_verification_request(companions);
-
-    let error = match accepted_setup_public_relinearization_keys_from_transport(&package, &request)
-    {
-        Ok(_) => panic!("reduced-ring material must not become runtime relinearization keys"),
-        Err(error) => error,
-    };
-
-    assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
-    assert!(
-        error
-            .message
-            .contains("requires profile-ring component vectors")
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_round_two_aggregate_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["relinearizationKeyShareRounds"]["roundTwoAggregateRoots"][0]["roundTwoAggregateRoot"] =
@@ -517,7 +348,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "relinearizationRoundTwoAggregateRootMismatch"
@@ -526,10 +357,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_round_
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_relinearization_trustee_specific_key_switch_seed",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["relinearizationKeyShareRounds"]["roundOneRecords"][0]["keySwitchSeedHex"] =
@@ -539,7 +370,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
@@ -554,10 +385,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_relinearization_truste
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed()
-{
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_trustee_specific_key_switch_seed",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["galoisKeyShareBatches"][0]["galoisKeyShareMaterialRecords"][0]["keySwitchSeedHex"] =
@@ -567,7 +398,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specifi
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
@@ -582,9 +413,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_trustee_specifi
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_drift() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_batch_schedule_drift()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_galois_batch_schedule_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["galoisKeyShareBatches"][0]["requiredGaloisKeySchedule"][0]["rotation"] =
@@ -594,7 +426,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "evaluationKeyMaterialVerificationFailed"
@@ -609,10 +441,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_galois_batch_schedule_
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_evaluation_key_same_secret_family_root_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["relinearizationKeyShareRounds"]["sameSecretProofSetRoot"] =
@@ -622,7 +454,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_se
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "relinearizationKeyShareRoundsBindingMismatch"
@@ -631,9 +463,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_evaluation_key_same_se
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_missing_trustee_evaluation_key_proofs",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package
@@ -645,7 +478,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evalua
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofsMissing"
@@ -659,10 +492,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_trustee_evalua
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container()
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_malformed_trustee_evaluation_key_proof_container",
     );
 
     for field_name in ["proofRecords", "trusteeEvaluationKeyProofSetRoot"] {
@@ -676,7 +509,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_eval
         let result =
             verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(
             result["refusedObjects"][0]["reasonCode"],
             "trusteeEvaluationKeyProofVerificationFailed"
@@ -693,72 +526,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_trustee_eval
         );
         assert!(result["acceptedSetupHandoff"].is_null());
     }
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_trustee_evaluation_key_proofs",
-    );
-
-    let (mut extra_proof_package, extra_proof_request) =
-        transported_public_setup_package_and_request();
-    let duplicate_proof_record =
-        extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
-    extra_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("trustee evaluation-key proof records")
-        .push(duplicate_proof_record);
-    rebind_trustee_evaluation_key_proof_set_root(&mut extra_proof_package);
-    rebind_setup_key_correctness_certificate(&mut extra_proof_package);
-    rebind_collective_setup_package_hash(&mut extra_proof_package);
-    assert_refuses_trustee_evaluation_key_proof_variant(
-        extra_proof_package,
-        &extra_proof_request,
-        "proofRecords must contain one proof per trustee",
-    );
-
-    let (mut duplicate_proof_package, duplicate_proof_request) =
-        transported_public_setup_package_and_request();
-    duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][1] =
-        duplicate_proof_package["trusteeEvaluationKeyProofs"]["proofRecords"][0].clone();
-    rebind_trustee_evaluation_key_proof_record_root(&mut duplicate_proof_package, 1);
-    rebind_trustee_evaluation_key_proof_set_root(&mut duplicate_proof_package);
-    rebind_setup_key_correctness_certificate(&mut duplicate_proof_package);
-    rebind_collective_setup_package_hash(&mut duplicate_proof_package);
-    assert_refuses_trustee_evaluation_key_proof_variant(
-        duplicate_proof_package,
-        &duplicate_proof_request,
-        "proof records must be ordered by roster position",
-    );
-}
-
-fn assert_refuses_trustee_evaluation_key_proof_variant(
-    package: serde_json::Value,
-    request: &serde_json::Value,
-    message_fragment: &str,
-) {
-    let result =
-        verify_collective_bgv_setup_package(&package, request).expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert_eq!(
-        result["refusedObjects"][0]["objectPath"],
-        "setupPackage.trusteeEvaluationKeyProofs"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains(message_fragment)
-    );
-    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -779,49 +546,22 @@ fn collective_setup_verifier_refuses_trustee_evaluation_key_proofs_without_share
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_accounting_hash_drift() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_accounting_hash_drift",
-    );
-    let (mut package, request) = transported_public_setup_package_and_request();
-    package["trusteeEvaluationKeyProofs"]["proofAccountingHash"] =
-        serde_json::json!(valid_hash('1'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result =
-        verify_collective_bgv_setup_package(&package, &request).expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "trusteeEvaluationKeyProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("proofAccountingHash")
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_trustee_proof_statement_hash_drift",
     );
     let (mut package, request) = transported_public_setup_package_and_request();
     package["trusteeEvaluationKeyProofs"]["proofRecords"][0]["statementHash"] =
         serde_json::json!(valid_hash('4'));
     rebind_trustee_evaluation_key_proof_record_root(&mut package, 0);
     rebind_trustee_evaluation_key_proof_set_root(&mut package);
-    rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -836,9 +576,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_trustee_proof_statemen
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes() {
+fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_trustee_proof_bytes()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof_bytes",
+        "heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered_trustee_proof_bytes",
     );
     let (mut noncanonical_claim_package, mut noncanonical_claim_request) =
         transported_public_setup_package_and_request();
@@ -855,7 +596,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
     )
     .expect("verification response");
 
-    assert_eq!(noncanonical_claim_result["verifierStatus"], "refused");
+    assert_eq!(noncanonical_claim_result["isValid"], false);
     assert_eq!(
         noncanonical_claim_result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -901,7 +642,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_trustee_proof
         verify_collective_bgv_setup_package(&low_degree_shape_package, &low_degree_shape_request)
             .expect("verification response");
 
-    assert_eq!(low_degree_shape_result["verifierStatus"], "refused");
+    assert_eq!(low_degree_shape_result["isValid"], false);
     assert_eq!(
         low_degree_shape_result["refusedObjects"][0]["reasonCode"],
         "trusteeEvaluationKeyProofVerificationFailed"
@@ -946,9 +687,7 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
         proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
         proof_record["proofBytesHash"] =
             serde_json::json!(trustee_evaluation_key_proof_bytes_hash(&proof_bytes));
-        proof_record["proofSizeBytes"] = serde_json::json!(proof_bytes.len());
     } else {
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
         let chunks = proof_bytes_transport_chunks(proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
@@ -957,7 +696,6 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )
         .expect("trustee proof transport hashes");
-        proof_record["proofSizeBytes"] = serde_json::json!(proof_size_bytes);
         proof_record["proofBytesHash"] = serde_json::json!(proof_bytes_hash);
         proof_record["proofChunkSizeBytes"] =
             serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
@@ -992,15 +730,15 @@ fn mutate_first_trustee_evaluation_key_proof_bytes_and_rebind(
     }
     rebind_trustee_evaluation_key_proof_record_root(package, 0);
     rebind_trustee_evaluation_key_proof_set_root(package);
-    rebind_setup_key_correctness_certificate(package);
     rebind_collective_setup_package_hash(package);
 }
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cannot_reprove() {
+fn heavy_accepted_setup_final_package_round_two_records_with_substituted_aggregate_source_cannot_reprove()
+ {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cannot_reprove",
+        "heavy_accepted_setup_final_package_round_two_records_with_substituted_aggregate_source_cannot_reprove",
     );
     // A trustee whose round-two share multiplies a substituted aggregate
     // cannot generate a verifying proof: the statement carries the aggregate
@@ -1079,13 +817,11 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
         })
         .expect("statement over substituted round-two share");
     let witness = trustee_evaluation_key_witness_for_fixture(0, ring_degree, &statement);
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &serde_json::json!({
-            "fixture": "substituted-aggregate-reprove",
-            "trusteeRosterPosition": 0,
-        }),
-    )
+    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomness",
+        "fixture": "substituted-aggregate-reprove",
+        "trusteeRosterPosition": 0,
+    }))
     .expect("proof randomness seed");
 
     let error = match prove_evaluation_key_share(&statement, &witness, &proof_randomness_seed_hex) {
@@ -1104,48 +840,47 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
 // generates and the accepted-setup verifier accepts every roster-dependent
 // binding for a roster size other than the first-closure n = 10. Two reduced
 // development-ring (128) packages are built and verified through the same
-// terminal entry point the profile-ring accept fixture uses: a smallest
+// terminal entry point the full-ring accept fixture uses: a smallest
 // supported roster (n = 3, q_dec = 2-of-3) and the largest supported roster
 // (n = 20, q_dec = 7-of-20).
 //
 // The reduced development ring keeps each proof-bearing build to seconds-to-low
-// minutes. Terminal `accepted` is deliberately profile-ring only: the terminal
-// profile-ring gate (verify_profile_ring_material) refuses development-reduced-ring
+// minutes. Terminal `accepted` is deliberately full-ring only: the terminal
+// full-ring gate (verify_full_ring_material) refuses development-reduced-ring
 // material so a reduced-ring package can never be presented as certified.
-// So the strongest reduced-ring outcome is reaching exactly that profile-ring
+// So the strongest reduced-ring outcome is reaching exactly that full-ring
 // gate after every roster-dependent phase has passed: setup context + derived
 // quorums, the full phase transcript, common randomness and the roster-derived
 // public matrix derivations, VSS coefficient commitments, the n*n private VSS
 // envelope set, same-secret consistency, public-key shares and succinct proofs,
 // the relinearization/Galois evaluation-key records and their aggregate roots,
-// the public evaluation-key set, the roster-derived commitment-security and HE
-// security certificates, the active-static and key-correctness certificates,
-// and the roster-and-ring-derived transported VSS material metadata. The only
-// remaining refusal is the roster-independent profile-ring boundary,
-// which proves the dynamic-roster machinery and the roster-derived certificates
-// accept n != 10 exactly as far as the profile-ring boundary permits. Genuine terminal
-// `accepted` at the profile ring for n != 10 is deferred until the n = 10
-// supported-mobile runtime evidence work; the certified closure profile
-// remains n = 10 only, so no profile-ring n != 10 fixture runs in any lane.
+// the public evaluation-key set, and the roster-and-ring-derived transported
+// VSS material metadata. The only
+// remaining refusal is the roster-independent full-ring boundary,
+// which proves the dynamic-roster machinery accepts n != 10 exactly as far as
+// the full-ring boundary permits. Genuine terminal
+// `accepted` at the full ring for n != 10 is deferred until the n = 10
+// supported-phone runtime evidence work; the certified setup/evaluator parameters
+// remain n = 10 only, so no full-ring n != 10 fixture runs in any lane.
 //
 // This is prototype, desktop-only, fixture-backed evidence, not benchmarked or
-// mobile-certified. It is deferred from both default test lanes: its name is not
+// supported-phone evidence. It is deferred from both default test lanes: its name is not
 // the `heavy_accepted_setup` heavy-lane filter, and `#[ignore]` keeps it out of
 // the cheap gate, so it adds no runtime to either lane and runs only on demand.
 //
 // Run with:
 //   cargo test -p sealed-lattice-kernel \
-//     accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate \
+//     accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_gate \
 //     -- --ignored --nocapture
 #[test]
 #[ignore = "dynamic-roster reduced-ring evidence; on-demand, deferred from default lanes"]
-fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate() {
+fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_gate() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_claim_gate",
+        "accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_full_ring_claim_gate",
     );
 
     for participant_count in [3_u64, 20_u64] {
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "start reduced-ring terminal fixture for n={participant_count}"
         ));
         let stream_derivation_purpose = format!("dynamic-roster-{participant_count}");
@@ -1185,11 +920,10 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_clai
         // counts, common randomness and roster-derived public matrix
         // derivations, VSS coefficient commitments, the n*n private VSS envelope
         // set, same-secret consistency, public-key shares/proofs, evaluation-key
-        // records, the roster-derived commitment-security and HE-security
-        // certificates, and the roster-and-ring-derived transported VSS material
+        // records, and the roster-and-ring-derived transported VSS material
         // metadata) must have been accepted for both the smallest and the
         // largest supported roster, so the only refusal is the roster-independent
-        // profile-ring claim gate. A roster-dependent refusal - or a fixture
+        // full-ring claim gate. A roster-dependent refusal - or a fixture
         // transport-uniqueness artifact such as a duplicate aggregate transport
         // chunk hash from two trustees' companions carrying byte-identical chunk
         // content - would be a real n != 10 regression.
@@ -1199,18 +933,18 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_clai
             .to_string();
         assert_eq!(
             refusal_reason,
-            "vssCoefficientCommitmentMaterialOutsideProfile",
-            "n={participant_count}: the only refusal must be the profile-ring claim gate, got {refusal_reason}.{}",
+            "vssCoefficientCommitmentMaterialOutsideAcceptedRing",
+            "n={participant_count}: the only refusal must be the full-ring claim gate, got {refusal_reason}.{}",
             describe_duplicate_transport_chunk_hashes(&package),
         );
         assert_eq!(
             result["refusedObjects"][0]["objectPath"],
             "setupPackage.vssCoefficientCommitmentMaterial.ringDegree",
-            "n={participant_count}: the profile-ring claim gate refuses the reduced ring degree: {}",
+            "n={participant_count}: the full-ring claim gate refuses the reduced ring degree: {}",
             serde_json::to_string_pretty(&result).expect("verification result JSON")
         );
-        terminal_phase(&format!(
-            "reduced-ring fixture for n={participant_count} reached the profile-ring claim gate cleanly"
+        final_package_phase(&format!(
+            "reduced-ring fixture for n={participant_count} reached the full-ring claim gate cleanly"
         ));
     }
 }

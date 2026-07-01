@@ -1,5 +1,5 @@
 import {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -30,7 +30,8 @@ export const deriveActionContextHash = (
         'actionContextHash'
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('ActionContextHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ActionContext',
         acceptedRecoveryEpochUpdateHash:
             actionContext.acceptedRecoveryEpochUpdateHash,
         actionSequence: actionContext.actionSequence,
@@ -50,7 +51,7 @@ export const deriveActionContextHash = (
 export const deriveRecoveryEpochUpdateHash = (
     update: Omit<RecoveryEpochUpdate, 'recoveryEpochUpdateHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('RecoveryEpochUpdateHash', {
+    deriveCanonicalObjectHash({
         boardHeadHash: update.boardHeadHash,
         ceremonyId: update.ceremonyId,
         newDeviceEpoch: update.newDeviceEpoch,
@@ -148,9 +149,12 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         input.actionContext.deviceEpoch ===
             input.recoveryEpochState.currentDeviceEpoch
     ) {
+        const actionCurrent = refusedObjects.length === 0;
         return {
-            ok: refusedObjects.length === 0,
-            acceptedHashes: [input.actionContext.actionContextHash],
+            isValid: actionCurrent,
+            acceptedHashes: actionCurrent
+                ? [input.actionContext.actionContextHash]
+                : [],
             refusedObjects,
         };
     }
@@ -163,9 +167,12 @@ const isActionCurrentForRecoveryEpochUnchecked = (
         input.actionContext.deviceEpoch <
             input.recoveryEpochState.currentDeviceEpoch
     ) {
+        const actionCurrent = refusedObjects.length === 0;
         return {
-            ok: refusedObjects.length === 0,
-            acceptedHashes: [input.actionContext.actionContextHash],
+            isValid: actionCurrent,
+            acceptedHashes: actionCurrent
+                ? [input.actionContext.actionContextHash]
+                : [],
             refusedObjects,
         };
     }
@@ -180,7 +187,7 @@ const isActionCurrentForRecoveryEpochUnchecked = (
     );
 
     return {
-        ok: false,
+        isValid: false,
         acceptedHashes: [],
         refusedObjects,
     };
@@ -193,7 +200,7 @@ export const isActionCurrentForRecoveryEpoch = (
         return isActionCurrentForRecoveryEpochUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -430,7 +437,7 @@ const verifyRecoveryEpochUpdateUnchecked = (
     refusedObjects.push(...signatureResult.refusedObjects);
 
     return {
-        ok: refusedObjects.length === 0,
+        isValid: refusedObjects.length === 0,
         acceptedHashes:
             refusedObjects.length === 0
                 ? [
@@ -461,7 +468,7 @@ export const verifyRecoveryEpochUpdate = (
         return verifyRecoveryEpochUpdateUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

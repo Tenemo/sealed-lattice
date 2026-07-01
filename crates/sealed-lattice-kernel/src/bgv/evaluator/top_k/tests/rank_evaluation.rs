@@ -18,90 +18,76 @@ fn top_k_order_polynomial_masks_unselected_ranks() {
     assert_eq!(&decrypted[..rank_values.len()], &[1, 2, 0, 0, 0]);
 }
 
-// Manual consumed-schedule instrumentation: runs the real packing, batched-pair
-// rank, and sparse-target pipeline at the selected working level and reports
-// every relinearization level and (rotation, level) pair the evaluator
-// requested, asserting the frozen key schedule covers all of them through
-// truncation. This is the empirical evidence behind the consumed schedule.
-// It is #[ignore]d because the full-pipeline replay at the working level is far
-// too slow for the default lane; run it explicitly with --ignored. To
-// instrument another level, add a wrapper that calls
-// assert_consumed_schedule_within_frozen with that level.
-//
-//   cargo test -p sealed-lattice-kernel --release --lib \
-//     consumed_key_schedule_instrumentation -- --ignored --nocapture
 #[test]
-#[ignore = "manual consumed key schedule instrumentation"]
-fn consumed_key_schedule_instrumentation() {
-    assert_consumed_schedule_within_frozen(SELECTED_EVALUATOR_WORKING_LEVEL);
-}
-
-// Runs the bounded-domain top-k pipeline at `working_level` and asserts every
-// relinearization level and (rotation, level) pair the evaluator consumes is
-// covered by the frozen key schedule through truncation.
-fn assert_consumed_schedule_within_frozen(working_level: usize) {
-    let option_count = 20_usize;
-    // First-profile comparison domain: ten ballots with score span nine.
-    let score_domain_max = 90_u64;
-    let context =
-        EvaluatorContext::new("consumed-schedule-instrumentation", working_level).expect("context");
-    // Aggregate score slots inside the first-profile domain [10, 100].
-    let aggregate_scores = (0..option_count)
-        .map(|option| 10 + ((option * 7) % 91) as u64)
-        .collect::<Vec<_>>();
-    let aggregate = crate::bgv::evaluator::circuit::modulus_switch_to(
-        &context
-            .key()
-            .encrypt_slots(&aggregate_scores, "consumed-schedule-aggregate")
-            .expect("aggregate ciphertext"),
-        working_level,
+fn packed_rank_evaluation_decrypts_expected_ranks_and_tie_policy() {
+    let context = EvaluatorContext::new(
+        "packed-rank-evaluation-decrypts-expected-ranks",
+        SELECTED_EVALUATOR_WORKING_LEVEL,
     )
-    .expect("aggregate at working level");
-
-    let packed = pack_direct_score_slots(&context, &aggregate, option_count, "consumed-schedule")
-        .expect("score packing");
+    .expect("context");
+    let score_domain_max = 2;
+    let score_values = [0_u64, 2, 2];
+    let expected_rank_values = [2_u64, 0, 1];
+    let encrypted_scores = context
+        .key()
+        .encrypt_slots(&score_values, "boundary-tie-scores")
+        .expect("score ciphertext");
+    let packed_scores = pack_direct_score_slots(
+        &context,
+        &encrypted_scores,
+        score_values.len(),
+        "boundary-tie-pack",
+    )
+    .expect("packed scores");
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         &context,
-        &packed,
-        option_count,
+        &packed_scores,
+        score_values.len(),
         score_domain_max,
-        "consumed-schedule",
+        "boundary-tie-rank",
     )
     .expect("rank evaluation");
-    for top_count in [1_usize, 10, 20] {
-        project_packed_sparse_target_from_rank_evaluation(
-            &context,
-            &rank_evaluation,
-            option_count,
-            top_count,
-        )
-        .expect("sparse target");
-    }
+    let decrypted_slots = context
+        .key()
+        .decrypt_to_slots(&rank_evaluation.packed_ranks)
+        .expect("rank slots");
+    let decrypted_rank_values = (0..score_values.len())
+        .map(|logical_index| decrypted_slots[packed_score_slot(logical_index)])
+        .collect::<Vec<_>>();
 
-    let (consumed_relinearization_levels, consumed_rotations) = context.consumed_key_schedule();
-    println!("consumed key schedule at working level {working_level}");
-    println!("  relinearization levels: {consumed_relinearization_levels:?}");
-    println!("  rotations: {consumed_rotations:?}");
-
-    assert!(
-        consumed_relinearization_levels
-            .iter()
-            .all(|level| *level <= SELECTED_EVALUATOR_WORKING_LEVEL),
-        "every consumed relinearization level must be covered by the schedule key"
+    assert_eq!(
+        decrypted_rank_values, expected_rank_values,
+        "packed ranks should follow higher-score-first and lower-index tie ordering"
     );
-    let schedule = selected_evaluator_rotation_key_schedule(option_count).expect("schedule");
-    let mut schedule_level_by_rotation = std::collections::BTreeMap::new();
-    for (rotation, level) in schedule {
-        let entry = schedule_level_by_rotation.entry(rotation).or_insert(level);
-        *entry = (*entry).max(level);
-    }
-    for (rotation, level) in &consumed_rotations {
-        let schedule_level = schedule_level_by_rotation.get(rotation).unwrap_or_else(|| {
-            panic!("rotation {rotation} consumed at level {level} is outside the frozen schedule")
-        });
-        assert!(
-            schedule_level >= level,
-            "rotation {rotation} consumed at level {level} above its schedule level {schedule_level}"
+}
+
+#[test]
+fn packed_rank_plain_reference_covers_strict_ties_and_boundaries() {
+    let cases = [
+        ("strict order", vec![2_u64, 1, 0], vec![0_u64, 1, 2]),
+        ("middle tie", vec![1_u64, 2, 1], vec![1_u64, 0, 2]),
+        ("all equal", vec![1_u64, 1, 1], vec![0_u64, 1, 2]),
+    ];
+
+    for (case_label, score_values, expected_rank_values) in cases {
+        let rank_values = score_values
+            .iter()
+            .enumerate()
+            .map(|(option_index, score)| {
+                score_values
+                    .iter()
+                    .enumerate()
+                    .filter(|(other_option_index, other_score)| {
+                        *other_score > score
+                            || (*other_score == score && *other_option_index < option_index)
+                    })
+                    .count() as u64
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            rank_values, expected_rank_values,
+            "{case_label}: plain reference should follow higher-score-first and lower-index tie ordering"
         );
     }
 }

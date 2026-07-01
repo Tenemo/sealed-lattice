@@ -2,6 +2,8 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn collective_public_key_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -63,18 +65,12 @@ pub(in super::super) fn collective_public_key_object(
     let mut collective_public_key = serde_json::json!({
         "objectType": "CollectivePublicKey",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
-        "aggregationStatus": "succinct-proof-aggregated-with-accepted-setup-proof-accounting",
         "materialEncoding": "embedded-full-collective-public-key-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -93,8 +89,7 @@ pub(in super::super) fn collective_public_key_object(
         "aggregateCoefficientVectorsByLimb": aggregate_limbs,
     });
     collective_public_key["collectivePublicKeyRoot"] = serde_json::json!(
-        derive_protocol_hash("CollectivePublicKeyRoot", &collective_public_key)
-            .expect("collective public-key root")
+        derive_canonical_object_hash(&collective_public_key).expect("collective public-key root")
     );
 
     collective_public_key
@@ -193,17 +188,12 @@ pub(in super::super) fn public_key_share_material_object(
         let mut material_record = serde_json::json!({
             "objectType": "PublicKeyShareMaterial",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": "public-key-share",
             "materialEncoding": "embedded-full-public-key-share-coefficients",
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
-            "setupProfileHash": setup_context["setupProfileHash"],
-            "qShareHash": setup_context["qShareHash"],
-            "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-            "commitmentProfileHash": setup_context["commitmentProfileHash"],
+            "setupParametersHash": setup_context["setupParametersHash"],
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
@@ -216,8 +206,7 @@ pub(in super::super) fn public_key_share_material_object(
             "shareCoefficientVectorsByLimb": limbs,
         });
         material_record["publicKeyShareMaterialRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareRoot", &material_record)
-                .expect("public-key share material root")
+            derive_canonical_object_hash(&material_record).expect("public-key share material root")
         );
         material_roots.push(serde_json::json!({
             "trusteeIdentity": trustee_identity,
@@ -229,17 +218,12 @@ pub(in super::super) fn public_key_share_material_object(
     let mut material_set = serde_json::json!({
         "objectType": "PublicKeyShareMaterialSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": "public-key-share",
         "materialEncoding": "embedded-full-public-key-share-coefficients",
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -252,8 +236,7 @@ pub(in super::super) fn public_key_share_material_object(
         "shareMaterialRecords": material_records,
     });
     material_set["publicKeyShareMaterialSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareRoot", &material_set)
-            .expect("public-key share material set root")
+        derive_canonical_object_hash(&material_set).expect("public-key share material set root")
     );
 
     material_set
@@ -334,7 +317,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
         PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
         TrusteeEvaluationKeyStatement, public_key_share_succinct_proof_bytes_hash,
-        succinct_public_key_share_accounting_hash,
     };
     let setup_context = &package["setupContext"];
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
@@ -471,13 +453,11 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
         };
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "PublicKeyShareProofRoot",
-            &serde_json::json!({
-                "fixture": "public-key-share-succinct-proof-randomness",
-                "trusteeRosterPosition": trustee_roster_position,
-            }),
-        )
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "PublicKeyShareProofRoot",
+            "fixture": "public-key-share-succinct-proof-randomness",
+            "trusteeRosterPosition": trustee_roster_position,
+        }))
         .expect("public-key share succinct proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
         let proof_bytes = checkpointed_anchor_proof_bytes(
@@ -490,21 +470,15 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                 encode_trustee_evaluation_key_proof(&proof)
             },
         );
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash = public_key_share_succinct_proof_bytes_hash(&proof_bytes);
         let mut proof_record = serde_json::json!({
             "objectType": "PublicKeyShareSuccinctProof",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
-            "setupProfileHash": setup_context["setupProfileHash"],
-            "qShareHash": setup_context["qShareHash"],
-            "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-            "commitmentProfileHash": setup_context["commitmentProfileHash"],
+            "setupParametersHash": setup_context["setupParametersHash"],
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
@@ -517,47 +491,32 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             "sameSecretProofFamilyBindingRoot": same_secret_proof_record["sameSecretProofFamilyBindingRoot"],
             "sameSecretProofRoot": same_secret_proof_record["sameSecretProofRoot"],
             "statementHash": statement_hash_hex,
-            "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
         });
         proof_record["publicKeyShareSuccinctProofRoot"] = serde_json::json!(
-            derive_protocol_hash("PublicKeyShareProofRoot", &proof_record)
+            derive_canonical_object_hash(&proof_record)
                 .expect("public-key share succinct proof root")
         );
-        let proof_root_entry = serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "publicKeyShareSuccinctProofRoot": proof_record["publicKeyShareSuccinctProofRoot"],
-        });
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "generated public-key share succinct proof trustee {trustee_roster_position}"
         ));
 
-        (proof_root_entry, proof_record)
+        proof_record
         })
         .collect::<Vec<_>>();
     let mut proof_records = Vec::new();
-    let mut proof_roots = Vec::new();
-    for (proof_root_entry, proof_record) in per_trustee_records {
-        proof_roots.push(proof_root_entry);
+    for proof_record in per_trustee_records {
         proof_records.push(proof_record);
     }
     let mut proof_set = serde_json::json!({
         "objectType": "PublicKeyShareSuccinctProofSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": PUBLIC_KEY_SHARE_PROOF_FAMILY,
-        "proofAccountingHash": succinct_public_key_share_accounting_hash()
-            .expect("public-key share succinct accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -570,12 +529,10 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         "publicKeyShareSetRoot": package["publicKeyShares"]["publicKeyShareSetRoot"],
         "publicKeyShareProofSetRoot": package["publicKeyShareProofs"]["publicKeyShareProofSetRoot"],
         "publicKeyShareMaterialSetRoot": package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"],
-        "publicKeyShareSuccinctProofRoots": proof_roots,
         "proofRecords": proof_records,
     });
     proof_set["publicKeyShareSuccinctProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("PublicKeyShareProofRoot", &proof_set)
-            .expect("public-key share succinct proof set root")
+        derive_canonical_object_hash(&proof_set).expect("public-key share succinct proof set root")
     );
 
     proof_set

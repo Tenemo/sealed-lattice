@@ -7,6 +7,10 @@ pub(crate) use self::material_transport::{
     begin_setup_proof_material_transport_stream_request,
     finish_setup_proof_material_transport_stream_request, setup_proof_material_transport_hashes,
 };
+pub(in crate::bgv::setup) use self::material_transport::{
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
+};
 
 use serde_json::{Value, json};
 use sha3::{
@@ -17,10 +21,9 @@ use sha3::{
 use crate::{
     bgv::setup_helpers::validate_hash_string,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_bytes, append_varuint},
-    hashing::{HASH512_PREIMAGE_PREFIX, derive_protocol_hash, hash512_hex, to_hex},
+    hashing::{HASH512_PREIMAGE_PREFIX, derive_canonical_object_hash, hash512_hex, to_hex},
 };
 
-pub(super) const SETUP_PROOF_PROFILE_ID: &str = "SealedLattice-SetupProof-v1";
 pub(super) const SETUP_PROOF_BYTES_DOMAIN: &str =
     "sealed-lattice/collective-bgv-setup/succinct-proof-bytes-v1";
 pub(super) const SETUP_PROOF_SERIALIZATION: &str = "binary";
@@ -31,7 +34,7 @@ const SETUP_PROOF_BYTE_DECODER: &str = "sealed-lattice-succinct-setup-proof-byte
 // Families whose proof bytes ride the chunked setup proof-material transport:
 // private VSS plus the same-secret linkage anchor, public-key share, and
 // trustee evaluation-key succinct arguments. Their theorem accounting is bound
-// per family rather than through one shared profile.
+// per family rather than through one shared parameter set.
 pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
     "vss-opening-carry",
     "public-key-share",
@@ -40,5 +43,5 @@ pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
 ];
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {
-    CanonicalError::new(CanonicalErrorCode::ProfileComponentMismatch, message)
+    CanonicalError::new(CanonicalErrorCode::ComponentMismatch, message)
 }

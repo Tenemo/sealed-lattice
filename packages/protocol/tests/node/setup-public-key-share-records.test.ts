@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -211,20 +211,17 @@ describe('public-key share statement builders', () => {
             sameSecretStatements.statementRecords[0]?.sameSecretStatementRoot,
         );
         expect(publicKeyShareRoot).toBe(
-            deriveProtocolHash('PublicKeyShareRoot', shareRecordWithoutRoot),
+            deriveCanonicalObjectHash(shareRecordWithoutRoot),
         );
         expect(publicKeyShareSetRoot).toBe(
-            deriveProtocolHash('PublicKeyShareRoot', shareSetWithoutRoot),
+            deriveCanonicalObjectHash(shareSetWithoutRoot),
         );
         expect(firstProofRecord.publicKeyShareRoot).toBe(publicKeyShareRoot);
         expect(publicKeyShareProofRoot).toBe(
-            deriveProtocolHash(
-                'PublicKeyShareProofRoot',
-                proofRecordWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(proofRecordWithoutRoot),
         );
         expect(publicKeyShareProofSetRoot).toBe(
-            deriveProtocolHash('PublicKeyShareProofRoot', proofSetWithoutRoot),
+            deriveCanonicalObjectHash(proofSetWithoutRoot),
         );
     });
 
@@ -345,9 +342,6 @@ describe('public-key share statement builders', () => {
         expect(directMaterialBundle.materialSet).toEqual(
             transportedEmbeddedMaterial.materialSet,
         );
-        expect(directMaterialBundle.materialSet).not.toHaveProperty(
-            'shareMaterialRecords',
-        );
         expect(directMaterialBundle.transportedPublicKeyShareMaterial).toEqual(
             transportedEmbeddedMaterial.transportedPublicKeyShareMaterial,
         );
@@ -357,7 +351,6 @@ describe('public-key share statement builders', () => {
             binaryFormat: publicKeyShareMaterialBinaryFormat,
             chunkSizeBytes: setupTransportChunkSizeBytes,
         });
-        expect(directMaterialBundle).not.toHaveProperty('shareMaterialRecords');
         expect(reconstructedMaterialRecords).toEqual(
             embeddedMaterialSet.shareMaterialRecords,
         );

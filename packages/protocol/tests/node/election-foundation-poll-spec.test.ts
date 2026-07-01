@@ -19,8 +19,8 @@ const expectErrorCodes = (
 ): void => {
     const validation = validatePollSpec(input);
 
-    expect(validation.ok).toBe(false);
-    if (!validation.ok) {
+    expect(validation.isValid).toBe(false);
+    if (!validation.isValid) {
         expect(validation.errors.map((error) => error.code)).toEqual(
             expectedCodes,
         );
@@ -36,26 +36,20 @@ describe('election foundation poll-spec validation', () => {
                     max: 10,
                     skippedOptionScore: 1,
                 },
-                duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
-                tiePolicy: 'HigherScoreThenLowerOptionIndex',
             }),
         );
 
         expect(validation).toEqual({
-            ok: true,
+            isValid: true,
             normalized: createValidPollSpecInput({
                 scoreDomain: {
                     min: 1,
                     max: 10,
                     skippedOptionScore: 1,
                 },
-                duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
                 maxRosterSize: 20,
                 minRosterSize: 10,
-                rosterPolicy: 'OpenLinkPublicRoster',
                 smallRosterPolicy: 'ForbidMicroRoster',
-                thresholdProfileFamily: 'BalancedDefault',
-                tiePolicy: 'HigherScoreThenLowerOptionIndex',
             }),
         });
     });
@@ -69,43 +63,35 @@ describe('election foundation poll-spec validation', () => {
         );
 
         expect(validation).toMatchObject({
-            ok: true,
+            isValid: true,
             normalized: {
                 scoreDomain: {
                     min: 1,
                     max: 10,
                     skippedOptionScore: 1,
                 },
-                duplicateBallotPolicy: 'FirstValidBeforeVotingClosedCounts',
                 maxRosterSize: 20,
                 minRosterSize: 10,
-                rosterPolicy: 'OpenLinkPublicRoster',
                 smallRosterPolicy: 'ForbidMicroRoster',
-                thresholdProfileFamily: 'BalancedDefault',
-                tiePolicy: 'HigherScoreThenLowerOptionIndex',
             },
         });
     });
 
-    it('accepts explicit roster bounds and profile family policy', () => {
+    it('accepts explicit roster bounds and parameter family policy', () => {
         const validation = validatePollSpec(
             createValidPollSpecInput({
                 maxRosterSize: 20,
                 minRosterSize: 11,
-                rosterPolicy: 'OpenLinkPublicRoster',
                 smallRosterPolicy: 'WarnMicroRoster',
-                thresholdProfileFamily: 'BalancedDefault',
             }),
         );
 
         expect(validation).toMatchObject({
-            ok: true,
+            isValid: true,
             normalized: {
                 maxRosterSize: 20,
                 minRosterSize: 11,
-                rosterPolicy: 'OpenLinkPublicRoster',
                 smallRosterPolicy: 'WarnMicroRoster',
-                thresholdProfileFamily: 'BalancedDefault',
             },
         });
     });
@@ -122,9 +108,6 @@ describe('election foundation poll-spec validation', () => {
                     max: 9,
                     skippedOptionScore: 1,
                 } as unknown as PollSpecInput['scoreDomain'],
-                duplicateBallotPolicy:
-                    'FirstBallotCounts' as unknown as PollSpecInput['duplicateBallotPolicy'],
-                tiePolicy: 'RandomTieBreak' as PollSpecInput['tiePolicy'],
             }),
             [
                 'EmptyPollId',
@@ -132,8 +115,6 @@ describe('election foundation poll-spec validation', () => {
                 'InvalidOptionCount',
                 'InvalidTopOptionCount',
                 'UnsupportedScoreDomain',
-                'UnsupportedDuplicateBallotPolicy',
-                'UnsupportedTiePolicy',
             ],
         );
     });
@@ -173,19 +154,10 @@ describe('election foundation poll-spec validation', () => {
             createValidPollSpecInput({
                 maxRosterSize: 2,
                 minRosterSize: 51,
-                rosterPolicy:
-                    'InviteOnlyRoster' as PollSpecInput['rosterPolicy'],
                 smallRosterPolicy:
                     'SilentMicroRoster' as PollSpecInput['smallRosterPolicy'],
-                thresholdProfileFamily:
-                    'ExperimentalProfile' as PollSpecInput['thresholdProfileFamily'],
             }),
-            [
-                'UnsupportedRosterPolicy',
-                'UnsupportedThresholdProfileFamily',
-                'UnsupportedSmallRosterPolicy',
-                'InvalidRosterBounds',
-            ],
+            ['UnsupportedSmallRosterPolicy', 'InvalidRosterBounds'],
         );
     });
 
@@ -231,6 +203,6 @@ describe('election foundation poll-spec validation', () => {
             }),
         );
 
-        expect(validation.ok).toBe(true);
+        expect(validation.isValid).toBe(true);
     });
 });

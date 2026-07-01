@@ -1,20 +1,19 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import {
+    assertContextMatches,
+    assertProtocolHash,
+    contextFields,
+} from './common-fields.js';
 import type {
     PublicKeyShareProofSet,
     PublicKeyShareSet,
 } from './public-key-share-records.js';
-import {
-    setupProofProfileId,
-    type SameSecretConsistencyStatementSet,
-} from './same-secret-consistency-records.js';
+import type { SameSecretConsistencyStatementSet } from './same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 type JsonRecord = Record<string, unknown>;
-
-export const evaluatorKeyGenericSwitchPolicy =
-    'refused-unless-explicitly-required';
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;
@@ -33,9 +32,8 @@ export type RequiredGaloisSet = Readonly<
     JsonRecord & {
         readonly objectType: 'RequiredGaloisSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay';
-        readonly packingProfile: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
+        readonly evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay';
+        readonly packingScheme: 'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing';
         readonly rnsLimbCount: number;
         readonly entries: readonly RequiredGaloisKeyScheduleEntry[];
     }
@@ -45,8 +43,6 @@ export type EvaluatorKeySchedule = Readonly<
     JsonRecord & {
         readonly objectType: 'EvaluatorKeySchedule';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -58,7 +54,6 @@ export type EvaluatorKeySchedule = Readonly<
         readonly relinearizationLevelSchedule: readonly RelinearizationLevelScheduleEntry[];
         readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
         readonly requiredGaloisSetHash: ProtocolHash;
-        readonly genericKeySwitchPolicy: typeof evaluatorKeyGenericSwitchPolicy;
         readonly evaluatorKeyScheduleRoot: ProtocolHash;
     }
 >;
@@ -74,24 +69,6 @@ export type EvaluatorKeyScheduleInput = {
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
-};
-
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
-    'setupEpoch',
-] as const;
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
 };
 
 const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
@@ -114,37 +91,6 @@ const assertNonNegativeSafeInteger = (
 const assertNonEmptyString = (value: string, fieldName: string): void => {
     if (value.length === 0) {
         throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
     }
 };
 
@@ -189,9 +135,8 @@ export const createRequiredGaloisSet = (
     return {
         objectType: 'RequiredGaloisSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        evaluatorProfile: 'direct-encrypted-ballot-evaluator-replay',
-        packingProfile:
+        evaluatorScheme: 'direct-encrypted-ballot-evaluator-replay',
+        packingScheme:
             'direct-score-packing-compact-generator-basis-direct-encrypted-score-comparison-generator-ordered-rank-packing',
         rnsLimbCount,
         entries: validateRequiredGaloisSchedule(entries),
@@ -276,15 +221,10 @@ export const createEvaluatorKeySchedule = (
         rnsLimbCount,
         input.requiredGaloisKeySchedule,
     );
-    const requiredGaloisSetHash = deriveProtocolHash(
-        'RequiredGaloisSetHash',
-        requiredGaloisSet,
-    );
+    const requiredGaloisSetHash = deriveCanonicalObjectHash(requiredGaloisSet);
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount,
@@ -300,14 +240,11 @@ export const createEvaluatorKeySchedule = (
             createRelinearizationLevelSchedule(rnsLimbCount),
         requiredGaloisKeySchedule: requiredGaloisSet.entries,
         requiredGaloisSetHash,
-        genericKeySwitchPolicy: evaluatorKeyGenericSwitchPolicy,
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {
         ...scheduleWithoutRoot,
-        evaluatorKeyScheduleRoot: deriveProtocolHash(
-            'EvaluatorKeyScheduleRoot',
-            scheduleWithoutRoot,
-        ),
+        evaluatorKeyScheduleRoot:
+            deriveCanonicalObjectHash(scheduleWithoutRoot),
     } satisfies EvaluatorKeySchedule;
 };

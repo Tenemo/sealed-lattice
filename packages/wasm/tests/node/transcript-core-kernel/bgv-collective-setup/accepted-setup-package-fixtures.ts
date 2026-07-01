@@ -2,7 +2,6 @@
 // parts live under accepted-setup-package-fixtures/; this file re-exports only
 // the names consumed by the sibling kernel test files, keeping cross-part
 // helpers off the public fixture surface.
-export { acceptedActiveStaticSetupTheoremCertificate } from './accepted-setup-package-fixtures/certificates.js';
 export { rebindCollectiveSetupPackageHash } from './accepted-setup-package-fixtures/certificates.js';
 export { acceptedCommonRandomness } from './accepted-setup-package-fixtures/common-randomness.js';
 export { publicPrivateVssEnvelopeCommitmentReference } from './accepted-setup-package-fixtures/common-randomness.js';

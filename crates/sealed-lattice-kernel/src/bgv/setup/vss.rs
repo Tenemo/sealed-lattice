@@ -1,12 +1,9 @@
 use serde_json::{Value, json};
 
-use crate::{encoding::CanonicalResult, hashing::derive_protocol_hash};
-
+#[cfg(test)]
+use crate::encoding::CanonicalResult;
 #[cfg(test)]
 use crate::encoding::{CanonicalError, CanonicalErrorCode};
-
-pub(super) const CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID: &str =
-    "sealed-lattice-carry-aware-vss-share-opening-v1";
 
 #[cfg(test)]
 use super::{
@@ -51,12 +48,10 @@ pub(super) struct CarryAwareVssCommitmentOpeningInput<'a> {
     pub(super) fresh_randomness_bound: i128,
 }
 
-pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
+pub(super) fn carry_aware_vss_share_relation_value() -> Value {
     json!({
-        "objectType": "CarryAwareVssShareRelationProfile",
+        "objectType": "CarryAwareVssShareRelation",
         "objectVersion": 1,
-        "profileId": CARRY_AWARE_VSS_SHARE_RELATION_PROFILE_ID,
-        "sharingDomain": "per-rns-prime",
         "trusteePointRule": "roster-position-plus-one",
         "coefficientOrder": "constant-first",
         "relation": "sum(alpha_j^k * F_i,l,k) - sigma_i_to_j,l = q_l * z_i_to_j,l",
@@ -64,13 +59,6 @@ pub(super) fn carry_aware_vss_share_relation_profile_value() -> Value {
         "commitmentReductionRule": "prove-unreduced-lifted-share-with-hidden-carry-and-opening",
         "recipientWitnessDisclosure": "share-values-only; aggregate openings and carry witnesses are zero-knowledge proof witnesses",
     })
-}
-
-pub(super) fn carry_aware_vss_share_relation_profile_hash() -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "CarryAwareVssShareRelationProfileHash",
-        &carry_aware_vss_share_relation_profile_value(),
-    )
 }
 
 #[cfg(test)]

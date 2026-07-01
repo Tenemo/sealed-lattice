@@ -1,7 +1,9 @@
 use super::common::*;
+
 use super::shares::*;
 use super::succinct_proof_transport::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -10,8 +12,7 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
     PUBLIC_KEY_SHARE_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
     TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    public_key_share_succinct_proof_bytes_hash, succinct_public_key_share_accounting_hash,
-    verify_evaluation_key_share,
+    public_key_share_succinct_proof_bytes_hash, verify_evaluation_key_share,
 };
 
 pub(super) fn public_key_share_proofs_have_terminal_dependents(setup_package: &Value) -> bool {
@@ -26,12 +27,6 @@ fn public_key_share_succinct_proofs_have_terminal_dependents(setup_package: &Val
         || setup_package.get("galoisKeyShareBatches").is_some()
         || setup_package.get("trusteeEvaluationKeyProofs").is_some()
         || setup_package.get("evaluationKeys").is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificate")
-            .is_some()
-        || setup_package
-            .get("setupKeyCorrectnessCertificateHash")
-            .is_some()
 }
 
 pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
@@ -45,7 +40,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     }
     let Some(material_set) = material_set else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareMaterial".to_string()],
             Vec::new(),
@@ -62,7 +56,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         }
 
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareSuccinctProofs".to_string()],
             Vec::new(),
@@ -126,7 +119,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageAssembly"),
             vec!["transportedPublicKeyShareMaterial".to_string()],
             Vec::new(),
@@ -180,16 +172,10 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs",
         )?));
     }
-    let expected_accounting_hash = succinct_public_key_share_accounting_hash()?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
-        ("proofAccountingHash", expected_accounting_hash.as_str()),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_succinct_proof_refusal(
-                "publicKeyShareSuccinctProofSetProfileMismatch",
+                "publicKeyShareSuccinctProofSetParametersMismatch",
                 format!("publicKeyShareSuccinctProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareSuccinctProofs.{field_name}"),
             )?));
@@ -311,24 +297,6 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
             "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
         )?));
     }
-    let mut proof_roots = Vec::new();
-    for succinct_proof_record in proof_records_array {
-        proof_roots.push(json!({
-            "trusteeIdentity": value_string(succinct_proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(succinct_proof_record, "trusteeRosterPosition")?,
-            "publicKeyShareSuccinctProofRoot": value_string(
-                succinct_proof_record,
-                "publicKeyShareSuccinctProofRoot",
-            )?,
-        }));
-    }
-    if proof_set.get("publicKeyShareSuccinctProofRoots") != Some(&Value::Array(proof_roots)) {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
-            "publicKeyShareSuccinctProofRootListMismatch",
-            "publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofRoots must match the ordered proof records",
-            "setupPackage.publicKeyShareSuccinctProofs.publicKeyShareSuccinctProofRoots",
-        )?));
-    }
     let Some(succinct_proof_set_root) = proof_set
         .get("publicKeyShareSuccinctProofSetRoot")
         .and_then(Value::as_str)
@@ -348,7 +316,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         .as_object_mut()
         .expect("public-key share succinct proof set object was checked")
         .remove("publicKeyShareSuccinctProofSetRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if succinct_proof_set_root != expected_root {
         return Ok(Some(public_key_share_succinct_proof_refusal(
             "publicKeyShareSuccinctProofSetRootMismatch",
@@ -416,11 +384,7 @@ fn verify_public_key_share_succinct_proof_record(
         ));
     }
     verify_same_secret_context(proof_record, context.setup_context)?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", PUBLIC_KEY_SHARE_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -493,7 +457,7 @@ fn verify_public_key_share_succinct_proof_record(
     ] {
         if proof_record.get(field_name) != public_key_share_proof_record.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!(
                     "public-key share succinct proof {field_name} must match the proof statement"
                 ),
@@ -518,7 +482,7 @@ fn verify_public_key_share_succinct_proof_record(
         || proof_record.get("trusteeIdentity") != share_record.get("trusteeIdentity")
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share succinct proof must bind the accepted share, proof statement, material, and same-secret roots",
         ));
     }
@@ -554,24 +518,12 @@ fn verify_public_key_share_succinct_proof_record(
             != Some(same_secret_proof_binding.trustee_identity.as_str())
     {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public-key share succinct proof must bind the verified same-secret proof root",
         ));
     }
     let proof_bytes =
         public_key_share_succinct_proof_bytes_from_record(proof_record, context.request)?;
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "public-key share succinct proof byte length does not fit u64",
-        )
-    })?;
-    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proofSizeBytes must match supplied proof bytes",
-        ));
-    }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     if proof_bytes_hash != public_key_share_succinct_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(
@@ -659,7 +611,7 @@ fn verify_public_key_share_succinct_proof_record(
         .as_object_mut()
         .expect("public-key share succinct proof record object was checked")
         .remove("publicKeyShareSuccinctProofRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if proof_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

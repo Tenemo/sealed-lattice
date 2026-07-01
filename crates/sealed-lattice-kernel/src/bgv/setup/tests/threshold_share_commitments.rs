@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
 fn threshold_share_commitment_derivation_recomputes_all_recipient_limb_commitments() {
     let request = threshold_share_commitment_derivation_request(8);
@@ -7,7 +9,6 @@ fn threshold_share_commitment_derivation_recomputes_all_recipient_limb_commitmen
     let result = derive_threshold_share_commitments_from_request(&request)
         .expect("threshold share commitment derivation");
 
-    assert_eq!(result["ok"], true);
     assert_eq!(result["operation"], "deriveThresholdShareCommitments");
     assert_eq!(result["ringDegree"], 8);
     assert_eq!(result["ringDegreeStatus"], "development-reduced-ring");
@@ -112,7 +113,6 @@ fn threshold_share_commitment_derivation_consumes_transported_binary_material() 
         derive_threshold_share_commitments_from_transport_request(&transport_request)
             .expect("transport threshold share commitment derivation");
 
-    assert_eq!(transport_result["ok"], true);
     assert_eq!(
         transport_result["operation"],
         "deriveThresholdShareCommitmentsFromTransport"
@@ -227,16 +227,6 @@ fn threshold_share_commitment_derivation_consumes_streamed_binary_material() {
         stream_result["verifiedVssCoefficientCommitmentMaterial"]["thresholdShareCommitmentRoot"],
         stream_result["thresholdShareCommitmentRoot"]
     );
-
-    let release_result = release_verified_transported_vss_material_request(&serde_json::json!({
-        "verificationId": derivation_id,
-    }))
-    .expect("release stream-verified material");
-    assert_eq!(
-        release_result["operation"],
-        "releaseVerifiedTransportedVssMaterial"
-    );
-    assert_eq!(release_result["released"], true);
 }
 
 #[test]
@@ -277,61 +267,6 @@ fn threshold_share_commitment_stream_refuses_tampered_chunk_bytes() {
             .message
             .contains("transport stream chunk bytes do not match the declared chunk hash")
     );
-}
-
-#[test]
-fn threshold_share_commitment_stream_abort_releases_derivation_id() {
-    let request = threshold_share_commitment_derivation_request(8);
-    let material_bytes = encode_transport_material_from_request(&request);
-    let transported_material = transported_material_value(&material_bytes);
-    let stream_template = transported_material_stream_template_value(&transported_material);
-    let derivation_id = "threshold-share-stream-abort-test";
-
-    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-        "derivationId": derivation_id,
-        "setupContext": request["setupContext"],
-        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
-        "transportedVssCoefficientCommitmentMaterial": stream_template,
-    }))
-    .expect("begin stream threshold derivation");
-
-    let abort_result =
-        abort_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-            "derivationId": derivation_id,
-        }))
-        .expect("abort stream threshold derivation");
-    assert_eq!(
-        abort_result["operation"],
-        "abortThresholdShareCommitmentsFromTransportStream"
-    );
-    assert_eq!(abort_result["aborted"], true);
-
-    let error = absorb_threshold_share_commitment_transport_derivation_stream_chunk_request(
-        &serde_json::json!({
-            "derivationId": derivation_id,
-            "chunkIndex": 0,
-            "bytesHex": transported_material["chunks"][0]["bytesHex"],
-        }),
-    )
-    .expect_err("aborted stream must not accept chunks");
-    assert!(
-        error
-            .message
-            .contains("transport derivationId is not active")
-    );
-
-    begin_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-        "derivationId": derivation_id,
-        "setupContext": request["setupContext"],
-        "publicMatrixSeedHash": request["publicMatrixSeedHash"],
-        "transportedVssCoefficientCommitmentMaterial": transported_material_stream_template_value(&transported_material),
-    }))
-    .expect("derivation id can be reused after abort");
-
-    abort_threshold_share_commitment_transport_derivation_stream_request(&serde_json::json!({
-        "derivationId": derivation_id,
-    }))
-    .expect("cleanup reused stream threshold derivation");
 }
 
 #[test]
@@ -398,50 +333,40 @@ fn threshold_share_commitment_transport_refuses_chunk_hash_drift() {
 }
 
 fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_json::Value {
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
     let ceremony_id = "ceremony-main";
-    let manifest_hash = derive_protocol_hash(
-        "ElectionManifestHash",
-        &serde_json::json!({ "manifest": "threshold-share-commitments-test" }),
-    )
+    let manifest_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "ElectionManifestHash",
+        "manifest": "threshold-share-commitments-test",
+    }))
     .expect("manifest hash");
-    let roster_hash = derive_protocol_hash(
-        "RosterHash",
-        &serde_json::json!({ "roster": "threshold-share-commitments-test" }),
-    )
+    let roster_hash = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "RosterHash",
+        "roster": "threshold-share-commitments-test",
+    }))
     .expect("roster hash");
-    let setup_profile_hash = profile["setupProfileHash"]
-        .as_str()
-        .expect("setup profile hash");
-    let q_share_hash = profile["qShareHash"].as_str().expect("Q_share hash");
-    let carry_aware_vss_relation_profile_hash = profile["carryAwareVssShareRelationProfileHash"]
-        .as_str()
-        .expect("carry-aware VSS relation profile hash");
-    let commitment_profile_hash = profile["commitmentProfileHash"]
-        .as_str()
-        .expect("commitment profile hash");
+    let setup_parameters_hash =
+        crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
+            &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(10),
+        )
+        .expect("roster-derived setup parameters hash");
+    let setup_parameters_hash = setup_parameters_hash.as_str();
     let setup_epoch = "setup-epoch-1";
     let setup_context = serde_json::json!({
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
-        "qShareHash": q_share_hash,
-        "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-        "commitmentProfileHash": commitment_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
     });
-    let public_matrix_seed_hash = derive_protocol_hash(
-        "SetupPublicMatrixSeedHash",
-        &serde_json::json!({
-            "fixture": "threshold-share-commitments-public-matrix",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
-            "setupEpoch": setup_epoch,
-        }),
-    )
+    let public_matrix_seed_hash = derive_canonical_object_hash(&serde_json::json!({
+    "objectType": "SetupPublicMatrixSeedHash",
+    "fixture": "threshold-share-commitments-public-matrix",
+        "ceremonyId": ceremony_id,
+        "manifestHash": manifest_hash,
+        "rosterHash": roster_hash,
+        "setupParametersHash": setup_parameters_hash,
+        "setupEpoch": setup_epoch,
+    }))
     .expect("public matrix seed hash");
 
     let mut source_trustee_records = Vec::new();
@@ -485,10 +410,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -497,24 +419,6 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "rnsPrime": rns_prime,
                     "shamirCoefficientIndex": shamir_coefficient_index,
                     "commitmentRoot": commitment_root,
-                    "commitmentChunkRoot": derive_protocol_hash(
-                        "VssCoefficientCommitmentRoot",
-                        &serde_json::json!({
-                            "fixture": "threshold-share-commitment-chunk",
-                            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                            "rnsLimbIndex": rns_limb_index,
-                            "shamirCoefficientIndex": shamir_coefficient_index,
-                        }),
-                    ).expect("commitment chunk root"),
-                    "coefficientVectorHash512": derive_protocol_hash(
-                        "VssCoefficientCommitmentRoot",
-                        &serde_json::json!({
-                            "fixture": "threshold-share-coefficient-vector",
-                            "sourceTrusteeRosterPosition": source_trustee_roster_position,
-                            "rnsLimbIndex": rns_limb_index,
-                            "shamirCoefficientIndex": shamir_coefficient_index,
-                        }),
-                    ).expect("coefficient vector hash"),
                 }));
                 coefficient_commitment_material.push(serde_json::json!({
                     "objectType": "VssCoefficientCommitmentMaterial",
@@ -522,10 +426,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
                     "ceremonyId": ceremony_id,
                     "manifestHash": manifest_hash,
                     "rosterHash": roster_hash,
-                    "setupProfileHash": setup_profile_hash,
-                    "qShareHash": q_share_hash,
-                    "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-                    "commitmentProfileHash": commitment_profile_hash,
+                    "setupParametersHash": setup_parameters_hash,
                     "setupEpoch": setup_epoch,
                     "sourceTrusteeIdentity": source_trustee_identity.as_str(),
                     "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -544,10 +445,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
-            "qShareHash": q_share_hash,
-            "carryAwareVssShareRelationProfileHash": carry_aware_vss_relation_profile_hash,
-            "commitmentProfileHash": commitment_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
             "sourceTrusteeIdentity": source_trustee_identity,
             "sourceTrusteeRosterPosition": source_trustee_roster_position,
@@ -555,7 +453,7 @@ fn threshold_share_commitment_derivation_request(ring_degree: usize) -> serde_js
             "coefficientCommitments": coefficient_commitments,
         });
         source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
-            derive_protocol_hash("VssCoefficientCommitmentRoot", &source_trustee_record)
+            derive_canonical_object_hash(&source_trustee_record)
                 .expect("source trustee commitment root")
         );
         source_trustee_records.push(source_trustee_record);
@@ -699,8 +597,6 @@ fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> S
     let mut commitment_set = serde_json::json!({
         "objectType": "VssCoefficientCommitmentSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
         "publicMatrixSeedHash": request["publicMatrixSeedHash"],
         "participantCount": 10,
         "thresholdDegree": 4,
@@ -711,17 +607,13 @@ fn vss_commitment_root_from_derivation_request(request: &serde_json::Value) -> S
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         commitment_set[field_name] = setup_context[field_name].clone();
     }
 
-    derive_protocol_hash("VssCoefficientCommitmentRoot", &commitment_set)
-        .expect("VSS commitment root")
+    derive_canonical_object_hash(&commitment_set).expect("VSS commitment root")
 }
 
 fn threshold_coefficient_message_fixture(

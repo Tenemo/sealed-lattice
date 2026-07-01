@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Clone)]
 pub(super) struct PrivateVssEnvelopeBinding {
     pub(super) source_trustee_identity: String,
@@ -92,7 +94,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
 ) -> CanonicalResult<Option<Value>> {
     let Some(commitment_set) = setup_package.get("privateVssEnvelopeCommitments") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitments".to_string()],
             Vec::new(),
@@ -148,7 +149,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitmentRoot".to_string()],
             Vec::new(),
@@ -161,7 +161,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("privateVssEnvelopeDelivery"),
             vec!["privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot".to_string()],
             Vec::new(),
@@ -180,17 +179,6 @@ pub(super) fn verify_private_vss_envelope_commitments(
         )?));
     }
 
-    if commitment_set
-        .get("mailboxEncryptionProfileId")
-        .and_then(Value::as_str)
-        != Some(PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID)
-    {
-        return Ok(Some(private_vss_envelope_refusal(
-            "privateVssEnvelopeMailboxProfileMismatch",
-            "privateVssEnvelopeCommitments.mailboxEncryptionProfileId must match the accepted private VSS mailbox profile",
-            "setupPackage.privateVssEnvelopeCommitments.mailboxEncryptionProfileId",
-        )?));
-    }
     let roster = super::accepted_roster_from_package(setup_package);
     if commitment_set
         .get("participantCount")
@@ -199,7 +187,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
     {
         return Ok(Some(private_vss_envelope_refusal(
             "privateVssEnvelopeParticipantCountMismatch",
-            "privateVssEnvelopeCommitments.participantCount must match the accepted setup profile",
+            "privateVssEnvelopeCommitments.participantCount must match the accepted setup parameters",
             "setupPackage.privateVssEnvelopeCommitments.participantCount",
         )?));
     }
@@ -330,7 +318,7 @@ pub(super) fn verify_private_vss_envelope_commitments(
             }
         }
     }
-    let expected_root = derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if set_root != expected_root {
         return Ok(Some(private_vss_envelope_refusal(
             "privateVssEnvelopeCommitmentRootMismatch",
@@ -351,10 +339,7 @@ fn verify_private_vss_envelope_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if value.get(field_name) != setup_context.get(field_name) {
@@ -528,17 +513,6 @@ fn private_vss_envelope_binding_from_reference(
         "setupPackage.privateVssEnvelopeCommitments.envelopeReferences",
     ) {
         return Ok(Err(refusal));
-    }
-    if envelope_reference
-        .get("mailboxEncryptionProfileId")
-        .and_then(Value::as_str)
-        != Some(PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID)
-    {
-        return Ok(Err(Refusal::new(
-            "privateVssEnvelopeReferenceMailboxProfileMismatch",
-            "private VSS envelope commitment must bind the accepted mailbox encryption profile",
-            "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.mailboxEncryptionProfileId",
-        )));
     }
     if envelope_reference
         .get("publicMatrixSeedHash")
@@ -782,8 +756,7 @@ fn private_vss_envelope_binding_from_reference(
             "setupPackage.privateVssEnvelopeCommitments.envelopeReferences.privateEnvelopeAad",
         )));
     }
-    let expected_aad_hash =
-        derive_protocol_hash("PrivateVssEnvelopeAadHash", private_envelope_aad)?;
+    let expected_aad_hash = derive_canonical_object_hash(private_envelope_aad)?;
     if envelope_reference
         .get("privateEnvelopeAadHash")
         .and_then(Value::as_str)
@@ -843,8 +816,7 @@ fn private_vss_envelope_binding_from_reference(
         .as_object_mut()
         .expect("private VSS envelope commitment reference object was checked")
         .remove("encryptedEnvelope");
-    let expected_record_root =
-        derive_protocol_hash("PrivateVssEnvelopeCommitmentRoot", &record_root_input)?;
+    let expected_record_root = derive_canonical_object_hash(&record_root_input)?;
     if private_envelope_commitment_root != expected_record_root {
         return Ok(Err(Refusal::new(
             "privateVssEnvelopeCommitmentRecordRootMismatch",
@@ -918,11 +890,6 @@ fn verify_encrypted_private_vss_envelope(
     }
 
     for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        (
-            "mailboxEncryptionProfileId",
-            PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID,
-        ),
         ("ciphertextContentType", "private-vss-share-envelope"),
         ("publicMatrixSeedHash", public_matrix_seed_hash),
         (
@@ -1118,10 +1085,8 @@ fn verify_encrypted_private_vss_envelope(
         .as_object_mut()
         .expect("encrypted envelope object was checked")
         .remove("encryptedEnvelopeHash");
-    let expected_encrypted_envelope_hash = derive_protocol_hash(
-        "PrivateVssEncryptedEnvelopeHash",
-        &encrypted_envelope_root_input,
-    )?;
+    let expected_encrypted_envelope_hash =
+        derive_canonical_object_hash(&encrypted_envelope_root_input)?;
     if encrypted_envelope_hash != expected_encrypted_envelope_hash {
         return Ok(Err(Refusal::new(
             "privateVssEncryptedEnvelopeHashMismatch",
@@ -1148,20 +1113,12 @@ fn private_vss_envelope_aad_value(
     Ok(json!({
         "objectType": PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "mailboxEncryptionProfileId": PRIVATE_VSS_MAILBOX_ENCRYPTION_PROFILE_ID,
         "privateEnvelopeObjectType": "PrivateVssShareEnvelope",
         "ciphertextContentType": "private-vss-share-envelope",
         "ceremonyId": setup_context_string(setup_context, "ceremonyId")?,
         "manifestHash": setup_context_string(setup_context, "manifestHash")?,
         "rosterHash": setup_context_string(setup_context, "rosterHash")?,
-        "setupProfileHash": setup_context_string(setup_context, "setupProfileHash")?,
-        "qShareHash": setup_context_string(setup_context, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": setup_context_string(
-            setup_context,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": setup_context_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": setup_context_string(setup_context, "setupParametersHash")?,
         "setupEpoch": setup_context_string(setup_context, "setupEpoch")?,
         "phaseOrderHash": phase_order_hash()?,
         "publicMatrixSeedHash": public_matrix_seed_hash,
@@ -1183,7 +1140,6 @@ fn private_vss_envelope_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("privateVssEnvelopeDelivery"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

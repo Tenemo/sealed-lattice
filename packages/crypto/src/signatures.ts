@@ -11,7 +11,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import { canonicalJson } from './canonical-json.js';
-import { deriveProtocolHash } from './hashes.js';
+import { deriveCanonicalObjectHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
 const mlDsaContextByteLimit = 255;
@@ -20,7 +20,6 @@ const mlDsa65PublicKeyByteLength = ml_dsa65.lengths.publicKey!;
 const mlDsa65SignatureByteLength = ml_dsa65.lengths.signature!;
 
 export type SignatureExpectation = {
-    readonly allowUnboundVerification?: boolean;
     readonly objectType?: SignedObjectType;
     readonly objectVersion?: number;
     readonly signerRole?: SignerRole;
@@ -42,7 +41,7 @@ const emptySignatureVerificationResult = (
     message: string,
     objectHash?: ProtocolHash,
 ): SignatureVerificationResult => ({
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects: [
         {
@@ -56,7 +55,7 @@ const emptySignatureVerificationResult = (
 const successfulSignatureVerification = (
     signatureHash: ProtocolHash,
 ): SignatureVerificationResult => ({
-    ok: true,
+    isValid: true,
     acceptedHashes: [signatureHash],
     refusedObjects: [],
 });
@@ -122,7 +121,8 @@ export const deriveMlDsaPublicKeyHash = (
         'publicKeyBytesHex',
     );
 
-    return deriveProtocolHash('PublicKeyHash', {
+    return deriveCanonicalObjectHash({
+        objectType: 'MlDsaPublicKeyHash',
         algorithm: 'ML-DSA-65',
         publicKeyBytesHex,
     });
@@ -131,7 +131,8 @@ export const deriveMlDsaPublicKeyHash = (
 export const deriveProtocolSignatureHash = (
     signature: Omit<ProtocolSignatureEnvelope, 'signatureHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('ProtocolSignatureEnvelopeHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ProtocolSignatureEnvelope',
         profile: signature.profile,
         publicKeyBytesHex: signature.publicKeyBytesHex,
         publicKeyHash: signature.publicKeyHash,
@@ -160,30 +161,10 @@ const validateProfile = (
             signature.signatureHash,
         );
     }
-    if (
-        signature.profile.providerName.length === 0 ||
-        signature.profile.providerVersion.length === 0 ||
-        !isProtocolHashString(signature.profile.providerBuildHash) ||
-        signature.profile.fips204Version.length === 0 ||
-        signature.profile.errataStatus.length === 0
-    ) {
-        return emptySignatureVerificationResult(
-            'InvalidSignature',
-            'Signature profile metadata must be fully bound with canonical provider build material.',
-            signature.signatureHash,
-        );
-    }
     if (byteLength > mlDsaContextByteLimit) {
         return emptySignatureVerificationResult(
             'InvalidMlDsaContext',
             'ML-DSA context strings must be at most 255 bytes.',
-            signature.signatureHash,
-        );
-    }
-    if (signature.profile.contextStringByteLength !== byteLength) {
-        return emptySignatureVerificationResult(
-            'InvalidMlDsaContext',
-            'ML-DSA context string byte length does not match the profile.',
             signature.signatureHash,
         );
     }
@@ -506,10 +487,7 @@ const verifySignedObjectSignatureInner = (
         return shapeFailure;
     }
 
-    if (
-        expectation.allowUnboundVerification !== true &&
-        !hasExplicitSignatureExpectationBinding(expectation)
-    ) {
+    if (!hasExplicitSignatureExpectationBinding(expectation)) {
         return emptySignatureVerificationResult(
             'InvalidSignedRoot',
             'Signature verification requires explicit expectation bindings.',

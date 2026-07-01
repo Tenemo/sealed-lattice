@@ -2,6 +2,8 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn same_secret_proofs_object(
     package: &serde_json::Value,
 ) -> serde_json::Value {
@@ -13,7 +15,7 @@ pub(in super::super) fn same_secret_proofs_object(
         .as_array()
         .expect("same-secret statement records");
     let participant_count = participant_count_from_package(package);
-    let per_trustee_records = (0..participant_count)
+    let proof_records = (0..participant_count)
         .into_par_iter()
         .map(|trustee_roster_position| {
         let trustee_identity = format!("trustee-{trustee_roster_position}");
@@ -110,13 +112,11 @@ pub(in super::super) fn same_secret_proofs_object(
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
         };
-        let proof_randomness_seed_hex = derive_protocol_hash(
-            "SameSecretProofRoot",
-            &serde_json::json!({
-                "fixture": "same-secret-internal-proof-randomness",
-                "trusteeRosterPosition": trustee_roster_position,
-            }),
-        )
+        let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "SameSecretProofRoot",
+            "fixture": "same-secret-internal-proof-randomness",
+            "trusteeRosterPosition": trustee_roster_position,
+        }))
         .expect("same-secret proof randomness seed");
         let statement_hash_hex = to_hex(&statement.statement_hash());
         let proof_bytes = checkpointed_anchor_proof_bytes(
@@ -129,7 +129,6 @@ pub(in super::super) fn same_secret_proofs_object(
                 encode_trustee_evaluation_key_proof(&proof)
             },
         );
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
         let proof_bytes_hash =
             crate::bgv::setup::trustee_evaluation_key_proof::same_secret_anchor_proof_bytes_hash(
                 &proof_bytes,
@@ -137,18 +136,12 @@ pub(in super::super) fn same_secret_proofs_object(
         let mut proof_record = serde_json::json!({
             "objectType": "SameSecretProof",
             "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
-            "setupProofProfileId": "SealedLattice-SetupProof-v1",
             "proofFamily":
                 crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
             "ceremonyId": setup_context["ceremonyId"],
             "manifestHash": setup_context["manifestHash"],
             "rosterHash": setup_context["rosterHash"],
-            "setupProfileHash": setup_context["setupProfileHash"],
-            "qShareHash": setup_context["qShareHash"],
-            "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-            "commitmentProfileHash": setup_context["commitmentProfileHash"],
+            "setupParametersHash": setup_context["setupParametersHash"],
             "setupEpoch": setup_context["setupEpoch"],
             "trusteeIdentity": trustee_identity.as_str(),
             "trusteeRosterPosition": trustee_roster_position,
@@ -157,60 +150,39 @@ pub(in super::super) fn same_secret_proofs_object(
             "trusteeSecretCommitmentRoot": statement_record["trusteeSecretCommitmentRoot"],
             "sameSecretProofFamilyBindingRoot": statement_record["sameSecretProofFamilyBindingRoot"],
             "statementHash": statement_hash_hex,
-            "proofSizeBytes": proof_size_bytes,
             "proofBytesHash": proof_bytes_hash,
             "proofBytesHex": to_hex(&proof_bytes),
         });
         proof_record["sameSecretProofRoot"] = serde_json::json!(
-            derive_protocol_hash("SameSecretProofRoot", &proof_record)
+            derive_canonical_object_hash(&proof_record)
                 .expect("same-secret proof root")
         );
-        let proof_root_entry = serde_json::json!({
-            "trusteeIdentity": trustee_identity,
-            "trusteeRosterPosition": trustee_roster_position,
-            "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
-        });
-        terminal_phase(&format!("generated same-secret proof trustee {trustee_roster_position}"));
+        final_package_phase(&format!(
+            "generated same-secret proof trustee {trustee_roster_position}"
+        ));
 
-        (proof_root_entry, proof_record)
+        proof_record
         })
         .collect::<Vec<_>>();
-    let mut proof_records = Vec::new();
-    let mut same_secret_proof_roots = Vec::new();
-    for (proof_root_entry, proof_record) in per_trustee_records {
-        same_secret_proof_roots.push(proof_root_entry);
-        proof_records.push(proof_record);
-    }
     let mut proof_set = serde_json::json!({
         "objectType": "SameSecretProofSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "commitmentProfileId": "SealedLattice-BDLOP-Commitment-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily":
             crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
-        "proofAccountingHash":
-            crate::bgv::setup::trustee_evaluation_key_proof::succinct_same_secret_linkage_anchor_accounting_hash()
-                .expect("same-secret anchor accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "sameSecretConsistencyRoot": package["sameSecretConsistency"]["sameSecretConsistencyRoot"],
         "sameSecretProofFamilyBindingRoot": package["sameSecretConsistency"]["sameSecretProofFamilyBindingRoot"],
         "vssCoefficientCommitmentMaterialRoot": package["vssCoefficientCommitmentMaterial"]["vssCoefficientCommitmentMaterialRoot"],
-        "sameSecretProofRoots": same_secret_proof_roots,
         "proofRecords": proof_records,
     });
     proof_set["sameSecretProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("SameSecretProofRoot", &proof_set)
-            .expect("same-secret proof set root")
+        derive_canonical_object_hash(&proof_set).expect("same-secret proof set root")
     );
 
     proof_set

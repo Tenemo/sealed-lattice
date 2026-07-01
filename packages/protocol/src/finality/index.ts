@@ -64,12 +64,12 @@ const verifyTargetRecordShape = (
         electionManifestHash: checkpoint.electionManifestHash,
         encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
         evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
-        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        bgvParametersHash: checkpoint.bgvParametersHash,
         evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         targetCiphertextHash: checkpoint.targetCiphertextHash,
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
+        thresholdParametersHash: checkpoint.thresholdParametersHash,
         tiePolicyHash: checkpoint.tiePolicyHash,
         topOptionCount: checkpoint.topOptionCount,
     });
@@ -79,7 +79,7 @@ const verifyTargetRecordShape = (
         electionManifestHash: checkpoint.electionManifestHash,
         encryptedBallotAggregateHash: checkpoint.encryptedBallotAggregateHash,
         evaluatorReplayContextHash: checkpoint.evaluatorReplayContextHash,
-        evaluatorReplayProfileHash: checkpoint.evaluatorReplayProfileHash,
+        bgvParametersHash: checkpoint.bgvParametersHash,
         evaluatorReplayRecordHash: checkpoint.evaluatorReplayRecordHash,
         finalizedBoardHeadHash: checkpoint.finalizedBoardHeadHash,
         objectType: checkpoint.objectType,
@@ -88,7 +88,7 @@ const verifyTargetRecordShape = (
         targetFinalityPolicyHash: checkpoint.targetFinalityPolicyHash,
         targetLayoutHash: checkpoint.targetLayoutHash,
         targetProposalHash: checkpoint.targetProposalHash,
-        thresholdProfileHash: checkpoint.thresholdProfileHash,
+        thresholdParametersHash: checkpoint.thresholdParametersHash,
         tiePolicyHash: checkpoint.tiePolicyHash,
         topOptionCount: checkpoint.topOptionCount,
         witnessPolicyHash: checkpoint.witnessPolicyHash,
@@ -597,7 +597,7 @@ const verifyTargetFinalityUnchecked = (
         refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
-        ok: finalityAccepted,
+        isValid: finalityAccepted,
         acceptedHashes: finalityAccepted ? acceptedHashes : [],
         refusedObjects:
             forkEvidence === undefined
@@ -636,7 +636,7 @@ export const verifyTargetFinality = (
         return verifyTargetFinalityUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

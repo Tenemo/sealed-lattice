@@ -2,11 +2,11 @@
 
 > This project is under active implementation. It has not been audited or externally reviewed.
 
-[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![Documentation build](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/pages.yml?branch=master&label=docs&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/pages.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
+[![npm downloads](https://img.shields.io/npm/dm/sealed-lattice?color=5FA04E)](https://www.npmjs.com/package/sealed-lattice) [![CI](https://img.shields.io/github/actions/workflow/status/Tenemo/sealed-lattice/ci.yml?branch=master&label=tests&color=5FA04E)](https://github.com/Tenemo/sealed-lattice/actions/workflows/ci.yml) [![License](https://img.shields.io/github/license/Tenemo/sealed-lattice?color=5FA04E)](LICENSE)
 
 `sealed-lattice` is a browser-first, mobile-first, post-quantum threshold homomorphic voting library workspace. Every roster participant is intended to act as both voter and trustee. Untrusted services may store and distribute transcript objects, but the verification path is participant mobile browsers, not servers or dedicated heavy verifier machines.
 
-The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. It is not a complete voting library and must not be used for real ballots or ballot secrecy. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
+The published npm package is intentionally narrow while the protocol implementation is still being built and checked. Use it for development verification, package integration, transcript helpers, and foundation checks. The canonical public security posture lives in [SECURITY.md](SECURITY.md).
 
 ## Selected direction
 
@@ -18,17 +18,21 @@ active-static secure-with-abort collective BGV setup
 -> ballot validity proofs for the fixed encrypted-ballot relation
 -> public ciphertext aggregation
 -> bounded-domain encrypted evaluator replay on mobile
--> unanimous target finality for the first profile
+-> target finality for the selected target
 -> one-shot target-bound threshold decryption of C_target only
 ```
 
-The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. Current security limitations, profile caveats, HE evidence, and target-decryption boundaries are not repeated here; see [SECURITY.md](SECURITY.md).
+The first target profile is planned around `n = 10`, `m = 20`, every `1 <= K_top <= 20`, `q_setup_complete = 10`, `q_ballot_release = 10`, `q_final = 10`, and `q_dec = 4`. The current target-finality verifier is a 5-of-7 witness-checkpoint shell; trustee-finality and target-decryption certification remain downstream. Current security limitations, profile caveats, HE evidence, and target-decryption boundaries are not repeated here; see [SECURITY.md](SECURITY.md).
 
 ## Current package boundary
 
-The public package currently exposes development verification helpers while the full voting API is being built and checked. These cover poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and narrow setup-development verification helpers. Reserved complete-protocol entry points fail closed until the matching implementation and verification work is complete.
+The public package currently exposes helpers for poll validation, threshold derivation, lifecycle and capability checks, foundation transcript checks, and setup-development verification.
 
-Current package tests are development evidence only. They do not replace supported mobile runtime evidence, production hardening, or the complete protocol security boundary in [SECURITY.md](SECURITY.md).
+Threshold derivation is a helper, not a security certificate. The first target profile above is the only current setup/evaluator evidence profile; other roster sizes returned by helper APIs need their own profile evidence, runtime measurements, and security review before they carry a security or mobile claim.
+
+The first setup/evaluator boundary is implemented as development verification evidence for the first profile. Its public verifier requires externally supplied manifest and setup-roster hashes, verifies the active-static setup package, VSS acceptances, public key, evaluation keys, proof/key transport, and setup/evaluator HE boundary, and returns an accepted setup handoff for downstream development work. The missing public workflow pieces are listed below; security caveats and audit status live in [SECURITY.md](SECURITY.md).
+
+Package tests are development evidence. Read [SECURITY.md](SECURITY.md) before treating any result as security evidence.
 
 ## Installation
 
@@ -43,7 +47,7 @@ pnpm add sealed-lattice
 ## Basic usage
 
 ```typescript
-import { deriveThresholdProfile, validatePollSpec } from "sealed-lattice";
+import { deriveThresholdParameters, validatePollSpec } from "sealed-lattice";
 
 const pollValidation = validatePollSpec({
     pollId: "board-election-2026",
@@ -52,26 +56,26 @@ const pollValidation = validatePollSpec({
     topOptionCount: 1,
 });
 
-if (!pollValidation.ok) {
+if (!pollValidation.isValid) {
     throw new Error(
         pollValidation.errors[0]?.message ?? "Invalid poll specification.",
     );
 }
 
-const thresholdProfile = deriveThresholdProfile({
+const thresholdParameters = deriveThresholdParameters({
     rosterSize: 10,
 });
 ```
 
-`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdProfile` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
+`pollValidation.normalized` contains the validated poll with defaults applied. `thresholdParameters` contains the derived threshold, quorum, corruption-bound, and warning fields for the frozen roster size.
 
 ## What you can use today
 
 - poll specification validation and canonical hash derivation;
-- threshold and frozen roster profile derivation;
+- threshold and frozen roster parameter derivation;
 - lifecycle transition and action capability checks;
 - board consistency, cast receipt, close record, target finality, roster manifest, recovery epoch, first-valid ordering, and foundation transcript checks;
-- setup-development verification helpers for local share checks, setup package verification input construction, setup package verification, and accepted setup handoff handling;
+- setup-development verification helpers for local share checks, setup-roster hash derivation, setup package verification input construction, setup package verification, and accepted setup handoff consumption;
 - foundation transcript verification through the packaged kernel;
 - package-boundary and public API smoke coverage for development integration.
 
@@ -82,14 +86,14 @@ const thresholdProfile = deriveThresholdProfile({
 - public encrypted ballot package creation, verification, or accepted proof transport APIs;
 - public encrypted ballot aggregation APIs;
 - public bounded-domain mobile evaluator replay APIs;
-- production target-bound decryption, target recombination, or result release APIs;
-- production security claims; see [SECURITY.md](SECURITY.md).
+- target-bound decryption, target recombination, or result release APIs;
+- security claims beyond [SECURITY.md](SECURITY.md).
 
 The public package must not expose raw BGV decryption, arbitrary threshold decryption, individual ballot decryption, aggregate score decryption, rank or comparison opening, evaluator intermediate opening, raw VSS share export, secret-share export, ballot proof witness export, encryption randomness export, or test-only plaintext oracle access.
 
 ## Security
 
-Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, and cryptographic caveats.
+Read [SECURITY.md](SECURITY.md) before treating any verification result as security evidence. That file owns the public threat model, retry policy, audit status, unsupported-evidence rules, and cryptographic caveats.
 
 ## Repository layout
 
@@ -97,7 +101,6 @@ Read [SECURITY.md](SECURITY.md) before treating any verification result as secur
 sealed-lattice/
   crates/
     sealed-lattice-kernel/      Rust transcript-core and proof-verifier kernel
-  docs/                         Public documentation site and API documentation tools
   packages/
     crypto/                     Internal canonical JSON, hashes, signatures
     protocol/                   Internal protocol logic and reference paths
@@ -105,15 +108,8 @@ sealed-lattice/
     types/                      Shared TypeScript type declarations
     wasm/                       Internal WASM loader package
   test-vectors/                 Canonical public regression vectors
-  tools/                        CI, vector, packaging, and documentation tools
+  tools/                        CI and packaging tools
 ```
-
-## Documentation
-
-- [Documentation site](https://tenemo.github.io/sealed-lattice/)
-- [Guides](https://tenemo.github.io/sealed-lattice/guides/)
-- [Protocol spec](https://tenemo.github.io/sealed-lattice/spec/)
-- [API reference](https://tenemo.github.io/sealed-lattice/api/)
 
 ## Development
 
@@ -129,37 +125,27 @@ Run the main local validation gate:
 pnpm run check
 ```
 
-`pnpm run check` builds the workspace once, runs the type-check, then runs lint, docs verification, package smoke verification, public package policy verification, package-boundary verification, test vector verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the non-heavy kernel Node tests through the repository check runner.
+`pnpm run check` builds the workspace once, runs the type-check, then runs lint, package smoke verification, public package policy verification, test-lane coverage verification, package-boundary verification, dead-code scan, Rust formatting, Rust clippy, fast Rust kernel tests, fast Node tests, and the kernel-fast Node tests through the repository check runner.
 
 For public SDK API changes, run `pnpm run api-surface:generate` and review the compact summary diff manually in the PR. API surface review is not part of `pnpm run check`.
 
-Run focused verification:
+Common focused verification commands:
 
 ```bash
-pnpm run vectors
-pnpm run test:rust:kernel:heavy
+pnpm run test:rust:kernel
+pnpm run test:rust:kernel:accepted-setup
 pnpm run test:node:fast
 pnpm run test:node:protocol
 pnpm run test:node:kernel
-pnpm run test:node:kernel:heavy
 pnpm run test:node
 pnpm run test:browser
 pnpm run test:lattigo-oracle
-pnpm run verify:docs
 pnpm run smoke:pack:npm
 ```
 
-The native Rust heavy lane now has constrained free-runner-knob evidence. On
-June 21, 2026, `pnpm run test:rust:kernel:heavy -- --no-run-log` completed with
-`57 passed; 0 failed` under `CARGO_INCREMENTAL=0`, `RAYON_NUM_THREADS=4`,
-`SEALED_LATTICE_HEAVY_TEST_THREAD_COUNT=1`,
-`SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE=1`,
-`SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE=2`, and no checkpoint resume. The
-run finished in `17978.14s` and the measured process-tree peak RSS was
-`9.97 GiB`. This is native CI-runner setup/proof/key-transport evidence only; it
-is not browser, WASM, or supported-phone mobile runtime evidence.
+Use the narrower command that matches the component being changed. Accepted-setup proof lanes are maintainer evidence for setup/proof changes; they do not change the public boundary in [SECURITY.md](SECURITY.md).
 
-Keep default and release gates focused on the selected direct path and shared substrate. Heavy proof, browser, and mobile evidence lanes should be added only when they measure accepted direct-path evidence.
+Accepted-setup proof lanes default to accelerated local mode: incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode.
 
 Build and package-smoke the published SDK:
 

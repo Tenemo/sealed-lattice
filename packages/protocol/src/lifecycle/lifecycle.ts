@@ -12,39 +12,39 @@ const transitionMap = {
     votingOpen: ['votingClosed', 'forkDetected'],
     votingClosed: ['encryptedBallotsSelected', 'forkDetected'],
     encryptedBallotsSelected: [
-        'ballotProofsVerified',
+        'isBallotProofsVerified',
         'pending',
         'forkDetected',
     ],
-    ballotProofsVerified: [
-        'encryptedBallotAggregateComputed',
+    isBallotProofsVerified: [
+        'isEncryptedBallotAggregateComputed',
         'pending',
         'forkDetected',
     ],
-    encryptedBallotAggregateComputed: [
+    isEncryptedBallotAggregateComputed: [
         'evaluatorReplayed',
         'pending',
         'forkDetected',
     ],
     evaluatorReplayed: ['targetFinalityReached', 'pending', 'forkDetected'],
     targetFinalityReached: [
-        'targetAccepted',
-        'outsideSupportedProfile',
+        'isTargetAccepted',
+        'outsideSupportedParameters',
         'pending',
         'forkDetected',
     ],
-    targetAccepted: ['decryptionPending', 'forkDetected'],
+    isTargetAccepted: ['decryptionPending', 'forkDetected'],
     decryptionPending: ['decryptionSharesReady', 'pending', 'forkDetected'],
     decryptionSharesReady: [
         'resultDecoded',
-        'outsideSupportedProfile',
+        'outsideSupportedParameters',
         'pending',
         'forkDetected',
     ],
     resultDecoded: ['fullyVerified', 'pending', 'forkDetected'],
     fullyVerified: [],
     pending: [],
-    outsideSupportedProfile: [],
+    outsideSupportedParameters: [],
     forkDetected: [],
 } as const satisfies Record<LifecycleState, readonly LifecycleState[]>;
 

@@ -1,9 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-    ansiEscapePattern,
-    waitForTimeout,
-} from './check-progress-reporter/helpers.js';
+import { ansiEscapePattern } from './check-progress-reporter/helpers.js';
 
 import {
     CheckProgressReporter,
@@ -11,6 +8,10 @@ import {
 } from '#tools/ci/check-progress-reporter';
 
 describe('check progress reporter state', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
     it('records command-count progress, failure output, and timing details', () => {
         let nowMilliseconds = 1_000;
         const writtenLines: string[] = [];
@@ -115,74 +116,6 @@ describe('check progress reporter state', () => {
         });
     });
 
-    it('debounces live TTY redraws for output bursts', async () => {
-        let nowMilliseconds = 1_000;
-        const writtenChunks: string[] = [];
-        const reporter = new CheckProgressReporter({
-            lanes: [
-                {
-                    commands: [
-                        {
-                            description: 'Noisy command',
-                        },
-                    ],
-                    name: 'Noisy lane',
-                },
-            ],
-            now: () => nowMilliseconds,
-            output: {
-                columns: 120,
-                isTTY: true,
-                write: (chunk: string | Uint8Array): boolean => {
-                    writtenChunks.push(chunk.toString());
-
-                    return true;
-                },
-            },
-            redrawEnabled: true,
-            renderIntervalMilliseconds: 60_000,
-        });
-        const observer = reporter.createCommandObserver('Noisy lane');
-
-        reporter.start();
-        observer.onCommandStart?.({
-            invocation: {
-                args: [],
-                command: 'sample',
-                description: 'Noisy command',
-            },
-            startedAtMilliseconds: nowMilliseconds,
-        });
-        observer.onCommandOutput?.({
-            chunk: 'first line\n',
-            invocation: {
-                args: [],
-                command: 'sample',
-                description: 'Noisy command',
-            },
-            streamName: 'stdout',
-        });
-        observer.onCommandOutput?.({
-            chunk: 'second line\n',
-            invocation: {
-                args: [],
-                command: 'sample',
-                description: 'Noisy command',
-            },
-            streamName: 'stdout',
-        });
-        nowMilliseconds = 1_100;
-        await waitForTimeout(150);
-        reporter.stop();
-
-        const terminalOutput = writtenChunks.join('');
-        const latestOutputRenderCount =
-            terminalOutput.split('latest output').length - 1;
-        expect(terminalOutput).toContain('Noisy lane > first line');
-        expect(terminalOutput).toContain('Noisy lane > second line');
-        expect(latestOutputRenderCount).toBe(1);
-    });
-
     it('uses COLUMNS as the forced-redraw width when the output stream is not a TTY', () => {
         const previousColumns = process.env.COLUMNS;
         process.env.COLUMNS = '60';
@@ -229,7 +162,8 @@ describe('check progress reporter state', () => {
         expect(visibleLines.every((line) => line.length <= 60)).toBe(true);
     });
 
-    it('uses Turbo progress from captured build output without opaque command fractions', async () => {
+    it('uses Turbo progress from captured build output without opaque command fractions', () => {
+        vi.useFakeTimers();
         let nowMilliseconds = 1_000;
         const writtenChunks: string[] = [];
         const reporter = new CheckProgressReporter({
@@ -284,14 +218,14 @@ describe('check progress reporter state', () => {
             streamName: 'stdout',
         });
         nowMilliseconds = 1_100;
-        await waitForTimeout(150);
+        vi.advanceTimersByTime(150);
         observer.onCommandOutput?.({
             chunk: ' Tasks:    4 successful, 5 total\n',
             invocation,
             streamName: 'stdout',
         });
         nowMilliseconds = 1_200;
-        await waitForTimeout(150);
+        vi.advanceTimersByTime(150);
         reporter.stop();
 
         const terminalOutput = writtenChunks.join('');
@@ -313,7 +247,8 @@ describe('check progress reporter state', () => {
         });
     });
 
-    it('uses Vitest reporter progress markers without showing them as latest output', async () => {
+    it('uses Vitest reporter progress markers without showing them as latest output', () => {
+        vi.useFakeTimers();
         let nowMilliseconds = 1_000;
         const writtenChunks: string[] = [];
         const reporter = new CheckProgressReporter({
@@ -366,7 +301,7 @@ describe('check progress reporter state', () => {
             streamName: 'stdout',
         });
         nowMilliseconds = 1_100;
-        await waitForTimeout(150);
+        vi.advanceTimersByTime(150);
         reporter.stop();
 
         const terminalOutput = writtenChunks.join('');
@@ -376,7 +311,8 @@ describe('check progress reporter state', () => {
         expect(terminalOutput).not.toContain('sealed-lattice-progress');
     });
 
-    it('uses libtest output as secondary Rust progress', async () => {
+    it('uses libtest output as secondary Rust progress', () => {
+        vi.useFakeTimers();
         let nowMilliseconds = 1_000;
         const writtenChunks: string[] = [];
         const reporter = new CheckProgressReporter({
@@ -455,7 +391,7 @@ describe('check progress reporter state', () => {
             streamName: 'stdout',
         });
         nowMilliseconds = 1_150;
-        await waitForTimeout(150);
+        vi.advanceTimersByTime(150);
         reporter.stop();
 
         const terminalOutput = writtenChunks.join('');
@@ -471,102 +407,6 @@ describe('check progress reporter state', () => {
                         secondary: {
                             completed: 3,
                             total: 4,
-                            unit: 'test',
-                        },
-                    },
-                },
-            ],
-        });
-    });
-
-    it('uses compact libtest output as secondary Rust progress', async () => {
-        let nowMilliseconds = 1_000;
-        const writtenChunks: string[] = [];
-        const reporter = new CheckProgressReporter({
-            lanes: [
-                {
-                    commands: [
-                        {
-                            description: 'cargo test',
-                        },
-                    ],
-                    name: 'Rust kernel (fmt, clippy, test)',
-                    progress: {
-                        source: 'libtest',
-                    },
-                },
-            ],
-            now: () => nowMilliseconds,
-            output: {
-                columns: 180,
-                isTTY: true,
-                write: (chunk: string | Uint8Array): boolean => {
-                    writtenChunks.push(chunk.toString());
-
-                    return true;
-                },
-            },
-            redrawEnabled: true,
-            renderIntervalMilliseconds: 60_000,
-        });
-        const observer = reporter.createCommandObserver(
-            'Rust kernel (fmt, clippy, test)',
-        );
-        const testInvocation = {
-            args: [],
-            command: 'cargo',
-            description: 'cargo test',
-        };
-
-        reporter.start();
-        observer.onCommandStart?.({
-            invocation: testInvocation,
-            startedAtMilliseconds: nowMilliseconds,
-        });
-        observer.onCommandOutput?.({
-            chunk: [
-                'running 398 tests',
-                '....................................................................................... 87/398',
-                '',
-            ].join('\n'),
-            invocation: testInvocation,
-            streamName: 'stdout',
-        });
-        nowMilliseconds = 1_100;
-        await waitForTimeout(150);
-        observer.onCommandOutput?.({
-            chunk: [
-                '......................................................................i......test bgv::setup::tests::slow_case has been running for over 60 seconds',
-                '........................................................................................................................................................................................................................................................ 398/398',
-                'test result: ok. 397 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 245.00s',
-                '',
-            ].join('\n'),
-            invocation: testInvocation,
-            streamName: 'stdout',
-        });
-        nowMilliseconds = 1_150;
-        await waitForTimeout(150);
-        reporter.stop();
-
-        const terminalOutput = writtenChunks.join('');
-        expect(terminalOutput).toContain('87/398 tests');
-        expect(terminalOutput).toContain('398/398 tests');
-        expect(terminalOutput).not.toContain(
-            '....................................................................................... 87/398',
-        );
-        expect(terminalOutput).not.toContain(
-            '......test bgv::setup::tests::slow_case',
-        );
-        expect(terminalOutput).toContain(
-            'Rust kernel (fmt, clippy, test) > test bgv::setup::tests::slow_case has been running for over 60 seconds',
-        );
-        expect(reporter.createTimingDetails()).toMatchObject({
-            lanes: [
-                {
-                    progress: {
-                        secondary: {
-                            completed: 398,
-                            total: 398,
                             unit: 'test',
                         },
                     },

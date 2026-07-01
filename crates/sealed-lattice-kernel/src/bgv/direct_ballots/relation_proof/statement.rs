@@ -8,13 +8,9 @@ pub(super) fn direct_ballot_relation_statement_hash(
     let public_key_hash = direct_ballot_public_key_hash(evaluator_key)?;
     let statement_json = canonical_json(&json!({
         "objectType": "DirectEncryptedBallotValidityRelationStatement",
-        "objectVersion": 3,
+        "objectVersion": 4,
         "setupPackageHash": setup_package_hash(setup_package)?,
-        "profileId": PROFILE_ID,
-        "profileHash": profile_hash()?,
-        "polynomialDegree": POLYNOMIAL_DEGREE,
-        "plaintextModulus": PLAINTEXT_MODULUS,
-        "dataPrimeCount": DATA_PRIMES.len(),
+        "bgvParametersHash": bgv_parameters_hash()?,
         "publicKeyHash": to_hex(&public_key_hash),
         "ciphertextRoot": ballot.ciphertext_root.as_str(),
         "ciphertextCanonicalByteLength": ballot.ciphertext_canonical_byte_length,
@@ -26,7 +22,7 @@ pub(super) fn direct_ballot_relation_statement_hash(
     }))?;
 
     Ok(hash512(
-        "sealed-lattice/direct-encrypted-ballot/relation-statement-v3",
+        DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN,
         &[statement_json.as_bytes()],
     ))
 }

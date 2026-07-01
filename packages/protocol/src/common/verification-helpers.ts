@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ProtocolHash,
     ProtocolObjectType,
@@ -62,10 +62,10 @@ export const uniqueStrings = <StringValue extends string>(
 export const compareCanonicalStrings = (left: string, right: string): number =>
     left < right ? -1 : left > right ? 1 : 0;
 
-export const defaultSignedRootContextHash = deriveProtocolHash(
-    'ActionContextHash',
-    { context: 'default' },
-);
+export const defaultSignedRootContextHash = deriveCanonicalObjectHash({
+    objectType: 'ActionContext',
+    context: 'default',
+});
 
 // Fixed 64-byte (512-bit) length every signed object root must declare.
 export const signedObjectRootByteLength = 64;

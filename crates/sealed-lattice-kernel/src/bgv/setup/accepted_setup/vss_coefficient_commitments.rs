@@ -1,11 +1,12 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn verify_vss_coefficient_commitments(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(commitment_set) = setup_package.get("vssCoefficientCommitments") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitments".to_string()],
             Vec::new(),
@@ -70,25 +71,12 @@ pub(super) fn verify_vss_coefficient_commitments(
             "setupPackage.vssCoefficientCommitments.publicMatrixSeedHash",
         )?));
     }
-    if commitment_set
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Ok(Some(vss_commitment_refusal(
-            "vssCommitmentProfileHashMismatch",
-            "vssCoefficientCommitments.commitmentProfileHash must match the accepted setup commitment profile",
-            "setupPackage.vssCoefficientCommitments.commitmentProfileHash",
-        )?));
-    }
-
     let expected_trustees = expected_trustees_from_phase_transcript(setup_package)?;
     let Some(source_trustee_records) = commitment_set
         .get("sourceTrusteeRecords")
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitments.sourceTrusteeRecords".to_string()],
             Vec::new(),
@@ -122,7 +110,6 @@ pub(super) fn verify_vss_coefficient_commitments(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitments.vssCoefficientCommitmentRoot".to_string()],
             Vec::new(),
@@ -138,7 +125,7 @@ pub(super) fn verify_vss_coefficient_commitments(
         .as_object_mut()
         .expect("VSS commitment set object was checked")
         .remove("vssCoefficientCommitmentRoot");
-    let expected_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if commitment_root != expected_root {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentRootMismatch",
@@ -158,15 +145,12 @@ fn verify_vss_commitment_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if commitment_set.get(field_name) != setup_context.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("vssCoefficientCommitments.{field_name} must match setupContext"),
             ));
         }
@@ -180,7 +164,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
 ) -> CanonicalResult<Option<Value>> {
     let Some(material_set) = setup_package.get("vssCoefficientCommitmentMaterial") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec!["vssCoefficientCommitmentMaterial".to_string()],
             Vec::new(),
@@ -222,28 +205,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             "vssCoefficientCommitmentMaterialContextMismatch",
             error.message,
             "setupPackage.vssCoefficientCommitmentMaterial",
-        )?));
-    }
-    if material_set
-        .get("commitmentProfileId")
-        .and_then(Value::as_str)
-        != Some(SETUP_COMMITMENT_PROFILE_ID)
-    {
-        return Ok(Some(vss_material_refusal(
-            "vssCoefficientCommitmentMaterialProfileMismatch",
-            "vssCoefficientCommitmentMaterial.commitmentProfileId must match the accepted setup commitment profile",
-            "setupPackage.vssCoefficientCommitmentMaterial.commitmentProfileId",
-        )?));
-    }
-    if material_set
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Ok(Some(vss_material_refusal(
-            "vssCoefficientCommitmentMaterialProfileHashMismatch",
-            "vssCoefficientCommitmentMaterial.commitmentProfileHash must match the accepted setup commitment profile hash",
-            "setupPackage.vssCoefficientCommitmentMaterial.commitmentProfileHash",
         )?));
     }
     let material_encoding = material_set
@@ -315,7 +276,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
     {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialParticipantCountMismatch",
-            "vssCoefficientCommitmentMaterial.participantCount must match the accepted setup profile",
+            "vssCoefficientCommitmentMaterial.participantCount must match the accepted setup parameters",
             "setupPackage.vssCoefficientCommitmentMaterial.participantCount",
         )?));
     }
@@ -324,7 +285,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
     {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialThresholdMismatch",
-            "vssCoefficientCommitmentMaterial.thresholdDegree must match the accepted setup profile",
+            "vssCoefficientCommitmentMaterial.thresholdDegree must match the accepted setup parameters",
             "setupPackage.vssCoefficientCommitmentMaterial.thresholdDegree",
         )?));
     }
@@ -354,7 +315,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
             .and_then(Value::as_array)
         else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("vssCoefficientCommitments"),
                 vec!["vssCoefficientCommitmentMaterial.coefficientCommitments".to_string()],
                 Vec::new(),
@@ -384,7 +344,6 @@ pub(super) fn verify_vss_coefficient_commitment_material(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec![
                 "vssCoefficientCommitmentMaterial.vssCoefficientCommitmentMaterialRoot".to_string(),
@@ -402,7 +361,7 @@ pub(super) fn verify_vss_coefficient_commitment_material(
         .as_object_mut()
         .expect("VSS coefficient commitment material set object was checked")
         .remove("vssCoefficientCommitmentMaterialRoot");
-    let expected_root = derive_protocol_hash("VssCoefficientCommitmentMaterialRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if material_root != expected_root {
         return Ok(Some(vss_material_refusal(
             "vssCoefficientCommitmentMaterialRootMismatch",
@@ -420,7 +379,6 @@ fn vss_material_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssCoefficientCommitments"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -449,20 +407,12 @@ fn verify_binary_vss_material_transport_metadata(material_set: &Value) -> Canoni
             "binary VSS material transport metadata must be an object",
         ));
     }
-    if transport.get("transportProfileId").and_then(Value::as_str)
-        != Some(SETUP_TRANSPORT_PROFILE_ID)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "binary VSS material transportProfileId must match the accepted setup transport profile",
-        ));
-    }
     if transport.get("chunkSizeBytes").and_then(Value::as_u64)
         != Some(SETUP_TRANSPORT_CHUNK_SIZE_BYTES)
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "binary VSS material chunkSizeBytes must match the accepted setup transport profile",
+            "binary VSS material chunkSizeBytes must match the accepted setup transport parameters",
         ));
     }
     for field_name in ["chunkCount", "totalByteLength"] {
@@ -531,10 +481,7 @@ fn verify_vss_source_trustee_commitment_record(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if source_trustee_record.get(field_name) != setup_context.get(field_name) {
@@ -600,7 +547,6 @@ fn verify_vss_source_trustee_commitment_record(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec![
                 "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments".to_string(),
@@ -637,7 +583,6 @@ fn verify_vss_source_trustee_commitment_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssCoefficientCommitments"),
             vec![
                 "vssCoefficientCommitments.sourceTrusteeRecords.sourceTrusteeCommitmentRoot"
@@ -657,7 +602,7 @@ fn verify_vss_source_trustee_commitment_record(
         .as_object_mut()
         .expect("VSS source trustee commitment object was checked")
         .remove("sourceTrusteeCommitmentRoot");
-    let expected_root = derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if source_trustee_commitment_root != expected_root {
         return Ok(Some(vss_commitment_refusal(
             "vssSourceTrusteeCommitmentRootMismatch",
@@ -701,10 +646,7 @@ fn verify_vss_coefficient_commitment_record(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if coefficient_record.get(field_name) != setup_context.get(field_name) {
@@ -786,7 +728,7 @@ fn verify_vss_coefficient_commitment_record(
     if shamir_coefficient_index >= roster.decryption_threshold {
         return Ok(Some(vss_commitment_refusal(
             "vssCoefficientCommitmentShamirIndexInvalid",
-            "VSS coefficient commitment shamirCoefficientIndex is outside the first-profile threshold degree",
+            "VSS coefficient commitment shamirCoefficientIndex is outside the first-roster threshold degree",
             "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.shamirCoefficientIndex",
         )?));
     }
@@ -797,29 +739,24 @@ fn verify_vss_coefficient_commitment_record(
             "setupPackage.vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments",
         )?));
     }
-    for field_name in [
-        "commitmentRoot",
-        "commitmentChunkRoot",
-        "coefficientVectorHash512",
-    ] {
-        let Some(hash) = coefficient_record.get(field_name).and_then(Value::as_str) else {
-            return Ok(Some(verification_response(
-                VerifierStatus::Pending,
-                Some("vssCoefficientCommitments"),
-                vec![format!(
-                    "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
-                )],
-                Vec::new(),
-                Vec::new(),
-            )?));
-        };
-        validate_hash_string(
-            hash,
-            &format!(
-                "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.{field_name}"
-            ),
-        )?;
-    }
+    let Some(hash) = coefficient_record
+        .get("commitmentRoot")
+        .and_then(Value::as_str)
+    else {
+        return Ok(Some(verification_response(
+            Some("vssCoefficientCommitments"),
+            vec![
+                "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.commitmentRoot"
+                    .to_string(),
+            ],
+            Vec::new(),
+            Vec::new(),
+        )?));
+    };
+    validate_hash_string(
+        hash,
+        "vssCoefficientCommitments.sourceTrusteeRecords.coefficientCommitments.commitmentRoot",
+    )?;
 
     Ok(None)
 }
@@ -879,7 +816,6 @@ fn vss_commitment_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssCoefficientCommitments"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

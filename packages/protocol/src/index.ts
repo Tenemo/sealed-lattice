@@ -14,9 +14,11 @@ export {
     verifyRecoveryEpochUpdate,
 } from './recovery/index.js';
 export {
+    deriveCollectiveBgvSetupRosterHash,
     verifyRosterExternalAcceptance,
     verifyRosterManifestTranscript,
 } from './roster/index.js';
+export type { CollectiveBgvSetupRosterEntryInput } from './roster/index.js';
 export {
     createPrivateVssMailboxSourceTrusteeDeliveryReferences,
     createPrivateVssMailboxDeliverySet,
@@ -34,7 +36,6 @@ export {
     publicKeyShareMaterialBinaryFormat,
     publicKeyShareMaterialTransportEncoding,
     publicKeyShareMaterialEncoding,
-    publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
     materialRecordsFromTransportedPublicKeyShareMaterial,
 } from './setup/public-key-share-records.js';
@@ -55,12 +56,10 @@ export {
     createEvaluatorKeySchedule,
     createRelinearizationLevelSchedule,
     createRequiredGaloisSet,
-    evaluatorKeyGenericSwitchPolicy,
 } from './setup/evaluator-key-schedule.js';
 export {
-    acceptedBgvProfileRingDegree,
+    acceptedBgvFullRingDegree,
     acceptedBgvSetupQShare,
-    acceptedBgvSetupQShareHash,
     acceptedBgvSetupQSharePrimes,
     binaryVssCoefficientCommitmentMaterialByteLength,
     createBinaryChunkedVssCoefficientCommitmentBundle,
@@ -71,11 +70,10 @@ export {
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
-    setupCommitmentProfileId,
     setupCommitmentRandomnessWidth,
     setupCommitmentRootPayload,
     setupTransportChunkSizeBytes,
-    setupTransportProfileId,
+    setupTransportSchemeId,
     vssCoefficientCommitmentMaterialBinaryFormat,
 } from './setup/vss-coefficient-commitments.js';
 export {
@@ -85,8 +83,6 @@ export {
     decryptLocalTrusteeSetupState,
     encryptLocalTrusteeSetupState,
     localTrusteeSetupStateDeletionBoundary,
-    localTrusteeSetupStateExportPolicy,
-    localTrusteeSetupStateStorageProfile,
     retainedLocalTrusteeSetupMaterialClasses,
 } from './setup/local-trustee-setup-state.js';
 export {
@@ -110,13 +106,9 @@ export {
     createBinaryChunkedSameSecretProofMaterialTransport,
     createSameSecretProofSet,
     createSameSecretConsistencyStatementSet,
-    sameSecretAnchorArgument,
     sameSecretBoundProofFamilies,
-    sameSecretGenericKeySwitchBindingPolicy,
     sameSecretProofFamily,
     sameSecretRelation,
-    sameSecretTargetDecryptionBindingPolicy,
-    setupProofProfileId,
 } from './setup/same-secret-consistency-records.js';
 export {
     createVssComplaintSet,
@@ -212,7 +204,6 @@ export type {
     PublicKeyShareSuccinctProofByteMaterial,
     PublicKeyShareSuccinctProofMaterial,
     PublicKeyShareSuccinctProofRecord,
-    PublicKeyShareSuccinctProofRootReference,
     PublicKeyShareSuccinctProofSet,
     PublicKeyShareSuccinctProofSetInput,
     PublicKeyShareSuccinctTransportedProofBytes,
@@ -283,15 +274,12 @@ export type {
     SetupContributionAssemblyInput,
 } from './setup/setup-contribution-orchestration.js';
 export type {
-    BgvHeSecurityCertificate,
-    BgvRnsProfileForCertificates,
-    CollectiveBgvSetupProfileForCertificates,
+    BgvRnsParametersForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
     SetupCertificates,
     SetupCertificatesInput,
-    SetupCommitmentSecurityCertificate,
-    SetupProofAccountingCertificate,
     SetupTransportCertificate,
 } from './setup/setup-certificates.js';
 export type {
@@ -300,7 +288,6 @@ export type {
     SetupPackageInput,
     SetupPackageVerificationInput,
     SetupPackageVerificationInputSource,
-    SetupKeyCorrectnessCertificate,
 } from './setup/setup-package-assembly.js';
 export type {
     ThresholdShareCommitmentLimb,
@@ -317,12 +304,10 @@ export type {
     SameSecretProofByteMaterial,
     SameSecretProofMaterial,
     SameSecretProofRecord,
-    SameSecretProofRootReference,
     SameSecretProofSet,
     SameSecretProofSetInput,
     SameSecretTransportedProofBytes,
     TransportedSameSecretProofMaterialSet,
-    TrusteeSecretCommitmentRootReference,
 } from './setup/same-secret-consistency-records.js';
 export type {
     VerifiedSetupProofMaterial,
@@ -342,7 +327,7 @@ export type {
     VssShareComplaintRecordInput,
 } from './setup/vss-share-verification-records.js';
 export {
-    deriveFrozenRosterProfile,
-    deriveThresholdProfile,
-    deriveThresholdProfileHash,
+    deriveFrozenRosterParameters,
+    deriveThresholdParameters,
+    deriveThresholdParametersHash,
 } from './lifecycle/thresholds.js';

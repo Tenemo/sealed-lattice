@@ -5,21 +5,18 @@ use super::sharing::{
     RnsShamirShare, canonical_trustee_point, evaluate_shamir_polynomial,
     interpolate_shamir_constant_with_threshold,
 };
+use super::threshold_share_commitments::derive_threshold_share_commitments_from_transport_request;
 use super::validation::{validate_setup_package_internal_bindings, validate_setup_package_shape};
 use super::vss::{evaluate_unreduced_shamir_polynomial, verify_carry_aware_vss_share_opening};
 use super::{
-    DATA_PRIMES, PASSIVE_SETUP_PROFILE_ID, POLYNOMIAL_DEGREE,
-    abort_threshold_share_commitment_transport_derivation_stream_request,
+    DATA_PRIMES, POLYNOMIAL_DEGREE,
     absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
-    begin_threshold_share_commitment_transport_derivation_stream_request, data_basis_modulus_bits,
-    dense_centered_binomial_coefficients, derive_threshold_share_commitments_from_request,
-    derive_threshold_share_commitments_from_transport_request,
-    describe_collective_bgv_setup_profile, development_evaluator_key_from_passive_setup_package,
-    extended_basis_modulus_bits,
+    begin_threshold_share_commitment_transport_derivation_stream_request,
+    derive_threshold_share_commitments_from_request, describe_collective_bgv_setup_parameters,
+    development_evaluator_key_from_passive_setup_package,
     finish_threshold_share_commitment_transport_derivation_stream_request,
     generate_passive_setup_package_from_request, read_public_evaluation_key_rotation_requests,
-    release_verified_transported_vss_material_request, sample_public_residues,
-    selected_public_evaluation_key_rotation_requests,
+    sample_public_residues, selected_public_evaluation_key_rotation_requests,
     verify_local_trustee_setup_state_from_request, verify_passive_setup_package_from_request,
     verify_private_vss_share_envelope_from_request,
 };
@@ -35,7 +32,6 @@ use super::{
         PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
         verify_private_vss_share_succinct_relation_proof,
     },
-    trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash,
     vss::{CarryAwareVssCommitmentOpeningInput, verify_carry_aware_vss_commitment_opening},
 };
 use crate::bgv::evaluator::{
@@ -46,8 +42,8 @@ use crate::bgv::evaluator::{
 };
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
 use crate::bgv::ntt::forward_negacyclic_ntt;
-use crate::bgv::profile::PLAINTEXT_MODULUS;
-use crate::hashing::{derive_protocol_hash, hash512};
+use crate::bgv::parameters::PLAINTEXT_MODULUS;
+use crate::hashing::{derive_canonical_object_hash, hash512};
 use std::sync::OnceLock;
 
 mod accepted_setup;
@@ -63,8 +59,6 @@ mod vss_share_relation;
 
 type SetupPackageMutation = (&'static str, Box<dyn Fn(&mut serde_json::Value)>);
 
-const EXPECTED_PASSIVE_SETUP_TEST_PACKAGE_HASH: &str = "0afc588b05a79ca085f81bab52bfe3f2056ab36f7c53c29e8c8a77aa0d97bdb2753f496d78001e6af25a7626d4b9b0c2401934298b7f2fbf6e8d0d8337e101d6";
-
 static PASSIVE_SETUP_TEST_PACKAGE: OnceLock<serde_json::Value> = OnceLock::new();
 static PASSIVE_SETUP_TEST_EVALUATOR_KEY: OnceLock<DevelopmentBgvKey> = OnceLock::new();
 static PASSIVE_SETUP_LEVEL_ONE_PUBLIC_MATERIAL: OnceLock<serde_json::Value> = OnceLock::new();
@@ -75,17 +69,14 @@ static PASSIVE_SETUP_ROTATION_PUBLIC_CONTEXT: OnceLock<EvaluatorContext> = OnceL
 fn request() -> serde_json::Value {
     serde_json::json!({
         "ceremonyId": "ceremony-main",
-        "manifestHash": derive_protocol_hash(
-            "ElectionManifestHash",
-            &serde_json::json!({ "manifest": "passive-bgv-setup-test" }),
+        "manifestHash": derive_canonical_object_hash(
+            &serde_json::json!({ "objectType": "ElectionManifestHash", "manifest": "passive-bgv-setup-test" }),
         ).expect("manifest hash"),
-        "rosterHash": derive_protocol_hash(
-            "RosterHash",
-            &serde_json::json!({ "roster": "passive-bgv-setup-test" }),
+        "rosterHash": derive_canonical_object_hash(
+            &serde_json::json!({ "objectType": "RosterHash", "roster": "passive-bgv-setup-test" }),
         ).expect("roster hash"),
-        "thresholdProfileHash": derive_protocol_hash(
-            "ThresholdProfileHash",
-            &serde_json::json!({ "threshold": "passive-bgv-setup-test" }),
+        "thresholdParametersHash": derive_canonical_object_hash(
+            &serde_json::json!({ "objectType": "ThresholdParametersHash", "threshold": "passive-bgv-setup-test" }),
         ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
@@ -111,10 +102,8 @@ fn rebind_setup_package_hash(package: &mut serde_json::Value) {
         .as_object_mut()
         .expect("setup package must be an object")
         .remove("setupPackageHash");
-    package["setupPackageHash"] = serde_json::json!(
-        derive_protocol_hash("BGVPassiveSetupPackageHash", &hash_input)
-            .expect("setup package hash")
-    );
+    package["setupPackageHash"] =
+        serde_json::json!(derive_canonical_object_hash(&hash_input).expect("setup package hash"));
 }
 
 fn valid_hash(fill: char) -> String {
@@ -259,8 +248,7 @@ fn rebind_public_evaluation_key_material_hash(material: &mut serde_json::Value) 
         .expect("public evaluation-key material must be an object")
         .remove("publicEvaluationKeyMaterialHash");
     material["publicEvaluationKeyMaterialHash"] = serde_json::json!(
-        derive_protocol_hash("EvaluationKeySetHash", material)
-            .expect("public evaluation-key material hash")
+        derive_canonical_object_hash(material).expect("public evaluation-key material hash")
     );
 }
 
@@ -303,10 +291,4 @@ fn assert_setup_package_payload_is_rejected(
             .is_err(),
         "{mutation_description} should be rejected"
     );
-}
-
-fn centered_binomial_eta2_value_from_byte(byte: u8) -> i64 {
-    i64::from(byte & 1) + i64::from((byte >> 1) & 1)
-        - i64::from((byte >> 2) & 1)
-        - i64::from((byte >> 3) & 1)
 }

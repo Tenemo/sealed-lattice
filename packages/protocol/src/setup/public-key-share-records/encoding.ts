@@ -1,30 +1,19 @@
 import { hash512Hex } from '@sealed-lattice/crypto';
 
-import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
+import { assertProtocolHash } from '../common-fields.js';
 
 import {
     publicKeyShareCoefficientVectorHashDomain,
     type PublicKeyShareSetInput,
 } from './constants-and-types.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
-const contextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
-    'setupEpoch',
-] as const;
 
-export const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
+export {
+    assertContextMatches,
+    assertProtocolHash,
+    contextFields,
+} from '../common-fields.js';
 
 export const assertLowercaseHexBytes = (
     value: string,
@@ -164,34 +153,6 @@ export const coefficientVectorHash512 = (
 export const coefficientVectorToLittleEndianHex = (
     coefficients: readonly number[],
 ): string => bytesToHex(coefficientVectorBytes(coefficients));
-
-export const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<CollectiveBgvSetupContext, (typeof contextFieldNames)[number]> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-export const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
-    }
-};
 
 export const sortedByRosterPosition = <
     RecordValue extends { readonly trusteeRosterPosition: number },

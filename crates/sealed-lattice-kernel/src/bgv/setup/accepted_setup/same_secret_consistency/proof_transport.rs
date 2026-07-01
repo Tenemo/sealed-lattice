@@ -1,5 +1,11 @@
 use super::*;
 
+use crate::bgv::setup::setup_proof::{
+    setup_proof_record_has_transport_reference, transported_setup_proof_material_chunks,
+    verify_setup_proof_record_transport_reference, verify_transported_setup_proof_material_hashes,
+};
+use crate::hashing::derive_canonical_object_hash;
+
 use crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY;
 
 pub(super) fn same_secret_proof_bytes_from_record(
@@ -7,18 +13,7 @@ pub(super) fn same_secret_proof_bytes_from_record(
     request: &Value,
 ) -> CanonicalResult<Vec<u8>> {
     let has_embedded_proof_bytes = proof_record.get("proofBytesHex").is_some();
-    let has_transport_reference = [
-        "proofBytesEncoding",
-        "proofMaterialRoot",
-        "proofChunkSizeBytes",
-        "proofChunkCount",
-        "proofTotalByteLength",
-        "proofFullObjectHash",
-        "proofChunkRoot",
-        "proofChunkHashes",
-    ]
-    .iter()
-    .any(|field_name| proof_record.get(*field_name).is_some());
+    let has_transport_reference = setup_proof_record_has_transport_reference(proof_record);
 
     if has_embedded_proof_bytes && has_transport_reference {
         return Err(CanonicalError::new(
@@ -81,117 +76,34 @@ pub(in crate::bgv::setup) fn same_secret_anchor_proof_material_root(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SameSecretLinkageAnchorProofMaterialRoot",
-        &json!({
-            "objectType": "SameSecretLinkageAnchorProofMaterialReference",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "statementHash": value_string(proof_record, "statementHash")?,
-            "proofSizeBytes": value_u64(proof_record, "proofSizeBytes")?,
-            "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "SameSecretLinkageAnchorProofMaterialReference",
+        "objectVersion": 1,
+        "proofFamily": SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY,
+        "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
+        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+        "statementHash": value_string(proof_record, "statementHash")?,
+        "proofBytesHash": value_string(proof_record, "proofBytesHash")?,
+        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    }))
 }
 
 fn verify_same_secret_proof_transport_reference(
     proof_record: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    if value_u64(proof_record, "proofChunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofChunkSizeBytes must match the setup proof transport profile",
-        ));
-    }
-    let expected_chunk_count =
-        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "same-secret proof material chunk count does not fit u64",
-            )
-        })?;
-    if value_u64(proof_record, "proofChunkCount")? != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofChunkCount must match transported proof chunks",
-        ));
-    }
-    if value_u64(proof_record, "proofTotalByteLength")? != transport_hashes.total_byte_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofTotalByteLength must match transported proof chunks",
-        ));
-    }
-    if value_u64(proof_record, "proofSizeBytes")? != transport_hashes.total_byte_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofSizeBytes must match transported proof byte length",
-        ));
-    }
-    if value_string(proof_record, "proofFullObjectHash")?
-        != transport_hashes.full_object_hash.as_str()
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofFullObjectHash must match transported proof chunks",
-        ));
-    }
-    if value_string(proof_record, "proofChunkRoot")? != transport_hashes.chunk_root.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofChunkRoot must match the canonical proof chunk manifest",
-        ));
-    }
-    let Some(chunk_hash_values) = proof_record
-        .get("proofChunkHashes")
-        .and_then(Value::as_array)
-    else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofChunkHashes must list every transported proof chunk",
-        ));
-    };
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofChunkHashes length must match transported proof chunks",
-        ));
-    }
-    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-        .enumerate()
-    {
-        let Some(chunk_hash) = chunk_hash_value.as_str() else {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("same-secret proofChunkHashes[{chunk_index}] must be a hash string"),
-            ));
-        };
-        validate_hash_string(
-            chunk_hash,
-            &format!("sameSecretProof.proofChunkHashes[{chunk_index}]"),
-        )?;
-        if chunk_hash != expected_chunk_hash {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "same-secret proofChunkHashes must match transported proof chunks",
-            ));
-        }
-    }
-
-    Ok(())
+    verify_setup_proof_record_transport_reference(
+        proof_record,
+        transport_hashes,
+        "same-secret",
+        "same-secret",
+        "sameSecretProof",
+    )
 }
 
 fn transported_same_secret_proof_material_chunks(
@@ -257,8 +169,6 @@ fn transported_same_secret_proof_material_chunks(
 fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -281,8 +191,6 @@ fn verify_transported_same_secret_proof_material_set_header(value: &Value) -> Ca
 fn verify_transported_same_secret_proof_material_header(value: &Value) -> CanonicalResult<()> {
     for (field_name, expected_value) in [
         ("objectType", SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -309,90 +217,20 @@ fn verify_transported_same_secret_proof_material_header(value: &Value) -> Canoni
 }
 
 fn transported_same_secret_proof_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
-    if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof material chunkSizeBytes must match the setup proof transport profile",
-        ));
-    }
-    let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "transported same-secret proof material chunkCount does not fit usize",
-        )
-    })?;
-    let Some(chunk_values) = value.get("chunks").and_then(Value::as_array) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof material chunks are required",
-        ));
-    };
-    if chunk_values.len() != expected_chunk_count {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof material chunks length must match chunkCount",
-        ));
-    }
-    let mut chunks = Vec::with_capacity(expected_chunk_count);
-    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
-        let observed_chunk_index = value_u64(chunk_value, "chunkIndex")?;
-        if observed_chunk_index != expected_chunk_index as u64 {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported same-secret proof chunks must be supplied in ascending chunk-index order",
-            ));
-        }
-        chunks.push(decode_hex(value_string(chunk_value, "bytesHex")?)?);
-    }
-
-    Ok(chunks)
+    transported_setup_proof_material_chunks(
+        value,
+        "transported same-secret proof material",
+        "transported same-secret proof",
+    )
 }
 
 fn verify_transported_same_secret_proof_material_hashes(
     value: &Value,
     transport_hashes: &super::setup_proof::SetupProofMaterialTransportHashes,
 ) -> CanonicalResult<()> {
-    if value_u64(value, "totalByteLength")? != transport_hashes.total_byte_length {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof totalByteLength must match supplied chunks",
-        ));
-    }
-    if value_string(value, "fullObjectHash")? != transport_hashes.full_object_hash.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof fullObjectHash must match supplied chunks",
-        ));
-    }
-    if value_string(value, "chunkRoot")? != transport_hashes.chunk_root.as_str() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof chunkRoot must match supplied chunks",
-        ));
-    }
-    let Some(chunk_hash_values) = value.get("chunkHashes").and_then(Value::as_array) else {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof chunkHashes are required",
-        ));
-    };
-    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "transported same-secret proof chunkHashes length must match supplied chunks",
-        ));
-    }
-    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
-        .iter()
-        .zip(transport_hashes.chunk_hashes.iter())
-    {
-        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "transported same-secret proof chunkHashes must match supplied chunks",
-            ));
-        }
-    }
-
-    Ok(())
+    verify_transported_setup_proof_material_hashes(
+        value,
+        transport_hashes,
+        "transported same-secret proof",
+    )
 }

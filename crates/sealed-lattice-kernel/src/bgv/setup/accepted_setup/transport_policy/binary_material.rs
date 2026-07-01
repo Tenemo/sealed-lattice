@@ -1,5 +1,5 @@
-use super::certificate::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(super) fn verify_binary_vss_material_transport_reference(
     setup_package: &Value,
@@ -38,17 +38,6 @@ pub(super) fn verify_binary_vss_material_transport_reference(
             "setupPackage.vssCoefficientCommitmentMaterial.transport",
         )));
     };
-    if transport_object
-        .get("transportProfileId")
-        .and_then(Value::as_str)
-        != Some(SETUP_TRANSPORT_PROFILE_ID)
-    {
-        return Ok(Err(Refusal::new(
-            "vssMaterialTransportReferenceProfileMismatch",
-            "vssCoefficientCommitmentMaterial.transport.transportProfileId must match the setup transport profile",
-            "setupPackage.vssCoefficientCommitmentMaterial.transport.transportProfileId",
-        )));
-    }
     for (field_name, expected_value) in [
         ("chunkSizeBytes", SETUP_TRANSPORT_CHUNK_SIZE_BYTES),
         ("chunkCount", expected_chunk_count),
@@ -97,18 +86,6 @@ pub(super) fn verify_binary_vss_material_transport_reference(
     }
 
     Ok(Ok(()))
-}
-
-pub(super) fn transport_chunk_hashes(
-    transport_certificate: &Value,
-    expected_chunk_count: usize,
-) -> CanonicalResult<Result<Vec<String>, Refusal>> {
-    transport_hashes_at(
-        transport_certificate,
-        "chunkHashes",
-        expected_chunk_count,
-        "setupPackage.setupTransportCertificate",
-    )
 }
 
 pub(super) fn transport_hashes_at(
@@ -214,43 +191,6 @@ pub(super) fn setup_transport_expected_hash_array(
     Ok(chunk_hashes)
 }
 
-pub(super) fn setup_transport_full_object_set_hash(
-    transported_objects: &[SetupTransportedObjectBinding],
-    total_byte_length: u64,
-    chunk_count: u64,
-    chunk_hashes: &[String],
-) -> CanonicalResult<String> {
-    let transported_object_values = transported_objects
-        .iter()
-        .map(|transported_object| {
-            json!({
-                "objectName": transported_object.object_name,
-                "objectRole": transported_object.object_role,
-                "objectRoot": transported_object.object_root,
-                "byteLength": transported_object.byte_length,
-                "chunkStartIndex": transported_object.chunk_start_index,
-                "chunkCount": transported_object.chunk_count,
-                "chunkRoot": transported_object.chunk_root,
-                "fullObjectHash": transported_object.full_object_hash,
-            })
-        })
-        .collect::<Vec<_>>();
-
-    derive_protocol_hash(
-        "SetupTransportFullObjectSetHash",
-        &json!({
-            "objectType": "SetupTransportFullObjectSet",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
-            "transportedObjects": transported_object_values,
-            "totalByteLength": total_byte_length,
-            "chunkCount": chunk_count,
-            "chunkHashes": chunk_hashes,
-        }),
-    )
-}
-
 pub(in super::super) fn setup_transport_chunk_manifest_root(
     chunk_size_bytes: u64,
     chunk_count: u64,
@@ -258,20 +198,15 @@ pub(in super::super) fn setup_transport_chunk_manifest_root(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &json!({
-            "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
 }
 
 pub(in super::super) fn setup_transport_vss_material_byte_length_for_roster(

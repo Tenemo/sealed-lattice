@@ -9,7 +9,7 @@ pub(in super::super) const SAME_SECRET_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
 pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "public-key-share-proof-material";
 // The trustee evaluation-key family also persists transported proof material
-// under `trustee-evaluation-key-proof-material` during the terminal-transport
+// under `trustee-evaluation-key-proof-material` during the final-package transport
 // flow. This sibling directory is the statement-keyed raw-proof store used by the
 // non-transport container build that the heavy accepted-setup tests consume,
 // which never enters the transported-material resume path.
@@ -20,9 +20,7 @@ fn anchor_proof_checkpoint_path(
     family_directory: &str,
     statement_hash_hex: &str,
 ) -> std::path::PathBuf {
-    std::path::PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
+    crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
         .join(family_directory)
         .join(format!("{statement_hash_hex}.bin"))
 }
@@ -39,12 +37,12 @@ pub(in super::super) fn checkpointed_anchor_proof_bytes(
     statement_hash_hex: &str,
     generate_proof_bytes: impl FnOnce() -> Vec<u8>,
 ) -> Vec<u8> {
-    if !terminal_accepted_setup_checkpoint_resume_enabled() {
+    if !final_package_checkpoint_resume_enabled() {
         return generate_proof_bytes();
     }
     let path = anchor_proof_checkpoint_path(family_directory, statement_hash_hex);
     if let Ok(proof_bytes) = std::fs::read(&path) {
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "resumed {family_directory} proof checkpoint {statement_hash_hex}"
         ));
         return proof_bytes;
@@ -78,7 +76,7 @@ fn persist_anchor_proof_checkpoint(
     }
 }
 
-pub(in super::super) fn terminal_accepted_setup_checkpoint_resume_enabled() -> bool {
+pub(in super::super) fn final_package_checkpoint_resume_enabled() -> bool {
     matches!(
         std::env::var("SEALED_LATTICE_RESUME_TEST_CHECKPOINTS").as_deref(),
         Ok("1")

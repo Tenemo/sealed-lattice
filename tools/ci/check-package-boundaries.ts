@@ -27,11 +27,6 @@ const testVectorsDirectoryPath = path.resolve(workspaceRoot, 'test-vectors');
 const testsDirectoryPath = path.resolve(workspaceRoot, 'tests');
 const testSupportDirectoryPath = path.resolve(testsDirectoryPath, 'support');
 const toolsDirectoryPath = path.resolve(workspaceRoot, 'tools');
-const typedocToolsDirectoryPath = path.resolve(
-    workspaceRoot,
-    'docs',
-    'typedoc',
-);
 const packageSourceExtensions = ['.ts', '.tsx', '.mts', '.cts'] as const;
 const repositoryImportPolicyExtensions = [
     '.ts',
@@ -355,7 +350,6 @@ const collectRepositoryImportPolicyFiles = async (
 
     await addFiles(testsDirectoryPath);
     await addFiles(toolsDirectoryPath);
-    await addFiles(typedocToolsDirectoryPath);
 
     return [...filePaths].sort();
 };

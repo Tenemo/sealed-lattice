@@ -14,7 +14,7 @@ const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const verifyBoardConsistency =
     publicApiRuntimeRecord.verifyBoardConsistency as VerifyBoardConsistency;
 const requiredPublicFunctionNames = [
-    'deriveThresholdProfile',
+    'deriveThresholdParameters',
     'validatePollSpec',
     'evaluateActionCapability',
     'deriveValidatedFirstValidOrder',

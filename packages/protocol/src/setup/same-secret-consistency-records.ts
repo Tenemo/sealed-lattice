@@ -1,18 +1,20 @@
-import {
-    deriveProtocolHash,
-    hash512Hex,
-    setupProofMaterialFullObjectHashHex,
-} from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    setupProofChunkManifestRoot,
-    setupProofMaterialChunkHash,
-    setupProofTransportChunkSizeBytes,
+    assertContextMatches,
+    assertProtocolHash,
+    contextFields,
+} from './common-fields.js';
+import {
+    setupProofMaterialRecordTransportFields,
+    setupProofMaterialReferenceFields,
+    setupProofMaterialTransportChunks,
+    setupProofMaterialTransportMetadata,
+    setupTransportedProofMaterialFields,
     type TransportedSetupProofMaterialSet,
 } from './setup-proof-material-transport.js';
 import {
-    setupCommitmentProfileId,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VssCoefficientCommitmentRecord,
     type VssCoefficientCommitmentSet,
@@ -22,25 +24,17 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 
 type JsonRecord = Record<string, unknown>;
 
-export const setupProofProfileId = 'SealedLattice-SetupProof-v1';
 export const sameSecretProofFamily = 'same-secret-linkage-anchor';
 const sameSecretAnchorProofBytesHashDomain =
     'sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1';
 export const sameSecretRelation =
     'vss-constant-commitments-open-to-one-short-secret-across-q-share-limbs';
-export const sameSecretAnchorArgument =
-    'one keyless succinct linkage proof per trustee; secret-dependent families bind the anchor root and open the same commitment values';
 export const sameSecretBoundProofFamilies = [
     'vss-constant-relation',
     'public-key-share',
     'relinearization-key-share',
     'galois-key-share',
 ] as const;
-
-export const sameSecretGenericKeySwitchBindingPolicy =
-    'absent-unless-frozen-schedule-requires-proof-family';
-export const sameSecretTargetDecryptionBindingPolicy =
-    'later-target-share-must-bind-threshold-share-commitment';
 
 export type SameSecretConstantCoefficientCommitmentRoot = Readonly<{
     readonly rnsLimbIndex: number;
@@ -49,19 +43,10 @@ export type SameSecretConstantCoefficientCommitmentRoot = Readonly<{
     readonly commitmentRoot: ProtocolHash;
 }>;
 
-export type TrusteeSecretCommitmentRootReference = Readonly<{
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly trusteeSecretCommitmentRoot: ProtocolHash;
-}>;
-
 export type SameSecretConsistencyStatementRecord = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretConsistencyStatement';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
@@ -69,8 +54,6 @@ export type SameSecretConsistencyStatementRecord = Readonly<
         readonly constantCoefficientCommitmentRoots: readonly SameSecretConstantCoefficientCommitmentRoot[];
         readonly trusteeSecretCommitmentRoot: ProtocolHash;
         readonly boundSecretDependentProofFamilies: typeof sameSecretBoundProofFamilies;
-        readonly genericKeySwitchBindingPolicy: typeof sameSecretGenericKeySwitchBindingPolicy;
-        readonly targetDecryptionBindingPolicy: typeof sameSecretTargetDecryptionBindingPolicy;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly sameSecretRelation: typeof sameSecretRelation;
         readonly sameSecretStatementRoot: ProtocolHash;
@@ -81,16 +64,12 @@ export type SameSecretConsistencyStatementSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretConsistencyStatementSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly thresholdDegree: number;
         readonly vssCoefficientCommitmentRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
-        readonly trusteeSecretCommitmentRoots: readonly TrusteeSecretCommitmentRootReference[];
         readonly statementRecords: readonly SameSecretConsistencyStatementRecord[];
         readonly sameSecretConsistencyRoot: ProtocolHash;
     }
@@ -117,12 +96,10 @@ export type SameSecretProofByteMaterial =
 
 export type SameSecretProofMaterial = Readonly<
     SameSecretProofByteMaterial & {
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
         readonly trusteeIdentity: string;
         readonly trusteeRosterPosition: number;
         readonly statementHash: ProtocolHash;
-        readonly proofSizeBytes: number;
         readonly proofBytesHash: ProtocolHash;
     }
 >;
@@ -132,9 +109,6 @@ export type SameSecretProofRecord = Readonly<
         SameSecretProofByteMaterial & {
             readonly objectType: 'SameSecretProof';
             readonly objectVersion: 1;
-            readonly setupProfileId: 'CollectiveBgvSetup-v1';
-            readonly commitmentProfileId: typeof setupCommitmentProfileId;
-            readonly setupProofProfileId: typeof setupProofProfileId;
             readonly proofFamily: typeof sameSecretProofFamily;
             readonly trusteeIdentity: string;
             readonly trusteeRosterPosition: number;
@@ -143,33 +117,21 @@ export type SameSecretProofRecord = Readonly<
             readonly trusteeSecretCommitmentRoot: ProtocolHash;
             readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
             readonly statementHash: ProtocolHash;
-            readonly proofSizeBytes: number;
             readonly proofBytesHash: ProtocolHash;
             readonly sameSecretProofRoot: ProtocolHash;
         }
 >;
 
-export type SameSecretProofRootReference = Readonly<{
-    readonly trusteeIdentity: string;
-    readonly trusteeRosterPosition: number;
-    readonly sameSecretProofRoot: ProtocolHash;
-}>;
-
 export type SameSecretProofSet = Readonly<
     JsonRecord & {
         readonly objectType: 'SameSecretProofSet';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly commitmentProfileId: typeof setupCommitmentProfileId;
-        readonly setupProofProfileId: typeof setupProofProfileId;
         readonly proofFamily: typeof sameSecretProofFamily;
-        readonly proofAccountingHash: ProtocolHash;
         readonly participantCount: number;
         readonly rnsLimbCount: number;
         readonly sameSecretConsistencyRoot: ProtocolHash;
         readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
         readonly vssCoefficientCommitmentMaterialRoot: ProtocolHash;
-        readonly sameSecretProofRoots: readonly SameSecretProofRootReference[];
         readonly proofRecords: readonly SameSecretProofRecord[];
         readonly sameSecretProofSetRoot: ProtocolHash;
     }
@@ -189,7 +151,6 @@ export type SameSecretProofSetInput = {
     readonly participantCount: number;
     readonly sameSecretConsistency: SameSecretConsistencyStatementSet;
     readonly vssCoefficientCommitmentMaterial: SetupPackageVssCoefficientCommitmentMaterialSet;
-    readonly proofAccountingHash: ProtocolHash;
     readonly proofMaterials: readonly SameSecretProofMaterial[];
 };
 
@@ -205,18 +166,7 @@ export type BinaryChunkedSameSecretProofMaterialTransport = Readonly<{
     readonly transportedSameSecretProofMaterial: TransportedSameSecretProofMaterialSet;
 }>;
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const lowercaseHexPattern = /^(?:[0-9a-f]{2})*$/u;
-const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
-    'setupEpoch',
-] as const;
 
 const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
     if (!Number.isSafeInteger(value) || value <= 0) {
@@ -232,12 +182,6 @@ const assertNonNegativeSafeInteger = (
         throw new TypeError(
             `${fieldName} must be a non-negative safe integer.`,
         );
-    }
-};
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 };
 
@@ -261,40 +205,6 @@ const bytesFromHex = (hex: string, fieldName: string): Uint8Array => {
     }
 
     return bytes;
-};
-
-const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
-    }
 };
 
 const validateInput = (input: SameSecretConsistencyStatementSetInput): void => {
@@ -321,11 +231,6 @@ const validateSameSecretProofMaterial = (
     material: SameSecretProofMaterial,
     fieldName: string,
 ): void => {
-    if (material.setupProofProfileId !== setupProofProfileId) {
-        throw new Error(
-            `${fieldName}.setupProofProfileId must match setup proof profile.`,
-        );
-    }
     if (material.proofFamily !== sameSecretProofFamily) {
         throw new Error(
             `${fieldName}.proofFamily must be the same-secret linkage anchor family.`,
@@ -340,10 +245,6 @@ const validateSameSecretProofMaterial = (
         `${fieldName}.trusteeRosterPosition`,
     );
     assertProtocolHash(material.statementHash, `${fieldName}.statementHash`);
-    assertPositiveSafeInteger(
-        material.proofSizeBytes,
-        `${fieldName}.proofSizeBytes`,
-    );
     assertProtocolHash(material.proofBytesHash, `${fieldName}.proofBytesHash`);
     const proofBytesHex = (material as JsonRecord).proofBytesHex;
     if (proofBytesHex !== undefined) {
@@ -351,11 +252,6 @@ const validateSameSecretProofMaterial = (
             throw new TypeError(`${fieldName}.proofBytesHex must be a string.`);
         }
         assertLowercaseHexBytes(proofBytesHex, `${fieldName}.proofBytesHex`);
-        if (proofBytesHex.length / 2 !== material.proofSizeBytes) {
-            throw new Error(
-                `${fieldName}.proofBytesHex must match proofSizeBytes.`,
-            );
-        }
     } else {
         const transportedMaterial = material as SameSecretTransportedProofBytes;
         if (
@@ -382,13 +278,6 @@ const validateSameSecretProofMaterial = (
             transportedMaterial.proofTotalByteLength,
             `${fieldName}.proofTotalByteLength`,
         );
-        if (
-            transportedMaterial.proofTotalByteLength !== material.proofSizeBytes
-        ) {
-            throw new Error(
-                `${fieldName}.proofTotalByteLength must match proofSizeBytes.`,
-            );
-        }
         assertProtocolHash(
             transportedMaterial.proofFullObjectHash,
             `${fieldName}.proofFullObjectHash`,
@@ -456,7 +345,6 @@ const validateProofSetInput = (input: SameSecretProofSetInput): void => {
             'vssCoefficientCommitmentMaterial must match the same-secret statement set.',
         );
     }
-    assertProtocolHash(input.proofAccountingHash, 'proofAccountingHash');
 };
 
 const sortedSourceTrusteeRecords = (
@@ -544,9 +432,6 @@ const trusteeSecretCommitmentPayload = (
 ): JsonRecord => ({
     objectType: 'TrusteeSecretCommitment',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    commitmentProfileId: setupCommitmentProfileId,
-    setupProofProfileId,
     ...contextFields(setupContext),
     trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
     trusteeRosterPosition: sourceTrusteeRecord.sourceTrusteeRosterPosition,
@@ -558,32 +443,20 @@ const trusteeSecretCommitmentPayload = (
 const sameSecretProofFamilyBindingPayload = (): JsonRecord => ({
     objectType: 'SameSecretProofFamilyBinding',
     objectVersion: 1,
-    setupProfileId: 'CollectiveBgvSetup-v1',
-    setupProofProfileId,
     proofFamily: sameSecretProofFamily,
     sameSecretRelation,
-    anchorArgument: sameSecretAnchorArgument,
     boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-    genericKeySwitchBindingPolicy: sameSecretGenericKeySwitchBindingPolicy,
-    targetDecryptionBindingPolicy: sameSecretTargetDecryptionBindingPolicy,
 });
 
 const sameSecretProofFamilyBindingRoot = (): ProtocolHash =>
-    deriveProtocolHash(
-        'SameSecretProofFamilyBindingRoot',
-        sameSecretProofFamilyBindingPayload(),
-    );
+    deriveCanonicalObjectHash(sameSecretProofFamilyBindingPayload());
 
 const createStatementRecord = (
     setupContext: CollectiveBgvSetupContext,
     sourceTrusteeRecord: VssSourceTrusteeCoefficientCommitmentRecord,
     constantRoots: readonly SameSecretConstantCoefficientCommitmentRoot[],
-): {
-    readonly statementRecord: SameSecretConsistencyStatementRecord;
-    readonly trusteeSecretCommitmentRootReference: TrusteeSecretCommitmentRootReference;
-} => {
-    const trusteeSecretCommitmentRoot = deriveProtocolHash(
-        'TrusteeSecretCommitmentRoot',
+): SameSecretConsistencyStatementRecord => {
+    const trusteeSecretCommitmentRoot = deriveCanonicalObjectHash(
         trusteeSecretCommitmentPayload(
             setupContext,
             sourceTrusteeRecord,
@@ -594,9 +467,6 @@ const createStatementRecord = (
     const statementRecordWithoutRoot = {
         objectType: 'SameSecretConsistencyStatement',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        commitmentProfileId: setupCommitmentProfileId,
-        setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ...contextFields(setupContext),
         trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
@@ -606,31 +476,19 @@ const createStatementRecord = (
         constantCoefficientCommitmentRoots: constantRoots,
         trusteeSecretCommitmentRoot,
         boundSecretDependentProofFamilies: sameSecretBoundProofFamilies,
-        genericKeySwitchBindingPolicy: sameSecretGenericKeySwitchBindingPolicy,
-        targetDecryptionBindingPolicy: sameSecretTargetDecryptionBindingPolicy,
         sameSecretProofFamilyBindingRoot: proofFamilyBindingRoot,
         sameSecretRelation,
     } as const satisfies Omit<
         SameSecretConsistencyStatementRecord,
         'sameSecretStatementRoot'
     >;
-    const statementRecord = {
+
+    return {
         ...statementRecordWithoutRoot,
-        sameSecretStatementRoot: deriveProtocolHash(
-            'SameSecretConsistencyRoot',
+        sameSecretStatementRoot: deriveCanonicalObjectHash(
             statementRecordWithoutRoot,
         ),
     } satisfies SameSecretConsistencyStatementRecord;
-
-    return {
-        statementRecord,
-        trusteeSecretCommitmentRootReference: {
-            trusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
-            trusteeRosterPosition:
-                sourceTrusteeRecord.sourceTrusteeRosterPosition,
-            trusteeSecretCommitmentRoot,
-        },
-    };
 };
 
 export const createSameSecretConsistencyStatementSet = (
@@ -638,7 +496,7 @@ export const createSameSecretConsistencyStatementSet = (
 ): SameSecretConsistencyStatementSet => {
     validateInput(input);
     const proofFamilyBindingRoot = sameSecretProofFamilyBindingRoot();
-    const statementOutputs = sortedSourceTrusteeRecords(input).map(
+    const statementRecords = sortedSourceTrusteeRecords(input).map(
         (sourceTrusteeRecord) =>
             createStatementRecord(
                 input.setupContext,
@@ -652,9 +510,6 @@ export const createSameSecretConsistencyStatementSet = (
     const statementSetWithoutRoot = {
         objectType: 'SameSecretConsistencyStatementSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        commitmentProfileId: setupCommitmentProfileId,
-        setupProofProfileId,
         proofFamily: sameSecretProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -663,12 +518,7 @@ export const createSameSecretConsistencyStatementSet = (
         vssCoefficientCommitmentRoot:
             input.vssCoefficientCommitments.vssCoefficientCommitmentRoot,
         sameSecretProofFamilyBindingRoot: proofFamilyBindingRoot,
-        trusteeSecretCommitmentRoots: statementOutputs.map(
-            (output) => output.trusteeSecretCommitmentRootReference,
-        ),
-        statementRecords: statementOutputs.map(
-            (output) => output.statementRecord,
-        ),
+        statementRecords,
     } as const satisfies Omit<
         SameSecretConsistencyStatementSet,
         'sameSecretConsistencyRoot'
@@ -676,8 +526,7 @@ export const createSameSecretConsistencyStatementSet = (
 
     return {
         ...statementSetWithoutRoot,
-        sameSecretConsistencyRoot: deriveProtocolHash(
-            'SameSecretConsistencyRoot',
+        sameSecretConsistencyRoot: deriveCanonicalObjectHash(
             statementSetWithoutRoot,
         ),
     } satisfies SameSecretConsistencyStatementSet;
@@ -810,9 +659,6 @@ export const createSameSecretProofSet = (
             const proofRecordWithoutRoot = {
                 objectType: 'SameSecretProof',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                commitmentProfileId: setupCommitmentProfileId,
-                setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: statementRecord.trusteeIdentity,
@@ -825,7 +671,6 @@ export const createSameSecretProofSet = (
                 sameSecretProofFamilyBindingRoot:
                     statementRecord.sameSecretProofFamilyBindingRoot,
                 statementHash: proofMaterial.statementHash,
-                proofSizeBytes: proofMaterial.proofSizeBytes,
                 proofBytesHash: proofMaterial.proofBytesHash,
                 ...sameSecretProofByteMaterial(proofMaterial),
             } as const satisfies Omit<
@@ -835,8 +680,7 @@ export const createSameSecretProofSet = (
 
             return {
                 ...proofRecordWithoutRoot,
-                sameSecretProofRoot: deriveProtocolHash(
-                    'SameSecretProofRoot',
+                sameSecretProofRoot: deriveCanonicalObjectHash(
                     proofRecordWithoutRoot,
                 ),
             } satisfies SameSecretProofRecord;
@@ -845,11 +689,7 @@ export const createSameSecretProofSet = (
     const proofSetWithoutRoot = {
         objectType: 'SameSecretProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        commitmentProfileId: setupCommitmentProfileId,
-        setupProofProfileId,
         proofFamily: sameSecretProofFamily,
-        proofAccountingHash: input.proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -860,20 +700,12 @@ export const createSameSecretProofSet = (
         vssCoefficientCommitmentMaterialRoot:
             input.vssCoefficientCommitmentMaterial
                 .vssCoefficientCommitmentMaterialRoot,
-        sameSecretProofRoots: proofRecords.map((proofRecord) => ({
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            sameSecretProofRoot: proofRecord.sameSecretProofRoot,
-        })),
         proofRecords,
     } as const satisfies Omit<SameSecretProofSet, 'sameSecretProofSetRoot'>;
 
     return {
         ...proofSetWithoutRoot,
-        sameSecretProofSetRoot: deriveProtocolHash(
-            'SameSecretProofRoot',
-            proofSetWithoutRoot,
-        ),
+        sameSecretProofSetRoot: deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies SameSecretProofSet;
 };
 
@@ -901,11 +733,6 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                 proofBytesHex,
                 `proofMaterials.${String(proofIndex)}.proofBytesHex`,
             );
-            if (proofMaterial.proofSizeBytes !== proofBytes.byteLength) {
-                throw new Error(
-                    `proofMaterials.${String(proofIndex)}.proofSizeBytes must match proofBytesHex.`,
-                );
-            }
             const expectedProofBytesHash = hash512Hex(
                 sameSecretAnchorProofBytesHashDomain,
                 [proofBytes],
@@ -915,96 +742,40 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
                     `proofMaterials.${String(proofIndex)}.proofBytesHash must match proofBytesHex before transport.`,
                 );
             }
-            const chunks: Uint8Array[] = [];
-            for (
-                let chunkStart = 0;
-                chunkStart < proofBytes.byteLength;
-                chunkStart += setupProofTransportChunkSizeBytes
-            ) {
-                chunks.push(
-                    proofBytes.slice(
-                        chunkStart,
-                        Math.min(
-                            chunkStart + setupProofTransportChunkSizeBytes,
-                            proofBytes.byteLength,
-                        ),
-                    ),
-                );
-            }
-            if (chunks.length === 0) {
-                throw new Error(
-                    `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
-                );
-            }
-            const totalByteLength = proofBytes.byteLength;
-            const fullObjectHash = setupProofMaterialFullObjectHashHex(
+            const proofMaterialTransport = setupProofMaterialTransportMetadata(
                 sameSecretProofFamily,
-                totalByteLength,
-                chunks,
+                proofBytes,
+                `proofMaterials.${String(proofIndex)}.proofBytesHex must produce at least one transported chunk.`,
             );
-            const chunkHashes = chunks.map((chunk, chunkIndex) =>
-                setupProofMaterialChunkHash(
-                    sameSecretProofFamily,
-                    fullObjectHash,
-                    chunkIndex,
-                    chunk,
-                ),
-            );
-            const chunkRoot = setupProofChunkManifestRoot(
-                sameSecretProofFamily,
-                chunkHashes,
-                fullObjectHash,
-                totalByteLength,
-            );
-            const proofMaterialRoot = deriveProtocolHash(
-                'SameSecretLinkageAnchorProofMaterialRoot',
-                {
-                    objectType: 'SameSecretLinkageAnchorProofMaterialReference',
-                    objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
-                    proofFamily: sameSecretProofFamily,
-                    trusteeIdentity: proofMaterial.trusteeIdentity,
-                    trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
-                    statementHash: proofMaterial.statementHash,
-                    proofSizeBytes: proofMaterial.proofSizeBytes,
-                    proofBytesHash: proofMaterial.proofBytesHash,
-                    chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                    chunkCount: chunkHashes.length,
-                    totalByteLength,
-                    fullObjectHash,
-                    chunkRoot,
-                    chunkHashes,
-                },
-            );
+            const proofMaterialRoot = deriveCanonicalObjectHash({
+                objectType: 'SameSecretLinkageAnchorProofMaterialReference',
+                objectVersion: 1,
+                proofFamily: sameSecretProofFamily,
+                trusteeIdentity: proofMaterial.trusteeIdentity,
+                trusteeRosterPosition: proofMaterial.trusteeRosterPosition,
+                statementHash: proofMaterial.statementHash,
+                proofBytesHash: proofMaterial.proofBytesHash,
+                ...setupProofMaterialReferenceFields(proofMaterialTransport),
+            });
             transportedProofMaterials.push({
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: sameSecretProofFamily,
-                proofMaterialRoot,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: chunkHashes.length,
-                totalByteLength,
-                fullObjectHash,
-                chunkHashes,
-                chunkRoot,
-                chunks: chunks.map((chunk, chunkIndex) => ({
-                    chunkIndex,
-                    bytesHex: bytesToHex(chunk),
-                })),
+                ...setupTransportedProofMaterialFields(
+                    proofMaterialTransport,
+                    proofMaterialRoot,
+                ),
+                chunks: setupProofMaterialTransportChunks(
+                    proofMaterialTransport,
+                ),
             });
             const transportedMaterial = {
                 ...materialRecord,
-                proofBytesEncoding: 'binary-chunked-proof-bytes',
-                proofMaterialRoot,
-                proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-                proofChunkCount: chunkHashes.length,
-                proofTotalByteLength: totalByteLength,
-                proofFullObjectHash: fullObjectHash,
-                proofChunkRoot: chunkRoot,
-                proofChunkHashes: chunkHashes,
+                ...setupProofMaterialRecordTransportFields(
+                    proofMaterialTransport,
+                    proofMaterialRoot,
+                    'binary-chunked-proof-bytes',
+                ),
             } as JsonRecord;
             delete transportedMaterial.proofBytesHex;
 
@@ -1017,8 +788,6 @@ export const createBinaryChunkedSameSecretProofMaterialTransport = (
         transportedSameSecretProofMaterial: {
             objectType: 'SetupTransportedSameSecretProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: sameSecretProofFamily,
             proofMaterials: transportedProofMaterials,
         },

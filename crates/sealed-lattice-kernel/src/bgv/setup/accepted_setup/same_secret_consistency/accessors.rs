@@ -368,7 +368,7 @@ pub(in super::super) fn same_secret_statement_bindings_from_package(
             .is_some()
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "same-secret statement records contain a duplicate roster position",
             ));
         }

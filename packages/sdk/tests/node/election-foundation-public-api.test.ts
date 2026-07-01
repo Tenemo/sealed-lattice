@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import * as publicApiRuntime from '../../dist/index.js';
 
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import {
     createFoundationTranscriptCoreFixture,
     createFoundationTranscriptFixture,
@@ -19,31 +20,39 @@ type VerifyFoundationTranscript = (
 type VerifyTranscriptCoreFixture = (
     fixture: TranscriptCoreFixture,
 ) => Promise<TranscriptCoreVerificationResult>;
-type VerifyTranscript = () => {
-    readonly ok: boolean;
-    readonly refusedObjects: readonly {
-        readonly code: string;
-    }[];
-};
+type DeriveCollectiveBgvSetupRosterHash = (
+    entries: readonly Readonly<{
+        readonly rosterPosition: number;
+        readonly trusteeIdentity: string;
+        readonly signingPublicKeyHash: string;
+    }>[],
+) => string;
 
 const publicApiRuntimeRecord = publicApiRuntime as Record<string, unknown>;
 const verifyFoundationTranscript =
     publicApiRuntimeRecord.verifyFoundationTranscript as VerifyFoundationTranscript;
 const verifyTranscriptCoreFixture =
     publicApiRuntimeRecord.verifyTranscriptCoreFixture as VerifyTranscriptCoreFixture;
-const verifyTranscript =
-    publicApiRuntimeRecord.verifyTranscript as VerifyTranscript;
+const deriveCollectiveBgvSetupRosterHash =
+    publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash as DeriveCollectiveBgvSetupRosterHash;
 
 const requiredPublicFunctions = [
     [
-        'deriveFrozenRosterProfile',
-        publicApiRuntimeRecord.deriveFrozenRosterProfile,
+        'deriveCollectiveBgvSetupRosterHash',
+        publicApiRuntimeRecord.deriveCollectiveBgvSetupRosterHash,
+    ],
+    [
+        'deriveFrozenRosterParameters',
+        publicApiRuntimeRecord.deriveFrozenRosterParameters,
     ],
     ['derivePollSpecHash', publicApiRuntimeRecord.derivePollSpecHash],
-    ['deriveThresholdProfile', publicApiRuntimeRecord.deriveThresholdProfile],
     [
-        'deriveThresholdProfileHash',
-        publicApiRuntimeRecord.deriveThresholdProfileHash,
+        'deriveThresholdParameters',
+        publicApiRuntimeRecord.deriveThresholdParameters,
+    ],
+    [
+        'deriveThresholdParametersHash',
+        publicApiRuntimeRecord.deriveThresholdParametersHash,
     ],
     [
         'deriveValidatedFirstValidOrder',
@@ -83,7 +92,6 @@ const requiredPublicFunctions = [
     ],
     ['verifyFoundationTranscript', verifyFoundationTranscript],
     ['verifyTargetFinality', publicApiRuntimeRecord.verifyTargetFinality],
-    ['verifyTranscript', verifyTranscript],
     [
         'verifyTranscriptCoreFixture',
         publicApiRuntimeRecord.verifyTranscriptCoreFixture,
@@ -117,20 +125,11 @@ describe('election foundation public package API in Node', () => {
         }
     });
 
-    it('keeps reserved transcript verification fail closed', () => {
-        expect(verifyTranscript()).toMatchObject({
-            ok: false,
-            refusedObjects: [
-                expect.objectContaining({ code: 'OperationUnavailable' }),
-            ],
-        });
-    });
-
     it('verifies the deterministic foundation transcript through the public package', () => {
         const fixture = createFoundationTranscriptFixture();
         const verification = verifyFoundationTranscript(fixture.input);
 
-        expect(verification.ok).toBe(true);
+        expect(verification.isValid).toBe(true);
         expect(verification.electionManifestHash).toBe(
             fixture.expectedHashes.electionManifestHash,
         );
@@ -166,6 +165,43 @@ describe('election foundation public package API in Node', () => {
         );
     });
 
+    it('derives the setup roster hash used by setup package verification', () => {
+        const expectedSetupRosterHash = deriveCanonicalObjectHash({
+            objectType: 'CollectiveBgvSetupRoster',
+            rosterEntries: [
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+                {
+                    objectType: 'CollectiveBgvSetupRosterEntry',
+                    objectVersion: 1,
+                    rosterPosition: 1,
+                    trusteeIdentity: 'trustee-1',
+                    signingPublicKeyHash: 'b'.repeat(128),
+                },
+            ],
+        });
+
+        expect(
+            deriveCollectiveBgvSetupRosterHash([
+                {
+                    rosterPosition: 1,
+                    trusteeIdentity: 'trustee-1',
+                    signingPublicKeyHash: 'b'.repeat(128),
+                },
+                {
+                    rosterPosition: 0,
+                    trusteeIdentity: 'trustee-0',
+                    signingPublicKeyHash: 'a'.repeat(128),
+                },
+            ]),
+        ).toBe(expectedSetupRosterHash);
+    });
+
     it('matches foundation roots through the packaged transcript-core WASM verifier', async () => {
         const fixture = createFoundationTranscriptFixture();
         const transcriptCoreFixture = createFoundationTranscriptCoreFixture(
@@ -176,7 +212,7 @@ describe('election foundation public package API in Node', () => {
         );
 
         expect(transcriptCoreVerification).toMatchObject({
-            ok: true,
+            isValid: true,
             caseName: 'foundation-transcript-roots',
             objectHash512: transcriptCoreFixture.expectedObjectHash512,
             chunkRoot: transcriptCoreFixture.expectedChunkRoot,

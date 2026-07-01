@@ -1,7 +1,6 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 
 import {
@@ -15,14 +14,9 @@ import {
     textEncoder,
 } from './constants-and-types.js';
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const lowercaseHexPattern = /^[0-9a-f]+$/u;
 
-export const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
+export { assertProtocolHash } from '../common-fields.js';
 
 export const assertPositiveSafeInteger = (
     value: number,
@@ -253,11 +247,9 @@ export const evaluationKeyShareComponentVectorRoot = (
     ringDegree: number,
     componentVectors: readonly JsonRecord[],
 ): ProtocolHash =>
-    deriveProtocolHash('EvaluationKeyShareComponentVectorRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentVectorSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily,
         keySwitchDomain,
         keySwitchSeedHex,
@@ -320,23 +312,17 @@ export const evaluationKeyShareComponentMaterialTransportHashes = (
             chunk,
         ),
     );
-    const chunkRoot = deriveProtocolHash(
-        'EvaluationKeyShareComponentMaterialChunkRoot',
-        {
-            objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
-            proofFamily,
-            keySwitchMaterialEncoding:
-                evaluationKeyShareComponentMaterialEncoding,
-            chunkSizeBytes: setupProofTransportChunkSizeBytes,
-            chunkCount: chunkHashes.length,
-            totalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        },
-    );
+    const chunkRoot = deriveCanonicalObjectHash({
+        objectType: 'EvaluationKeyShareComponentMaterialChunkManifest',
+        objectVersion: 1,
+        proofFamily,
+        keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
+        chunkSizeBytes: setupProofTransportChunkSizeBytes,
+        chunkCount: chunkHashes.length,
+        totalByteLength,
+        chunkHashes,
+        fullObjectHash,
+    });
 
     return {
         fullObjectHash,
@@ -354,11 +340,9 @@ export const evaluationKeyShareComponentMaterialReferenceRoot = (
     level: number,
     transportHashes: ComponentMaterialTransportHashes,
 ): ProtocolHash =>
-    deriveProtocolHash('EvaluationKeyShareComponentMaterialRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'EvaluationKeyShareComponentMaterialReference',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily,
         keySwitchMaterialEncoding: evaluationKeyShareComponentMaterialEncoding,
         trusteeIdentity,

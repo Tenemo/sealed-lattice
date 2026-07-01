@@ -23,9 +23,9 @@
 // integer-bound across limb fields by a two-prime lift, and every theorem row
 // carries its closure argument with one explicitly named conjecture (the CS25
 // entropy-capacity FRI proximity-gap bound; see accounting.rs for the 2026
-// Option B re-basing off the disproved up-to-capacity conjecture), classical
-// Fiat-Shamir accounting, reference-only QROM rows, and a bounded-leakage
-// smudging scope rather than 128-bit zero-knowledge.
+// Option B re-basing off the disproved up-to-capacity conjecture), CMS19 QROM
+// accounting at the achieved setup-proof level, and a bounded-leakage smudging
+// scope rather than 128-bit zero-knowledge.
 //
 // Argument shape per limb field F_{q_l} (one trace commitment and one batched
 // FRI instance per limb, shared by every listed key):
@@ -53,18 +53,8 @@ mod prover;
 mod relation;
 mod verifier;
 
-pub(crate) use commands::{
-    generate_trustee_evaluation_key_proof_from_request,
-    verify_trustee_evaluation_key_proof_from_request,
-};
+pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 
-pub(in crate::bgv::setup) use accounting::{
-    succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
-    succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
-    succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
-    succinct_same_secret_linkage_anchor_accounting_hash,
-    succinct_same_secret_linkage_anchor_accounting_value,
-};
 pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
@@ -128,7 +118,7 @@ pub(in crate::bgv::setup) fn private_vss_share_succinct_proof_bytes_hash(
 
 // Each logical length-N witness vector is split into TRACE_SPLIT physical
 // columns over a trace domain of size N / TRACE_SPLIT. The split frees domain
-// headroom under the guaranteed 2-adicity of the profile primes (2^16 divides
+// headroom under the guaranteed 2-adicity of the BGV primes (2^16 divides
 // q - 1): the extension coset is DOMAIN_BLOWUP times the trace, and committed
 // columns claim degree below COMMITMENT_BOUND_FACTOR times the trace, so the
 // batched FRI still runs at rate 1/2 while masked columns of degree
@@ -144,7 +134,7 @@ pub(super) const COMMITMENT_BOUND_FACTOR: usize = 2;
 // DEEP points and zero anchor (339 at the selected parameters), so 512 random
 // mask coefficients cover the opened evaluations with margin at full size.
 // The cap trace / 4 keeps the cubic row-check composition inside the blowup;
-// development ring sizes below the full profile fall under the cap and are not
+// development ring sizes below the full parameter set fall under the cap and are not
 // zero-knowledge evidence.
 pub(super) fn column_mask_degree(trace_size: usize) -> usize {
     512.min(trace_size / 4)
@@ -172,7 +162,7 @@ pub(super) const CONSISTENCY_COEFFICIENT_BITS: u32 = 8;
 // Each consistency claim is one shared integer (clear bounded combination
 // plus a ninety-two-bit mask committed digit-wise in binary mask columns)
 // published as its residue in every limb field. The product of the two
-// smallest profile primes exceeds twice the claim bound, so the verifier's
+// smallest BGV primes exceeds twice the claim bound, so the verifier's
 // centered two-prime lift is unique and per-claim leakage is the clear bound
 // over the mask bound, about 2^-68. This is not a 128-bit zero-knowledge row.
 pub(super) const CLAIM_MASK_DIGIT_COUNT: usize = 92;

@@ -1,5 +1,5 @@
 export {
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveProtocolSignatureHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
@@ -31,6 +31,7 @@ export {
     verifyCloseRecordShell,
 } from '#packages/protocol/src/closing/index';
 export {
+    deriveCollectiveBgvSetupRosterHash,
     deriveElectionManifestHash,
     deriveRegistrationEntryHash,
     deriveRosterHash,

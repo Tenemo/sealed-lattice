@@ -1,11 +1,12 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn verify_evaluator_key_schedule(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
     let Some(schedule) = setup_package.get("evaluatorKeySchedule") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("relinearizationRoundOne"),
             vec!["evaluatorKeySchedule".to_string()],
             Vec::new(),
@@ -49,18 +50,6 @@ pub(super) fn verify_evaluator_key_schedule(
             error.message,
             "setupPackage.evaluatorKeySchedule",
         )?));
-    }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-    ] {
-        if schedule.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Ok(Some(evaluator_key_schedule_refusal(
-                "evaluatorKeyScheduleProfileMismatch",
-                format!("evaluatorKeySchedule.{field_name} must be {expected_value}"),
-                format!("setupPackage.evaluatorKeySchedule.{field_name}"),
-            )?));
-        }
     }
     for (field_name, expected_value) in [
         ("participantCount", roster.participant_count),
@@ -168,7 +157,7 @@ pub(super) fn verify_evaluator_key_schedule(
     {
         return Ok(Some(evaluator_key_schedule_refusal(
             "evaluatorKeyScheduleRelinearizationMismatch",
-            "evaluatorKeySchedule.relinearizationLevelSchedule must match the frozen first-profile relinearization levels",
+            "evaluatorKeySchedule.relinearizationLevelSchedule must match the frozen first-roster relinearization levels",
             "setupPackage.evaluatorKeySchedule.relinearizationLevelSchedule",
         )?));
     }
@@ -176,7 +165,7 @@ pub(super) fn verify_evaluator_key_schedule(
     if schedule.get("requiredGaloisKeySchedule") != Some(&expected_required_galois_key_schedule) {
         return Ok(Some(evaluator_key_schedule_refusal(
             "evaluatorKeyScheduleGaloisMismatch",
-            "evaluatorKeySchedule.requiredGaloisKeySchedule must match the frozen first-profile Galois key schedule",
+            "evaluatorKeySchedule.requiredGaloisKeySchedule must match the frozen first-roster Galois key schedule",
             "setupPackage.evaluatorKeySchedule.requiredGaloisKeySchedule",
         )?));
     }
@@ -189,7 +178,7 @@ pub(super) fn verify_evaluator_key_schedule(
     {
         return Ok(Some(evaluator_key_schedule_refusal(
             "requiredGaloisSetHashMismatch",
-            "evaluatorKeySchedule.requiredGaloisSetHash does not match the frozen first-profile Galois set",
+            "evaluatorKeySchedule.requiredGaloisSetHash does not match the frozen first-roster Galois set",
             "setupPackage.evaluatorKeySchedule.requiredGaloisSetHash",
         )?));
     }
@@ -199,7 +188,6 @@ pub(super) fn verify_evaluator_key_schedule(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("relinearizationRoundOne"),
             vec!["evaluatorKeySchedule.evaluatorKeyScheduleRoot".to_string()],
             Vec::new(),
@@ -215,7 +203,7 @@ pub(super) fn verify_evaluator_key_schedule(
         .as_object_mut()
         .expect("evaluator key schedule object was checked")
         .remove("evaluatorKeyScheduleRoot");
-    let expected_root = derive_protocol_hash("EvaluatorKeyScheduleRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if evaluator_key_schedule_root != expected_root {
         return Ok(Some(evaluator_key_schedule_refusal(
             "evaluatorKeyScheduleRootMismatch",
@@ -236,15 +224,12 @@ pub(super) fn verify_context_fields_match(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if value.get(field_name) != setup_context.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("{value_name}.{field_name} must match setupContext"),
             ));
         }
@@ -259,7 +244,6 @@ fn evaluator_key_schedule_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("relinearizationRoundOne"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -291,7 +275,7 @@ pub(super) fn verify_pending_evaluation_key_material_boundary(
 pub(super) fn verify_generic_key_switch_policy(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {
-    // The first profile never schedules generic key-switch material and the matching
+    // The first roster never schedules generic key-switch material and the matching
     // proof family is unimplemented, so any generic key-switch keys are refused
     // unconditionally. The frozen evaluator-key schedule the verifier recomputes
     // (verify_evaluator_key_schedule, EvaluatorKeyScheduleRoot) covers only the
@@ -299,12 +283,11 @@ pub(super) fn verify_generic_key_switch_policy(
     // genericKeySwitchKeys object, so this is the sole coverage for its absence.
     if setup_package.get("genericKeySwitchKeys").is_some() {
         return Ok(Some(verification_response(
-            VerifierStatus::Refused,
             Some("setupPackageVerification"),
             Vec::new(),
             vec![Refusal::new(
-                "genericKeySwitchOutsideProfile",
-                "generic key-switch material is refused: the first profile never schedules it and the matching proof family is unimplemented",
+                "genericKeySwitchOutsideParameters",
+                "generic key-switch material is refused: the first roster never schedules it and the matching proof family is unimplemented",
                 "setupPackage.genericKeySwitchKeys".to_string(),
             )],
             Vec::new(),

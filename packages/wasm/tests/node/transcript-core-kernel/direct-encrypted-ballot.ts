@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import type { TranscriptCoreKernel } from '#packages/wasm/src/index';
 import type {
     BgvPassiveSetupPackage,
@@ -48,8 +48,6 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
     readonly workingLevel: number;
     readonly evaluationKeyMaterialSource: string;
     readonly publicEvaluationKeyMaterialHash?: string;
-    readonly packedScoreRoot: string;
-    readonly rankRoot: string;
     readonly targetLayoutHash: string;
     readonly targetIdRoot: string;
     readonly targetOrderRoot: string;
@@ -64,13 +62,13 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
               readonly targetProposalHash: string;
               readonly ceremonyId: string;
               readonly electionManifestHash: string;
-              readonly thresholdProfileHash: string;
+              readonly thresholdParametersHash: string;
               readonly evaluatorReplayContextHash: string;
               readonly evaluatorReplayRecordHash: string;
               readonly encryptedBallotAggregateHash: string;
               readonly targetCiphertextHash: string;
               readonly targetLayoutHash: string;
-              readonly evaluatorReplayProfileHash: string;
+              readonly bgvParametersHash: string;
               readonly targetFinalityPolicyHash: string;
           };
     readonly replayTimeMilliseconds: string;
@@ -78,7 +76,7 @@ export type DirectEncryptedBallotEvaluatorReplayResult = {
 
 export type DirectEncryptedBallotResult = {
     readonly operation: 'runDirectEncryptedBallot';
-    readonly profile: {
+    readonly parameters: {
         readonly dataPrimeCount: number;
     };
     readonly ballotLayout: {
@@ -105,32 +103,9 @@ export type DirectEncryptedBallotResult = {
         readonly responsePolynomialDegree: number;
         readonly sharedResponsePolynomialCount: number;
         readonly proofSizeBytes: number;
-        readonly verifiedProofSizeBytes: number;
         readonly totalProofBytes: number;
         readonly proofBytesHash: string;
         readonly proofGate: string;
-        readonly proofAccounting: {
-            readonly challengeBits: number;
-            readonly nominalChallengeBits: number;
-            readonly weakestCheckedRelation: string;
-            readonly weakestRelationEffectiveBitsPerCheck: number;
-            readonly supportRelationModulusBits: number;
-            readonly classicalSoundnessBitsAfterSupportUnionBound:
-                | number
-                | null;
-            readonly maskCoefficientBits: number;
-            readonly responseCoefficientBytes: number;
-            readonly supportCheckCount: number;
-            readonly supportMaximumDegree: number;
-            readonly supportUnionLossBits: number;
-            readonly targetClassicalSoundnessBits: number;
-            readonly minimumIndependentRepetitionsForTarget: number | null;
-            readonly estimatedIndependentRepetitionsFromWeakestRelationBeforeUnionLosses: number;
-            readonly estimatedRepeatedProofSizeBytes: number;
-            readonly estimatedRepeatedTotalProofBytes: number;
-            readonly witnessBoundBitsForMaskShiftAccounting: number;
-            readonly zeroKnowledgeShiftSlackBitsAfterResponseUnionBound: number;
-        };
         readonly proofTransport: {
             readonly encoding: string;
             readonly chunkSizeBytes: number;
@@ -142,7 +117,7 @@ export type DirectEncryptedBallotResult = {
             readonly firstProofChunkHashes: readonly string[];
             readonly firstProofPublicTransportHash: string;
             readonly firstProofStatementHash: string;
-            readonly proofProfileHash: string;
+            readonly proofParametersHash: string;
         };
         readonly proofMaskRandomness: {
             readonly source:
@@ -170,13 +145,16 @@ export const createDirectBallotSetupPackage = (
 ): BgvPassiveSetupPackage =>
     kernel.generateBgvPassiveSetup({
         ceremonyId: 'direct-encrypted-ballot-node-wasm-ceremony',
-        manifestHash: deriveProtocolHash('ElectionManifestHash', {
+        manifestHash: deriveCanonicalObjectHash({
+            objectType: 'ElectionManifestHash',
             manifest: 'direct encrypted ballot node wasm smoke',
         }),
-        rosterHash: deriveProtocolHash('RosterHash', {
+        rosterHash: deriveCanonicalObjectHash({
+            objectType: 'RosterHash',
             roster: 'direct encrypted ballot node wasm smoke',
         }),
-        thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
+        thresholdParametersHash: deriveCanonicalObjectHash({
+            objectType: 'ThresholdParametersHash',
             threshold: 'direct encrypted ballot node wasm smoke',
         }),
         participants: [
@@ -200,7 +178,8 @@ export const createDirectBallotSetupPackage = (
     });
 
 export const directBallotActionContextHash = (): string =>
-    deriveProtocolHash('ActionContextHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ActionContextHash',
         action: 'direct encrypted ballot node wasm smoke',
     });
 
@@ -231,7 +210,8 @@ export const createDirectBallotInputs = (
         { length: ballotCount },
         (_unusedBallot, ballotIndex) => ({
             voterIdentity: `voter-node-wasm-${String(ballotIndex + 1).padStart(2, '0')}`,
-            actionContextHash: deriveProtocolHash('ActionContextHash', {
+            actionContextHash: deriveCanonicalObjectHash({
+                objectType: 'ActionContextHash',
                 action: 'direct encrypted ballot node wasm smoke',
                 ballotIndex,
             }),

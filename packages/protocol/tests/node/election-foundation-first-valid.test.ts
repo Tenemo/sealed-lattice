@@ -5,7 +5,7 @@ import {
     type RecoveryEpochMapEntry,
     type ValidatedFirstValidObject,
     contextHash,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     deriveValidatedFirstValidOrder,
     manifestPolicyHashes,
 } from './election-foundation-test-helpers';
@@ -59,8 +59,6 @@ describe('first-valid ordering shells', () => {
             objects,
             requiredContextHash: contextHash,
             selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-            expectedSelectionPolicyHash:
-                manifestPolicyHashes.firstValidPolicyHash,
             currentRecoveryEpochMap: {
                 'participant-1': recoveryEpochState,
                 'participant-2': {
@@ -72,7 +70,7 @@ describe('first-valid ordering shells', () => {
         };
 
         expect(deriveValidatedFirstValidOrder(input)).toMatchObject({
-            ok: true,
+            isValid: true,
             orderedObjects: [
                 expect.objectContaining({ objectHash: 'object-a' }),
                 expect.objectContaining({ objectHash: 'object-b' }),
@@ -81,14 +79,11 @@ describe('first-valid ordering shells', () => {
 
         const badInput: FirstValidOrderingInput = {
             ...input,
-            selectionPolicyHash: deriveProtocolHash('ChallengeDomainHash', {
-                payload: { policy: 'wrong' },
-                purpose: 'fixture-first-valid-policy-v1',
-            }),
             objects: [
                 {
                     ...objects[0],
-                    contextHash: deriveProtocolHash('ActionContextHash', {
+                    contextHash: deriveCanonicalObjectHash({
+                        objectType: 'ActionContext',
                         context: 'wrong',
                     }),
                 },
@@ -106,9 +101,12 @@ describe('first-valid ordering shells', () => {
             ],
         };
 
-        expect(deriveValidatedFirstValidOrder(badInput).refusedObjects).toEqual(
+        const badResult = deriveValidatedFirstValidOrder(badInput);
+
+        expect(badResult.isValid).toBe(false);
+        expect(badResult.acceptedHashes).toEqual([]);
+        expect(badResult.refusedObjects).toEqual(
             expect.arrayContaining([
-                expect.objectContaining({ code: 'FirstValidPolicyMismatch' }),
                 expect.objectContaining({ code: 'FirstValidContextMismatch' }),
                 expect.objectContaining({ code: 'StaleRecoveryEpoch' }),
                 expect.objectContaining({
@@ -123,8 +121,6 @@ describe('first-valid ordering shells', () => {
             deriveValidatedFirstValidOrder({
                 requiredContextHash: contextHash,
                 selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-                expectedSelectionPolicyHash:
-                    manifestPolicyHashes.firstValidPolicyHash,
                 currentRecoveryEpochMap: {
                     'participant-1': {
                         signerIdentity: 'participant-1',
@@ -184,8 +180,6 @@ describe('first-valid ordering shells', () => {
         const result = deriveValidatedFirstValidOrder({
             requiredContextHash: contextHash,
             selectionPolicyHash: manifestPolicyHashes.firstValidPolicyHash,
-            expectedSelectionPolicyHash:
-                manifestPolicyHashes.firstValidPolicyHash,
             currentRecoveryEpochMap: {
                 'participant-1': {
                     signerIdentity: 'participant-1',
@@ -216,7 +210,7 @@ describe('first-valid ordering shells', () => {
             ],
         });
 
-        expect(result.ok).toBe(false);
+        expect(result.isValid).toBe(false);
         expect(result.orderedObjects).toEqual([]);
         expect(result.refusedObjects).toEqual(
             expect.arrayContaining([

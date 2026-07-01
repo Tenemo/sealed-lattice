@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { dynamicRosterProfileCertificateHash } from './election-foundation-fixture-constants';
+import { dynamicRosterParametersCertificateHash } from './election-foundation-fixture-constants';
 import {
     collectContributorPositionSets,
     createDeterministicPolynomial,
@@ -8,7 +8,7 @@ import {
     shamirVectors,
 } from './plaintext-oracle-test-vectors';
 
-import { deriveThresholdProfile } from '#packages/protocol/src/lifecycle/thresholds';
+import { deriveThresholdParameters } from '#packages/protocol/src/lifecycle/thresholds';
 import {
     deriveInterpolationCoefficientReport,
     deriveWorstCaseInterpolationCoefficientReport,
@@ -40,19 +40,19 @@ describe('plaintext oracle Shamir and interpolation', () => {
     });
 
     it.each([3, 19, 20])(
-        'reconstructs for supported roster size %d using threshold profile',
+        'reconstructs for supported roster size %d using threshold parameters',
         (rosterSize) => {
-            const thresholdProfile = deriveThresholdProfile({
+            const thresholdParameters = deriveThresholdParameters({
                 rosterSize,
-                casualMicroRosterAcknowledged: rosterSize < 10,
-                dynamicRosterProfileCertificateHash:
+                isCasualMicroRosterAcknowledged: rosterSize < 10,
+                dynamicRosterParametersCertificateHash:
                     rosterSize >= 10 && rosterSize !== 10
-                        ? dynamicRosterProfileCertificateHash
+                        ? dynamicRosterParametersCertificateHash
                         : undefined,
             });
             const polynomial = createDeterministicPolynomial(
                 normalizeFieldElement(rosterSize * 19),
-                thresholdProfile.decryptionThreshold,
+                thresholdParameters.decryptionThreshold,
             );
             const shares = evaluateShamirPolynomialForRoster(
                 polynomial,
@@ -60,7 +60,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
             );
             const contributorRosterPositions = selectSpreadContributorPositions(
                 rosterSize,
-                thresholdProfile.decryptionThreshold,
+                thresholdParameters.decryptionThreshold,
             );
             const selectedShares = contributorRosterPositions.map(
                 (rosterPosition) =>
@@ -78,14 +78,14 @@ describe('plaintext oracle Shamir and interpolation', () => {
     it.each([3, 4, 5, 6, 7, 8])(
         'reconstructs every first-valid contributor set for small roster size %d',
         (rosterSize) => {
-            const thresholdProfile = deriveThresholdProfile({
+            const thresholdParameters = deriveThresholdParameters({
                 rosterSize,
-                casualMicroRosterAcknowledged: true,
+                isCasualMicroRosterAcknowledged: true,
             });
             const secret = normalizeFieldElement(rosterSize * 23);
             const polynomial = createDeterministicPolynomial(
                 secret,
-                thresholdProfile.decryptionThreshold,
+                thresholdParameters.decryptionThreshold,
             );
             const shares = evaluateShamirPolynomialForRoster(
                 polynomial,
@@ -94,7 +94,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
 
             for (const contributorRosterPositions of collectContributorPositionSets(
                 rosterSize,
-                thresholdProfile.decryptionThreshold,
+                thresholdParameters.decryptionThreshold,
             )) {
                 const selectedShares = contributorRosterPositions.map(
                     (rosterPosition) =>
@@ -110,7 +110,7 @@ describe('plaintext oracle Shamir and interpolation', () => {
         },
     );
 
-    it('matches selected and stress-profile interpolation coefficient reports', () => {
+    it('matches selected and stress-parameters interpolation coefficient reports', () => {
         const selectedReport = deriveInterpolationCoefficientReport({
             contributorRosterPositions:
                 shamirVectors.selectedContributorRosterPositions,

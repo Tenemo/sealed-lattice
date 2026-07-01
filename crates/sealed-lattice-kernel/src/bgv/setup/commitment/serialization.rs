@@ -1,64 +1,17 @@
-use super::profile::*;
+use super::commitment_parameters::*;
 use super::validation::*;
 use super::*;
 
 pub(in super::super) fn setup_commitment_root(
     commitment: &SetupCommitmentValue,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupCommitmentRoot",
-        &setup_commitment_root_payload(commitment),
-    )
-}
-
-pub(super) fn setup_commitment_chunk_root(
-    commitment: &SetupCommitmentValue,
-    commitment_root: &str,
-) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "VssCoefficientCommitmentRoot",
-        &json!({
-            "objectType": "VssCoefficientCommitmentChunkRoot",
-            "objectVersion": 1,
-            "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
-            "commitmentRoot": commitment_root,
-            "commitmentLimbs": commitment.limbs.iter().map(|limb| {
-                json!({
-                    "commitmentModulusIndex": limb.commitment_modulus_index,
-                    "modulus": limb.modulus,
-                    "rowCoefficientHash512": limb.rows.iter().map(|row| {
-                        coefficient_vector_hash512(
-                            row,
-                            "sealed-lattice-bdlop-commitment/row-coefficients-v1",
-                        )
-                    }).collect::<Vec<_>>()
-                })
-            }).collect::<Vec<_>>()
-        }),
-    )
-}
-
-pub(super) fn public_commitment_coefficient_vector_hash512(
-    commitment: &SetupCommitmentValue,
-) -> String {
-    let coefficients = commitment
-        .limbs
-        .iter()
-        .flat_map(|limb| limb.rows.iter())
-        .flat_map(|row| row.iter().copied())
-        .collect::<Vec<_>>();
-
-    coefficient_vector_hash512(
-        &coefficients,
-        "sealed-lattice-bdlop-commitment/public-commitment-coefficients-v1",
-    )
+    derive_canonical_object_hash(&setup_commitment_root_payload(commitment))
 }
 
 pub(in super::super) fn setup_commitment_full_value(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
         "objectVersion": 1,
-        "profileId": SETUP_COMMITMENT_PROFILE_ID,
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
         "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,
@@ -86,11 +39,6 @@ pub(in super::super) fn parse_setup_commitment_full_value(
             "setup commitment objectVersion must be 1",
         ));
     }
-    if value.get("profileId").and_then(Value::as_str) != Some(SETUP_COMMITMENT_PROFILE_ID) {
-        return Err(invalid_commitment_input(
-            "setup commitment profileId does not match the accepted commitment profile",
-        ));
-    }
     let source_rns_limb_index = read_usize(value, "sourceRnsLimbIndex")?;
     let source_message_modulus = read_u64(value, "sourceMessageModulus")?;
     validate_source_rns_limb(source_rns_limb_index, source_message_modulus)?;
@@ -113,7 +61,7 @@ pub(in super::super) fn parse_setup_commitment_full_value(
         let commitment_modulus_index = read_usize(limb_value, "commitmentModulusIndex")?;
         if !SETUP_COMMITMENT_MODULUS_LIMB_INDICES.contains(&commitment_modulus_index) {
             return Err(invalid_commitment_input(
-                "setup commitment limb uses a modulus outside the accepted commitment profile",
+                "setup commitment limb uses a modulus outside the accepted commitment parameters",
             ));
         }
         if seen_limb_indices.contains(&commitment_modulus_index) {
@@ -162,7 +110,6 @@ fn setup_commitment_root_payload(commitment: &SetupCommitmentValue) -> Value {
     json!({
         "objectType": "SetupCommitment",
         "objectVersion": 1,
-        "profileId": SETUP_COMMITMENT_PROFILE_ID,
         "sourceRnsLimbIndex": commitment.source_rns_limb_index,
         "sourceMessageModulus": commitment.source_message_modulus,
         "shamirCoefficientIndex": commitment.shamir_coefficient_index,

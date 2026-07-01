@@ -5,12 +5,10 @@ import { ml_kem768 } from '@noble/post-quantum/ml-kem.js';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson, hash512Hex } from './canonical-json.js';
-import { deriveProtocolHash } from './hashes.js';
+import { deriveCanonicalObjectHash } from './hashes.js';
 
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-export const privateVssMailboxEncryptionProfileId =
-    'sealed-lattice-private-vss-mailbox-ml-kem-768-hkdf-sha384-aes-256-gcm-v1';
 const mlKem768SeedByteLength = ml_kem768.lengths.seed!;
 const mlKem768PublicKeyByteLength = ml_kem768.lengths.publicKey!;
 const mlKem768SecretKeyByteLength = ml_kem768.lengths.secretKey!;
@@ -23,10 +21,7 @@ const encryptedEnvelopeAadBindingFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
     'publicMatrixSeedHash',
     'vssCoefficientCommitmentRoot',
@@ -63,8 +58,6 @@ export type PrivateVssEncryptedEnvelope = Readonly<
     Record<string, unknown> & {
         readonly objectType: 'EncryptedPrivateVssShareEnvelope';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly mailboxEncryptionProfileId: typeof privateVssMailboxEncryptionProfileId;
         readonly ciphertextContentType: 'private-vss-share-envelope';
         readonly privateEnvelopeHash: ProtocolHash;
         readonly privateEnvelopeAad: unknown;
@@ -148,7 +141,8 @@ const arrayBufferFromBytes = (bytes: Uint8Array): ArrayBuffer => {
 };
 
 const deriveMailboxPublicKeyHash = (publicKeyBytesHex: string): ProtocolHash =>
-    deriveProtocolHash('PublicKeyHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'MlKemMailboxPublicKey',
         algorithm: 'ML-KEM-768',
         keyPurpose: 'private-vss-mailbox',
         publicKeyBytesHex,
@@ -170,8 +164,6 @@ const deriveAesGcmKeyBytes = (
         textEncoder.encode(
             canonicalJson({
                 purpose: 'private-vss-mailbox-aes-256-gcm-key',
-                mailboxEncryptionProfileId:
-                    privateVssMailboxEncryptionProfileId,
                 privateEnvelopeAadHash,
                 recipientMailboxPublicKeyHash,
                 kemCiphertextHash,
@@ -259,12 +251,10 @@ export const encryptPrivateVssMailboxEnvelope = async (
                   aesGcmNonceByteLength,
                   'aeadNonceBytesHex',
               );
-    const privateEnvelopeAadHash = deriveProtocolHash(
-        'PrivateVssEnvelopeAadHash',
+    const privateEnvelopeAadHash = deriveCanonicalObjectHash(
         input.privateEnvelopeAad,
     );
-    const privateEnvelopeHash = deriveProtocolHash(
-        'PrivateVssShareEnvelopeHash',
+    const privateEnvelopeHash = deriveCanonicalObjectHash(
         input.privateEnvelope,
     );
     const recipientMailboxPublicKeyHash = deriveMailboxPublicKeyHash(
@@ -315,8 +305,6 @@ export const encryptPrivateVssMailboxEnvelope = async (
     const envelopeWithoutHash = {
         objectType: 'EncryptedPrivateVssShareEnvelope',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
         ciphertextContentType: 'private-vss-share-envelope',
         ...aadBindingFields(input.privateEnvelopeAad),
         privateEnvelopeHash,
@@ -336,10 +324,7 @@ export const encryptPrivateVssMailboxEnvelope = async (
 
     const encryptedEnvelope = {
         ...envelopeWithoutHash,
-        encryptedEnvelopeHash: deriveProtocolHash(
-            'PrivateVssEncryptedEnvelopeHash',
-            envelopeWithoutHash,
-        ),
+        encryptedEnvelopeHash: deriveCanonicalObjectHash(envelopeWithoutHash),
     };
 
     return {
@@ -406,8 +391,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
             'encryptedEnvelope.ciphertextByteLength does not match ciphertextBytesHex.',
         );
     }
-    const privateEnvelopeAadHash = deriveProtocolHash(
-        'PrivateVssEnvelopeAadHash',
+    const privateEnvelopeAadHash = deriveCanonicalObjectHash(
         input.encryptedEnvelope.privateEnvelopeAad,
     );
     if (
@@ -423,8 +407,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
             ([fieldName]) => fieldName !== 'encryptedEnvelopeHash',
         ),
     );
-    const expectedEncryptedEnvelopeHash = deriveProtocolHash(
-        'PrivateVssEncryptedEnvelopeHash',
+    const expectedEncryptedEnvelopeHash = deriveCanonicalObjectHash(
         encryptedEnvelopeWithoutHash,
     );
     if (
@@ -477,10 +460,7 @@ export const decryptPrivateVssMailboxEnvelope = async (
     const privateEnvelope = JSON.parse(
         textDecoder.decode(plaintextBytes),
     ) as unknown;
-    const privateEnvelopeHash = deriveProtocolHash(
-        'PrivateVssShareEnvelopeHash',
-        privateEnvelope,
-    );
+    const privateEnvelopeHash = deriveCanonicalObjectHash(privateEnvelope);
     if (privateEnvelopeHash !== input.encryptedEnvelope.privateEnvelopeHash) {
         throw new Error(
             'Decrypted private VSS envelope hash does not match encryptedEnvelope.privateEnvelopeHash.',

@@ -1,9 +1,7 @@
 use super::*;
 use crate::bgv::{
-    evaluator::engine::encode_slots_to_coefficients,
-    evaluator::records::target_layout_hash,
-    profile::{direct_comparison_profile_hash, profile_hash},
-    setup::generate_passive_setup_package_from_request,
+    evaluator::engine::encode_slots_to_coefficients, evaluator::records::target_layout_hash,
+    parameters::bgv_parameters_hash, setup::generate_passive_setup_package_from_request,
 };
 
 mod recombination;
@@ -11,17 +9,14 @@ mod recombination;
 fn setup_request() -> Value {
     json!({
         "ceremonyId": "target-decryption-ceremony",
-        "manifestHash": derive_protocol_hash(
-            "ElectionManifestHash",
-            &json!({ "manifest": "target-decryption-test" }),
+        "manifestHash": derive_canonical_object_hash(
+            &json!({ "objectType": "ElectionManifestHash", "manifest": "target-decryption-test" }),
         ).expect("manifest hash"),
-        "rosterHash": derive_protocol_hash(
-            "RosterHash",
-            &json!({ "roster": "target-decryption-test" }),
+        "rosterHash": derive_canonical_object_hash(
+            &json!({ "objectType": "RosterHash", "roster": "target-decryption-test" }),
         ).expect("roster hash"),
-        "thresholdProfileHash": derive_protocol_hash(
-            "ThresholdProfileHash",
-            &json!({ "threshold": "target-decryption-test" }),
+        "thresholdParametersHash": derive_canonical_object_hash(
+            &json!({ "objectType": "ThresholdParametersHash", "threshold": "target-decryption-test" }),
         ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 3 },
@@ -36,23 +31,20 @@ fn setup_package() -> Value {
     generate_passive_setup_package_from_request(&setup_request()).expect("setup package")
 }
 
-fn target_share_profile(setup_package: &Value) -> Value {
-    let profile = json!({
-        "objectType": "TargetDecryptionShareProfile",
+fn target_share_parameters(setup_package: &Value) -> Value {
+    let share_parameters = json!({
+        "objectType": "TargetDecryptionShareParameters",
         "objectVersion": 1,
-        "thresholdProfileHash": setup_package["setupInputs"]["thresholdProfileHash"],
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "targetDecryptionProfileHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileHash"],
-        "targetDecryptionProfileBindingHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileBindingHash"],
+        "thresholdParametersHash": setup_package["setupInputs"]["thresholdParametersHash"],
+        "targetDecryptionParametersHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersHash"],
+        "targetDecryptionParametersBindingHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersBindingHash"],
         "decryptionThreshold": 2,
         "minimumSharesForInterpolation": 2,
         "decryptionShareQuorum": 2,
     });
-    let mut with_hash = profile;
-    with_hash["targetShareProfileHash"] = json!(
-        derive_protocol_hash("TargetDecryptionShareProfileHash", &with_hash)
-            .expect("target share profile hash")
-    );
+    let mut with_hash = share_parameters;
+    with_hash["targetShareParametersHash"] =
+        json!(derive_canonical_object_hash(&with_hash).expect("target share parameters hash"));
     with_hash
 }
 
@@ -91,48 +83,38 @@ fn accepted_record(
         "objectVersion": 1,
         "ceremonyId": setup_package["setupInputs"]["ceremonyId"],
         "electionManifestHash": setup_package["setupInputs"]["manifestHash"],
-        "targetProposalHash": derive_protocol_hash(
-            "TargetProposalHash",
-            &json!({ "target": "accepted" }),
+        "targetProposalHash": derive_canonical_object_hash(
+            &json!({ "objectType": "TargetProposalHash", "target": "accepted" }),
         ).expect("proposal hash"),
-        "evaluatorReplayRecordHash": derive_protocol_hash(
-            "EvaluatorReplayRecordHash",
-            &json!({ "replay": "accepted" }),
+        "evaluatorReplayRecordHash": derive_canonical_object_hash(
+            &json!({ "objectType": "EvaluatorReplayRecordHash", "replay": "accepted" }),
         ).expect("replay hash"),
-        "targetContextHash": derive_protocol_hash(
-            "TargetContextHash",
-            &json!({ "context": "accepted target" }),
+        "targetContextHash": derive_canonical_object_hash(
+            &json!({ "objectType": "TargetContextHash", "context": "accepted target" }),
         ).expect("context hash"),
-        "targetFinalityRecordHash": derive_protocol_hash(
-            "TargetFinalityRecordHash",
-            &json!({ "finality": "record" }),
+        "targetFinalityRecordHash": derive_canonical_object_hash(
+            &json!({ "objectType": "TargetFinalityRecordHash", "finality": "record" }),
         ).expect("record hash"),
-        "targetFinalityCheckpointHash": derive_protocol_hash(
-            "TargetFinalityCheckpointHash",
-            &json!({ "finality": "checkpoint" }),
+        "targetFinalityCheckpointHash": derive_canonical_object_hash(
+            &json!({ "objectType": "TargetFinalityCheckpointHash", "finality": "checkpoint" }),
         ).expect("checkpoint hash"),
-        "evaluatorReplayProfileHash": direct_comparison_profile_hash()
-            .expect("direct comparison profile hash"),
-        "targetPreimageHash": derive_protocol_hash(
-            "TargetPreimageHash",
-            &json!({ "preimage": "accepted" }),
+        "bgvParametersHash": bgv_parameters_hash()
+            .expect("BGV parameters hash"),
+        "targetPreimageHash": derive_canonical_object_hash(
+            &json!({ "objectType": "TargetPreimageHash", "preimage": "accepted" }),
         ).expect("preimage hash"),
         "targetCiphertextHash": target_ciphertext_hash,
         "targetLayoutHash": target_layout_hash,
-        "targetDecryptionProfileHash": setup_package["targetDecryptionStatus"]["targetDecryptionProfileHash"],
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "targetBasisHash": derive_protocol_hash(
-            "TargetBasisHash",
-            &json!({ "basis": "test" }),
+        "targetDecryptionParametersHash": setup_package["targetDecryptionStatus"]["targetDecryptionParametersHash"],
+        "targetBasisHash": derive_canonical_object_hash(
+            &json!({ "objectType": "TargetBasisHash", "basis": "test" }),
         ).expect("target basis hash"),
         "boardSequence": 0,
         "boardPosition": 0,
         "organizerIdentity": "organizer",
     });
-    record["targetAcceptedRecordHash"] = json!(
-        derive_protocol_hash("TargetAcceptedRecordHash", &record)
-            .expect("target accepted record hash")
-    );
+    record["targetAcceptedRecordHash"] =
+        json!(derive_canonical_object_hash(&record).expect("target accepted record hash"));
     record
 }
 
@@ -193,7 +175,7 @@ fn generate_share(
     accepted_record: &Value,
     target_ciphertext_binding: &Value,
     target_ciphertexts: &Value,
-    target_share_profile: &Value,
+    target_share_parameters: &Value,
     trustee_identity: &str,
 ) -> Value {
     generate_bgv_target_decryption_share_from_request(&json!({
@@ -204,7 +186,7 @@ fn generate_share(
         "targetAcceptedRecord": accepted_record,
         "targetCiphertextBinding": target_ciphertext_binding,
         "targetCiphertexts": target_ciphertexts,
-        "targetShareProfile": target_share_profile,
+        "targetShareParameters": target_share_parameters,
         "trusteeIdentity": trustee_identity,
     }))
     .expect("generate share")

@@ -151,48 +151,6 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
             }),
         ),
         (
-            "setup parameter certificate hash",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["setupParameterCertificateHash"] =
-                    serde_json::json!(valid_hash('8'));
-            }),
-        ),
-        (
-            "target-threshold decryptability certificate hash",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["targetThresholdDecryptabilityCertificateHash"] =
-                    serde_json::json!(valid_hash('8'));
-            }),
-        ),
-        (
-            "target-threshold decryptability certificate key root",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["targetThresholdDecryptabilityCertificate"]["keyBinding"]
-                    ["collectivePublicKeyRoot"] = serde_json::json!(valid_hash('8'));
-            }),
-        ),
-        (
-            "collective secret distribution certificate hash",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["collectiveSecretDistributionCertificateHash"] =
-                    serde_json::json!(valid_hash('9'));
-            }),
-        ),
-        (
-            "final security status",
-            Box::new(|mutated_package| {
-                mutated_package["certificates"]["setupParameterCertificate"]["finalSecurityStatus"] =
-                    serde_json::json!("accepted");
-            }),
-        ),
-        (
-            "development encryption direct proof claim",
-            Box::new(|mutated_package| {
-                mutated_package["developmentEncryptionFixture"]["fixture"]["directProofClaim"] =
-                    serde_json::json!(true);
-            }),
-        ),
-        (
             "evaluation key material commitment",
             Box::new(|mutated_package| {
                 mutated_package["evaluationKeys"]["evaluationKeyMaterialCommitment"]["record"]["sampledRelationChecks"]
@@ -219,9 +177,8 @@ fn passive_setup_payload_validation_rejects_binding_mutations() {
 fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
     let package = setup_package();
     for field_name in [
+        "bgvParametersHash",
         "evaluatorBindingContextHash",
-        "encryptedBallotAggregateLayoutHash",
-        "directAggregateLayoutHash",
         "comparisonInputDerivationCircuitHash",
         "encryptedComparisonInputHash",
         "encryptedSparseTargetProjectionHash",
@@ -229,7 +186,7 @@ fn passive_setup_payload_validation_rejects_evaluator_binding_mutations() {
         "passiveSetupEvaluatorContextBindingHash",
     ] {
         let mut mutated_package = package.clone();
-        mutated_package["profileBindings"][field_name] = serde_json::json!(valid_hash('b'));
+        mutated_package["parameterBindings"][field_name] = serde_json::json!(valid_hash('b'));
         assert_setup_package_payload_is_rejected(mutated_package, field_name);
     }
 }
@@ -272,23 +229,12 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
 
     for invalid_participant_count in [2_usize, 51_usize] {
         let minimally_shaped_package = serde_json::json!({
-            "certificates": {
-                "setupParameterCertificate": {
-                    "finalSecurityStatus": "acceptedForDirectEvaluatorReplayTargetPending",
-                },
-            },
-            "targetDecryptionStatus": {
-                "targetC1C4StatusAccepted": false,
-                "targetPartDecImplemented": true,
-                "setupMaterialMatchesTargetDecryption": true,
-            },
             "objectType": "BgvPassiveSetupPackage",
             "objectVersion": 1,
             "participants": vec![serde_json::json!({}); invalid_participant_count],
             "setupInputs": {
                 "participantCount": invalid_participant_count,
             },
-            "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         });
         assert!(
             validate_setup_package_shape(&minimally_shaped_package).is_err(),
@@ -297,7 +243,7 @@ fn passive_setup_rejects_wrong_request_and_recovery_state_shapes() {
     }
 
     let mut malformed_threshold_hash_request = request();
-    malformed_threshold_hash_request["thresholdProfileHash"] = serde_json::json!("not-a-hash");
+    malformed_threshold_hash_request["thresholdParametersHash"] = serde_json::json!("not-a-hash");
     assert!(
         generate_passive_setup_package_from_request(&malformed_threshold_hash_request).is_err()
     );

@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -18,10 +18,7 @@ export type CollectiveBgvSetupContext = Readonly<
         readonly ceremonyId: string;
         readonly manifestHash: ProtocolHash;
         readonly rosterHash: ProtocolHash;
-        readonly setupProfileHash: ProtocolHash;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly setupEpoch: string;
     }
 >;
@@ -63,7 +60,7 @@ export type VssShareComplaintRecordInput = {
 };
 
 export type PrivateVssLocalVerificationFailure = Readonly<{
-    readonly ok: false;
+    readonly isValid: false;
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly refusedObjects: readonly Readonly<{
@@ -151,10 +148,7 @@ type VssShareVerificationPayloadFields = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
@@ -171,10 +165,7 @@ const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 
@@ -239,7 +230,7 @@ const verifyGeneratedSignatureEnvelope = (
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
-    if (!result.ok) {
+    if (!result.isValid) {
         const refusedObject = result.refusedObjects[0];
         throw new Error(
             refusedObject === undefined
@@ -262,11 +253,7 @@ const shareVerificationPayloadFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
     sourceTrusteeIdentity: envelopeReference.sourceTrusteeIdentity,
     sourceTrusteeRosterPosition: envelopeReference.sourceTrusteeRosterPosition,
@@ -336,14 +323,12 @@ export const createVssShareAcceptanceRecord = async (
         deviceEpoch: input.deviceEpoch,
         signingPublicKeyHash: input.signingPublicKeyHash,
     } as const satisfies JsonRecord;
-    const acceptanceRoot = deriveProtocolHash(
-        'VssShareAcceptanceRoot',
-        acceptancePayload,
-    );
+    const acceptanceRoot = deriveCanonicalObjectHash(acceptancePayload);
     const acceptanceByteLength = canonicalByteLength(acceptancePayload);
-    // Same namespace as the object root; the distinct purpose field (and payload shape) domain-separates the signature-context hash from the root under the canonical-JSON preimage.
-    const acceptanceContextHash = deriveProtocolHash('VssShareAcceptanceRoot', {
-        purpose: 'vss-share-acceptance-signature-context',
+    // The signature-context hash carries its own objectType discriminator, which
+    // domain-separates it from the object root under the shared canonical-object hash.
+    const acceptanceContextHash = deriveCanonicalObjectHash({
+        objectType: 'VssShareAcceptanceSignatureContext',
         ...shareVerificationPayloadFields(
             input.setupContext,
             input.privateVssEnvelopeCommitmentRoot,
@@ -403,11 +388,7 @@ export const createVssShareAcceptanceSet = (input: {
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,
@@ -416,8 +397,7 @@ export const createVssShareAcceptanceSet = (input: {
 
     return {
         ...acceptanceSetWithoutRoot,
-        vssShareAcceptanceRoot: deriveProtocolHash(
-            'VssShareAcceptanceRoot',
+        vssShareAcceptanceRoot: deriveCanonicalObjectHash(
             acceptanceSetWithoutRoot,
         ),
     } satisfies VssShareAcceptanceSet;
@@ -445,13 +425,10 @@ export const createVssShareComplaintRecord = async (
         deviceEpoch: input.deviceEpoch,
         signingPublicKeyHash: input.signingPublicKeyHash,
     } as const satisfies JsonRecord;
-    const complaintRoot = deriveProtocolHash(
-        'VssComplaintRoot',
-        complaintPayload,
-    );
+    const complaintRoot = deriveCanonicalObjectHash(complaintPayload);
     const complaintByteLength = canonicalByteLength(complaintPayload);
-    const complaintContextHash = deriveProtocolHash('VssComplaintRoot', {
-        purpose: 'vss-share-complaint-signature-context',
+    const complaintContextHash = deriveCanonicalObjectHash({
+        objectType: 'VssShareComplaintSignatureContext',
         ...shareVerificationPayloadFields(
             input.setupContext,
             input.privateVssEnvelopeCommitmentRoot,
@@ -527,7 +504,6 @@ export const createVssShareComplaintRecordFromLocalVerification = async (
             input.privateVssEnvelopeCommitmentRoot,
             input.envelopeReference,
         ),
-        verificationStatus: 'failed-local-private-vss-opening',
         privateEnvelopeHashFromLocalVerification:
             input.localVerification.privateEnvelopeHash,
         localVerificationRoot: input.localVerification.localVerificationRoot,
@@ -544,10 +520,7 @@ export const createVssShareComplaintRecordFromLocalVerification = async (
 
     return createVssShareComplaintRecord({
         ...input,
-        complaintEvidenceRoot: deriveProtocolHash(
-            'VssComplaintRoot',
-            evidencePayload,
-        ),
+        complaintEvidenceRoot: deriveCanonicalObjectHash(evidencePayload),
         complaintReasonCode: firstRefusal.reasonCode,
     });
 };
@@ -570,11 +543,7 @@ export const createVssComplaintSet = (input: {
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         privateVssEnvelopeCommitmentRoot:
             input.privateVssEnvelopeCommitmentRoot,
@@ -583,9 +552,6 @@ export const createVssComplaintSet = (input: {
 
     return {
         ...complaintSetWithoutRoot,
-        vssComplaintRoot: deriveProtocolHash(
-            'VssComplaintRoot',
-            complaintSetWithoutRoot,
-        ),
+        vssComplaintRoot: deriveCanonicalObjectHash(complaintSetWithoutRoot),
     } satisfies VssComplaintSet;
 };

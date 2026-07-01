@@ -25,7 +25,7 @@
     "bugs": {
         "url": "https://github.com/Tenemo/sealed-lattice/issues"
     },
-    "homepage": "https://tenemo.github.io/sealed-lattice/",
+    "homepage": "https://github.com/Tenemo/sealed-lattice",
     "engines": {
         "node": ">=24.14.1"
     },

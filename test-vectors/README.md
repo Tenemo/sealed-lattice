@@ -1,19 +1,10 @@
 # Test vectors
 
-This directory stores deterministic test vectors and the manifest used to verify them.
+Deterministic known-answer vectors consumed by the test suite. Each vector carries its inputs and the expected outputs (hashes, tallies, slot encodings); the consuming tests re-derive those outputs from the producing code and assert they match, so every vector is bound to the code that generates it.
 
 ## Files
 
-- `manifest.json`: canonical file list and SHA-256 hashes for committed vector files
-- `README.md`: usage notes for contributors
+- `plaintext-oracle/`: comparator polynomials, field arithmetic, Shamir recovery, sparse targets, and top-k derivation, exercised by the `plaintext-oracle-*` protocol tests.
+- `succinct-setup-statement-hashes.json`: byte-identical succinct-setup statement hashes the Rust and TS/WASM provers must both reproduce.
 
-## Commands
-
-```bash
-pnpm run vectors
-pnpm run vectors:generate
-```
-
-`pnpm run vectors` verifies that the committed files match `manifest.json`. `pnpm run vectors:generate` rewrites the manifest from the current contents of the directory.
-
-The repository currently includes tracked plaintext oracle vectors for comparator polynomials, field arithmetic, Shamir recovery, sparse targets, and top-k derivation so the manifest always exercises real file hashing and verification.
+When the producing code changes a vector's output on purpose, update the expected values in the JSON; the consuming test verifies them, and git tracks the change.

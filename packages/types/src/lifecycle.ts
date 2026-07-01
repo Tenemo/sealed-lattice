@@ -1,6 +1,6 @@
 import type { ProtocolHash } from './protocol-hash.js';
 
-/** Backend corruption model used when deriving threshold profiles. */
+/** Backend corruption model used when deriving threshold parameters. */
 export type HeBackendCorruptionModel =
     | {
           readonly kind: 'StructuralOneThird';
@@ -16,51 +16,50 @@ export type DecryptionShareFilteringMode =
     | 'ProofVerifiedSharesOnly'
     | 'RobustDecodeAfterInvalidShareFiltering';
 
-/** Canonical rule used to select target-bound decryption shares. */
-export type DecryptionShareSelectionRule =
-    'FirstValidSharesInCanonicalBoardOrder';
-
-/** Certified target-bound decryption share-selection profile. */
-export type TargetBoundShareSelectionProfile = {
-    readonly profileId: string;
+/** Certified target-bound decryption share-selection parameters. */
+export type TargetBoundShareSelectionParameters = {
     readonly certificateHash: string;
-    readonly targetDecryptionProfileId: string;
     readonly targetBasisHash: ProtocolHash;
     readonly decryptionShareQuorum: number;
     readonly minimumSharesForInterpolation: number;
     readonly minimumArrivalsForRobustDecode: number;
     readonly invalidShareFilteringMode: DecryptionShareFilteringMode;
-    readonly selectedShareRule: DecryptionShareSelectionRule;
 };
 
-/** Input used to derive a threshold profile from roster and backend assumptions. */
-export type ThresholdProfileInput = {
+/** Input used to derive threshold parameters from roster and backend assumptions. */
+export type ThresholdParametersInput = {
     readonly rosterSize: number;
     readonly heBackendCorruptionModel?: HeBackendCorruptionModel;
-    readonly targetBoundShareSelectionProfile?: TargetBoundShareSelectionProfile;
-    readonly dynamicRosterProfileCertificateHash?: ProtocolHash;
-    readonly casualMicroRosterAcknowledged?: boolean;
+    readonly targetBoundShareSelectionParameters?: TargetBoundShareSelectionParameters;
+    readonly dynamicRosterParametersCertificateHash?: ProtocolHash;
+    readonly isCasualMicroRosterAcknowledged?: boolean;
 };
 
-/** Roster profile classification for the derived threshold parameters. */
-export type RosterProfileKind =
+/** Roster parameters classification for the derived threshold parameters. */
+export type RosterParametersKind =
     | 'CasualMicroRoster'
-    | 'FirstProfileRoster'
+    | 'FirstParametersRoster'
     | 'SupportedDynamicRosterRange'
     | 'UncertifiedDynamicRoster';
 
 /** Warning label emitted when threshold parameters require caveats. */
 export type ThresholdWarning =
     | 'CasualMicroRoster'
-    | 'DynamicRosterProfileCertificateRequired'
+    | 'DynamicRosterParametersCertificateRequired'
     | 'BackendCorruptionBoundTooHigh'
-    | 'ShareSelectionProfileRequired';
+    | 'ShareSelectionParametersRequired';
 
-/** Derived threshold, quorum, and corruption-bound parameters for one roster. */
-export type ThresholdProfile = {
+/**
+ * Derived threshold, quorum, and corruption-bound parameters for one roster.
+ *
+ * This is parameter derivation, not a security certificate. Dynamic roster
+ * parameter sets still need their own certificate and runtime evidence before
+ * they carry a security or supported-phone claim.
+ */
+export type ThresholdParameters = {
     readonly rosterSize: number;
-    readonly rosterProfileKind: RosterProfileKind;
-    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
+    readonly rosterParametersKind: RosterParametersKind;
+    readonly dynamicRosterParametersCertificateHash: ProtocolHash | null;
     readonly structuralCorruptionBound: number;
     readonly backendCorruptionBound: number;
     readonly privacyCorruptionBound: number;
@@ -70,7 +69,7 @@ export type ThresholdProfile = {
     readonly decryptionThreshold: number;
     readonly releaseQuorum: number;
     readonly decryptionShareQuorum: number | null;
-    readonly targetBoundShareSelectionProfile: TargetBoundShareSelectionProfile | null;
+    readonly targetBoundShareSelectionParameters: TargetBoundShareSelectionParameters | null;
     readonly maximumRaceShares: number;
     readonly setupCompletionQuorum: number;
     readonly backendCorruptionModel: HeBackendCorruptionModel;
@@ -83,18 +82,6 @@ export type ScoreDomain = {
     readonly max: 10;
     readonly skippedOptionScore: 1;
 };
-
-/** Duplicate ballot policy currently supported by the public facade. */
-export type DuplicateBallotPolicy = 'FirstValidBeforeVotingClosedCounts';
-
-/** Tie-breaking policy currently supported by the public facade. */
-export type TiePolicy = 'HigherScoreThenLowerOptionIndex';
-
-/** Public roster admission model selected at poll creation. */
-export type RosterPolicy = 'OpenLinkPublicRoster';
-
-/** Threshold/profile family selected at poll creation. */
-export type ThresholdProfileFamily = 'BalancedDefault';
 
 /** Policy for rosters below the dynamic supported-roster family. */
 export type SmallRosterPolicy =
@@ -109,12 +96,8 @@ export type PollSpecInput = {
     readonly options: readonly string[];
     readonly topOptionCount: number;
     readonly scoreDomain?: ScoreDomain;
-    readonly duplicateBallotPolicy?: DuplicateBallotPolicy;
-    readonly tiePolicy?: TiePolicy;
-    readonly rosterPolicy?: RosterPolicy;
     readonly minRosterSize?: number;
     readonly maxRosterSize?: number;
-    readonly thresholdProfileFamily?: ThresholdProfileFamily;
     readonly smallRosterPolicy?: SmallRosterPolicy;
 };
 
@@ -125,30 +108,24 @@ export type PollSpec = {
     readonly options: readonly string[];
     readonly topOptionCount: number;
     readonly scoreDomain: ScoreDomain;
-    readonly duplicateBallotPolicy: DuplicateBallotPolicy;
-    readonly tiePolicy: TiePolicy;
-    readonly rosterPolicy: RosterPolicy;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
-    readonly thresholdProfileFamily: ThresholdProfileFamily;
     readonly smallRosterPolicy: SmallRosterPolicy;
 };
 
-/** Concrete threshold/profile output derived after roster freeze. */
-export type FrozenRosterProfile = {
-    readonly objectType: 'FrozenRosterProfile';
+/** Concrete threshold parameter output derived after roster freeze. */
+export type FrozenRosterParameters = {
+    readonly objectType: 'FrozenRosterParameters';
     readonly objectVersion: 1;
-    readonly thresholdProfileHash: ProtocolHash;
+    readonly thresholdParametersHash: ProtocolHash;
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
     readonly rosterSize: number;
-    readonly rosterPolicy: RosterPolicy;
-    readonly thresholdProfileFamily: ThresholdProfileFamily;
     readonly smallRosterPolicy: SmallRosterPolicy;
     readonly minRosterSize: number;
     readonly maxRosterSize: number;
-    readonly dynamicRosterProfileCertificateHash: ProtocolHash | null;
-    readonly thresholdProfile: ThresholdProfile;
+    readonly dynamicRosterParametersCertificateHash: ProtocolHash | null;
+    readonly thresholdParameters: ThresholdParameters;
 };
 
 /** Stable poll specification validation error code. */
@@ -160,11 +137,7 @@ export type PollSpecValidationErrorCode =
     | 'DuplicateOptionLabel'
     | 'InvalidTopOptionCount'
     | 'UnsupportedScoreDomain'
-    | 'UnsupportedDuplicateBallotPolicy'
-    | 'UnsupportedTiePolicy'
-    | 'UnsupportedRosterPolicy'
     | 'InvalidRosterBounds'
-    | 'UnsupportedThresholdProfileFamily'
     | 'UnsupportedSmallRosterPolicy';
 
 /** Structured poll specification validation error. */
@@ -177,11 +150,11 @@ export type PollSpecValidationError = {
 /** Poll specification validation result with normalized output or errors. */
 export type PollSpecValidation =
     | {
-          readonly ok: true;
+          readonly isValid: true;
           readonly normalized: PollSpec;
       }
     | {
-          readonly ok: false;
+          readonly isValid: false;
           readonly errors: readonly PollSpecValidationError[];
       };
 
@@ -195,17 +168,17 @@ export type LifecycleState =
     | 'votingOpen'
     | 'votingClosed'
     | 'encryptedBallotsSelected'
-    | 'ballotProofsVerified'
-    | 'encryptedBallotAggregateComputed'
+    | 'isBallotProofsVerified'
+    | 'isEncryptedBallotAggregateComputed'
     | 'evaluatorReplayed'
     | 'targetFinalityReached'
-    | 'targetAccepted'
+    | 'isTargetAccepted'
     | 'decryptionPending'
     | 'decryptionSharesReady'
     | 'resultDecoded'
     | 'fullyVerified'
     | 'pending'
-    | 'outsideSupportedProfile'
+    | 'outsideSupportedParameters'
     | 'forkDetected';
 
 /** Allowed lifecycle transition edge. */
@@ -232,7 +205,7 @@ export type ProtocolAction =
     | 'AcceptTarget'
     | 'CreateTargetBoundDecryptionShare'
     | 'VerifyDecryptionShare'
-    | 'VerifyTargetDecryptionProfile'
+    | 'VerifyTargetDecryptionParameters'
     | 'RecombineAcceptedTarget'
     | 'DecodeVerifiedTopK'
     | 'CreateRecoveryEpochUpdate'
@@ -250,34 +223,33 @@ export type RecoveryState =
 /** Context used to decide whether a protocol action is currently allowed. */
 export type CapabilityContext = {
     readonly lifecycleState: LifecycleState;
-    readonly thresholdProfile: ThresholdProfile;
-    readonly pollSpecValid: boolean;
+    readonly thresholdParameters: ThresholdParameters;
+    readonly isPollSpecValid: boolean;
     readonly finalRosterHash?: ProtocolHash;
-    readonly frozenRosterProfileHash?: ProtocolHash;
-    readonly trusteeSetupComplete?: boolean;
-    readonly encryptedBallotLayoutFrozen?: boolean;
-    readonly ballotValidityProofProfileFrozen?: boolean;
-    readonly evaluatorReplayProfileFrozen?: boolean;
-    readonly targetOutputLayoutFrozen?: boolean;
-    readonly targetDecryptionProfileReferencePresent?: boolean;
-    readonly localRosterAccepted?: boolean;
+    readonly frozenRosterParametersHash?: ProtocolHash;
+    readonly isTrusteeSetupComplete?: boolean;
+    readonly isEncryptedBallotLayoutFrozen?: boolean;
+    readonly isBallotValidityProofParametersFrozen?: boolean;
+    readonly isEvaluatorReplayParametersFrozen?: boolean;
+    readonly isTargetOutputLayoutFrozen?: boolean;
+    readonly isTargetDecryptionParametersReferencePresent?: boolean;
+    readonly isLocalRosterAccepted?: boolean;
     readonly rosterExternalAcceptanceHash?: ProtocolHash;
     readonly actionContextRosterExternalAcceptanceHash?: ProtocolHash | null;
     readonly setupCompleteCount?: number;
     readonly turnoutCount?: number;
     readonly decryptionShareCount?: number;
-    readonly ballotProofsVerified?: boolean;
-    readonly encryptedBallotAggregateComputed?: boolean;
-    readonly evaluatorReplaySucceeded?: boolean;
-    readonly targetFinalityAccepted?: boolean;
-    readonly targetAccepted?: boolean;
-    readonly targetDecryptionProfileVerified?: boolean;
-    readonly runtimeProfileSupported?: boolean;
-    readonly directProofTransportPresent?: boolean;
-    readonly mobileReplayEvidencePresent?: boolean;
-    readonly targetDecryptionCertificatePresent?: boolean;
-    readonly targetDecryptionClosureApplied?: boolean;
-    readonly activeMaliciousClosureApplied?: boolean;
+    readonly isBallotProofsVerified?: boolean;
+    readonly isEncryptedBallotAggregateComputed?: boolean;
+    readonly isEvaluatorReplaySucceeded?: boolean;
+    readonly isTargetFinalityAccepted?: boolean;
+    readonly isTargetAccepted?: boolean;
+    readonly isTargetDecryptionParametersVerified?: boolean;
+    readonly isRuntimeParametersSupported?: boolean;
+    readonly isDirectProofTransportPresent?: boolean;
+    readonly isMobileReplayEvidencePresent?: boolean;
+    readonly isTargetDecryptionCertificatePresent?: boolean;
+    readonly isTargetDecryptionClosureApplied?: boolean;
     readonly recoveryState?: RecoveryState;
 };
 
@@ -297,8 +269,8 @@ export type RefusalReason =
     | 'TargetFinalityCheckpointMissing'
     | 'TargetNotAccepted'
     | 'FirstThresholdSharesNotReached'
-    | 'TargetDecryptionProfileNotCertified'
-    | 'OutsideMeasuredRuntimeProfile'
+    | 'TargetDecryptionParametersNotCertified'
+    | 'OutsideMeasuredRuntimeParameters'
     | 'MissingDirectProofTransport'
     | 'MissingMobileReplayEvidence'
     | 'MissingTargetDecryptionCertificate'

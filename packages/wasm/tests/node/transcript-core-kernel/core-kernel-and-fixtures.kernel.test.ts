@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
     foundationTranscriptCoreFixture,
-    invalidEnumFixture,
     textDecoder,
     textEncoder,
     wasmHeader,
@@ -11,7 +10,7 @@ import {
 
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     setupProofMaterialFullObjectHashHex,
 } from '#packages/crypto/src/index';
 import {
@@ -29,8 +28,6 @@ type SetupCommitmentOpeningComputation = Readonly<{
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: string;
-    readonly commitmentChunkRoot: string;
-    readonly coefficientVectorHash512: string;
 }>;
 
 type SetupCommitmentKernel = Readonly<{
@@ -47,11 +44,8 @@ type SetupCommitmentKernel = Readonly<{
 }>;
 
 type ThresholdShareTransportStreamKernel = Readonly<{
-    readonly describeCollectiveBgvSetupProfile: () => {
-        readonly setupProfileHash: string;
-        readonly qShareHash: string;
-        readonly carryAwareVssShareRelationProfileHash: string;
-        readonly commitmentProfileHash: string;
+    readonly describeCollectiveBgvSetupParameters: () => {
+        readonly setupParametersHash: string;
     };
     readonly beginThresholdShareCommitmentsFromTransportStream: (input: {
         readonly derivationId: string;
@@ -205,22 +199,14 @@ describe('transcript-core kernel in Node', () => {
             chunkSize: foundationTranscriptCoreFixture.chunkSize,
         });
 
-        expect(foundationAnalysis.evaluatorReplayProfileId).toBe(
-            'transcript-core-no-evaluator-replay-proof-v1',
-        );
+        expect(foundationAnalysis.tags).toContain('direct-route');
+        expect(foundationAnalysis.title).toBe('Foundation transcript roots');
+        expect(foundationAnalysis.sequence).toBe(10);
     });
 
-    it('derives protocol Hashes and field results through WASM', async () => {
+    it('computes Shamir interpolation and plaintext comparison through WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
-        expect(
-            kernel.deriveProtocolHash({
-                namespace: 'PollSpecHash',
-                value: { poll: 'main' },
-            }),
-        ).toBe(
-            '43b28c9a3dcb3e34d75c9936a9930b68fb9f2010b87d43a6a61cbaa85d343d9fd0be2b312a90f404367b9c68793b0dcf02c4dae7351f6e96ded894b92f898cb4',
-        );
         expect(
             kernel.interpolateShamirConstantTerm({
                 sharePoints: [
@@ -240,18 +226,13 @@ describe('transcript-core kernel in Node', () => {
             equal: 0,
             scoreDifference: 1,
         });
-        expect(() =>
-            kernel.deriveProtocolHash({
-                namespace: 'UnreservedHash',
-                value: {},
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
     });
 
-    it('keeps TypeScript and Rust canonical JSON behavior aligned for protocol Hashes', async () => {
+    it('keeps TypeScript and Rust canonical JSON behavior aligned for canonical object Hashes', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const acceptedValues: readonly unknown[] = [
+        const acceptedValues: readonly Record<string, unknown>[] = [
             {
+                objectType: 'CanonicalJsonParityProbe',
                 flags: [true, false, null],
                 nested: {
                     a: 'Cafe\u0301',
@@ -266,32 +247,40 @@ describe('transcript-core kernel in Node', () => {
                     rosterPosition: 20,
                 },
                 shareVectorWidth: 220,
+                objectType: 'CanonicalJsonParityProbe',
             },
         ];
 
         for (const value of acceptedValues) {
-            expect(
-                kernel.deriveProtocolHash({
-                    namespace: 'PollSpecHash',
-                    value,
-                }),
-            ).toBe(deriveProtocolHash('PollSpecHash', value));
+            expect(kernel.deriveCanonicalObjectHash({ value })).toBe(
+                deriveCanonicalObjectHash(value),
+            );
         }
 
         const rejectedValues: readonly {
-            readonly value: unknown;
+            readonly value: Record<string, unknown>;
             readonly expectedKernelCode: string;
         }[] = [
             {
-                value: { ['e\u0301']: 1, ['\u00E9']: 2 },
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    ['e\u0301']: 1,
+                    ['\u00E9']: 2,
+                },
                 expectedKernelCode: 'DuplicateField',
             },
             {
-                value: { unsafeInteger: Number.MAX_SAFE_INTEGER + 1 },
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    unsafeInteger: Number.MAX_SAFE_INTEGER + 1,
+                },
                 expectedKernelCode: 'InvalidFixture',
             },
             {
-                value: { fractional: 1.5 },
+                value: {
+                    objectType: 'CanonicalJsonParityProbe',
+                    fractional: 1.5,
+                },
                 expectedKernelCode: 'InvalidFixture',
             },
         ];
@@ -299,20 +288,18 @@ describe('transcript-core kernel in Node', () => {
         for (const { value, expectedKernelCode } of rejectedValues) {
             expect(() => canonicalJson(value)).toThrow(TypeError);
 
-            let protocolHashError: unknown;
+            let canonicalObjectHashError: unknown;
             try {
-                kernel.deriveProtocolHash({
-                    namespace: 'PollSpecHash',
-                    value,
-                });
+                kernel.deriveCanonicalObjectHash({ value });
             } catch (error) {
-                protocolHashError = error;
+                canonicalObjectHashError = error;
             }
-            expect(protocolHashError).toBeInstanceOf(
+            expect(canonicalObjectHashError).toBeInstanceOf(
                 TranscriptCoreKernelCommandError,
             );
             expect(
-                (protocolHashError as TranscriptCoreKernelCommandError).code,
+                (canonicalObjectHashError as TranscriptCoreKernelCommandError)
+                    .code,
             ).toBe(expectedKernelCode);
         }
     });
@@ -346,8 +333,6 @@ describe('transcript-core kernel in Node', () => {
 
         expect(computation.operation).toBe('computeSetupCommitmentFromOpening');
         expect(computation.commitmentRoot).toHaveLength(128);
-        expect(computation.commitmentChunkRoot).toHaveLength(128);
-        expect(computation.coefficientVectorHash512).toHaveLength(128);
         expect(computation.commitment).toMatchObject({
             objectType: 'SetupCommitment',
             sourceRnsLimbIndex: 0,
@@ -372,16 +357,12 @@ describe('transcript-core kernel in Node', () => {
     it('exposes chunk-fed VSS threshold derivation stream commands through WASM', async () => {
         const kernel =
             (await loadTranscriptCoreKernel()) as ThresholdShareTransportStreamKernel;
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
         const setupContext = {
             ceremonyId: 'ceremony-main',
             manifestHash: 'a'.repeat(128),
             rosterHash: 'b'.repeat(128),
-            setupProfileHash: profile.setupProfileHash,
-            qShareHash: profile.qShareHash,
-            carryAwareVssShareRelationProfileHash:
-                profile.carryAwareVssShareRelationProfileHash,
-            commitmentProfileHash: profile.commitmentProfileHash,
+            setupParametersHash: parameters.setupParametersHash,
             setupEpoch: 'setup-epoch-1',
         };
         const derivationId = 'wasm-vss-stream-smoke';
@@ -448,8 +429,6 @@ describe('transcript-core kernel in Node', () => {
             transportedSetupProofMaterial: {
                 objectType: 'SetupTransportedSameSecretProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId: 'SealedLattice-SetupProof-v1',
                 proofFamily,
                 proofMaterialRoot,
                 chunkSizeBytes: setupProofTransportChunkSizeBytes,
@@ -512,37 +491,32 @@ describe('transcript-core kernel in Node', () => {
                 foundationTranscriptCoreFixture.expectedObjectHash512,
             chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
         });
-        expect(kernel.verifyFixture(invalidEnumFixture)).toEqual({
-            caseName: 'invalid-enum',
-            expectedErrorCode: 'InvalidEnum',
-        });
     });
 
     it('maps canonical rejection errors from command responses', async () => {
         const kernel = await loadTranscriptCoreKernel();
+        const malformedMagicHex = '42414421';
 
         expect(() =>
             kernel.analyzeCanonicalObject({
-                canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
+                canonicalBytesHex: malformedMagicHex,
                 chunkSize: 8,
             }),
         ).toThrow(TranscriptCoreKernelCommandError);
 
-        let invalidEnumError: unknown;
+        let canonicalError: unknown;
         try {
             kernel.analyzeCanonicalObject({
-                canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
+                canonicalBytesHex: malformedMagicHex,
                 chunkSize: 8,
             });
         } catch (error) {
-            invalidEnumError = error;
+            canonicalError = error;
         }
-        expect(invalidEnumError).toBeInstanceOf(
-            TranscriptCoreKernelCommandError,
+        expect(canonicalError).toBeInstanceOf(TranscriptCoreKernelCommandError);
+        expect((canonicalError as TranscriptCoreKernelCommandError).code).toBe(
+            'MalformedMagic',
         );
-        expect(
-            (invalidEnumError as TranscriptCoreKernelCommandError).code,
-        ).toBe('InvalidEnum');
     });
 
     it('keeps byte round-trip as an allocation smoke path', async () => {
@@ -558,11 +532,5 @@ describe('transcript-core kernel in Node', () => {
 
         expect(kernel.hashRaw('00')).toMatch(/^[a-f0-9]{128}$/u);
         expect(kernel.listCanonicalErrorCodes()).toContain('InvalidEnum');
-        expect(kernel.listReservedRootNamespaces()).toContain(
-            'sealed-lattice-root/poll-spec-hash-v1',
-        );
-        expect(kernel.listReservedRootNamespaces()).toContain(
-            'sealed-lattice-root/proof-bytes-hash-v1',
-        );
     });
 });

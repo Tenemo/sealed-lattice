@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Debug, Clone)]
 pub(crate) struct SetupVssMaterialTransportHashes {
     pub(crate) full_object_hash: String,
@@ -328,7 +330,7 @@ pub(super) fn read_binary_setup_commitment(
         let modulus = reader.read_u64_le("commitment modulus")?;
         if DATA_PRIMES.get(expected_commitment_modulus_index) != Some(&modulus) {
             return Err(invalid_threshold_commitment_input(
-                "transported commitment modulus does not match the commitment profile",
+                "transported commitment modulus does not match the commitment parameters",
             ));
         }
         let mut rows = Vec::with_capacity(SETUP_COMMITMENT_ROW_COUNT);
@@ -785,18 +787,13 @@ pub(super) fn setup_transport_chunk_manifest_root(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupTransportChunkManifestRoot",
-        &json!({
-            "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "transportProfileId": SETUP_TRANSPORT_PROFILE_ID,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE,
+        "objectVersion": 1,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
 }

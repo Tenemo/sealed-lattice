@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import type {
@@ -20,7 +20,7 @@ type CommonRandomnessContextFields = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
 }>;
 
@@ -82,13 +82,11 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPublicDerivations';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly publicMatrixSeedHash: ProtocolHash;
         readonly bgvPublicA: Readonly<
             JsonRecord & {
                 readonly objectType: 'BgvPublicAPolynomial';
                 readonly objectVersion: 1;
-                readonly setupProfileId: 'CollectiveBgvSetup-v1';
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicPolynomialRoot: ProtocolHash;
             }
@@ -97,7 +95,6 @@ export type SetupCommonRandomnessPublicDerivations = Readonly<
             JsonRecord & {
                 readonly objectType: 'SetupPublicMatrixMaterial';
                 readonly objectVersion: 1;
-                readonly setupProfileId: 'CollectiveBgvSetup-v1';
                 readonly publicMatrixSeedHash: ProtocolHash;
                 readonly publicMatricesRoot: ProtocolHash;
             }
@@ -191,7 +188,7 @@ const commonRandomnessContextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
@@ -200,7 +197,7 @@ const assertInputContext = (setupContext: CollectiveBgvSetupContext): void => {
         'ceremonyId',
         'manifestHash',
         'rosterHash',
-        'setupProfileHash',
+        'setupParametersHash',
         'setupEpoch',
     ] as const) {
         assertNonEmptyString(
@@ -319,10 +316,7 @@ const assertRecordHashMatches = (
         void removedCommitHash;
         void removedSignatureEnvelopeHash;
         void removedSignatureEnvelope;
-        const expectedCommitHash = deriveProtocolHash(
-            'CommonRandomnessCommitHash',
-            hashInput,
-        );
+        const expectedCommitHash = deriveCanonicalObjectHash(hashInput);
         if (record.commitHash !== expectedCommitHash) {
             throw new Error(
                 `${objectPath}.commitHash does not match the canonical payload.`,
@@ -341,10 +335,7 @@ const assertRecordHashMatches = (
     void removedRevealHash;
     void removedSignatureEnvelopeHash;
     void removedSignatureEnvelope;
-    const expectedRevealHash = deriveProtocolHash(
-        'CommonRandomnessRevealHash',
-        hashInput,
-    );
+    const expectedRevealHash = deriveCanonicalObjectHash(hashInput);
     if (record.revealHash !== expectedRevealHash) {
         throw new Error(
             `${objectPath}.revealHash does not match the canonical payload.`,
@@ -398,11 +389,6 @@ const assertPublicDerivationsMatchKernelShape = (
     if (publicDerivations.objectVersion !== 1) {
         throw new Error('publicDerivations.objectVersion must be 1.');
     }
-    if (publicDerivations.setupProfileId !== 'CollectiveBgvSetup-v1') {
-        throw new Error(
-            'publicDerivations.setupProfileId must be CollectiveBgvSetup-v1.',
-        );
-    }
     if (publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash) {
         throw new Error(
             'publicDerivations.publicMatrixSeedHash must match the derived public matrix seed hash.',
@@ -416,11 +402,10 @@ const assertPublicDerivationsMatchKernelShape = (
     if (
         bgvPublicA.objectType !== 'BgvPublicAPolynomial' ||
         bgvPublicA.objectVersion !== 1 ||
-        bgvPublicA.setupProfileId !== 'CollectiveBgvSetup-v1' ||
         bgvPublicA.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            'publicDerivations.bgvPublicA must match the accepted public-a derivation profile.',
+            'publicDerivations.bgvPublicA must match the accepted public-a derivation parameters.',
         );
     }
     assertProtocolHash(
@@ -435,11 +420,10 @@ const assertPublicDerivationsMatchKernelShape = (
     if (
         publicMatrices.objectType !== 'SetupPublicMatrixMaterial' ||
         publicMatrices.objectVersion !== 1 ||
-        publicMatrices.setupProfileId !== 'CollectiveBgvSetup-v1' ||
         publicMatrices.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            'publicDerivations.publicMatrices must match the accepted setup public matrix profile.',
+            'publicDerivations.publicMatrices must match the accepted setup public matrix parameters.',
         );
     }
     assertProtocolHash(
@@ -467,8 +451,7 @@ const assertPublicDerivationsMatchKernelShape = (
         publicDerivations.publicDerivationRoot,
         'publicDerivations.publicDerivationRoot',
     );
-    const expectedPublicDerivationRoot = deriveProtocolHash(
-        'SetupPublicDerivationRoot',
+    const expectedPublicDerivationRoot = deriveCanonicalObjectHash(
         withoutHashField(publicDerivations, 'publicDerivationRoot'),
     );
     if (
@@ -488,12 +471,13 @@ const commonRandomnessSignatureContextHash = (
     payload: JsonRecord,
     objectRoot: ProtocolHash,
 ): ProtocolHash =>
-    deriveProtocolHash(`${objectType}Hash`, {
+    deriveCanonicalObjectHash({
+        objectType: `${objectType}SignatureContext`,
         purpose,
         ceremonyId: payload.ceremonyId,
         manifestHash: payload.manifestHash,
         rosterHash: payload.rosterHash,
-        setupProfileHash: payload.setupProfileHash,
+        setupParametersHash: payload.setupParametersHash,
         setupEpoch: payload.setupEpoch,
         trusteeIdentity: payload.trusteeIdentity,
         rosterPosition: payload.rosterPosition,
@@ -522,7 +506,7 @@ const verifyGeneratedSignatureEnvelope = (
         recoveryEpoch: signedRoot.recoveryEpoch,
         deviceEpoch: signedRoot.deviceEpoch,
     });
-    if (!result.ok) {
+    if (!result.isValid) {
         const refusedObject = result.refusedObjects[0];
         throw new Error(
             refusedObject === undefined
@@ -549,10 +533,7 @@ export const createCommonRandomnessReveal = async (
         ...commonRandomnessParticipantFields(input),
         revealHex: input.revealHex,
     } as const satisfies JsonRecord;
-    const revealHash = deriveProtocolHash(
-        'CommonRandomnessRevealHash',
-        revealWithoutHash,
-    );
+    const revealHash = deriveCanonicalObjectHash(revealWithoutHash);
     const revealContextHash = commonRandomnessSignatureContextHash(
         'CommonRandomnessReveal',
         'common-randomness-reveal-signature-context',
@@ -602,10 +583,7 @@ export const createCommonRandomnessCommit = async (
         ...commonRandomnessParticipantFields(input),
         revealHash: input.revealHash,
     } as const satisfies JsonRecord;
-    const commitHash = deriveProtocolHash(
-        'CommonRandomnessCommitHash',
-        commitWithoutHash,
-    );
+    const commitHash = deriveCanonicalObjectHash(commitWithoutHash);
     const commitContextHash = commonRandomnessSignatureContextHash(
         'CommonRandomnessCommit',
         'common-randomness-commit-signature-context',
@@ -699,18 +677,15 @@ export const createSetupCommonRandomness = (
         (revealRecord) => revealRecord.revealHash,
     );
     // Commit-then-reveal coin flip: the public matrix seed is the joint digest of all reveal hashes in roster order, so no single trustee can bias the derived CRS after seeing others' reveals.
-    const publicMatrixSeedHash = deriveProtocolHash(
-        'SetupPublicMatrixSeedHash',
-        {
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            ceremonyId: input.setupContext.ceremonyId,
-            manifestHash: input.setupContext.manifestHash,
-            rosterHash: input.setupContext.rosterHash,
-            setupProfileHash: input.setupContext.setupProfileHash,
-            setupEpoch: input.setupContext.setupEpoch,
-            orderedRevealHashes,
-        },
-    );
+    const publicMatrixSeedHash = deriveCanonicalObjectHash({
+        objectType: 'SetupPublicMatrixSeed',
+        ceremonyId: input.setupContext.ceremonyId,
+        manifestHash: input.setupContext.manifestHash,
+        rosterHash: input.setupContext.rosterHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
+        setupEpoch: input.setupContext.setupEpoch,
+        orderedRevealHashes,
+    });
     const publicDerivations =
         input.derivePublicDerivations(publicMatrixSeedHash);
     assertPublicDerivationsMatchKernelShape(
@@ -730,8 +705,7 @@ export const createSetupCommonRandomness = (
 
     return {
         ...commonRandomnessWithoutRoot,
-        commonRandomnessRoot: deriveProtocolHash(
-            'SetupCommonRandomnessRoot',
+        commonRandomnessRoot: deriveCanonicalObjectHash(
             commonRandomnessWithoutRoot,
         ),
     } satisfies SetupCommonRandomness;

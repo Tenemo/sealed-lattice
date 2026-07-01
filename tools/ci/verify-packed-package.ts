@@ -15,7 +15,6 @@ import { fileURLToPath } from 'node:url';
 
 import {
     resolvePackageManagerRunner,
-    resolvePackageManagerRunnerFromArguments,
     resolvePackageManagerRunnerForPackageManager,
     type PackageManager,
 } from './package-manager-runner.js';
@@ -90,8 +89,8 @@ const createInstallArguments = (
     tarballPath: string,
 ): readonly string[] =>
     packageManager === 'npm'
-        ? ['install', '--ignore-scripts', '--silent', tarballPath]
-        : ['add', '--ignore-scripts', '--silent', tarballPath];
+        ? ['install', '--ignore-scripts', tarballPath]
+        : ['add', '--ignore-scripts', tarballPath];
 
 const isPackedFileMetadata = (value: unknown): value is PackedFileMetadata => {
     if (typeof value !== 'object' || value === null) {
@@ -312,10 +311,8 @@ const runSmokeEntryPoint = (consumerDirectory: string): void => {
 };
 
 const main = async (): Promise<void> => {
-    const packageManagerRunner = resolvePackageManagerRunnerFromArguments(
-        process.argv.slice(2),
-    );
-    const npmPackRunner = resolvePackageManagerRunnerForPackageManager('npm');
+    const packageManagerRunner =
+        resolvePackageManagerRunnerForPackageManager('npm');
     const tempRoot = await mkdtemp(join(tmpdir(), 'sealed-lattice-packed-'));
     const packDirectory = join(tempRoot, 'pack');
     const consumerDirectory = join(tempRoot, 'consumer');
@@ -365,7 +362,7 @@ const main = async (): Promise<void> => {
 
         const publishedPackageFilePaths = parsePackDryRunFilePaths(
             runPackageManagerAndCaptureOutput(
-                npmPackRunner,
+                packageManagerRunner,
                 createDryRunPackArguments(),
                 packageDirectory,
             ),

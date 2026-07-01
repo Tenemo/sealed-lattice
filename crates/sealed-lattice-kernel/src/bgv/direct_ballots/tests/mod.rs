@@ -1,14 +1,13 @@
 use std::sync::OnceLock;
 
 mod aggregation_and_evaluator;
-mod command_report;
 mod proof_transport;
 mod relation_proof_checks;
 mod request_validation;
 
 use serde_json::json;
 
-use crate::hashing::derive_protocol_hash;
+use crate::hashing::derive_canonical_object_hash;
 
 use super::*;
 
@@ -73,9 +72,9 @@ fn direct_ballot_test_ballot_encryption_randomness(ballot_count: usize) -> Value
 fn direct_ballot_test_ballot_json(voter_identity: &str, ballot_index: usize) -> Value {
     json!({
         "voterIdentity": voter_identity,
-        "actionContextHash": derive_protocol_hash(
-            "ActionContextHash",
+        "actionContextHash": derive_canonical_object_hash(
             &json!({
+                "objectType": "ActionContextHash",
                 "action": "direct encrypted ballot randomness rejection test",
                 "ballotIndex": ballot_index
             }),
@@ -156,17 +155,14 @@ fn setup_package_not_reached() -> Value {
 fn setup_package_with_seed(setup_seed: &str) -> Value {
     crate::bgv::commands::generate_bgv_passive_setup_from_request(&json!({
         "ceremonyId": "direct-encrypted-ballot-test-ceremony",
-        "manifestHash": derive_protocol_hash(
-            "ElectionManifestHash",
-            &json!({ "manifest": "direct encrypted ballot test" }),
+        "manifestHash": derive_canonical_object_hash(
+            &json!({ "objectType": "ElectionManifestHash", "manifest": "direct encrypted ballot test" }),
         ).expect("manifest hash"),
-        "rosterHash": derive_protocol_hash(
-            "RosterHash",
-            &json!({ "roster": "direct encrypted ballot test" }),
+        "rosterHash": derive_canonical_object_hash(
+            &json!({ "objectType": "RosterHash", "roster": "direct encrypted ballot test" }),
         ).expect("roster hash"),
-        "thresholdProfileHash": derive_protocol_hash(
-            "ThresholdProfileHash",
-            &json!({ "threshold": "direct encrypted ballot test" }),
+        "thresholdParametersHash": derive_canonical_object_hash(
+            &json!({ "objectType": "ThresholdParametersHash", "threshold": "direct encrypted ballot test" }),
         ).expect("threshold hash"),
         "participants": [
             { "trusteeIdentity": "trustee-1", "rosterPosition": 0, "boardPosition": 0 },

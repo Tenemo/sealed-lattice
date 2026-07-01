@@ -13,8 +13,6 @@ import {
 import {
     createLocalRunLog,
     currentProcessExitCode,
-    removeRunLogArguments,
-    runLogDisabledByArguments,
     type ActiveLocalRunLog,
 } from './local-run-log.js';
 import {
@@ -26,6 +24,7 @@ import {
     runCommandsInSeries,
     type CommandInvocation,
 } from './run-command.js';
+import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
@@ -53,21 +52,8 @@ export type ParsedCheckArguments = {
     readonly progressMode: CheckProgressMode;
 };
 
-const checkUsage =
-    'Usage: run-check.ts [--no-run-log] [--progress=auto|always|never].';
+const checkUsage = 'Usage: run-check.ts [--progress=auto|always|never].';
 const rustKernelLaneName = 'Rust kernel (fmt, clippy, fast test)';
-const rustKernelHeavyTestPattern = 'heavy_accepted_setup';
-
-const rustKernelFastTestArguments = [
-    'test',
-    '-p',
-    'sealed-lattice-kernel',
-    '--quiet',
-    '--',
-    '--skip',
-    rustKernelHeavyTestPattern,
-    '--show-output',
-] as const;
 
 const isCheckProgressMode = (value: string): value is CheckProgressMode =>
     value === 'always' || value === 'auto' || value === 'never';
@@ -79,6 +65,10 @@ export const parseCheckArguments = (
     for (let index = 0; index < commandArguments.length; index += 1) {
         const argument = commandArguments[index];
         if (argument === undefined) {
+            continue;
+        }
+
+        if (argument === '--') {
             continue;
         }
 
@@ -178,13 +168,7 @@ const buildGatingLanes = (
         packageManagerRunner,
         'Smoke npm package',
         'smoke-pack-npm',
-        [
-            'exec',
-            'tsx',
-            './tools/ci/verify-packed-package.ts',
-            '--package-manager',
-            'npm',
-        ],
+        ['exec', 'tsx', './tools/ci/verify-packed-package.ts'],
     ),
 ];
 
@@ -210,21 +194,18 @@ const buildRustKernelLane = (): ValidationLane => ({
         ),
         createCargoCommand(
             'cargo test (optimized test profile, fast)',
-            rustKernelFastTestArguments,
+            cargoTestArgumentsForRustKernelFast(),
             'cargo-test',
         ),
     ],
     name: rustKernelLaneName,
 });
 
-// Independent checks run concurrently against the built output. The docs lane
-// runs the post-build docs commands directly instead of `pnpm run docs:build`,
-// because the standalone docs script rebuilds the workspace and would write
-// `dist/` during the parallel phase. The commit gate runs the fast Node test
-// project, the non-heavy kernel Node project, and the fast Rust kernel tests.
-// The heavier protocol, kernel-heavy Node project, ignored Rust kernel heavy
-// tests, and the Playwright browser projects stay in their standalone lanes for
-// pre-push verification.
+// Independent checks run concurrently against the built output. The commit gate
+// runs the fast Node test project, the kernel-fast Node project, and the fast
+// Rust kernel tests. The heavier protocol, kernel-heavy Node project, ignored
+// Rust accepted-setup proof tests, and the Playwright browser projects stay in
+// their standalone lanes for pre-push verification.
 const buildParallelLanes = (
     packageManagerRunner: PackageManagerRunner,
 ): readonly ValidationLane[] => {
@@ -243,73 +224,6 @@ const buildParallelLanes = (
     return [
         lane('Lint', 'lint', ['run', 'lint']),
         buildRustKernelLane(),
-        {
-            commands: [
-                createPackageManagerCommand(
-                    'Clear docs API reference',
-                    ['exec', 'del-cli', 'docs/src/content/docs/api/reference'],
-                    {
-                        logFileSlug: 'docs-clear-api-reference',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Generate docs API reference',
-                    [
-                        'exec',
-                        'tsx',
-                        './node_modules/typedoc/bin/typedoc',
-                        '--options',
-                        'typedoc.config.mjs',
-                    ],
-                    {
-                        logFileSlug: 'docs-api-reference',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Postprocess docs API reference',
-                    ['exec', 'tsx', './docs/typedoc/postprocess-site-docs.ts'],
-                    {
-                        logFileSlug: 'docs-api-postprocess',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Clear docs site output',
-                    ['exec', 'del-cli', 'docs/dist'],
-                    {
-                        logFileSlug: 'docs-clear-site-output',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Build docs site',
-                    ['exec', 'astro', 'build', '--root', 'docs', '--silent'],
-                    {
-                        logFileSlug: 'docs-site-build',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Verify docs links',
-                    ['exec', 'tsx', './docs/typedoc/verify-docs.ts'],
-                    {
-                        logFileSlug: 'docs-link-verification',
-                        packageManagerRunner,
-                    },
-                ),
-                createPackageManagerCommand(
-                    'Verify rendered docs',
-                    ['exec', 'tsx', './tools/ci/verify-docs-render.ts'],
-                    {
-                        logFileSlug: 'docs-render-verification',
-                        packageManagerRunner,
-                    },
-                ),
-            ],
-            name: 'Verify docs',
-        },
         lane('Verify public package policy', 'package-policy', [
             'exec',
             'tsx',
@@ -325,7 +239,6 @@ const buildParallelLanes = (
             'tsx',
             './tools/ci/check-package-boundaries.ts',
         ]),
-        lane('Verify test vectors', 'test-vectors', ['run', 'vectors']),
         lane('Knip unused-code scan', 'knip', ['exec', 'knip']),
         lane('Node tests (fast)', 'vitest-node', [
             'exec',
@@ -338,11 +251,11 @@ const buildParallelLanes = (
             '--reporter',
             './tools/ci/vitest-progress-reporter.ts',
         ]),
-        lane('Node tests (kernel)', 'vitest-node-kernel', [
+        lane('Node tests (kernel fast)', 'vitest-node-kernel-fast', [
             'exec',
             'vitest',
             '--project',
-            'node-kernel',
+            'node-kernel-fast',
             '--run',
             '--reporter',
             'default',
@@ -378,7 +291,7 @@ const buildProgressLanePlans = (
         }
         if (
             lane.name === 'Node tests (fast)' ||
-            lane.name === 'Node tests (kernel)'
+            lane.name === 'Node tests (kernel fast)'
         ) {
             return {
                 secondary:
@@ -591,8 +504,7 @@ const overallExitCode = (results: readonly ValidationLaneResult[]): number => {
 
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
-    const commandArguments = removeRunLogArguments(rawArguments);
-    const parsedArguments = parseCheckArguments(commandArguments);
+    const parsedArguments = parseCheckArguments(rawArguments);
     const packageManagerRunner = resolvePackageManagerRunner();
     const gatingLanes = buildGatingLanes(packageManagerRunner);
     const parallelLanes = buildParallelLanes(packageManagerRunner);
@@ -605,13 +517,11 @@ const main = async (): Promise<void> => {
             parsedArguments.progressMode,
         ),
     });
-    const runLog = runLogDisabledByArguments(rawArguments)
-        ? undefined
-        : await createLocalRunLog({
-              commandLineArguments: rawArguments,
-              lanes: validationLanes.map((lane) => lane.name),
-              scriptName: 'check',
-          });
+    const runLog = await createLocalRunLog({
+        commandLineArguments: rawArguments,
+        lanes: validationLanes.map((lane) => lane.name),
+        scriptName: 'check',
+    });
     let timingDetails: CheckRunTimingDetails | undefined;
 
     try {

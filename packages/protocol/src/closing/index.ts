@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     CastReceipt,
     CastReceiptVerification,
@@ -25,7 +25,7 @@ import {
 export const deriveCastReceiptHash = (
     receipt: Omit<CastReceipt, 'castReceiptHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('CastReceiptHash', {
+    deriveCanonicalObjectHash({
         boardPosition: receipt.boardPosition,
         boardSequence: receipt.boardSequence,
         ceremonyId: receipt.ceremonyId,
@@ -45,7 +45,9 @@ export const derivePostVotingClosedContextHash = (input: {
     readonly electionManifestHash: ProtocolHash;
     readonly votingClosedBoardHeadHash: ProtocolHash;
 }): ProtocolHash =>
-    deriveProtocolHash('PostVotingClosedContextHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'PostVotingClosedContext',
+        objectVersion: 1,
         ceremonyId: input.ceremonyId,
         closeRecordHash: input.closeRecordHash,
         electionManifestHash: input.electionManifestHash,
@@ -58,7 +60,7 @@ export const deriveCloseRecordHash = (
         'closeRecordHash' | 'postVotingClosedContextHash' | 'signature'
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('CloseRecordHash', {
+    deriveCanonicalObjectHash({
         boardPosition: closeRecord.boardPosition,
         boardSequence: closeRecord.boardSequence,
         ceremonyId: closeRecord.ceremonyId,
@@ -196,7 +198,7 @@ const verifyCastReceiptShellUnchecked = (
 
     return {
         ...verificationBase,
-        castReceiptHash: verificationBase.ok
+        castReceiptHash: verificationBase.isValid
             ? input.receipt.castReceiptHash
             : undefined,
     };
@@ -209,7 +211,7 @@ export const verifyCastReceiptShell = (
         return verifyCastReceiptShellUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(
@@ -426,10 +428,10 @@ const verifyCloseRecordShellUnchecked = (
 
     return {
         ...verificationBase,
-        closeRecordHash: verificationBase.ok
+        closeRecordHash: verificationBase.isValid
             ? input.closeRecord.closeRecordHash
             : undefined,
-        postVotingClosedContextHash: verificationBase.ok
+        postVotingClosedContextHash: verificationBase.isValid
             ? (input.closeRecord.postVotingClosedContextHash ?? undefined)
             : undefined,
     };
@@ -442,7 +444,7 @@ export const verifyCloseRecordShell = (
         return verifyCloseRecordShellUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

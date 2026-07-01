@@ -6,7 +6,7 @@ use crate::{
         },
         modular_arithmetic::{add_mod, add_mod_fast, mul_mod_fast, sub_mod},
         ntt::{forward_negacyclic_ntt, inverse_negacyclic_ntt},
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -152,49 +152,26 @@ fn ntt_limbs(limbs: &[Vec<u64>], primes: &[u64]) -> CanonicalResult<Vec<Vec<u64>
         ));
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        limbs
-            .par_iter()
-            .zip(primes.par_iter())
-            .map(|(limb, modulus)| forward_negacyclic_ntt(limb, *modulus))
-            .collect()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        limbs
-            .iter()
-            .zip(primes.iter())
-            .map(|(limb, modulus)| forward_negacyclic_ntt(limb, *modulus))
-            .collect()
-    }
+    evaluator_parallel_iterator!(
+        limbs.par_iter().zip(primes.par_iter()),
+        limbs.iter().zip(primes.iter())
+    )
+    .map(|(limb, modulus)| forward_negacyclic_ntt(limb, *modulus))
+    .collect()
 }
 
 fn secret_residues_for_level(secret: &[i64], level: usize) -> Vec<Vec<u64>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        DATA_PRIMES[..=level]
-            .par_iter()
-            .map(|modulus| {
-                secret
-                    .iter()
-                    .map(|coefficient| signed_residue(*coefficient, *modulus))
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        DATA_PRIMES[..=level]
+    evaluator_parallel_iterator!(
+        DATA_PRIMES[..=level].par_iter(),
+        DATA_PRIMES[..=level].iter()
+    )
+    .map(|modulus| {
+        secret
             .iter()
-            .map(|modulus| {
-                secret
-                    .iter()
-                    .map(|coefficient| signed_residue(*coefficient, *modulus))
-                    .collect::<Vec<_>>()
-            })
-            .collect()
-    }
+            .map(|coefficient| signed_residue(*coefficient, *modulus))
+            .collect::<Vec<_>>()
+    })
+    .collect()
 }
 
 // Generate a key-switching key for a source polynomial whose RNS limbs are
@@ -209,24 +186,7 @@ fn generate_key_switch_key(
 ) -> CanonicalResult<KeySwitchKey> {
     let primes = &DATA_PRIMES[..=level];
     let secret_residues = secret_residues_for_level(key.secret(), level);
-    #[cfg(not(target_arch = "wasm32"))]
-    let components = source_limbs
-        .par_iter()
-        .enumerate()
-        .map(|(digit_index, source_limb)| {
-            generate_key_switch_component_for_digit(
-                primes,
-                &secret_residues,
-                digit_index,
-                source_limb,
-                domain,
-                seed_hex,
-            )
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let components = source_limbs
-        .iter()
+    let components = evaluator_parallel_iterator!(source_limbs.par_iter(), source_limbs.iter())
         .enumerate()
         .map(|(digit_index, source_limb)| {
             generate_key_switch_component_for_digit(
@@ -258,26 +218,7 @@ fn generate_key_switch_component_for_digit(
         &[domain.as_bytes(), seed_hex.as_bytes(), &digit_bytes],
     )
     .centered_binomial_eta2(POLYNOMIAL_DEGREE);
-    #[cfg(not(target_arch = "wasm32"))]
-    let limbs = primes
-        .par_iter()
-        .enumerate()
-        .map(|(limb_index, modulus)| {
-            generate_key_switch_component_limb_for_digit(KeySwitchComponentLimbInput {
-                secret_residue_limb: &secret_residues[limb_index],
-                source_limb,
-                error: &error,
-                limb_index,
-                modulus: *modulus,
-                digit_index,
-                domain,
-                seed_hex,
-            })
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let limbs = primes
-        .iter()
+    let limbs = evaluator_parallel_iterator!(primes.par_iter(), primes.iter())
         .enumerate()
         .map(|(limb_index, modulus)| {
             generate_key_switch_component_limb_for_digit(KeySwitchComponentLimbInput {
@@ -383,24 +324,19 @@ pub(crate) fn key_switch_key_from_public_components(
             "public key-switch component-a digit count does not match its level",
         ));
     }
-    #[cfg(not(target_arch = "wasm32"))]
-    let components = component_b_by_digit
-        .into_par_iter()
-        .zip(component_a_by_digit.into_par_iter())
-        .enumerate()
-        .map(|(digit_index, (component_b, component_a))| {
-            public_key_switch_component_for_digit(primes, digit_index, component_b, component_a)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let components = component_b_by_digit
-        .into_iter()
-        .zip(component_a_by_digit.into_iter())
-        .enumerate()
-        .map(|(digit_index, (component_b, component_a))| {
-            public_key_switch_component_for_digit(primes, digit_index, component_b, component_a)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let components = evaluator_parallel_iterator!(
+        component_b_by_digit
+            .into_par_iter()
+            .zip(component_a_by_digit.into_par_iter()),
+        component_b_by_digit
+            .into_iter()
+            .zip(component_a_by_digit.into_iter())
+    )
+    .enumerate()
+    .map(|(digit_index, (component_b, component_a))| {
+        public_key_switch_component_for_digit(primes, digit_index, component_b, component_a)
+    })
+    .collect::<CanonicalResult<Vec<_>>>()?;
 
     Ok(KeySwitchKey { level, components })
 }
@@ -446,19 +382,9 @@ fn public_component_a_by_digit(
             "public key-switch material level is outside the selected data basis",
         )
     })?;
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        (0..=level)
-            .into_par_iter()
-            .map(|digit_index| public_component_a_for_digit(primes, domain, seed_hex, digit_index))
-            .collect()
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        (0..=level)
-            .map(|digit_index| public_component_a_for_digit(primes, domain, seed_hex, digit_index))
-            .collect()
-    }
+    evaluator_parallel_iterator!((0..=level).into_par_iter(), 0..=level)
+        .map(|digit_index| public_component_a_for_digit(primes, domain, seed_hex, digit_index))
+        .collect()
 }
 
 fn public_component_a_for_digit(
@@ -467,20 +393,11 @@ fn public_component_a_for_digit(
     seed_hex: &str,
     digit_index: usize,
 ) -> CanonicalResult<Vec<Vec<u64>>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        Ok(primes
-            .par_iter()
+    Ok(
+        evaluator_parallel_iterator!(primes.par_iter(), primes.iter())
             .map(|modulus| public_component_a_limb(domain, seed_hex, digit_index, *modulus))
-            .collect::<Vec<_>>())
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        Ok(primes
-            .iter()
-            .map(|modulus| public_component_a_limb(domain, seed_hex, digit_index, *modulus))
-            .collect::<Vec<_>>())
-    }
+            .collect::<Vec<_>>(),
+    )
 }
 
 fn public_component_a_limb(
@@ -529,22 +446,13 @@ fn key_switch_component(
     let mut switched_zero = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
     let mut switched_one = vec![vec![0_u64; POLYNOMIAL_DEGREE]; primes.len()];
     let active_components = &key_switch_key.components[..=term_level];
-    #[cfg(not(target_arch = "wasm32"))]
-    let partials = active_components
-        .par_iter()
-        .enumerate()
-        .map(|(digit_index, component)| {
-            key_switch_component_digit(term, primes, digit_index, component)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let partials = active_components
-        .iter()
-        .enumerate()
-        .map(|(digit_index, component)| {
-            key_switch_component_digit(term, primes, digit_index, component)
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
+    let partials =
+        evaluator_parallel_iterator!(active_components.par_iter(), active_components.iter())
+            .enumerate()
+            .map(|(digit_index, component)| {
+                key_switch_component_digit(term, primes, digit_index, component)
+            })
+            .collect::<CanonicalResult<Vec<_>>>()?;
     for (partial_zero, partial_one) in partials {
         add_component_in_place(&mut switched_zero, &partial_zero, term_level)?;
         add_component_in_place(&mut switched_one, &partial_one, term_level)?;
@@ -618,15 +526,7 @@ pub(crate) fn generate_relinearization_key(
 ) -> CanonicalResult<KeySwitchKey> {
     // The relinearization source is the squared secret.
     let secret_residues = secret_residues_for_level(key.secret(), level);
-    #[cfg(not(target_arch = "wasm32"))]
-    let squared = secret_residues
-        .par_iter()
-        .enumerate()
-        .map(|(limb_index, limb)| negacyclic_mul(limb, limb, DATA_PRIMES[limb_index]))
-        .collect::<CanonicalResult<Vec<_>>>()?;
-    #[cfg(target_arch = "wasm32")]
-    let squared = secret_residues
-        .iter()
+    let squared = evaluator_parallel_iterator!(secret_residues.par_iter(), secret_residues.iter())
         .enumerate()
         .map(|(limb_index, limb)| negacyclic_mul(limb, limb, DATA_PRIMES[limb_index]))
         .collect::<CanonicalResult<Vec<_>>>()?;
@@ -678,7 +578,7 @@ mod tests {
             modulus_switch,
         },
         ntt::forward_negacyclic_ntt,
-        profile::PLAINTEXT_MODULUS,
+        parameters::PLAINTEXT_MODULUS,
     };
 
     const DEVELOPMENT_SEED: &str = "0011223344556677";

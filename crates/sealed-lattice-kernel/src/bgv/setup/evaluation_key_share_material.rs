@@ -45,15 +45,14 @@ use crate::{
     bgv::coefficient_codec::{
         coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
     },
-    bgv::profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint},
-    hashing::{derive_protocol_hash, hash512_hex},
+    hashing::hash512_hex,
 };
 
-use super::accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID;
 #[cfg(test)]
 use super::sampling::negacyclic_product_mod;
-use super::setup_proof::{SETUP_PROOF_PROFILE_ID, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES};
+use super::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/evaluation-key-share-component-vector-v1";

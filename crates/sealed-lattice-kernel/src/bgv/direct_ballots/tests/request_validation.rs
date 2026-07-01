@@ -7,9 +7,9 @@ fn direct_encrypted_ballot_command_rejects_more_than_twenty_ballots() {
         .map(|ballot_index| {
             json!({
                 "voterIdentity": format!("voter-{}", ballot_index + 1),
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
+                "actionContextHash": derive_canonical_object_hash(
                     &json!({
+                        "objectType": "ActionContextHash",
                         "action": "direct encrypted ballot max batch test",
                         "ballotIndex": ballot_index
                     }),
@@ -50,9 +50,9 @@ fn direct_encrypted_ballot_command_rejects_missing_ballot_encryption_randomness(
         "ballots": [
             {
                 "voterIdentity": "voter-missing-encryption-randomness",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot missing encryption randomness test" }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot missing encryption randomness test" }),
                 ).expect("action hash"),
                 "scores": [
                     10, 9, 8, 7, 6,
@@ -82,9 +82,9 @@ fn direct_encrypted_ballot_command_rejects_ballot_embedded_encryption_seed() {
         "ballots": [
             {
                 "voterIdentity": "voter-embedded-encryption-seed",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot embedded encryption seed test" }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot embedded encryption seed test" }),
                 ).expect("action hash"),
                 "encryptionSeedHex": direct_ballot_test_randomness_hex("embedded-ballot-seed", 0),
                 "scores": [
@@ -205,9 +205,9 @@ fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
         "ballots": [
             {
                 "voterIdentity": "duplicate-voter",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot duplicate test", "ballotIndex": 0 }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot duplicate test", "ballotIndex": 0 }),
                 ).expect("action hash"),
                 "scores": [
                     10, 9, 8, 7, 6,
@@ -218,9 +218,9 @@ fn direct_encrypted_ballot_command_rejects_duplicate_voter_identity() {
             },
             {
                 "voterIdentity": "duplicate-voter",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot duplicate test", "ballotIndex": 1 }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot duplicate test", "ballotIndex": 1 }),
                 ).expect("action hash"),
                 "scores": [
                     1, 2, 3, 4, 5,
@@ -249,9 +249,9 @@ fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
         "ballots": [
             {
                 "voterIdentity": "voter-b",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot order test", "ballotIndex": 0 }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot order test", "ballotIndex": 0 }),
                 ).expect("action hash"),
                 "scores": [
                     10, 9, 8, 7, 6,
@@ -262,9 +262,9 @@ fn direct_encrypted_ballot_command_rejects_wrong_voter_order() {
             },
             {
                 "voterIdentity": "voter-a",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot order test", "ballotIndex": 1 }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot order test", "ballotIndex": 1 }),
                 ).expect("action hash"),
                 "scores": [
                     1, 2, 3, 4, 5,
@@ -293,9 +293,9 @@ fn direct_encrypted_ballot_command_rejects_invalid_score_before_proof_generation
         "ballots": [
             {
                 "voterIdentity": "voter-invalid-score",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot invalid score test" }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot invalid score test" }),
                 ).expect("action hash"),
                 "scores": [
                     10, 9, 8, 7, 6,
@@ -324,9 +324,9 @@ fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
         "ballots": [
             {
                 "voterIdentity": "voter-wrong-key",
-                "actionContextHash": derive_protocol_hash(
-                    "ActionContextHash",
-                    &json!({ "action": "direct encrypted ballot wrong key test" }),
+                "actionContextHash": derive_canonical_object_hash(
+                    &json!({
+                        "objectType": "ActionContextHash", "action": "direct encrypted ballot wrong key test" }),
                 ).expect("action hash"),
                 "scores": [
                     10, 9, 8, 7, 6,
@@ -339,7 +339,7 @@ fn direct_encrypted_ballot_command_rejects_wrong_setup_seed() {
     }))
     .expect_err("wrong setup seed must reject before direct ballot encryption");
 
-    assert_eq!(error.code, CanonicalErrorCode::ProfileComponentMismatch);
+    assert_eq!(error.code, CanonicalErrorCode::ComponentMismatch);
     assert!(
         error
             .message

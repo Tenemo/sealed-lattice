@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     FoundationTranscriptInput,
     ProtocolRefusalCode,
@@ -23,7 +23,8 @@ import {
 } from '#tests/support/foundation-transcript-fixture';
 
 const protocolHashFixture = (label: string): string =>
-    deriveProtocolHash('ChallengeDomainHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ChallengeDomainHash',
         label,
         purpose: 'foundation-mutation',
     });
@@ -34,7 +35,7 @@ const expectRefusalCode = (
 ): void => {
     const verification = verifyFoundationTranscript(input);
 
-    expect(verification.ok).toBe(false);
+    expect(verification.isValid).toBe(false);
     expect(verification.acceptedHashes).toEqual([]);
     expect(verification.refusedObjects).toEqual(
         expect.arrayContaining([expect.objectContaining({ code })]),
@@ -80,12 +81,12 @@ describe('integrated election foundation transcript', () => {
             fixture.input.rosterManifestTranscript.pollSpec.topOptionCount,
         ).toBe(foundationTopOptionCount);
         expect(
-            fixture.input.rosterManifestTranscript.frozenRosterProfile
-                .thresholdProfile,
+            fixture.input.rosterManifestTranscript.frozenRosterParameters
+                .thresholdParameters,
         ).toMatchObject({
             rosterSize: foundationParticipantCount,
         });
-        expect(verification.ok).toBe(true);
+        expect(verification.isValid).toBe(true);
         expect(verification.refusedObjects).toEqual([]);
         expect(verification.electionManifestHash).toBe(
             fixture.expectedHashes.electionManifestHash,
@@ -107,10 +108,10 @@ describe('integrated election foundation transcript', () => {
             fixture.expectedHashes.targetFinalityRecordHash,
         );
         expect(verification.componentResults).toMatchObject({
-            firstValidOrdering: { ok: true },
-            rosterExternalAcceptance: { ok: true },
-            rosterManifest: { ok: true },
-            targetFinality: { ok: true },
+            firstValidOrdering: { isValid: true },
+            rosterExternalAcceptance: { isValid: true },
+            rosterManifest: { isValid: true },
+            targetFinality: { isValid: true },
         });
         expect(
             verification.componentResults.firstValidOrdering.orderedObjects,
@@ -542,33 +543,11 @@ describe('integrated election foundation transcript', () => {
                 ],
             },
         };
-        const manifestBindingInput = createManifestOpaqueBindingInput({
-            evaluatorReplayProfileId: 'unsupported-evaluator-replay-profile',
+        const bgvParametersInput = createManifestOpaqueBindingInput({
+            bgvParametersHash: protocolHashFixture('wrong-bgv-parameters'),
         });
-        const ballotProofProfileInput = createManifestOpaqueBindingInput({
-            ballotValidityProofProfileId:
-                'unsupported-ballot-validity-proof-profile',
-        });
-        const encryptedBallotLayoutInput = createManifestOpaqueBindingInput({
-            encryptedBallotLayoutHash: protocolHashFixture(
-                'wrong-encrypted-ballot-layout',
-            ),
-        });
-        const encryptedAggregateProfileInput = createManifestOpaqueBindingInput(
-            {
-                encryptedBallotAggregateProfileHash: protocolHashFixture(
-                    'wrong-encrypted-ballot-aggregate-profile',
-                ),
-            },
-        );
-        const directComparisonProfileInput = createManifestOpaqueBindingInput({
-            directComparisonProfileId: 'unsupported-direct-comparison-profile',
-        });
-        const targetDecryptionProfileInput = createManifestOpaqueBindingInput({
-            targetDecryptionProfileId: 'unsupported-target-decryption-profile',
-        });
-        const mobileProfileInput = createManifestOpaqueBindingInput({
-            mobileProfileId: 'unsupported-mobile-profile',
+        const targetLayoutInput = createManifestOpaqueBindingInput({
+            targetLayoutHash: protocolHashFixture('wrong-target-layout'),
         });
 
         const mutationCases = [
@@ -593,13 +572,8 @@ describe('integrated election foundation transcript', () => {
             [wrongBoardPolicyInput, 'TargetFinalityPolicyMismatch'],
             [proposalNotIncludedInput, 'EvaluatorReplayRecordNotIncluded'],
             [wrongObjectTypeInput, 'WrongObjectType'],
-            [manifestBindingInput, 'ManifestHashMismatch'],
-            [ballotProofProfileInput, 'ManifestHashMismatch'],
-            [encryptedBallotLayoutInput, 'ManifestHashMismatch'],
-            [encryptedAggregateProfileInput, 'ManifestHashMismatch'],
-            [directComparisonProfileInput, 'ManifestHashMismatch'],
-            [targetDecryptionProfileInput, 'ManifestHashMismatch'],
-            [mobileProfileInput, 'ManifestHashMismatch'],
+            [bgvParametersInput, 'ManifestHashMismatch'],
+            [targetLayoutInput, 'ManifestHashMismatch'],
         ] as const satisfies readonly (readonly [
             FoundationTranscriptInput,
             ProtocolRefusalCode,

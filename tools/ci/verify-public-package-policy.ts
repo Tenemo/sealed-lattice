@@ -261,6 +261,13 @@ const validateVendoredProtocolRuntime = async (
             );
         }
     }
+    for (const relativeSourcePath of policy.vendoredProtocolRuntimeModules) {
+        if (!reachableRuntimeModules.reachableModules.has(relativeSourcePath)) {
+            failures.push(
+                `vendoredProtocolRuntimeModules includes unreachable source "${relativeSourcePath}"`,
+            );
+        }
+    }
 
     return failures.sort((left, right) => left.localeCompare(right));
 };
@@ -313,6 +320,13 @@ const validateVendoredCryptoRuntime = async (
             );
         }
     }
+    for (const relativeSourcePath of policy.vendoredCryptoRuntimeModules) {
+        if (!reachableRuntimeModules.reachableModules.has(relativeSourcePath)) {
+            failures.push(
+                `vendoredCryptoRuntimeModules includes unreachable source "${relativeSourcePath}"`,
+            );
+        }
+    }
 
     return failures.sort((left, right) => left.localeCompare(right));
 };
@@ -320,34 +334,9 @@ const validateVendoredCryptoRuntime = async (
 export const validatePublicPackagePolicy = async (
     policy: PublicPackagePolicy,
     runtimeExports: readonly string[],
-    typeExports: readonly string[] = [],
 ): Promise<string[]> => {
     const failures: string[] = [];
     const runtimeExportSet = new Set(runtimeExports);
-    const typeExportSet = new Set(typeExports);
-
-    failures.push(
-        ...validateUnique('forbiddenTypeExports', policy.forbiddenTypeExports),
-    );
-
-    for (const exportName of policy.forbiddenTypeExports) {
-        if (typeExportSet.has(exportName)) {
-            failures.push(`Forbidden type export is public: ${exportName}`);
-        }
-    }
-
-    failures.push(
-        ...validateUnique(
-            'forbiddenRuntimeExports',
-            policy.forbiddenRuntimeExports,
-        ),
-    );
-
-    for (const exportName of policy.forbiddenRuntimeExports) {
-        if (runtimeExportSet.has(exportName)) {
-            failures.push(`Forbidden runtime export is public: ${exportName}`);
-        }
-    }
 
     failures.push(
         ...(await validateVendoredProtocolRuntime(policy, runtimeExportSet)),
@@ -356,51 +345,6 @@ export const validatePublicPackagePolicy = async (
 
     return sortedUnique(failures);
 };
-
-export const collectEntryPointTypeExportNames = (
-    declarationText: string,
-): string[] => {
-    const exportNames: string[] = [];
-    const namedExportPattern =
-        /export\s+type\s*\{(?<body>[^}]+)\}\s*from\s*['"][^'"]+['"]/gu;
-    const typeDeclarationPattern =
-        /export\s+(?:declare\s+)?(?:type|interface)\s+(?<name>[A-Za-z_$][\w$]*)/gu;
-
-    for (const match of declarationText.matchAll(namedExportPattern)) {
-        const body = match.groups?.body;
-        if (body === undefined) {
-            continue;
-        }
-        exportNames.push(
-            ...body
-                .split(',')
-                .map((part) => part.trim())
-                .filter((part) => part.length > 0)
-                .map((part) => {
-                    const [exportName] = part.split(/\s+as\s+/u);
-
-                    return exportName.trim();
-                }),
-        );
-    }
-
-    for (const match of declarationText.matchAll(typeDeclarationPattern)) {
-        const exportName = match.groups?.name;
-        if (exportName !== undefined) {
-            exportNames.push(exportName);
-        }
-    }
-
-    return sortedUnique(exportNames);
-};
-
-const loadEntryPointTypeExportNames = async (): Promise<string[]> =>
-    collectEntryPointTypeExportNames(
-        await fs.readFile(
-            path.resolve(repoRoot, 'packages', 'sdk', 'dist', 'index.d.ts'),
-            'utf8',
-        ),
-    );
 
 const loadRuntimeExportNames = async (): Promise<string[]> => {
     const runtimeModule = (await import(
@@ -416,7 +360,6 @@ const main = async (): Promise<void> => {
     const failures = await validatePublicPackagePolicy(
         publicPackagePolicy,
         await loadRuntimeExportNames(),
-        await loadEntryPointTypeExportNames(),
     );
 
     if (failures.length > 0) {

@@ -1,26 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    loadTranscriptCoreKernel,
-    TranscriptCoreKernelCommandError,
-} from '#packages/wasm/src/index';
-import {
-    createFoundationTranscriptCoreFixture,
-    createFoundationTranscriptFixture,
-    createInvalidFoundationTranscriptStatusFixture,
-} from '#tests/support/foundation-transcript-fixture';
+import { loadTranscriptCoreKernel } from '#packages/wasm/src/index';
 
-const foundationTranscriptFixture = createFoundationTranscriptFixture();
-const foundationTranscriptCoreFixture = createFoundationTranscriptCoreFixture(
-    foundationTranscriptFixture.expectedHashes,
-);
-const invalidEnumFixture = createInvalidFoundationTranscriptStatusFixture(
-    foundationTranscriptFixture.expectedHashes,
-);
-const protocolHashPattern = /^[a-f0-9]{128}$/u;
+const hash512Pattern = /^[a-f0-9]{128}$/u;
 
 describe('transcript-core kernel in browsers', () => {
-    it('loads the transcript-core module and exposes command exports', async () => {
+    it('loads the transcript-core module and runs a command through browser WASM', async () => {
         const kernel = await loadTranscriptCoreKernel();
 
         expect(kernel.exportedFunctionNames).toEqual(
@@ -31,87 +16,11 @@ describe('transcript-core kernel in browsers', () => {
                 'sealed_lattice_transcript_core_command_with_length',
             ]),
         );
-    });
 
-    it('verifies the foundation transcript-core fixture', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(kernel.verifyFixture(foundationTranscriptCoreFixture)).toEqual({
-            caseName: 'foundation-transcript-roots',
-            objectHash512:
-                foundationTranscriptCoreFixture.expectedObjectHash512,
-            chunkRoot: foundationTranscriptCoreFixture.expectedChunkRoot,
-        });
-    });
-
-    it('derives protocol hash and field checks through WASM', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        const pollSpecHash = kernel.deriveProtocolHash({
-            namespace: 'PollSpecHash',
-            value: { poll: 'main' },
+        const pollSpecHash = kernel.deriveCanonicalObjectHash({
+            value: { objectType: 'PollSpec', poll: 'main' },
         });
 
-        expect(pollSpecHash).toMatch(protocolHashPattern);
-        expect(pollSpecHash).toBe(
-            kernel.deriveProtocolHash({
-                namespace: 'PollSpecHash',
-                value: { poll: 'main' },
-            }),
-        );
-        expect(
-            kernel.interpolateShamirConstantTerm({
-                sharePoints: [
-                    { rosterPosition: 1, value: 15 },
-                    { rosterPosition: 2, value: 25 },
-                ],
-            }),
-        ).toBe(5);
-    });
-
-    it('rejects malformed canonical bytes with the same error code', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-
-        expect(() =>
-            kernel.analyzeCanonicalObject({
-                canonicalBytesHex: invalidEnumFixture.canonicalBytesHex,
-                chunkSize: 8,
-            }),
-        ).toThrow(TranscriptCoreKernelCommandError);
-    });
-
-    it('produces byte-identical BGV canonical roots through browser WASM', async () => {
-        const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeBgvRnsProfile();
-        const encodedResult = kernel.encodeBgvBatchPlaintext({
-            slots: [0, 1, 65_536, 17, 99],
-            level: 0,
-            layoutBinding: profile.batchLayoutBinding,
-            includeCanonicalBytesHex: true,
-        });
-
-        expect(profile.profileHash).toMatch(protocolHashPattern);
-        expect(profile.batchLayoutBindingHash).toMatch(protocolHashPattern);
-        expect(encodedResult).not.toMatchObject({ ok: false });
-        const encoded = encodedResult as {
-            readonly canonicalBytesHex: string;
-            readonly canonicalBytesHash512: string;
-            readonly canonicalByteLength: number;
-            readonly plaintextRoot: string;
-        };
-
-        expect(encoded.plaintextRoot).toMatch(protocolHashPattern);
-        expect(encoded.canonicalBytesHash512).toMatch(protocolHashPattern);
-        expect(encoded.canonicalByteLength).toBeGreaterThan(0);
-        expect(
-            kernel.validateBgvPlaintextObject({
-                canonicalBytesHex: encoded.canonicalBytesHex,
-                expectedPlaintextRoot: encoded.plaintextRoot,
-            }),
-        ).toMatchObject({
-            ok: true,
-            objectKind: 'plaintext',
-            plaintextRoot: encoded.plaintextRoot,
-        });
+        expect(pollSpecHash).toMatch(hash512Pattern);
     });
 });

@@ -1,24 +1,19 @@
-import { createSetupCommitmentSecurityCertificate } from './commitment-security-certificate.js';
 import {
     assertObjectRecord,
     hashArrayField,
     hashField,
     setupCertificateTransportedObjectInputs,
 } from './field-helpers.js';
-import { createBgvHeSecurityCertificate } from './he-security-certificate.js';
-import {
-    bgvProfileForCertificates,
-    setupProfileForCertificates,
-} from './profile-derivations.js';
-import { createSetupProofAccountingCertificate } from './proof-accounting-certificate.js';
+import { setupParametersForCertificates } from './parameter-derivations.js';
 import { createSetupTransportCertificate } from './transport-certificate.js';
 import type { SetupCertificates, SetupCertificatesInput } from './types.js';
 
 export const createSetupCertificates = (
     input: SetupCertificatesInput,
 ): SetupCertificates => {
-    const setupProfile = setupProfileForCertificates(input.setupProfile);
-    const bgvProfile = bgvProfileForCertificates(input.bgvProfile);
+    const setupParameters = setupParametersForCertificates(
+        input.setupParameters,
+    );
     const vssCoefficientCommitmentMaterial = assertObjectRecord(
         input.vssCoefficientCommitmentMaterial,
         'vssCoefficientCommitmentMaterial',
@@ -31,37 +26,10 @@ export const createSetupCertificates = (
     };
 
     return {
-        setupCommitmentSecurityCertificate:
-            createSetupCommitmentSecurityCertificate(setupProfile),
         setupTransportCertificate: createSetupTransportCertificate(
-            setupProfile,
+            setupParameters,
             vssCoefficientCommitmentMaterial,
             transportInput,
-        ),
-        setupProofAccountingCertificate: createSetupProofAccountingCertificate(
-            setupProfile,
-            input.sameSecretLinkageAnchorProofAccounting === undefined
-                ? undefined
-                : assertObjectRecord(
-                      input.sameSecretLinkageAnchorProofAccounting,
-                      'sameSecretLinkageAnchorProofAccounting',
-                  ),
-            input.publicKeyShareProofAccounting === undefined
-                ? undefined
-                : assertObjectRecord(
-                      input.publicKeyShareProofAccounting,
-                      'publicKeyShareProofAccounting',
-                  ),
-            input.trusteeEvaluationKeyProofAccounting === undefined
-                ? undefined
-                : assertObjectRecord(
-                      input.trusteeEvaluationKeyProofAccounting,
-                      'trusteeEvaluationKeyProofAccounting',
-                  ),
-        ),
-        heSecurityCertificate: createBgvHeSecurityCertificate(
-            setupProfile,
-            bgvProfile,
         ),
     };
 };

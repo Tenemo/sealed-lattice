@@ -1,22 +1,22 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(tag = "command")]
 enum TranscriptCoreCommand {
     ListCanonicalErrorCodes,
-    ListReservedRootNamespaces,
     AnalyzeCanonicalObject,
     ComputeChunkRoot,
     HashRaw,
-    DeriveProtocolHash,
+    DeriveCanonicalObjectHash,
     InterpolateShamirConstantTerm,
     EvaluatePlaintextComparison,
     VerifyFixture,
-    DescribeBgvRnsProfile,
+    DescribeBgvRnsParameters,
     DescribeBgvOperationRegistry,
     ValidateBgvEvaluatorOperation,
-    DescribeBgvPassiveSetupObjectModel,
-    DescribeCollectiveBgvSetupProfile,
+    DescribeCollectiveBgvSetupParameters,
     DeriveCollectiveBgvSetupPublicDerivations,
     GenerateBgvPassiveSetup,
     VerifyBgvPassiveSetup,
@@ -24,15 +24,11 @@ enum TranscriptCoreCommand {
     VerifyPrivateVssShareEnvelope,
     GeneratePrivateVssShareProof,
     GenerateTrusteeEvaluationKeyProof,
-    VerifyTrusteeEvaluationKeyProof,
     ComputeSetupCommitmentFromOpening,
     DeriveThresholdShareCommitments,
-    DeriveThresholdShareCommitmentsFromTransport,
     BeginThresholdShareCommitmentsFromTransportStream,
-    AbortThresholdShareCommitmentsFromTransportStream,
     AbsorbThresholdShareCommitmentsFromTransportStreamChunk,
     FinishThresholdShareCommitmentsFromTransportStream,
-    ReleaseVerifiedTransportedVssMaterial,
     BeginSetupProofMaterialTransportStream,
     AbsorbSetupProofMaterialTransportStreamChunk,
     FinishSetupProofMaterialTransportStream,
@@ -81,12 +77,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
             ALL_CANONICAL_ERROR_CODES
                 .iter()
                 .map(|code| Value::String(code.as_str().to_string()))
-                .collect(),
-        )),
-        TranscriptCoreCommand::ListReservedRootNamespaces => Ok(Value::Array(
-            RESERVED_ROOT_NAMESPACES
-                .iter()
-                .map(|namespace| Value::String((*namespace).to_string()))
                 .collect(),
         )),
         TranscriptCoreCommand::AnalyzeCanonicalObject => {
@@ -156,8 +146,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
                 "hash512": hash512_hex("transcript-core/raw", &[&bytes]),
             }))
         }
-        TranscriptCoreCommand::DeriveProtocolHash => {
-            let namespace = read_string_field(&request, "namespace")?;
+        TranscriptCoreCommand::DeriveCanonicalObjectHash => {
             let value = request.get("value").ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
@@ -166,7 +155,7 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
             })?;
 
             Ok(json!({
-                "protocolHash": derive_protocol_hash(namespace, value)?,
+                "canonicalObjectHash": derive_canonical_object_hash(value)?,
             }))
         }
         TranscriptCoreCommand::InterpolateShamirConstantTerm => {
@@ -203,11 +192,10 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
 
             verify_fixture(&fixture)
         }
-        TranscriptCoreCommand::DescribeBgvRnsProfile
+        TranscriptCoreCommand::DescribeBgvRnsParameters
         | TranscriptCoreCommand::DescribeBgvOperationRegistry
         | TranscriptCoreCommand::ValidateBgvEvaluatorOperation
-        | TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel
-        | TranscriptCoreCommand::DescribeCollectiveBgvSetupProfile
+        | TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters
         | TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations
         | TranscriptCoreCommand::GenerateBgvPassiveSetup
         | TranscriptCoreCommand::VerifyBgvPassiveSetup
@@ -215,15 +203,11 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::VerifyPrivateVssShareEnvelope
         | TranscriptCoreCommand::GeneratePrivateVssShareProof
         | TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof
-        | TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof
         | TranscriptCoreCommand::ComputeSetupCommitmentFromOpening
         | TranscriptCoreCommand::DeriveThresholdShareCommitments
-        | TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport
         | TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream
-        | TranscriptCoreCommand::AbortThresholdShareCommitmentsFromTransportStream
         | TranscriptCoreCommand::AbsorbThresholdShareCommitmentsFromTransportStreamChunk
         | TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream
-        | TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial
         | TranscriptCoreCommand::BeginSetupProofMaterialTransportStream
         | TranscriptCoreCommand::AbsorbSetupProofMaterialTransportStreamChunk
         | TranscriptCoreCommand::FinishSetupProofMaterialTransportStream
@@ -245,8 +229,8 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
 
 fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> CanonicalResult<Value> {
     match command {
-        TranscriptCoreCommand::DescribeBgvRnsProfile => {
-            crate::bgv::commands::describe_bgv_rns_profile()
+        TranscriptCoreCommand::DescribeBgvRnsParameters => {
+            crate::bgv::commands::describe_bgv_rns_parameters()
         }
         TranscriptCoreCommand::DescribeBgvOperationRegistry => {
             crate::bgv::commands::describe_bgv_operation_registry()
@@ -254,11 +238,8 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::ValidateBgvEvaluatorOperation => {
             crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
         }
-        TranscriptCoreCommand::DescribeBgvPassiveSetupObjectModel => {
-            crate::bgv::commands::describe_bgv_passive_setup_object_model()
-        }
-        TranscriptCoreCommand::DescribeCollectiveBgvSetupProfile => {
-            crate::bgv::commands::describe_collective_bgv_setup_profile_from_request()
+        TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
+            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request()
         }
         TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations => {
             crate::bgv::commands::derive_collective_bgv_setup_public_derivations(request)
@@ -281,17 +262,11 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::GenerateTrusteeEvaluationKeyProof => {
             crate::bgv::commands::generate_trustee_evaluation_key_proof(request)
         }
-        TranscriptCoreCommand::VerifyTrusteeEvaluationKeyProof => {
-            crate::bgv::commands::verify_trustee_evaluation_key_proof(request)
-        }
         TranscriptCoreCommand::ComputeSetupCommitmentFromOpening => {
             crate::bgv::commands::compute_setup_commitment_from_opening(request)
         }
         TranscriptCoreCommand::DeriveThresholdShareCommitments => {
             crate::bgv::commands::derive_threshold_share_commitments(request)
-        }
-        TranscriptCoreCommand::DeriveThresholdShareCommitmentsFromTransport => {
-            crate::bgv::commands::derive_threshold_share_commitments_from_transport(request)
         }
         TranscriptCoreCommand::BeginThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::begin_threshold_share_commitments_from_transport_stream(request)
@@ -301,14 +276,8 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
                 request,
             )
         }
-        TranscriptCoreCommand::AbortThresholdShareCommitmentsFromTransportStream => {
-            crate::bgv::commands::abort_threshold_share_commitments_from_transport_stream(request)
-        }
         TranscriptCoreCommand::FinishThresholdShareCommitmentsFromTransportStream => {
             crate::bgv::commands::finish_threshold_share_commitments_from_transport_stream(request)
-        }
-        TranscriptCoreCommand::ReleaseVerifiedTransportedVssMaterial => {
-            crate::bgv::commands::release_verified_transported_vss_material(request)
         }
         TranscriptCoreCommand::BeginSetupProofMaterialTransportStream => {
             crate::bgv::commands::begin_setup_proof_material_transport_stream(request)
@@ -358,18 +327,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }
-}
-
-fn read_string_field<'a>(request: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    request
-        .get(field_name)
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!("{field_name} must be a string"),
-            )
-        })
 }
 
 fn read_u64_field(request: &Value, field_name: &str) -> CanonicalResult<u64> {

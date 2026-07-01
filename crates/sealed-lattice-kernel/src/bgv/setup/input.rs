@@ -4,7 +4,8 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
     let ceremony_id = read_non_empty_string(request, "ceremonyId")?.to_string();
     let manifest_hash = read_hash_field(request, "manifestHash")?.to_string();
     let roster_hash = read_hash_field(request, "rosterHash")?.to_string();
-    let threshold_profile_hash = read_hash_field(request, "thresholdProfileHash")?.to_string();
+    let threshold_parameters_hash =
+        read_hash_field(request, "thresholdParametersHash")?.to_string();
     let setup_seed_provided = request.get("setupSeed").is_some();
     let setup_seed = request
         .get("setupSeed")
@@ -20,14 +21,14 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
         &ceremony_id,
         &manifest_hash,
         &roster_hash,
-        &threshold_profile_hash,
+        &threshold_parameters_hash,
         setup_seed,
     );
     let private_setup_seed_hash = private_passive_setup_seed_hash(
         &ceremony_id,
         &manifest_hash,
         &roster_hash,
-        &threshold_profile_hash,
+        &threshold_parameters_hash,
         setup_seed,
     );
     let participants = read_setup_participants(request)?;
@@ -66,7 +67,7 @@ pub(super) fn read_passive_setup_input(request: &Value) -> CanonicalResult<Passi
         ceremony_id,
         manifest_hash,
         roster_hash,
-        threshold_profile_hash,
+        threshold_parameters_hash,
         setup_seed_provided,
         setup_seed_hash,
         private_setup_seed_hash,
@@ -78,7 +79,7 @@ pub(super) fn passive_setup_seed_hash(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
-    threshold_profile_hash: &str,
+    threshold_parameters_hash: &str,
     setup_seed: &str,
 ) -> String {
     hash512_hex(
@@ -87,7 +88,7 @@ pub(super) fn passive_setup_seed_hash(
             ceremony_id.as_bytes(),
             manifest_hash.as_bytes(),
             roster_hash.as_bytes(),
-            threshold_profile_hash.as_bytes(),
+            threshold_parameters_hash.as_bytes(),
             setup_seed.as_bytes(),
         ],
     )
@@ -97,7 +98,7 @@ pub(super) fn private_passive_setup_seed_hash(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
-    threshold_profile_hash: &str,
+    threshold_parameters_hash: &str,
     setup_seed: &str,
 ) -> String {
     hash512_hex(
@@ -106,7 +107,7 @@ pub(super) fn private_passive_setup_seed_hash(
             ceremony_id.as_bytes(),
             manifest_hash.as_bytes(),
             roster_hash.as_bytes(),
-            threshold_profile_hash.as_bytes(),
+            threshold_parameters_hash.as_bytes(),
             setup_seed.as_bytes(),
         ],
     )
@@ -126,12 +127,12 @@ pub(super) fn private_passive_setup_seed_hash_from_package_witness(
     let ceremony_id = string_at_path(setup_inputs, &["ceremonyId"])?;
     let manifest_hash = string_at_path(setup_inputs, &["manifestHash"])?;
     let roster_hash = string_at_path(setup_inputs, &["rosterHash"])?;
-    let threshold_profile_hash = string_at_path(setup_inputs, &["thresholdProfileHash"])?;
+    let threshold_parameters_hash = string_at_path(setup_inputs, &["thresholdParametersHash"])?;
     let expected_setup_seed_hash = passive_setup_seed_hash(
         ceremony_id,
         manifest_hash,
         roster_hash,
-        threshold_profile_hash,
+        threshold_parameters_hash,
         setup_seed,
     );
     compare_hash_at_path(
@@ -145,7 +146,7 @@ pub(super) fn private_passive_setup_seed_hash_from_package_witness(
         ceremony_id,
         manifest_hash,
         roster_hash,
-        threshold_profile_hash,
+        threshold_parameters_hash,
         setup_seed,
     ))
 }

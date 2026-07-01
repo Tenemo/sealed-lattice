@@ -34,7 +34,6 @@
         "Bleichenbacher's",
         "ciphertext",
         "dbaeumer",
-        "docdash",
         "esbenp",
         "Homomorphically",
         "isqrt",
@@ -42,10 +41,8 @@
         "Khadir's",
         "Longname",
         "Noordhuis",
-        "pretypedoc",
         "PRIMALITY",
         "Shamir's",
-        "shamirs",
-        "typedefs"
+        "shamirs"
     ]
 }

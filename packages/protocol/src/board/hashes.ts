@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     BoardEntryMerklePathStep,
     ConflictingHeadEvidence,
@@ -22,22 +22,23 @@ type BoardEntryHashInput = {
 export const deriveBoardEntryHash = (
     entry: BoardEntryHashInput,
 ): ProtocolHash =>
-    deriveProtocolHash('BoardEntryHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'BoardEntry',
         boardPosition: entry.boardPosition,
         includedObjectHash: entry.includedObjectHash,
         includedObjectType: entry.includedObjectType,
     });
 
-// Two distinct board-root models share the 'BoardRootHash' namespace: this
-// structured Merkle-tree model (leaf/branch/root nodeKind variants, below) and
-// the flat boardEntryHashes-list model (deriveBoardEntryListRootHash). The
-// presence of `nodeKind` vs the list shape disambiguates them in the preimage.
+// The structured Merkle-tree model (leaf/branch/root variants below) and the
+// flat boardEntryHashes-list model (deriveBoardEntryListRootHash) are kept
+// disjoint by their distinct `objectType` discriminators under the shared
+// canonical-object hash domain.
 export const deriveBoardLeafNodeHash = (
     boardPosition: number,
     boardEntryHash: ProtocolHash,
 ): ProtocolHash =>
-    deriveProtocolHash('BoardRootHash', {
-        nodeKind: 'BoardEntryLeaf',
+    deriveCanonicalObjectHash({
+        objectType: 'BoardEntryLeaf',
         boardPosition,
         boardEntryHash,
     });
@@ -46,8 +47,8 @@ export const deriveBoardBranchNodeHash = (
     leftNodeHash: ProtocolHash,
     rightNodeHash: ProtocolHash,
 ): ProtocolHash =>
-    deriveProtocolHash('BoardRootHash', {
-        nodeKind: 'BoardEntryBranch',
+    deriveCanonicalObjectHash({
+        objectType: 'BoardEntryBranch',
         leftNodeHash,
         rightNodeHash,
     });
@@ -56,8 +57,8 @@ export const deriveBoardRootFromNodeHash = (
     boardEntryCount: number,
     rootNodeHash: ProtocolHash | null,
 ): ProtocolHash =>
-    deriveProtocolHash('BoardRootHash', {
-        nodeKind: 'BoardEntryRoot',
+    deriveCanonicalObjectHash({
+        objectType: 'BoardEntryRoot',
         boardEntryCount,
         rootNodeHash,
     });
@@ -83,12 +84,15 @@ const deriveNextBoardMerkleLevel = (
     return nextLevelHashes;
 };
 
-// Flat board-root model: hashes the whole boardEntryHashes list directly (no
-// nodeKind). Shares the 'BoardRootHash' namespace with the structured tree
-// model above; the differing payload shape keeps the two preimages disjoint.
+// Flat board-root model: hashes the whole boardEntryHashes list directly. Its
+// `objectType` discriminator keeps it disjoint from the structured tree model.
 export const deriveBoardEntryListRootHash = (
     boardEntryHashes: readonly ProtocolHash[],
-): ProtocolHash => deriveProtocolHash('BoardRootHash', { boardEntryHashes });
+): ProtocolHash =>
+    deriveCanonicalObjectHash({
+        objectType: 'BoardEntryListRoot',
+        boardEntryHashes,
+    });
 
 export const deriveBoardRootHash = (
     boardEntryHashes: readonly ProtocolHash[],
@@ -158,7 +162,7 @@ export const deriveBoardEntryMerklePath = (
 };
 
 export const deriveBoardHeadHash = (head: SignedBoardHead): ProtocolHash =>
-    deriveProtocolHash('BoardHeadHash', {
+    deriveCanonicalObjectHash({
         boardPolicyHash: head.boardPolicyHash,
         boardRoot: head.boardRoot,
         boardSequence: head.boardSequence,
@@ -197,6 +201,7 @@ export const deriveInclusionProofHash = (
     inclusionProof: Omit<InclusionProof, 'inclusionProofHash'>,
 ): ProtocolHash => {
     const sharedPayload = {
+        objectType: 'InclusionProof',
         boardHeadHash: inclusionProof.boardHeadHash,
         boardEntryHash: inclusionProof.boardEntryHash,
         boardPosition: inclusionProof.boardPosition,
@@ -206,8 +211,7 @@ export const deriveInclusionProofHash = (
         includedObjectType: inclusionProof.includedObjectType,
     };
 
-    return deriveProtocolHash(
-        'InclusionProofHash',
+    return deriveCanonicalObjectHash(
         inclusionProofUsesMerklePath(inclusionProof)
             ? {
                   ...sharedPayload,
@@ -225,13 +229,13 @@ export const deriveInclusionProofHash = (
 export const deriveConflictingHeadEvidenceHash = (
     evidence: Omit<ConflictingHeadEvidence, 'evidenceHash'>,
 ): ProtocolHash =>
-    deriveProtocolHash('ConflictingHeadEvidenceHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'ConflictingHeadEvidence',
         boardPolicyHash: evidence.boardPolicyHash,
         ceremonyId: evidence.ceremonyId,
         equivocatingWitnessIdentities:
             evidence.equivocatingWitnessIdentities ?? [],
         leftBoardHeadHash: evidence.leftBoardHeadHash,
-        purpose: 'board-conflicting-head-evidence-v1',
         rightBoardHeadHash: evidence.rightBoardHeadHash,
         targetFinalityScope: evidence.targetFinalityScope ?? null,
     });

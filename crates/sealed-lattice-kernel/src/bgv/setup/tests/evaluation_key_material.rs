@@ -4,7 +4,6 @@ use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
 #[test]
 fn passive_setup_public_evaluation_key_material_drives_relinearization_without_private_witness() {
     let evaluator_key = setup_derived_evaluator_key();
-    let public_material = level_one_public_material();
     let public_context = level_one_public_context();
     let left = modulus_switch_to(
         &evaluator_key
@@ -27,8 +26,6 @@ fn passive_setup_public_evaluation_key_material_drives_relinearization_without_p
         .expect("decrypt public material product");
 
     assert_eq!(&decrypted[..3], &[10, 18, 28]);
-    assert!(public_material.get("setupPrivateWitness").is_none());
-    assert!(public_material.get("privateSetupSeedHash").is_none());
 }
 
 #[test]

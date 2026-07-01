@@ -8,8 +8,8 @@ import type {
 
 import {
     canonicalJson,
+    deriveCanonicalObjectHash,
     deriveMlDsaPublicKeyHash,
-    deriveProtocolHash,
     deriveProtocolSignatureHash,
 } from '#packages/crypto/src/index';
 
@@ -21,9 +21,6 @@ export type MlDsaKeyPairFixture = {
     readonly publicKeyHash: ProtocolHash;
     readonly secretKeyBytesHex: string;
 };
-
-const deriveMlDsaContextByteLength = (contextString: string): number =>
-    textEncoder.encode(contextString).byteLength;
 
 const isLowercaseHex = (value: string): boolean =>
     /^[0-9a-f]*$/u.test(value) && value.length % 2 === 0;
@@ -65,32 +62,19 @@ export const createMlDsaSignatureProfileFixture = (
     overrides: Partial<MlDsaSignatureProfile> = {},
 ): MlDsaSignatureProfile => {
     const contextString = overrides.contextString ?? 'sealed-lattice:v1';
-    const contextStringByteLength =
-        overrides.contextStringByteLength ??
-        deriveMlDsaContextByteLength(contextString);
 
     return {
         algorithm: 'ML-DSA-65',
         mode: overrides.mode ?? 'PureMLDSA',
-        providerName: overrides.providerName ?? 'deterministic-fixture',
-        providerVersion: overrides.providerVersion ?? '1',
-        providerBuildHash:
-            overrides.providerBuildHash ??
-            deriveProtocolHash('ProviderBuildHash', {
-                providerName: 'deterministic-fixture',
-                providerVersion: '1',
-            }),
-        fips204Version: overrides.fips204Version ?? 'FIPS 204',
-        errataStatus: overrides.errataStatus ?? 'none',
         contextString,
-        contextStringByteLength,
     };
 };
 
 export const createMlDsaKeyPairFixture = (
     seedLabel: string,
 ): MlDsaKeyPairFixture => {
-    const seed = deriveProtocolHash('ChallengeDomainHash', {
+    const seed = deriveCanonicalObjectHash({
+        objectType: 'MlDsaKeyFixtureSeed',
         purpose: 'ml-dsa-fixture-seed',
         seedLabel,
     }).slice(0, 64);

@@ -1,21 +1,19 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    setupProfileId,
     setupTransportChunkSizeBytes,
     setupTransportCopyCountLimit,
     setupTransportedObjectLoadingPolicy,
     setupTransportLargestSingleBufferBytes,
     setupTransportLazyLoadingPolicy,
-    setupTransportProfileId,
     setupTransportResumePolicy,
     setupTransportStorageQuotaBytes,
     setupTransportStreamOrder,
 } from './constants.js';
 import { assertProtocolHash, hashField } from './field-helpers.js';
 import type {
-    CollectiveBgvSetupProfileForCertificates,
+    CollectiveBgvSetupParametersForCertificates,
     JsonRecord,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
@@ -32,11 +30,9 @@ function setupTransportChunkManifestRoot(
         readonly fullObjectHash: ProtocolHash;
     }>,
 ): ProtocolHash {
-    return deriveProtocolHash('SetupTransportChunkManifestRoot', {
+    return deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
-        setupProfileId,
-        transportProfileId: setupTransportProfileId,
         chunkSizeBytes: setupTransportChunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
@@ -113,12 +109,12 @@ function transportedObjectRecords(
 }
 
 const setupTransportCertificateBody = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     vssCoefficientCommitmentMaterial: JsonRecord,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificateBody => {
-    const publicVssMaterialSizeProfile =
-        setupProfile.publicVssCommitmentMaterialSizeProfile;
+    const publicVssMaterialSizeParameters =
+        setupParameters.publicVssCommitmentMaterialSize;
     const transportedObjects = transportedObjectRecords([
         {
             objectName: 'vssCoefficientCommitmentMaterial',
@@ -129,12 +125,12 @@ const setupTransportCertificateBody = (
                 'vssCoefficientCommitmentMaterial',
             ),
             byteLength:
-                publicVssMaterialSizeProfile.fullMaterialCoefficientBytes,
+                publicVssMaterialSizeParameters.fullMaterialCoefficientBytes,
             fullObjectHash: transportInput.fullObjectHash,
             chunkRoot: setupTransportChunkManifestRoot({
                 chunkCount: transportInput.chunkHashes.length,
                 totalByteLength:
-                    publicVssMaterialSizeProfile.fullMaterialCoefficientBytes,
+                    publicVssMaterialSizeParameters.fullMaterialCoefficientBytes,
                 chunkHashes: transportInput.chunkHashes,
                 fullObjectHash: transportInput.fullObjectHash,
             }),
@@ -147,45 +143,16 @@ const setupTransportCertificateBody = (
             accumulatedLength + transportedObject.byteLength,
         0,
     );
-    const chunkHashes = transportedObjects.flatMap(
-        (transportedObject) => transportedObject.chunkHashes,
+    const chunkCount = transportedObjects.reduce(
+        (accumulatedChunkCount, transportedObject) =>
+            accumulatedChunkCount + transportedObject.chunkCount,
+        0,
     );
-    const chunkCount = chunkHashes.length;
-    const fullObjectHash = deriveProtocolHash(
-        'SetupTransportFullObjectSetHash',
-        {
-            objectType: 'SetupTransportFullObjectSet',
-            objectVersion: 1,
-            setupProfileId,
-            transportProfileId: setupTransportProfileId,
-            transportedObjects: transportedObjects.map((transportedObject) => ({
-                objectName: transportedObject.objectName,
-                objectRole: transportedObject.objectRole,
-                objectRoot: transportedObject.objectRoot,
-                byteLength: transportedObject.byteLength,
-                chunkStartIndex: transportedObject.chunkStartIndex,
-                chunkCount: transportedObject.chunkCount,
-                chunkRoot: transportedObject.chunkRoot,
-                fullObjectHash: transportedObject.fullObjectHash,
-            })),
-            totalByteLength,
-            chunkCount,
-            chunkHashes,
-        },
-    );
-    const chunkRoot = setupTransportChunkManifestRoot({
-        chunkCount,
-        totalByteLength,
-        chunkHashes,
-        fullObjectHash,
-    });
 
     return {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
-        setupProfileId,
-        transportProfileId: setupTransportProfileId,
-        setupTransportProfileHash: setupProfile.setupTransportProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
         chunkSizeBytes: setupTransportChunkSizeBytes,
@@ -198,28 +165,23 @@ const setupTransportCertificateBody = (
         resumePolicy: setupTransportResumePolicy,
         lazyLoadingPolicy: setupTransportLazyLoadingPolicy,
         transportedObjects,
-        chunkHashes,
-        chunkRoot,
-        fullObjectHash,
     };
 };
 
 export const createSetupTransportCertificate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
+    setupParameters: CollectiveBgvSetupParametersForCertificates,
     vssCoefficientCommitmentMaterial: JsonRecord,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificate => {
     const certificateBody = setupTransportCertificateBody(
-        setupProfile,
+        setupParameters,
         vssCoefficientCommitmentMaterial,
         transportInput,
     );
 
     return {
         ...certificateBody,
-        setupTransportCertificateHash: deriveProtocolHash(
-            'SetupTransportCertificateHash',
-            certificateBody,
-        ),
+        setupTransportCertificateHash:
+            deriveCanonicalObjectHash(certificateBody),
     };
 };

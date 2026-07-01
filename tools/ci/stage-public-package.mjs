@@ -56,7 +56,6 @@ const requiredPackageEntries = ['package.json', 'LICENSE', 'dist'];
 /**
  * @typedef {object} StagePublicPackageArguments
  * @property {string} destinationPath
- * @property {string | undefined} projectRoot
  */
 
 /**
@@ -126,13 +125,12 @@ export const parseStagePublicPackageArguments = (args) => {
 
     if (destinationPath === undefined) {
         throw new Error(
-            'Usage: node ./tools/ci/stage-public-package.mjs --out <directory> [--project-root <directory>]',
+            'Usage: node ./tools/ci/stage-public-package.mjs --out <directory>',
         );
     }
 
     return {
         destinationPath,
-        projectRoot: readOptionValue(args, '--project-root'),
     };
 };
 

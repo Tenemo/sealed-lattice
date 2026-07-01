@@ -1,12 +1,8 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
+
+import { type SameSecretConsistencyStatementRecord } from '../same-secret-consistency-records.js';
 
 import {
-    setupProofProfileId,
-    type SameSecretConsistencyStatementRecord,
-} from '../same-secret-consistency-records.js';
-
-import {
-    publicKeyShareProofBindingStatus,
     publicKeyShareProofFamily,
     type PublicKeyShareContributionInput,
     type PublicKeyShareMaterialSetInput,
@@ -164,8 +160,6 @@ export const createPublicKeyShareSet = (
             const shareRecordWithoutRoot = {
                 objectType: 'PublicKeyShare',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: contribution.trusteeIdentity,
                 trusteeRosterPosition: contribution.trusteeRosterPosition,
@@ -180,7 +174,6 @@ export const createPublicKeyShareSet = (
                 rnsLimbCount: input.qSharePrimes.length,
                 shareCoefficientVectorHash512ByLimb:
                     contribution.shareCoefficientVectorHash512ByLimb,
-                proofBindingStatus: publicKeyShareProofBindingStatus,
             } as const satisfies Omit<
                 PublicKeyShareRecord,
                 'publicKeyShareRoot'
@@ -188,8 +181,7 @@ export const createPublicKeyShareSet = (
 
             return {
                 ...shareRecordWithoutRoot,
-                publicKeyShareRoot: deriveProtocolHash(
-                    'PublicKeyShareRoot',
+                publicKeyShareRoot: deriveCanonicalObjectHash(
                     shareRecordWithoutRoot,
                 ),
             } satisfies PublicKeyShareRecord;
@@ -198,9 +190,6 @@ export const createPublicKeyShareSet = (
     const shareSetWithoutRoot = {
         objectType: 'PublicKeyShareSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
-        proofBindingStatus: publicKeyShareProofBindingStatus,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -209,20 +198,12 @@ export const createPublicKeyShareSet = (
         publicAPolynomialRoot: input.publicAPolynomialRoot,
         sameSecretConsistencyRoot:
             input.sameSecretConsistency.sameSecretConsistencyRoot,
-        publicKeyShareRoots: shareRecords.map((shareRecord) => ({
-            trusteeIdentity: shareRecord.trusteeIdentity,
-            trusteeRosterPosition: shareRecord.trusteeRosterPosition,
-            publicKeyShareRoot: shareRecord.publicKeyShareRoot,
-        })),
         shareRecords,
     } as const satisfies Omit<PublicKeyShareSet, 'publicKeyShareSetRoot'>;
 
     return {
         ...shareSetWithoutRoot,
-        publicKeyShareSetRoot: deriveProtocolHash(
-            'PublicKeyShareRoot',
-            shareSetWithoutRoot,
-        ),
+        publicKeyShareSetRoot: deriveCanonicalObjectHash(shareSetWithoutRoot),
     } satisfies PublicKeyShareSet;
 };
 
@@ -287,8 +268,6 @@ export const createPublicKeyShareProofSet = (
             const proofRecordWithoutRoot = {
                 objectType: 'PublicKeyShareProof',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: publicKeyShareProofFamily,
                 ...contextFields(input.setupContext),
                 trusteeIdentity: shareRecord.trusteeIdentity,
@@ -302,9 +281,6 @@ export const createPublicKeyShareProofSet = (
                 trusteeSecretCommitmentRoot:
                     sameSecretStatement.trusteeSecretCommitmentRoot,
                 rnsLimbCount: input.qSharePrimes.length,
-                errorSupport: 'checked-by-public-key-share-succinct-proof-set',
-                proofBytesStatus:
-                    'supplied-by-public-key-share-succinct-proof-set',
             } as const satisfies Omit<
                 PublicKeyShareProofRecord,
                 'publicKeyShareProofRoot'
@@ -312,8 +288,7 @@ export const createPublicKeyShareProofSet = (
 
             return {
                 ...proofRecordWithoutRoot,
-                publicKeyShareProofRoot: deriveProtocolHash(
-                    'PublicKeyShareProofRoot',
+                publicKeyShareProofRoot: deriveCanonicalObjectHash(
                     proofRecordWithoutRoot,
                 ),
             } satisfies PublicKeyShareProofRecord;
@@ -322,8 +297,6 @@ export const createPublicKeyShareProofSet = (
     const proofSetWithoutRoot = {
         objectType: 'PublicKeyShareProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -334,11 +307,6 @@ export const createPublicKeyShareProofSet = (
         sameSecretConsistencyRoot:
             input.sameSecretConsistency.sameSecretConsistencyRoot,
         publicKeyShareSetRoot: input.publicKeyShares.publicKeyShareSetRoot,
-        publicKeyShareProofRoots: proofRecords.map((proofRecord) => ({
-            trusteeIdentity: proofRecord.trusteeIdentity,
-            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-            publicKeyShareProofRoot: proofRecord.publicKeyShareProofRoot,
-        })),
         proofRecords,
     } as const satisfies Omit<
         PublicKeyShareProofSet,
@@ -347,10 +315,8 @@ export const createPublicKeyShareProofSet = (
 
     return {
         ...proofSetWithoutRoot,
-        publicKeyShareProofSetRoot: deriveProtocolHash(
-            'PublicKeyShareProofRoot',
-            proofSetWithoutRoot,
-        ),
+        publicKeyShareProofSetRoot:
+            deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies PublicKeyShareProofSet;
 };
 

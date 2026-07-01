@@ -36,14 +36,13 @@ describe('sparse target decoder oracle', () => {
         },
     ] as const satisfies readonly PlaintextTopKRankingEntry[];
 
-    it('decodes the WinnerRankTopK-v1 target vector', () => {
-        expect(sparseTargetVectors.layoutId).toBe('WinnerRankTopK-v1');
+    it('decodes the canonical sparse top-k target vector', () => {
         const decoding = decodeSparseTopKTarget({
             expectedLayoutHash: sparseTargetVectors.layoutHash,
             target: sparseTargetVectors.target,
         });
 
-        expect(decoding.ok).toBe(true);
+        expect(decoding.isValid).toBe(true);
         expect(decoding.targetHash).toBe(sparseTargetVectors.targetHash);
         expect(decoding.selectedOptionOrdinals).toEqual(
             sparseTargetVectors.expectedSelectedOptionOrdinals,
@@ -137,21 +136,9 @@ describe('sparse target decoder oracle', () => {
             },
         },
         {
-            caseName: 'nonzero forbidden semantic slot',
+            caseName: 'target slot length mismatch',
             overrides: {
-                forbiddenSemanticSlots: [0, 1, 0, 0],
-            },
-        },
-        {
-            caseName: 'missing forbidden semantic slots',
-            overrides: {
-                forbiddenSemanticSlots: [],
-            },
-        },
-        {
-            caseName: 'extra forbidden semantic slot',
-            overrides: {
-                forbiddenSemanticSlots: [0, 0, 0, 0, 0],
+                targetIdSlots: [1],
             },
         },
     ])('rejects malformed sparse target: $caseName', ({ overrides }) => {
@@ -164,7 +151,7 @@ describe('sparse target decoder oracle', () => {
             target: mutatedTarget,
         });
 
-        expect(decoding.ok).toBe(false);
+        expect(decoding.isValid).toBe(false);
         expect(decoding.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'SparseTargetInvalid' }),
@@ -178,7 +165,7 @@ describe('sparse target decoder oracle', () => {
             target: sparseTargetVectors.target,
         });
 
-        expect(decoding.ok).toBe(false);
+        expect(decoding.isValid).toBe(false);
         expect(decoding.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'SparseTargetInvalid' }),
@@ -196,7 +183,7 @@ describe('sparse target decoder oracle', () => {
             target: malformedTarget,
         });
 
-        expect(decoding.ok).toBe(false);
+        expect(decoding.isValid).toBe(false);
         expect(decoding.refusedObjects).toEqual(
             expect.arrayContaining([
                 expect.objectContaining({ code: 'SparseTargetInvalid' }),

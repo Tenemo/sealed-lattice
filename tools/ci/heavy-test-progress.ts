@@ -1,5 +1,13 @@
 import { performance } from 'node:perf_hooks';
 
+import {
+    isLibtestSlowTestNotice,
+    parseLibtestFinishedTestLine,
+    parseLibtestRunningTestCount,
+    parseLibtestStandaloneResult,
+    parseLibtestStartedTestName,
+    type LibtestResult,
+} from './libtest-output.js';
 import type { CommandRunObserver } from './run-command.js';
 
 // The heavy accepted-setup tests run under the default libtest harness, which
@@ -27,20 +35,6 @@ export type HeavyTestProgressReporter = {
     readonly terminalOutputFilter: (line: string) => boolean;
 };
 
-// `running N tests` is emitted once per test binary as it starts.
-const runningTestsPattern = /^running (\d+) tests?/;
-// A finished test prints `test <name> ... ok|FAILED|ignored`. The
-// `has been running for over 60 seconds` notices use a different shape and are
-// intentionally not matched here.
-const finishedTestPattern = /^test (\S+) \.\.\. (ok|FAILED|ignored)\b/;
-// libtest prints "test <name> has been running for over N seconds" roughly every
-// minute for a still-running test. The heartbeat above already conveys liveness
-// and progress, so on a suite whose tests routinely run several minutes these
-// notices are redundant terminal noise. The reporter exposes a filter that drops
-// them from the terminal echo; the on-disk run log still keeps every line.
-const libtestSlowTestNoticePattern =
-    /\bhas been running for over \d+ seconds?\b/;
-
 export const createHeavyTestProgressReporter = (input: {
     readonly label: string;
     readonly threadCount: number;
@@ -63,6 +57,7 @@ export const createHeavyTestProgressReporter = (input: {
     let failedTestCount = 0;
     let lineBuffer = '';
     let heartbeatTimer: NodeJS.Timeout | undefined;
+    let pendingStartedTestName: string | undefined;
 
     const estimatedRunningCount = (): number => {
         if (expectedTestCount === undefined) {
@@ -99,22 +94,41 @@ export const createHeavyTestProgressReporter = (input: {
         );
     };
 
+    const recordCompletion = (
+        testName: string,
+        result: LibtestResult,
+    ): void => {
+        if (pendingStartedTestName === testName) {
+            pendingStartedTestName = undefined;
+        }
+        completedTestCount += 1;
+        if (result === 'FAILED') {
+            failedTestCount += 1;
+        }
+        write(
+            `[${input.label}] ${formatElapsed(now() - startedAtMilliseconds)} - finished ${renderCounts()}: ${testName} (${result})\n`,
+        );
+    };
+
     const consumeLine = (line: string): void => {
-        const runningMatch = runningTestsPattern.exec(line);
-        if (runningMatch?.[1] !== undefined) {
-            expectedTestCount =
-                (expectedTestCount ?? 0) + Number(runningMatch[1]);
+        const runningTestCount = parseLibtestRunningTestCount(line);
+        if (runningTestCount !== undefined) {
+            expectedTestCount = (expectedTestCount ?? 0) + runningTestCount;
             return;
         }
-        const finishedMatch = finishedTestPattern.exec(line);
-        if (finishedMatch?.[1] !== undefined) {
-            completedTestCount += 1;
-            if (finishedMatch[2] === 'FAILED') {
-                failedTestCount += 1;
-            }
-            write(
-                `[${input.label}] ${formatElapsed(now() - startedAtMilliseconds)} - finished ${renderCounts()}: ${finishedMatch[1]} (${finishedMatch[2]})\n`,
-            );
+        const finishedTest = parseLibtestFinishedTestLine(line);
+        if (finishedTest !== undefined) {
+            recordCompletion(finishedTest.testName, finishedTest.result);
+            return;
+        }
+        const startedTestName = parseLibtestStartedTestName(line);
+        if (startedTestName !== undefined) {
+            pendingStartedTestName = startedTestName;
+            return;
+        }
+        const resultOnly = parseLibtestStandaloneResult(line);
+        if (pendingStartedTestName !== undefined && resultOnly !== undefined) {
+            recordCompletion(pendingStartedTestName, resultOnly);
         }
     };
 
@@ -132,6 +146,7 @@ export const createHeavyTestProgressReporter = (input: {
             completedTestCount = 0;
             failedTestCount = 0;
             lineBuffer = '';
+            pendingStartedTestName = undefined;
             stop();
             heartbeatTimer = setInterval(emitHeartbeat, heartbeatMilliseconds);
             // Do not let the heartbeat alone keep the process alive.
@@ -158,6 +173,6 @@ export const createHeavyTestProgressReporter = (input: {
         observer,
         stop,
         terminalOutputFilter: (line: string): boolean =>
-            !libtestSlowTestNoticePattern.test(line),
+            !isLibtestSlowTestNotice(line),
     };
 };

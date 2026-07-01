@@ -1,15 +1,10 @@
-import {
-    deriveProtocolHash,
-    hash512Hex,
-    setupProofMaterialFullObjectHashHex,
-} from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import {
-    setupProofChunkManifestRoot,
-    setupProofMaterialChunkHash,
-    setupProofTransportChunkSizeBytes,
+    setupProofMaterialRecordTransportFields,
+    setupProofMaterialReferenceFields,
+    setupProofMaterialTransportChunks,
+    setupProofMaterialTransportMetadata,
 } from '../setup-proof-material-transport.js';
 
 import {
@@ -38,7 +33,6 @@ import {
     assertProtocolHash,
     assertJsonRecord,
     bytesFromHex,
-    bytesToHex,
     coefficientVectorFromLittleEndianHex,
     evaluationKeyShareComponentVectorHash,
     evaluationKeyShareComponentVectorRoot,
@@ -518,7 +512,6 @@ export const createTrusteeEvaluationKeyProofs = (
         input.transportedEvaluationKeyShareComponentMaterial,
     );
 
-    let proofAccountingHash: ProtocolHash | undefined;
     const proofRecords = sameSecretProofReferences.map((proofReference) => {
         const witness = witnessesByRosterPosition.get(
             proofReference.trusteeRosterPosition,
@@ -695,38 +688,18 @@ export const createTrusteeEvaluationKeyProofs = (
             negativeIndicatorCoefficients:
                 witness.negativeIndicatorCoefficients,
             openingRandomnessByLimb: witness.openingRandomnessByLimb,
-            proofRandomnessSource: 'fresh-csprng',
             proofRandomnessSeedHex,
             proofRandomnessNonceHex,
         });
-        if (
-            generatedProof.ok !== true ||
-            generatedProof.operation !== 'generateTrusteeEvaluationKeyProof'
-        ) {
+        if (generatedProof.operation !== 'generateTrusteeEvaluationKeyProof') {
             throw new Error(
                 'trusteeEvaluationKeyProofGenerator returned the wrong operation.',
-            );
-        }
-        assertProtocolHash(
-            generatedProof.proofAccountingHash,
-            'generatedProof.proofAccountingHash',
-        );
-        if (proofAccountingHash === undefined) {
-            proofAccountingHash = generatedProof.proofAccountingHash;
-        } else if (proofAccountingHash !== generatedProof.proofAccountingHash) {
-            throw new Error(
-                'trustee evaluation-key proofs must pin one proof accounting hash.',
             );
         }
         assertProtocolHash(
             generatedProof.statementHash,
             'generatedProof.statementHash',
         );
-        if (generatedProof.keyCount !== statementKeys.length) {
-            throw new Error(
-                'generatedProof.keyCount must match the frozen key schedule.',
-            );
-        }
         if (generatedProof.sameSecretLinkageIncluded !== true) {
             throw new Error(
                 'generatedProof must include the same-secret linkage.',
@@ -755,8 +728,6 @@ export const createTrusteeEvaluationKeyProofs = (
         const recordWithoutRoot = {
             objectType: 'TrusteeEvaluationKeyProof',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
@@ -766,8 +737,6 @@ export const createTrusteeEvaluationKeyProofs = (
                 proofReference.trusteeSecretCommitmentRoot,
             sameSecretProofRoot: proofReference.sameSecretProofRoot,
             statementHash: generatedProof.statementHash,
-            keyCount: statementKeys.length,
-            proofSizeBytes: proofBytes.byteLength,
             proofBytesHash: hash512Hex(
                 trusteeEvaluationKeyProofBytesHashDomain,
                 [proofBytes],
@@ -777,13 +746,11 @@ export const createTrusteeEvaluationKeyProofs = (
 
         return {
             ...recordWithoutRoot,
-            trusteeEvaluationKeyProofRoot: deriveProtocolHash(
-                'TrusteeEvaluationKeyProofRoot',
-                recordWithoutRoot,
-            ),
+            trusteeEvaluationKeyProofRoot:
+                deriveCanonicalObjectHash(recordWithoutRoot),
         } as TrusteeEvaluationKeyProofRecord;
     });
-    if (proofAccountingHash === undefined) {
+    if (proofRecords.length === 0) {
         throw new Error(
             'trustee evaluation-key proofs require at least one participant.',
         );
@@ -797,10 +764,7 @@ export const createTrusteeEvaluationKeyProofs = (
     const proofSetWithoutRoot = {
         objectType: 'TrusteeEvaluationKeyProofSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: trusteeEvaluationKeyProofFamily,
-        proofAccountingHash,
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
         rnsLimbCount: input.qSharePrimes.length,
@@ -832,10 +796,8 @@ export const createTrusteeEvaluationKeyProofs = (
 
     return {
         ...proofSetWithoutRoot,
-        trusteeEvaluationKeyProofSetRoot: deriveProtocolHash(
-            'TrusteeEvaluationKeyProofSetRoot',
-            proofSetWithoutRoot,
-        ),
+        trusteeEvaluationKeyProofSetRoot:
+            deriveCanonicalObjectHash(proofSetWithoutRoot),
     } satisfies TrusteeEvaluationKeyProofSet;
 };
 
@@ -872,105 +834,46 @@ export const transportTrusteeEvaluationKeyProofSet = (
                 'proofRecords.proofBytesHash must match proofBytesHex before transport.',
             );
         }
-        const chunks: Uint8Array[] = [];
-        for (
-            let chunkStart = 0;
-            chunkStart < proofBytes.byteLength;
-            chunkStart += setupProofTransportChunkSizeBytes
-        ) {
-            chunks.push(
-                proofBytes.slice(
-                    chunkStart,
-                    Math.min(
-                        chunkStart + setupProofTransportChunkSizeBytes,
-                        proofBytes.byteLength,
-                    ),
-                ),
-            );
-        }
-        if (chunks.length === 0) {
-            throw new Error(
-                'proofRecords.proofBytesHex must produce at least one transported chunk.',
-            );
-        }
-        const totalByteLength = proofBytes.byteLength;
-        const fullObjectHash = setupProofMaterialFullObjectHashHex(
+        const proofMaterialTransport = setupProofMaterialTransportMetadata(
             trusteeEvaluationKeyProofFamily,
-            totalByteLength,
-            chunks,
+            proofBytes,
+            'proofRecords.proofBytesHex must produce at least one transported chunk.',
         );
-        const chunkHashes = chunks.map((chunk, chunkIndex) =>
-            setupProofMaterialChunkHash(
-                trusteeEvaluationKeyProofFamily,
-                fullObjectHash,
-                chunkIndex,
-                chunk,
-            ),
-        );
-        const chunkRoot = setupProofChunkManifestRoot(
-            trusteeEvaluationKeyProofFamily,
-            chunkHashes,
-            fullObjectHash,
-            totalByteLength,
-        );
-        const proofMaterialRoot = deriveProtocolHash(
-            'TrusteeEvaluationKeyProofMaterialRoot',
-            {
-                objectType: 'TrusteeEvaluationKeyProofMaterialReference',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                proofFamily: trusteeEvaluationKeyProofFamily,
-                trusteeIdentity: proofRecord.trusteeIdentity,
-                trusteeRosterPosition: proofRecord.trusteeRosterPosition,
-                statementHash: proofRecord.statementHash,
-                proofSizeBytes: proofRecord.proofSizeBytes,
-                proofBytesHash: proofRecord.proofBytesHash,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: chunkHashes.length,
-                totalByteLength,
-                fullObjectHash,
-                chunkRoot,
-                chunkHashes,
-            },
-        );
+        const proofMaterialRoot = deriveCanonicalObjectHash({
+            objectType: 'TrusteeEvaluationKeyProofMaterialReference',
+            objectVersion: 1,
+            proofFamily: trusteeEvaluationKeyProofFamily,
+            trusteeIdentity: proofRecord.trusteeIdentity,
+            trusteeRosterPosition: proofRecord.trusteeRosterPosition,
+            statementHash: proofRecord.statementHash,
+            proofBytesHash: proofRecord.proofBytesHash,
+            ...setupProofMaterialReferenceFields(proofMaterialTransport),
+        });
         transportedProofMaterials.push({
             objectType: evaluationKeyShareProofTransportObjectType,
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
-            proofBytesEncoding: setupProofMaterialTransportEncoding,
-            proofMaterialRoot,
-            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-            proofChunkCount: chunkHashes.length,
-            proofTotalByteLength: totalByteLength,
-            proofFullObjectHash: fullObjectHash,
-            proofChunkRoot: chunkRoot,
-            proofChunkHashes: chunkHashes,
-            chunks: chunks.map((chunk, chunkIndex) => ({
-                chunkIndex,
-                bytesHex: bytesToHex(chunk),
-            })),
+            ...setupProofMaterialRecordTransportFields(
+                proofMaterialTransport,
+                proofMaterialRoot,
+                setupProofMaterialTransportEncoding,
+            ),
+            chunks: setupProofMaterialTransportChunks(proofMaterialTransport),
         });
         const transportedRecordWithoutRoot = {
             ...recordFields,
-            proofBytesEncoding: setupProofMaterialTransportEncoding,
-            proofMaterialRoot,
-            proofChunkSizeBytes: setupProofTransportChunkSizeBytes,
-            proofChunkCount: chunkHashes.length,
-            proofTotalByteLength: totalByteLength,
-            proofFullObjectHash: fullObjectHash,
-            proofChunkRoot: chunkRoot,
-            proofChunkHashes: chunkHashes,
+            ...setupProofMaterialRecordTransportFields(
+                proofMaterialTransport,
+                proofMaterialRoot,
+                setupProofMaterialTransportEncoding,
+            ),
         } as JsonRecord;
         delete transportedRecordWithoutRoot.proofBytesHex;
         delete transportedRecordWithoutRoot.trusteeEvaluationKeyProofRoot;
 
         return {
             ...transportedRecordWithoutRoot,
-            trusteeEvaluationKeyProofRoot: deriveProtocolHash(
-                'TrusteeEvaluationKeyProofRoot',
+            trusteeEvaluationKeyProofRoot: deriveCanonicalObjectHash(
                 transportedRecordWithoutRoot,
             ),
         } as TrusteeEvaluationKeyProofRecord;
@@ -984,16 +887,12 @@ export const transportTrusteeEvaluationKeyProofSet = (
     return {
         trusteeEvaluationKeyProofs: {
             ...proofSetWithoutRoot,
-            trusteeEvaluationKeyProofSetRoot: deriveProtocolHash(
-                'TrusteeEvaluationKeyProofSetRoot',
-                proofSetWithoutRoot,
-            ),
+            trusteeEvaluationKeyProofSetRoot:
+                deriveCanonicalObjectHash(proofSetWithoutRoot),
         } as TrusteeEvaluationKeyProofSet,
         transportedEvaluationKeyShareProofMaterial: {
             objectType: evaluationKeyShareProofTransportSetObjectType,
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: trusteeEvaluationKeyProofFamily,
             proofMaterials: transportedProofMaterials,
         },

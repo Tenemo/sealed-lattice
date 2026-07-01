@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Option<Value>> {
     let Some(complaint_set) = setup_package.get("vssComplaints") else {
         return Ok(None);
@@ -126,7 +128,7 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
         .as_object_mut()
         .expect("VSS complaint set object was checked")
         .remove("vssComplaintRoot");
-    let expected_root = derive_protocol_hash("VssComplaintRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if complaint_root != expected_root {
         return Ok(Some(vss_complaint_refusal(
             "vssComplaintRootMismatch",
@@ -137,12 +139,11 @@ pub(super) fn verify_vss_complaints(setup_package: &Value) -> CanonicalResult<Op
 
     // A single valid complaint aborts the ceremony because any provable dealer equivocation is disqualifying, whereas acceptance must be unanimous over all source-by-recipient pairs.
     Ok(Some(verification_response(
-        VerifierStatus::Aborted,
         Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(
             "vssComplaintAcceptedAbort",
-            "a valid VSS complaint aborts the first-profile setup ceremony",
+            "a valid VSS complaint aborts the first-roster setup ceremony",
             "setupPackage.vssComplaints",
         )],
         Vec::new(),
@@ -157,15 +158,12 @@ fn verify_vss_complaint_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if complaint_set.get(field_name) != setup_context.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("vssComplaints.{field_name} must match setupContext"),
             ));
         }
@@ -211,10 +209,7 @@ fn verify_vss_complaint_record(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if complaint_record.get(field_name) != verification_context.setup_context.get(field_name) {
@@ -453,7 +448,7 @@ fn verify_vss_complaint_record(
     }
 
     let complaint_payload = vss_complaint_payload_value(complaint_record)?;
-    let expected_complaint_root = derive_protocol_hash("VssComplaintRoot", &complaint_payload)?;
+    let expected_complaint_root = derive_canonical_object_hash(&complaint_payload)?;
     let Some(complaint_root) = complaint_record
         .get("complaintRoot")
         .and_then(Value::as_str)
@@ -592,13 +587,7 @@ fn vss_complaint_payload_value(complaint_record: &Value) -> CanonicalResult<Valu
         "ceremonyId": value_string(complaint_record, "ceremonyId")?,
         "manifestHash": value_string(complaint_record, "manifestHash")?,
         "rosterHash": value_string(complaint_record, "rosterHash")?,
-        "setupProfileHash": value_string(complaint_record, "setupProfileHash")?,
-        "qShareHash": value_string(complaint_record, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(
-            complaint_record,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": value_string(complaint_record, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(complaint_record, "setupParametersHash")?,
         "setupEpoch": value_string(complaint_record, "setupEpoch")?,
         "sourceTrusteeIdentity": value_string(complaint_record, "sourceTrusteeIdentity")?,
         "sourceTrusteeRosterPosition": value_u64(complaint_record, "sourceTrusteeRosterPosition")?,
@@ -622,36 +611,27 @@ fn vss_complaint_signature_context_hash(
     complaint_record: &Value,
     complaint_root: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "VssComplaintRoot",
-        &json!({
-            "purpose": "vss-share-complaint-signature-context",
-            "ceremonyId": value_string(complaint_record, "ceremonyId")?,
-            "manifestHash": value_string(complaint_record, "manifestHash")?,
-            "rosterHash": value_string(complaint_record, "rosterHash")?,
-            "setupProfileHash": value_string(complaint_record, "setupProfileHash")?,
-            "qShareHash": value_string(complaint_record, "qShareHash")?,
-            "carryAwareVssShareRelationProfileHash": value_string(
-                complaint_record,
-                "carryAwareVssShareRelationProfileHash",
-            )?,
-            "commitmentProfileHash": value_string(complaint_record, "commitmentProfileHash")?,
-            "setupEpoch": value_string(complaint_record, "setupEpoch")?,
-            "sourceTrusteeIdentity": value_string(complaint_record, "sourceTrusteeIdentity")?,
-            "sourceTrusteeRosterPosition": value_u64(complaint_record, "sourceTrusteeRosterPosition")?,
-            "recipientIdentity": value_string(complaint_record, "recipientIdentity")?,
-            "recipientRosterPosition": value_u64(complaint_record, "recipientRosterPosition")?,
-            "sourceTrusteeCommitmentRoot": value_string(complaint_record, "sourceTrusteeCommitmentRoot")?,
-            "privateVssEnvelopeCommitmentRoot": value_string(
-                complaint_record,
-                "privateVssEnvelopeCommitmentRoot",
-            )?,
-            "privateEnvelopeHash": value_string(complaint_record, "privateEnvelopeHash")?,
-            "complaintEvidenceRoot": value_string(complaint_record, "complaintEvidenceRoot")?,
-            "complaintReasonCode": value_string(complaint_record, "complaintReasonCode")?,
-            "complaintRoot": complaint_root,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "VssShareComplaintSignatureContext",
+        "ceremonyId": value_string(complaint_record, "ceremonyId")?,
+        "manifestHash": value_string(complaint_record, "manifestHash")?,
+        "rosterHash": value_string(complaint_record, "rosterHash")?,
+        "setupParametersHash": value_string(complaint_record, "setupParametersHash")?,
+        "setupEpoch": value_string(complaint_record, "setupEpoch")?,
+        "sourceTrusteeIdentity": value_string(complaint_record, "sourceTrusteeIdentity")?,
+        "sourceTrusteeRosterPosition": value_u64(complaint_record, "sourceTrusteeRosterPosition")?,
+        "recipientIdentity": value_string(complaint_record, "recipientIdentity")?,
+        "recipientRosterPosition": value_u64(complaint_record, "recipientRosterPosition")?,
+        "sourceTrusteeCommitmentRoot": value_string(complaint_record, "sourceTrusteeCommitmentRoot")?,
+        "privateVssEnvelopeCommitmentRoot": value_string(
+            complaint_record,
+            "privateVssEnvelopeCommitmentRoot",
+        )?,
+        "privateEnvelopeHash": value_string(complaint_record, "privateEnvelopeHash")?,
+        "complaintEvidenceRoot": value_string(complaint_record, "complaintEvidenceRoot")?,
+        "complaintReasonCode": value_string(complaint_record, "complaintReasonCode")?,
+        "complaintRoot": complaint_root,
+    }))
 }
 
 fn vss_complaint_refusal(
@@ -660,7 +640,6 @@ fn vss_complaint_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],
@@ -673,7 +652,6 @@ pub(super) fn verify_vss_share_acceptances(
 ) -> CanonicalResult<Option<Value>> {
     let Some(acceptance_set) = setup_package.get("vssShareAcceptances") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances".to_string()],
             Vec::new(),
@@ -762,7 +740,6 @@ pub(super) fn verify_vss_share_acceptances(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords".to_string()],
             Vec::new(),
@@ -795,7 +772,6 @@ pub(super) fn verify_vss_share_acceptances(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.vssShareAcceptanceRoot".to_string()],
             Vec::new(),
@@ -811,7 +787,7 @@ pub(super) fn verify_vss_share_acceptances(
         .as_object_mut()
         .expect("VSS share acceptance set object was checked")
         .remove("vssShareAcceptanceRoot");
-    let expected_root = derive_protocol_hash("VssShareAcceptanceRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if acceptance_root != expected_root {
         return Ok(Some(vss_share_acceptance_refusal(
             "vssShareAcceptanceRootMismatch",
@@ -831,15 +807,12 @@ fn verify_vss_share_acceptance_context(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if acceptance_set.get(field_name) != setup_context.get(field_name) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("vssShareAcceptances.{field_name} must match setupContext"),
             ));
         }
@@ -917,10 +890,7 @@ fn verify_vss_share_acceptance_record(
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ] {
         if acceptance_record.get(field_name) != verification_context.setup_context.get(field_name) {
@@ -1074,7 +1044,6 @@ fn verify_vss_share_acceptance_record(
     for field_name in ["privateEnvelopeHash", "localVerificationRoot"] {
         let Some(hash) = acceptance_record.get(field_name).and_then(Value::as_str) else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("vssAcceptanceOrComplaint"),
                 vec![format!(
                     "vssShareAcceptances.acceptanceRecords.{field_name}"
@@ -1166,14 +1135,12 @@ fn verify_vss_share_acceptance_record(
     }
 
     let acceptance_payload = vss_share_acceptance_payload_value(acceptance_record)?;
-    let expected_acceptance_root =
-        derive_protocol_hash("VssShareAcceptanceRoot", &acceptance_payload)?;
+    let expected_acceptance_root = derive_canonical_object_hash(&acceptance_payload)?;
     let Some(acceptance_root) = acceptance_record
         .get("acceptanceRoot")
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceRoot".to_string()],
             Vec::new(),
@@ -1204,7 +1171,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_u64)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceByteLength".to_string()],
             Vec::new(),
@@ -1226,7 +1192,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.acceptanceContextHash".to_string()],
             Vec::new(),
@@ -1250,7 +1215,6 @@ fn verify_vss_share_acceptance_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("vssAcceptanceOrComplaint"),
             vec!["vssShareAcceptances.acceptanceRecords.signatureEnvelopeHash".to_string()],
             Vec::new(),
@@ -1313,13 +1277,7 @@ fn vss_share_acceptance_payload_value(acceptance_record: &Value) -> CanonicalRes
         "ceremonyId": value_string(acceptance_record, "ceremonyId")?,
         "manifestHash": value_string(acceptance_record, "manifestHash")?,
         "rosterHash": value_string(acceptance_record, "rosterHash")?,
-        "setupProfileHash": value_string(acceptance_record, "setupProfileHash")?,
-        "qShareHash": value_string(acceptance_record, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(
-            acceptance_record,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": value_string(acceptance_record, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(acceptance_record, "setupParametersHash")?,
         "setupEpoch": value_string(acceptance_record, "setupEpoch")?,
         "sourceTrusteeIdentity": value_string(acceptance_record, "sourceTrusteeIdentity")?,
         "sourceTrusteeRosterPosition": value_u64(acceptance_record, "sourceTrusteeRosterPosition")?,
@@ -1342,35 +1300,26 @@ fn vss_share_acceptance_signature_context_hash(
     acceptance_record: &Value,
     acceptance_root: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "VssShareAcceptanceRoot",
-        &json!({
-            "purpose": "vss-share-acceptance-signature-context",
-            "ceremonyId": value_string(acceptance_record, "ceremonyId")?,
-            "manifestHash": value_string(acceptance_record, "manifestHash")?,
-            "rosterHash": value_string(acceptance_record, "rosterHash")?,
-            "setupProfileHash": value_string(acceptance_record, "setupProfileHash")?,
-            "qShareHash": value_string(acceptance_record, "qShareHash")?,
-            "carryAwareVssShareRelationProfileHash": value_string(
-                acceptance_record,
-                "carryAwareVssShareRelationProfileHash",
-            )?,
-            "commitmentProfileHash": value_string(acceptance_record, "commitmentProfileHash")?,
-            "setupEpoch": value_string(acceptance_record, "setupEpoch")?,
-            "sourceTrusteeIdentity": value_string(acceptance_record, "sourceTrusteeIdentity")?,
-            "sourceTrusteeRosterPosition": value_u64(acceptance_record, "sourceTrusteeRosterPosition")?,
-            "recipientIdentity": value_string(acceptance_record, "recipientIdentity")?,
-            "recipientRosterPosition": value_u64(acceptance_record, "recipientRosterPosition")?,
-            "sourceTrusteeCommitmentRoot": value_string(acceptance_record, "sourceTrusteeCommitmentRoot")?,
-            "privateVssEnvelopeCommitmentRoot": value_string(
-                acceptance_record,
-                "privateVssEnvelopeCommitmentRoot",
-            )?,
-            "privateEnvelopeHash": value_string(acceptance_record, "privateEnvelopeHash")?,
-            "localVerificationRoot": value_string(acceptance_record, "localVerificationRoot")?,
-            "acceptanceRoot": acceptance_root,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "VssShareAcceptanceSignatureContext",
+        "ceremonyId": value_string(acceptance_record, "ceremonyId")?,
+        "manifestHash": value_string(acceptance_record, "manifestHash")?,
+        "rosterHash": value_string(acceptance_record, "rosterHash")?,
+        "setupParametersHash": value_string(acceptance_record, "setupParametersHash")?,
+        "setupEpoch": value_string(acceptance_record, "setupEpoch")?,
+        "sourceTrusteeIdentity": value_string(acceptance_record, "sourceTrusteeIdentity")?,
+        "sourceTrusteeRosterPosition": value_u64(acceptance_record, "sourceTrusteeRosterPosition")?,
+        "recipientIdentity": value_string(acceptance_record, "recipientIdentity")?,
+        "recipientRosterPosition": value_u64(acceptance_record, "recipientRosterPosition")?,
+        "sourceTrusteeCommitmentRoot": value_string(acceptance_record, "sourceTrusteeCommitmentRoot")?,
+        "privateVssEnvelopeCommitmentRoot": value_string(
+            acceptance_record,
+            "privateVssEnvelopeCommitmentRoot",
+        )?,
+        "privateEnvelopeHash": value_string(acceptance_record, "privateEnvelopeHash")?,
+        "localVerificationRoot": value_string(acceptance_record, "localVerificationRoot")?,
+        "acceptanceRoot": acceptance_root,
+    }))
 }
 
 fn vss_share_acceptance_refusal(
@@ -1379,7 +1328,6 @@ fn vss_share_acceptance_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("vssAcceptanceOrComplaint"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

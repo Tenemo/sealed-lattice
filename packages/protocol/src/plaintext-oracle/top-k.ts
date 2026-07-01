@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ComparatorPolynomialSet,
     FieldElement,
@@ -44,7 +44,7 @@ const toPlaintextScore = (score: unknown): PlaintextScore => {
 
 const assertPollSpecShape = (pollSpec: PollSpec): void => {
     const validation = validatePollSpec(pollSpec);
-    if (!validation.ok) {
+    if (!validation.isValid) {
         throw new RangeError(
             'Plaintext oracle poll specification must pass lifecycle validation.',
         );
@@ -52,11 +52,10 @@ const assertPollSpecShape = (pollSpec: PollSpec): void => {
     if (
         pollSpec.scoreDomain.min !== 1 ||
         pollSpec.scoreDomain.max !== 10 ||
-        pollSpec.scoreDomain.skippedOptionScore !== 1 ||
-        pollSpec.tiePolicy !== 'HigherScoreThenLowerOptionIndex'
+        pollSpec.scoreDomain.skippedOptionScore !== 1
     ) {
         throw new RangeError(
-            'Plaintext oracle requires the frozen 1..10 score domain and higher-score tie policy.',
+            'Plaintext oracle requires the frozen 1..10 score domain.',
         );
     }
     if (
@@ -151,7 +150,10 @@ const derivePlaintextTally = (input: {
 
     return {
         ...tallyPayload,
-        tallyHash: deriveProtocolHash('PlaintextTallyHash', tallyPayload),
+        tallyHash: deriveCanonicalObjectHash({
+            objectType: 'PlaintextTally',
+            ...tallyPayload,
+        }),
     };
 };
 
@@ -316,10 +318,10 @@ export const deriveComparatorPolynomialSet = (
 
     return {
         ...comparatorPayload,
-        comparatorHash: deriveProtocolHash(
-            'TopKCircuitHash',
-            comparatorPayload,
-        ),
+        comparatorHash: deriveCanonicalObjectHash({
+            objectType: 'TopKCircuit',
+            ...comparatorPayload,
+        }),
     };
 };
 
@@ -348,10 +350,10 @@ export const derivePlaintextTopKOracle = (input: {
 
     return {
         ...oraclePayload,
-        oracleHash: deriveProtocolHash(
-            'PlaintextTopKOracleHash',
-            oraclePayload,
-        ),
+        oracleHash: deriveCanonicalObjectHash({
+            objectType: 'PlaintextTopKOracle',
+            ...oraclePayload,
+        }),
         tally,
     };
 };

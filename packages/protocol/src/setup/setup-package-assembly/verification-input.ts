@@ -7,6 +7,7 @@ import type {
 
 import {
     assertObjectRecord,
+    assertProtocolHash,
     cloneJsonLike,
 } from './constants-and-assertions.js';
 import type {
@@ -42,6 +43,9 @@ const publicVssMaterialReferenceForVerificationInput = (
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): SetupPackageVerificationInput => {
+    assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
+    assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
+
     const transportedVssCoefficientCommitmentMaterial =
         publicVssMaterialReferenceForVerificationInput(
             input.transportedVssCoefficientCommitmentMaterial,
@@ -65,6 +69,8 @@ export const createSetupPackageVerificationInput = (
 
     return {
         setupPackage: input.setupPackage,
+        expectedManifestHash: input.expectedManifestHash,
+        expectedRosterHash: input.expectedRosterHash,
         ...(transportedVssCoefficientCommitmentMaterial === undefined
             ? {}
             : {

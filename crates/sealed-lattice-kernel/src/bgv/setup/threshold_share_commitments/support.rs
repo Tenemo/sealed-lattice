@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::bgv::setup_helpers::is_lowercase_protocol_hash;
+
 pub(super) fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
     for field_name in setup_context_field_names() {
         if setup_context.get(field_name).is_none() {
@@ -8,56 +10,26 @@ pub(super) fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()>
             )));
         }
     }
-    for field_name in [
-        "manifestHash",
-        "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
-    ] {
+    for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         let hash = hash_string_field(setup_context, field_name)?;
         validate_hash_string(hash, &format!("setupContext.{field_name}"))?;
     }
     string_field(setup_context, "ceremonyId")?;
     string_field(setup_context, "setupEpoch")?;
 
-    // The setup profile hash is a roster family (distinct per participant
+    // The setup parameters hash is a roster family (distinct per participant
     // count), so it must be compared against the hash derived from this setup
-    // context's roster, not the first-closure n = 10 hash.
+    // context's roster, not the first-closure n = 10 hash. It subsumes the
+    // former per-component parameter hashes (Q_share, carry-aware VSS relation,
+    // commitment) and the BGV parameters.
     let roster = accepted_roster_from_setup_context(setup_context);
     if setup_context
-        .get("setupProfileHash")
+        .get("setupParametersHash")
         .and_then(Value::as_str)
-        != Some(setup_profile_hash_for_roster(&roster)?.as_str())
+        != Some(setup_parameters_hash_for_roster(&roster)?.as_str())
     {
         return Err(invalid_threshold_commitment_input(
-            "setupContext.setupProfileHash does not match CollectiveBgvSetup-v1",
-        ));
-    }
-    if setup_context.get("qShareHash").and_then(Value::as_str)
-        != Some(accepted_q_share_hash()?.as_str())
-    {
-        return Err(invalid_threshold_commitment_input(
-            "setupContext.qShareHash does not match the accepted Q_share prime list",
-        ));
-    }
-    if setup_context
-        .get("carryAwareVssShareRelationProfileHash")
-        .and_then(Value::as_str)
-        != Some(carry_aware_vss_share_relation_profile_hash()?.as_str())
-    {
-        return Err(invalid_threshold_commitment_input(
-            "setupContext.carryAwareVssShareRelationProfileHash does not match the accepted carry-aware VSS relation profile",
-        ));
-    }
-    if setup_context
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Err(invalid_threshold_commitment_input(
-            "setupContext.commitmentProfileHash does not match the accepted setup commitment profile",
+            "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
         ));
     }
 
@@ -97,15 +69,12 @@ pub(super) fn copy_context_fields(
     Ok(())
 }
 
-pub(super) fn setup_context_field_names() -> [&'static str; 8] {
+pub(super) fn setup_context_field_names() -> [&'static str; 5] {
     [
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ]
 }
@@ -189,11 +158,7 @@ pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<us
 }
 
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() == 128
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
+    if is_lowercase_protocol_hash(hash) {
         return Ok(());
     }
 

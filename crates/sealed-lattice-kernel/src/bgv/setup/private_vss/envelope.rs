@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 const PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "PrivateVssShareEnvelope";
 const PRIVATE_VSS_LIMB_OPENING_OBJECT_TYPE: &str = "PrivateVssShareLimbOpening";
 
@@ -132,8 +134,7 @@ pub(super) fn verify_private_envelope_header(
         &private_envelope_aad_hash,
         "privateEnvelope.privateEnvelopeAadHash",
     )?;
-    let private_envelope_hash =
-        derive_protocol_hash("PrivateVssShareEnvelopeHash", private_envelope)?;
+    let private_envelope_hash = derive_canonical_object_hash(private_envelope)?;
 
     Ok(Ok(PrivateEnvelopeBinding {
         private_envelope_hash,
@@ -350,16 +351,13 @@ fn verify_private_envelope_limb(
         Err(refusal) => return Ok(Err(refusal)),
     };
 
-    let share_values_hash = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &json!({
-            "objectType": "PrivateVssShareValueVector",
-            "objectVersion": 1,
-            "rnsLimbIndex": rns_limb_index,
-            "rnsPrime": rns_prime,
-            "shareValues": share_values,
-        }),
-    )?;
+    let share_values_hash = derive_canonical_object_hash(&json!({
+        "objectType": "PrivateVssShareValueVector",
+        "objectVersion": 1,
+        "rnsLimbIndex": rns_limb_index,
+        "rnsPrime": rns_prime,
+        "shareValues": share_values,
+    }))?;
     let proof_verification = match verify_private_vss_share_succinct_relation_proof(
         PrivateVssShareSuccinctProofVerificationInput {
             setup_context,
@@ -402,11 +400,8 @@ fn verify_private_envelope_limb(
         "proofStatementRoot": proof_verification.proof_statement_root,
         "proofMaterialRoot": proof_verification.proof_material_root,
         "statementHash": proof_verification.statement_hash_hex,
-        "proofAccountingHash": proof_verification.proof_accounting_hash,
-        "proofSizeBytes": proof_verification.proof_size_bytes,
     });
-    let limb_verification_root =
-        derive_protocol_hash("PrivateVssLocalVerificationRoot", &limb_verification_record)?;
+    let limb_verification_root = derive_canonical_object_hash(&limb_verification_record)?;
 
     Ok(Ok(LimbVerification {
         rns_limb_index,

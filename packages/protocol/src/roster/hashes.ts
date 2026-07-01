@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     ElectionManifest,
     ProtocolHash,
@@ -7,12 +7,21 @@ import type {
     TrusteeSetupEntry,
 } from '@sealed-lattice/types';
 
-import { compareCanonicalStrings } from '../common/verification-helpers.js';
+import {
+    compareCanonicalStrings,
+    isProtocolHashString,
+} from '../common/verification-helpers.js';
+
+export type CollectiveBgvSetupRosterEntryInput = Readonly<{
+    readonly rosterPosition: number;
+    readonly trusteeIdentity: string;
+    readonly signingPublicKeyHash: ProtocolHash;
+}>;
 
 export const deriveRegistrationEntryHash = (
     entry: Omit<RegistrationEntry, 'registrationEntryHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('RegistrationEntryHash', {
+    deriveCanonicalObjectHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
         ceremonyId: entry.ceremonyId,
@@ -27,10 +36,10 @@ export const deriveRegistrationEntryHash = (
 export const deriveTrusteeSetupEntryHash = (
     entry: Omit<TrusteeSetupEntry, 'trusteeSetupEntryHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('TrusteeSetupEntryHash', {
+    deriveCanonicalObjectHash({
         boardPosition: entry.boardPosition,
         boardSequence: entry.boardSequence,
-        bgvProfileHash: entry.bgvProfileHash,
+        bgvParametersHash: entry.bgvParametersHash,
         collectivePublicKeyRoot: entry.collectivePublicKeyRoot,
         ceremonyId: entry.ceremonyId,
         deviceEpoch: entry.deviceEpoch,
@@ -41,9 +50,6 @@ export const deriveTrusteeSetupEntryHash = (
         publicKeyShareRoot: entry.publicKeyShareRoot,
         recoveryEpoch: entry.recoveryEpoch,
         rotSetHash: entry.rotSetHash,
-        rustBgvBackendProfileHash: entry.rustBgvBackendProfileHash,
-        setupProfileId: entry.setupProfileId,
-        targetDecryptionProfileId: entry.targetDecryptionProfileId,
         thresholdShareVerificationKeyRoot:
             entry.thresholdShareVerificationKeyRoot,
         trusteeThresholdVerificationKeyHash:
@@ -58,9 +64,9 @@ export const deriveTrusteeSetupEntryHash = (
 export const deriveRosterHash = (
     entries: readonly RegistrationEntry[],
 ): ProtocolHash =>
-    deriveProtocolHash(
-        'RosterHash',
-        entries
+    deriveCanonicalObjectHash({
+        objectType: 'Roster',
+        entries: entries
             .map((entry) => ({
                 participantIdentity: entry.participantIdentity.normalize('NFC'),
                 registrationEntryHash: entry.registrationEntryHash,
@@ -72,7 +78,74 @@ export const deriveRosterHash = (
                     right.participantIdentity,
                 ),
             ),
-    );
+    });
+
+export const deriveCollectiveBgvSetupRosterHash = (
+    entries: readonly CollectiveBgvSetupRosterEntryInput[],
+): ProtocolHash => {
+    if (!Array.isArray(entries)) {
+        throw new TypeError(
+            'Collective BGV setup roster entries must be an array.',
+        );
+    }
+
+    const inputEntries: readonly CollectiveBgvSetupRosterEntryInput[] = entries;
+    const rosterEntries = inputEntries
+        .map((entry) => {
+            if (typeof entry !== 'object' || entry === null) {
+                throw new TypeError(
+                    'Collective BGV setup roster entry must be an object.',
+                );
+            }
+            if (
+                !Number.isSafeInteger(entry.rosterPosition) ||
+                entry.rosterPosition < 0
+            ) {
+                throw new TypeError(
+                    'rosterPosition must be a non-negative safe integer.',
+                );
+            }
+            if (
+                typeof entry.trusteeIdentity !== 'string' ||
+                entry.trusteeIdentity.length === 0
+            ) {
+                throw new TypeError('trusteeIdentity must be non-empty.');
+            }
+            if (!isProtocolHashString(entry.signingPublicKeyHash)) {
+                throw new TypeError(
+                    'signingPublicKeyHash must be a protocol hash.',
+                );
+            }
+
+            return {
+                objectType: 'CollectiveBgvSetupRosterEntry',
+                objectVersion: 1,
+                rosterPosition: entry.rosterPosition,
+                trusteeIdentity: entry.trusteeIdentity,
+                signingPublicKeyHash: entry.signingPublicKeyHash,
+            };
+        })
+        .sort((left, right) => left.rosterPosition - right.rosterPosition);
+    for (
+        let entryIndex = 1;
+        entryIndex < rosterEntries.length;
+        entryIndex += 1
+    ) {
+        if (
+            rosterEntries[entryIndex]?.rosterPosition ===
+            rosterEntries[entryIndex - 1]?.rosterPosition
+        ) {
+            throw new TypeError(
+                'Collective BGV setup roster entries must have distinct roster positions.',
+            );
+        }
+    }
+
+    return deriveCanonicalObjectHash({
+        objectType: 'CollectiveBgvSetupRoster',
+        rosterEntries,
+    });
+};
 
 export const deriveRosterExternalAcceptanceHash = (
     acceptance: Omit<
@@ -80,7 +153,7 @@ export const deriveRosterExternalAcceptanceHash = (
         'rosterExternalAcceptanceHash' | 'signature'
     >,
 ): ProtocolHash =>
-    deriveProtocolHash('RosterExternalAcceptanceHash', {
+    deriveCanonicalObjectHash({
         acceptedBoardHeadHash: acceptance.acceptedBoardHeadHash,
         ceremonyId: acceptance.ceremonyId,
         electionManifestHash: acceptance.electionManifestHash,
@@ -94,7 +167,7 @@ export const deriveRosterExternalAcceptanceHash = (
 export const deriveElectionManifestHash = (
     manifest: Omit<ElectionManifest, 'electionManifestHash' | 'signature'>,
 ): ProtocolHash =>
-    deriveProtocolHash('ElectionManifestHash', {
+    deriveCanonicalObjectHash({
         boardPosition: manifest.boardPosition,
         boardSequence: manifest.boardSequence,
         ceremonyId: manifest.ceremonyId,
@@ -104,5 +177,5 @@ export const deriveElectionManifestHash = (
         objectVersion: manifest.objectVersion,
         pollSpecHash: manifest.pollSpecHash,
         rosterHash: manifest.rosterHash,
-        thresholdProfileHash: manifest.thresholdProfileHash,
+        thresholdParametersHash: manifest.thresholdParametersHash,
     });

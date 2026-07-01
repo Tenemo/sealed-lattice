@@ -5,7 +5,7 @@
 // records together.
 import {
     createSetupVssMaterialFullObjectHasher,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
     setupVssMaterialFullObjectHashHex,
 } from '@sealed-lattice/crypto';
@@ -23,12 +23,10 @@ import {
     setupCommitmentRootPayload,
 } from './commitment-values.js';
 import {
-    acceptedBgvProfileRingDegree,
+    acceptedBgvFullRingDegree,
     setupCommitmentModulusLimbIndices,
-    setupCommitmentProfileId,
     setupCommitmentRowCount,
     setupTransportChunkSizeBytes,
-    setupTransportProfileId,
     vssCoefficientCommitmentMaterialBinaryFormat,
     vssCoefficientCommitmentMaterialBinaryMagic,
     type BinaryChunkedVssCoefficientCommitmentMaterialSet,
@@ -44,7 +42,6 @@ import {
     type VssSourceTrusteeCoefficientCommitmentRecord,
 } from './constants-and-types.js';
 import {
-    assertHashLike,
     assertJsonRecord,
     assertJsonRecordArray,
     bytesToHex,
@@ -84,11 +81,9 @@ function setupTransportChunkManifestRoot(input: {
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
 }): ProtocolHash {
-    return deriveProtocolHash('SetupTransportChunkManifestRoot', {
+    return deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: setupTransportProfileId,
         chunkSizeBytes: input.chunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
@@ -438,8 +433,7 @@ export const writeSetupCommitment = (
         materialRecord.commitment,
         'vssCoefficientCommitmentMaterial.coefficientCommitments.commitment',
     );
-    const commitmentRoot = deriveProtocolHash(
-        'SetupCommitmentRoot',
+    const commitmentRoot = deriveCanonicalObjectHash(
         setupCommitmentRootPayload(commitment),
     );
     if (commitmentRoot !== materialRecord.commitmentRoot) {
@@ -546,15 +540,10 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
         readonly chunkCount: number;
     }>,
 ): BinaryChunkedVssCoefficientCommitmentMaterialSet => {
-    const commitmentProfileHash = input.setupContext.commitmentProfileHash;
-    assertHashLike(commitmentProfileHash, 'setupContext.commitmentProfileHash');
     const materialSetWithoutRoot = {
         objectType: 'VssCoefficientCommitmentMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         ...contextFields(input.setupContext),
-        commitmentProfileId: setupCommitmentProfileId,
-        commitmentProfileHash,
         materialEncoding: 'binary-chunked-full-public-setup-commitment-values',
         binaryFormat: vssCoefficientCommitmentMaterialBinaryFormat,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -564,12 +553,11 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
         rnsLimbCount: input.rnsLimbCount,
         ringDegree: input.ringDegree,
         ringDegreeStatus:
-            input.ringDegree === acceptedBgvProfileRingDegree
-                ? 'profile-ring'
+            input.ringDegree === acceptedBgvFullRingDegree
+                ? 'full-ring'
                 : 'development-reduced-ring',
         materialRecordCount: input.materialRecordCount,
         transport: {
-            transportProfileId: setupTransportProfileId,
             chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: input.chunkCount,
             totalByteLength: input.transportHashes.totalByteLength,
@@ -583,8 +571,7 @@ export const buildBinaryVssCoefficientCommitmentMaterialSet = (
 
     return {
         ...materialSetWithoutRoot,
-        vssCoefficientCommitmentMaterialRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentMaterialRoot',
+        vssCoefficientCommitmentMaterialRoot: deriveCanonicalObjectHash(
             materialSetWithoutRoot,
         ),
     } satisfies BinaryChunkedVssCoefficientCommitmentMaterialSet;
@@ -813,7 +800,7 @@ const readTransportedSetupCommitment = (
                 modulus
             ) {
                 throw new Error(
-                    'transported commitment modulus does not match the commitment profile.',
+                    'transported commitment modulus does not match the commitment parameters.',
                 );
             }
             const rows = Array.from({ length: setupCommitmentRowCount }, () =>
@@ -917,10 +904,8 @@ export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
     delete (materialRootWithoutRoot as JsonRecord)
         .vssCoefficientCommitmentMaterialRoot;
     if (
-        deriveProtocolHash(
-            'VssCoefficientCommitmentMaterialRoot',
-            materialRootWithoutRoot,
-        ) !== input.materialSet.vssCoefficientCommitmentMaterialRoot
+        deriveCanonicalObjectHash(materialRootWithoutRoot) !==
+        input.materialSet.vssCoefficientCommitmentMaterialRoot
     ) {
         throw new Error(
             'binary VSS material set root must match the canonical material set.',
@@ -995,12 +980,12 @@ export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
         setupCommitmentModulusLimbIndices.length
     ) {
         throw new Error(
-            'transported VSS material commitment limb count does not match the commitment profile.',
+            'transported VSS material commitment limb count does not match the commitment parameters.',
         );
     }
     if (reader.readVaruint('rowCount') !== setupCommitmentRowCount) {
         throw new Error(
-            'transported VSS material row count does not match the commitment profile.',
+            'transported VSS material row count does not match the commitment parameters.',
         );
     }
 
@@ -1046,8 +1031,7 @@ export const materialRecordsFromTransportedVssCoefficientCommitmentMaterial = (
                     input.materialSet.ringDegree,
                     expectedCommitmentModuli,
                 );
-                const commitmentRoot = deriveProtocolHash(
-                    'SetupCommitmentRoot',
+                const commitmentRoot = deriveCanonicalObjectHash(
                     setupCommitmentRootPayload(commitment),
                 );
                 const expectedCommitmentRecord =

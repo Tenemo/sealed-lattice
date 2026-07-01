@@ -1,16 +1,18 @@
 # Lattigo oracle boundary
 
-This directory owns the development-only Lattigo reference metadata and oracle tooling used by the BGV-RNS comparison lane.
+This directory holds a development-only Lattigo oracle used to cross-check sealed-lattice BGV-RNS ring arithmetic. It is a developer sanity tool, not a verified artifact.
 
 Pinned reference material is kept under `temp/lattigo/` only. The downloaded archive and extracted checkout are fully ignored by git, are not runtime code, are not public SDK inputs, and are not protocol evidence. The Docker oracle extracts the verified archive from `temp/lattigo/` as its build input. The sealed-lattice verification path accepts only sealed-lattice Rust/WASM canonical BGV objects.
 
-Pinned reference:
+The oracle compares against Lattigo at a fixed upstream commit:
 
 - Repository: `https://github.com/tuneinsight/lattigo`
 - Commit: `5dbffbdea05394de2ca3a432ed5318aa832e3f40`
-- Commit date: `2026-05-07T10:30:53Z`
-- Archive SHA-256: `33c9049ea3c3eb0189b55619766a5bd07457de1c2c68565778a1253d9039d680`
-- Required Go toolchain for the oracle container: `go1.25.0`
-- Container base image hash: `sha256:81dc45d05a7444ead8c92a389621fafabc8e40f8fd1a19d7e5df14e61e98bc1a`
 
-The oracle may compare behavior that is actually comparable across all selected BGV-RNS moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects.
+The archive SHA-256 integrity check, the Go toolchain, and the base image digest all live in `Dockerfile`, which verifies the downloaded archive with `sha256sum -c` and resolves Go modules with `go mod verify` before building. That is the single source of truth; there is no separate metadata manifest to keep in sync.
+
+The oracle may compare behavior that is actually comparable across all selected BGV-RNS moduli, such as selected ring construction, coefficient-domain addition, subtraction, Barrett multiplication, and NTT/INTT round trips. It must not accept Lattigo serialization, keys, default parameters, Docker output, or oracle roots as transcript objects. Coefficient ordering and NTT root direction are reviewed for parity; automorphism direction, key-switch decomposition, ciphertext component order, slot ordering, and plaintext encoding convention are out of scope and are never treated as protocol evidence.
+
+## Running it
+
+Place the upstream archive at the git-ignored path `temp/lattigo/lattigo-5dbffbdea05394de2ca3a432ed5318aa832e3f40.zip`, then run `pnpm run test:lattigo-oracle` (requires Docker). It builds the oracle image and runs the comparison against the committed fixtures in `sealed-lattice-canonical-rns-fixtures.json`.

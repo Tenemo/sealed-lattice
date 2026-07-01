@@ -116,7 +116,7 @@ describe('accepted setup public package API in Node', () => {
 
         expect(commonRandomness).toMatchObject({
             objectType: 'SetupCommonRandomness',
-            setupProfileHash: setupContext.setupProfileHash,
+            setupParametersHash: setupContext.setupParametersHash,
             publicDerivations: {
                 objectType: 'SetupPublicDerivations',
                 publicMatrixSeedHash: String(

@@ -111,7 +111,6 @@ type TopKVectors = {
 type SparseTargetVectors = {
     readonly expectedSelectedOptionOrdinals: readonly number[];
     readonly layoutHash: string;
-    readonly layoutId: 'WinnerRankTopK-v1';
     readonly schemaVersion: 1;
     readonly target: SparseTopKTarget;
     readonly targetHash: string;
@@ -160,12 +159,12 @@ export const comparatorPolynomialVectors =
 export const assertValidPollSpec = (
     input: PollSpecInput,
 ): ReturnType<typeof validatePollSpec> & {
-    readonly ok: true;
+    readonly isValid: true;
 } => {
     const validation = validatePollSpec(input);
 
-    expect(validation.ok).toBe(true);
-    if (!validation.ok) {
+    expect(validation.isValid).toBe(true);
+    if (!validation.isValid) {
         throw new Error('Expected poll spec fixture to validate.');
     }
 
@@ -244,10 +243,7 @@ export const mutateSparseTarget = (
     overrides: Partial<Omit<SparseTopKTarget, 'targetHash'>>,
 ): SparseTopKTarget => {
     const targetWithoutHash = {
-        forbiddenSemanticSlots:
-            overrides.forbiddenSemanticSlots ?? target.forbiddenSemanticSlots,
         layoutHash: overrides.layoutHash ?? target.layoutHash,
-        layoutId: overrides.layoutId ?? target.layoutId,
         optionCount: overrides.optionCount ?? target.optionCount,
         targetIdSlots: overrides.targetIdSlots ?? target.targetIdSlots,
         targetOrderSlots: overrides.targetOrderSlots ?? target.targetOrderSlots,

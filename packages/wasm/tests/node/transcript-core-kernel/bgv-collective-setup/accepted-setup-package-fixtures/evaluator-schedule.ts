@@ -1,5 +1,5 @@
 import {
-    firstProfileParticipantCount,
+    firstRosterParticipantCount,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
@@ -13,11 +13,11 @@ import {
 } from '#packages/protocol/src/setup/public-key-share-records';
 import { type SameSecretConsistencyStatementSet } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
-import type { BgvCollectiveSetupProfileDescription } from '#packages/wasm/src/index';
+import type { BgvCollectiveSetupParametersDescription } from '#packages/wasm/src/index';
 
 export function acceptedEvaluatorKeySchedule(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     commonRandomness: JsonRecord,
     sameSecretConsistency: SameSecretConsistencyStatementSet,
     publicKeyShares: PublicKeyShareSet,
@@ -29,8 +29,8 @@ export function acceptedEvaluatorKeySchedule(
 
     return createEvaluatorKeySchedule({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         publicMatrixSeedHash,
         relinearizationCrpRoot: String(crpRoots.relinearizationCrpRoot),
         galoisKeyCrpRoot: String(crpRoots.galoisKeyCrpRoot),
@@ -38,6 +38,6 @@ export function acceptedEvaluatorKeySchedule(
         publicKeyShares,
         publicKeyShareProofs,
         requiredGaloisKeySchedule:
-            profile.evaluatorKeyScheduleProfile.requiredGaloisKeySchedule,
+            parameters.evaluatorKeySchedule.requiredGaloisKeySchedule,
     });
 }

@@ -128,12 +128,12 @@ pub(super) fn global_claim_integers(
     let mut signed_vectors: Vec<&[i64]> = Vec::new();
     if statement.private_vss_share.is_some() {
         // The message (Shamir coefficient) columns carry no consistency claim:
-        // they are pinned across the commitment fields by the opening rows plus
-        // the opening-randomness consistency, so masking them would only add
-        // zero-knowledge leakage with no soundness gain. Only the carry and the
-        // opening-randomness columns are claimed. This order must match
-        // consistency_vector_count and the consistency loop in relation.rs
-        // ([carry, opening-randomness...]).
+        // their cross-field consistency is argued globally by carry consistency,
+        // the public range-checked share, and enough honest recipient checks.
+        // Masking them would only add zero-knowledge leakage with no soundness
+        // gain. Only the carry and the opening-randomness columns are claimed.
+        // This order must match consistency_vector_count and the consistency
+        // loop in relation.rs ([carry, opening-randomness...]).
         signed_vectors.push(&witness.private_vss_carry_witnesses);
         for randomness_columns in &witness.private_vss_opening_randomness_by_shamir_index {
             for column in randomness_columns {

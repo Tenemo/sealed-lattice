@@ -2,7 +2,7 @@
 // per-source-trustee contribution builder and its retained and provider-backed
 // opening-material sources, and the embedded, binary-chunked, and kernel-streamed
 // bundle constructors.
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import {
     buildBinaryVssCoefficientCommitmentMaterialSet,
@@ -15,8 +15,7 @@ import {
 } from './binary-transport.js';
 import { computeSetupCommitmentWithKernel } from './commitment-values.js';
 import {
-    acceptedBgvProfileRingDegree,
-    setupCommitmentProfileId,
+    acceptedBgvFullRingDegree,
     setupTransportChunkSizeBytes,
     type BinaryChunkedVssCoefficientCommitmentBundle,
     type StreamingBinaryChunkedVssCoefficientCommitmentBundle,
@@ -152,9 +151,6 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
                 rnsPrime,
                 shamirCoefficientIndex,
                 commitmentRoot: commitmentComputation.commitmentRoot,
-                commitmentChunkRoot: commitmentComputation.commitmentChunkRoot,
-                coefficientVectorHash512:
-                    commitmentComputation.coefficientVectorHash512,
             });
             const materialRecord = {
                 objectType: 'VssCoefficientCommitmentMaterial',
@@ -191,8 +187,7 @@ const createVssSourceTrusteeCoefficientCommitmentContributionWithOptions = (
     >;
     const sourceTrusteeRecord = {
         ...sourceTrusteeRecordWithoutRoot,
-        sourceTrusteeCommitmentRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentRoot',
+        sourceTrusteeCommitmentRoot: deriveCanonicalObjectHash(
             sourceTrusteeRecordWithoutRoot,
         ),
     } satisfies VssSourceTrusteeCoefficientCommitmentRecord;
@@ -418,8 +413,7 @@ export const createVssCoefficientCommitmentBundle = (
     >;
     const commitmentSet = {
         ...commitmentSetWithoutRoot,
-        vssCoefficientCommitmentRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentRoot',
+        vssCoefficientCommitmentRoot: deriveCanonicalObjectHash(
             commitmentSetWithoutRoot,
         ),
     } satisfies VssCoefficientCommitmentSet;
@@ -427,7 +421,6 @@ export const createVssCoefficientCommitmentBundle = (
         objectType: 'VssCoefficientCommitmentMaterialSet',
         objectVersion: 1,
         ...context,
-        commitmentProfileId: setupCommitmentProfileId,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot:
             commitmentSet.vssCoefficientCommitmentRoot,
@@ -437,8 +430,8 @@ export const createVssCoefficientCommitmentBundle = (
         rnsLimbCount: input.qSharePrimes.length,
         ringDegree: input.ringDegree,
         ringDegreeStatus:
-            input.ringDegree === acceptedBgvProfileRingDegree
-                ? 'profile-ring'
+            input.ringDegree === acceptedBgvFullRingDegree
+                ? 'full-ring'
                 : 'development-reduced-ring',
         materialRecordCount: coefficientCommitmentMaterial.length,
         coefficientCommitments: coefficientCommitmentMaterial,
@@ -448,8 +441,7 @@ export const createVssCoefficientCommitmentBundle = (
     >;
     const materialSet = {
         ...materialSetWithoutRoot,
-        vssCoefficientCommitmentMaterialRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentMaterialRoot',
+        vssCoefficientCommitmentMaterialRoot: deriveCanonicalObjectHash(
             materialSetWithoutRoot,
         ),
     } satisfies VssCoefficientCommitmentMaterialSet;
@@ -541,8 +533,7 @@ export const createBinaryChunkedVssCoefficientCommitmentBundle = (
     >;
     const commitmentSet = {
         ...commitmentSetWithoutRoot,
-        vssCoefficientCommitmentRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentRoot',
+        vssCoefficientCommitmentRoot: deriveCanonicalObjectHash(
             commitmentSetWithoutRoot,
         ),
     } satisfies VssCoefficientCommitmentSet;
@@ -698,8 +689,7 @@ export const createStreamingBinaryChunkedVssCoefficientCommitmentBundle = (
     >;
     const commitmentSet = {
         ...commitmentSetWithoutRoot,
-        vssCoefficientCommitmentRoot: deriveProtocolHash(
-            'VssCoefficientCommitmentRoot',
+        vssCoefficientCommitmentRoot: deriveCanonicalObjectHash(
             commitmentSetWithoutRoot,
         ),
     } satisfies VssCoefficientCommitmentSet;

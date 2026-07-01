@@ -50,45 +50,8 @@ export type SetupPackageCertificateInput = Omit<
 >;
 
 export type SetupPackageCertificateRecords = Readonly<{
-    readonly setupCommitmentSecurityCertificate: JsonRecord;
     readonly setupTransportCertificate: JsonRecord;
-    readonly setupProofAccountingCertificate: JsonRecord;
-    readonly heSecurityCertificate: JsonRecord;
 }>;
-
-export type SetupKeyCorrectnessCertificate = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupKeyCorrectnessCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
-    }
->;
-
-export type SetupKeyCorrectnessCertificateBody = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupKeyCorrectnessCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    }
->;
-
-export type ActiveStaticSetupTheoremCertificate = Readonly<
-    JsonRecord & {
-        readonly objectType: 'ActiveStaticSetupTheoremCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
-    }
->;
-
-export type ActiveStaticSetupTheoremCertificateBody = Readonly<
-    JsonRecord & {
-        readonly objectType: 'ActiveStaticSetupTheoremCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    }
->;
 
 export type SetupPackageInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
@@ -143,17 +106,13 @@ export type SetupPackageInput = Readonly<{
         | TransportedPublicEvaluationKeyMaterialSet
         | JsonRecord;
     readonly setupCertificateInput?: SetupPackageCertificateInput;
-    readonly setupCommitmentSecurityCertificate?: JsonRecord;
     readonly setupTransportCertificate?: JsonRecord;
-    readonly setupProofAccountingCertificate?: JsonRecord;
-    readonly heSecurityCertificate?: JsonRecord;
 }>;
 
 export type SetupPackage = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupPackage';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupContext: CollectiveBgvSetupContext;
         readonly qShare: JsonRecord;
         readonly phaseTranscript: readonly SetupPhaseRecord[];
@@ -184,24 +143,16 @@ export type SetupPackage = Readonly<
         readonly galoisKeyShareBatches: readonly GaloisKeyShareBatch[];
         readonly trusteeEvaluationKeyProofs: TrusteeEvaluationKeyProofSet;
         readonly evaluationKeys: PublicEvaluationKeySet;
-        readonly setupCommitmentSecurityCertificate: JsonRecord;
-        readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificate: JsonRecord;
         readonly setupTransportCertificateHash: ProtocolHash;
-        readonly setupProofAccountingCertificate: JsonRecord;
-        readonly setupProofAccountingCertificateHash: ProtocolHash;
-        readonly setupKeyCorrectnessCertificate: SetupKeyCorrectnessCertificate;
-        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
-        readonly activeStaticSetupTheoremCertificate: ActiveStaticSetupTheoremCertificate;
-        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
-        readonly heSecurityCertificate: JsonRecord;
-        readonly heSecurityCertificateHash: ProtocolHash;
         readonly setupPackageHash: ProtocolHash;
     }
 >;
 
 export type SetupPackageVerificationInputSource = Readonly<{
     readonly setupPackage: SetupPackage;
+    readonly expectedManifestHash: ProtocolHash;
+    readonly expectedRosterHash: ProtocolHash;
     readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
     readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
@@ -214,11 +165,3 @@ export type SetupPackageVerificationInputSource = Readonly<{
 }>;
 
 export type SetupPackageVerificationInput = SetupPackageVerificationInputSource;
-
-export type SetupPackageInputWithDerivedCollectivePublicKey = Omit<
-    SetupPackageInput,
-    'collectivePublicKey'
-> &
-    Readonly<{
-        readonly collectivePublicKey: CollectivePublicKey;
-    }>;

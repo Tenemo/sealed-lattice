@@ -4,24 +4,13 @@ import type { CollectiveBgvSetupContext } from '../vss-share-verification-record
 
 import type { JsonRecord } from './types.js';
 
-export const setupProfileId = 'CollectiveBgvSetup-v1';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
-export const contextFieldNames = [
+const contextFieldNames = [
     'ceremonyId',
     'manifestHash',
     'rosterHash',
-    'setupProfileHash',
-    'qShareHash',
-    'carryAwareVssShareRelationProfileHash',
-    'commitmentProfileHash',
-    'setupEpoch',
-] as const;
-const commonRandomnessContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupProfileHash',
+    'setupParametersHash',
     'setupEpoch',
 ] as const;
 export const requiredSetupPhases = [
@@ -91,10 +80,7 @@ export const assertContext = (
     for (const fieldName of [
         'manifestHash',
         'rosterHash',
-        'setupProfileHash',
-        'qShareHash',
-        'carryAwareVssShareRelationProfileHash',
-        'commitmentProfileHash',
+        'setupParametersHash',
     ] as const) {
         assertProtocolHash(
             setupContext[fieldName],
@@ -109,20 +95,6 @@ export const assertContextMatches = (
     objectPath: string,
 ): void => {
     for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
-
-export const assertCommonRandomnessContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    objectPath: string,
-): void => {
-    for (const fieldName of commonRandomnessContextFieldNames) {
         if (value[fieldName] !== setupContext[fieldName]) {
             throw new Error(
                 `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
@@ -172,46 +144,6 @@ export const hashField = (
     assertProtocolHash(hashValue, `${objectPath}.${fieldName}`);
 
     return hashValue;
-};
-
-const optionalHashValue = (
-    value: unknown,
-    fieldPath: string,
-): ProtocolHash | null => {
-    if (value === undefined) {
-        return null;
-    }
-    if (typeof value !== 'string') {
-        throw new TypeError(`${fieldPath} must be a string when present.`);
-    }
-    assertProtocolHash(value, fieldPath);
-
-    return value;
-};
-
-export const optionalTopLevelHashValue = (
-    value: Readonly<Record<string, unknown>>,
-    fieldName: string,
-): ProtocolHash | null => optionalHashValue(value[fieldName], fieldName);
-
-export const optionalNestedHashValue = (
-    value: Readonly<Record<string, unknown>>,
-    objectFieldName: string,
-    hashFieldName: string,
-): ProtocolHash | null => {
-    const objectValue = value[objectFieldName];
-    if (objectValue === undefined) {
-        return null;
-    }
-    const record = assertObjectRecord(
-        objectValue,
-        `setupPackage.${objectFieldName}`,
-    );
-
-    return optionalHashValue(
-        record[hashFieldName],
-        `setupPackage.${objectFieldName}.${hashFieldName}`,
-    );
 };
 
 export const cloneJsonLike = (value: unknown): unknown => {

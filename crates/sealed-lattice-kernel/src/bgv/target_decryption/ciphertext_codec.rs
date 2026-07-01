@@ -15,7 +15,7 @@ pub(super) fn read_target_ciphertext_pair(
     )?;
     if target_id.ciphertext.level != target_order.ciphertext.level {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "target id and target order ciphertexts must use the same BGV level",
         ));
     }
@@ -42,23 +42,20 @@ pub(super) fn read_target_ciphertext_pair(
     )?;
     if target_ciphertext_hash != target_accepted.target_ciphertext_hash {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "target ciphertext pair does not match the accepted target ciphertext hash",
         ));
     }
-    let target_ciphertext_binding_hash = derive_protocol_hash(
-        "TargetDecryptionCiphertextBindingHash",
-        &json!({
-            "objectType": "TargetDecryptionCiphertextBinding",
-            "objectVersion": 1,
-            "aggregateCiphertextRoot": aggregate_ciphertext_root,
-            "topCount": top_count,
-            "targetLayoutHash": target_accepted.target_layout_hash,
-            "targetIdRoot": target_id.root,
-            "targetOrderRoot": target_order.root,
-            "targetCiphertextHash": target_ciphertext_hash,
-        }),
-    )?;
+    let target_ciphertext_binding_hash = derive_canonical_object_hash(&json!({
+        "objectType": "TargetDecryptionCiphertextBinding",
+        "objectVersion": 1,
+        "aggregateCiphertextRoot": aggregate_ciphertext_root,
+        "topCount": top_count,
+        "targetLayoutHash": target_accepted.target_layout_hash,
+        "targetIdRoot": target_id.root,
+        "targetOrderRoot": target_order.root,
+        "targetCiphertextHash": target_ciphertext_hash,
+    }))?;
 
     Ok(TargetCiphertextPair {
         target_id: target_id.ciphertext,
@@ -93,7 +90,7 @@ pub(super) fn parse_target_ciphertext(
     for component in object.components {
         if component.level != level || component.basis_id != basis_id {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 format!("{label} components must use the same data-basis level"),
             ));
         }
@@ -118,18 +115,15 @@ pub(crate) fn direct_target_ciphertext_hash(
     target_id_root: &str,
     target_order_root: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EncryptedSparseTargetProjectionHash",
-        &json!({
-            "objectType": "EncryptedSparseTargetCiphertext",
-            "objectVersion": 1,
-            "aggregateCiphertextRoot": aggregate_ciphertext_root,
-            "topCount": top_count,
-            "tiePolicy": TIE_POLICY,
-            "targetLayoutHash": target_layout_hash,
-            "targetIdRoot": target_id_root,
-            "targetOrderRoot": target_order_root,
-            "openedIntermediates": [],
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "EncryptedSparseTargetCiphertext",
+        "objectVersion": 1,
+        "aggregateCiphertextRoot": aggregate_ciphertext_root,
+        "topCount": top_count,
+        "tiePolicy": TIE_POLICY,
+        "targetLayoutHash": target_layout_hash,
+        "targetIdRoot": target_id_root,
+        "targetOrderRoot": target_order_root,
+        "openedIntermediates": [],
+    }))
 }

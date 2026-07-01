@@ -1,7 +1,7 @@
 import { validHash } from '../../bgv-passive-setup-fixtures.js';
 import {
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
+    firstRosterDecryptionThreshold,
+    firstRosterParticipantCount,
     hexToBytes,
     jsonRecord,
     textEncoder,
@@ -13,7 +13,6 @@ import {
     createSameSecretConsistencyStatementSet,
     createSameSecretProofSet,
     sameSecretProofFamily,
-    setupProofProfileId,
     type SameSecretConsistencyStatementSet,
     type SameSecretProofMaterial,
     type SameSecretProofSet,
@@ -27,20 +26,20 @@ import {
 } from '#packages/protocol/src/setup/vss-coefficient-commitments';
 import { type CollectiveBgvSetupContext } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
 export function acceptedSameSecretConsistency(
     setupContext: CollectiveBgvSetupContext,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     vssCoefficientCommitments: VssCoefficientCommitmentSet,
 ): SameSecretConsistencyStatementSet {
     return createSameSecretConsistencyStatementSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
-        thresholdDegree: firstProfileDecryptionThreshold,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
+        thresholdDegree: firstRosterDecryptionThreshold,
         vssCoefficientCommitments,
     });
 }
@@ -52,38 +51,29 @@ const sameSecretProofBytesHash = (proofBytesHex: string): string =>
     );
 
 export function sameSecretProofsWithDriftedStatementHashes(
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     setupPackage: JsonRecord,
 ): SameSecretProofSet {
     const sameSecretConsistency =
         setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet;
-    const setupProofAccountingCertificate = jsonRecord(
-        setupPackage.setupProofAccountingCertificate,
-        'setupPackage.setupProofAccountingCertificate',
-    );
     const proofBytesHex = '00';
     const proofMaterials: SameSecretProofMaterial[] =
         sameSecretConsistency.statementRecords.map((statementRecord) => ({
-            setupProofProfileId,
             proofFamily: sameSecretProofFamily,
             trusteeIdentity: statementRecord.trusteeIdentity,
             trusteeRosterPosition: statementRecord.trusteeRosterPosition,
             statementHash: validHash('7'),
-            proofSizeBytes: 1,
             proofBytesHash: sameSecretProofBytesHash(proofBytesHex),
             proofBytesHex,
         }));
 
     return createSameSecretProofSet({
         setupContext: setupPackage.setupContext as CollectiveBgvSetupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         sameSecretConsistency,
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
-        proofAccountingHash: String(
-            setupProofAccountingCertificate.sameSecretLinkageAnchorProofAccountingHash,
-        ),
         proofMaterials,
     });
 }
@@ -120,15 +110,11 @@ const centeredTernaryFromResidue = (
 
 export function sameSecretProofsWithGeneratedProofs(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     setupPackage: JsonRecord,
     vssCoefficientCommitmentBundle: VssCoefficientCommitmentBundle,
 ): SameSecretProofSet {
     const setupContext = setupPackage.setupContext as CollectiveBgvSetupContext;
-    const setupProofAccountingCertificate = jsonRecord(
-        setupPackage.setupProofAccountingCertificate,
-        'setupPackage.setupProofAccountingCertificate',
-    );
     const vssCoefficientCommitmentMaterial = jsonRecord(
         setupPackage.vssCoefficientCommitmentMaterial,
         'setupPackage.vssCoefficientCommitmentMaterial',
@@ -158,7 +144,7 @@ export function sameSecretProofsWithGeneratedProofs(
                             firstLimbOpening.rnsPrime,
                         ),
                     );
-                const constantCommitments = profile.qShare.primes.map(
+                const constantCommitments = parameters.qShare.primes.map(
                     (_rnsPrime, rnsLimbIndex) => {
                         const materialRecord =
                             sourceTrusteeOpeningMaterial.sourceTrusteeCoefficientCommitmentMaterialRecords.find(
@@ -177,7 +163,7 @@ export function sameSecretProofsWithGeneratedProofs(
                         return materialRecord.commitment;
                     },
                 );
-                const openingRandomnessByLimb = profile.qShare.primes.map(
+                const openingRandomnessByLimb = parameters.qShare.primes.map(
                     (_rnsPrime, rnsLimbIndex) =>
                         requiredVssOpening(
                             sourceTrusteeOpeningMaterial,
@@ -218,8 +204,6 @@ export function sameSecretProofsWithGeneratedProofs(
                                 secretCoefficient < 0 ? 1 : 0,
                         ),
                         openingRandomnessByLimb,
-                        proofRandomnessSource:
-                            'development-deterministic-fixture',
                         proofRandomnessSeedHex: hash512Hex(
                             'sealed-lattice-test/same-secret-proof-seed-v1',
                             [textEncoder.encode(proofRandomnessLabel)],
@@ -237,14 +221,12 @@ export function sameSecretProofsWithGeneratedProofs(
                 }
 
                 return {
-                    setupProofProfileId,
                     proofFamily: sameSecretProofFamily,
                     trusteeIdentity:
                         sourceTrusteeOpeningMaterial.sourceTrusteeIdentity,
                     trusteeRosterPosition:
                         sourceTrusteeOpeningMaterial.sourceTrusteeRosterPosition,
                     statementHash: generatedProof.statementHash,
-                    proofSizeBytes: generatedProof.proofByteLength,
                     proofBytesHash: sameSecretProofBytesHash(
                         generatedProof.proofBytesHex,
                     ),
@@ -255,15 +237,12 @@ export function sameSecretProofsWithGeneratedProofs(
 
     return createSameSecretProofSet({
         setupContext,
-        qSharePrimes: profile.qShare.primes,
-        participantCount: firstProfileParticipantCount,
+        qSharePrimes: parameters.qShare.primes,
+        participantCount: firstRosterParticipantCount,
         sameSecretConsistency:
             setupPackage.sameSecretConsistency as SameSecretConsistencyStatementSet,
         vssCoefficientCommitmentMaterial:
             setupPackage.vssCoefficientCommitmentMaterial as SetupPackageVssCoefficientCommitmentMaterialSet,
-        proofAccountingHash: String(
-            setupProofAccountingCertificate.sameSecretLinkageAnchorProofAccountingHash,
-        ),
         proofMaterials,
     });
 }

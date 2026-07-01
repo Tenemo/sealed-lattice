@@ -1,4 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type {
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
@@ -129,11 +129,11 @@ const deriveFirstValidOrderHash = (
     >,
     orderedCandidates: readonly ValidatedFirstValidObject[],
 ): string =>
-    deriveProtocolHash('FirstValidOrderHash', {
+    deriveCanonicalObjectHash({
+        objectType: 'FirstValidOrder',
         orderedObjectHashes: orderedCandidates.map(
             (candidate) => candidate.objectHash,
         ),
-        purpose: 'first-valid-order-v1',
         requiredContextHash: input.requiredContextHash,
         selectionPolicyHash: input.selectionPolicyHash,
     });
@@ -145,16 +145,6 @@ const deriveValidatedFirstValidOrderUnchecked = (
     const deduplicatedCandidates: ValidatedFirstValidObject[] = [];
     const seenObjectHashes = new Set<string>();
     const seenConflictKeys = new Map<string, ValidatedFirstValidObject>();
-
-    if (input.selectionPolicyHash !== input.expectedSelectionPolicyHash) {
-        refusedObjects.push(
-            createRefusal(
-                'FirstValidPolicyMismatch',
-                'First-valid ordering requires the manifest-bound selection policy hash.',
-                input.selectionPolicyHash,
-            ),
-        );
-    }
 
     for (const candidate of input.objects) {
         const candidateShapeRefusals = validateFirstValidObjectShape(candidate);
@@ -268,11 +258,16 @@ const deriveValidatedFirstValidOrderUnchecked = (
     );
 
     return {
-        ok: refusedObjects.length === 0,
-        acceptedHashes: uniqueStrings([
-            firstValidOrderHash,
-            ...orderedCandidates.map((candidate) => candidate.objectHash),
-        ]),
+        isValid: refusedObjects.length === 0,
+        acceptedHashes:
+            refusedObjects.length === 0
+                ? uniqueStrings([
+                      firstValidOrderHash,
+                      ...orderedCandidates.map(
+                          (candidate) => candidate.objectHash,
+                      ),
+                  ])
+                : [],
         refusedObjects,
         firstValidOrderHash:
             refusedObjects.length === 0 ? firstValidOrderHash : undefined,
@@ -287,7 +282,7 @@ export const deriveValidatedFirstValidOrder = (
         return deriveValidatedFirstValidOrderUnchecked(input);
     } catch (error) {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

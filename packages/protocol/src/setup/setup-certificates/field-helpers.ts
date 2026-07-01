@@ -1,9 +1,7 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { protocolHashPattern } from './constants.js';
 import type {
-    CollectiveBgvSetupProfileForCertificates,
     JsonRecord,
     SetupCertificateTransportedObjectInput,
 } from './types.js';
@@ -19,16 +17,13 @@ export const assertObjectRecord = (
     return value as JsonRecord;
 };
 
-const cloneJsonRecord = (value: JsonRecord): JsonRecord =>
-    JSON.parse(JSON.stringify(value)) as JsonRecord;
-
 export const assertProtocolHash = (value: string, fieldName: string): void => {
     if (!protocolHashPattern.test(value)) {
         throw new TypeError(`${fieldName} must be a protocol hash.`);
     }
 };
 
-export const stringField = (
+const stringField = (
     value: Readonly<Record<string, unknown>>,
     fieldName: string,
     objectPath: string,
@@ -52,47 +47,7 @@ export const hashField = (
     return fieldValue;
 };
 
-export const acceptedCertificateTemplate = (
-    setupProfile: CollectiveBgvSetupProfileForCertificates,
-    templateFieldName: string,
-    objectType: string,
-    hashFieldName: string,
-    hashNamespace: string,
-): JsonRecord | null => {
-    const templates = setupProfile.acceptedCertificateTemplates;
-    if (templates === undefined) {
-        return null;
-    }
-    const certificate = assertObjectRecord(
-        templates[templateFieldName],
-        `setupProfile.acceptedCertificateTemplates.${templateFieldName}`,
-    );
-    if (certificate.objectType !== objectType) {
-        throw new Error(
-            `setupProfile.acceptedCertificateTemplates.${templateFieldName}.objectType must be ${objectType}.`,
-        );
-    }
-    const certificateHash = stringField(
-        certificate,
-        hashFieldName,
-        `setupProfile.acceptedCertificateTemplates.${templateFieldName}`,
-    );
-    assertProtocolHash(
-        certificateHash,
-        `setupProfile.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName}`,
-    );
-    const hashInput = cloneJsonRecord(certificate);
-    delete hashInput[hashFieldName];
-    if (deriveProtocolHash(hashNamespace, hashInput) !== certificateHash) {
-        throw new Error(
-            `setupProfile.acceptedCertificateTemplates.${templateFieldName}.${hashFieldName} must match the certificate body.`,
-        );
-    }
-
-    return cloneJsonRecord(certificate);
-};
-
-export const numberField = (
+const numberField = (
     value: Readonly<Record<string, unknown>>,
     fieldName: string,
     objectPath: string,
@@ -232,69 +187,3 @@ export const numberArrayField = (
         return item;
     });
 };
-
-export const assertDerivedHashMatches = (
-    namespace: string,
-    value: JsonRecord,
-    expectedHash: ProtocolHash,
-    fieldName: string,
-): void => {
-    const observedHash = deriveProtocolHash(namespace, value);
-    if (observedHash !== expectedHash) {
-        throw new Error(`${fieldName} must match the supplied profile body.`);
-    }
-};
-
-export const scalarPowerSum = (
-    coefficientCount: number,
-    trusteePoint: number,
-): bigint => {
-    let scalarSum = 0n;
-    let trusteePower = 1n;
-    const trusteePointWide = BigInt(trusteePoint);
-    for (
-        let coefficientIndex = 0;
-        coefficientIndex < coefficientCount;
-        coefficientIndex += 1
-    ) {
-        scalarSum += trusteePower;
-        if (coefficientIndex + 1 < coefficientCount) {
-            trusteePower *= trusteePointWide;
-        }
-    }
-
-    return scalarSum;
-};
-
-export const ceilLog2Bigint = (value: bigint): number => {
-    if (value <= 1n) {
-        return 0;
-    }
-
-    return (value - 1n).toString(2).length;
-};
-
-export const modulusProductDecimal = (moduli: readonly number[]): string =>
-    moduli
-        .reduce((product, modulus) => product * BigInt(modulus), 1n)
-        .toString();
-
-export const moduliBitLengthSum = (moduli: readonly number[]): number =>
-    moduli.reduce(
-        (bitLengthSum, modulus) => bitLengthSum + modulus.toString(2).length,
-        0,
-    );
-
-export const keySwitchComponentPolynomialCount = (
-    entries: readonly Readonly<{ readonly level: number }>[],
-): number =>
-    entries.reduce((total, entry) => {
-        if (!Number.isSafeInteger(entry.level) || entry.level < 0) {
-            throw new TypeError(
-                'evaluatorKeyScheduleProfile levels must be non-negative safe integers.',
-            );
-        }
-        const digitCount = entry.level + 1;
-
-        return total + digitCount * digitCount;
-    }, 0);

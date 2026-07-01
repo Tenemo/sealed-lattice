@@ -1,10 +1,9 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import {
     setupTransportChunkSizeBytes,
-    setupTransportProfileId,
+    setupTransportSchemeId,
 } from '../vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
@@ -53,11 +52,9 @@ const setupTransportChunkManifestRoot = (input: {
     readonly chunkHashes: readonly ProtocolHash[];
     readonly fullObjectHash: ProtocolHash;
 }): ProtocolHash =>
-    deriveProtocolHash('SetupTransportChunkManifestRoot', {
+    deriveCanonicalObjectHash({
         objectType: 'SetupTransportChunkManifest',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: setupTransportProfileId,
         chunkSizeBytes: input.chunkSizeBytes,
         chunkCount: input.chunkCount,
         totalByteLength: input.totalByteLength,
@@ -183,8 +180,6 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
     const materialSetWithoutRoot = {
         objectType: 'PublicKeyShareMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
         materialEncoding: publicKeyShareMaterialTransportEncoding,
         binaryFormat: publicKeyShareMaterialBinaryFormat,
@@ -198,7 +193,7 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
         publicKeyShareSetRoot: input.publicKeyShareSetRoot,
         publicKeyShareMaterialRoots: input.publicKeyShareMaterialRoots,
         transport: {
-            transportProfileId: setupTransportProfileId,
+            transportSchemeId: setupTransportSchemeId,
             chunkSizeBytes: setupTransportChunkSizeBytes,
             chunkCount: input.chunkCount,
             totalByteLength: input.transportHashes.totalByteLength,
@@ -212,8 +207,7 @@ const binaryChunkedPublicKeyShareMaterialSetFromTransport = (
 
     return {
         ...materialSetWithoutRoot,
-        publicKeyShareMaterialSetRoot: deriveProtocolHash(
-            'PublicKeyShareRoot',
+        publicKeyShareMaterialSetRoot: deriveCanonicalObjectHash(
             materialSetWithoutRoot,
         ),
     } satisfies BinaryChunkedPublicKeyShareMaterialSet;
@@ -453,7 +447,7 @@ const transportedPublicKeyShareMaterialChunks = (
     }
     if (transportedMaterial.chunkSizeBytes !== setupTransportChunkSizeBytes) {
         throw new Error(
-            'transportedPublicKeyShareMaterial.chunkSizeBytes must match the setup transport profile.',
+            'transportedPublicKeyShareMaterial.chunkSizeBytes must match the setup transport scheme.',
         );
     }
     if (!Array.isArray(transportedMaterial.chunks)) {
@@ -554,8 +548,8 @@ const transportedPublicKeyShareMaterialReader = (
         input.materialSet.materialEncoding !==
             publicKeyShareMaterialTransportEncoding ||
         input.materialSet.binaryFormat !== publicKeyShareMaterialBinaryFormat ||
-        input.materialSet.transport.transportProfileId !==
-            setupTransportProfileId ||
+        input.materialSet.transport.transportSchemeId !==
+            setupTransportSchemeId ||
         input.materialSet.transport.chunkSizeBytes !==
             setupTransportChunkSizeBytes ||
         input.materialSet.transport.chunkCount !== chunks.length ||
@@ -590,7 +584,7 @@ const transportedPublicKeyShareMaterialReader = (
     const materialSetWithoutRoot = { ...input.materialSet };
     delete (materialSetWithoutRoot as JsonRecord).publicKeyShareMaterialSetRoot;
     if (
-        deriveProtocolHash('PublicKeyShareRoot', materialSetWithoutRoot) !==
+        deriveCanonicalObjectHash(materialSetWithoutRoot) !==
         input.materialSet.publicKeyShareMaterialSetRoot
     ) {
         throw new Error(
@@ -730,8 +724,6 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),
@@ -750,8 +742,7 @@ export const materialRecordsFromTransportedPublicKeyShareMaterial = (
         >;
         const materialRecord = {
             ...materialRecordWithoutRoot,
-            publicKeyShareMaterialRoot: deriveProtocolHash(
-                'PublicKeyShareRoot',
+            publicKeyShareMaterialRoot: deriveCanonicalObjectHash(
                 materialRecordWithoutRoot,
             ),
         } satisfies PublicKeyShareMaterialRecord;

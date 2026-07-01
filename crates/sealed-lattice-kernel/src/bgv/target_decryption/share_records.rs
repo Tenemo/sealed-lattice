@@ -5,7 +5,7 @@ pub(super) fn read_partial_decryption_share(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
+    target_share_parameters: &TargetShareParameters,
 ) -> CanonicalResult<PartialDecryptionShare> {
     if string_at_path(share, &["objectType"])? != "BgvTargetDecryptionShare"
         || unsigned_at_path(share, &["objectVersion"])? != 1
@@ -31,23 +31,20 @@ pub(super) fn read_partial_decryption_share(
         setup_binding,
         target_accepted,
         target_ciphertexts,
-        target_share_profile,
+        target_share_parameters,
         participant,
     )?;
     let payload = value_at_path(share, &["sharePayload"])?;
-    let share_root = derive_protocol_hash("BgvTargetDecryptionShareRoot", payload)?;
+    let share_root = derive_canonical_object_hash(payload)?;
     compare_hash_field(share, "shareRoot", &share_root, "target share root")?;
-    let expected_hash = derive_protocol_hash(
-        "BgvTargetDecryptionShareHash",
-        &share_record_hash_input(
-            setup_binding,
-            target_accepted,
-            target_ciphertexts,
-            target_share_profile,
-            participant,
-            &share_root,
-        ),
-    )?;
+    let expected_hash = derive_canonical_object_hash(&share_record_hash_input(
+        setup_binding,
+        target_accepted,
+        target_ciphertexts,
+        target_share_parameters,
+        participant,
+        &share_root,
+    ))?;
     compare_hash_field(
         share,
         "targetDecryptionShareHash",
@@ -78,7 +75,7 @@ pub(super) fn compare_share_record_fields(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
+    target_share_parameters: &TargetShareParameters,
     participant: &ParticipantBinding,
 ) -> CanonicalResult<()> {
     compare_hash_field(
@@ -182,16 +179,19 @@ pub(super) fn compare_share_record_fields(
             target_ciphertexts.target_order_root.as_str(),
         ),
         (
-            "targetDecryptionProfileHash",
-            target_accepted.target_decryption_profile_hash.as_str(),
+            "targetDecryptionParametersHash",
+            target_accepted.target_decryption_parameters_hash.as_str(),
         ),
         (
-            "targetDecryptionProfileBindingHash",
+            "targetDecryptionParametersBindingHash",
             setup_binding
-                .target_decryption_profile_binding_hash
+                .target_decryption_parameters_binding_hash
                 .as_str(),
         ),
-        ("targetShareProfileHash", target_share_profile.hash.as_str()),
+        (
+            "targetShareParametersHash",
+            target_share_parameters.hash.as_str(),
+        ),
         (
             "targetBasisHash",
             target_accepted.target_basis_hash.as_str(),
@@ -291,14 +291,14 @@ pub(super) fn read_partial_limb_set(
                 || unsigned_at_path(record, &["modulus"])? != DATA_PRIMES[limb_index]
             {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "target share payload limb order or modulus does not match the selected BGV basis",
                 ));
             }
             let coefficients = coefficient_vector_from_le_hex(
                 string_at_path(record, &["partialDecryptionLeHex"])?,
                 POLYNOMIAL_DEGREE,
-                "target partial-decryption coefficient vector byte length does not match the selected BGV profile",
+                "target partial-decryption coefficient vector byte length does not match the selected BGV parameters",
             )?;
             let expected_hash = coefficient_vector_hash512(
                 &coefficients,
@@ -327,7 +327,7 @@ pub(super) fn share_record_hash_input(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
     target_ciphertexts: &TargetCiphertextPair,
-    target_share_profile: &TargetShareProfile,
+    target_share_parameters: &TargetShareParameters,
     participant: &ParticipantBinding,
     share_root: &str,
 ) -> Value {
@@ -354,9 +354,9 @@ pub(super) fn share_record_hash_input(
         "targetCiphertextBindingHash": target_ciphertexts.target_ciphertext_binding_hash,
         "targetIdRoot": target_ciphertexts.target_id_root,
         "targetOrderRoot": target_ciphertexts.target_order_root,
-        "targetDecryptionProfileHash": target_accepted.target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
-        "targetShareProfileHash": target_share_profile.hash,
+        "targetDecryptionParametersHash": target_accepted.target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": setup_binding.target_decryption_parameters_binding_hash,
+        "targetShareParametersHash": target_share_parameters.hash,
         "targetBasisHash": target_accepted.target_basis_hash,
         "thresholdShareVerificationKeyRoot": setup_binding.threshold_verification.threshold_share_verification_key_root,
         "thresholdShareVerificationKeyHash": setup_binding.threshold_verification.threshold_share_verification_key_hash,

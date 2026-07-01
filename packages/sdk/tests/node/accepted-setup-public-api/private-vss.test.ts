@@ -39,29 +39,24 @@ describe('accepted setup public package API in Node', () => {
                 },
             });
         expect(malformedVerification).toMatchObject({
-            ok: false,
+            isValid: false,
             operation: 'verifyPrivateVssShareEnvelope',
-            verifierStatus: 'refused',
         });
         expect(JSON.stringify(malformedVerification)).not.toMatch(
             /shareValues|coefficientMessage|randomnessByColumn/u,
         );
 
         const acceptedLocalVerification = {
-            ok: true,
+            isValid: true,
             operation: 'verifyPrivateVssShareEnvelope',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            verifierStatus: 'accepted',
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: envelopeReference.localVerificationRoot,
             limbVerifications: [],
             refusedObjects: [],
         };
         const refusedLocalVerification = {
-            ok: false,
+            isValid: false,
             operation: 'verifyPrivateVssShareEnvelope',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            verifierStatus: 'refused',
             privateEnvelopeHash: envelopeReference.privateEnvelopeHash,
             localVerificationRoot: null,
             limbVerifications: [],

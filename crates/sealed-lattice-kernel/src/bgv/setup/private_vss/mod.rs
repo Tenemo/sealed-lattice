@@ -4,27 +4,21 @@ use serde_json::{Value, json};
 
 use crate::{
     bgv::{
-        profile::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
         setup_helpers::decimal_i128_value,
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 use super::{
-    accepted_setup::{COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash},
-    commitment::{
-        SetupCommitmentValue, parse_setup_commitment_full_value, setup_commitment_profile_hash,
-        setup_commitment_root,
-    },
+    commitment::{SetupCommitmentValue, parse_setup_commitment_full_value, setup_commitment_root},
     private_vss_share_proof::{
         PrivateVssShareSuccinctProofGenerationInput, PrivateVssShareSuccinctProofVerificationInput,
         PrivateVssShareSuccinctProofWitness, private_vss_share_succinct_proof_record,
         verify_private_vss_share_succinct_relation_proof,
     },
-    setup_proof::SETUP_PROOF_PROFILE_ID,
     sharing::canonical_trustee_point,
-    vss::carry_aware_vss_share_relation_profile_hash,
 };
 
 // The private VSS delivery path is split by responsibility into sibling
@@ -57,7 +51,6 @@ pub(crate) fn verify_private_vss_share_envelope_from_request(
         Ok(response) => Ok(response),
         Err(refusal) => Ok(verification_response(
             false,
-            "refused",
             None,
             None,
             Vec::new(),
@@ -167,7 +160,7 @@ fn verify_private_vss_share_envelope_inner(
         .map(|verification| verification.ring_degree)
         .unwrap_or(0);
     let ring_degree_status = if ring_degree == POLYNOMIAL_DEGREE {
-        "profile-ring"
+        "full-ring"
     } else {
         "development-reduced-ring"
     };
@@ -181,10 +174,7 @@ fn verify_private_vss_share_envelope_inner(
         ring_degree_status,
         &limb_verifications,
     )?;
-    let local_verification_root = derive_protocol_hash(
-        "PrivateVssLocalVerificationRoot",
-        &local_verification_record,
-    )?;
+    let local_verification_root = derive_canonical_object_hash(&local_verification_record)?;
 
     if let Some(expected_private_envelope_hash) = request
         .get("expectedPrivateEnvelopeHash")
@@ -221,7 +211,6 @@ fn verify_private_vss_share_envelope_inner(
 
     let mut response = verification_response(
         true,
-        "accepted",
         Some(envelope_binding.private_envelope_hash),
         Some(local_verification_root),
         limb_verifications

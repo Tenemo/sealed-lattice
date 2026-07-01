@@ -1,6 +1,6 @@
 import { expect } from 'vitest';
 
-import { deriveProtocolHash } from '#packages/crypto/src/index';
+import { deriveCanonicalObjectHash } from '#packages/crypto/src/index';
 import {
     TranscriptCoreKernelCommandError,
     type TranscriptCoreKernel,
@@ -9,13 +9,16 @@ import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-
 
 export const setupRequest = {
     ceremonyId: 'ceremony-main',
-    manifestHash: deriveProtocolHash('ElectionManifestHash', {
+    manifestHash: deriveCanonicalObjectHash({
+        objectType: 'ElectionManifestHash',
         manifest: 'passive-bgv-setup-test',
     }),
-    rosterHash: deriveProtocolHash('RosterHash', {
+    rosterHash: deriveCanonicalObjectHash({
+        objectType: 'RosterHash',
         roster: 'passive-bgv-setup-test',
     }),
-    thresholdProfileHash: deriveProtocolHash('ThresholdProfileHash', {
+    thresholdParametersHash: deriveCanonicalObjectHash({
+        objectType: 'ThresholdParametersHash',
         threshold: 'passive-bgv-setup-test',
     }),
     participants: [
@@ -47,8 +50,7 @@ export const rebindSetupPackageHash = (
 
     return {
         ...setupPackage,
-        setupPackageHash: kernel.deriveProtocolHash({
-            namespace: 'BGVPassiveSetupPackageHash',
+        setupPackageHash: kernel.deriveCanonicalObjectHash({
             value: hashInput,
         }),
     };

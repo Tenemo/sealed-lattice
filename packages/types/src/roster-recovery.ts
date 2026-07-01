@@ -1,5 +1,5 @@
 import type { BoardConsistencyInput, InclusionProof } from './board-target.js';
-import type { FrozenRosterProfile, PollSpec } from './lifecycle.js';
+import type { FrozenRosterParameters, PollSpec } from './lifecycle.js';
 import type { ProtocolHash } from './protocol-hash.js';
 import type {
     ProtocolObjectType,
@@ -29,11 +29,8 @@ export type TrusteeSetupEntry = {
     readonly trusteeSetupEntryHash: ProtocolHash;
     readonly ceremonyId: string;
     readonly trusteeIdentity: string;
-    readonly setupProfileId: string;
-    readonly targetDecryptionProfileId: string;
     readonly trusteeSetupRoot: ProtocolHash;
-    readonly bgvProfileHash: ProtocolHash;
-    readonly rustBgvBackendProfileHash: ProtocolHash;
+    readonly bgvParametersHash: ProtocolHash;
     readonly participantSetupRecordHash: ProtocolHash;
     readonly publicKeyShareRoot: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
@@ -60,50 +57,12 @@ export type ManifestPolicyHashes = {
 
 /** Opaque cryptographic implementation bindings embedded in a manifest. */
 export type ManifestOpaqueBindings = {
-    readonly bgvPassiveSetupProfileId: string;
-    readonly encryptedBallotLayoutProfileId: string;
-    readonly ballotValidityProofProfileId: string;
-    readonly encryptedBallotAggregateProfileId: string;
-    readonly evaluatorReplayProfileId: string;
-    readonly directComparisonProfileId: string;
-    readonly targetDecryptionProfileId: string;
-    readonly mobileProfileId: string;
-    readonly heParamHash: ProtocolHash;
-    readonly bgvPassiveSetupPackageHash: ProtocolHash;
-    readonly bgvSetupParameterCertificateHash: ProtocolHash;
-    readonly bgvProfileHash: ProtocolHash;
-    readonly rustBgvBackendProfileHash: ProtocolHash;
-    readonly bgvPublicKeyRoot: ProtocolHash;
+    readonly bgvParametersHash: ProtocolHash;
     readonly collectivePublicKeyRoot: ProtocolHash;
-    readonly collectiveSecretDistributionCertificateHash: ProtocolHash;
-    readonly errorDistributionCertificateHash: ProtocolHash;
-    readonly keySwitchDecompositionHash: ProtocolHash;
-    readonly canonicalCiphertextConventionHash: ProtocolHash;
-    readonly bgvBatchEncoderHash: ProtocolHash;
-    readonly encryptedBallotLayoutHash: ProtocolHash;
-    readonly ballotValidityProofProfileHash: ProtocolHash;
-    readonly encryptedBallotAggregateProfileHash: ProtocolHash;
-    readonly encryptedBallotAggregateLayoutHash: ProtocolHash;
-    readonly directAggregateLayoutHash: ProtocolHash;
-    readonly comparisonInputDerivationCircuitHash: ProtocolHash;
-    readonly encryptedComparisonInputHash: ProtocolHash;
-    readonly encryptedSparseTargetProjectionHash: ProtocolHash;
     readonly targetLayoutHash: ProtocolHash;
-    readonly evaluatorReplayProfileHash: ProtocolHash;
-    readonly directComparisonProfileHash: ProtocolHash;
-    readonly evaluationNoiseProfileHash: ProtocolHash;
-    readonly heEvaluationNoiseCertHash: ProtocolHash;
-    readonly allowedEvaluatorOpsHash: ProtocolHash;
     readonly rotSetHash: ProtocolHash;
     readonly evaluationKeyRoot: ProtocolHash;
-    readonly evaluationKeySizeProfileHash: ProtocolHash;
     readonly thresholdShareVerificationKeyRoot: ProtocolHash;
-    readonly thresholdShareVerificationKeyHash: ProtocolHash;
-    readonly trusteeThresholdVerificationKeyHash: ProtocolHash;
-    readonly targetDecryptionProfileHash: ProtocolHash;
-    readonly targetThresholdDecryptabilityCertificateHash: ProtocolHash;
-    readonly targetBasisHash: ProtocolHash;
-    readonly mobileProfileHash: ProtocolHash;
 };
 
 /** Signed election manifest accepted after roster and setup checks. */
@@ -114,7 +73,7 @@ export type ElectionManifest = {
     readonly ceremonyId: string;
     readonly pollSpecHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly thresholdProfileHash: ProtocolHash;
+    readonly thresholdParametersHash: ProtocolHash;
     readonly manifestPolicyHashes: ManifestPolicyHashes;
     readonly manifestOpaqueBindings: ManifestOpaqueBindings;
     readonly boardSequence: number;
@@ -151,7 +110,7 @@ export type RosterManifestTranscriptInput = {
     readonly trusteeSetupEntries: readonly TrusteeSetupEntry[];
     readonly trusteeSetupInclusionProofs: readonly InclusionProof[];
     readonly pollSpec: PollSpec;
-    readonly frozenRosterProfile: FrozenRosterProfile;
+    readonly frozenRosterParameters: FrozenRosterParameters;
     readonly electionManifest: ElectionManifest;
     readonly organizerPublicKeyHash: ProtocolHash;
     readonly organizerIdentity: string;
@@ -229,7 +188,6 @@ export type FirstValidOrderingInput = {
     readonly objects: readonly ValidatedFirstValidObject[];
     readonly requiredContextHash: ProtocolHash;
     readonly selectionPolicyHash: ProtocolHash;
-    readonly expectedSelectionPolicyHash: ProtocolHash;
     readonly currentRecoveryEpochMap: Readonly<
         Record<string, RecoveryEpochMapEntry>
     >;

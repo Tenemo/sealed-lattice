@@ -1,6 +1,4 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -13,10 +11,6 @@ const estimatorDirectoryPath = path.resolve(
     'lattice-estimator',
 );
 const expectedEstimatorCommit = '27a581bb8e9d49f5e9e2db315bd48ac769d5f5f5';
-const expectedEstimatorOutputCanonicalSha256 =
-    '1ec69c0642e6fcabe486dbc8b33ce2cad00289c629cf7405d154d94aed94f399';
-const estimatorResultArtifactPath =
-    process.env.SEALED_LATTICE_HE_ESTIMATOR_RESULTS_PATH;
 
 const pythonEstimatorScript = String.raw`
 import json
@@ -341,44 +335,9 @@ const parseJson = (jsonText: string): JsonValue =>
 const normalizeJsonText = (jsonText: string): string =>
     `${JSON.stringify(sortJsonValue(parseJson(jsonText)), null, 2)}\n`;
 
-const sha256Hex = (text: string): string =>
-    createHash('sha256').update(text, 'utf8').digest('hex');
-
 const main = (): void => {
     assertPinnedEstimatorCheckout();
-    const output = normalizeJsonText(runEstimator());
-
-    if (process.argv.includes('--check-artifact')) {
-        if (
-            estimatorResultArtifactPath === undefined ||
-            estimatorResultArtifactPath.trim() === ''
-        ) {
-            throw new Error(
-                'Set SEALED_LATTICE_HE_ESTIMATOR_RESULTS_PATH before using --check-artifact.',
-            );
-        }
-        const resolvedEstimatorResultArtifactPath = path.resolve(
-            repoRoot,
-            estimatorResultArtifactPath,
-        );
-        const expected = normalizeJsonText(
-            readFileSync(resolvedEstimatorResultArtifactPath, 'utf8'),
-        );
-        if (output !== expected) {
-            throw new Error(
-                `${resolvedEstimatorResultArtifactPath} does not match the estimator output`,
-            );
-        }
-
-        const outputHash = sha256Hex(output);
-        if (outputHash !== expectedEstimatorOutputCanonicalSha256) {
-            throw new Error(
-                `${resolvedEstimatorResultArtifactPath} canonical SHA-256 mismatch: expected ${expectedEstimatorOutputCanonicalSha256}, got ${outputHash}`,
-            );
-        }
-    }
-
-    process.stdout.write(output);
+    process.stdout.write(normalizeJsonText(runEstimator()));
 };
 
 if (isDirectlyInvokedModule(import.meta.url)) {

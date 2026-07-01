@@ -1,3 +1,8 @@
+import {
+    parseLibtestFinishedTestLine,
+    parseLibtestRunningTestCount,
+} from '../libtest-output.js';
+
 import { readProgressCount } from './formatting.js';
 import { isRecord, progressEventPrefix, type LaneState } from './types.js';
 
@@ -160,9 +165,9 @@ export const consumeLibtestProgressLine = (
     line: string,
 ): string | undefined => {
     const trimmedLine = line.trim();
-    const runningMatch = /^running (\d+) tests?$/u.exec(trimmedLine);
-    if (runningMatch?.[1] !== undefined) {
-        beginLibtestBatch(lane, Number(runningMatch[1]));
+    const runningTestCount = parseLibtestRunningTestCount(trimmedLine);
+    if (runningTestCount !== undefined) {
+        beginLibtestBatch(lane, runningTestCount);
 
         return undefined;
     }
@@ -206,7 +211,7 @@ export const consumeLibtestProgressLine = (
         return compactProgressPrefixMatch[2];
     }
 
-    if (/^test .+ \.\.\. (?:ok|ignored|FAILED)$/u.test(trimmedLine)) {
+    if (parseLibtestFinishedTestLine(trimmedLine) !== undefined) {
         recordLibtestCompletedTests(lane, 1);
 
         return line;

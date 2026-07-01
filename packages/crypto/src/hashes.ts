@@ -1,66 +1,30 @@
-import { protocolHashNamespaceValues } from '@sealed-lattice/types';
-import type {
-    ProtocolHash,
-    ProtocolHashNamespace,
-} from '@sealed-lattice/types';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import { canonicalJson, hash512Hex } from './canonical-json.js';
 
-export { protocolHashNamespaceValues };
-export type { ProtocolHashNamespace };
-
 const textEncoder = new TextEncoder();
 
-const protocolHashNamespaceSet = new Set<string>(protocolHashNamespaceValues);
+// Single structural hash domain for canonical typed protocol objects, records,
+// and roots. Every preimage is the canonical JSON of an object carrying a
+// mandatory `objectType` discriminator, so domain separation comes from that
+// in-band type tag rather than from a per-type wire namespace. This domain MUST
+// byte-match the Rust kernel's derive_canonical_object_hash.
+const canonicalObjectHashDomain = 'sealed-lattice-root/canonical-object-v1';
 
-// PascalCase namespace -> kebab-case, feeding the `sealed-lattice-root/<kebab>-v1`
-// wire domain template below. This derivation is the domain-separation namespace
-// for every deriveProtocolHash and must stay stable: any change rotates all hashes.
-const pascalCaseToKebabCase = (value: string): string =>
-    value
-        .replace(/([A-Z]+)([A-Z][a-z])/gu, '$1-$2')
-        .replace(/([a-z0-9])([A-Z])/gu, '$1-$2')
-        .toLowerCase();
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+    typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const reservedProtocolHashDomainSet = new Set(
-    protocolHashNamespaceValues.map(
-        (reservedNamespace) =>
-            `sealed-lattice-root/${pascalCaseToKebabCase(reservedNamespace)}-v1`,
-    ),
-);
-
-// Fails closed: only namespaces pre-registered in the transcript-core registry
-// (protocolHashNamespaceValues) resolve to a domain. Unknown PascalCase names,
-// or unreserved `sealed-lattice-root/...` strings, throw — no unscoped domains.
-export const resolveProtocolHashDomain = (namespace: string): string => {
-    if (protocolHashNamespaceSet.has(namespace)) {
-        return `sealed-lattice-root/${pascalCaseToKebabCase(namespace)}-v1`;
-    }
-
-    if (namespace.startsWith('sealed-lattice-root/')) {
-        if (reservedProtocolHashDomainSet.has(namespace)) {
-            return namespace;
-        }
-
+// The non-empty-objectType check is load-bearing: it makes "never merge a
+// typeless preimage into the shared domain" a hard rejection, not a convention.
+export const deriveCanonicalObjectHash = (value: unknown): ProtocolHash => {
+    const objectType = isRecord(value) ? value.objectType : undefined;
+    if (typeof objectType !== 'string' || objectType.length === 0) {
         throw new TypeError(
-            'Protocol hash namespace domain must be reserved in the transcript-core registry.',
-        );
-    }
-    if (!/^[A-Z][A-Za-z0-9]*$/u.test(namespace)) {
-        throw new TypeError(
-            'Protocol hash namespace must be a reserved PascalCase name.',
+            'Canonical object hash requires a non-empty objectType discriminator.',
         );
     }
 
-    throw new TypeError(
-        'Protocol hash namespace must be reserved in the transcript-core registry.',
-    );
-};
-
-export const deriveProtocolHash = (
-    namespace: string,
-    value: unknown,
-): ProtocolHash =>
-    hash512Hex(resolveProtocolHashDomain(namespace), [
+    return hash512Hex(canonicalObjectHashDomain, [
         textEncoder.encode(canonicalJson(value)),
     ]);
+};

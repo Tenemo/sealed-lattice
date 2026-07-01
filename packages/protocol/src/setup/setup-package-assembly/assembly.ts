@@ -1,18 +1,12 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { resolveThresholdShareCommitments, validateInput } from './bindings.js';
 import {
-    createActiveStaticSetupTheoremCertificate,
-    createSetupKeyCorrectnessCertificate,
     derivedCollectivePublicKey,
     resolveSetupCertificateRecords,
 } from './certificates.js';
-import { hashField, setupProfileId } from './constants-and-assertions.js';
-import type {
-    SetupPackage,
-    SetupPackageInput,
-    SetupPackageInputWithDerivedCollectivePublicKey,
-} from './types.js';
+import { hashField } from './constants-and-assertions.js';
+import type { SetupPackage, SetupPackageInput } from './types.js';
 import {
     publicPrivateVssEnvelopeCommitmentSet,
     setupPackageHashInput,
@@ -23,42 +17,14 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
     const thresholdShareCommitments = resolveThresholdShareCommitments(input);
     validateInput(input, certificates, thresholdShareCommitments);
     const collectivePublicKey = derivedCollectivePublicKey(input);
-    const resolvedInput: SetupPackageInputWithDerivedCollectivePublicKey = {
-        ...input,
-        collectivePublicKey,
-    };
-    const setupKeyCorrectnessCertificate = createSetupKeyCorrectnessCertificate(
-        resolvedInput,
-        certificates,
-    );
 
     const privateVssEnvelopeCommitments = publicPrivateVssEnvelopeCommitmentSet(
         input.privateVssEnvelopeCommitments,
-    );
-    const setupCommitmentSecurityCertificateHash = hashField(
-        certificates.setupCommitmentSecurityCertificate,
-        'setupCommitmentSecurityCertificateHash',
-        'setupCommitmentSecurityCertificate',
     );
     const setupTransportCertificateHash = hashField(
         certificates.setupTransportCertificate,
         'setupTransportCertificateHash',
         'setupTransportCertificate',
-    );
-    const setupProofAccountingCertificateHash = hashField(
-        certificates.setupProofAccountingCertificate,
-        'setupProofAccountingCertificateHash',
-        'setupProofAccountingCertificate',
-    );
-    const heSecurityCertificateHash = hashField(
-        certificates.heSecurityCertificate,
-        'heSecurityCertificateHash',
-        'heSecurityCertificate',
-    );
-    const setupKeyCorrectnessCertificateHash = hashField(
-        setupKeyCorrectnessCertificate,
-        'setupKeyCorrectnessCertificateHash',
-        'setupKeyCorrectnessCertificate',
     );
     const privateVssEnvelopeCommitmentRoot = hashField(
         privateVssEnvelopeCommitments,
@@ -71,10 +37,9 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         'collectivePublicKey',
     );
 
-    const packageWithoutActiveStaticCertificate = {
+    const packageWithoutHash = {
         objectType: 'SetupPackage',
         objectVersion: 1,
-        setupProfileId,
         setupContext: input.setupContext,
         qShare: input.qShare,
         phaseTranscript: input.phaseTranscript,
@@ -102,38 +67,13 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         galoisKeyShareBatches: input.galoisKeyShareBatches,
         trusteeEvaluationKeyProofs: input.trusteeEvaluationKeyProofs,
         evaluationKeys: input.evaluationKeys,
-        setupCommitmentSecurityCertificate:
-            certificates.setupCommitmentSecurityCertificate,
-        setupCommitmentSecurityCertificateHash,
         setupTransportCertificate: certificates.setupTransportCertificate,
         setupTransportCertificateHash,
-        setupProofAccountingCertificate:
-            certificates.setupProofAccountingCertificate,
-        setupProofAccountingCertificateHash,
-        setupKeyCorrectnessCertificate,
-        setupKeyCorrectnessCertificateHash,
-        heSecurityCertificate: certificates.heSecurityCertificate,
-        heSecurityCertificateHash,
-    } as const;
-    const activeStaticSetupTheoremCertificate =
-        createActiveStaticSetupTheoremCertificate(
-            packageWithoutActiveStaticCertificate,
-        );
-    const activeStaticSetupTheoremCertificateHash = hashField(
-        activeStaticSetupTheoremCertificate,
-        'activeStaticSetupTheoremCertificateHash',
-        'activeStaticSetupTheoremCertificate',
-    );
-    const packageWithoutHash = {
-        ...packageWithoutActiveStaticCertificate,
-        activeStaticSetupTheoremCertificate,
-        activeStaticSetupTheoremCertificateHash,
     } as const satisfies Omit<SetupPackage, 'setupPackageHash'>;
 
     return {
         ...packageWithoutHash,
-        setupPackageHash: deriveProtocolHash(
-            'SetupPackageHash',
+        setupPackageHash: deriveCanonicalObjectHash(
             setupPackageHashInput(packageWithoutHash),
         ),
     } satisfies SetupPackage;

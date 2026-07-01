@@ -1,4 +1,4 @@
-import { deriveProtocolHash, hash512Hex } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -26,7 +26,6 @@ import {
     type EvaluatorKeySchedule,
     type RequiredGaloisKeyScheduleEntry,
 } from '#packages/protocol/src/setup/evaluator-key-schedule';
-import { setupProofProfileId } from '#packages/protocol/src/setup/same-secret-consistency-records';
 import {
     makeSetupContext,
     makeSetupFixtureHash,
@@ -64,15 +63,12 @@ const requiredGaloisKeySchedule = [
 ] as const satisfies readonly RequiredGaloisKeyScheduleEntry[];
 
 const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
-    const requiredGaloisSetHash = deriveProtocolHash(
-        'RequiredGaloisSetHash',
+    const requiredGaloisSetHash = deriveCanonicalObjectHash(
         createRequiredGaloisSet(qSharePrimes.length, requiredGaloisKeySchedule),
     );
     const scheduleWithoutRoot = {
         objectType: 'EvaluatorKeySchedule',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         ...setupContext,
         participantCount,
         rnsLimbCount: qSharePrimes.length,
@@ -91,15 +87,12 @@ const evaluatorKeySchedule = (): EvaluatorKeySchedule => {
         ],
         requiredGaloisKeySchedule,
         requiredGaloisSetHash,
-        genericKeySwitchPolicy: 'refused-unless-explicitly-required',
     } as const satisfies Omit<EvaluatorKeySchedule, 'evaluatorKeyScheduleRoot'>;
 
     return {
         ...scheduleWithoutRoot,
-        evaluatorKeyScheduleRoot: deriveProtocolHash(
-            'EvaluatorKeyScheduleRoot',
-            scheduleWithoutRoot,
-        ),
+        evaluatorKeyScheduleRoot:
+            deriveCanonicalObjectHash(scheduleWithoutRoot),
     } satisfies EvaluatorKeySchedule;
 };
 
@@ -126,11 +119,9 @@ const relinearizationKeySwitchSeed = (
     round: 'round-one' | 'round-two',
     level: number,
 ): string =>
-    deriveProtocolHash('RelinearizationKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: schedule.evaluatorKeyScheduleRoot,
@@ -144,11 +135,9 @@ const galoisKeySwitchSeed = (
     rotation: number,
     level: number,
 ): string =>
-    deriveProtocolHash('GaloisKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: schedule.evaluatorKeyScheduleRoot,
@@ -391,22 +380,14 @@ const stubGenerator = (
         );
 
         return {
-            ok: true,
             operation: 'generateTrusteeEvaluationKeyProof',
-            proofAccountingHash: fixtureHash('proof-accounting'),
             statementHash: fixtureHash(
                 `statement-${String(input.context.trusteeRosterPosition)}`,
             ),
             limbCount: qSharePrimes.length,
-            keyCount: input.keys.length,
             sameSecretLinkageIncluded: true,
             proofByteLength: proofBytesHex.length / 2,
             proofBytesHex,
-            proofRandomness: {
-                source: input.proofRandomnessSource,
-                retention:
-                    'proof randomness seed material is consumed for proof generation and is not returned',
-            },
         };
     };
 };
@@ -512,16 +493,10 @@ describe('createRelinearizationKeyShareRounds', () => {
             expect(record.keySwitchComponentVectorRoot).toBe(
                 record.roundOneShareRoot,
             );
-            expect(record).not.toHaveProperty('proofBytesHash');
-            expect(record).not.toHaveProperty('statementHash');
-            expect(record).not.toHaveProperty('sourceSquareBindingRoot');
             const recordWithoutRoot = { ...record } as JsonRecord;
             delete recordWithoutRoot.roundOneRecordRoot;
             expect(record.roundOneRecordRoot).toBe(
-                deriveProtocolHash(
-                    'RelinearizationRoundOneRecordRoot',
-                    recordWithoutRoot,
-                ),
+                deriveCanonicalObjectHash(recordWithoutRoot),
             );
         }
         for (const record of rounds.roundTwoRecords) {
@@ -541,47 +516,35 @@ describe('createRelinearizationKeyShareRounds', () => {
                 matchingRoundOne?.roundOneShareRoot,
             );
         }
-        const expectedRoundOneAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundOneAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundOneAggregate',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                evaluatorKeyScheduleRoot:
-                    fixture.schedule.evaluatorKeyScheduleRoot,
-                level: scheduledLevel,
-                roundOneRecordRoots: rounds.roundOneRecords.map((record) => ({
-                    trusteeIdentity: record.trusteeIdentity,
-                    trusteeRosterPosition: record.trusteeRosterPosition,
-                    roundOneRecordRoot: record.roundOneRecordRoot,
-                })),
-            },
-        );
+        const expectedRoundOneAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundOneAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
+            level: scheduledLevel,
+            roundOneRecordRoots: rounds.roundOneRecords.map((record) => ({
+                trusteeIdentity: record.trusteeIdentity,
+                trusteeRosterPosition: record.trusteeRosterPosition,
+                roundOneRecordRoot: record.roundOneRecordRoot,
+            })),
+        });
         expect(rounds.roundOneAggregateRoots).toEqual([
             {
                 level: scheduledLevel,
                 roundOneAggregateRoot: expectedRoundOneAggregateRoot,
             },
         ]);
-        const expectedRoundTwoAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundTwoAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundTwoAggregate',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                evaluatorKeyScheduleRoot:
-                    fixture.schedule.evaluatorKeyScheduleRoot,
-                level: scheduledLevel,
-                roundOneAggregateRoot: expectedRoundOneAggregateRoot,
-                roundTwoRecordRoots: rounds.roundTwoRecords.map((record) => ({
-                    trusteeIdentity: record.trusteeIdentity,
-                    trusteeRosterPosition: record.trusteeRosterPosition,
-                    roundTwoRecordRoot: record.roundTwoRecordRoot,
-                })),
-            },
-        );
+        const expectedRoundTwoAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundTwoAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot: fixture.schedule.evaluatorKeyScheduleRoot,
+            level: scheduledLevel,
+            roundOneAggregateRoot: expectedRoundOneAggregateRoot,
+            roundTwoRecordRoots: rounds.roundTwoRecords.map((record) => ({
+                trusteeIdentity: record.trusteeIdentity,
+                trusteeRosterPosition: record.trusteeRosterPosition,
+                roundTwoRecordRoot: record.roundTwoRecordRoot,
+            })),
+        });
         expect(rounds.roundTwoAggregateRoots).toEqual([
             {
                 level: scheduledLevel,
@@ -591,10 +554,7 @@ describe('createRelinearizationKeyShareRounds', () => {
         const roundsWithoutRoot = { ...rounds } as JsonRecord;
         delete roundsWithoutRoot.relinearizationKeyShareRoundsRoot;
         expect(rounds.relinearizationKeyShareRoundsRoot).toBe(
-            deriveProtocolHash(
-                'RelinearizationKeyShareRoundsRoot',
-                roundsWithoutRoot,
-            ),
+            deriveCanonicalObjectHash(roundsWithoutRoot),
         );
     });
 
@@ -710,21 +670,12 @@ describe('createGaloisKeyShareBatches', () => {
                     expect(materialRecord.keySwitchComponentVectorRoot).toBe(
                         materialRecord.galoisKeyShareRoot,
                     );
-                    expect(materialRecord).not.toHaveProperty('proofBytesHash');
-                    expect(materialRecord).not.toHaveProperty('ceremonyId');
                 },
-            );
-            expect(batch.galoisKeyShareRoots).toEqual(
-                batch.galoisKeyShareMaterialRecords.map((materialRecord) => ({
-                    rotation: materialRecord.rotation,
-                    level: materialRecord.level,
-                    galoisKeyShareRoot: materialRecord.galoisKeyShareRoot,
-                })),
             );
             const batchWithoutRoot = { ...batch } as JsonRecord;
             delete batchWithoutRoot.galoisKeyShareBatchRoot;
             expect(batch.galoisKeyShareBatchRoot).toBe(
-                deriveProtocolHash('GaloisKeyShareBatchRoot', batchWithoutRoot),
+                deriveCanonicalObjectHash(batchWithoutRoot),
             );
         });
     });
@@ -869,9 +820,6 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         expect(trusteeEvaluationKeyProofs.proofFamily).toBe(
             trusteeEvaluationKeyProofFamily,
         );
-        expect(trusteeEvaluationKeyProofs.proofAccountingHash).toBe(
-            fixtureHash('proof-accounting'),
-        );
         expect(trusteeEvaluationKeyProofs.keySwitchDecompositionHash).toBe(
             fixtureHash('key-switch-decomposition'),
         );
@@ -889,14 +837,10 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                 expect(proofRecord.trusteeRosterPosition).toBe(
                     trusteeRosterPosition,
                 );
-                expect(proofRecord.keyCount).toBe(statementKeyCount);
                 expect(proofRecord.statementHash).toBe(
                     fixtureHash(`statement-${String(trusteeRosterPosition)}`),
                 );
                 const proofBytesHex = stubProofBytesHex(trusteeRosterPosition);
-                expect(proofRecord.proofSizeBytes).toBe(
-                    proofBytesHex.length / 2,
-                );
                 expect(proofRecord.proofBytesHash).toBe(
                     trusteeEvaluationKeyProofBytesHash(proofBytesHex),
                 );
@@ -907,10 +851,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
                 const recordWithoutRoot = { ...proofRecord } as JsonRecord;
                 delete recordWithoutRoot.trusteeEvaluationKeyProofRoot;
                 expect(proofRecord.trusteeEvaluationKeyProofRoot).toBe(
-                    deriveProtocolHash(
-                        'TrusteeEvaluationKeyProofRoot',
-                        recordWithoutRoot,
-                    ),
+                    deriveCanonicalObjectHash(recordWithoutRoot),
                 );
             },
         );
@@ -920,71 +861,7 @@ describe('createTrusteeEvaluationKeyProofs', () => {
         delete proofSetWithoutRoot.trusteeEvaluationKeyProofSetRoot;
         expect(
             trusteeEvaluationKeyProofs.trusteeEvaluationKeyProofSetRoot,
-        ).toBe(
-            deriveProtocolHash(
-                'TrusteeEvaluationKeyProofSetRoot',
-                proofSetWithoutRoot,
-            ),
-        );
-    });
-
-    it('rejects generators that drift the proof accounting hash across trustees', () => {
-        const fixture = evaluationKeyFixture();
-        const { relinearizationKeyShareRounds, galoisKeyShareBatches } =
-            builtRoundsAndBatches(fixture);
-        let generatedCount = 0;
-        const driftingGenerator: TrusteeEvaluationKeyProofGenerator = (
-            input,
-        ) => {
-            const baseline = stubGenerator([])(input);
-            generatedCount += 1;
-
-            return {
-                ...baseline,
-                proofAccountingHash:
-                    generatedCount === 1
-                        ? baseline.proofAccountingHash
-                        : fixtureHash('drifted-proof-accounting'),
-            };
-        };
-        expect(() =>
-            createTrusteeEvaluationKeyProofs({
-                ...fixture.commonInput,
-                relinearizationKeyShareRounds,
-                galoisKeyShareBatches,
-                keySwitchDecompositionHash: fixtureHash(
-                    'key-switch-decomposition',
-                ),
-                trusteeWitnesses: trusteeWitnesses(),
-                trusteeEvaluationKeyProofGenerator: driftingGenerator,
-            }),
-        ).toThrow(
-            'trustee evaluation-key proofs must pin one proof accounting hash',
-        );
-    });
-
-    it('rejects generators that return the wrong key count', () => {
-        const fixture = evaluationKeyFixture();
-        const { relinearizationKeyShareRounds, galoisKeyShareBatches } =
-            builtRoundsAndBatches(fixture);
-        const wrongKeyCountGenerator: TrusteeEvaluationKeyProofGenerator = (
-            input,
-        ) => ({
-            ...stubGenerator([])(input),
-            keyCount: input.keys.length + 1,
-        });
-        expect(() =>
-            createTrusteeEvaluationKeyProofs({
-                ...fixture.commonInput,
-                relinearizationKeyShareRounds,
-                galoisKeyShareBatches,
-                keySwitchDecompositionHash: fixtureHash(
-                    'key-switch-decomposition',
-                ),
-                trusteeWitnesses: trusteeWitnesses(),
-                trusteeEvaluationKeyProofGenerator: wrongKeyCountGenerator,
-            }),
-        ).toThrow('generatedProof.keyCount must match the frozen key schedule');
+        ).toBe(deriveCanonicalObjectHash(proofSetWithoutRoot));
     });
 
     it('rejects witnesses that do not cover every statement key or participant', () => {
@@ -1094,15 +971,11 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
         ).toHaveLength(participantCount);
         transport.trusteeEvaluationKeyProofs.proofRecords.forEach(
             (proofRecord, recordIndex) => {
-                expect(proofRecord).not.toHaveProperty('proofBytesHex');
                 const recordFields = proofRecord as JsonRecord;
                 expect(recordFields.proofBytesEncoding).toBe(
                     'binary-chunked-proof-bytes',
                 );
                 expect(recordFields.proofChunkCount).toBe(1);
-                expect(recordFields.proofTotalByteLength).toBe(
-                    proofRecord.proofSizeBytes,
-                );
                 const transportedMaterial =
                     transport.transportedEvaluationKeyShareProofMaterial
                         .proofMaterials[recordIndex];
@@ -1123,13 +996,13 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
                 expect(chunks[0].bytesHex).toBe(
                     stubProofBytesHex(proofRecord.trusteeRosterPosition),
                 );
+                expect(recordFields.proofTotalByteLength).toBe(
+                    chunks[0].bytesHex.length / 2,
+                );
                 const recordWithoutRoot = { ...proofRecord } as JsonRecord;
                 delete recordWithoutRoot.trusteeEvaluationKeyProofRoot;
                 expect(proofRecord.trusteeEvaluationKeyProofRoot).toBe(
-                    deriveProtocolHash(
-                        'TrusteeEvaluationKeyProofRoot',
-                        recordWithoutRoot,
-                    ),
+                    deriveCanonicalObjectHash(recordWithoutRoot),
                 );
             },
         );
@@ -1140,12 +1013,7 @@ describe('transportTrusteeEvaluationKeyProofSet', () => {
         expect(
             transport.trusteeEvaluationKeyProofs
                 .trusteeEvaluationKeyProofSetRoot,
-        ).toBe(
-            deriveProtocolHash(
-                'TrusteeEvaluationKeyProofSetRoot',
-                proofSetWithoutRoot,
-            ),
-        );
+        ).toBe(deriveCanonicalObjectHash(proofSetWithoutRoot));
         expect(
             transport.trusteeEvaluationKeyProofs
                 .trusteeEvaluationKeyProofSetRoot,
@@ -1197,9 +1065,6 @@ describe('createBinaryChunkedEvaluationKeyShareMaterialTransport', () => {
         ]) {
             expect(contribution.shareMaterial.keySwitchMaterialEncoding).toBe(
                 'binary-chunked-key-switch-component-vectors',
-            );
-            expect(contribution.shareMaterial).not.toHaveProperty(
-                'keySwitchComponentVectors',
             );
         }
         for (const componentMaterial of transport
@@ -1335,9 +1200,6 @@ describe('createPublicEvaluationKeySet', () => {
             relinearizationKeyShareRounds.roundOneAggregateRoots[0]
                 .roundOneAggregateRoot,
         );
-        expect(relinearizationKeyRoot).not.toHaveProperty(
-            'roundOneSourceSquareAggregateRoot',
-        );
         expect(evaluationKeys.galoisKeyRoots).toHaveLength(
             requiredGaloisKeySchedule.length,
         );
@@ -1354,21 +1216,14 @@ describe('createPublicEvaluationKeySet', () => {
                         expect(
                             contributingShareRoot.trusteeRosterPosition,
                         ).toBe(trusteeRosterPosition);
-                        expect(contributingShareRoot).not.toHaveProperty(
-                            'galoisKeyShareProofRoot',
-                        );
                     },
                 );
             },
         );
-        expect(evaluationKeys.genericKeySwitchKeyRoots).toEqual([]);
         const evaluationKeysWithoutHash = { ...evaluationKeys } as JsonRecord;
         delete evaluationKeysWithoutHash.evaluationKeySetHash;
         expect(evaluationKeys.evaluationKeySetHash).toBe(
-            deriveProtocolHash(
-                'EvaluationKeySetHash',
-                evaluationKeysWithoutHash,
-            ),
+            deriveCanonicalObjectHash(evaluationKeysWithoutHash),
         );
     });
 
@@ -1437,16 +1292,10 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
         expect(
             relinearizationShareMaterialRoots[0].keySwitchComponentMaterialRoot,
         ).toBe(null);
-        expect(relinearizationShareMaterialRoots[0]).not.toHaveProperty(
-            'proofRoot',
-        );
         const galoisShareMaterialRoots =
             manifest.galoisShareMaterialRoots as readonly JsonRecord[];
         expect(galoisShareMaterialRoots).toHaveLength(
             participantCount * requiredGaloisKeySchedule.length,
-        );
-        expect(galoisShareMaterialRoots[0]).not.toHaveProperty(
-            'galoisKeyShareProofRoot',
         );
     });
 
@@ -1463,8 +1312,6 @@ describe('createBinaryChunkedPublicEvaluationKeyMaterialTransport', () => {
                     objectType:
                         'SetupTransportedEvaluationKeyShareComponentMaterialSet',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     componentMaterials: [
                         { keySwitchComponentMaterialRoot: fixtureHash('x') },
                     ],

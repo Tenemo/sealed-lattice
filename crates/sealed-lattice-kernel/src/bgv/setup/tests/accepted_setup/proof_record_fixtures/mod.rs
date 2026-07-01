@@ -25,7 +25,7 @@ pub(super) struct BuiltTrusteeEvaluationKeyProofRecord {
 }
 
 // Maximum number of trustee evaluation-key provers that run concurrently while
-// assembling the first-profile package fixture. Each first-profile prover holds
+// assembling the first-roster package fixture. Each first-roster prover holds
 // its statement, witness, and proof working set, which is several gigabytes, so
 // proving all ten trustees at once needs far more than physical memory and
 // forces heavy paging. Generating the proofs in batches of this size keeps
@@ -49,9 +49,9 @@ pub(super) fn participant_count_from_package(package: &serde_json::Value) -> u64
 
 /// An explicit `SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE` override when the
 /// memory-aware heavy test runner (or an operator) set one. When present it is
-/// authoritative for terminal proving concurrency, so a memory-constrained
+/// authoritative for final-package proving concurrency, so a memory-constrained
 /// runner serializes provers regardless of how many cores it reports; absent,
-/// the terminal proving path derives concurrency from the core count instead.
+/// the final-package proving path derives concurrency from the core count instead.
 pub(super) fn explicit_trustee_proof_batch_size_override() -> Option<usize> {
     std::env::var("SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE")
         .ok()

@@ -33,14 +33,14 @@ const nextFoundationEvidence = [
 ] as const;
 
 const emptyFirstValidOrdering: FirstValidOrderingVerification = {
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects: [],
     orderedObjects: [],
 };
 
 const emptyTargetFinality: TargetFinalityVerification = {
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects: [],
     validWitnessIdentities: [],
@@ -51,21 +51,21 @@ const buildFailure = (
     refusedObjects: readonly RefusalRecord[],
     componentResults?: Partial<FoundationTranscriptComponentResults>,
 ): FoundationTranscriptVerification => ({
-    ok: false,
+    isValid: false,
     acceptedHashes: [],
     refusedObjects,
     validWitnessIdentities: [],
     nextRequiredEvidence: nextFoundationEvidence,
     componentResults: {
         rosterManifest: componentResults?.rosterManifest ?? {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [],
             participantIdentities: [],
         },
         rosterExternalAcceptance:
             componentResults?.rosterExternalAcceptance ?? {
-                ok: false,
+                isValid: false,
                 acceptedHashes: [],
                 refusedObjects: [],
             },
@@ -136,9 +136,7 @@ const collectCrossBindingRefusals = (
 
     if (
         input.firstValidOrdering.selectionPolicyHash !==
-            manifestPolicyHashes.firstValidPolicyHash ||
-        input.firstValidOrdering.expectedSelectionPolicyHash !==
-            manifestPolicyHashes.firstValidPolicyHash
+        manifestPolicyHashes.firstValidPolicyHash
     ) {
         refusedObjects.push(
             createRefusal(
@@ -193,17 +191,17 @@ const collectCrossBindingRefusals = (
 
     if (
         checkpoint.electionManifestHash !== manifest.electionManifestHash ||
-        checkpoint.thresholdProfileHash !==
-            input.rosterManifestTranscript.frozenRosterProfile
-                .thresholdProfileHash ||
-        checkpoint.evaluatorReplayProfileHash !==
-            manifestOpaqueBindings.evaluatorReplayProfileHash ||
+        checkpoint.thresholdParametersHash !==
+            input.rosterManifestTranscript.frozenRosterParameters
+                .thresholdParametersHash ||
+        checkpoint.bgvParametersHash !==
+            manifestOpaqueBindings.bgvParametersHash ||
         checkpoint.targetLayoutHash !== manifestOpaqueBindings.targetLayoutHash
     ) {
         refusedObjects.push(
             createRefusal(
                 'TargetFinalityPolicyMismatch',
-                'Foundation target proposal must bind the accepted manifest, frozen roster profile, evaluator replay profile, and target layout.',
+                'Foundation target proposal must bind the accepted manifest, frozen roster parameters, BGV parameters, and target layout.',
                 checkpoint.targetFinalityCheckpointHash,
                 'TargetFinalityCheckpoint',
             ),
@@ -278,11 +276,11 @@ const verifyFoundationTranscriptUnchecked = (
     ];
     const accepted =
         refusedObjects.length === 0 &&
-        rosterManifest.ok &&
-        rosterExternalAcceptance.ok &&
-        recoveryEpochUpdates.every((result) => result.ok) &&
-        firstValidOrdering.ok &&
-        targetFinality.ok;
+        rosterManifest.isValid &&
+        rosterExternalAcceptance.isValid &&
+        recoveryEpochUpdates.every((result) => result.isValid) &&
+        firstValidOrdering.isValid &&
+        targetFinality.isValid;
 
     if (!accepted) {
         return {
@@ -293,7 +291,7 @@ const verifyFoundationTranscriptUnchecked = (
     }
 
     return {
-        ok: true,
+        isValid: true,
         acceptedHashes: uniqueStrings([
             ...rosterManifest.acceptedHashes,
             ...rosterExternalAcceptance.acceptedHashes,

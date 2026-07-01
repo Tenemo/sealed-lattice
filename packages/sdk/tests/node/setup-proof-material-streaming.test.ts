@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { verifySetupPackage } from '#packages/sdk/src/index.js';
+
 type JsonRecord = Record<string, unknown>;
 
 const proofHash =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const alternateProofHash =
     'fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210';
-const setupProofProfileId = 'SealedLattice-SetupProof-v1';
-
+const expectedManifestHash = '1'.repeat(128);
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
@@ -64,7 +65,14 @@ vi.mock('../../dist/kernel.js', () => ({
     loadTranscriptCoreKernel: () => Promise.resolve(mockKernel),
 }));
 
-const publicPackage = await import('../../dist/index.js');
+const publicPackage = (await import('../../dist/index.js')) as Readonly<{
+    readonly verifySetupPackage: typeof verifySetupPackage;
+}>;
+const expectedRosterHash = '2'.repeat(128);
+const setupVerificationBindings = {
+    expectedManifestHash,
+    expectedRosterHash,
+} as const;
 
 let streamedProofMaterialReferences: Map<string, JsonRecord>;
 
@@ -87,15 +95,11 @@ const transportedSetupProofMaterialSet = (
     ({
         objectType: transportCase.materialSetObjectType,
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: transportCase.proofFamily,
         proofMaterials: [
             {
                 objectType: transportCase.materialObjectType,
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
                 chunkSizeBytes: 1_048_576,
@@ -139,14 +143,10 @@ const verifiedSetupProofMaterials = (
     ({
         objectType: 'VerifiedSetupProofMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofMaterials: [
             {
                 objectType: 'VerifiedSetupProofMaterial',
                 objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
                 verificationId: 'caller-supplied-handle',
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
@@ -176,13 +176,11 @@ describe('setup proof material streaming in the public package', () => {
                     );
 
                     return {
-                        ok: true,
                         operation: 'beginSetupProofMaterialTransportStream',
                     };
                 },
             ),
             absorbSetupProofMaterialTransportStreamChunk: vi.fn(() => ({
-                ok: true,
                 operation: 'absorbSetupProofMaterialTransportStreamChunk',
             })),
             finishSetupProofMaterialTransportStream: vi.fn(
@@ -194,14 +192,11 @@ describe('setup proof material streaming in the public package', () => {
                             );
 
                         return {
-                            ok: true,
                             operation:
                                 'finishSetupProofMaterialTransportStream',
                             verifiedSetupProofMaterial: {
                                 objectType: 'VerifiedSetupProofMaterial',
                                 objectVersion: 1,
-                                setupProfileId: 'CollectiveBgvSetup-v1',
-                                setupProofProfileId,
                                 verificationId: input.verificationId,
                                 proofFamily: proofMaterial?.proofFamily,
                                 proofMaterialRoot:
@@ -223,9 +218,8 @@ describe('setup proof material streaming in the public package', () => {
                 }),
             ),
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                ok: false,
+                isValid: false,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                verifierStatus: 'outsideProfile',
                 observedInput: input,
             })),
         };
@@ -236,31 +230,28 @@ describe('setup proof material streaming in the public package', () => {
         const acceptedSetupHandoff = {
             objectType: 'CollectiveBgvAcceptedSetupHandoff',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
             acceptedSetupHandoffRoot,
             directBallotEncryption: {
                 collectivePublicKeyRoot: proofHash,
             },
             publicAggregation: {
-                aggregateCiphertextProfileRoot: proofHash,
+                aggregateCiphertextParametersRoot: proofHash,
             },
             boundedEvaluatorReplay: {
-                evaluatorProfileRoot: proofHash,
+                evaluatorParametersRoot: proofHash,
             },
             futureTargetDecryptionBoundary: {
                 qTargetState: 'downstream-null',
             },
             certificateRoots: {
-                heSecurityCertificateHash: proofHash,
+                setupTransportCertificateHash: proofHash,
             },
         };
         mockKernel = {
             ...mockKernel,
             verifyCollectiveBgvSetup: vi.fn((input: JsonRecord) => ({
-                ok: true,
+                isValid: true,
                 operation: 'verifyCollectiveBgvSetupPackage',
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                verifierStatus: 'accepted',
                 currentPhase: 'setupPackageVerification',
                 acceptedHashes: [acceptedSetupHandoffRoot],
                 missingObjects: [],
@@ -275,12 +266,12 @@ describe('setup proof material streaming in the public package', () => {
                 objectType: 'SetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
         });
 
         expect(result).toMatchObject({
-            ok: true,
+            isValid: true,
             operation: 'verifyCollectiveBgvSetupPackage',
-            verifierStatus: 'accepted',
             acceptedSetupHandoff,
         });
         expect(result.acceptedSetupHandoff?.acceptedSetupHandoffRoot).toBe(
@@ -291,7 +282,22 @@ describe('setup proof material streaming in the public package', () => {
                 objectType: 'SetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
         });
+    });
+
+    it('requires external manifest and roster hashes before calling the kernel verifier', async () => {
+        const inputWithoutExternalBindings = {
+            setupPackage: {
+                objectType: 'SetupPackage',
+                objectVersion: 1,
+            },
+        } as unknown as VerifySetupPackageInput;
+
+        await expect(
+            publicPackage.verifySetupPackage(inputWithoutExternalBindings),
+        ).rejects.toThrow(/expectedManifestHash/u);
+        expect(mockKernel.verifyCollectiveBgvSetup).not.toHaveBeenCalled();
     });
 
     it.each(setupProofMaterialTransportCases)(
@@ -302,6 +308,7 @@ describe('setup proof material streaming in the public package', () => {
                     objectType: 'SetupPackage',
                     objectVersion: 1,
                 },
+                ...setupVerificationBindings,
                 [transportCase.fieldName]:
                     transportedSetupProofMaterialSet(transportCase),
             });
@@ -316,9 +323,6 @@ describe('setup proof material streaming in the public package', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
             });
-            expect(
-                beginInput?.transportedSetupProofMaterial,
-            ).not.toHaveProperty('chunks');
             expect(
                 mockKernel.absorbSetupProofMaterialTransportStreamChunk,
             ).toHaveBeenCalledWith(
@@ -340,15 +344,10 @@ describe('setup proof material streaming in the public package', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
             });
-            expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
-                'chunks',
-            );
             expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject(
                 {
                     objectType: 'VerifiedSetupProofMaterialSet',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofMaterials: [
                         expect.objectContaining({
                             objectType: 'VerifiedSetupProofMaterial',
@@ -367,6 +366,7 @@ describe('setup proof material streaming in the public package', () => {
                 objectType: 'SetupPackage',
                 objectVersion: 1,
             },
+            ...setupVerificationBindings,
             transportedSameSecretProofMaterial:
                 transportedSameSecretProofMaterialSet(),
             transportedPublicKeyShareProofMaterial:
@@ -397,9 +397,6 @@ describe('setup proof material streaming in the public package', () => {
                 proofFamily: transportCase.proofFamily,
                 proofMaterialRoot: proofHash,
             });
-            expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
-                'chunks',
-            );
         }
         const expectedVerifiedProofMaterials =
             setupProofMaterialTransportCases.map((transportCase): unknown => {
@@ -415,8 +412,6 @@ describe('setup proof material streaming in the public package', () => {
         expect(finalVerifyInput?.verifiedSetupProofMaterials).toMatchObject({
             objectType: 'VerifiedSetupProofMaterialSet',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofMaterials: expectedVerifiedProofMaterials,
         });
     });
@@ -434,6 +429,7 @@ describe('setup proof material streaming in the public package', () => {
                     objectType: 'SetupPackage',
                     objectVersion: 1,
                 },
+                ...setupVerificationBindings,
                 [transportCase.fieldName]:
                     transportedSetupProofMaterialSet(transportCase),
                 verifiedSetupProofMaterials: suppliedHandles,
@@ -456,9 +452,11 @@ describe('setup proof material streaming in the public package', () => {
             ] as
                 | Readonly<{ readonly proofMaterials: readonly JsonRecord[] }>
                 | undefined;
-            expect(finalMaterialSet?.proofMaterials[0]).not.toHaveProperty(
-                'chunks',
-            );
+            expect(finalMaterialSet?.proofMaterials[0]).toMatchObject({
+                objectType: transportCase.materialObjectType,
+                proofFamily: transportCase.proofFamily,
+                proofMaterialRoot: proofHash,
+            });
             expect(finalVerifyInput?.verifiedSetupProofMaterials).toBe(
                 suppliedHandles,
             );

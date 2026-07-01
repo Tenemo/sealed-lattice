@@ -38,8 +38,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
@@ -67,7 +66,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
     )
     .expect("verification response");
 
-    assert_eq!(missing_statement_proofs_result["verifierStatus"], "refused");
+    assert_eq!(missing_statement_proofs_result["isValid"], false);
     assert_eq!(
         missing_statement_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareProofsMissing"
@@ -88,7 +87,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_missing_dependent_publ
     )
     .expect("verification response");
 
-    assert_eq!(missing_succinct_proofs_result["verifierStatus"], "refused");
+    assert_eq!(missing_succinct_proofs_result["isValid"], false);
     assert_eq!(
         missing_succinct_proofs_result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofsMissing"
@@ -135,7 +134,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
         let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("verification response");
 
-        assert_eq!(result["verifierStatus"], "refused");
+        assert_eq!(result["isValid"], false);
         assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
         assert_eq!(
             result["refusedObjects"][0]["objectPath"],
@@ -143,138 +142,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
         );
         assert!(result["acceptedSetupHandoff"].is_null());
     }
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_public_proofs() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_extra_and_duplicate_public_proofs",
-    );
-
-    let mut extra_same_secret_proof_package = same_secret_proof_bearing_collective_setup_package();
-    let duplicate_same_secret_proof_record =
-        extra_same_secret_proof_package["sameSecretProofs"]["proofRecords"][0].clone();
-    extra_same_secret_proof_package["sameSecretProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("same-secret proof records")
-        .push(duplicate_same_secret_proof_record);
-    rebind_collective_same_secret_proof_roots(&mut extra_same_secret_proof_package);
-    rebind_collective_same_secret_proof_set_root(&mut extra_same_secret_proof_package);
-    rebind_collective_setup_package_hash(&mut extra_same_secret_proof_package);
-    assert_refuses_proof_object_variant(
-        extra_same_secret_proof_package,
-        "sameSecretProofCountMismatch",
-        "setupPackage.sameSecretProofs.proofRecords",
-        None,
-    );
-
-    let mut duplicate_same_secret_proof_package =
-        same_secret_proof_bearing_collective_setup_package();
-    duplicate_same_secret_proof_package["sameSecretProofs"]["proofRecords"][1] =
-        duplicate_same_secret_proof_package["sameSecretProofs"]["proofRecords"][0].clone();
-    rebind_same_secret_proof_record_root(&mut duplicate_same_secret_proof_package, 1);
-    rebind_collective_same_secret_proof_roots(&mut duplicate_same_secret_proof_package);
-    rebind_collective_same_secret_proof_set_root(&mut duplicate_same_secret_proof_package);
-    rebind_collective_setup_package_hash(&mut duplicate_same_secret_proof_package);
-    assert_refuses_proof_object_variant(
-        duplicate_same_secret_proof_package,
-        "sameSecretProofVerificationFailed",
-        "setupPackage.sameSecretProofs.proofRecords",
-        Some("distinct trustee roster positions"),
-    );
-
-    let mut extra_public_key_statement_proof_package =
-        public_key_share_succinct_proof_bearing_collective_setup_package();
-    let duplicate_public_key_statement_proof_record =
-        extra_public_key_statement_proof_package["publicKeyShareProofs"]["proofRecords"][0].clone();
-    extra_public_key_statement_proof_package["publicKeyShareProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("public-key statement proof records")
-        .push(duplicate_public_key_statement_proof_record);
-    rebind_collective_public_key_share_proof_roots(&mut extra_public_key_statement_proof_package);
-    rebind_collective_setup_package_hash(&mut extra_public_key_statement_proof_package);
-    assert_refuses_proof_object_variant(
-        extra_public_key_statement_proof_package,
-        "publicKeyShareProofCountMismatch",
-        "setupPackage.publicKeyShareProofs.proofRecords",
-        None,
-    );
-
-    let mut duplicate_public_key_statement_proof_package =
-        public_key_share_succinct_proof_bearing_collective_setup_package();
-    duplicate_public_key_statement_proof_package["publicKeyShareProofs"]["proofRecords"][1] =
-        duplicate_public_key_statement_proof_package["publicKeyShareProofs"]["proofRecords"][0]
-            .clone();
-    rebind_collective_public_key_share_proof_roots(
-        &mut duplicate_public_key_statement_proof_package,
-    );
-    rebind_collective_setup_package_hash(&mut duplicate_public_key_statement_proof_package);
-    assert_refuses_proof_object_variant(
-        duplicate_public_key_statement_proof_package,
-        "publicKeyShareProofDuplicate",
-        "setupPackage.publicKeyShareProofs.proofRecords",
-        Some("distinct trustee roster positions"),
-    );
-
-    let mut extra_public_key_succinct_proof_package =
-        public_key_share_succinct_proof_bearing_collective_setup_package();
-    let duplicate_public_key_succinct_proof_record =
-        extra_public_key_succinct_proof_package["publicKeyShareSuccinctProofs"]["proofRecords"][0]
-            .clone();
-    extra_public_key_succinct_proof_package["publicKeyShareSuccinctProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("public-key succinct proof records")
-        .push(duplicate_public_key_succinct_proof_record);
-    rebind_collective_public_key_succinct_proof_roots(&mut extra_public_key_succinct_proof_package);
-    rebind_collective_setup_package_hash(&mut extra_public_key_succinct_proof_package);
-    assert_refuses_proof_object_variant(
-        extra_public_key_succinct_proof_package,
-        "publicKeyShareSuccinctProofCountMismatch",
-        "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
-        None,
-    );
-
-    let mut duplicate_public_key_succinct_proof_package =
-        public_key_share_succinct_proof_bearing_collective_setup_package();
-    duplicate_public_key_succinct_proof_package["publicKeyShareSuccinctProofs"]["proofRecords"]
-        [1] =
-        duplicate_public_key_succinct_proof_package["publicKeyShareSuccinctProofs"]["proofRecords"]
-            [0]
-        .clone();
-    rebind_collective_public_key_succinct_proof_roots(
-        &mut duplicate_public_key_succinct_proof_package,
-    );
-    rebind_collective_setup_package_hash(&mut duplicate_public_key_succinct_proof_package);
-    assert_refuses_proof_object_variant(
-        duplicate_public_key_succinct_proof_package,
-        "publicKeyShareSuccinctProofVerificationFailed",
-        "setupPackage.publicKeyShareSuccinctProofs.proofRecords",
-        Some("distinct trustee roster positions"),
-    );
-}
-
-fn assert_refuses_proof_object_variant(
-    package: serde_json::Value,
-    reason_code: &str,
-    object_path: &str,
-    message_fragment: Option<&str>,
-) {
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(result["refusedObjects"][0]["reasonCode"], reason_code);
-    assert_eq!(result["refusedObjects"][0]["objectPath"], object_path);
-    if let Some(message_fragment) = message_fragment {
-        assert!(
-            result["refusedObjects"][0]["message"]
-                .as_str()
-                .expect("refusal message")
-                .contains(message_fragment)
-        );
-    }
-    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -296,7 +163,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
         "public-key-share-proof-material",
         DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
     );
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -307,8 +173,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succin
     )
     .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
@@ -337,7 +202,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
@@ -358,8 +223,7 @@ fn heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_pu
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["transportedPublicKeyShareMaterial"])
@@ -411,7 +275,6 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
                 .collect(),
         },
     );
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -422,8 +285,7 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_materi
     )
     .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "pending");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["missingObjects"],
         serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
@@ -451,7 +313,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_p
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareMaterialVerificationFailed"
@@ -483,60 +345,10 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareMaterialVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_proofs",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofBytesHash"] =
-        serde_json::json!(valid_hash('a'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_statement_hash()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_statement_hash",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["statementHash"] =
-        serde_json::json!(valid_hash('f'));
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("statementHash")
     );
 }
 
@@ -557,7 +369,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "sameSecretProofsMissing"
@@ -567,98 +379,6 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
         "setupPackage.sameSecretProofs"
     );
     assert!(result["acceptedSetupHandoff"].is_null());
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_set_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_set_drift",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["sameSecretProofSetRoot"] =
-        serde_json::json!(valid_hash('b'));
-    rebind_collective_public_key_succinct_proof_roots(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofSetBindingMismatch"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_root_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_root_drift",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["sameSecretProofFamilyBindingRoot"] =
-        serde_json::json!(valid_hash('d'));
-    rebind_collective_public_key_succinct_proof_roots(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofSetBindingMismatch"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_root_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_proof_root_drift",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["sameSecretProofRoot"] =
-        serde_json::json!(valid_hash('c'));
-    rebind_collective_public_key_succinct_proof_roots(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_record_drift()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_same_secret_family_record_drift",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["sameSecretProofFamilyBindingRoot"] =
-        serde_json::json!(valid_hash('e'));
-    rebind_collective_public_key_succinct_proof_roots(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
 }
 
 #[test]
@@ -682,63 +402,17 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_sh
             &proof_bytes
         )
     );
-    package["publicKeyShareSuccinctProofs"]["proofRecords"][0]["proofSizeBytes"] =
-        serde_json::json!(proof_bytes.len());
     rebind_collective_public_key_succinct_proof_roots(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "publicKeyShareSuccinctProofVerificationFailed"
     );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_low_degree_shape_with_rebound_roots()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_public_key_succinct_low_degree_shape_with_rebound_roots",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let proof_record = &mut package["publicKeyShareSuccinctProofs"]["proofRecords"][0];
-    let mut proof_bytes = decode_hex(
-        proof_record["proofBytesHex"]
-            .as_str()
-            .expect("embedded public-key succinct proof bytes"),
-    )
-    .expect("public-key succinct proof bytes");
-    let ring_degree = proof_record["ringDegree"].as_u64().expect("ring degree") as usize;
-    set_first_limb_low_degree_fold_count_to_wrong_value(
-        &mut proof_bytes,
-        FirstLimbProofCodecLayout::public_key_share(ring_degree),
-    );
-    proof_record["proofBytesHex"] = serde_json::json!(to_hex(&proof_bytes));
-    proof_record["proofBytesHash"] =
-        serde_json::json!(public_key_share_succinct_proof_bytes_hash(&proof_bytes));
-    proof_record["proofSizeBytes"] = serde_json::json!(proof_bytes.len());
-    rebind_collective_public_key_succinct_proof_roots(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
-    assert!(
-        result["refusedObjects"][0]["message"]
-            .as_str()
-            .expect("refusal message")
-            .contains("low-degree committed fold count does not match the statement")
-    );
-    assert!(result["acceptedSetupHandoff"].is_null());
 }
 
 #[test]
@@ -753,11 +427,10 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_collective_public_key_f
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "outsideProfile");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
 }
 
@@ -790,7 +463,7 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_collective_pu
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "collectivePublicKeyVerificationFailed"
@@ -814,7 +487,7 @@ fn heavy_accepted_setup_collective_setup_public_key_loader_refuses_reduced_ring_
     assert!(
         error
             .message
-            .contains("requires profile-ring aggregate coefficients")
+            .contains("requires full-ring aggregate coefficients")
     );
 }
 
@@ -850,7 +523,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         verify_collective_bgv_setup_package(&missing_object_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(missing_object_result["verifierStatus"], "refused");
+    assert_eq!(missing_object_result["isValid"], false);
     assert_eq!(
         missing_object_result["refusedObjects"][0]["reasonCode"],
         "publicKeyMaterialBeforeProofVerification"
@@ -871,7 +544,7 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_collective_public_key
         verify_collective_bgv_setup_package(&missing_root_package, &serde_json::json!({}))
             .expect("verification response");
 
-    assert_eq!(missing_root_result["verifierStatus"], "refused");
+    assert_eq!(missing_root_result["isValid"], false);
     assert_eq!(
         missing_root_result["refusedObjects"][0]["reasonCode"],
         "publicKeyMaterialBeforeProofVerification"

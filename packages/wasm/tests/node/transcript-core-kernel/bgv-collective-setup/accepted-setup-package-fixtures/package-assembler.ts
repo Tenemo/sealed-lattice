@@ -2,8 +2,8 @@ import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
 import {
     cloneJsonRecord,
     collectiveSetupRosterHash,
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
+    firstRosterDecryptionThreshold,
+    firstRosterParticipantCount,
     privateVssMailboxKeyPairForRosterPosition,
     privateVssMailboxPublicKeyBytesHash,
     setupTrusteeSignatureSeedLabel,
@@ -11,10 +11,6 @@ import {
 } from '../setup-fixture-primitives.js';
 
 import {
-    acceptedActiveStaticSetupTheoremCertificate,
-    acceptedHeSecurityCertificate,
-    acceptedSetupCommitmentSecurityCertificate,
-    acceptedSetupProofAccountingCertificate,
     acceptedSetupTransportCertificate,
     rebindCollectiveSetupPackageHash,
 } from './certificates.js';
@@ -48,57 +44,48 @@ import {
     type ProtocolRootSigner,
 } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
-const acceptedShapedSetupPackageCacheByProfileKey = new Map<
+const acceptedShapedSetupPackageCacheByParametersKey = new Map<
     string,
     Promise<JsonRecord>
 >();
 
 function acceptedShapedSetupPackageCacheKey(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
 ): string {
-    const bgvProfile = kernel.describeBgvRnsProfile();
+    const bgvParameters = kernel.describeBgvRnsParameters();
 
     return [
-        profile.setupProfileId,
-        profile.setupProfileHash,
-        profile.qShareHash,
-        profile.carryAwareVssShareRelationProfileHash,
-        profile.commitmentProfileHash,
-        bgvProfile.profileHash,
-        bgvProfile.backendProfileHash,
+        setupParameters.setupParametersHash,
+        bgvParameters.bgvParametersHash,
     ].join('|');
 }
 
 async function buildAcceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
 ): Promise<JsonRecord> {
     let previousPhaseRoot: string | null = null;
     const setupContext = {
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
         rosterHash: collectiveSetupRosterHash((input) =>
-            kernel.deriveProtocolHash(input),
+            kernel.deriveCanonicalObjectHash(input),
         ),
-        setupProfileHash: profile.setupProfileHash,
-        qShareHash: profile.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            profile.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: profile.commitmentProfileHash,
+        setupParametersHash: setupParameters.setupParametersHash,
         setupEpoch: 'setup-epoch-1',
-        participantCount: firstProfileParticipantCount,
+        participantCount: firstRosterParticipantCount,
         qSetupComplete: 10,
         qBallotRelease: 10,
         qFinal: 10,
-        qDec: firstProfileDecryptionThreshold,
+        qDec: firstRosterDecryptionThreshold,
     } satisfies CollectiveBgvSetupContext;
     const phaseTranscript: JsonRecord[] = [];
-    for (const phase of profile.phaseOrder) {
+    for (const phase of setupParameters.phaseOrder) {
         const participantPhaseObjects = await Promise.all(
             Array.from({ length: 10 }, async (_unusedSlot, rosterPosition) => {
                 const trusteeIdentity = `trustee-${String(rosterPosition)}`;
@@ -150,10 +137,10 @@ async function buildAcceptedShapedSetupPackage(
         phaseTranscript.push(phaseRecord);
         previousPhaseRoot = phaseRecord.phaseRoot;
     }
-    const commonRandomness = acceptedCommonRandomness(kernel, profile);
+    const commonRandomness = acceptedCommonRandomness(kernel, setupParameters);
     const vssCoefficientCommitmentBundle = acceptedVssCoefficientCommitments(
         setupContext,
-        profile,
+        setupParameters,
         String(commonRandomness.publicMatrixSeedHash),
     );
     const vssCoefficientCommitments =
@@ -175,7 +162,7 @@ async function buildAcceptedShapedSetupPackage(
     const privateVssEnvelopeCommitments =
         packageShapePrivateVssEnvelopeCommitments(
             kernel,
-            profile,
+            setupParameters,
             setupContext,
             commonRandomness,
             vssCoefficientCommitments,
@@ -191,46 +178,40 @@ async function buildAcceptedShapedSetupPackage(
     );
     const sameSecretConsistency = acceptedSameSecretConsistency(
         setupContext,
-        profile,
+        setupParameters,
         vssCoefficientCommitments,
     );
     const publicKeyShares = acceptedPublicKeyShares(
         setupContext,
-        profile,
+        setupParameters,
         commonRandomness,
         sameSecretConsistency,
     );
     const publicKeyShareProofs = acceptedPublicKeyShareProofs(
         setupContext,
-        profile,
+        setupParameters,
         commonRandomness,
         sameSecretConsistency,
         publicKeyShares,
     );
     const evaluatorKeySchedule = acceptedEvaluatorKeySchedule(
         setupContext,
-        profile,
+        setupParameters,
         commonRandomness,
         sameSecretConsistency,
         publicKeyShares,
         publicKeyShareProofs,
     );
-    const setupCommitmentSecurityCertificate =
-        acceptedSetupCommitmentSecurityCertificate(profile);
-    const setupProofAccountingCertificate =
-        acceptedSetupProofAccountingCertificate(profile);
-    const heSecurityCertificate = acceptedHeSecurityCertificate(profile);
     const setupTransportCertificate = acceptedSetupTransportCertificate(
         kernel,
-        profile,
+        setupParameters,
         vssCoefficientCommitmentMaterial,
     );
     const setupPackage: JsonRecord = {
         objectType: 'SetupPackage',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
         setupContext,
-        qShare: profile.qShare,
+        qShare: setupParameters.qShare,
         phaseTranscript,
         commonRandomness,
         vssCoefficientCommitments,
@@ -247,25 +228,10 @@ async function buildAcceptedShapedSetupPackage(
         galoisKeyShareBatches: [],
         trusteeEvaluationKeyProofs: {},
         evaluationKeys: {},
-        setupCommitmentSecurityCertificate,
-        setupCommitmentSecurityCertificateHash:
-            setupCommitmentSecurityCertificate.setupCommitmentSecurityCertificateHash,
         setupTransportCertificate,
         setupTransportCertificateHash:
             setupTransportCertificate.setupTransportCertificateHash,
-        setupProofAccountingCertificate,
-        setupProofAccountingCertificateHash:
-            setupProofAccountingCertificate.setupProofAccountingCertificateHash,
-        heSecurityCertificate,
-        heSecurityCertificateHash:
-            heSecurityCertificate.heSecurityCertificateHash,
     };
-    const activeStaticSetupTheoremCertificate =
-        acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-    setupPackage.activeStaticSetupTheoremCertificate =
-        activeStaticSetupTheoremCertificate;
-    setupPackage.activeStaticSetupTheoremCertificateHash =
-        activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
     rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
     return setupPackage;
@@ -273,17 +239,20 @@ async function buildAcceptedShapedSetupPackage(
 
 export async function acceptedShapedSetupPackage(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
 ): Promise<JsonRecord> {
-    const cacheKey = acceptedShapedSetupPackageCacheKey(kernel, profile);
+    const cacheKey = acceptedShapedSetupPackageCacheKey(
+        kernel,
+        setupParameters,
+    );
     let acceptedShapedSetupPackagePromise =
-        acceptedShapedSetupPackageCacheByProfileKey.get(cacheKey);
+        acceptedShapedSetupPackageCacheByParametersKey.get(cacheKey);
     if (acceptedShapedSetupPackagePromise === undefined) {
         acceptedShapedSetupPackagePromise = buildAcceptedShapedSetupPackage(
             kernel,
-            profile,
+            setupParameters,
         );
-        acceptedShapedSetupPackageCacheByProfileKey.set(
+        acceptedShapedSetupPackageCacheByParametersKey.set(
             cacheKey,
             acceptedShapedSetupPackagePromise,
         );

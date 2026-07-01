@@ -1,7 +1,7 @@
 use crate::{
     bgv::{
         modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod_fast, pow_mod, sub_mod_fast},
-        profile::{
+        parameters::{
             POLYNOMIAL_DEGREE, ROOT_PARAMETERS, RootParameters, root_parameters_for_modulus,
         },
     },
@@ -68,7 +68,7 @@ fn transform_negacyclic_in_place(
     let root_parameters = root_parameters_for_modulus(modulus).ok_or_else(|| {
         CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "modulus is not part of the selected BGV-RNS profile",
+            "modulus is not part of the selected BGV-RNS parameters",
         )
     })?;
     let plan = build_ntt_plan(root_parameters, values.len())?;
@@ -124,7 +124,7 @@ fn full_degree_ntt_plan(modulus: u64) -> CanonicalResult<&'static NttPlan> {
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "modulus is not part of the selected BGV-RNS profile",
+                "modulus is not part of the selected BGV-RNS parameters",
             )
         })
 }
@@ -326,7 +326,7 @@ mod tests {
     use crate::{
         bgv::{
             modular_arithmetic::sub_mod,
-            profile::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
+            parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME},
         },
         encoding::CanonicalResult,
     };

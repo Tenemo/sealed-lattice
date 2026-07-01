@@ -64,11 +64,8 @@ describe('accepted setup public package API in Node', () => {
             });
 
         expect(restoredState).toMatchObject({
-            ok: true,
             operation: 'restoreLocalTrusteeSetupState',
-            setupProfileId: 'CollectiveBgvSetup-v1',
             localStateVerification: {
-                ok: true,
                 operation: 'verifyLocalTrusteeSetupState',
                 localStateRoot: (
                     exportedState.localStateCommitment as Record<

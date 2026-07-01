@@ -1,6 +1,6 @@
 import {
     canonicalJson,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     verifySignedObjectSignature,
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
@@ -135,11 +135,7 @@ describe('VSS share verification record builders', () => {
                     ceremonyId: setupContext.ceremonyId,
                     manifestHash: setupContext.manifestHash,
                     rosterHash: setupContext.rosterHash,
-                    setupProfileHash: setupContext.setupProfileHash,
-                    qShareHash: setupContext.qShareHash,
-                    carryAwareVssShareRelationProfileHash:
-                        setupContext.carryAwareVssShareRelationProfileHash,
-                    commitmentProfileHash: setupContext.commitmentProfileHash,
+                    setupParametersHash: setupContext.setupParametersHash,
                     setupEpoch: setupContext.setupEpoch,
                     sourceTrusteeIdentity: 'trustee-1',
                     sourceTrusteeRosterPosition: 1,
@@ -182,7 +178,7 @@ describe('VSS share verification record builders', () => {
                 byteLength: firstRecord.acceptanceByteLength,
                 recoveryEpoch: 2,
                 deviceEpoch: 3,
-            }).ok,
+            }).isValid,
         ).toBe(true);
 
         const acceptanceSet = createVssShareAcceptanceSet({
@@ -198,17 +194,13 @@ describe('VSS share verification record builders', () => {
             ),
         ).toEqual([0, 1]);
         expect(acceptanceSet.vssShareAcceptanceRoot).toBe(
-            deriveProtocolHash('VssShareAcceptanceRoot', {
+            deriveCanonicalObjectHash({
                 objectType: 'VssShareAcceptanceSet',
                 objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                qShareHash: setupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    setupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash: setupContext.commitmentProfileHash,
+                setupParametersHash: setupContext.setupParametersHash,
                 setupEpoch: setupContext.setupEpoch,
                 privateVssEnvelopeCommitmentRoot: fixtureHash(
                     'private-envelope-set',
@@ -313,7 +305,7 @@ describe('VSS share verification record builders', () => {
                 byteLength: complaintRecord.complaintByteLength,
                 recoveryEpoch: 4,
                 deviceEpoch: 5,
-            }).ok,
+            }).isValid,
         ).toBe(true);
 
         const complaintSet = createVssComplaintSet({
@@ -324,17 +316,13 @@ describe('VSS share verification record builders', () => {
             complaintRecords: [complaintRecord],
         });
         expect(complaintSet.vssComplaintRoot).toBe(
-            deriveProtocolHash('VssComplaintRoot', {
+            deriveCanonicalObjectHash({
                 objectType: 'VssComplaintSet',
                 objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                qShareHash: setupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    setupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash: setupContext.commitmentProfileHash,
+                setupParametersHash: setupContext.setupParametersHash,
                 setupEpoch: setupContext.setupEpoch,
                 privateVssEnvelopeCommitmentRoot: fixtureHash(
                     'private-envelope-set',
@@ -366,7 +354,7 @@ describe('VSS share verification record builders', () => {
         );
         const failedEnvelopeReference = envelopeReference(1, 2);
         const localVerification = {
-            ok: false,
+            isValid: false,
             privateEnvelopeHash: failedEnvelopeReference.privateEnvelopeHash,
             localVerificationRoot: null,
             refusedObjects: [
@@ -393,17 +381,13 @@ describe('VSS share verification record builders', () => {
             'private-vss-opening-verification-failed',
         );
         expect(complaintRecord.complaintEvidenceRoot).toBe(
-            deriveProtocolHash('VssComplaintRoot', {
+            deriveCanonicalObjectHash({
                 objectType: 'VssShareComplaintEvidence',
                 objectVersion: 1,
                 ceremonyId: setupContext.ceremonyId,
                 manifestHash: setupContext.manifestHash,
                 rosterHash: setupContext.rosterHash,
-                setupProfileHash: setupContext.setupProfileHash,
-                qShareHash: setupContext.qShareHash,
-                carryAwareVssShareRelationProfileHash:
-                    setupContext.carryAwareVssShareRelationProfileHash,
-                commitmentProfileHash: setupContext.commitmentProfileHash,
+                setupParametersHash: setupContext.setupParametersHash,
                 setupEpoch: setupContext.setupEpoch,
                 sourceTrusteeIdentity:
                     failedEnvelopeReference.sourceTrusteeIdentity,
@@ -417,7 +401,6 @@ describe('VSS share verification record builders', () => {
                 privateVssEnvelopeCommitmentRoot,
                 privateEnvelopeHash:
                     failedEnvelopeReference.privateEnvelopeHash,
-                verificationStatus: 'failed-local-private-vss-opening',
                 privateEnvelopeHashFromLocalVerification:
                     failedEnvelopeReference.privateEnvelopeHash,
                 localVerificationRoot: null,

@@ -1,5 +1,4 @@
 import { BinaryChunkWriter } from '../binary-chunk-writer.js';
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
 import { setupProofTransportChunkSizeBytes } from '../setup-proof-material-transport.js';
 
 import {
@@ -280,8 +279,6 @@ const transportEvaluationKeyShareComponentMaterial = (
         componentMaterial: {
             objectType: evaluationKeyShareComponentMaterialTransportObjectType,
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: workItem.proofFamily,
             keySwitchMaterialEncoding:
                 evaluationKeyShareComponentMaterialEncoding,
@@ -419,8 +416,6 @@ export const createBinaryChunkedEvaluationKeyShareMaterialTransport = (
             objectType:
                 evaluationKeyShareComponentMaterialTransportSetObjectType,
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             componentMaterials,
         },
     };

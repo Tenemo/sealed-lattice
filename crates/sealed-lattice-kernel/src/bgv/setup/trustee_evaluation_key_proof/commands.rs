@@ -1,67 +1,19 @@
 use serde_json::{Value, json};
 
-use super::accounting::{
-    succinct_evaluation_key_proof_accounting_hash, succinct_evaluation_key_proof_accounting_value,
-    succinct_private_vss_share_accounting_hash, succinct_private_vss_share_accounting_value,
-    succinct_public_key_share_accounting_hash, succinct_public_key_share_accounting_value,
-    succinct_same_secret_linkage_anchor_accounting_hash,
-    succinct_same_secret_linkage_anchor_accounting_value,
-};
-use super::proof_codec::{
-    decode_trustee_evaluation_key_proof, encode_trustee_evaluation_key_proof,
-};
+use super::proof_codec::encode_trustee_evaluation_key_proof;
 use super::prover::prove_evaluation_key_share;
 use super::relation::{
     EvaluationKeyShareDescriptor, EvaluationKeyShareKind, SameSecretLinkageStatement,
     SuccinctSetupProofContext, SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyStatement,
     TrusteeEvaluationKeyWitness,
 };
-use super::verifier::verify_evaluation_key_share;
 use super::*;
-use crate::bgv::profile::DATA_PRIMES;
+use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::parse_setup_commitment_full_value;
-use crate::bgv::setup::setup_proof::SETUP_PROOF_PROFILE_ID;
-use crate::hashing::{derive_protocol_hash, to_hex};
+use crate::hashing::{derive_canonical_object_hash, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
-
-// The accounting object each migrated family carries on its command responses.
-// The argument machinery is shared, so only the family label and accounting
-// object differ.
-fn family_accounting_hash(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<String> {
-    match shape {
-        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-            succinct_same_secret_linkage_anchor_accounting_hash()
-        }
-        SuccinctSetupProofFamilyShape::PublicKeyShare => {
-            succinct_public_key_share_accounting_hash()
-        }
-        SuccinctSetupProofFamilyShape::PrivateVssShare => {
-            succinct_private_vss_share_accounting_hash()
-        }
-        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
-            succinct_evaluation_key_proof_accounting_hash()
-        }
-    }
-}
-
-fn family_accounting_value(shape: SuccinctSetupProofFamilyShape) -> CanonicalResult<Value> {
-    match shape {
-        SuccinctSetupProofFamilyShape::SameSecretLinkageAnchor => {
-            succinct_same_secret_linkage_anchor_accounting_value()
-        }
-        SuccinctSetupProofFamilyShape::PublicKeyShare => {
-            succinct_public_key_share_accounting_value()
-        }
-        SuccinctSetupProofFamilyShape::PrivateVssShare => {
-            succinct_private_vss_share_accounting_value()
-        }
-        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
-            succinct_evaluation_key_proof_accounting_value()
-        }
-    }
-}
 
 // Generate one trustee-batched evaluation-key proof from a JSON request. The
 // statement carries the ceremony context, the key descriptors with embedded
@@ -97,15 +49,6 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
-    let proof_randomness_source = read_string(request, "proofRandomnessSource")?;
-    if !matches!(
-        proof_randomness_source,
-        "fresh-csprng" | "development-deterministic-fixture"
-    ) {
-        return Err(invalid_succinct_setup_proof(
-            "proofRandomnessSource must be fresh-csprng or development-deterministic-fixture",
-        ));
-    }
     let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
         &statement,
         proof_randomness_seed_hex,
@@ -114,25 +57,14 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
 
     let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
-    let shape = statement.family_shape()?;
-
     Ok(json!({
-        "ok": true,
         "operation": "generateTrusteeEvaluationKeyProof",
         "proofFamily": statement.context.proof_family,
-        "proofAccountingHash": family_accounting_hash(shape)?,
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.limb_count(),
-        "keyCount": statement.keys.len(),
         "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
-        "proofRandomness": {
-            "source": proof_randomness_source,
-            "binding": "seed and nonce are bound to statement hash, proof family, trustee identity, roster position, and setup epoch before proof masking",
-            "nonceHash": proof_randomness_nonce_hash(proof_randomness_nonce_hex)?,
-            "retention": "proof randomness seed material is consumed for proof generation and is not returned"
-        },
     }))
 }
 
@@ -153,61 +85,16 @@ fn statement_bound_proof_randomness_seed_hex(
     )?;
     let statement_hash = to_hex(&statement.statement_hash());
 
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
-            "objectVersion": 1,
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": &statement.context.proof_family,
-            "statementHash": statement_hash,
-            "trusteeIdentity": &statement.context.trustee_identity,
-            "trusteeRosterPosition": statement.context.trustee_roster_position,
-            "setupEpoch": &statement.context.setup_epoch,
-            "proofRandomnessNonceHex": proof_randomness_nonce_hex,
-            "proofRandomnessSeedHex": to_hex(&seed_bytes),
-        }),
-    )
-}
-
-fn proof_randomness_nonce_hash(proof_randomness_nonce_hex: &str) -> CanonicalResult<String> {
-    let nonce_bytes = decode_exact_hex_bytes(
-        proof_randomness_nonce_hex,
-        PROOF_RANDOMNESS_NONCE_BYTES,
-        "proofRandomnessNonceHex",
-    )?;
-
-    derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &json!({
-            "objectType": "TrusteeEvaluationKeyProofRandomnessNonceHash",
-            "objectVersion": 1,
-            "nonceBytesHex": to_hex(&nonce_bytes),
-        }),
-    )
-}
-
-pub(crate) fn verify_trustee_evaluation_key_proof_from_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let statement = statement_from_request(request)?;
-    let proof_bytes = read_hex_bytes(request, "proofBytesHex")?;
-    let proof = decode_trustee_evaluation_key_proof(&statement, &proof_bytes)?;
-    verify_evaluation_key_share(&statement, &proof)?;
-    let shape = statement.family_shape()?;
-
-    Ok(json!({
-        "ok": true,
-        "operation": "verifyTrusteeEvaluationKeyProof",
-        "proofFamily": statement.context.proof_family,
-        "proofAccountingHash": family_accounting_hash(shape)?,
-        "proofAccounting": family_accounting_value(shape)?,
-        "statementHash": to_hex(&statement.statement_hash()),
-        "limbCount": statement.limb_count(),
-        "keyCount": statement.keys.len(),
-        "sameSecretLinkageIncluded": statement.same_secret_linkage.is_some(),
-        "proofByteLength": proof_bytes.len(),
+    derive_canonical_object_hash(&json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomnessBinding",
+        "objectVersion": 1,
+        "proofFamily": &statement.context.proof_family,
+        "statementHash": statement_hash,
+        "trusteeIdentity": &statement.context.trustee_identity,
+        "trusteeRosterPosition": statement.context.trustee_roster_position,
+        "setupEpoch": &statement.context.setup_epoch,
+        "proofRandomnessNonceHex": proof_randomness_nonce_hex,
+        "proofRandomnessSeedHex": to_hex(&seed_bytes),
     }))
 }
 

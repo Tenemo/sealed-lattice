@@ -1,9 +1,4 @@
 import {
-    cloneJsonRecord,
-    firstProfileDecryptionThreshold,
-    firstProfileParticipantCount,
-    jsonRecord,
-    protocolHashPattern,
     setupTransportChunkCount,
     setupTransportChunkSizeBytes,
     setupTransportTotalByteLength,
@@ -13,7 +8,7 @@ import {
 import { publicPrivateVssEnvelopeCommitmentSet } from './common-randomness.js';
 
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
@@ -33,68 +28,19 @@ export function rebindCollectiveSetupPackageHash(
     setupPackage: JsonRecord,
 ): void {
     delete setupPackage.setupPackageHash;
-    setupPackage.setupPackageHash = kernel.deriveProtocolHash({
-        namespace: 'SetupPackageHash',
+    setupPackage.setupPackageHash = kernel.deriveCanonicalObjectHash({
         value: setupPackageHashInput(setupPackage),
     });
 }
 
-export function acceptedSetupCommitmentSecurityCertificate(
-    profile: BgvCollectiveSetupProfileDescription,
-): JsonRecord {
-    const acceptedCertificateTemplates = jsonRecord(
-        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
-        'profile.acceptedCertificateTemplates',
-    );
-
-    return cloneJsonRecord(
-        jsonRecord(
-            acceptedCertificateTemplates.setupCommitmentSecurityCertificate,
-            'profile.acceptedCertificateTemplates.setupCommitmentSecurityCertificate',
-        ),
-    );
-}
-
-export function acceptedSetupProofAccountingCertificate(
-    profile: BgvCollectiveSetupProfileDescription,
-): JsonRecord {
-    const acceptedCertificateTemplates = jsonRecord(
-        (profile as unknown as JsonRecord).acceptedCertificateTemplates,
-        'profile.acceptedCertificateTemplates',
-    );
-
-    return cloneJsonRecord(
-        jsonRecord(
-            acceptedCertificateTemplates.setupProofAccountingCertificate,
-            'profile.acceptedCertificateTemplates.setupProofAccountingCertificate',
-        ),
-    );
-}
-
-export function acceptedHeSecurityCertificate(
-    setupProfile: BgvCollectiveSetupProfileDescription,
-): JsonRecord {
-    const acceptedCertificateTemplates = jsonRecord(
-        (setupProfile as unknown as JsonRecord).acceptedCertificateTemplates,
-        'setupProfile.acceptedCertificateTemplates',
-    );
-
-    return cloneJsonRecord(
-        jsonRecord(
-            acceptedCertificateTemplates.heSecurityCertificate,
-            'setupProfile.acceptedCertificateTemplates.heSecurityCertificate',
-        ),
-    );
-}
-
 export function acceptedSetupTransportCertificate(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    parameters: BgvCollectiveSetupParametersDescription,
     vssCoefficientCommitmentMaterial: JsonRecord,
 ): JsonRecord {
-    const vssObjectFullObjectHash = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportChunkManifestRoot',
+    const vssObjectFullObjectHash = kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'SetupTransportChunkManifestRoot',
             fixture: 'setup-transport-full-object-hash',
             totalByteLength: setupTransportTotalByteLength,
         },
@@ -102,17 +48,17 @@ export function acceptedSetupTransportCertificate(
     const chunkHashes = Array.from(
         { length: setupTransportChunkCount },
         (_unused, chunkIndex) =>
-            kernel.deriveProtocolHash({
-                namespace: 'SetupTransportChunkManifestRoot',
+            kernel.deriveCanonicalObjectHash({
                 value: {
+                    objectType: 'SetupTransportChunkManifestRoot',
                     fixture: 'setup-transport-chunk-hash',
                     chunkIndex,
                 },
             }),
     );
-    const vssObjectChunkRoot = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportChunkManifestRoot',
+    const vssObjectChunkRoot = kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'SetupTransportChunkManifestRoot',
             fixture: 'setup-transport-vss-object-chunk-root',
             totalByteLength: setupTransportTotalByteLength,
         },
@@ -134,54 +80,11 @@ export function acceptedSetupTransportCertificate(
         encoding: 'binary',
         loadingPolicy: 'stream-verified-before-object-use',
     };
-    // The certificate-level hashes are the verifier-recomputed aggregates over
-    // the transported-object set.
-    const fullObjectHash = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportFullObjectSetHash',
-        value: {
-            objectType: 'SetupTransportFullObjectSet',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
-            transportedObjects: [
-                {
-                    objectName: transportedVssObject.objectName,
-                    objectRole: transportedVssObject.objectRole,
-                    objectRoot: transportedVssObject.objectRoot,
-                    byteLength: transportedVssObject.byteLength,
-                    chunkStartIndex: transportedVssObject.chunkStartIndex,
-                    chunkCount: transportedVssObject.chunkCount,
-                    chunkRoot: transportedVssObject.chunkRoot,
-                    fullObjectHash: transportedVssObject.fullObjectHash,
-                },
-            ],
-            totalByteLength: setupTransportTotalByteLength,
-            chunkCount: setupTransportChunkCount,
-            chunkHashes,
-        },
-    });
-    const chunkRoot = kernel.deriveProtocolHash({
-        namespace: 'SetupTransportChunkManifestRoot',
-        value: {
-            objectType: 'SetupTransportChunkManifest',
-            objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            transportProfileId:
-                'sealed-lattice-setup-binary-chunked-transport-v1',
-            chunkSizeBytes: setupTransportChunkSizeBytes,
-            chunkCount: setupTransportChunkCount,
-            totalByteLength: setupTransportTotalByteLength,
-            chunkHashes,
-            fullObjectHash,
-        },
-    });
     const certificate = {
         objectType: 'SetupTransportCertificate',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        transportProfileId: 'sealed-lattice-setup-binary-chunked-transport-v1',
-        setupTransportProfileHash: profile.setupTransportProfileHash,
+        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
+        setupParametersHash: parameters.setupParametersHash,
         largeObjectEncoding: 'binary',
         chunking: 'required',
         chunkSizeBytes: setupTransportChunkSizeBytes,
@@ -194,140 +97,11 @@ export function acceptedSetupTransportCertificate(
         resumePolicy: 'chunk-index-checkpointed-by-hash',
         lazyLoadingPolicy: 'root-addressed-large-object-loading',
         transportedObjects: [transportedVssObject],
-        chunkHashes,
-        chunkRoot,
-        fullObjectHash,
     };
 
     return {
         ...certificate,
-        setupTransportCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'SetupTransportCertificateHash',
-            value: certificate,
-        }),
-    };
-}
-
-function optionalHashFromRecord(
-    record: JsonRecord,
-    fieldName: string,
-): string | null {
-    const value = record[fieldName];
-    if (value === undefined) {
-        return null;
-    }
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
-        throw new Error(`${fieldName} must be a protocol hash.`);
-    }
-
-    return value;
-}
-
-function optionalNestedHashFromRecord(
-    record: JsonRecord,
-    objectFieldName: string,
-    hashFieldName: string,
-): string | null {
-    const objectValue = record[objectFieldName];
-    if (
-        typeof objectValue !== 'object' ||
-        objectValue === null ||
-        Array.isArray(objectValue)
-    ) {
-        return null;
-    }
-
-    return optionalHashFromRecord(objectValue as JsonRecord, hashFieldName);
-}
-
-export function acceptedActiveStaticSetupTheoremCertificate(
-    kernel: TranscriptCoreKernel,
-    setupPackage: JsonRecord,
-): JsonRecord {
-    const setupContext = setupPackage.setupContext as JsonRecord;
-    const certificate = {
-        objectType: 'ActiveStaticSetupTheoremCertificate',
-        objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        ceremonyId: setupContext.ceremonyId,
-        manifestHash: setupContext.manifestHash,
-        rosterHash: setupContext.rosterHash,
-        setupProfileHash: setupContext.setupProfileHash,
-        qShareHash: setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: setupContext.commitmentProfileHash,
-        setupEpoch: setupContext.setupEpoch,
-        adversaryModel: {
-            secretConfidentialityCorruptTrusteeBound:
-                firstProfileDecryptionThreshold - 1,
-            fullRosterSetupCompletionRequired: true,
-        },
-        livenessModel: {
-            model: 'secure-with-abort',
-            setupCompletionQuorum: firstProfileParticipantCount,
-            participantCount: firstProfileParticipantCount,
-        },
-        dependencyHashes: {
-            setupCommitmentSecurityCertificateHash:
-                setupPackage.setupCommitmentSecurityCertificateHash,
-            setupTransportCertificateHash:
-                setupPackage.setupTransportCertificateHash,
-            setupProofAccountingCertificateHash:
-                setupPackage.setupProofAccountingCertificateHash,
-            heSecurityCertificateHash: setupPackage.heSecurityCertificateHash,
-            setupKeyCorrectnessCertificateHash: optionalHashFromRecord(
-                setupPackage,
-                'setupKeyCorrectnessCertificateHash',
-            ),
-        },
-        terminalRoots: {
-            thresholdShareCommitmentRoot: optionalHashFromRecord(
-                setupPackage,
-                'thresholdShareCommitmentRoot',
-            ),
-            sameSecretProofSetRoot: optionalNestedHashFromRecord(
-                setupPackage,
-                'sameSecretProofs',
-                'sameSecretProofSetRoot',
-            ),
-            publicKeyShareMaterialSetRoot: optionalNestedHashFromRecord(
-                setupPackage,
-                'publicKeyShareMaterial',
-                'publicKeyShareMaterialSetRoot',
-            ),
-            publicKeyShareSuccinctProofSetRoot: optionalNestedHashFromRecord(
-                setupPackage,
-                'publicKeyShareSuccinctProofs',
-                'publicKeyShareSuccinctProofSetRoot',
-            ),
-            collectivePublicKeyRoot: optionalNestedHashFromRecord(
-                setupPackage,
-                'collectivePublicKey',
-                'collectivePublicKeyRoot',
-            ),
-            evaluatorKeyScheduleRoot: optionalNestedHashFromRecord(
-                setupPackage,
-                'evaluatorKeySchedule',
-                'evaluatorKeyScheduleRoot',
-            ),
-            evaluationKeySetHash: optionalNestedHashFromRecord(
-                setupPackage,
-                'evaluationKeys',
-                'evaluationKeySetHash',
-            ),
-            publicEvaluationKeyMaterialRoot: optionalNestedHashFromRecord(
-                setupPackage,
-                'evaluationKeys',
-                'publicEvaluationKeyMaterialRoot',
-            ),
-        },
-    };
-
-    return {
-        ...certificate,
-        activeStaticSetupTheoremCertificateHash: kernel.deriveProtocolHash({
-            namespace: 'ActiveStaticSetupTheoremCertificateHash',
+        setupTransportCertificateHash: kernel.deriveCanonicalObjectHash({
             value: certificate,
         }),
     };

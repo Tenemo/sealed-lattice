@@ -64,7 +64,6 @@ pub(super) fn parse_direct_ballot_relation_proof(
         score_linear_commitment,
         support_commitment,
         response_vector,
-        relation_commitment_hash,
     })
 }
 
@@ -608,14 +607,6 @@ pub(super) fn usize_to_u64_bytes(value: usize) -> CanonicalResult<[u8; 8]> {
             )
         })?
         .to_le_bytes())
-}
-
-pub(super) fn ceil_log2_usize(value: usize) -> u32 {
-    if value <= 1 {
-        0
-    } else {
-        usize::BITS - (value - 1).leading_zeros()
-    }
 }
 
 pub(super) fn invalid_direct_ballot_relation_proof(message: impl Into<String>) -> CanonicalError {

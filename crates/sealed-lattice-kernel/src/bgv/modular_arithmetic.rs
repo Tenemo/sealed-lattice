@@ -231,7 +231,7 @@ pub(crate) fn is_prime_for_tests(value: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{add_mod, inverse_mod, mul_mod, pow_mod, sub_mod};
-    use crate::bgv::profile::{DATA_PRIMES, SPECIAL_PRIME};
+    use crate::bgv::parameters::{DATA_PRIMES, SPECIAL_PRIME};
 
     #[test]
     fn modular_arithmetic_handles_boundaries_for_every_selected_prime() {

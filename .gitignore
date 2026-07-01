@@ -13,9 +13,6 @@ dist/
 target/
 .turbo/
 *.tsbuildinfo
-docs/.astro/
-docs/dist/
-docs/src/content/docs/api/reference/
 .vitest-attachments/
 **/__screenshots__/
 .lighthouseci/

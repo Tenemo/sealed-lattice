@@ -1,5 +1,7 @@
 use super::*;
+
 use crate::bgv::evaluator::top_k::SELECTED_EVALUATOR_WORKING_LEVEL;
+use crate::hashing::derive_canonical_object_hash;
 
 const PUBLIC_KEY_SWITCH_COMPONENT_VECTOR_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/public-key-switch-component-vector-v1";
@@ -104,7 +106,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
                 .get(&(*rotation, key.level))
                 .ok_or_else(|| {
                     CanonicalError::new(
-                        CanonicalErrorCode::ProfileComponentMismatch,
+                        CanonicalErrorCode::ComponentMismatch,
                         "requested public rotation key is not part of the selected setup rotation set",
                     )
                 })?;
@@ -125,7 +127,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_key_material_from_request
         Value::String(PUBLIC_EVALUATION_KEY_COMPONENT_ENCODING.to_string());
     material["relinearizationKeys"] = Value::Array(relinearization_keys);
     material["rotationKeys"] = Value::Array(rotation_keys);
-    let public_material_hash = derive_protocol_hash("EvaluationKeySetHash", &material)?;
+    let public_material_hash = derive_canonical_object_hash(&material)?;
     material["publicEvaluationKeyMaterialHash"] = Value::String(public_material_hash);
 
     Ok(material)
@@ -171,7 +173,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
             .get(&(rotation, level))
             .ok_or_else(|| {
                 CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "requested public rotation key is not part of the selected setup rotation set",
                 )
             })?;
@@ -179,7 +181,7 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
         key.drop_component_a_ntt();
         if rotation_keys.insert(rotation, key).is_some() {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "rotation key requests must not repeat a rotation element",
             ));
         }
@@ -187,7 +189,6 @@ pub(crate) fn generate_passive_setup_public_evaluation_keys_from_request(
     let record = json!({
         "objectType": "PreparedBgvPublicEvaluationKeyMaterial",
         "objectVersion": 1,
-        "setupProfileId": PASSIVE_SETUP_PROFILE_ID,
         "setupPackageHash": string_at_path(setup_package, &["setupPackageHash"])?,
         "collectivePublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "collectivePublicKeyRoot"])?,
         "bgvPublicKeyRoot": string_at_path(setup_package, &["collectivePublicKey", "bgvPublicKeyRoot"])?,
@@ -223,16 +224,10 @@ pub(crate) fn public_evaluation_keys_from_material(
     )?;
     if usize_at_path(material, &["objectVersion"])? != 1 {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
+            CanonicalErrorCode::ComponentMismatch,
             "public evaluation-key material object version is unsupported",
         ));
     }
-    compare_string_at_path(
-        material,
-        &["setupProfileId"],
-        PASSIVE_SETUP_PROFILE_ID,
-        "public evaluation-key material setup profile",
-    )?;
     compare_string_at_path(
         material,
         &["componentEncoding"],
@@ -300,7 +295,7 @@ pub(crate) fn public_evaluation_keys_from_material(
     compare_hash_at_path(
         material,
         &["publicEvaluationKeyMaterialHash"],
-        &derive_protocol_hash("EvaluationKeySetHash", &hash_input)?,
+        &derive_canonical_object_hash(&hash_input)?,
         "public evaluation-key material hash",
     )?;
 
@@ -314,14 +309,14 @@ pub(crate) fn public_evaluation_keys_from_material(
             || seed != seed_material.relinearization_key_seed
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public relinearization key entry does not match the selected key schedule",
             ));
         }
         let key = public_key_switch_material_entry_to_key(entry, "relinearization", None)?;
         if relinearization_key.replace(key).is_some() {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public evaluation-key material repeats a relinearization key entry",
             ));
         }
@@ -345,14 +340,14 @@ pub(crate) fn public_evaluation_keys_from_material(
             != Some(seed)
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public rotation key seed does not match the setup key stream",
             ));
         }
         let key = public_key_switch_material_entry_to_key(entry, "rotation", Some(rotation))?;
         if rotation_keys.insert(rotation, key).is_some() {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public evaluation-key material repeats a rotation key",
             ));
         }
@@ -382,7 +377,7 @@ pub(super) fn read_public_evaluation_key_rotation_requests(
                     let level = usize_at_path(entry, &["level"])?;
                     if !seen.insert((rotation, level)) {
                         return Err(CanonicalError::new(
-                            CanonicalErrorCode::ProfileComponentMismatch,
+                            CanonicalErrorCode::ComponentMismatch,
                             "rotationKeys must not repeat a rotation and level",
                         ));
                     }
@@ -476,14 +471,14 @@ fn public_key_switch_material_entry_to_key(
         Some(rotation) => {
             if usize_at_path(entry, &["rotation"])? != rotation {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "public rotation key material has the wrong rotation",
                 ));
             }
         }
         None if !entry.get("rotation").is_none_or(Value::is_null) => {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public relinearization key material must not carry a rotation",
             ));
         }
@@ -500,7 +495,7 @@ fn public_key_switch_material_entry_to_key(
         let digit_index = usize_at_path(digit, &["digitIndex"])?;
         if digit_index != component_b_by_digit.len() {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public key-switch material digits must be in canonical order",
             ));
         }
@@ -509,20 +504,20 @@ fn public_key_switch_material_entry_to_key(
             let limb_index = usize_at_path(limb, &["limbIndex"])?;
             if limb_index != component_b_by_limb.len() {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "public key-switch material limbs must be in canonical order",
                 ));
             }
             if unsigned_at_path(limb, &["modulus"])? != DATA_PRIMES[limb_index] {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "public key-switch material limb modulus does not match the selected data basis",
                 ));
             }
             let coefficients = coefficient_vector_from_le_hex(
                 string_at_path(limb, &["componentZeroBLeHex"])?,
                 POLYNOMIAL_DEGREE,
-                "public key-switch coefficient vector byte length does not match the selected BGV profile",
+                "public key-switch coefficient vector byte length does not match the selected BGV parameters",
             )?;
             compare_hash_at_path(
                 limb,

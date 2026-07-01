@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_hash(
     coefficients: &[u64],
 ) -> String {
@@ -17,26 +19,21 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_vector_root(
     ring_degree: usize,
     component_vector_entries: &[Value],
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "EvaluationKeyShareComponentVectorRoot",
-        &json!({
-            "objectType": "EvaluationKeyShareComponentVectorSet",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": proof_family.proof_family(),
-            "keySwitchDomain": key_switch_domain,
-            "keySwitchSeedHex": key_switch_seed_hex,
-            "level": level,
-            "ringDegree": ring_degree,
-            // The gadget decomposition base is the RNS base itself: for a key at
-            // this level there is exactly one digit per active prime, so the
-            // component matrix is square with digitCount = rnsLimbCount = level + 1.
-            "digitCount": level + 1,
-            "rnsLimbCount": level + 1,
-            "componentVectors": component_vector_entries,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "EvaluationKeyShareComponentVectorSet",
+        "objectVersion": 1,
+        "proofFamily": proof_family.proof_family(),
+        "keySwitchDomain": key_switch_domain,
+        "keySwitchSeedHex": key_switch_seed_hex,
+        "level": level,
+        "ringDegree": ring_degree,
+        // The gadget decomposition base is the RNS base itself: for a key at
+        // this level there is exactly one digit per active prime, so the
+        // component matrix is square with digitCount = rnsLimbCount = level + 1.
+        "digitCount": level + 1,
+        "rnsLimbCount": level + 1,
+        "componentVectors": component_vector_entries,
+    }))
 }
 
 #[cfg(test)]
@@ -213,22 +210,17 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_transport_h
             "evaluation-key component material chunk count does not fit u64",
         )
     })?;
-    let chunk_root = derive_protocol_hash(
-        "EvaluationKeyShareComponentMaterialChunkRoot",
-        &json!({
-            "objectType": "EvaluationKeyShareComponentMaterialChunkManifest",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": proof_family.proof_family(),
-            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )?;
+    let chunk_root = derive_canonical_object_hash(&json!({
+        "objectType": "EvaluationKeyShareComponentMaterialChunkManifest",
+        "objectVersion": 1,
+        "proofFamily": proof_family.proof_family(),
+        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))?;
 
     Ok(EvaluationKeyShareComponentMaterialTransportHashes {
         full_object_hash,
@@ -301,9 +293,7 @@ fn stored_verified_evaluation_key_share_component_material_chunks(
 
 #[cfg(test)]
 fn verified_evaluation_key_share_component_material_store_directory() -> PathBuf {
-    PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
+    super::super::accepted_setup_final_package_material_store_checkpoint_directory()
         .join("evaluation-key-component-material")
 }
 
@@ -392,8 +382,6 @@ fn verified_evaluation_key_share_component_material_store_metadata(
     json!({
         "objectType": "VerifiedEvaluationKeyShareComponentMaterialStoreEntry",
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
         "keySwitchComponentMaterialRoot": material_root,
         "totalByteLength": transport_hashes.total_byte_length,
@@ -486,35 +474,30 @@ pub(in crate::bgv::setup) fn evaluation_key_share_component_material_reference_r
     let digit_count = level.checked_add(1).ok_or_else(|| {
         invalid_evaluation_key_share_material("evaluation-key digit count overflowed")
     })?;
-    derive_protocol_hash(
-        "EvaluationKeyShareComponentMaterialRoot",
-        &json!({
-            "objectType": "EvaluationKeyShareComponentMaterialReference",
-            "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": proof_family.proof_family(),
-            "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
-            "trusteeIdentity": string_field(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "keySwitchDomain": string_field(proof_record, "keySwitchDomain")?,
-            "keySwitchSeedHex": string_field(proof_record, "keySwitchSeedHex")?,
-            "level": level,
-            "ringDegree": value_u64(proof_record, "ringDegree")?,
-            "digitCount": digit_count,
-            "rnsLimbCount": digit_count,
-            "keySwitchComponentVectorRoot": string_field(
-                proof_record,
-                "keySwitchComponentVectorRoot",
-            )?,
-            "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
-            "chunkCount": transport_hashes.chunk_hashes.len(),
-            "totalByteLength": transport_hashes.total_byte_length,
-            "fullObjectHash": transport_hashes.full_object_hash,
-            "chunkRoot": transport_hashes.chunk_root,
-            "chunkHashes": transport_hashes.chunk_hashes,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "EvaluationKeyShareComponentMaterialReference",
+        "objectVersion": 1,
+        "proofFamily": proof_family.proof_family(),
+        "keySwitchMaterialEncoding": EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+        "trusteeIdentity": string_field(proof_record, "trusteeIdentity")?,
+        "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
+        "keySwitchDomain": string_field(proof_record, "keySwitchDomain")?,
+        "keySwitchSeedHex": string_field(proof_record, "keySwitchSeedHex")?,
+        "level": level,
+        "ringDegree": value_u64(proof_record, "ringDegree")?,
+        "digitCount": digit_count,
+        "rnsLimbCount": digit_count,
+        "keySwitchComponentVectorRoot": string_field(
+            proof_record,
+            "keySwitchComponentVectorRoot",
+        )?,
+        "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "chunkCount": transport_hashes.chunk_hashes.len(),
+        "totalByteLength": transport_hashes.total_byte_length,
+        "fullObjectHash": transport_hashes.full_object_hash,
+        "chunkRoot": transport_hashes.chunk_root,
+        "chunkHashes": transport_hashes.chunk_hashes,
+    }))
 }
 
 // Each chunk is a length-framed hash part here (unlike the streamed setup-proof
@@ -726,12 +709,6 @@ fn component_b_vectors_from_transported_material(
     if material_set.get("objectType").and_then(Value::as_str)
         != Some(EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_TRANSPORT_SET_OBJECT_TYPE)
         || material_set.get("objectVersion").and_then(Value::as_u64) != Some(1)
-        || material_set.get("setupProfileId").and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || material_set
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
     {
         return Err(invalid_evaluation_key_share_material(
             "transported evaluation-key component material set header is invalid",
@@ -815,14 +792,6 @@ fn verify_evaluation_key_share_component_material_header(
             .and_then(Value::as_u64)
             != Some(1)
         || component_material
-            .get("setupProfileId")
-            .and_then(Value::as_str)
-            != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-        || component_material
-            .get("setupProofProfileId")
-            .and_then(Value::as_str)
-            != Some(SETUP_PROOF_PROFILE_ID)
-        || component_material
             .get("proofFamily")
             .and_then(Value::as_str)
             != Some(proof_family.proof_family())
@@ -871,7 +840,7 @@ fn verify_evaluation_key_share_component_material_header(
 fn evaluation_key_share_component_material_chunks(value: &Value) -> CanonicalResult<Vec<Vec<u8>>> {
     if value_u64(value, "chunkSizeBytes")? != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES {
         return Err(invalid_evaluation_key_share_material(
-            "transported evaluation-key component material chunkSizeBytes must match the setup transport profile",
+            "transported evaluation-key component material chunkSizeBytes must match the setup transport parameters",
         ));
     }
     let expected_chunk_count = usize::try_from(value_u64(value, "chunkCount")?).map_err(|_| {

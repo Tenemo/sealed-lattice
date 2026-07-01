@@ -137,7 +137,6 @@ fn verify_terminal_vss_material_handle_policy(request: &Value) -> CanonicalResul
     let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial")
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageVerification"),
             vec!["transportedVssCoefficientCommitmentMaterial".to_string()],
             Vec::new(),
@@ -156,7 +155,6 @@ fn verify_terminal_vss_material_handle_policy(request: &Value) -> CanonicalResul
         .is_none()
     {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("setupPackageVerification"),
             vec!["verifiedVssCoefficientCommitmentMaterial".to_string()],
             Vec::new(),
@@ -238,7 +236,6 @@ fn terminal_transport_policy_refusal(
     object_path: impl Into<String>,
 ) -> CanonicalResult<Value> {
     verification_response(
-        VerifierStatus::Refused,
         Some("setupPackageVerification"),
         Vec::new(),
         vec![Refusal::new(reason_code, message, object_path)],

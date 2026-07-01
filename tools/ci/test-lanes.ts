@@ -6,7 +6,7 @@ export const nodeHookTimeoutMs = 240_000;
 export const nodeTestLaneValues = [
     'fast',
     'protocol',
-    'kernel',
+    'kernel-fast',
     'kernel-heavy',
 ] as const;
 
@@ -51,12 +51,12 @@ export const nodeTestLaneDefinitions = {
         projectName: 'node-protocol',
         testTimeout: nodeKernelHeavyTestTimeoutMs,
     },
-    kernel: {
-        commandDescription: 'Run kernel Node tests',
+    'kernel-fast': {
+        commandDescription: 'Run fast kernel Node tests',
         exclude: heavyKernelNodeTestGlobs,
         fileParallelism: false,
         include: kernelNodeTestGlobs,
-        projectName: 'node-kernel',
+        projectName: 'node-kernel-fast',
         testTimeout: nodeKernelHeavyTestTimeoutMs,
     },
     'kernel-heavy': {
@@ -71,14 +71,14 @@ export const nodeTestLaneDefinitions = {
 export const nodeTestProjectDefinitions = [
     nodeTestLaneDefinitions.fast,
     nodeTestLaneDefinitions.protocol,
-    nodeTestLaneDefinitions.kernel,
+    nodeTestLaneDefinitions['kernel-fast'],
     nodeTestLaneDefinitions['kernel-heavy'],
 ] as const;
 
 export const defaultNodeTestLanes = [
     'fast',
     'protocol',
-    'kernel',
+    'kernel-fast',
     'kernel-heavy',
 ] as const satisfies readonly NodeTestLane[];
 

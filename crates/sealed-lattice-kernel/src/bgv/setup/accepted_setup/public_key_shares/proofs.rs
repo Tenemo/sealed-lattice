@@ -1,6 +1,8 @@
 use super::common::*;
+
 use super::succinct_proofs::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 pub(in super::super) fn verify_public_key_share_proofs(
     setup_package: &Value,
@@ -15,7 +17,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
         }
 
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareProofs".to_string()],
             Vec::new(),
@@ -59,14 +60,10 @@ pub(in super::super) fn verify_public_key_share_proofs(
             "setupPackage.publicKeyShareProofs",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "public-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
-                "publicKeyShareProofSetProfileMismatch",
+                "publicKeyShareProofSetParametersMismatch",
                 format!("publicKeyShareProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareProofs.{field_name}"),
             )?));
@@ -146,7 +143,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
         )?));
     }
     let mut seen_roster_positions = BTreeSet::new();
-    let mut public_key_share_proof_roots = Vec::new();
     for proof_record in proof_records {
         if let Some(response) = verify_public_key_share_proof_record(
             proof_record,
@@ -158,20 +154,6 @@ pub(in super::super) fn verify_public_key_share_proofs(
         )? {
             return Ok(Some(response));
         }
-        public_key_share_proof_roots.push(json!({
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "publicKeyShareProofRoot": value_string(proof_record, "publicKeyShareProofRoot")?,
-        }));
-    }
-    if proof_set.get("publicKeyShareProofRoots")
-        != Some(&Value::Array(public_key_share_proof_roots))
-    {
-        return Ok(Some(public_key_share_proof_refusal(
-            "publicKeyShareProofRootListMismatch",
-            "publicKeyShareProofs.publicKeyShareProofRoots must match the ordered proof records",
-            "setupPackage.publicKeyShareProofs.publicKeyShareProofRoots",
-        )?));
     }
 
     let Some(public_key_share_proof_set_root) = proof_set
@@ -193,7 +175,7 @@ pub(in super::super) fn verify_public_key_share_proofs(
         .as_object_mut()
         .expect("public-key share proof set object was checked")
         .remove("publicKeyShareProofSetRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_proof_set_root != expected_root {
         return Ok(Some(public_key_share_proof_refusal(
             "publicKeyShareProofSetRootMismatch",
@@ -243,14 +225,10 @@ fn verify_public_key_share_proof_record(
             "setupPackage.publicKeyShareProofs.proofRecords",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", "public-key-share"),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", "public-key-share")] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(public_key_share_proof_refusal(
-                "publicKeyShareProofProfileMismatch",
+                "publicKeyShareProofParametersMismatch",
                 format!("public-key share proof {field_name} must be {expected_value}"),
                 format!("setupPackage.publicKeyShareProofs.proofRecords.{field_name}"),
             )?));
@@ -338,7 +316,6 @@ fn verify_public_key_share_proof_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShareProofs.proofRecords.publicKeyShareProofRoot".to_string()],
             Vec::new(),
@@ -354,7 +331,7 @@ fn verify_public_key_share_proof_record(
         .as_object_mut()
         .expect("public-key share proof object was checked")
         .remove("publicKeyShareProofRoot");
-    let expected_root = derive_protocol_hash("PublicKeyShareProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if public_key_share_proof_root != expected_root {
         return Ok(Some(public_key_share_proof_refusal(
             "publicKeyShareProofRootMismatch",
@@ -371,7 +348,6 @@ pub(super) fn verify_public_key_share_limb_hashes(
 ) -> CanonicalResult<Option<Value>> {
     let Some(limb_values) = limb_values else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb".to_string()],
             Vec::new(),
@@ -402,7 +378,6 @@ pub(super) fn verify_public_key_share_limb_hashes(
             .and_then(Value::as_str)
         else {
             return Ok(Some(verification_response(
-                VerifierStatus::Pending,
                 Some("publicKeyShareProofs"),
                 vec![
                     "publicKeyShares.shareRecords.shareCoefficientVectorHash512ByLimb.coefficientVectorHash512"
@@ -460,7 +435,7 @@ fn public_key_share_bindings_from_package(
             .is_some()
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public-key share records contain a duplicate roster position",
             ));
         }

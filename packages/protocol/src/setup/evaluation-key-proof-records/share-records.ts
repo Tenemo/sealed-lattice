@@ -1,9 +1,8 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
+import { assertContextMatches, contextFields } from '../common-fields.js';
 import { type EvaluatorKeySchedule } from '../evaluator-key-schedule.js';
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
-import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
     type EvaluationKeyProofCommonInput,
@@ -20,7 +19,6 @@ import {
     type RelinearizationKeyShareRoundsInput,
     type SameSecretProofReference,
     evaluationKeyShareComponentMaterialEncoding,
-    setupContextFieldNames,
 } from './constants-and-types.js';
 import {
     assertLowercaseHex,
@@ -193,37 +191,6 @@ const shareMaterialRecordFields = (
           }),
 });
 
-const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
-    setupEpoch: setupContext.setupEpoch,
-});
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
-    }
-};
-
 const contributionKey = (
     level: number,
     trusteeRosterPosition: number,
@@ -234,11 +201,9 @@ const relinearizationKeySwitchSeed = (
     round: 'round-one' | 'round-two',
     level: number,
 ): ProtocolHash =>
-    deriveProtocolHash('RelinearizationKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -252,11 +217,9 @@ const galoisKeySwitchSeed = (
     rotation: number,
     level: number,
 ): ProtocolHash =>
-    deriveProtocolHash('GaloisKeyShareSeed', {
+    deriveCanonicalObjectHash({
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -503,8 +466,6 @@ export const createRelinearizationKeyShareRounds = (
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundOne',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -529,10 +490,8 @@ export const createRelinearizationKeyShareRounds = (
                     roundOneShareRoot: contribution.roundOneShareRoot,
                     ...shareMaterialRecordFields(contribution.shareMaterial),
                 } as JsonRecord;
-                const roundOneRecordRoot = deriveProtocolHash(
-                    'RelinearizationRoundOneRecordRoot',
-                    recordWithoutRoot,
-                );
+                const roundOneRecordRoot =
+                    deriveCanonicalObjectHash(recordWithoutRoot);
                 roundOneShareRoots.set(key, contribution.roundOneShareRoot);
                 roundOneRecordRoots.set(key, roundOneRecordRoot);
                 roundOneRecords.push({
@@ -547,19 +506,14 @@ export const createRelinearizationKeyShareRounds = (
                 };
             },
         );
-        const roundOneAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundOneAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundOneAggregate',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                level,
-                roundOneRecordRoots: roundOneRecordRootsForLevel,
-            },
-        );
+        const roundOneAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundOneAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot:
+                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+            level,
+            roundOneRecordRoots: roundOneRecordRootsForLevel,
+        });
         roundOneAggregateRootByLevel.set(level, roundOneAggregateRoot);
 
         return {
@@ -610,8 +564,6 @@ export const createRelinearizationKeyShareRounds = (
                 const recordWithoutRoot = {
                     objectType: 'RelinearizationKeyShareRoundTwo',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: 'relinearization-key-share',
                     ...contextFields(input.setupContext),
                     trusteeIdentity: proofReference.trusteeIdentity,
@@ -639,10 +591,8 @@ export const createRelinearizationKeyShareRounds = (
                     roundTwoShareRoot: contribution.roundTwoShareRoot,
                     ...shareMaterialRecordFields(contribution.shareMaterial),
                 } as JsonRecord;
-                const roundTwoRecordRoot = deriveProtocolHash(
-                    'RelinearizationRoundTwoRecordRoot',
-                    recordWithoutRoot,
-                );
+                const roundTwoRecordRoot =
+                    deriveCanonicalObjectHash(recordWithoutRoot);
                 roundTwoRecords.push({
                     ...recordWithoutRoot,
                     roundTwoRecordRoot,
@@ -661,20 +611,15 @@ export const createRelinearizationKeyShareRounds = (
                 'roundTwoContributions is missing a scheduled round-one aggregate root.',
             );
         }
-        const roundTwoAggregateRoot = deriveProtocolHash(
-            'RelinearizationRoundTwoAggregateRoot',
-            {
-                objectType: 'RelinearizationRoundTwoAggregate',
-                objectVersion: 1,
-                setupProfileId: 'CollectiveBgvSetup-v1',
-                setupProofProfileId,
-                evaluatorKeyScheduleRoot:
-                    input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
-                level,
-                roundOneAggregateRoot,
-                roundTwoRecordRoots: roundTwoRecordRootsForLevel,
-            },
-        );
+        const roundTwoAggregateRoot = deriveCanonicalObjectHash({
+            objectType: 'RelinearizationRoundTwoAggregate',
+            objectVersion: 1,
+            evaluatorKeyScheduleRoot:
+                input.evaluatorKeySchedule.evaluatorKeyScheduleRoot,
+            level,
+            roundOneAggregateRoot,
+            roundTwoRecordRoots: roundTwoRecordRootsForLevel,
+        });
 
         return {
             level,
@@ -685,8 +630,6 @@ export const createRelinearizationKeyShareRounds = (
     const roundsWithoutRoot = {
         objectType: 'RelinearizationKeyShareRounds',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -716,10 +659,8 @@ export const createRelinearizationKeyShareRounds = (
 
     return {
         ...roundsWithoutRoot,
-        relinearizationKeyShareRoundsRoot: deriveProtocolHash(
-            'RelinearizationKeyShareRoundsRoot',
-            roundsWithoutRoot,
-        ),
+        relinearizationKeyShareRoundsRoot:
+            deriveCanonicalObjectHash(roundsWithoutRoot),
     } satisfies RelinearizationKeyShareRounds;
 };
 
@@ -801,8 +742,6 @@ export const createGaloisKeyShareBatches = (
                 return {
                     objectType: 'GaloisKeyShareMaterial',
                     objectVersion: 1,
-                    setupProfileId: 'CollectiveBgvSetup-v1',
-                    setupProofProfileId,
                     proofFamily: 'galois-key-share',
                     trusteeIdentity: proofReference.trusteeIdentity,
                     trusteeRosterPosition: proofReference.trusteeRosterPosition,
@@ -815,18 +754,9 @@ export const createGaloisKeyShareBatches = (
                 } as GaloisKeyShareMaterialRecord;
             },
         );
-        const galoisKeyShareRoots = contribution.galoisKeyShares.map(
-            (shareContribution) => ({
-                rotation: shareContribution.rotation,
-                level: shareContribution.level,
-                galoisKeyShareRoot: shareContribution.galoisKeyShareRoot,
-            }),
-        );
         const batchWithoutRoot = {
             objectType: 'GaloisKeyShareBatch',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: 'galois-key-share',
             ...contextFields(input.setupContext),
             trusteeIdentity: proofReference.trusteeIdentity,
@@ -849,7 +779,6 @@ export const createGaloisKeyShareBatches = (
                 input.evaluatorKeySchedule.requiredGaloisSetHash,
             requiredGaloisKeySchedule:
                 input.evaluatorKeySchedule.requiredGaloisKeySchedule,
-            galoisKeyShareRoots,
             galoisKeyShareMaterialRecords,
         } as const satisfies Omit<
             GaloisKeyShareBatch,
@@ -858,10 +787,8 @@ export const createGaloisKeyShareBatches = (
 
         return {
             ...batchWithoutRoot,
-            galoisKeyShareBatchRoot: deriveProtocolHash(
-                'GaloisKeyShareBatchRoot',
-                batchWithoutRoot,
-            ),
+            galoisKeyShareBatchRoot:
+                deriveCanonicalObjectHash(batchWithoutRoot),
         } satisfies GaloisKeyShareBatch;
     });
 };

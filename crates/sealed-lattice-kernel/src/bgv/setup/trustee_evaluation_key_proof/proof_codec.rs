@@ -14,7 +14,7 @@ use super::*;
 // are refused.
 const PROOF_MAGIC: &[u8; 8] = b"SLTEKP03";
 
-// Every limb modulus the proof commits over is a profile data prime: a ~2^47
+// Every limb modulus the proof commits over is a BGV data prime: a ~2^47
 // value whose residues fit in six little-endian bytes. Field and challenge-
 // extension coordinates are written at exactly that width instead of a full
 // eight-byte u64, dropping the two high zero bytes every residue would otherwise
@@ -22,11 +22,11 @@ const PROOF_MAGIC: &[u8; 8] = b"SLTEKP03";
 // change and the const evaluation fails the build if a prime ever no longer
 // fits. Length prefixes and Merkle digests keep their natural widths.
 const fn field_residue_byte_width() -> usize {
-    let mut max_modulus = crate::bgv::profile::DATA_PRIMES[0];
+    let mut max_modulus = crate::bgv::parameters::DATA_PRIMES[0];
     let mut index = 1;
-    while index < crate::bgv::profile::DATA_PRIMES.len() {
-        if crate::bgv::profile::DATA_PRIMES[index] > max_modulus {
-            max_modulus = crate::bgv::profile::DATA_PRIMES[index];
+    while index < crate::bgv::parameters::DATA_PRIMES.len() {
+        if crate::bgv::parameters::DATA_PRIMES[index] > max_modulus {
+            max_modulus = crate::bgv::parameters::DATA_PRIMES[index];
         }
         index += 1;
     }

@@ -34,10 +34,10 @@ use crate::{
     bgv::{
         evaluator::engine::{DevelopmentBgvKey, encode_slots_to_coefficients, negacyclic_mul},
         modular_arithmetic::{add_mod, mul_mod, sub_mod},
-        profile::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, PROFILE_ID, profile_hash},
+        parameters::{DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, bgv_parameters_hash},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, derive_protocol_hash, hash512, hash512_hex, to_hex},
+    hashing::{canonical_json, hash512, hash512_hex, to_hex},
 };
 
 const DIRECT_BALLOT_RELATION_PROOF_MAGIC: &[u8; 8] = b"SLDBP001";
@@ -47,10 +47,10 @@ const DIRECT_BALLOT_RANDOMIZER_SUPPORT_EXPANSION_COEFFICIENTS: usize = 3;
 const DIRECT_BALLOT_ERROR_SUPPORT_EXPANSION_COEFFICIENTS: usize = 5;
 const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BITS: u32 = 192;
 const DIRECT_BALLOT_RELATION_PROOF_CHALLENGE_BYTES: usize = 24;
-const DIRECT_BALLOT_RELATION_CLAIM_SOUNDNESS_TARGET_BITS: u32 = 128;
 const DIRECT_BALLOT_RELATION_MASK_COEFFICIENT_BITS: usize = 360;
 const DIRECT_BALLOT_RELATION_RESPONSE_COEFFICIENT_BYTES: usize = 48;
-const DIRECT_BALLOT_RELATION_WITNESS_BOUND_BITS: u32 = 16;
+const DIRECT_BALLOT_RELATION_STATEMENT_HASH_DOMAIN: &str =
+    "sealed-lattice/direct-encrypted-ballot/relation-statement-v4";
 const DIRECT_BALLOT_RELATION_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/direct-encrypted-ballot/relation-proof-bytes-v1";
 
@@ -67,14 +67,6 @@ pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) relation_commitment_polynomial_count: usize,
     pub(super) shared_response_polynomial_count: usize,
     pub(super) shared_response_scalar_count: usize,
-}
-
-#[derive(Debug)]
-pub(super) struct DirectBallotRelationProofVerification {
-    pub(super) proof_size_bytes: usize,
-    pub(super) statement_hash_hex: String,
-    pub(super) relation_commitment_hash_hex: String,
-    pub(super) challenge: String,
 }
 
 #[derive(Clone)]
@@ -110,7 +102,6 @@ struct ParsedDirectBallotRelationProof {
     score_linear_commitment: DirectBallotScoreLinearCommitment,
     support_commitment: DirectBallotSupportCommitment,
     response_vector: DirectBallotWitnessVector,
-    relation_commitment_hash: [u8; 64],
 }
 
 #[derive(Clone, Copy)]

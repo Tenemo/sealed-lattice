@@ -6,18 +6,18 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
     let ceremony_id = string_at_path(setup_package, &["setupInputs", "ceremonyId"])?.to_string();
     let election_manifest_hash =
         hash_at_path(setup_package, &["setupInputs", "manifestHash"])?.to_string();
-    let threshold_profile_hash =
-        hash_at_path(setup_package, &["setupInputs", "thresholdProfileHash"])?.to_string();
-    let target_decryption_profile_hash = hash_at_path(
+    let threshold_parameters_hash =
+        hash_at_path(setup_package, &["setupInputs", "thresholdParametersHash"])?.to_string();
+    let target_decryption_parameters_hash = hash_at_path(
         setup_package,
-        &["targetDecryptionStatus", "targetDecryptionProfileHash"],
+        &["targetDecryptionStatus", "targetDecryptionParametersHash"],
     )?
     .to_string();
-    let target_decryption_profile_binding_hash = hash_at_path(
+    let target_decryption_parameters_binding_hash = hash_at_path(
         setup_package,
         &[
             "targetDecryptionStatus",
-            "targetDecryptionProfileBindingHash",
+            "targetDecryptionParametersBindingHash",
         ],
     )?
     .to_string();
@@ -68,9 +68,9 @@ pub(super) fn read_setup_binding(setup_package: &Value) -> CanonicalResult<Setup
         setup_package_hash,
         ceremony_id,
         election_manifest_hash,
-        threshold_profile_hash,
-        target_decryption_profile_hash,
-        target_decryption_profile_binding_hash,
+        threshold_parameters_hash,
+        target_decryption_parameters_hash,
+        target_decryption_parameters_binding_hash,
         participants,
         threshold_verification: ThresholdVerificationBinding {
             threshold_share_verification_key_root,
@@ -91,12 +91,6 @@ pub(super) fn read_target_accepted_binding(
             "targetAcceptedRecord must be a canonical TargetAcceptedRecord",
         ));
     }
-    if string_at_path(record, &["targetDecryptionProfileId"])? != TARGET_DECRYPTION_PROFILE_ID {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "target accepted record uses an unsupported target decryption profile",
-        ));
-    }
     compare_string_field(
         record,
         "ceremonyId",
@@ -111,34 +105,30 @@ pub(super) fn read_target_accepted_binding(
     )?;
     compare_hash_field(
         record,
-        "targetDecryptionProfileHash",
-        &setup_binding.target_decryption_profile_hash,
-        "target decryption profile hash",
+        "targetDecryptionParametersHash",
+        &setup_binding.target_decryption_parameters_hash,
+        "target decryption parameters hash",
     )?;
-    let expected_record_hash = derive_protocol_hash(
-        "TargetAcceptedRecordHash",
-        &json!({
-            "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
-            "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
-            "ceremonyId": string_at_path(record, &["ceremonyId"])?,
-            "electionManifestHash": hash_at_path(record, &["electionManifestHash"])?,
-            "evaluatorReplayProfileHash": hash_at_path(record, &["evaluatorReplayProfileHash"])?,
-            "evaluatorReplayRecordHash": hash_at_path(record, &["evaluatorReplayRecordHash"])?,
-            "objectType": string_at_path(record, &["objectType"])?,
-            "objectVersion": unsigned_at_path(record, &["objectVersion"])?,
-            "organizerIdentity": string_at_path(record, &["organizerIdentity"])?,
-            "targetBasisHash": hash_at_path(record, &["targetBasisHash"])?,
-            "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
-            "targetContextHash": hash_at_path(record, &["targetContextHash"])?,
-            "targetDecryptionProfileHash": hash_at_path(record, &["targetDecryptionProfileHash"])?,
-            "targetDecryptionProfileId": string_at_path(record, &["targetDecryptionProfileId"])?,
-            "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
-            "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
-            "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
-            "targetPreimageHash": hash_at_path(record, &["targetPreimageHash"])?,
-            "targetProposalHash": hash_at_path(record, &["targetProposalHash"])?,
-        }),
-    )?;
+    let expected_record_hash = derive_canonical_object_hash(&json!({
+        "boardPosition": unsigned_at_path(record, &["boardPosition"])?,
+        "boardSequence": unsigned_at_path(record, &["boardSequence"])?,
+        "ceremonyId": string_at_path(record, &["ceremonyId"])?,
+        "electionManifestHash": hash_at_path(record, &["electionManifestHash"])?,
+        "bgvParametersHash": hash_at_path(record, &["bgvParametersHash"])?,
+        "evaluatorReplayRecordHash": hash_at_path(record, &["evaluatorReplayRecordHash"])?,
+        "objectType": string_at_path(record, &["objectType"])?,
+        "objectVersion": unsigned_at_path(record, &["objectVersion"])?,
+        "organizerIdentity": string_at_path(record, &["organizerIdentity"])?,
+        "targetBasisHash": hash_at_path(record, &["targetBasisHash"])?,
+        "targetCiphertextHash": hash_at_path(record, &["targetCiphertextHash"])?,
+        "targetContextHash": hash_at_path(record, &["targetContextHash"])?,
+        "targetDecryptionParametersHash": hash_at_path(record, &["targetDecryptionParametersHash"])?,
+        "targetFinalityCheckpointHash": hash_at_path(record, &["targetFinalityCheckpointHash"])?,
+        "targetFinalityRecordHash": hash_at_path(record, &["targetFinalityRecordHash"])?,
+        "targetLayoutHash": hash_at_path(record, &["targetLayoutHash"])?,
+        "targetPreimageHash": hash_at_path(record, &["targetPreimageHash"])?,
+        "targetProposalHash": hash_at_path(record, &["targetProposalHash"])?,
+    }))?;
     compare_hash_field(
         record,
         "targetAcceptedRecordHash",
@@ -159,47 +149,44 @@ pub(super) fn read_target_accepted_binding(
         target_context_hash: hash_at_path(record, &["targetContextHash"])?.to_string(),
         target_ciphertext_hash: hash_at_path(record, &["targetCiphertextHash"])?.to_string(),
         target_layout_hash: hash_at_path(record, &["targetLayoutHash"])?.to_string(),
-        target_decryption_profile_hash: hash_at_path(record, &["targetDecryptionProfileHash"])?
-            .to_string(),
+        target_decryption_parameters_hash: hash_at_path(
+            record,
+            &["targetDecryptionParametersHash"],
+        )?
+        .to_string(),
         target_basis_hash: hash_at_path(record, &["targetBasisHash"])?.to_string(),
     })
 }
 
-pub(super) fn read_target_share_profile(
+pub(super) fn read_target_share_parameters(
     value: &Value,
     setup_binding: &SetupBinding,
-) -> CanonicalResult<TargetShareProfile> {
-    if string_at_path(value, &["objectType"])? != "TargetDecryptionShareProfile"
+) -> CanonicalResult<TargetShareParameters> {
+    if string_at_path(value, &["objectType"])? != "TargetDecryptionShareParameters"
         || unsigned_at_path(value, &["objectVersion"])? != 1
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
-            "targetShareProfile must be a TargetDecryptionShareProfile version 1 object",
+            "targetShareParameters must be a TargetDecryptionShareParameters version 1 object",
         ));
     }
     compare_hash_field(
         value,
-        "thresholdProfileHash",
-        &setup_binding.threshold_profile_hash,
-        "target share threshold profile hash",
-    )?;
-    compare_string_field(
-        value,
-        "targetDecryptionProfileId",
-        TARGET_DECRYPTION_PROFILE_ID,
-        "target decryption profile id",
+        "thresholdParametersHash",
+        &setup_binding.threshold_parameters_hash,
+        "target share threshold parameters hash",
     )?;
     compare_hash_field(
         value,
-        "targetDecryptionProfileHash",
-        &setup_binding.target_decryption_profile_hash,
-        "target decryption profile hash",
+        "targetDecryptionParametersHash",
+        &setup_binding.target_decryption_parameters_hash,
+        "target decryption parameters hash",
     )?;
     compare_hash_field(
         value,
-        "targetDecryptionProfileBindingHash",
-        &setup_binding.target_decryption_profile_binding_hash,
-        "target decryption profile binding hash",
+        "targetDecryptionParametersBindingHash",
+        &setup_binding.target_decryption_parameters_binding_hash,
+        "target decryption parameters binding hash",
     )?;
     let decryption_threshold = usize_field(value, "decryptionThreshold")?;
     let minimum_shares_for_interpolation = usize_field(value, "minimumSharesForInterpolation")?;
@@ -208,8 +195,8 @@ pub(super) fn read_target_share_profile(
     let expected_decryption_threshold = participant_count / 3 + 1;
     if decryption_threshold != expected_decryption_threshold {
         return Err(CanonicalError::new(
-            CanonicalErrorCode::ProfileComponentMismatch,
-            "targetShareProfile.decryptionThreshold must match the setup roster-derived threshold",
+            CanonicalErrorCode::ComponentMismatch,
+            "targetShareParameters.decryptionThreshold must match the setup roster-derived threshold",
         ));
     }
     if decryption_threshold == 0
@@ -220,30 +207,29 @@ pub(super) fn read_target_share_profile(
     {
         return Err(CanonicalError::new(
             CanonicalErrorCode::MalformedLength,
-            "targetShareProfile quorum values are inconsistent with the setup roster",
+            "targetShareParameters quorum values are inconsistent with the setup roster",
         ));
     }
 
     let hash_input = json!({
-        "objectType": "TargetDecryptionShareProfile",
+        "objectType": "TargetDecryptionShareParameters",
         "objectVersion": 1,
-        "thresholdProfileHash": setup_binding.threshold_profile_hash,
-        "targetDecryptionProfileId": TARGET_DECRYPTION_PROFILE_ID,
-        "targetDecryptionProfileHash": setup_binding.target_decryption_profile_hash,
-        "targetDecryptionProfileBindingHash": setup_binding.target_decryption_profile_binding_hash,
+        "thresholdParametersHash": setup_binding.threshold_parameters_hash,
+        "targetDecryptionParametersHash": setup_binding.target_decryption_parameters_hash,
+        "targetDecryptionParametersBindingHash": setup_binding.target_decryption_parameters_binding_hash,
         "decryptionThreshold": decryption_threshold,
         "minimumSharesForInterpolation": minimum_shares_for_interpolation,
         "decryptionShareQuorum": decryption_share_quorum,
     });
-    let hash = derive_protocol_hash("TargetDecryptionShareProfileHash", &hash_input)?;
+    let hash = derive_canonical_object_hash(&hash_input)?;
     compare_hash_field(
         value,
-        "targetShareProfileHash",
+        "targetShareParametersHash",
         &hash,
-        "target share profile hash",
+        "target share parameters hash",
     )?;
 
-    Ok(TargetShareProfile {
+    Ok(TargetShareParameters {
         decryption_threshold,
         minimum_shares_for_interpolation,
         decryption_share_quorum,

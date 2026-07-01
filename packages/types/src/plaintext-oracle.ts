@@ -31,7 +31,7 @@ export type InterpolationCoefficientReport = {
     readonly threshold: number;
 };
 
-/** Exhaustive worst-case interpolation report for a bounded roster profile. */
+/** Exhaustive worst-case interpolation report for a bounded roster. */
 export type WorstCaseInterpolationCoefficientReport = {
     readonly exhaustiveSubsetCount: number;
     readonly maxCenteredAbsCoefficient: number;

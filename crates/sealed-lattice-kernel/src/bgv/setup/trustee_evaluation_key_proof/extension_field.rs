@@ -303,7 +303,7 @@ impl ChallengeExtensionTower {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bgv::profile::DATA_PRIMES;
+    use crate::bgv::parameters::DATA_PRIMES;
 
     #[test]
     fn tower_constants_exist_for_every_data_prime_and_define_a_field() {

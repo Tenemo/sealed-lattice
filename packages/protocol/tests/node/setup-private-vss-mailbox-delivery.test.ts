@@ -1,6 +1,6 @@
 import {
     createPrivateVssMailboxKeyPair,
-    deriveProtocolHash,
+    deriveCanonicalObjectHash,
     hash512Hex,
 } from '@sealed-lattice/crypto';
 import { describe, expect, it } from 'vitest';
@@ -13,15 +13,15 @@ import {
 
 const fixtureHash = makeSetupFixtureHash('setup-private-vss-mailbox-delivery');
 
-const setupContext = makeSetupContext(fixtureHash, 'carry-aware');
+const setupContext = makeSetupContext(fixtureHash);
 
 describe('private VSS mailbox delivery', () => {
     it('refuses to build delivery envelopes without private share proof generation', async () => {
         await expect(
             createPrivateVssMailboxDeliverySet({
                 kernel: {
-                    deriveProtocolHash: ({ namespace, value }) =>
-                        deriveProtocolHash(namespace, value),
+                    deriveCanonicalObjectHash: ({ value }) =>
+                        deriveCanonicalObjectHash(value),
                     verifyPrivateVssShareEnvelope: () => {
                         throw new Error(
                             'local verifier must not be reached without proof generation.',
@@ -88,8 +88,8 @@ describe('private VSS mailbox delivery', () => {
 
         const deliverySet = await createPrivateVssMailboxDeliverySet({
             kernel: {
-                deriveProtocolHash: ({ namespace, value }) =>
-                    deriveProtocolHash(namespace, value),
+                deriveCanonicalObjectHash: ({ value }) =>
+                    deriveCanonicalObjectHash(value),
                 verifyPrivateVssShareEnvelope: (input) => {
                     observedPrivateEnvelope = input.privateEnvelope as Record<
                         string,
@@ -101,9 +101,8 @@ describe('private VSS mailbox delivery', () => {
                             | undefined;
 
                     return {
-                        ok: true,
-                        privateEnvelopeHash: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
+                        isValid: true,
+                        privateEnvelopeHash: deriveCanonicalObjectHash(
                             input.privateEnvelope,
                         ),
                         localVerificationRoot:
@@ -128,14 +127,11 @@ describe('private VSS mailbox delivery', () => {
             privateVssShareProofFactory: () => ({
                 objectType: 'PrivateVssShareProof',
                 objectVersion: 1,
-                proofProfileId:
-                    'sealed-lattice-private-vss-share-proof-succinct-v1',
-                setupProofProfileId: 'SealedLattice-SetupProof-v1',
+                proofId: 'sealed-lattice-private-vss-share-proof-succinct-v1',
                 proofFamily: 'vss-opening-carry',
                 proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                 proofStatementRoot: fixtureHash('statement-root'),
                 statementHash: fixtureHash('statement-hash'),
-                proofSizeBytes: proofBytes.byteLength,
                 proofBytesHash,
                 proofMaterialRoot: fixtureHash('embedded-material-root'),
                 proofBytesHex,
@@ -179,7 +175,6 @@ describe('private VSS mailbox delivery', () => {
         )[0];
         const transportedProofRecord =
             limbOpening.privateVssShareProof as Record<string, unknown>;
-        expect(transportedProofRecord.proofBytesHex).toBeUndefined();
         expect(transportedProofRecord.proofBytesEncoding).toBe(
             'binary-chunked-proof-bytes',
         );
@@ -215,12 +210,11 @@ describe('private VSS mailbox delivery', () => {
         await expect(
             createPrivateVssMailboxDeliverySet({
                 kernel: {
-                    deriveProtocolHash: ({ namespace, value }) =>
-                        deriveProtocolHash(namespace, value),
+                    deriveCanonicalObjectHash: ({ value }) =>
+                        deriveCanonicalObjectHash(value),
                     verifyPrivateVssShareEnvelope: (input) => ({
-                        ok: true,
-                        privateEnvelopeHash: deriveProtocolHash(
-                            'PrivateVssShareEnvelopeHash',
+                        isValid: true,
+                        privateEnvelopeHash: deriveCanonicalObjectHash(
                             input.privateEnvelope,
                         ),
                         localVerificationRoot: fixtureHash(
@@ -244,9 +238,8 @@ describe('private VSS mailbox delivery', () => {
                 privateVssShareProofFactory: ({ rnsLimbIndex }) => ({
                     objectType: 'PrivateVssShareProof',
                     objectVersion: 1,
-                    proofProfileId:
+                    proofId:
                         'sealed-lattice-private-vss-share-proof-succinct-v1',
-                    setupProofProfileId: 'SealedLattice-SetupProof-v1',
                     proofFamily: 'vss-opening-carry',
                     proofBytesEncoding: 'embedded-binary-proof-bytes-hex',
                     proofStatementRoot: fixtureHash(
@@ -259,7 +252,6 @@ describe('private VSS mailbox delivery', () => {
                             rnsLimbIndex,
                         )}`,
                     ),
-                    proofSizeBytes: 4,
                     proofBytesHash: fixtureHash(
                         `short-proof-count-proof-bytes-${String(rnsLimbIndex)}`,
                     ),

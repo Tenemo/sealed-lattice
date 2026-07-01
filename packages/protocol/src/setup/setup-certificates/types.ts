@@ -4,10 +4,9 @@ import type { setupTransportedObjectLoadingPolicy } from './constants.js';
 
 export type JsonRecord = Record<string, unknown>;
 
-export type CollectiveBgvSetupProfileForCertificates = Readonly<
+export type CollectiveBgvSetupParametersForCertificates = Readonly<
     JsonRecord & {
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProfileHash: ProtocolHash;
+        readonly setupParametersHash: ProtocolHash;
         readonly participantCount: number;
         readonly qDec: number;
         readonly qShare: Readonly<
@@ -15,25 +14,19 @@ export type CollectiveBgvSetupProfileForCertificates = Readonly<
                 readonly primes: readonly number[];
             }
         >;
-        readonly qShareHash: ProtocolHash;
-        readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-        readonly commitmentProfile: Readonly<
+        readonly commitment: Readonly<
             JsonRecord & {
                 readonly messageEncoding: JsonRecord;
             }
         >;
-        readonly commitmentProfileHash: ProtocolHash;
-        readonly publicVssCommitmentMaterialSizeProfile: Readonly<
+        readonly publicVssCommitmentMaterialSize: Readonly<
             JsonRecord & {
                 readonly fullMaterialCoefficientBytes: number;
             }
         >;
-        readonly setupProofProfile: JsonRecord;
-        readonly setupProofProfileHash: ProtocolHash;
-        readonly setupTransportProfile: JsonRecord;
-        readonly setupTransportProfileHash: ProtocolHash;
-        readonly acceptedCertificateTemplates?: JsonRecord;
-        readonly evaluatorKeyScheduleProfile: Readonly<
+        readonly setupProof: JsonRecord;
+        readonly setupTransport: JsonRecord;
+        readonly evaluatorKeySchedule: Readonly<
             JsonRecord & {
                 readonly relinearizationLevelSchedule: readonly Readonly<{
                     readonly level: number;
@@ -43,24 +36,20 @@ export type CollectiveBgvSetupProfileForCertificates = Readonly<
                 }>[];
             }
         >;
-        readonly evaluatorKeyScheduleProfileHash: ProtocolHash;
     }
 >;
 
-export type BgvRnsProfileForCertificates = Readonly<
+export type BgvRnsParametersForCertificates = Readonly<
     JsonRecord & {
-        readonly profile: Readonly<
+        readonly parameters: Readonly<
             JsonRecord & {
-                readonly profileId: string;
-                readonly backendProfileId: string;
                 readonly polynomialDegree: number;
                 readonly plaintextModulus: number;
-                readonly dataBasisId: string;
                 readonly dataPrimes: readonly number[];
                 readonly specialPrime: number;
             }
         >;
-        readonly securityEstimatorInputHash: string;
+        readonly bgvParametersHash: ProtocolHash;
     }
 >;
 
@@ -81,39 +70,18 @@ export type SetupCertificateTransportInput = Readonly<{
 }>;
 
 export type SetupCertificatesInput = Readonly<{
-    readonly setupProfile:
-        | CollectiveBgvSetupProfileForCertificates
+    readonly setupParameters:
+        | CollectiveBgvSetupParametersForCertificates
         | JsonRecord;
-    readonly bgvProfile: BgvRnsProfileForCertificates | JsonRecord;
+    readonly bgvParameters: BgvRnsParametersForCertificates | JsonRecord;
     readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
-    readonly sameSecretLinkageAnchorProofAccounting?: JsonRecord;
-    readonly publicKeyShareProofAccounting?: JsonRecord;
-    readonly trusteeEvaluationKeyProofAccounting?: JsonRecord;
 }>;
-
-export type SetupCommitmentSecurityCertificate = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupCommitmentSecurityCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
-    }
->;
-
-export type SetupCommitmentSecurityCertificateBody = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupCommitmentSecurityCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    }
->;
 
 export type SetupTransportCertificate = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
         readonly setupTransportCertificateHash: ProtocolHash;
     }
 >;
@@ -122,49 +90,11 @@ export type SetupTransportCertificateBody = Readonly<
     JsonRecord & {
         readonly objectType: 'SetupTransportCertificate';
         readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    }
->;
-
-export type SetupProofAccountingCertificate = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupProofAccountingCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly setupProofAccountingCertificateHash: ProtocolHash;
-    }
->;
-
-export type SetupProofAccountingCertificateBody = Readonly<
-    JsonRecord & {
-        readonly objectType: 'SetupProofAccountingCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    }
->;
-
-export type BgvHeSecurityCertificate = Readonly<
-    JsonRecord & {
-        readonly objectType: 'BgvHeSecurityCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
-        readonly heSecurityCertificateHash: ProtocolHash;
-    }
->;
-
-export type BgvHeSecurityCertificateBody = Readonly<
-    JsonRecord & {
-        readonly objectType: 'BgvHeSecurityCertificate';
-        readonly objectVersion: 1;
-        readonly setupProfileId: 'CollectiveBgvSetup-v1';
     }
 >;
 
 export type SetupCertificates = Readonly<{
-    readonly setupCommitmentSecurityCertificate: SetupCommitmentSecurityCertificate;
     readonly setupTransportCertificate: SetupTransportCertificate;
-    readonly setupProofAccountingCertificate: SetupProofAccountingCertificate;
-    readonly heSecurityCertificate: BgvHeSecurityCertificate;
 }>;
 
 export type SetupTransportedObjectRecord = Readonly<{

@@ -1,25 +1,18 @@
 use serde_json::{Value, json};
 
 use crate::{
-    bgv::profile::DATA_PRIMES,
+    bgv::parameters::DATA_PRIMES,
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_protocol_hash,
+    hashing::derive_canonical_object_hash,
 };
 
 use super::{
-    accepted_setup::{
-        COLLECTIVE_BGV_SETUP_PROFILE_ID, accepted_q_share_hash, accepted_roster_from_setup_context,
-        setup_profile_hash_for_roster,
-    },
-    commitment::setup_commitment_profile_hash,
+    accepted_setup::{accepted_roster_from_setup_context, setup_parameters_hash_for_roster},
     sharing::canonical_trustee_point,
-    vss::carry_aware_vss_share_relation_profile_hash,
 };
 
 const LOCAL_STATE_OBJECT_TYPE: &str = "LocalTrusteeSetupStateCommitment";
 const LOCAL_STATE_DELETION_RECEIPT_OBJECT_TYPE: &str = "LocalTrusteeSetupStateDeletionReceipt";
-const LOCAL_STATE_EXPORT_POLICY: &str = "roots-only-no-raw-share-or-opening-export";
-const LOCAL_STATE_STORAGE_PROFILE: &str = "encrypted-local-device-state-required";
 const DELETION_BOUNDARY: &str = "after-private-vss-aggregation";
 
 const DELETED_MATERIAL_CLASSES: &[&str] = &[
@@ -92,16 +85,12 @@ pub(crate) fn verify_local_trustee_setup_state_from_request(
     }
 
     Ok(json!({
-        "ok": true,
         "operation": "verifyLocalTrusteeSetupState",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
         "trusteeIdentity": string_field(local_state, "trusteeIdentity")?,
         "trusteeRosterPosition": trustee_roster_position,
         "trusteePoint": trustee_point,
         "localStateRoot": local_state_root,
         "deletionReceiptRoot": deletion_receipt_root,
-        "exportPolicy": LOCAL_STATE_EXPORT_POLICY,
-        "storageProfile": LOCAL_STATE_STORAGE_PROFILE,
         "deletionBoundary": DELETION_BOUNDARY,
     }))
 }
@@ -114,14 +103,7 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
             )));
         }
     }
-    for field_name in [
-        "manifestHash",
-        "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
-    ] {
+    for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         validate_hash_string(
             hash_string_field(setup_context, field_name)?,
             &format!("setupContext.{field_name}"),
@@ -129,42 +111,18 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
     }
     string_field(setup_context, "ceremonyId")?;
     string_field(setup_context, "setupEpoch")?;
-    // The setup profile hash is a roster family, so it must match the hash
+    // The setup parameters hash is a roster family, so it must match the hash
     // derived from this setup context's roster, not the first-closure n = 10
-    // hash.
+    // hash. It subsumes the former per-component parameter hashes (Q_share,
+    // carry-aware VSS relation, commitment) and the BGV parameters.
     let roster = accepted_roster_from_setup_context(setup_context);
     if setup_context
-        .get("setupProfileHash")
+        .get("setupParametersHash")
         .and_then(Value::as_str)
-        != Some(setup_profile_hash_for_roster(&roster)?.as_str())
+        != Some(setup_parameters_hash_for_roster(&roster)?.as_str())
     {
         return Err(invalid_local_state_input(
-            "setupContext.setupProfileHash does not match CollectiveBgvSetup-v1",
-        ));
-    }
-    if setup_context.get("qShareHash").and_then(Value::as_str)
-        != Some(accepted_q_share_hash()?.as_str())
-    {
-        return Err(invalid_local_state_input(
-            "setupContext.qShareHash does not match the accepted Q_share prime list",
-        ));
-    }
-    if setup_context
-        .get("carryAwareVssShareRelationProfileHash")
-        .and_then(Value::as_str)
-        != Some(carry_aware_vss_share_relation_profile_hash()?.as_str())
-    {
-        return Err(invalid_local_state_input(
-            "setupContext.carryAwareVssShareRelationProfileHash does not match the accepted carry-aware VSS relation profile",
-        ));
-    }
-    if setup_context
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Err(invalid_local_state_input(
-            "setupContext.commitmentProfileHash does not match the accepted setup commitment profile",
+            "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
         ));
     }
 
@@ -183,25 +141,6 @@ fn verify_local_state_header(local_state: &Value, setup_context: &Value) -> Cano
         ));
     }
     compare_context_fields(local_state, setup_context, "localStateCommitment")?;
-    if local_state.get("setupProfileId").and_then(Value::as_str)
-        != Some(COLLECTIVE_BGV_SETUP_PROFILE_ID)
-    {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.setupProfileId must be CollectiveBgvSetup-v1",
-        ));
-    }
-    if local_state.get("exportPolicy").and_then(Value::as_str) != Some(LOCAL_STATE_EXPORT_POLICY) {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.exportPolicy must forbid raw share and opening export",
-        ));
-    }
-    if local_state.get("storageProfile").and_then(Value::as_str)
-        != Some(LOCAL_STATE_STORAGE_PROFILE)
-    {
-        return Err(invalid_local_state_input(
-            "localStateCommitment.storageProfile must require encrypted local device state",
-        ));
-    }
     string_field(local_state, "trusteeIdentity")?;
 
     Ok(())
@@ -272,7 +211,7 @@ fn local_state_deletion_receipt_root(deletion_receipt: &Value) -> CanonicalResul
         .as_object_mut()
         .ok_or_else(|| invalid_local_state_input("deletionReceipt must be an object"))?
         .remove("deletionReceiptRoot");
-    derive_protocol_hash("LocalTrusteeDeletionReceiptRoot", &root_input)
+    derive_canonical_object_hash(&root_input)
 }
 
 fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
@@ -281,7 +220,7 @@ fn local_state_commitment_root(local_state: &Value) -> CanonicalResult<String> {
         .as_object_mut()
         .ok_or_else(|| invalid_local_state_input("localStateCommitment must be an object"))?;
     object.remove("localStateRoot");
-    derive_protocol_hash("LocalTrusteeSetupStateRoot", &root_input)
+    derive_canonical_object_hash(&root_input)
 }
 
 fn compare_context_fields(
@@ -300,15 +239,12 @@ fn compare_context_fields(
     Ok(())
 }
 
-fn setup_context_field_names() -> [&'static str; 8] {
+fn setup_context_field_names() -> [&'static str; 5] {
     [
         "ceremonyId",
         "manifestHash",
         "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
+        "setupParametersHash",
         "setupEpoch",
     ]
 }

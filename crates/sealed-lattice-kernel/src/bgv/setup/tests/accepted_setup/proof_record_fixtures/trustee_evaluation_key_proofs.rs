@@ -2,6 +2,8 @@ use super::super::*;
 use super::*;
 use rayon::prelude::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 pub(in super::super) fn trustee_evaluation_key_proofs_object_with_terminal_transport(
     package: &serde_json::Value,
     transported_component_material: &serde_json::Value,
@@ -68,10 +70,10 @@ fn trustee_evaluation_key_proofs_object_inner(
     let ring_degree =
         same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
     let checkpoint_resume_enabled =
-        terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
+        terminal_transport.is_some() && final_package_checkpoint_resume_enabled();
     let compact_terminal_proof_transport = terminal_transport.is_some();
     let trustee_proof_batch_size = if terminal_transport.is_some() {
-        // Full-ring terminal proving. An explicit
+        // Full-ring final-package proving. An explicit
         // SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE (set by the memory-aware heavy
         // test runner from available RAM) is authoritative, so a memory-constrained
         // runner serializes provers and the build is not killed mid-proving no
@@ -117,16 +119,11 @@ fn trustee_evaluation_key_proofs_object_inner(
                 let record = serde_json::json!({
                     "objectType": "TrusteeEvaluationKeyProof",
                     "objectVersion": 1,
-                    "setupProfileId": "CollectiveBgvSetup-v1",
-                    "setupProofProfileId": "SealedLattice-SetupProof-v1",
                     "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
                     "ceremonyId": setup_context["ceremonyId"],
                     "manifestHash": setup_context["manifestHash"],
                     "rosterHash": setup_context["rosterHash"],
-                    "setupProfileHash": setup_context["setupProfileHash"],
-                    "qShareHash": setup_context["qShareHash"],
-                    "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-                    "commitmentProfileHash": setup_context["commitmentProfileHash"],
+                    "setupParametersHash": setup_context["setupParametersHash"],
                     "setupEpoch": setup_context["setupEpoch"],
                     "trusteeIdentity": trustee_identity,
                     "trusteeRosterPosition": trustee_roster_position,
@@ -134,7 +131,6 @@ fn trustee_evaluation_key_proofs_object_inner(
                     "trusteeSecretCommitmentRoot": proof_record["trusteeSecretCommitmentRoot"],
                     "sameSecretProofRoot": proof_record["sameSecretProofRoot"],
                     "statementHash": to_hex(&statement.statement_hash()),
-                    "keyCount": statement.keys.len(),
                 });
 
                 TrusteeEvaluationKeyProofWorkItem {
@@ -145,7 +141,7 @@ fn trustee_evaluation_key_proofs_object_inner(
             })
             .collect::<Vec<_>>();
         let resumed_records = if checkpoint_resume_enabled {
-            terminal_trustee_evaluation_key_proof_records_from_checkpoints(&work_item_batch)
+            final_package_trustee_evaluation_key_proof_records_from_checkpoints(&work_item_batch)
         } else {
             BTreeMap::new()
         };
@@ -181,8 +177,7 @@ fn trustee_evaluation_key_proofs_object_inner(
             .expect("trustee evaluation-key proof record object")
             .remove("trusteeEvaluationKeyProofRoot");
         record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-            derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
-                .expect("trustee evaluation-key proof root")
+            derive_canonical_object_hash(&record).expect("trustee evaluation-key proof root")
         );
         proof_records.push(record);
     }
@@ -209,18 +204,11 @@ fn trustee_evaluation_key_proofs_object_inner(
     let mut proof_set = serde_json::json!({
         "objectType": "TrusteeEvaluationKeyProofSet",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        "proofAccountingHash": succinct_evaluation_key_proof_accounting_hash()
-            .expect("succinct evaluation-key proof accounting hash"),
         "ceremonyId": setup_context["ceremonyId"],
         "manifestHash": setup_context["manifestHash"],
         "rosterHash": setup_context["rosterHash"],
-        "setupProfileHash": setup_context["setupProfileHash"],
-        "qShareHash": setup_context["qShareHash"],
-        "carryAwareVssShareRelationProfileHash": setup_context["carryAwareVssShareRelationProfileHash"],
-        "commitmentProfileHash": setup_context["commitmentProfileHash"],
+        "setupParametersHash": setup_context["setupParametersHash"],
         "setupEpoch": setup_context["setupEpoch"],
         "participantCount": participant_count_from_package(package),
         "rnsLimbCount": DATA_PRIMES.len(),
@@ -241,8 +229,7 @@ fn trustee_evaluation_key_proofs_object_inner(
         "proofRecords": proof_records,
     });
     proof_set["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
-        derive_protocol_hash("TrusteeEvaluationKeyProofSetRoot", &proof_set)
-            .expect("trustee evaluation-key proof set root")
+        derive_canonical_object_hash(&proof_set).expect("trustee evaluation-key proof set root")
     );
 
     proof_set
@@ -255,14 +242,14 @@ fn build_trustee_evaluation_key_proof_record(
     compact_terminal_proof_transport: bool,
 ) -> BuiltTrusteeEvaluationKeyProofRecord {
     if let Some(resumed_record) = resumed_records.get(&work_item.trustee_roster_position) {
-        terminal_phase(&format!(
+        final_package_phase(&format!(
             "resumed trustee evaluation-key proof trustee {} from checkpoint",
             work_item.trustee_roster_position
         ));
         return resumed_record.clone();
     }
 
-    terminal_phase(&format!(
+    final_package_phase(&format!(
         "generating trustee evaluation-key proof trustee {}",
         work_item.trustee_roster_position
     ));
@@ -271,13 +258,11 @@ fn build_trustee_evaluation_key_proof_record(
         ring_degree,
         &work_item.statement,
     );
-    let proof_randomness_seed_hex = derive_protocol_hash(
-        "TrusteeEvaluationKeyProofRandomness",
-        &serde_json::json!({
-            "fixture": "trustee-evaluation-key-proof-randomness",
-            "trusteeRosterPosition": work_item.trustee_roster_position,
-        }),
-    )
+    let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
+        "objectType": "TrusteeEvaluationKeyProofRandomness",
+        "fixture": "trustee-evaluation-key-proof-randomness",
+        "trusteeRosterPosition": work_item.trustee_roster_position,
+    }))
     .expect("trustee proof randomness seed");
     let statement_hash_hex = to_hex(&work_item.statement.statement_hash());
     let proof_bytes = checkpointed_anchor_proof_bytes(
@@ -303,7 +288,7 @@ fn build_trustee_evaluation_key_proof_record(
             encode_trustee_evaluation_key_proof(&proof)
         },
     );
-    terminal_phase(&format!(
+    final_package_phase(&format!(
         "generated trustee evaluation-key proof trustee {} ({} bytes)",
         work_item.trustee_roster_position,
         proof_bytes.len(),
@@ -326,8 +311,6 @@ fn trustee_evaluation_key_record_with_embedded_proof_bytes(
     mut record: serde_json::Value,
     proof_bytes: &[u8],
 ) -> serde_json::Value {
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
-    record["proofSizeBytes"] = serde_json::json!(proof_size_bytes);
     record["proofBytesHash"] =
         serde_json::json!(trustee_evaluation_key_proof_bytes_hash(proof_bytes));
     record["proofBytesHex"] = serde_json::json!(to_hex(proof_bytes));
@@ -339,7 +322,6 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
     mut record: serde_json::Value,
     proof_bytes: Vec<u8>,
 ) -> BuiltTrusteeEvaluationKeyProofRecord {
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
     let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
     let chunks = proof_bytes_transport_chunks(proof_bytes);
     let transport_hashes = setup_proof_material_transport_hashes(
@@ -350,7 +332,6 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
     .expect("trustee evaluation-key proof transport hashes");
     apply_trustee_evaluation_key_proof_transport_fields(
         &mut record,
-        proof_size_bytes,
         &proof_bytes_hash,
         &transport_hashes,
     );
@@ -359,7 +340,7 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
             .expect("trustee evaluation-key proof material root");
     record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
     record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-        derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+        derive_canonical_object_hash(&record)
             .expect("transported trustee evaluation-key proof root")
     );
     let proof_material =
@@ -373,19 +354,18 @@ fn trustee_evaluation_key_record_with_compact_transported_proof_bytes(
     }
 }
 
-fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
+fn final_package_trustee_evaluation_key_proof_records_from_checkpoints(
     work_items: &[TrusteeEvaluationKeyProofWorkItem],
 ) -> BTreeMap<u64, BuiltTrusteeEvaluationKeyProofRecord> {
-    let directory = std::path::PathBuf::from("temp")
-        .join("test-checkpoints")
-        .join("terminal-accepted-setup-material-store")
-        .join("trustee-evaluation-key-proof-material");
+    let directory =
+        crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
+            .join("trustee-evaluation-key-proof-material");
     let Ok(entries) = std::fs::read_dir(&directory) else {
         return BTreeMap::new();
     };
     let mut resumed_records = BTreeMap::new();
     for entry in entries {
-        let entry = entry.expect("terminal proof checkpoint directory entry");
+        let entry = entry.expect("final-package proof checkpoint directory entry");
         let path = entry.path();
         if path.extension().and_then(std::ffi::OsStr::to_str) != Some("bin") {
             continue;
@@ -400,8 +380,8 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
         {
             continue;
         }
-        let proof_bytes = std::fs::read(&path).expect("terminal trustee proof checkpoint bytes");
-        let proof_size_bytes = u64::try_from(proof_bytes.len()).expect("proof size bytes");
+        let proof_bytes =
+            std::fs::read(&path).expect("final-package trustee proof checkpoint bytes");
         let proof_bytes_hash = trustee_evaluation_key_proof_bytes_hash(&proof_bytes);
         let chunks = proof_bytes_transport_chunks(proof_bytes);
         let transport_hashes = setup_proof_material_transport_hashes(
@@ -418,7 +398,6 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
             let mut record = work_item.record.clone();
             apply_trustee_evaluation_key_proof_transport_fields(
                 &mut record,
-                proof_size_bytes,
                 &proof_bytes_hash,
                 &transport_hashes,
             );
@@ -430,7 +409,7 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
             }
             record["proofMaterialRoot"] = serde_json::json!(proof_material_root.clone());
             record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-                derive_protocol_hash("TrusteeEvaluationKeyProofRoot", &record)
+                derive_canonical_object_hash(&record)
                     .expect("transported trustee evaluation-key proof root")
             );
             let proof_material =
@@ -451,7 +430,7 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
             break;
         }
         if let Some(trustee_roster_position) = matched_trustee {
-            terminal_phase(&format!(
+            final_package_phase(&format!(
                 "matched trustee evaluation-key proof checkpoint for trustee {trustee_roster_position}"
             ));
         }
@@ -462,11 +441,9 @@ fn terminal_trustee_evaluation_key_proof_records_from_checkpoints(
 
 fn apply_trustee_evaluation_key_proof_transport_fields(
     record: &mut serde_json::Value,
-    proof_size_bytes: u64,
     proof_bytes_hash: &str,
     transport_hashes: &crate::bgv::setup::setup_proof::SetupProofMaterialTransportHashes,
 ) {
-    record["proofSizeBytes"] = serde_json::json!(proof_size_bytes);
     record["proofBytesHash"] = serde_json::json!(proof_bytes_hash);
     record["proofBytesEncoding"] = serde_json::json!(SETUP_PROOF_MATERIAL_ENCODING);
     record["proofChunkSizeBytes"] = serde_json::json!(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES);
@@ -484,8 +461,6 @@ fn transported_trustee_evaluation_key_proof_material(
     serde_json::json!({
         "objectType": "SetupTransportedEvaluationKeyShareProofMaterial",
         "objectVersion": 1,
-        "setupProfileId": "CollectiveBgvSetup-v1",
-        "setupProofProfileId": "SealedLattice-SetupProof-v1",
         "proofFamily": TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
         "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
         "proofMaterialRoot": proof_record["proofMaterialRoot"],

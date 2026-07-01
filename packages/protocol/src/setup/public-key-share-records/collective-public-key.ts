@@ -1,6 +1,4 @@
-import { deriveProtocolHash } from '@sealed-lattice/crypto';
-
-import { setupProofProfileId } from '../same-secret-consistency-records.js';
+import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
 import { transportedPublicKeyShareMaterialReader } from './binary-material-transport.js';
 import {
@@ -100,7 +98,7 @@ const assertCollectivePublicKeySourceBindings = (
             input.publicAPolynomialRoot
     ) {
         throw new Error(
-            'publicKeyShareMaterial must bind the collective public-key profile and common randomness.',
+            'publicKeyShareMaterial must bind the collective public-key parameters and common randomness.',
         );
     }
 };
@@ -132,11 +130,7 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
     const collectivePublicKeyWithoutRoot = {
         objectType: 'CollectivePublicKey',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: publicKeyShareProofFamily,
-        aggregationStatus:
-            'succinct-proof-aggregated-with-accepted-setup-proof-accounting',
         materialEncoding: 'embedded-full-collective-public-key-coefficients',
         ...contextFields(input.setupContext),
         participantCount: input.participantCount,
@@ -164,8 +158,7 @@ const createCollectivePublicKeyFromAggregateCoefficients = (
 
     return {
         ...collectivePublicKeyWithoutRoot,
-        collectivePublicKeyRoot: deriveProtocolHash(
-            'CollectivePublicKeyRoot',
+        collectivePublicKeyRoot: deriveCanonicalObjectHash(
             collectivePublicKeyWithoutRoot,
         ),
     } satisfies CollectivePublicKey;
@@ -197,7 +190,7 @@ export const createCollectivePublicKey = (
                     input.qSharePrimes.length
             ) {
                 throw new Error(
-                    'publicKeyShareMaterial records must match the collective public-key profile.',
+                    'publicKeyShareMaterial records must match the collective public-key parameters.',
                 );
             }
             materialRecord.shareCoefficientVectorsByLimb.forEach(
@@ -363,8 +356,6 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
         const materialRecordWithoutRoot = {
             objectType: 'PublicKeyShareMaterial',
             objectVersion: 1,
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            setupProofProfileId,
             proofFamily: publicKeyShareProofFamily,
             materialEncoding: publicKeyShareMaterialEncoding,
             ...contextFields(input.setupContext),
@@ -383,8 +374,7 @@ export const createCollectivePublicKeyFromTransportedPublicKeyShareMaterial = (
             PublicKeyShareMaterialRecord,
             'publicKeyShareMaterialRoot'
         >;
-        const publicKeyShareMaterialRoot = deriveProtocolHash(
-            'PublicKeyShareRoot',
+        const publicKeyShareMaterialRoot = deriveCanonicalObjectHash(
             materialRecordWithoutRoot,
         );
         materialRootReferences.push({

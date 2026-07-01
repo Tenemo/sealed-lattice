@@ -1,5 +1,7 @@
 use super::family_binding::*;
+
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 use crate::bgv::setup::trustee_evaluation_key_proof::SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY;
 
@@ -8,7 +10,6 @@ pub(in super::super) fn verify_same_secret_consistency(
 ) -> CanonicalResult<Option<Value>> {
     let Some(statement_set) = setup_package.get("sameSecretConsistency") else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency".to_string()],
             Vec::new(),
@@ -52,15 +53,10 @@ pub(in super::super) fn verify_same_secret_consistency(
             "setupPackage.sameSecretConsistency",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if statement_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
-                "sameSecretConsistencyProfileMismatch",
+                "sameSecretConsistencyParametersMismatch",
                 format!("sameSecretConsistency.{field_name} must be {expected_value}"),
                 format!("setupPackage.sameSecretConsistency.{field_name}"),
             )?));
@@ -123,7 +119,6 @@ pub(in super::super) fn verify_same_secret_consistency(
         .and_then(Value::as_array)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.statementRecords".to_string()],
             Vec::new(),
@@ -139,36 +134,15 @@ pub(in super::super) fn verify_same_secret_consistency(
     }
 
     let mut seen_roster_positions = BTreeSet::new();
-    let mut trustee_secret_commitment_roots = Vec::new();
     for statement_record in statement_records {
-        let trustee_secret_commitment_root = match verify_same_secret_statement_record(
+        if let Some(response) = verify_same_secret_statement_record(
             statement_record,
             setup_context,
             &trustee_bindings,
             &mut seen_roster_positions,
         )? {
-            Some(response) => return Ok(Some(response)),
-            None => statement_record
-                .get("trusteeSecretCommitmentRoot")
-                .and_then(Value::as_str)
-                .expect("trustee secret commitment root was verified")
-                .to_string(),
-        };
-        trustee_secret_commitment_roots.push(json!({
-            "trusteeIdentity": value_string(statement_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(statement_record, "trusteeRosterPosition")?,
-            "trusteeSecretCommitmentRoot": trustee_secret_commitment_root,
-        }));
-    }
-
-    if statement_set.get("trusteeSecretCommitmentRoots")
-        != Some(&Value::Array(trustee_secret_commitment_roots))
-    {
-        return Ok(Some(same_secret_refusal(
-            "sameSecretTrusteeRootListMismatch",
-            "sameSecretConsistency.trusteeSecretCommitmentRoots must match the ordered statement records",
-            "setupPackage.sameSecretConsistency.trusteeSecretCommitmentRoots",
-        )?));
+            return Ok(Some(response));
+        }
     }
 
     let Some(same_secret_consistency_root) = statement_set
@@ -176,7 +150,6 @@ pub(in super::super) fn verify_same_secret_consistency(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.sameSecretConsistencyRoot".to_string()],
             Vec::new(),
@@ -192,7 +165,7 @@ pub(in super::super) fn verify_same_secret_consistency(
         .as_object_mut()
         .expect("same-secret statement set object was checked")
         .remove("sameSecretConsistencyRoot");
-    let expected_root = derive_protocol_hash("SameSecretConsistencyRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if same_secret_consistency_root != expected_root {
         return Ok(Some(same_secret_refusal(
             "sameSecretConsistencyRootMismatch",
@@ -244,15 +217,10 @@ fn verify_same_secret_statement_record(
             "setupPackage.sameSecretConsistency.statementRecords",
         )?));
     }
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if statement_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_refusal(
-                "sameSecretStatementProfileMismatch",
+                "sameSecretStatementParametersMismatch",
                 format!("same-secret statement {field_name} must be {expected_value}"),
                 format!("setupPackage.sameSecretConsistency.statementRecords.{field_name}"),
             )?));
@@ -291,7 +259,7 @@ fn verify_same_secret_statement_record(
     }
     let Some(binding) = trustee_bindings.get(&trustee_roster_position) else {
         return Ok(Some(same_secret_refusal(
-            "sameSecretStatementTrusteeOutsideProfile",
+            "sameSecretStatementTrusteeOutsideParameters",
             "same-secret statement trusteeRosterPosition is outside the accepted roster",
             "setupPackage.sameSecretConsistency.statementRecords.trusteeRosterPosition",
         )?));
@@ -329,7 +297,6 @@ fn verify_same_secret_statement_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.statementRecords.trusteeSecretCommitmentRoot".to_string()],
             Vec::new(),
@@ -341,10 +308,8 @@ fn verify_same_secret_statement_record(
         "sameSecretConsistency.statementRecords.trusteeSecretCommitmentRoot",
     )?;
     // Recompute the trustee secret commitment from the setup context and the ordered VSS constant commitments so it cannot be detached from this ceremony's dealing.
-    let expected_trustee_secret_commitment_root = derive_protocol_hash(
-        "TrusteeSecretCommitmentRoot",
-        &trustee_secret_commitment_payload(setup_context, binding)?,
-    )?;
+    let expected_trustee_secret_commitment_root =
+        derive_canonical_object_hash(&trustee_secret_commitment_payload(setup_context, binding)?)?;
     if trustee_secret_commitment_root != expected_trustee_secret_commitment_root {
         return Ok(Some(same_secret_refusal(
             "trusteeSecretCommitmentRootMismatch",
@@ -358,7 +323,6 @@ fn verify_same_secret_statement_record(
         .and_then(Value::as_str)
     else {
         return Ok(Some(verification_response(
-            VerifierStatus::Pending,
             Some("publicKeyShareProofs"),
             vec!["sameSecretConsistency.statementRecords.sameSecretStatementRoot".to_string()],
             Vec::new(),
@@ -374,8 +338,7 @@ fn verify_same_secret_statement_record(
         .as_object_mut()
         .expect("same-secret statement object was checked")
         .remove("sameSecretStatementRoot");
-    let expected_statement_root =
-        derive_protocol_hash("SameSecretConsistencyRoot", &statement_root_input)?;
+    let expected_statement_root = derive_canonical_object_hash(&statement_root_input)?;
     if same_secret_statement_root != expected_statement_root {
         return Ok(Some(same_secret_refusal(
             "sameSecretStatementRootMismatch",
@@ -413,7 +376,7 @@ fn same_secret_trustee_bindings_from_vss(
             != Some(trustee_identity.as_str())
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "VSS source trustee record does not match the accepted setup roster",
             ));
         }
@@ -434,7 +397,7 @@ fn same_secret_trustee_bindings_from_vss(
             .is_some()
         {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "VSS source trustee records contain a duplicate roster position",
             ));
         }
@@ -478,7 +441,7 @@ fn same_secret_constant_commitment_roots_from_source_trustee(
             })?;
         if coefficient_record.get("rnsPrime").and_then(Value::as_u64) != Some(rns_prime) {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "VSS constant coefficient commitment RNS prime does not match Q_share",
             ));
         }
@@ -500,19 +463,10 @@ fn trustee_secret_commitment_payload(
     Ok(json!({
         "objectType": TRUSTEE_SECRET_COMMITMENT_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "commitmentProfileId": SETUP_COMMITMENT_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "ceremonyId": value_string(setup_context, "ceremonyId")?,
         "manifestHash": value_string(setup_context, "manifestHash")?,
         "rosterHash": value_string(setup_context, "rosterHash")?,
-        "setupProfileHash": value_string(setup_context, "setupProfileHash")?,
-        "qShareHash": value_string(setup_context, "qShareHash")?,
-        "carryAwareVssShareRelationProfileHash": value_string(
-            setup_context,
-            "carryAwareVssShareRelationProfileHash",
-        )?,
-        "commitmentProfileHash": value_string(setup_context, "commitmentProfileHash")?,
+        "setupParametersHash": value_string(setup_context, "setupParametersHash")?,
         "setupEpoch": value_string(setup_context, "setupEpoch")?,
         "trusteeIdentity": binding.trustee_identity,
         "trusteeRosterPosition": binding.trustee_roster_position,

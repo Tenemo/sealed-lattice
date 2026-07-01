@@ -1,11 +1,13 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn common_randomness_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
-    setup_profile_hash: &str,
+    setup_parameters_hash: &str,
     setup_epoch: &str,
     participant_count: u64,
 ) -> serde_json::Value {
@@ -14,13 +16,11 @@ pub(super) fn common_randomness_object(
     let mut ordered_reveal_hashes = Vec::new();
     for roster_position in 0..participant_count {
         let trustee_identity = format!("trustee-{roster_position}");
-        let reveal_source_hash = derive_protocol_hash(
-            "CommonRandomnessRevealHash",
-            &serde_json::json!({
-                "fixture": "common-randomness-reveal",
-                "rosterPosition": roster_position,
-            }),
-        )
+        let reveal_source_hash = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "CommonRandomnessRevealHash",
+            "fixture": "common-randomness-reveal",
+            "rosterPosition": roster_position,
+        }))
         .expect("reveal source hash");
         let reveal_hex = reveal_source_hash[..64].to_string();
         let mut reveal_record = serde_json::json!({
@@ -29,7 +29,7 @@ pub(super) fn common_randomness_object(
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
             "signerRole": "Trustee",
             "trusteeIdentity": trustee_identity.clone(),
@@ -38,25 +38,22 @@ pub(super) fn common_randomness_object(
             "deviceEpoch": 0,
             "revealHex": reveal_hex,
         });
-        let reveal_hash = derive_protocol_hash("CommonRandomnessRevealHash", &reveal_record)
-            .expect("reveal hash");
+        let reveal_hash = derive_canonical_object_hash(&reveal_record).expect("reveal hash");
         let reveal_byte_length =
             u64::try_from(canonical_json(&reveal_record).expect("reveal record").len())
                 .expect("reveal record length");
-        let reveal_context_hash = derive_protocol_hash(
-            "CommonRandomnessRevealHash",
-            &serde_json::json!({
-                "purpose": "common-randomness-reveal-signature-context",
-                "ceremonyId": ceremony_id,
-                "manifestHash": manifest_hash,
-                "rosterHash": roster_hash,
-                "setupProfileHash": setup_profile_hash,
-                "setupEpoch": setup_epoch,
-                "trusteeIdentity": trustee_identity.as_str(),
-                "rosterPosition": roster_position,
-                "objectRoot": reveal_hash.as_str(),
-            }),
-        )
+        let reveal_context_hash = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "CommonRandomnessRevealSignatureContext",
+            "purpose": "common-randomness-reveal-signature-context",
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "trusteeIdentity": trustee_identity.as_str(),
+            "rosterPosition": roster_position,
+            "objectRoot": reveal_hash.as_str(),
+        }))
         .expect("reveal signature context hash");
         let signature_seed_label = setup_trustee_signature_seed_label(&trustee_identity);
         let reveal_signature_fixture = create_protocol_signature_fixture(
@@ -91,7 +88,7 @@ pub(super) fn common_randomness_object(
             "ceremonyId": ceremony_id,
             "manifestHash": manifest_hash,
             "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
+            "setupParametersHash": setup_parameters_hash,
             "setupEpoch": setup_epoch,
             "signerRole": "Trustee",
             "trusteeIdentity": trustee_identity.as_str(),
@@ -100,25 +97,22 @@ pub(super) fn common_randomness_object(
             "deviceEpoch": 0,
             "revealHash": reveal_hash.as_str(),
         });
-        let commit_hash = derive_protocol_hash("CommonRandomnessCommitHash", &commit_record)
-            .expect("commit hash");
+        let commit_hash = derive_canonical_object_hash(&commit_record).expect("commit hash");
         let commit_byte_length =
             u64::try_from(canonical_json(&commit_record).expect("commit record").len())
                 .expect("commit record length");
-        let commit_context_hash = derive_protocol_hash(
-            "CommonRandomnessCommitHash",
-            &serde_json::json!({
-                "purpose": "common-randomness-commit-signature-context",
-                "ceremonyId": ceremony_id,
-                "manifestHash": manifest_hash,
-                "rosterHash": roster_hash,
-                "setupProfileHash": setup_profile_hash,
-                "setupEpoch": setup_epoch,
-                "trusteeIdentity": trustee_identity.as_str(),
-                "rosterPosition": roster_position,
-                "objectRoot": commit_hash.as_str(),
-            }),
-        )
+        let commit_context_hash = derive_canonical_object_hash(&serde_json::json!({
+            "objectType": "CommonRandomnessCommitSignatureContext",
+            "purpose": "common-randomness-commit-signature-context",
+            "ceremonyId": ceremony_id,
+            "manifestHash": manifest_hash,
+            "rosterHash": roster_hash,
+            "setupParametersHash": setup_parameters_hash,
+            "setupEpoch": setup_epoch,
+            "trusteeIdentity": trustee_identity.as_str(),
+            "rosterPosition": roster_position,
+            "objectRoot": commit_hash.as_str(),
+        }))
         .expect("commit signature context hash");
         let commit_signature_fixture = create_protocol_signature_fixture(
             &signature_seed_label,
@@ -146,18 +140,15 @@ pub(super) fn common_randomness_object(
         commit_records.push(commit_record);
     }
 
-    let public_matrix_seed_hash = derive_protocol_hash(
-        "SetupPublicMatrixSeedHash",
-        &serde_json::json!({
-            "setupProfileId": "CollectiveBgvSetup-v1",
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "rosterHash": roster_hash,
-            "setupProfileHash": setup_profile_hash,
-            "setupEpoch": setup_epoch,
-            "orderedRevealHashes": ordered_reveal_hashes,
-        }),
-    )
+    let public_matrix_seed_hash = derive_canonical_object_hash(&serde_json::json!({
+    "objectType": "SetupPublicMatrixSeed",
+    "ceremonyId": ceremony_id,
+        "manifestHash": manifest_hash,
+        "rosterHash": roster_hash,
+        "setupParametersHash": setup_parameters_hash,
+        "setupEpoch": setup_epoch,
+        "orderedRevealHashes": ordered_reveal_hashes,
+    }))
     .expect("public matrix seed hash");
     // The public matrices are derived per roster decryption threshold, so the
     // fixture must derive them with the same threshold the verifier recomputes
@@ -190,7 +181,7 @@ pub(super) fn common_randomness_object(
         "ceremonyId": ceremony_id,
         "manifestHash": manifest_hash,
         "rosterHash": roster_hash,
-        "setupProfileHash": setup_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "setupEpoch": setup_epoch,
         "commitRecords": commit_records,
         "revealRecords": reveal_records,
@@ -198,8 +189,7 @@ pub(super) fn common_randomness_object(
         "publicDerivations": public_derivations,
     });
     let common_randomness_root =
-        derive_protocol_hash("SetupCommonRandomnessRoot", &common_randomness)
-            .expect("common randomness root");
+        derive_canonical_object_hash(&common_randomness).expect("common randomness root");
     common_randomness["commonRandomnessRoot"] = serde_json::json!(common_randomness_root);
 
     common_randomness

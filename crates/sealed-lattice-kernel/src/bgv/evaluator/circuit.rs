@@ -15,7 +15,7 @@ use crate::{
             },
         },
         modular_arithmetic::mul_mod,
-        profile::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
+        parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
     },
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
@@ -33,12 +33,6 @@ pub(crate) struct EvaluatorContext {
     rotation_keys: BTreeMap<usize, KeySwitchKey>,
     #[cfg(not(target_arch = "wasm32"))]
     generated_rotation_keys: RwLock<BTreeMap<(usize, usize, String), KeySwitchKey>>,
-    // Consumed-schedule instrumentation: which relinearization levels and
-    // (rotation, level) pairs the evaluator actually requested.
-    #[cfg(not(target_arch = "wasm32"))]
-    consumed_relinearization_levels: RwLock<std::collections::BTreeSet<usize>>,
-    #[cfg(not(target_arch = "wasm32"))]
-    consumed_rotations: RwLock<std::collections::BTreeSet<(usize, usize)>>,
 }
 
 impl EvaluatorContext {
@@ -66,10 +60,6 @@ impl EvaluatorContext {
             rotation_keys: BTreeMap::new(),
             #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
-            #[cfg(not(target_arch = "wasm32"))]
-            consumed_relinearization_levels: RwLock::new(std::collections::BTreeSet::new()),
-            #[cfg(not(target_arch = "wasm32"))]
-            consumed_rotations: RwLock::new(std::collections::BTreeSet::new()),
         })
     }
 
@@ -91,10 +81,6 @@ impl EvaluatorContext {
             rotation_keys: key_material.rotation_keys,
             #[cfg(not(target_arch = "wasm32"))]
             generated_rotation_keys: RwLock::new(BTreeMap::new()),
-            #[cfg(not(target_arch = "wasm32"))]
-            consumed_relinearization_levels: RwLock::new(std::collections::BTreeSet::new()),
-            #[cfg(not(target_arch = "wasm32"))]
-            consumed_rotations: RwLock::new(std::collections::BTreeSet::new()),
         })
     }
 
@@ -110,10 +96,6 @@ impl EvaluatorContext {
     }
 
     fn relinearization_key(&self, level: usize) -> CanonicalResult<&KeySwitchKey> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Ok(mut consumed) = self.consumed_relinearization_levels.write() {
-            consumed.insert(level);
-        }
         let key = self.relinearization_key.as_ref().ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -139,7 +121,7 @@ impl EvaluatorContext {
         if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
             if rotation_key.level < level {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "loaded rotation key level is below the requested evaluator level",
                 ));
             }
@@ -149,7 +131,7 @@ impl EvaluatorContext {
 
         let key = self.key.as_ref().ok_or_else(|| {
             CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "public evaluation-key material is missing the requested rotation key",
             )
         })?;
@@ -199,14 +181,10 @@ impl EvaluatorContext {
         level: usize,
         fallback_seed_hex: &str,
     ) -> CanonicalResult<Ciphertext> {
-        #[cfg(not(target_arch = "wasm32"))]
-        if let Ok(mut consumed) = self.consumed_rotations.write() {
-            consumed.insert((galois_element, level));
-        }
         if let Some(rotation_key) = self.rotation_keys.get(&galois_element) {
             if rotation_key.level < level {
                 return Err(CanonicalError::new(
-                    CanonicalErrorCode::ProfileComponentMismatch,
+                    CanonicalErrorCode::ComponentMismatch,
                     "loaded rotation key level is below the requested evaluator level",
                 ));
             }
@@ -217,29 +195,6 @@ impl EvaluatorContext {
             self.resolve_galois_key(galois_element, level, fallback_seed_hex)?;
 
         rotate(ciphertext, galois_element, &generated_rotation_key)
-    }
-
-    // Consumed-schedule report for development instrumentation: every
-    // relinearization level and (rotation, level) pair requested so far.
-    #[cfg(all(test, not(target_arch = "wasm32")))]
-    pub(crate) fn consumed_key_schedule(
-        &self,
-    ) -> (
-        std::collections::BTreeSet<usize>,
-        std::collections::BTreeSet<(usize, usize)>,
-    ) {
-        let relinearization_levels = self
-            .consumed_relinearization_levels
-            .read()
-            .map(|levels| levels.clone())
-            .unwrap_or_default();
-        let rotations = self
-            .consumed_rotations
-            .read()
-            .map(|rotations| rotations.clone())
-            .unwrap_or_default();
-
-        (relinearization_levels, rotations)
     }
 }
 
@@ -597,7 +552,7 @@ mod tests {
     use std::sync::OnceLock;
 
     use super::{EvaluatorContext, evaluate_polynomial};
-    use crate::bgv::profile::PLAINTEXT_MODULUS;
+    use crate::bgv::parameters::PLAINTEXT_MODULUS;
 
     fn context() -> &'static EvaluatorContext {
         static CONTEXT: OnceLock<EvaluatorContext> = OnceLock::new();

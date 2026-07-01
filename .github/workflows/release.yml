@@ -62,8 +62,8 @@ jobs:
             - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
             - run: cargo test --workspace
 
-    rust-kernel-heavy:
-        name: rust kernel heavy
+    rust-accepted-setup-fast:
+        name: rust accepted setup fast
         needs:
             - validate-dispatch
         runs-on: ubuntu-latest
@@ -78,7 +78,47 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:rust:kernel:heavy -- --no-run-log
+            - name: Run Rust accepted setup fast proof checks
+              id: rust-accepted-setup-fast
+              timeout-minutes: 350
+              run: pnpm run test:rust:kernel:accepted-setup:fast -- --ci
+            - name: Upload Rust accepted setup fast logs
+              if: ${{ failure() && steps['rust-accepted-setup-fast'].outcome == 'failure' }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: error
+                  name: release-rust-accepted-setup-fast-logs
+                  retention-days: 7
+                  path: logs
+
+    rust-accepted-setup-final-package:
+        name: rust accepted setup final package
+        needs:
+            - validate-dispatch
+        runs-on: ubuntu-latest
+        timeout-minutes: 360
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              with:
+                  persist-credentials: false
+            - uses: ./.github/actions/bootstrap-pnpm
+            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
+              with:
+                  components: clippy, rustfmt
+                  targets: wasm32-unknown-unknown
+            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
+            - name: Run Rust accepted setup final package
+              id: accepted-setup-final-package
+              timeout-minutes: 350
+              run: pnpm run test:rust:kernel:accepted-setup:final-package -- --ci
+            - name: Upload Rust accepted setup final package logs
+              if: ${{ failure() && steps['accepted-setup-final-package'].outcome == 'failure' }}
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+              with:
+                  if-no-files-found: error
+                  name: release-rust-accepted-setup-final-package-logs
+                  retention-days: 7
+                  path: logs
 
     wasm:
         name: wasm
@@ -121,7 +161,6 @@ jobs:
                   pnpm exec tsx ./tools/ci/verify-public-package-policy.ts
                   pnpm exec tsx ./tools/ci/verify-test-lane-coverage.ts
                   pnpm exec tsx ./tools/ci/check-package-boundaries.ts
-                  pnpm run vectors
                   pnpm exec knip
 
     node-fast:
@@ -140,7 +179,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:fast -- --no-run-log
+            - run: pnpm run test:node:fast
 
     node-protocol:
         name: node protocol
@@ -158,10 +197,10 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:protocol -- --no-run-log
+            - run: pnpm run test:node:protocol
 
-    node-kernel:
-        name: node kernel
+    node-kernel-fast:
+        name: node kernel fast
         needs:
             - validate-dispatch
         runs-on: ubuntu-latest
@@ -176,7 +215,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel -- --no-run-log
+            - run: pnpm run test:node:kernel:fast
 
     node-kernel-heavy:
         name: node kernel heavy
@@ -194,7 +233,7 @@ jobs:
                   components: clippy, rustfmt
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm run test:node:kernel:heavy -- --no-run-log
+            - run: pnpm run test:node:kernel:heavy
 
     verify:
         name: verify
@@ -202,15 +241,15 @@ jobs:
         timeout-minutes: 5
         needs:
             - rust
-            - rust-kernel-heavy
+            - rust-accepted-setup-fast
+            - rust-accepted-setup-final-package
             - wasm
             - verify-static
             - node-fast
             - node-protocol
-            - node-kernel
+            - node-kernel-fast
             - node-kernel-heavy
             - browser
-            - docs
             - release-smoke
         if: ${{ always() }}
         steps:
@@ -249,26 +288,7 @@ jobs:
                   targets: wasm32-unknown-unknown
             - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
             - run: pnpm exec playwright install --with-deps chromium firefox webkit
-            - run: pnpm run test:browser -- --no-run-log
-
-    docs:
-        name: docs
-        needs:
-            - validate-dispatch
-        runs-on: ubuntu-latest
-        timeout-minutes: 25
-        steps:
-            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-              with:
-                  persist-credentials: false
-            - uses: ./.github/actions/bootstrap-pnpm
-            - uses: dtolnay/rust-toolchain@b18f7037bce1ea84c086f4d5e9493f853c0ce412
-              with:
-                  components: clippy, rustfmt
-                  targets: wasm32-unknown-unknown
-            - uses: Swatinem/rust-cache@aa7c1c80a07a27a84c0aa76d0cef0aad3830e330
-            - run: pnpm exec playwright install --with-deps chromium
-            - run: pnpm run verify:docs
+            - run: pnpm run test:browser
 
     release-smoke:
         name: release smoke

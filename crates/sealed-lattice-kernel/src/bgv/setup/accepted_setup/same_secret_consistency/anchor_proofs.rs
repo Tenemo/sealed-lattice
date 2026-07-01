@@ -1,7 +1,9 @@
 use super::accessors::*;
+
 use super::family_binding::*;
 use super::proof_transport::*;
 use super::*;
+use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
 use rayon::prelude::*;
@@ -9,8 +11,7 @@ use rayon::prelude::*;
 use crate::bgv::setup::trustee_evaluation_key_proof::{
     SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY, SameSecretLinkageStatement, SuccinctSetupProofContext,
     TrusteeEvaluationKeyStatement, decode_trustee_evaluation_key_proof,
-    same_secret_anchor_proof_bytes_hash, succinct_same_secret_linkage_anchor_accounting_hash,
-    verify_evaluation_key_share,
+    same_secret_anchor_proof_bytes_hash, verify_evaluation_key_share,
 };
 
 pub(in super::super) fn verify_optional_same_secret_proofs(
@@ -54,17 +55,10 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs",
         )?));
     }
-    let anchor_accounting_hash = succinct_same_secret_linkage_anchor_accounting_hash()?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-        ("proofAccountingHash", anchor_accounting_hash.as_str()),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if proof_set.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Ok(Some(same_secret_proof_refusal(
-                "sameSecretProofSetProfileMismatch",
+                "sameSecretProofSetParametersMismatch",
                 format!("sameSecretProofs.{field_name} must be {expected_value}"),
                 format!("setupPackage.sameSecretProofs.{field_name}"),
             )?));
@@ -192,22 +186,6 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs.proofRecords",
         )?));
     }
-    let mut proof_roots = Vec::new();
-    for proof_record in proof_records {
-        proof_roots.push(json!({
-            "trusteeIdentity": value_string(proof_record, "trusteeIdentity")?,
-            "trusteeRosterPosition": value_u64(proof_record, "trusteeRosterPosition")?,
-            "sameSecretProofRoot": value_string(proof_record, "sameSecretProofRoot")?,
-        }));
-    }
-    if proof_set.get("sameSecretProofRoots") != Some(&Value::Array(proof_roots)) {
-        return Ok(Some(same_secret_proof_refusal(
-            "sameSecretProofRootListMismatch",
-            "sameSecretProofs.sameSecretProofRoots must match the ordered proof records",
-            "setupPackage.sameSecretProofs.sameSecretProofRoots",
-        )?));
-    }
-
     let Some(proof_set_root) = proof_set
         .get("sameSecretProofSetRoot")
         .and_then(Value::as_str)
@@ -224,7 +202,7 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
         .as_object_mut()
         .expect("same-secret proof set object was checked")
         .remove("sameSecretProofSetRoot");
-    let expected_root = derive_protocol_hash("SameSecretProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if proof_set_root != expected_root {
         return Ok(Some(same_secret_proof_refusal(
             "sameSecretProofSetRootMismatch",
@@ -271,12 +249,7 @@ fn verify_same_secret_anchor_proof_record(
         ));
     }
     verify_same_secret_context(proof_record, context.setup_context)?;
-    for (field_name, expected_value) in [
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("commitmentProfileId", SETUP_COMMITMENT_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-        ("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
-    ] {
+    for (field_name, expected_value) in [("proofFamily", SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY)] {
         if proof_record.get(field_name).and_then(Value::as_str) != Some(expected_value) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
@@ -320,18 +293,6 @@ fn verify_same_secret_anchor_proof_record(
     }
 
     let proof_bytes = same_secret_proof_bytes_from_record(proof_record, context.request)?;
-    let proof_size_bytes = u64::try_from(proof_bytes.len()).map_err(|_| {
-        CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "same-secret proof byte length does not fit u64",
-        )
-    })?;
-    if proof_record.get("proofSizeBytes").and_then(Value::as_u64) != Some(proof_size_bytes) {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "same-secret proofSizeBytes must match proofBytesHex",
-        ));
-    }
     let proof_bytes_hash = value_string(proof_record, "proofBytesHash")?;
     if proof_bytes_hash != same_secret_anchor_proof_bytes_hash(&proof_bytes) {
         return Err(CanonicalError::new(
@@ -403,7 +364,7 @@ fn verify_same_secret_anchor_proof_record(
         .as_object_mut()
         .expect("same-secret proof record object was checked")
         .remove("sameSecretProofRoot");
-    let expected_root = derive_protocol_hash("SameSecretProofRoot", &root_input)?;
+    let expected_root = derive_canonical_object_hash(&root_input)?;
     if proof_root != expected_root {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,

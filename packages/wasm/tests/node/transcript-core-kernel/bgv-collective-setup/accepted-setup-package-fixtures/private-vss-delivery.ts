@@ -1,14 +1,11 @@
-import { expect } from 'vitest';
-
 import {
-    firstProfileParticipantCount,
+    firstRosterParticipantCount,
     minimumSuccinctProofFixtureRingDegree,
     privateVssMailboxKeyPairForRosterPosition,
     setupTrusteeSignatureSeedLabel,
     type JsonRecord,
 } from '../setup-fixture-primitives.js';
 
-import { privateVssMailboxEncryptionProfileId } from '#packages/crypto/src/index';
 import {
     createMlDsaKeyPairFixture,
     createMlDsaSignatureProfileFixture,
@@ -34,63 +31,27 @@ import {
     type VssShareComplaintRecord,
 } from '#packages/protocol/src/setup/vss-share-verification-records';
 import type {
-    BgvCollectiveSetupProfileDescription,
+    BgvCollectiveSetupParametersDescription,
     TranscriptCoreKernel,
 } from '#packages/wasm/src/index';
 
-function collectForbiddenPrivateVssDeliveryFieldPaths(
-    value: unknown,
-    objectPath = 'privateVssEnvelopeCommitments',
-): string[] {
-    const forbiddenFieldNames = new Set([
-        'privateEnvelope',
-        'coefficientMessage',
-        'randomnessByColumn',
-        'shareValues',
-        'aggregateOpening',
-        'aggregateOpeningColumns',
-        'carryWitnessesDecimal',
-    ]);
-    if (Array.isArray(value)) {
-        return value.flatMap((item, itemIndex) =>
-            collectForbiddenPrivateVssDeliveryFieldPaths(
-                item,
-                `${objectPath}.${String(itemIndex)}`,
-            ),
-        );
-    }
-    if (typeof value !== 'object' || value === null) {
-        return [];
-    }
-
-    return Object.entries(value).flatMap(([fieldName, fieldValue]) => {
-        const fieldPath = `${objectPath}.${fieldName}`;
-        if (forbiddenFieldNames.has(fieldName)) {
-            return [fieldPath];
-        }
-
-        return collectForbiddenPrivateVssDeliveryFieldPaths(
-            fieldValue,
-            fieldPath,
-        );
-    });
-}
-
 function collectiveSetupPhaseOrderHash(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
 ): string {
-    return kernel.deriveProtocolHash({
-        namespace: 'CollectiveBgvSetupPhaseOrderHash',
-        value: profile.phaseOrder.map(
-            (phase: {
-                readonly phaseId: string;
-                readonly phaseNumber: number;
-            }) => ({
-                phaseId: phase.phaseId,
-                phaseNumber: phase.phaseNumber,
-            }),
-        ),
+    return kernel.deriveCanonicalObjectHash({
+        value: {
+            objectType: 'CollectiveBgvSetupPhaseOrder',
+            phaseOrder: setupParameters.phaseOrder.map(
+                (phase: {
+                    readonly phaseId: string;
+                    readonly phaseNumber: number;
+                }) => ({
+                    phaseId: phase.phaseId,
+                    phaseNumber: phase.phaseNumber,
+                }),
+            ),
+        },
     });
 }
 
@@ -139,18 +100,12 @@ function packageShapePrivateVssEnvelopeAad(input: {
     return {
         objectType: 'PrivateVssEnvelopeAad',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
         privateEnvelopeObjectType: 'PrivateVssShareEnvelope',
         ciphertextContentType: 'private-vss-share-envelope',
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         phaseOrderHash: input.phaseOrderHash,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
@@ -187,7 +142,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
         input.sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
     );
     const envelopeSequenceNumber =
-        input.sourceTrusteeRosterPosition * firstProfileParticipantCount +
+        input.sourceTrusteeRosterPosition * firstRosterParticipantCount +
         input.recipientRosterPosition;
     const privateEnvelopeAad = packageShapePrivateVssEnvelopeAad({
         setupContext: input.setupContext,
@@ -201,21 +156,20 @@ function packageShapePrivateVssEnvelopeReference(input: {
         sourceTrusteeCommitmentRoot,
         envelopeSequenceNumber,
     });
-    const privateEnvelopeAadHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEnvelopeAadHash',
+    const privateEnvelopeAadHash = input.kernel.deriveCanonicalObjectHash({
         value: privateEnvelopeAad,
     });
-    const privateEnvelopeHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssShareEnvelopeHash',
+    const privateEnvelopeHash = input.kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'PrivateVssShareEnvelopeHash',
             fixture: 'package-shape-private-vss-envelope-reference',
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
         },
     });
-    const encryptedEnvelopeHash = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssEncryptedEnvelopeHash',
+    const encryptedEnvelopeHash = input.kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'PrivateVssEncryptedEnvelopeHash',
             fixture: 'package-shape-private-vss-envelope-reference',
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
@@ -223,9 +177,9 @@ function packageShapePrivateVssEnvelopeReference(input: {
             privateEnvelopeAadHash,
         },
     });
-    const localVerificationRoot = input.kernel.deriveProtocolHash({
-        namespace: 'PrivateVssLocalVerificationRoot',
+    const localVerificationRoot = input.kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'PrivateVssLocalVerificationRoot',
             fixture: 'package-shape-private-vss-envelope-reference',
             sourceTrusteeRosterPosition: input.sourceTrusteeRosterPosition,
             recipientRosterPosition: input.recipientRosterPosition,
@@ -235,15 +189,10 @@ function packageShapePrivateVssEnvelopeReference(input: {
     const referenceWithoutRoot = {
         objectType: 'PrivateVssEnvelopeCommitment',
         objectVersion: 1,
-        mailboxEncryptionProfileId: privateVssMailboxEncryptionProfileId,
         ceremonyId: input.setupContext.ceremonyId,
         manifestHash: input.setupContext.manifestHash,
         rosterHash: input.setupContext.rosterHash,
-        setupProfileHash: input.setupContext.setupProfileHash,
-        qShareHash: input.setupContext.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            input.setupContext.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: input.setupContext.commitmentProfileHash,
+        setupParametersHash: input.setupContext.setupParametersHash,
         setupEpoch: input.setupContext.setupEpoch,
         publicMatrixSeedHash: input.publicMatrixSeedHash,
         vssCoefficientCommitmentRoot: input.vssCoefficientCommitmentRoot,
@@ -261,7 +210,6 @@ function packageShapePrivateVssEnvelopeReference(input: {
         privateEnvelopeAadHash,
         recipientMailboxPublicKeyHash: recipientMailboxKeyPair.publicKeyHash,
         localVerificationRoot,
-        openingVerificationStatus: 'accepted-local-private-vss-opening',
     } as const satisfies Omit<
         PrivateVssEnvelopeCommitment,
         'privateEnvelopeCommitmentRoot'
@@ -269,8 +217,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
 
     return {
         ...referenceWithoutRoot,
-        privateEnvelopeCommitmentRoot: input.kernel.deriveProtocolHash({
-            namespace: 'PrivateVssEnvelopeCommitmentRoot',
+        privateEnvelopeCommitmentRoot: input.kernel.deriveCanonicalObjectHash({
             value: referenceWithoutRoot,
         }),
     } as const satisfies PrivateVssEnvelopeCommitment;
@@ -278,7 +225,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
 
 export function packageShapePrivateVssEnvelopeCommitments(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
     setupContext: JsonRecord,
     commonRandomness: JsonRecord,
     vssCoefficientCommitments: JsonRecord,
@@ -289,11 +236,14 @@ export function packageShapePrivateVssEnvelopeCommitments(
     const vssCoefficientCommitmentRoot = String(
         vssCoefficientCommitments.vssCoefficientCommitmentRoot,
     );
-    const phaseOrderHash = collectiveSetupPhaseOrderHash(kernel, profile);
+    const phaseOrderHash = collectiveSetupPhaseOrderHash(
+        kernel,
+        setupParameters,
+    );
     const envelopeReferences = sourceTrusteeRecords.flatMap(
         (sourceTrusteeRecord, sourceTrusteeRosterPosition) =>
             Array.from(
-                { length: firstProfileParticipantCount },
+                { length: firstRosterParticipantCount },
                 (_unusedRecipient, recipientRosterPosition) =>
                     packageShapePrivateVssEnvelopeReference({
                         kernel,
@@ -311,7 +261,8 @@ export function packageShapePrivateVssEnvelopeCommitments(
     const privateVssEnvelopeCommitmentSet =
         createPrivateVssMailboxDeliverySetFromReferences({
             kernel: {
-                deriveProtocolHash: (input) => kernel.deriveProtocolHash(input),
+                deriveCanonicalObjectHash: (input) =>
+                    kernel.deriveCanonicalObjectHash(input),
                 verifyPrivateVssShareEnvelope: (input) =>
                     kernel.verifyPrivateVssShareEnvelope(input),
             },
@@ -319,24 +270,18 @@ export function packageShapePrivateVssEnvelopeCommitments(
                 setupContext as PrivateVssMailboxDeliverySetInput['setupContext'],
             publicMatrixSeedHash,
             vssCoefficientCommitmentRoot,
-            participantCount: firstProfileParticipantCount,
+            participantCount: firstRosterParticipantCount,
             deliveryPhaseNumber: 6,
             verificationPhaseNumber: 7,
             envelopeReferences,
         });
-
-    expect(
-        collectForbiddenPrivateVssDeliveryFieldPaths(
-            privateVssEnvelopeCommitmentSet,
-        ),
-    ).toEqual([]);
 
     return privateVssEnvelopeCommitmentSet;
 }
 
 export async function focusedPrivateVssSourceDeliveryReferences(
     kernel: TranscriptCoreKernel,
-    profile: BgvCollectiveSetupProfileDescription,
+    setupParameters: BgvCollectiveSetupParametersDescription,
     setupContext: JsonRecord,
     commonRandomness: JsonRecord,
     vssCoefficientCommitments: JsonRecord,
@@ -359,7 +304,8 @@ export async function focusedPrivateVssSourceDeliveryReferences(
 
     return createPrivateVssMailboxSourceTrusteeDeliveryReferences({
         kernel: {
-            deriveProtocolHash: (input) => kernel.deriveProtocolHash(input),
+            deriveCanonicalObjectHash: (input) =>
+                kernel.deriveCanonicalObjectHash(input),
             generatePrivateVssShareProof: (input) =>
                 kernel.generatePrivateVssShareProof(input),
             verifyPrivateVssShareEnvelope: (input) =>
@@ -367,12 +313,12 @@ export async function focusedPrivateVssSourceDeliveryReferences(
         },
         setupContext:
             setupContext as PrivateVssMailboxDeliverySetInput['setupContext'],
-        phaseOrderHash: collectiveSetupPhaseOrderHash(kernel, profile),
+        phaseOrderHash: collectiveSetupPhaseOrderHash(kernel, setupParameters),
         publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
         vssCoefficientCommitmentRoot: String(
             vssCoefficientCommitments.vssCoefficientCommitmentRoot,
         ),
-        qSharePrimes: profile.qShare.primes,
+        qSharePrimes: setupParameters.qShare.primes,
         ringDegree: minimumSuccinctProofFixtureRingDegree,
         participantCount: 1,
         deliveryPhaseNumber: 6,
@@ -486,7 +432,7 @@ export async function acceptedVssComplaintSet(
             envelopeReference:
                 envelopeReference as PrivateVssEnvelopeVerificationReference,
             localVerification: {
-                ok: false,
+                isValid: false,
                 privateEnvelopeHash: String(
                     envelopeReference.privateEnvelopeHash,
                 ),

@@ -15,7 +15,7 @@ import {
     uniqueStrings,
 } from '../common/verification-helpers.js';
 import { derivePollSpecHash } from '../lifecycle/poll-spec.js';
-import { deriveFrozenRosterProfile } from '../lifecycle/thresholds.js';
+import { deriveFrozenRosterParameters } from '../lifecycle/thresholds.js';
 
 import { deriveRosterHash } from './hashes.js';
 import {
@@ -186,72 +186,72 @@ const verifyRosterManifestTranscriptUnchecked = (
             ),
         );
     }
-    if (input.frozenRosterProfile.pollSpecHash !== pollSpecHash) {
+    if (input.frozenRosterParameters.pollSpecHash !== pollSpecHash) {
         refusedObjects.push(
             createRefusal(
                 'ManifestHashMismatch',
-                'Frozen roster profile poll spec hash must match the transcript poll specification.',
-                input.frozenRosterProfile.thresholdProfileHash,
-                'FrozenRosterProfile',
+                'Frozen roster parameters poll spec hash must match the transcript poll specification.',
+                input.frozenRosterParameters.thresholdParametersHash,
+                'FrozenRosterParameters',
             ),
         );
     }
     if (
-        input.frozenRosterProfile.rosterHash !== rosterHash ||
-        input.frozenRosterProfile.rosterSize !== participantIdentities.length
+        input.frozenRosterParameters.rosterHash !== rosterHash ||
+        input.frozenRosterParameters.rosterSize !== participantIdentities.length
     ) {
         refusedObjects.push(
             createRefusal(
                 'RosterHashMismatch',
-                'Frozen roster profile must be derived from the accepted frozen roster.',
-                input.frozenRosterProfile.thresholdProfileHash,
-                'FrozenRosterProfile',
+                'Frozen roster parameters must be derived from the accepted frozen roster.',
+                input.frozenRosterParameters.thresholdParametersHash,
+                'FrozenRosterParameters',
             ),
         );
     }
     try {
-        const expectedFrozenRosterProfile = deriveFrozenRosterProfile({
+        const expectedFrozenRosterParameters = deriveFrozenRosterParameters({
             pollSpec: input.pollSpec,
             rosterHash,
             rosterSize: participantIdentities.length,
-            dynamicRosterProfileCertificateHash:
-                input.frozenRosterProfile.thresholdProfile
-                    .dynamicRosterProfileCertificateHash ?? undefined,
+            dynamicRosterParametersCertificateHash:
+                input.frozenRosterParameters.thresholdParameters
+                    .dynamicRosterParametersCertificateHash ?? undefined,
         });
         if (
-            expectedFrozenRosterProfile.thresholdProfileHash !==
-            input.frozenRosterProfile.thresholdProfileHash
+            expectedFrozenRosterParameters.thresholdParametersHash !==
+            input.frozenRosterParameters.thresholdParametersHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'ManifestHashMismatch',
-                    'Frozen roster profile threshold profile hash must match the roster-freeze derived profile.',
-                    input.frozenRosterProfile.thresholdProfileHash,
-                    'FrozenRosterProfile',
+                    'Frozen roster parameters threshold parameters hash must match the roster-freeze derived parameters.',
+                    input.frozenRosterParameters.thresholdParametersHash,
+                    'FrozenRosterParameters',
                 ),
             );
         }
         if (
-            canonicalJson(expectedFrozenRosterProfile) !==
-            canonicalJson(input.frozenRosterProfile)
+            canonicalJson(expectedFrozenRosterParameters) !==
+            canonicalJson(input.frozenRosterParameters)
         ) {
             refusedObjects.push(
                 createRefusal(
                     'ManifestHashMismatch',
-                    'Frozen roster profile payload must match the roster-freeze derived profile.',
-                    input.frozenRosterProfile.thresholdProfileHash,
-                    'FrozenRosterProfile',
+                    'Frozen roster parameters payload must match the roster-freeze derived parameters.',
+                    input.frozenRosterParameters.thresholdParametersHash,
+                    'FrozenRosterParameters',
                 ),
             );
         }
         if (
-            expectedFrozenRosterProfile.thresholdProfileHash !==
-            input.electionManifest.thresholdProfileHash
+            expectedFrozenRosterParameters.thresholdParametersHash !==
+            input.electionManifest.thresholdParametersHash
         ) {
             refusedObjects.push(
                 createRefusal(
                     'ManifestHashMismatch',
-                    'Election manifest threshold profile hash must match the roster-freeze derived profile.',
+                    'Election manifest threshold parameters hash must match the roster-freeze derived parameters.',
                     input.electionManifest.electionManifestHash,
                     'ElectionManifest',
                 ),
@@ -261,9 +261,9 @@ const verifyRosterManifestTranscriptUnchecked = (
         refusedObjects.push(
             createRefusal(
                 'ManifestHashMismatch',
-                'Frozen roster profile could not be derived from the poll policy and accepted roster.',
-                input.frozenRosterProfile.thresholdProfileHash,
-                'FrozenRosterProfile',
+                'Frozen roster parameters could not be derived from the poll policy and accepted roster.',
+                input.frozenRosterParameters.thresholdParametersHash,
+                'FrozenRosterParameters',
             ),
         );
     }
@@ -374,7 +374,7 @@ const verifyRosterManifestTranscriptUnchecked = (
         refusedObjects.length === 0 && forkEvidence === undefined;
 
     return {
-        ok: transcriptAccepted,
+        isValid: transcriptAccepted,
         acceptedHashes: transcriptAccepted
             ? uniqueStrings([
                   ...boardResult.acceptedHashes,
@@ -407,7 +407,7 @@ export const verifyRosterManifestTranscript = (
         return verifyRosterManifestTranscriptUnchecked(input);
     } catch {
         return {
-            ok: false,
+            isValid: false,
             acceptedHashes: [],
             refusedObjects: [
                 createRefusal(

@@ -1,4 +1,5 @@
 export const canonicalErrorCodeValues = [
+    'ComponentMismatch',
     'DuplicateField',
     'FieldOrder',
     'FixtureMismatch',
@@ -13,12 +14,8 @@ export const canonicalErrorCodeValues = [
     'MalformedVarUint',
     'MissingField',
     'NonCanonicalVarUint',
-    'ProfileComponentMismatch',
     'TrailingBytes',
-    'UnknownBaseProfile',
     'UnknownField',
-    'UnknownSecurityClosure',
-    'UnknownProofProfile',
     'UnsupportedCanonicalEnvelopeVersion',
     'UnsupportedObjectType',
     'UnsupportedObjectVersion',
@@ -41,11 +38,6 @@ export type GoldenTranscriptCoreFixture = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseProfileId: string;
-    readonly securityProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluatorReplayProfileId: string;
-    readonly decryptionProofProfileId: string;
     readonly expectedObjectHash512: string;
     readonly expectedChunkRoot: string;
     readonly chunkSize: number;
@@ -70,11 +62,6 @@ export type TranscriptCoreAnalysis = {
     readonly canonicalBytesHex: string;
     readonly objectType: 'TranscriptCore';
     readonly objectVersion: 1;
-    readonly baseProfileId: string;
-    readonly securityProfileId: string;
-    readonly heSetupProofProfileId: string;
-    readonly evaluatorReplayProfileId: string;
-    readonly decryptionProofProfileId: string;
     readonly objectHash512: string;
     readonly chunkRoot: string;
     readonly chunkSize: number;
@@ -106,13 +93,13 @@ export type TranscriptCoreFixtureVerification =
 /** Public transcript-core fixture verifier result. */
 export type TranscriptCoreVerificationResult =
     | {
-          readonly ok: true;
+          readonly isValid: true;
           readonly caseName: string;
           readonly objectHash512: string;
           readonly chunkRoot: string;
       }
     | {
-          readonly ok: false;
+          readonly isValid: false;
           readonly caseName: string;
           readonly rejection: {
               readonly code: CanonicalErrorCode;

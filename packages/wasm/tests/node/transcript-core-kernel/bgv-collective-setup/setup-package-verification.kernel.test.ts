@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import { setupRequest } from '../bgv-passive-setup-fixtures.js';
 
 import {
-    acceptedActiveStaticSetupTheoremCertificate,
     acceptedPublicKeyShareMaterial,
     acceptedShapedSetupPackage,
     acceptedVssCoefficientCommitments,
@@ -23,7 +22,7 @@ import {
 } from '#packages/wasm/src/index';
 
 describe('collective BGV setup kernel commands', () => {
-    it('classifies passive setup packages as outside profile', async () => {
+    it('classifies passive setup packages as outside parameters', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const passiveSetup = kernel.generateBgvPassiveSetup(setupRequest);
 
@@ -32,13 +31,11 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
+            isValid: false,
             operation: 'verifyCollectiveBgvSetupPackage',
-            setupProfileId: 'CollectiveBgvSetup-v1',
-            verifierStatus: 'outsideProfile',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(
-            'outsideCollectiveBgvSetupProfile',
+            'outsideCollectiveBgvSetupParameters',
         );
         expect(result.acceptedSetupHandoff).toBeUndefined();
     });
@@ -68,10 +65,13 @@ describe('collective BGV setup kernel commands', () => {
         expect(commandError.message).toContain('setupPackage is required');
     });
 
-    it('reports accepted-shaped setup as pending before reduced-ring public VSS profile checks', async () => {
+    it('reports accepted-shaped setup as pending before reduced-ring public VSS parameters checks', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
 
         const result = kernel.verifyCollectiveBgvSetup({
             setupPackage,
@@ -82,8 +82,7 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
-            verifierStatus: 'pending',
+            isValid: false,
             currentPhase: 'setupPackageVerification',
             missingObjects: [
                 'sameSecretProofs',
@@ -98,7 +97,7 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses protocol-built setup packages with malformed setup context before later pending', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
 
         for (const [fieldName, malformedValue] of [
             ['setupEpoch', 'setup-epoch 1'],
@@ -106,7 +105,7 @@ describe('collective BGV setup kernel commands', () => {
         ] as const) {
             const setupPackage = await acceptedShapedSetupPackage(
                 kernel,
-                profile,
+                parameters,
             );
             const setupContext = setupPackage.setupContext as JsonRecord;
             setupContext[fieldName] = malformedValue;
@@ -121,7 +120,7 @@ describe('collective BGV setup kernel commands', () => {
                 ),
             });
 
-            expect(result.verifierStatus).toBe('refused');
+            expect(result.isValid).toBe(false);
             expect(result.refusedObjects[0]).toMatchObject({
                 reasonCode: 'setupContextTokenMalformed',
                 objectPath: `setupPackage.setupContext.${fieldName}`,
@@ -133,16 +132,16 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses protocol-built same-secret proofs with statement-hash drift before later pending', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
         setupPackage.sameSecretProofs =
-            sameSecretProofsWithDriftedStatementHashes(profile, setupPackage);
-        const activeStaticSetupTheoremCertificate =
-            acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-        setupPackage.activeStaticSetupTheoremCertificate =
-            activeStaticSetupTheoremCertificate;
-        setupPackage.activeStaticSetupTheoremCertificateHash =
-            activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
+            sameSecretProofsWithDriftedStatementHashes(
+                parameters,
+                setupPackage,
+            );
         rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
         const result = kernel.verifyCollectiveBgvSetup({
@@ -153,7 +152,7 @@ describe('collective BGV setup kernel commands', () => {
             ),
         });
 
-        expect(result.verifierStatus).toBe('refused');
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects[0]).toMatchObject({
             reasonCode: 'sameSecretProofVerificationFailed',
         });
@@ -166,40 +165,37 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses protocol-built public-key share succinct proofs with statement-hash drift before later pending', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
         const setupContext =
             setupPackage.setupContext as CollectiveBgvSetupContext;
         const commonRandomness = setupPackage.commonRandomness as JsonRecord;
         const vssCoefficientCommitmentBundle =
             acceptedVssCoefficientCommitments(
                 setupContext,
-                profile,
+                parameters,
                 String(commonRandomness.publicMatrixSeedHash),
             );
         setupPackage.sameSecretProofs = sameSecretProofsWithGeneratedProofs(
             kernel,
-            profile,
+            parameters,
             setupPackage,
             vssCoefficientCommitmentBundle,
         );
         setupPackage.publicKeyShareMaterial = acceptedPublicKeyShareMaterial(
             setupContext,
-            profile,
+            parameters,
             commonRandomness,
             setupPackage.publicKeyShares as PublicKeyShareSet,
         );
         setupPackage.publicKeyShareSuccinctProofs =
             publicKeyShareSuccinctProofsWithDriftedStatementHashes(
-                profile,
+                parameters,
                 setupPackage,
             );
-        const activeStaticSetupTheoremCertificate =
-            acceptedActiveStaticSetupTheoremCertificate(kernel, setupPackage);
-        setupPackage.activeStaticSetupTheoremCertificate =
-            activeStaticSetupTheoremCertificate;
-        setupPackage.activeStaticSetupTheoremCertificateHash =
-            activeStaticSetupTheoremCertificate.activeStaticSetupTheoremCertificateHash;
         rebindCollectiveSetupPackageHash(kernel, setupPackage);
 
         const result = kernel.verifyCollectiveBgvSetup({
@@ -210,7 +206,7 @@ describe('collective BGV setup kernel commands', () => {
             ),
         });
 
-        expect(result.verifierStatus).toBe('refused');
+        expect(result.isValid).toBe(false);
         expect(result.refusedObjects[0]).toMatchObject({
             reasonCode: 'publicKeyShareSuccinctProofVerificationFailed',
         });
@@ -223,8 +219,11 @@ describe('collective BGV setup kernel commands', () => {
 
     it('aborts accepted-shaped setup on a protocol-built VSS complaint', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const profile = kernel.describeCollectiveBgvSetupProfile();
-        const setupPackage = await acceptedShapedSetupPackage(kernel, profile);
+        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const setupPackage = await acceptedShapedSetupPackage(
+            kernel,
+            parameters,
+        );
         setupPackage.vssComplaints = await acceptedVssComplaintSet(
             setupPackage.setupContext as JsonRecord,
             setupPackage.privateVssEnvelopeCommitments as JsonRecord,
@@ -240,8 +239,7 @@ describe('collective BGV setup kernel commands', () => {
         });
 
         expect(result).toMatchObject({
-            ok: false,
-            verifierStatus: 'aborted',
+            isValid: false,
             currentPhase: 'vssAcceptanceOrComplaint',
         });
         expect(result.refusedObjects[0]?.reasonCode).toBe(

@@ -1,7 +1,5 @@
 use crate::{
-    bgv::profile::{
-        BgvBasisKind, POLYNOMIAL_DEGREE, encrypted_ballot_aggregate_layout_hash, profile_hash,
-    },
+    bgv::parameters::{BgvBasisKind, POLYNOMIAL_DEGREE, bgv_parameters_hash},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
 };
 
@@ -30,12 +28,11 @@ impl PolynomialDomain {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RnsPolynomial {
-    pub(crate) profile_hash: String,
+    pub(crate) bgv_parameters_hash: String,
     pub(crate) basis_id: String,
     pub(crate) level: usize,
     pub(crate) coefficient_count: usize,
     pub(crate) domain: PolynomialDomain,
-    pub(crate) encrypted_ballot_aggregate_layout_hash: String,
     pub(crate) moduli: Vec<u64>,
     pub(crate) residues_by_modulus: Vec<Vec<u64>>,
 }
@@ -44,22 +41,21 @@ impl RnsPolynomial {
     pub(crate) fn coefficient_domain(
         basis_kind: BgvBasisKind,
         level: usize,
-        encrypted_ballot_aggregate_layout_hash: String,
+        bgv_parameters_hash: String,
         residues_by_modulus: Vec<Vec<u64>>,
     ) -> CanonicalResult<Self> {
         let moduli = basis_kind.moduli_for_level(level).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "requested BGV-RNS basis level is outside the selected profile",
+                "requested BGV-RNS basis level is outside the selected parameters",
             )
         })?;
         let polynomial = Self {
-            profile_hash: profile_hash()?,
+            bgv_parameters_hash,
             basis_id: basis_kind.basis_id().to_string(),
             level,
             coefficient_count: POLYNOMIAL_DEGREE,
             domain: PolynomialDomain::Coefficient,
-            encrypted_ballot_aggregate_layout_hash,
             moduli,
             residues_by_modulus,
         };
@@ -69,10 +65,10 @@ impl RnsPolynomial {
     }
 
     pub(crate) fn validate(&self) -> CanonicalResult<()> {
-        if self.profile_hash != profile_hash()? {
+        if self.bgv_parameters_hash != bgv_parameters_hash()? {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "BGV-RNS object profile hash does not match the selected profile",
+                CanonicalErrorCode::ComponentMismatch,
+                "BGV-RNS object parameters hash does not match the selected BGV parameters",
             ));
         }
         let basis_kind = BgvBasisKind::from_basis_id(&self.basis_id).ok_or_else(|| {
@@ -89,7 +85,7 @@ impl RnsPolynomial {
         })?;
         if self.moduli != expected_moduli {
             return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
+                CanonicalErrorCode::ComponentMismatch,
                 "BGV-RNS object modulus list does not match its selected basis and level",
             ));
         }
@@ -103,13 +99,6 @@ impl RnsPolynomial {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
                 "protocol-path BGV-RNS objects must be coefficient-domain canonical objects",
-            ));
-        }
-        if self.encrypted_ballot_aggregate_layout_hash != encrypted_ballot_aggregate_layout_hash()?
-        {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ProfileComponentMismatch,
-                "BGV-RNS object layout hash does not match the selected direct aggregate layout",
             ));
         }
         if self.residues_by_modulus.len() != self.moduli.len() {
@@ -141,9 +130,8 @@ impl RnsPolynomial {
 #[cfg(test)]
 mod tests {
     use super::{PolynomialDomain, RnsPolynomial};
-    use crate::bgv::profile::{
-        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        encrypted_ballot_aggregate_layout_hash,
+    use crate::bgv::parameters::{
+        BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, SPECIAL_PRIME, bgv_parameters_hash,
     };
 
     #[test]
@@ -152,7 +140,7 @@ mod tests {
         let object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
-            encrypted_ballot_aggregate_layout_hash().expect("layout hash"),
+            bgv_parameters_hash().expect("parameters hash"),
             residues_by_modulus,
         )
         .expect("object should validate");
@@ -163,12 +151,11 @@ mod tests {
 
     #[test]
     fn rns_validation_binds_each_selected_basis_and_level() {
-        let encrypted_ballot_aggregate_layout_hash =
-            encrypted_ballot_aggregate_layout_hash().expect("layout hash");
+        let bgv_parameters_hash = bgv_parameters_hash().expect("parameters hash");
         let data = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             DATA_PRIMES.len() - 1,
-            encrypted_ballot_aggregate_layout_hash.clone(),
+            bgv_parameters_hash.clone(),
             DATA_PRIMES
                 .iter()
                 .map(|modulus| vec![modulus - 1; POLYNOMIAL_DEGREE])
@@ -180,7 +167,7 @@ mod tests {
         let extended = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Extended,
             DATA_PRIMES.len(),
-            encrypted_ballot_aggregate_layout_hash.clone(),
+            bgv_parameters_hash.clone(),
             DATA_PRIMES
                 .iter()
                 .chain([SPECIAL_PRIME].iter())
@@ -193,7 +180,7 @@ mod tests {
         let special = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Special,
             0,
-            encrypted_ballot_aggregate_layout_hash,
+            bgv_parameters_hash,
             vec![vec![SPECIAL_PRIME - 1; POLYNOMIAL_DEGREE]],
         )
         .expect("special basis object");
@@ -205,7 +192,7 @@ mod tests {
         let mut object = RnsPolynomial::coefficient_domain(
             BgvBasisKind::Data,
             0,
-            encrypted_ballot_aggregate_layout_hash().expect("layout hash"),
+            bgv_parameters_hash().expect("parameters hash"),
             vec![vec![0_u64; POLYNOMIAL_DEGREE]],
         )
         .expect("object should build");
@@ -216,10 +203,10 @@ mod tests {
         object.residues_by_modulus[0][0] = object.moduli[0];
         assert!(object.validate().is_err());
 
-        let mut wrong_profile = object.clone();
-        wrong_profile.residues_by_modulus[0][0] = 0;
-        wrong_profile.profile_hash = "0".repeat(128);
-        assert!(wrong_profile.validate().is_err());
+        let mut wrong_parameters = object.clone();
+        wrong_parameters.residues_by_modulus[0][0] = 0;
+        wrong_parameters.bgv_parameters_hash = "0".repeat(128);
+        assert!(wrong_parameters.validate().is_err());
 
         let mut wrong_basis = object.clone();
         wrong_basis.residues_by_modulus[0][0] = 0;
@@ -230,11 +217,6 @@ mod tests {
         wrong_coefficient_count.residues_by_modulus[0][0] = 0;
         wrong_coefficient_count.coefficient_count = POLYNOMIAL_DEGREE - 1;
         assert!(wrong_coefficient_count.validate().is_err());
-
-        let mut wrong_layout = object.clone();
-        wrong_layout.residues_by_modulus[0][0] = 0;
-        wrong_layout.encrypted_ballot_aggregate_layout_hash = "0".repeat(128);
-        assert!(wrong_layout.validate().is_err());
 
         let mut wrong_limb_count = object;
         wrong_limb_count

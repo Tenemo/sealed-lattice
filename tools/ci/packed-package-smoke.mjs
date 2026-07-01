@@ -6,7 +6,7 @@ const assert = (condition, message) => {
 
 const publicApi = await import('sealed-lattice');
 const {
-    deriveThresholdProfile,
+    deriveThresholdParameters,
     deriveValidatedFirstValidOrder,
     verifyTranscriptCoreFixture,
 } = publicApi;
@@ -16,18 +16,17 @@ assert(
     'Transcript-core fixture verifier must be exported as a function',
 );
 assert(
-    typeof deriveThresholdProfile === 'function',
-    'Threshold profile calculator must be exported as a function',
+    typeof deriveThresholdParameters === 'function',
+    'Threshold parameters calculator must be exported as a function',
 );
 assert(
-    deriveThresholdProfile({ rosterSize: 10 }).privacyCorruptionBound === 3,
-    'Threshold profile calculator must be exported and deterministic',
+    deriveThresholdParameters({ rosterSize: 10 }).privacyCorruptionBound === 3,
+    'Threshold parameters calculator must be exported and deterministic',
 );
 assert(
     deriveValidatedFirstValidOrder({
         requiredContextHash: 'context',
         selectionPolicyHash: 'policy',
-        expectedSelectionPolicyHash: 'policy',
         currentRecoveryEpochMap: {
             participant: {
                 signerIdentity: 'participant',
@@ -60,7 +59,7 @@ const verification = await verifyTranscriptCoreFixture({
     expectedErrorCode: 'MalformedMagic',
 });
 assert(
-    verification.ok === false &&
+    verification.isValid === false &&
         verification.rejection?.code === 'MalformedMagic',
     'Packed transcript-core verifier did not reject malformed bytes as expected',
 );

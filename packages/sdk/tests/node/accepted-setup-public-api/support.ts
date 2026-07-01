@@ -4,7 +4,29 @@ import {
     verifySetupPackage,
 } from '../../../dist/index.js';
 import { loadTranscriptCoreKernel } from '../../../dist/kernel.js';
-import * as internalSetupFlow from '../../support/internal-setup-flow.js';
+import {
+    createCommonRandomnessCommit,
+    createCommonRandomnessReveal,
+    createEvaluatorKeySchedule,
+    createGaloisKeyShareBatches,
+    createPublicEvaluationKeySet,
+    createPublicKeyShareMaterialSet,
+    createPublicKeyShareProofSet,
+    createPublicKeyShareSet,
+    createPublicKeyShareSuccinctProofSet,
+    createRelinearizationKeyShareRounds,
+    createSameSecretProofSet,
+    createSetupCertificates,
+    createSetupCommonRandomness,
+    createSetupContribution,
+    createSetupIntent,
+    createSetupPackage,
+    createSetupPhaseRecord,
+    createVssComplaint,
+    createVssShareAcceptance,
+    exportEncryptedLocalTrusteeSetupState,
+    restoreLocalTrusteeSetupState,
+} from '../../support/internal-setup-flow.js';
 
 import { hash512Hex } from '#packages/crypto/src/index';
 import {
@@ -17,6 +39,7 @@ import {
     createSameSecretConsistencyStatementSet,
     createVssCoefficientCommitmentBundle,
     publicKeyShareCoefficientVectorHashDomain,
+    setupTransportChunkSizeBytes,
     type VssCoefficientOpeningInput,
     type VssSourceTrusteeCoefficientOpeningState,
 } from '#packages/protocol/src/index';
@@ -106,8 +129,28 @@ export type PublicSetupApi = {
 // The test still builds a package through the relocated internal flow and verifies it through
 // the public verifier path.
 export const publicSetupApi = {
-    ...internalSetupFlow,
+    createCommonRandomnessCommit,
+    createCommonRandomnessReveal,
+    createEvaluatorKeySchedule,
+    createGaloisKeyShareBatches,
+    createPublicEvaluationKeySet,
+    createPublicKeyShareMaterialSet,
+    createPublicKeyShareProofSet,
+    createPublicKeyShareSet,
+    createPublicKeyShareSuccinctProofSet,
+    createRelinearizationKeyShareRounds,
+    createSameSecretProofSet,
+    createSetupCertificates,
+    createSetupCommonRandomness,
+    createSetupContribution,
+    createSetupIntent,
+    createSetupPackage,
     createSetupPackageVerificationInput,
+    createSetupPhaseRecord,
+    createVssComplaint,
+    createVssShareAcceptance,
+    exportEncryptedLocalTrusteeSetupState,
+    restoreLocalTrusteeSetupState,
     verifyPrivateVssShare,
     verifySetupPackage,
 } as unknown as PublicSetupApi;
@@ -120,10 +163,7 @@ type SetupContextFixture = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: string;
     readonly rosterHash: string;
-    readonly setupProfileHash: string;
-    readonly qShareHash: string;
-    readonly carryAwareVssShareRelationProfileHash: string;
-    readonly commitmentProfileHash: string;
+    readonly setupParametersHash: string;
     readonly setupEpoch: string;
 }>;
 
@@ -131,9 +171,9 @@ export const hashFromKernel = (
     kernel: TranscriptCoreKernel,
     label: string,
 ): string =>
-    kernel.deriveProtocolHash({
-        namespace: 'ActionContextHash',
+    kernel.deriveCanonicalObjectHash({
         value: {
+            objectType: 'ActionContextHash',
             fixture: 'accepted-setup-public-api',
             label,
         },
@@ -142,17 +182,13 @@ export const hashFromKernel = (
 export const setupContextFromKernel = (
     kernel: TranscriptCoreKernel,
 ): SetupContextFixture => {
-    const profile = kernel.describeCollectiveBgvSetupProfile();
+    const parameters = kernel.describeCollectiveBgvSetupParameters();
 
     return {
         ceremonyId: 'ceremony-public-setup-api',
         manifestHash: hashFromKernel(kernel, 'manifest'),
         rosterHash: hashFromKernel(kernel, 'roster'),
-        setupProfileHash: profile.setupProfileHash,
-        qShareHash: profile.qShareHash,
-        carryAwareVssShareRelationProfileHash:
-            profile.carryAwareVssShareRelationProfileHash,
-        commitmentProfileHash: profile.commitmentProfileHash,
+        setupParametersHash: parameters.setupParametersHash,
         setupEpoch: 'setup-epoch-1',
     } as const;
 };
@@ -163,21 +199,15 @@ export const contextFields = (
     ceremonyId: setupContext.ceremonyId,
     manifestHash: setupContext.manifestHash,
     rosterHash: setupContext.rosterHash,
-    setupProfileHash: setupContext.setupProfileHash,
-    qShareHash: setupContext.qShareHash,
-    carryAwareVssShareRelationProfileHash:
-        setupContext.carryAwareVssShareRelationProfileHash,
-    commitmentProfileHash: setupContext.commitmentProfileHash,
+    setupParametersHash: setupContext.setupParametersHash,
     setupEpoch: setupContext.setupEpoch,
 });
 
-const protocolHashFromKernel = (
+const canonicalObjectHashFromKernel = (
     kernel: TranscriptCoreKernel,
-    namespace: string,
     value: Record<string, unknown>,
 ): string =>
-    kernel.deriveProtocolHash({
-        namespace,
+    kernel.deriveCanonicalObjectHash({
         value,
     });
 
@@ -186,8 +216,7 @@ export { qSharePrimes };
 export const participantCount = 2;
 export const vssFixtureRingDegree = 8;
 export const vssFixtureThresholdDegree = 2;
-export const setupTransportChunkSizeBytes = 1_048_576;
-const setupProofProfileId = 'SealedLattice-SetupProof-v1';
+export { setupTransportChunkSizeBytes };
 export const requiredGaloisKeySchedule = [
     {
         rotation: 3,
@@ -351,7 +380,6 @@ export const sameSecretProofMaterial = (
     const proofBytesHex = `aa55${proofRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
-        setupProofProfileId,
         proofFamily: 'same-secret-linkage-anchor',
         trusteeIdentity: statementRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
@@ -359,7 +387,6 @@ export const sameSecretProofMaterial = (
             kernel,
             `same-secret-proof-statement-${String(proofRosterPosition)}`,
         ),
-        proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
             `same-secret-proof-bytes-${String(proofRosterPosition)}`,
@@ -390,7 +417,6 @@ export const publicKeyShareSuccinctProofMaterial = (
     const proofBytesHex = `bb66${proofRosterPosition.toString(16).padStart(4, '0')}`;
 
     return {
-        setupProofProfileId,
         proofFamily: 'public-key-share',
         trusteeIdentity: proofRecord.trusteeIdentity,
         trusteeRosterPosition: proofRosterPosition,
@@ -398,7 +424,6 @@ export const publicKeyShareSuccinctProofMaterial = (
             kernel,
             `public-key-succinct-statement-${String(proofRosterPosition)}`,
         ),
-        proofSizeBytes: proofBytesHex.length / 2,
         proofBytesHash: hashFromKernel(
             kernel,
             `public-key-succinct-proof-bytes-${String(proofRosterPosition)}`,
@@ -413,11 +438,9 @@ const relinearizationKeySwitchSeed = (
     round: 'round-one' | 'round-two',
     level: number,
 ): string =>
-    protocolHashFromKernel(kernel, 'RelinearizationKeyShareSeed', {
+    canonicalObjectHashFromKernel(kernel, {
         objectType: 'RelinearizationKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'relinearization-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-level-and-round',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -432,11 +455,9 @@ const galoisKeySwitchSeed = (
     rotation: number,
     level: number,
 ): string =>
-    protocolHashFromKernel(kernel, 'GaloisKeyShareSeed', {
+    canonicalObjectHashFromKernel(kernel, {
         objectType: 'GaloisKeySwitchPublicSampleSeed',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId,
         proofFamily: 'galois-key-share',
         keySwitchSampleScope: 'shared-by-scheduled-rotation-and-level',
         evaluatorKeyScheduleRoot: evaluatorKeySchedule.evaluatorKeyScheduleRoot,
@@ -575,11 +596,11 @@ export const phaseTranscriptFixture = (
     kernel: TranscriptCoreKernel,
     setupContext: SetupContextFixture,
 ): readonly Record<string, unknown>[] => {
-    const profile = kernel.describeCollectiveBgvSetupProfile();
+    const parameters = kernel.describeCollectiveBgvSetupParameters();
     let previousPhaseRoot: string | null = null;
 
     return (
-        profile.phaseOrder as readonly {
+        parameters.phaseOrder as readonly {
             readonly phaseId: string;
             readonly phaseNumber: number;
         }[]
@@ -632,8 +653,7 @@ export const localStateInput = (
             },
         ],
     };
-    const privateEnvelopeHash = kernel.deriveProtocolHash({
-        namespace: 'PrivateVssShareEnvelopeHash',
+    const privateEnvelopeHash = kernel.deriveCanonicalObjectHash({
         value: privateEnvelope,
     });
     const privateVssEnvelopeCommitmentRoot = hashFromKernel(

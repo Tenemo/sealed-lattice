@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 
 use crate::{
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::{canonical_json, derive_protocol_hash},
+    hashing::{canonical_json, derive_canonical_object_hash},
     transcript_core::decode_hex,
 };
 
@@ -114,17 +114,6 @@ fn validate_profile(signature: &Value) -> Option<ProtocolSignatureFailure> {
             Some(signature),
         ));
     };
-    let Some(context_string_byte_length) = profile
-        .get("contextStringByteLength")
-        .and_then(Value::as_u64)
-    else {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidMlDsaContext",
-            "Signature profile must bind the ML-DSA context byte length.",
-            Some(signature),
-        ));
-    };
-
     if profile.get("algorithm").and_then(Value::as_str) != Some(ML_DSA_65_ALGORITHM) {
         return Some(ProtocolSignatureFailure::new(
             "InvalidSignature",
@@ -139,48 +128,11 @@ fn validate_profile(signature: &Value) -> Option<ProtocolSignatureFailure> {
             Some(signature),
         ));
     }
-    for field_name in [
-        "providerName",
-        "providerVersion",
-        "fips204Version",
-        "errataStatus",
-    ] {
-        if profile
-            .get(field_name)
-            .and_then(Value::as_str)
-            .is_none_or(str::is_empty)
-        {
-            return Some(ProtocolSignatureFailure::new(
-                "InvalidSignature",
-                "Signature profile metadata must be fully bound with canonical provider material.",
-                Some(signature),
-            ));
-        }
-    }
-    if !profile
-        .get("providerBuildHash")
-        .and_then(Value::as_str)
-        .is_some_and(is_protocol_hash_string)
-    {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidSignature",
-            "Signature profile provider build hash must be a canonical protocol hash.",
-            Some(signature),
-        ));
-    }
-
     let actual_context_byte_length = context_string.len();
     if actual_context_byte_length > ML_DSA_CONTEXT_BYTE_LIMIT {
         return Some(ProtocolSignatureFailure::new(
             "InvalidMlDsaContext",
             "ML-DSA context strings must be at most 255 bytes.",
-            Some(signature),
-        ));
-    }
-    if context_string_byte_length != actual_context_byte_length as u64 {
-        return Some(ProtocolSignatureFailure::new(
-            "InvalidMlDsaContext",
-            "ML-DSA context string byte length does not match the profile.",
             Some(signature),
         ));
     }
@@ -563,36 +515,32 @@ fn canonical_protocol_signature_message(signature: &Value) -> CanonicalResult<St
 }
 
 fn derive_ml_dsa_public_key_hash(public_key_bytes_hex: &str) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "PublicKeyHash",
-        &json!({
-            "algorithm": ML_DSA_65_ALGORITHM,
-            "publicKeyBytesHex": public_key_bytes_hex,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": "MlDsaPublicKeyHash",
+        "algorithm": ML_DSA_65_ALGORITHM,
+        "publicKeyBytesHex": public_key_bytes_hex,
+    }))
 }
 
 fn derive_protocol_signature_hash(signature: &Value) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "ProtocolSignatureEnvelopeHash",
-        &json!({
-            "profile": signature
-                .get("profile")
-                .expect("signature profile was validated"),
-            "publicKeyBytesHex": signature
-                .get("publicKeyBytesHex")
-                .expect("public key bytes were validated"),
-            "publicKeyHash": signature
-                .get("publicKeyHash")
-                .expect("public key hash was validated"),
-            "signatureBytesHex": signature
-                .get("signatureBytesHex")
-                .expect("signature bytes were validated"),
-            "signedRoot": signature
-                .get("signedRoot")
-                .expect("signed root was validated"),
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+    "objectType": "ProtocolSignatureEnvelope",
+    "profile": signature
+        .get("profile")
+        .expect("signature profile was validated"),
+        "publicKeyBytesHex": signature
+            .get("publicKeyBytesHex")
+            .expect("public key bytes were validated"),
+        "publicKeyHash": signature
+            .get("publicKeyHash")
+            .expect("public key hash was validated"),
+        "signatureBytesHex": signature
+            .get("signatureBytesHex")
+            .expect("signature bytes were validated"),
+        "signedRoot": signature
+            .get("signedRoot")
+            .expect("signed root was validated"),
+    }))
 }
 
 fn decode_hex_field(value: &str, expected_byte_length: usize) -> Result<Vec<u8>, ()> {
@@ -690,37 +638,21 @@ pub(crate) fn create_ml_dsa_public_key_hash_fixture(seed_label: &str) -> Canonic
 
 #[cfg(test)]
 fn create_ml_dsa_signature_profile_fixture() -> CanonicalResult<Value> {
-    let provider_build_hash = derive_protocol_hash(
-        "ProviderBuildHash",
-        &json!({
-            "providerName": "fips204-deterministic-fixture",
-            "providerVersion": "0.4.6",
-        }),
-    )?;
-
     Ok(json!({
         "algorithm": ML_DSA_65_ALGORITHM,
         "mode": PURE_ML_DSA_MODE,
-        "providerName": "fips204-deterministic-fixture",
-        "providerVersion": "0.4.6",
-        "providerBuildHash": provider_build_hash,
-        "fips204Version": "FIPS 204",
-        "errataStatus": "none",
         "contextString": SUPPORTED_ML_DSA_CONTEXT_STRING,
-        "contextStringByteLength": SUPPORTED_ML_DSA_CONTEXT_STRING.len(),
     }))
 }
 
 #[cfg(test)]
 fn fixture_seed(purpose: &str, seed_label: &str, signed_root: &Value) -> CanonicalResult<[u8; 32]> {
-    let seed_hash = derive_protocol_hash(
-        "ChallengeDomainHash",
-        &json!({
-            "purpose": purpose,
-            "seedLabel": seed_label,
-            "signedRoot": signed_root,
-        }),
-    )?;
+    let seed_hash = derive_canonical_object_hash(&json!({
+        "objectType": "MlDsaSignatureFixtureSeed",
+        "purpose": purpose,
+        "seedLabel": seed_label,
+        "signedRoot": signed_root,
+    }))?;
     let seed_bytes = decode_hex(&seed_hash[..64])?;
 
     Ok(seed_bytes
@@ -730,13 +662,11 @@ fn fixture_seed(purpose: &str, seed_label: &str, signed_root: &Value) -> Canonic
 
 #[cfg(test)]
 fn key_fixture_seed(seed_label: &str) -> CanonicalResult<[u8; 32]> {
-    let seed_hash = derive_protocol_hash(
-        "ChallengeDomainHash",
-        &json!({
-            "purpose": "ml-dsa-key-fixture-seed",
-            "seedLabel": seed_label,
-        }),
-    )?;
+    let seed_hash = derive_canonical_object_hash(&json!({
+        "objectType": "MlDsaKeyFixtureSeed",
+        "purpose": "ml-dsa-key-fixture-seed",
+        "seedLabel": seed_label,
+    }))?;
     let seed_bytes = decode_hex(&seed_hash[..64])?;
 
     Ok(seed_bytes
@@ -750,24 +680,20 @@ mod tests {
         ProtocolSignatureExpectation, create_protocol_signature_fixture,
         verify_protocol_signature_envelope,
     };
-    use crate::hashing::derive_protocol_hash;
+    use crate::hashing::derive_canonical_object_hash;
     use serde_json::json;
 
     #[test]
     fn verifies_ml_dsa_signature_envelope_against_bound_root() {
-        let object_root = derive_protocol_hash(
-            "SetupPhaseObjectHash",
-            &json!({
-                "fixture": "signed-object",
-            }),
-        )
+        let object_root = derive_canonical_object_hash(&json!({
+            "objectType": "ProtocolSignatureTestObject",
+            "fixture": "signed-object",
+        }))
         .expect("object root");
-        let context_hash = derive_protocol_hash(
-            "SetupPhaseObjectHash",
-            &json!({
-                "fixture": "signature-context",
-            }),
-        )
+        let context_hash = derive_canonical_object_hash(&json!({
+            "objectType": "ProtocolSignatureTestObject",
+            "fixture": "signature-context",
+        }))
         .expect("context hash");
         let signed_root = json!({
             "objectType": "SetupPhaseParticipantObject",
@@ -812,19 +738,15 @@ mod tests {
 
     #[test]
     fn rejects_tampered_signed_root_after_hash_rebinding() {
-        let object_root = derive_protocol_hash(
-            "SetupPhaseObjectHash",
-            &json!({
-                "fixture": "signed-object",
-            }),
-        )
+        let object_root = derive_canonical_object_hash(&json!({
+            "objectType": "ProtocolSignatureTestObject",
+            "fixture": "signed-object",
+        }))
         .expect("object root");
-        let context_hash = derive_protocol_hash(
-            "SetupPhaseObjectHash",
-            &json!({
-                "fixture": "signature-context",
-            }),
-        )
+        let context_hash = derive_canonical_object_hash(&json!({
+            "objectType": "ProtocolSignatureTestObject",
+            "fixture": "signature-context",
+        }))
         .expect("context hash");
         let signed_root = json!({
             "objectType": "SetupPhaseParticipantObject",

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 #[test]
 fn collective_setup_verifier_refuses_malformed_vss_commitment_records() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -57,7 +59,7 @@ fn collective_setup_verifier_refuses_tampered_threshold_share_commitments() {
         "tampered threshold share commitment ring-degree status",
         |package| {
             package["thresholdShareCommitments"]["recipientRecords"][0]["limbCommitments"][0]["ringDegreeStatus"] =
-                serde_json::json!("profile-ring");
+                serde_json::json!("full-ring");
             rebind_collective_threshold_share_commitment_root(package);
         },
         "thresholdShareCommitmentSetMismatch",
@@ -85,19 +87,20 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
         transport_derivation["vssCoefficientCommitmentMaterial"].clone();
     package["thresholdShareCommitments"] =
         transport_derivation["thresholdShareCommitments"].clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let missing_transport_result =
         verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
             .expect("missing transported material result");
-    assert_eq!(missing_transport_result["verifierStatus"], "pending");
+    assert_eq!(missing_transport_result["isValid"], false);
     assert_eq!(
         missing_transport_result["currentPhase"],
         "thresholdShareCommitments"
@@ -114,7 +117,7 @@ fn collective_setup_verifier_refuses_transported_vss_material_when_certificate_m
         }),
     )
     .expect("transported material result");
-    assert_eq!(transported_result["verifierStatus"], "refused");
+    assert_eq!(transported_result["isValid"], false);
     assert_eq!(
         transported_result["currentPhase"],
         "setupPackageVerification"
@@ -147,13 +150,14 @@ fn collective_setup_verifier_uses_stream_verified_vss_material_without_chunk_sid
     package["vssCoefficientCommitmentMaterial"] =
         stream_derivation["vssCoefficientCommitmentMaterial"].clone();
     package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
     let result = verify_collective_bgv_setup_package(
@@ -191,13 +195,14 @@ fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
     package["vssCoefficientCommitmentMaterial"] =
         stream_derivation["vssCoefficientCommitmentMaterial"].clone();
     package["thresholdShareCommitments"] = stream_derivation["thresholdShareCommitments"].clone();
-    let profile = describe_collective_bgv_setup_profile().expect("profile");
-    let setup_transport_certificate =
-        setup_transport_certificate_fixture(&profile, &package["vssCoefficientCommitmentMaterial"]);
+    let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &package["vssCoefficientCommitmentMaterial"],
+    );
     package["setupTransportCertificate"] = setup_transport_certificate.clone();
     package["setupTransportCertificateHash"] =
         setup_transport_certificate["setupTransportCertificateHash"].clone();
-    rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
     let mut forged_verified_material =
         stream_derivation["verifiedVssCoefficientCommitmentMaterial"].clone();
@@ -212,7 +217,7 @@ fn collective_setup_verifier_refuses_unmatched_stream_verified_vss_material() {
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
         "thresholdShareCommitmentVerifiedMaterialMismatch"
@@ -389,16 +394,14 @@ fn collective_setup_verifier_refuses_malformed_vss_share_acceptance_records() {
             tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
             signature_envelope["signatureBytesHex"] =
                 serde_json::json!(tampered_signature_bytes_hex);
-            let signature_envelope_hash = derive_protocol_hash(
-                "ProtocolSignatureEnvelopeHash",
-                &serde_json::json!({
-                    "profile": signature_envelope["profile"],
-                    "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-                    "publicKeyHash": signature_envelope["publicKeyHash"],
-                    "signatureBytesHex": signature_envelope["signatureBytesHex"],
-                    "signedRoot": signature_envelope["signedRoot"],
-                }),
-            )
+            let signature_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "ProtocolSignatureEnvelope",
+                "profile": signature_envelope["profile"],
+                "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+                "publicKeyHash": signature_envelope["publicKeyHash"],
+                "signatureBytesHex": signature_envelope["signatureBytesHex"],
+                "signedRoot": signature_envelope["signedRoot"],
+            }))
             .expect("signature envelope hash");
             signature_envelope["signatureHash"] =
                 serde_json::json!(signature_envelope_hash.clone());
@@ -425,8 +428,7 @@ fn collective_setup_verifier_aborts_on_valid_vss_complaint() {
 
     let result = verify_collective_setup_package(&package);
 
-    assert_eq!(result["ok"], false);
-    assert_eq!(result["verifierStatus"], "aborted");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "vssAcceptanceOrComplaint");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -484,16 +486,14 @@ fn collective_setup_verifier_refuses_malformed_vss_complaint_records() {
             tampered_signature_bytes_hex.replace_range(0..2, replacement_prefix);
             signature_envelope["signatureBytesHex"] =
                 serde_json::json!(tampered_signature_bytes_hex);
-            let signature_envelope_hash = derive_protocol_hash(
-                "ProtocolSignatureEnvelopeHash",
-                &serde_json::json!({
-                    "profile": signature_envelope["profile"],
-                    "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
-                    "publicKeyHash": signature_envelope["publicKeyHash"],
-                    "signatureBytesHex": signature_envelope["signatureBytesHex"],
-                    "signedRoot": signature_envelope["signedRoot"],
-                }),
-            )
+            let signature_envelope_hash = derive_canonical_object_hash(&serde_json::json!({
+                "objectType": "ProtocolSignatureEnvelope",
+                "profile": signature_envelope["profile"],
+                "publicKeyBytesHex": signature_envelope["publicKeyBytesHex"],
+                "publicKeyHash": signature_envelope["publicKeyHash"],
+                "signatureBytesHex": signature_envelope["signatureBytesHex"],
+                "signedRoot": signature_envelope["signedRoot"],
+            }))
             .expect("signature envelope hash");
             signature_envelope["signatureHash"] =
                 serde_json::json!(signature_envelope_hash.clone());

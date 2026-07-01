@@ -88,7 +88,7 @@ describe('plaintext tally and top-k oracle', () => {
         expect(oracle.ranking.map((entry) => entry.optionOrdinal)).toEqual(
             topKVectors.topOneClearWinnerCase.expectedRankingOptionOrdinals,
         );
-        expect(decoding.ok).toBe(true);
+        expect(decoding.isValid).toBe(true);
         expect(decoding.selectedOptionOrdinals).toEqual(
             topKVectors.topOneClearWinnerCase.expectedSelectedOptionOrdinals,
         );
@@ -153,7 +153,9 @@ describe('plaintext tally and top-k oracle', () => {
                 .slice(0, topOptionCount)
                 .map((entry) => entry.optionOrdinal);
 
-            expect(decoding.ok, `K_top=${String(topOptionCount)}`).toBe(true);
+            expect(decoding.isValid, `K_top=${String(topOptionCount)}`).toBe(
+                true,
+            );
             expect(decoding.selectedOptionOrdinals).toEqual(
                 expectedSelectedOrdinals,
             );

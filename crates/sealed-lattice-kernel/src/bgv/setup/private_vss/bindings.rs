@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::hashing::derive_canonical_object_hash;
+
 const VSS_SOURCE_TRUSTEE_COMMITMENT_OBJECT_TYPE: &str = "VssSourceTrusteeCoefficientCommitments";
 const VSS_COEFFICIENT_COMMITMENT_MATERIAL_OBJECT_TYPE: &str = "VssCoefficientCommitmentMaterial";
 
@@ -51,14 +53,7 @@ pub(super) fn verify_setup_context(
             )));
         }
     }
-    for field_name in [
-        "manifestHash",
-        "rosterHash",
-        "setupProfileHash",
-        "qShareHash",
-        "carryAwareVssShareRelationProfileHash",
-        "commitmentProfileHash",
-    ] {
+    for field_name in ["manifestHash", "rosterHash", "setupParametersHash"] {
         let hash = match hash_string_field(
             setup_context,
             field_name,
@@ -102,53 +97,24 @@ pub(super) fn verify_setup_context(
         )));
     }
 
-    // The setup profile hash is a roster family, so it must match the hash
+    // The setup parameters hash is a roster family, so it must match the hash
     // derived from this setup context's roster, not the first-closure n = 10
-    // hash.
-    let setup_profile_roster =
+    // hash. It subsumes the former per-component parameter hashes (Q_share,
+    // carry-aware VSS relation, commitment) and the BGV parameters.
+    let setup_parameters_roster =
         super::accepted_setup::accepted_roster_from_setup_context(setup_context);
     if setup_context
-        .get("setupProfileHash")
+        .get("setupParametersHash")
         .and_then(Value::as_str)
         != Some(
-            super::accepted_setup::setup_profile_hash_for_roster(&setup_profile_roster)?.as_str(),
+            super::accepted_setup::setup_parameters_hash_for_roster(&setup_parameters_roster)?
+                .as_str(),
         )
     {
         return Ok(Err(PrivateVssRefusal::new(
-            "setupProfileHashMismatch",
-            "setupContext.setupProfileHash does not match CollectiveBgvSetup-v1",
-            "setupContext.setupProfileHash",
-        )));
-    }
-    if setup_context.get("qShareHash").and_then(Value::as_str)
-        != Some(accepted_q_share_hash()?.as_str())
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "qShareHashMismatch",
-            "setupContext.qShareHash does not match the accepted Q_share prime list",
-            "setupContext.qShareHash",
-        )));
-    }
-    if setup_context
-        .get("carryAwareVssShareRelationProfileHash")
-        .and_then(Value::as_str)
-        != Some(carry_aware_vss_share_relation_profile_hash()?.as_str())
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "carryAwareVssRelationProfileHashMismatch",
-            "setupContext.carryAwareVssShareRelationProfileHash does not match the accepted carry-aware VSS relation profile",
-            "setupContext.carryAwareVssShareRelationProfileHash",
-        )));
-    }
-    if setup_context
-        .get("commitmentProfileHash")
-        .and_then(Value::as_str)
-        != Some(setup_commitment_profile_hash()?.as_str())
-    {
-        return Ok(Err(PrivateVssRefusal::new(
-            "commitmentProfileHashMismatch",
-            "setupContext.commitmentProfileHash does not match the accepted setup commitment profile",
-            "setupContext.commitmentProfileHash",
+            "setupParametersHashMismatch",
+            "setupContext.setupParametersHash does not match the roster-derived CollectiveBgvSetup-v1 setup parameters",
+            "setupContext.setupParametersHash",
         )));
     }
 
@@ -323,8 +289,7 @@ pub(super) fn verify_source_trustee_commitment_record(
         .as_object_mut()
         .expect("source trustee commitment record object was checked")
         .remove("sourceTrusteeCommitmentRoot");
-    let expected_source_trustee_commitment_root =
-        derive_protocol_hash("VssCoefficientCommitmentRoot", &root_input)?;
+    let expected_source_trustee_commitment_root = derive_canonical_object_hash(&root_input)?;
     if source_trustee_commitment_root != expected_source_trustee_commitment_root {
         return Ok(Err(PrivateVssRefusal::new(
             "sourceTrusteeCommitmentRootMismatch",

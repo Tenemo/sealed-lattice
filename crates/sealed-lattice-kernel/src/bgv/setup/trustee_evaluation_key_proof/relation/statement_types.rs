@@ -229,7 +229,7 @@ impl EvaluationKeyShareDescriptor {
                 }
                 // The statement binds the scheduled element as transported;
                 // the automorphism acts through its residue modulo the ring
-                // order, so frozen profile-scale schedule elements stay valid
+                // order, so frozen full-scale schedule elements stay valid
                 // on reduced development rings.
                 if galois_element.is_multiple_of(2) || galois_element <= 1 {
                     return Err(invalid_succinct_setup_proof(

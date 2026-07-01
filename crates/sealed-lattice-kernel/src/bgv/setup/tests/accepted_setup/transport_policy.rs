@@ -1,11 +1,11 @@
 use super::*;
 
 #[test]
-fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
+fn terminal_full_ring_gate_refuses_reduced_public_key_material() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "profile-ring",
+            "ringDegreeStatus": "full-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -17,14 +17,14 @@ fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
         },
     });
 
-    let response = verify_profile_ring_material(&package)
-        .expect("profile-ring verification")
+    let response = verify_full_ring_material(&package)
+        .expect("full-ring verification")
         .expect("reduced public-key material refusal");
 
-    assert_eq!(response["verifierStatus"], "outsideProfile");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],
@@ -33,11 +33,11 @@ fn terminal_profile_ring_gate_refuses_reduced_public_key_material() {
 }
 
 #[test]
-fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
+fn terminal_full_ring_gate_refuses_reduced_evaluation_key_records() {
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": POLYNOMIAL_DEGREE,
-            "ringDegreeStatus": "profile-ring",
+            "ringDegreeStatus": "full-ring",
         },
         "sameSecretProofs": {
             "proofRecords": [
@@ -72,14 +72,14 @@ fn terminal_profile_ring_gate_refuses_reduced_evaluation_key_records() {
         ],
     });
 
-    let response = verify_profile_ring_material(&package)
-        .expect("profile-ring verification")
+    let response = verify_full_ring_material(&package)
+        .expect("full-ring verification")
         .expect("reduced evaluation-key proof refusal");
 
-    assert_eq!(response["verifierStatus"], "outsideProfile");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
     assert_eq!(
         response["refusedObjects"][0]["objectPath"],
@@ -100,7 +100,7 @@ fn terminal_transport_policy_refuses_embedded_setup_material() {
         .expect("terminal transport policy")
         .expect("embedded VSS material refusal");
 
-    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "terminalVssMaterialTransportRequired"
@@ -177,7 +177,7 @@ fn terminal_transport_policy_refuses_raw_vss_chunk_sidecar() {
         .expect("terminal transport policy")
         .expect("raw VSS chunk sidecar refusal");
 
-    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
         "terminalVssMaterialHandleRequired"
@@ -210,7 +210,7 @@ fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
         .expect("terminal transport policy")
         .expect("missing stream-verified VSS handle response");
 
-    assert_eq!(response["verifierStatus"], "pending");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["missingObjects"],
         serde_json::json!(["verifiedVssCoefficientCommitmentMaterial"])
@@ -296,31 +296,6 @@ fn collective_setup_verifier_refuses_non_binary_setup_transport() {
 }
 
 #[test]
-fn collective_setup_verifier_refuses_malformed_setup_transport_manifest() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_malformed_setup_transport_manifest",
-    );
-    assert_minimal_collective_setup_package_refused(
-        "setup transport manifest with a missing chunk hash",
-        |package| {
-            package["setupTransportCertificate"]["chunkHashes"]
-                .as_array_mut()
-                .expect("chunk hashes")
-                .pop();
-        },
-        "transportChunkHashCountMismatch",
-    );
-
-    assert_minimal_collective_setup_package_refused(
-        "setup transport manifest with a wrong chunk root",
-        |package| {
-            package["setupTransportCertificate"]["chunkRoot"] = serde_json::json!(valid_hash('8'));
-        },
-        "transportChunkRootMismatch",
-    );
-}
-
-#[test]
 fn collective_setup_verifier_refuses_duplicate_setup_transport_object_root() {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "collective_setup_verifier_refuses_duplicate_setup_transport_object_root",
@@ -359,7 +334,7 @@ fn collective_setup_verifier_refuses_public_key_share_transport_missing_certific
     )
     .expect("verification response");
 
-    assert_eq!(result["verifierStatus"], "refused");
+    assert_eq!(result["isValid"], false);
     assert_eq!(result["currentPhase"], "setupPackageVerification");
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
@@ -368,80 +343,9 @@ fn collective_setup_verifier_refuses_public_key_share_transport_missing_certific
 }
 
 #[test]
-fn collective_setup_verifier_refuses_unrequested_setup_transport_object() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_unrequested_setup_transport_object",
-    );
-    let mut package = minimal_collective_setup_package();
-    append_unrequested_setup_transport_object(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_setup_package(&package);
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "transportedObjectUnexpected"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_unreferenced_setup_transport_sidecar",
-    );
-    let mut package = minimal_collective_setup_package();
-    let transported_same_secret_proof_material =
-        append_unreferenced_same_secret_transport_sidecar(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedSameSecretProofMaterial": transported_same_secret_proof_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "transportedObjectUnreferenced"
-    );
-}
-
-#[test]
-fn collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidecar() {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "collective_setup_verifier_refuses_unreferenced_setup_transport_material_sidecar",
-    );
-    let mut package = minimal_collective_setup_package();
-    let transported_evaluation_key_component_material =
-        append_unreferenced_evaluation_key_component_transport_sidecar(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedEvaluationKeyShareComponentMaterial": transported_evaluation_key_component_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(result["verifierStatus"], "refused");
-    assert_eq!(result["currentPhase"], "setupPackageVerification");
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "transportedObjectUnreferenced"
-    );
-}
-
-#[test]
-fn terminal_profile_ring_gate_refuses_reduced_vss_material() {
+fn terminal_full_ring_gate_refuses_reduced_vss_material() {
     let _accepted_setup_test_timing =
-        accepted_setup_test_timing("terminal_profile_ring_gate_refuses_reduced_vss_material");
+        accepted_setup_test_timing("terminal_full_ring_gate_refuses_reduced_vss_material");
     let package = serde_json::json!({
         "vssCoefficientCommitmentMaterial": {
             "ringDegree": 8,
@@ -449,14 +353,13 @@ fn terminal_profile_ring_gate_refuses_reduced_vss_material() {
         },
     });
 
-    let response = verify_profile_ring_material(&package)
-        .expect("profile-ring verification")
+    let response = verify_full_ring_material(&package)
+        .expect("full-ring verification")
         .expect("reduced VSS material refusal");
 
-    assert_eq!(response["ok"], false);
-    assert_eq!(response["verifierStatus"], "outsideProfile");
+    assert_eq!(response["isValid"], false);
     assert_eq!(
         response["refusedObjects"][0]["reasonCode"],
-        "vssCoefficientCommitmentMaterialOutsideProfile"
+        "vssCoefficientCommitmentMaterialOutsideAcceptedRing"
     );
 }

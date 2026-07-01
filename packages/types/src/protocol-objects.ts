@@ -15,7 +15,7 @@ export type ProtocolObjectType =
     | 'ElectionManifest'
     | 'EvaluatorReplayRecord'
     | 'FirstValidOrder'
-    | 'FrozenRosterProfile'
+    | 'FrozenRosterParameters'
     | 'RecoveryEpochUpdate'
     | 'RegistrationEntry'
     | 'Roster'
@@ -68,13 +68,7 @@ export type MlDsaSignatureMode = 'PureMLDSA' | 'HashMLDSA' | 'ExternalMuMLDSA';
 export type MlDsaSignatureProfile = {
     readonly algorithm: 'ML-DSA-65';
     readonly mode: MlDsaSignatureMode;
-    readonly providerName: string;
-    readonly providerVersion: string;
-    readonly providerBuildHash: ProtocolHash;
-    readonly fips204Version: string;
-    readonly errataStatus: string;
     readonly contextString: string;
-    readonly contextStringByteLength: number;
 };
 
 /** Canonical root object covered by a protocol signature. */
@@ -110,7 +104,7 @@ export type ProtocolRefusalCode =
     | 'EncryptedBallotAggregateInvalid'
     | 'BallotSetInvalid'
     | 'BallotValidityProofInvalid'
-    | 'BallotValidityProofProfileInvalid'
+    | 'BallotValidityProofParametersInvalid'
     | 'BoardConsistencyFailure'
     | 'BoardForkDetected'
     | 'CastReceiptInvalid'
@@ -180,18 +174,12 @@ export type ConflictingHeadEvidence = {
 
 /** Shared structured result shape for protocol verification helpers. */
 export type StructuredProtocolVerificationResult = {
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly acceptedHashes: readonly ProtocolHash[];
     readonly refusedObjects: readonly RefusalRecord[];
     readonly forkEvidence?: ConflictingHeadEvidence;
     readonly unresolvedReason?: string | null;
 };
-
-/** Fail-closed result returned by safe API entries reserved for later implementation. */
-export type FutureProtocolOperationResult =
-    StructuredProtocolVerificationResult & {
-        readonly operation: string;
-    };
 
 /** Structured result shape returned by signature verification. */
 export type SignatureVerificationResult = StructuredProtocolVerificationResult;

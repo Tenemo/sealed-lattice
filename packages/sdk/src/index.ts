@@ -1,10 +1,11 @@
 import {
     createSetupPackageVerificationInput as createSetupPackageVerificationInputInternal,
+    deriveCollectiveBgvSetupRosterHash as deriveCollectiveBgvSetupRosterHashInternal,
     deriveValidatedFirstValidOrder as deriveValidatedFirstValidOrderInternal,
-    deriveFrozenRosterProfile as deriveFrozenRosterProfileInternal,
+    deriveFrozenRosterParameters as deriveFrozenRosterParametersInternal,
     derivePollSpecHash as derivePollSpecHashInternal,
-    deriveThresholdProfile as deriveThresholdProfileInternal,
-    deriveThresholdProfileHash as deriveThresholdProfileHashInternal,
+    deriveThresholdParameters as deriveThresholdParametersInternal,
+    deriveThresholdParametersHash as deriveThresholdParametersHashInternal,
     evaluateActionCapability as evaluateActionCapabilityInternal,
     verifyFoundationTranscript as verifyFoundationTranscriptInternal,
     verifyCastReceiptShell as verifyCastReceiptShellInternal,
@@ -31,6 +32,7 @@ import type {
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
     SetupPackage as ProtocolSetupPackage,
     SetupPackageVerificationInputSource as ProtocolSetupPackageVerificationInputSource,
+    CollectiveBgvSetupRosterEntryInput as ProtocolCollectiveBgvSetupRosterEntryInput,
 } from '@sealed-lattice/protocol';
 import type {
     ActionCurrentForRecoveryEpochInput,
@@ -45,7 +47,6 @@ import type {
     CloseRecordVerificationInput,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
-    FutureProtocolOperationResult,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
     LifecycleTransition,
@@ -55,8 +56,8 @@ import type {
     ProtocolHash,
     RecoveryEpochVerification,
     RecoveryEpochVerificationInput,
-    ThresholdProfile,
-    ThresholdProfileInput,
+    ThresholdParameters,
+    ThresholdParametersInput,
     TranscriptCoreFixture,
     TranscriptCoreVerificationResult,
     RosterManifestTranscriptInput,
@@ -70,12 +71,30 @@ import type { TranscriptCoreKernel } from '@sealed-lattice/wasm';
 
 import { loadTranscriptCoreKernel } from './kernel.js';
 
+const protocolHashPattern = /^[0-9a-f]{128}$/u;
+
+function assertProtocolHash(
+    value: unknown,
+    fieldName: string,
+): asserts value is ProtocolHash {
+    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
+        throw new TypeError(`${fieldName} must be a protocol hash.`);
+    }
+}
+
+const assertSetupPackageVerificationBindings = (
+    input: VerifySetupPackageInput,
+): void => {
+    assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
+    assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
+};
+
 export type {
     AcceptedTargetFinalityCheckpoint,
     ActionContext,
     ActionCurrentForRecoveryEpochInput,
     ActionCurrentForRecoveryEpochResult,
-    TargetBoundShareSelectionProfile,
+    TargetBoundShareSelectionParameters,
     AppendOnlyConsistencyProof,
     BoardConsistencyInput,
     BoardConsistencyVerification,
@@ -94,17 +113,14 @@ export type {
     CloseRecordVerificationInput,
     ConflictingHeadEvidence,
     ConflictingManifestEvidence,
-    DuplicateBallotPolicy,
     ElectionManifest,
     DecryptionShareFilteringMode,
-    DecryptionShareSelectionRule,
     FoundationTranscriptComponentResults,
     FoundationTranscriptInput,
     FoundationTranscriptVerification,
     FirstValidOrderingInput,
     FirstValidOrderingVerification,
-    FrozenRosterProfile,
-    FutureProtocolOperationResult,
+    FrozenRosterParameters,
     GoldenTranscriptCoreFixture,
     GoldenTranscriptCoreFixtureVerification,
     HeBackendCorruptionModel,
@@ -140,8 +156,7 @@ export type {
     RosterExternalAcceptanceVerificationInput,
     RosterManifestTranscriptInput,
     RosterManifestTranscriptVerification,
-    RosterProfileKind,
-    RosterPolicy,
+    RosterParametersKind,
     ScoreDomain,
     SignatureVerificationResult,
     SignedBoardHead,
@@ -155,11 +170,9 @@ export type {
     TargetFinalityVerification,
     TargetFinalityVerificationInput,
     TargetProposal,
-    ThresholdProfile,
-    ThresholdProfileFamily,
-    ThresholdProfileInput,
+    ThresholdParameters,
+    ThresholdParametersInput,
     ThresholdWarning,
-    TiePolicy,
     TranscriptCoreAnalysis,
     TranscriptCoreFixture,
     TranscriptCoreFixtureVerification,
@@ -176,10 +189,7 @@ export type CollectiveBgvSetupContext = Readonly<{
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly carryAwareVssShareRelationProfileHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
 }>;
 
@@ -195,14 +205,12 @@ export type VerifyPrivateVssShareInput = Readonly<{
 }>;
 
 export type PrivateVssShareVerification = Readonly<{
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyPrivateVssShareEnvelope';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    readonly verifierStatus: 'accepted' | 'refused';
     readonly privateEnvelopeHash: ProtocolHash | null;
     readonly localVerificationRoot: ProtocolHash | null;
     readonly ringDegree?: number;
-    readonly ringDegreeStatus?: 'profile-ring' | 'development-reduced-ring';
+    readonly ringDegreeStatus?: 'full-ring' | 'development-reduced-ring';
     readonly verifiedRnsLimbCount?: number;
     readonly verifiedShamirCoefficientCommitmentCount?: number;
     readonly verifiedPrivateVssShareProofCount?: number;
@@ -224,6 +232,8 @@ export type PrivateVssShareVerification = Readonly<{
 }>;
 
 export type SetupPackage = ProtocolSetupPackage;
+export type CollectiveBgvSetupRosterEntryInput =
+    ProtocolCollectiveBgvSetupRosterEntryInput;
 
 export type SetupTransportedVssCoefficientCommitmentMaterialLike =
     ProtocolSetupTransportedVssCoefficientCommitmentMaterialLike;
@@ -248,8 +258,8 @@ export type TransportedPublicEvaluationKeyMaterialSet =
 export type VerifySetupPackageInput = Readonly<{
     readonly setupPackage: unknown;
     readonly expectedSetupPackageHash?: ProtocolHash;
-    readonly expectedManifestHash?: ProtocolHash;
-    readonly expectedRosterHash?: ProtocolHash;
+    readonly expectedManifestHash: ProtocolHash;
+    readonly expectedRosterHash: ProtocolHash;
     readonly transportedVssCoefficientCommitmentMaterial?: SetupTransportedVssCoefficientCommitmentMaterialLike;
     readonly verifiedVssCoefficientCommitmentMaterial?: VerifiedVssCoefficientCommitmentMaterial;
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
@@ -270,13 +280,10 @@ export type SetupPackageVerificationInputSource = Readonly<
 export type AcceptedSetupHandoff = Readonly<{
     readonly objectType: 'CollectiveBgvAcceptedSetupHandoff';
     readonly objectVersion: 1;
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
     readonly ceremonyId: string;
     readonly manifestHash: ProtocolHash;
     readonly rosterHash: ProtocolHash;
-    readonly setupProfileHash: ProtocolHash;
-    readonly qShareHash: ProtocolHash;
-    readonly commitmentProfileHash: ProtocolHash;
+    readonly setupParametersHash: ProtocolHash;
     readonly setupEpoch: string;
     readonly setupPackageHash: ProtocolHash;
     readonly directBallotEncryptionHandoff: Readonly<{
@@ -294,31 +301,15 @@ export type AcceptedSetupHandoff = Readonly<{
         readonly evaluationKeySetHash: ProtocolHash;
         readonly publicEvaluationKeyMaterialRoot?: ProtocolHash;
     }>;
-    readonly futureTargetDecryptionHandoff: Readonly<{
-        readonly targetDecryptionProfileId: string;
-    }>;
     readonly certificateRoots: Readonly<{
-        readonly setupCommitmentSecurityCertificateHash: ProtocolHash;
         readonly setupTransportCertificateHash: ProtocolHash;
-        readonly setupProofAccountingCertificateHash: ProtocolHash;
-        readonly setupKeyCorrectnessCertificateHash: ProtocolHash;
-        readonly activeStaticSetupTheoremCertificateHash: ProtocolHash;
-        readonly heSecurityCertificateHash: ProtocolHash;
     }>;
     readonly acceptedSetupHandoffRoot: ProtocolHash;
 }>;
 
 export type SetupPackageVerification = Readonly<{
-    readonly ok: boolean;
+    readonly isValid: boolean;
     readonly operation: 'verifyCollectiveBgvSetupPackage';
-    readonly setupProfileId: 'CollectiveBgvSetup-v1';
-    readonly verifierStatus:
-        | 'accepted'
-        | 'pending'
-        | 'refused'
-        | 'aborted'
-        | 'forkDetected'
-        | 'outsideProfile';
     readonly currentPhase: string | null;
     readonly phaseOrderHash: ProtocolHash;
     readonly acceptedHashes: readonly ProtocolHash[];
@@ -331,19 +322,26 @@ export type SetupPackageVerification = Readonly<{
     }>[];
 }>;
 
-/** Derives threshold, quorum, and warning parameters for a roster profile. */
-export const deriveThresholdProfile = (
-    input: ThresholdProfileInput,
-): ThresholdProfile => deriveThresholdProfileInternal(input);
+/** Derives threshold, quorum, and warning parameters for a roster. */
+export const deriveThresholdParameters = (
+    input: ThresholdParametersInput,
+): ThresholdParameters => deriveThresholdParametersInternal(input);
 
-/** Derives the concrete roster profile after registration closes and the roster freezes. */
-export const deriveFrozenRosterProfile = deriveFrozenRosterProfileInternal;
+/** Derives the concrete roster parameters after registration closes and the roster freezes. */
+export const deriveFrozenRosterParameters =
+    deriveFrozenRosterParametersInternal;
+
+/** Derives the setup-roster hash consumed by collective BGV setup package verification. */
+export const deriveCollectiveBgvSetupRosterHash = (
+    entries: readonly CollectiveBgvSetupRosterEntryInput[],
+): ProtocolHash => deriveCollectiveBgvSetupRosterHashInternal(entries);
 
 /** Derives the canonical poll-spec hash including roster policy fields. */
 export const derivePollSpecHash = derivePollSpecHashInternal;
 
-/** Derives the canonical threshold-profile hash for a frozen roster profile. */
-export const deriveThresholdProfileHash = deriveThresholdProfileHashInternal;
+/** Derives the canonical threshold parameters hash for frozen roster parameters. */
+export const deriveThresholdParametersHash =
+    deriveThresholdParametersHashInternal;
 
 /** Validates and normalizes a poll specification from trusted or untrusted input. */
 export function validatePollSpec(input: PollSpecInput): PollSpecValidation;
@@ -362,28 +360,6 @@ export const evaluateActionCapability = (
     action: ProtocolAction,
     context: CapabilityContext,
 ): CapabilityDecision => evaluateActionCapabilityInternal(action, context);
-
-// Fail-closed result builder for the reserved future complete-protocol entry points
-// below: each returns a structured OperationUnavailable refusal (ok:false) rather than
-// throwing, so callers get a typed, non-crashing refusal until the path is implemented.
-const unavailableFutureProtocolOperation = (
-    operation: string,
-): FutureProtocolOperationResult => ({
-    ok: false,
-    acceptedHashes: [],
-    refusedObjects: [
-        {
-            code: 'OperationUnavailable',
-            message: `${operation} is reserved for later protocol implementation and is not implemented in this package build.`,
-        },
-    ],
-    unresolvedReason: 'OperationUnavailable',
-    operation,
-});
-
-/** Reserved transcript verifier entry point for the future complete protocol path. */
-export const verifyTranscript = (): FutureProtocolOperationResult =>
-    unavailableFutureProtocolOperation('verifyTranscript');
 
 /** Verifies the integrated foundation transcript without claiming full election verification. */
 export const verifyFoundationTranscript = (
@@ -506,49 +482,6 @@ const setupProofMaterialReference = (proofMaterial: JsonRecord): JsonRecord => {
     return reference;
 };
 
-// Safe only because proofMaterialRoot is the collision-resistant commitment the kernel rebinds; chunks are dropped only after that root is in the verified set.
-const compactSetupProofMaterialSet = <
-    MaterialSet extends SetupProofMaterialTransportSet | undefined,
->(
-    materialSet: MaterialSet,
-    verifiedSetupProofMaterials: VerifiedSetupProofMaterialSet | undefined,
-): MaterialSet => {
-    if (
-        materialSet === undefined ||
-        verifiedSetupProofMaterials === undefined
-    ) {
-        return materialSet;
-    }
-
-    const verifiedProofMaterialRoots = new Set(
-        verifiedSetupProofMaterials.proofMaterials.map(
-            (proofMaterial) => proofMaterial.proofMaterialRoot,
-        ),
-    );
-    let strippedAnyChunks = false;
-    const proofMaterials = materialSet.proofMaterials.map((proofMaterial) => {
-        if (
-            !Object.prototype.hasOwnProperty.call(proofMaterial, 'chunks') ||
-            typeof proofMaterial.proofMaterialRoot !== 'string' ||
-            !verifiedProofMaterialRoots.has(proofMaterial.proofMaterialRoot)
-        ) {
-            return proofMaterial;
-        }
-        strippedAnyChunks = true;
-
-        return setupProofMaterialReference(proofMaterial);
-    });
-
-    if (!strippedAnyChunks) {
-        return materialSet;
-    }
-
-    return {
-        ...materialSet,
-        proofMaterials,
-    };
-};
-
 const setupProofMaterialChunks = (
     proofMaterial: unknown,
 ): readonly SetupProofMaterialChunk[] | undefined => {
@@ -615,28 +548,27 @@ const streamSetupProofMaterialSet = (
     return verifiedMaterials;
 };
 
+const compactSetupPackageVerificationInput = (
+    input: VerifySetupPackageInput,
+): VerifySetupPackageInput => {
+    const verificationInput = createSetupPackageVerificationInputInternal(
+        input as unknown as SetupPackageVerificationInputSource,
+    ) as VerifySetupPackageInput;
+
+    return input.expectedSetupPackageHash === undefined
+        ? verificationInput
+        : {
+              ...verificationInput,
+              expectedSetupPackageHash: input.expectedSetupPackageHash,
+          };
+};
+
 const prepareSetupPackageVerificationInputForKernel = (
     kernel: TranscriptCoreKernel,
     input: VerifySetupPackageInput,
 ): VerifySetupPackageInput => {
     if (input.verifiedSetupProofMaterials !== undefined) {
-        return {
-            ...input,
-            transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-                input.transportedSameSecretProofMaterial,
-                input.verifiedSetupProofMaterials,
-            ),
-            transportedPublicKeyShareProofMaterial:
-                compactSetupProofMaterialSet(
-                    input.transportedPublicKeyShareProofMaterial,
-                    input.verifiedSetupProofMaterials,
-                ),
-            transportedEvaluationKeyShareProofMaterial:
-                compactSetupProofMaterialSet(
-                    input.transportedEvaluationKeyShareProofMaterial,
-                    input.verifiedSetupProofMaterials,
-                ),
-        };
+        return compactSetupPackageVerificationInput(input);
     }
 
     const verifiedMaterials = setupProofMaterialTransportFieldNames.flatMap(
@@ -650,34 +582,21 @@ const prepareSetupPackageVerificationInputForKernel = (
     const verifiedSetupProofMaterials = {
         objectType: 'VerifiedSetupProofMaterialSet',
         objectVersion: 1,
-        setupProfileId: 'CollectiveBgvSetup-v1',
-        setupProofProfileId: 'SealedLattice-SetupProof-v1',
         proofMaterials: verifiedMaterials,
     } as const satisfies VerifiedSetupProofMaterialSet;
 
-    return {
+    return compactSetupPackageVerificationInput({
         ...input,
-        transportedSameSecretProofMaterial: compactSetupProofMaterialSet(
-            input.transportedSameSecretProofMaterial,
-            verifiedSetupProofMaterials,
-        ),
-        transportedPublicKeyShareProofMaterial: compactSetupProofMaterialSet(
-            input.transportedPublicKeyShareProofMaterial,
-            verifiedSetupProofMaterials,
-        ),
-        transportedEvaluationKeyShareProofMaterial:
-            compactSetupProofMaterialSet(
-                input.transportedEvaluationKeyShareProofMaterial,
-                verifiedSetupProofMaterials,
-            ),
         verifiedSetupProofMaterials,
-    };
+    });
 };
 
 /** Verifies an accepted setup package with the packaged Rust/WASM kernel. */
 export const verifySetupPackage = async (
     input: VerifySetupPackageInput,
 ): Promise<SetupPackageVerification> => {
+    assertSetupPackageVerificationBindings(input);
+
     const kernel = await loadTranscriptCoreKernel();
     const verificationInput = prepareSetupPackageVerificationInputForKernel(
         kernel,
@@ -696,7 +615,7 @@ export const verifyTranscriptCoreFixture = async (
 
     if ('expectedErrorCode' in verification) {
         return {
-            ok: false,
+            isValid: false,
             caseName: verification.caseName,
             rejection: {
                 code: verification.expectedErrorCode,
@@ -705,7 +624,7 @@ export const verifyTranscriptCoreFixture = async (
     }
 
     return {
-        ok: true,
+        isValid: true,
         caseName: verification.caseName,
         objectHash512: verification.objectHash512,
         chunkRoot: verification.chunkRoot,

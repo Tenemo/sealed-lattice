@@ -6,12 +6,11 @@ use super::{
     generator_power_basis_for_exponent, interpolate_coefficients, inverse_galois_element,
     pack_direct_score_slots, packed_rank_forward_basis_galois_elements,
     packed_rank_galois_elements, packed_rank_return_basis_galois_elements, packed_score_slot,
-    project_packed_sparse_target_from_rank_evaluation, score_bit_count,
-    selected_evaluator_rotation_key_schedule, top_k_order_value,
+    score_bit_count, selected_evaluator_rotation_key_schedule, top_k_order_value,
 };
 use crate::bgv::evaluator::circuit::EvaluatorContext;
 use crate::bgv::modular_arithmetic::{add_mod, mul_mod, pow_mod};
-use crate::bgv::profile::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
+use crate::bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
 
 mod interpolation;
 mod packing_and_rotations;

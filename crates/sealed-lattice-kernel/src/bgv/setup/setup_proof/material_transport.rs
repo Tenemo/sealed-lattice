@@ -5,13 +5,21 @@ use std::{
     sync::{Arc, Mutex, OnceLock},
 };
 
-use crate::{
-    bgv::setup::accepted_setup::COLLECTIVE_BGV_SETUP_PROFILE_ID, transcript_core::decode_hex,
-};
+use crate::transcript_core::decode_hex;
 
 const VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE: &str = "VerifiedSetupProofMaterialSet";
 const VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE: &str = "VerifiedSetupProofMaterial";
 const SETUP_PROOF_MATERIAL_STREAM_ID_MAX_BYTES: usize = 128;
+const SETUP_PROOF_RECORD_TRANSPORT_REFERENCE_FIELDS: &[&str] = &[
+    "proofBytesEncoding",
+    "proofMaterialRoot",
+    "proofChunkSizeBytes",
+    "proofChunkCount",
+    "proofTotalByteLength",
+    "proofFullObjectHash",
+    "proofChunkRoot",
+    "proofChunkHashes",
+];
 
 static SETUP_PROOF_MATERIAL_TRANSPORT_STREAM_SESSIONS: OnceLock<
     Mutex<BTreeMap<String, SetupProofMaterialTransportStreamSession>>,
@@ -60,20 +68,15 @@ struct VerifiedSetupProofMaterial {
 }
 
 pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
-    setup_profile_id: &str,
-    setup_proof_profile_hash: &str,
+    setup_parameters_hash: &str,
 ) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupProofRecordBinding",
         "objectVersion": 1,
-        "setupProfileId": setup_profile_id,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-        "setupProofProfileHash": setup_proof_profile_hash,
+        "setupParametersHash": setup_parameters_hash,
         "proofBytesDomain": SETUP_PROOF_BYTES_DOMAIN,
         "proofSerialization": SETUP_PROOF_SERIALIZATION,
         "proofByteDecoder": SETUP_PROOF_BYTE_DECODER,
-        "privateVssShareProofAccountingHash":
-            crate::bgv::setup::trustee_evaluation_key_proof::succinct_private_vss_share_accounting_hash()?,
     }))
 }
 
@@ -120,10 +123,7 @@ pub(crate) fn begin_setup_proof_material_transport_stream_request(
     );
 
     Ok(json!({
-        "ok": true,
         "operation": "beginSetupProofMaterialTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "verificationId": verification_id,
         "proofFamily": header.proof_family,
         "proofMaterialRoot": header.proof_material_root,
@@ -271,7 +271,7 @@ pub(crate) fn setup_proof_material_transport_hashes(
 ) -> CanonicalResult<SetupProofMaterialTransportHashes> {
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(setup_proof_error(
-            "setup proof material proof family is not in the fixed setup-proof profile",
+            "setup proof material proof family is not in the fixed setup-proof parameters",
         ));
     }
     if chunk_size_bytes == 0 {
@@ -360,6 +360,232 @@ pub(crate) fn setup_proof_material_transport_hashes(
         chunk_root,
         total_byte_length,
     })
+}
+
+pub(in crate::bgv::setup) fn setup_proof_record_has_transport_reference(value: &Value) -> bool {
+    SETUP_PROOF_RECORD_TRANSPORT_REFERENCE_FIELDS
+        .iter()
+        .any(|field_name| value.get(*field_name).is_some())
+}
+
+pub(in crate::bgv::setup) fn verify_setup_proof_record_transport_reference(
+    proof_record: &Value,
+    transport_hashes: &SetupProofMaterialTransportHashes,
+    chunk_size_message_label: &str,
+    reference_message_label: &str,
+    chunk_hash_field_path_prefix: &str,
+) -> CanonicalResult<()> {
+    if setup_proof_transport_u64_field(proof_record, "proofChunkSizeBytes")?
+        != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{chunk_size_message_label} proofChunkSizeBytes must match the setup proof transport parameters"
+            ),
+        ));
+    }
+    let expected_chunk_count =
+        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                format!("{reference_message_label} proof material chunk count does not fit u64"),
+            )
+        })?;
+    if setup_proof_transport_u64_field(proof_record, "proofChunkCount")? != expected_chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{reference_message_label} proofChunkCount must match transported proof chunks"
+            ),
+        ));
+    }
+    if setup_proof_transport_u64_field(proof_record, "proofTotalByteLength")?
+        != transport_hashes.total_byte_length
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{reference_message_label} proofTotalByteLength must match transported proof chunks"
+            ),
+        ));
+    }
+    if setup_proof_transport_string_field(proof_record, "proofFullObjectHash")?
+        != transport_hashes.full_object_hash.as_str()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{reference_message_label} proofFullObjectHash must match transported proof chunks"
+            ),
+        ));
+    }
+    if setup_proof_transport_string_field(proof_record, "proofChunkRoot")?
+        != transport_hashes.chunk_root.as_str()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{reference_message_label} proofChunkRoot must match the canonical proof chunk manifest"
+            ),
+        ));
+    }
+    let chunk_hash_values = setup_proof_transport_array_field(proof_record, "proofChunkHashes")
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{reference_message_label} proofChunkHashes must list every transported proof chunk"
+                ),
+            )
+        })?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{reference_message_label} proofChunkHashes length must match transported proof chunks"
+            ),
+        ));
+    }
+    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+        .enumerate()
+    {
+        let Some(chunk_hash) = chunk_hash_value.as_str() else {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{reference_message_label} proofChunkHashes[{chunk_index}] must be a hash string"
+                ),
+            ));
+        };
+        validate_hash_string(
+            chunk_hash,
+            &format!("{chunk_hash_field_path_prefix}.proofChunkHashes[{chunk_index}]"),
+        )?;
+        if chunk_hash != expected_chunk_hash {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{reference_message_label} proofChunkHashes must match transported proof chunks"
+                ),
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+pub(in crate::bgv::setup) fn transported_setup_proof_material_chunks(
+    value: &Value,
+    material_message_label: &str,
+    chunk_message_label: &str,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    if setup_proof_transport_u64_field(value, "chunkSizeBytes")?
+        != SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!(
+                "{material_message_label} chunkSizeBytes must match the setup proof transport parameters"
+            ),
+        ));
+    }
+    let expected_chunk_count =
+        usize::try_from(setup_proof_transport_u64_field(value, "chunkCount")?).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                format!("{material_message_label} chunkCount does not fit usize"),
+            )
+        })?;
+    let chunk_values = setup_proof_transport_array_field(value, "chunks").map_err(|_| {
+        CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{material_message_label} chunks are required"),
+        )
+    })?;
+    if chunk_values.len() != expected_chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{material_message_label} chunks length must match chunkCount"),
+        ));
+    }
+    let mut chunks = Vec::with_capacity(expected_chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        let observed_chunk_index = setup_proof_transport_u64_field(chunk_value, "chunkIndex")?;
+        if observed_chunk_index != expected_chunk_index as u64 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!(
+                    "{chunk_message_label} chunks must be supplied in ascending chunk-index order"
+                ),
+            ));
+        }
+        chunks.push(decode_hex(setup_proof_transport_string_field(
+            chunk_value,
+            "bytesHex",
+        )?)?);
+    }
+
+    Ok(chunks)
+}
+
+pub(in crate::bgv::setup) fn verify_transported_setup_proof_material_hashes(
+    value: &Value,
+    transport_hashes: &SetupProofMaterialTransportHashes,
+    hash_message_label: &str,
+) -> CanonicalResult<()> {
+    if setup_proof_transport_u64_field(value, "totalByteLength")?
+        != transport_hashes.total_byte_length
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{hash_message_label} totalByteLength must match supplied chunks"),
+        ));
+    }
+    if setup_proof_transport_string_field(value, "fullObjectHash")?
+        != transport_hashes.full_object_hash.as_str()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{hash_message_label} fullObjectHash must match supplied chunks"),
+        ));
+    }
+    if setup_proof_transport_string_field(value, "chunkRoot")?
+        != transport_hashes.chunk_root.as_str()
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{hash_message_label} chunkRoot must match supplied chunks"),
+        ));
+    }
+    let chunk_hash_values =
+        setup_proof_transport_array_field(value, "chunkHashes").map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{hash_message_label} chunkHashes are required"),
+            )
+        })?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            format!("{hash_message_label} chunkHashes length must match supplied chunks"),
+        ));
+    }
+    for (chunk_hash_value, expected_chunk_hash) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+    {
+        if chunk_hash_value.as_str() != Some(expected_chunk_hash.as_str()) {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{hash_message_label} chunkHashes must match supplied chunks"),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn setup_proof_material_transport_stream_sessions()
@@ -604,10 +830,7 @@ fn absorb_setup_proof_material_transport_stream_chunk(
     session.next_chunk_index += 1;
 
     Ok(json!({
-        "ok": true,
         "operation": "absorbSetupProofMaterialTransportStreamChunk",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "absorbedChunkIndex": chunk_index,
         "nextChunkIndex": session.next_chunk_index,
         "observedTotalByteLength": session.observed_total_byte_length,
@@ -726,10 +949,7 @@ fn finish_setup_proof_material_transport_stream(
         );
 
     Ok(json!({
-        "ok": true,
         "operation": "finishSetupProofMaterialTransportStream",
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "verificationId": verification_id,
         "proofFamily": session.header.proof_family,
         "proofMaterialRoot": session.header.proof_material_root,
@@ -755,8 +975,6 @@ fn verified_setup_proof_material_reference_value(
     json!({
         "objectType": VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE,
         "objectVersion": 1,
-        "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-        "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
         "verificationId": verification_id,
         "proofFamily": proof_family,
         "proofMaterialRoot": proof_material_root,
@@ -777,17 +995,15 @@ fn verify_verified_setup_proof_material_set_header(value: &Value) -> CanonicalRe
             "verifiedSetupProofMaterials must be an object",
         ));
     }
-    for (field_name, expected_value) in [
-        ("objectType", VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
-    ] {
-        if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidProtocolObject,
-                format!("verifiedSetupProofMaterials.{field_name} must be {expected_value}"),
-            ));
-        }
+    if value.get("objectType").and_then(Value::as_str)
+        != Some(VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE)
+    {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidProtocolObject,
+            format!(
+                "verifiedSetupProofMaterials.objectType must be {VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE}"
+            ),
+        ));
     }
     if value.get("objectVersion").and_then(Value::as_u64) != Some(1) {
         return Err(CanonicalError::new(
@@ -811,8 +1027,6 @@ fn verify_verified_setup_proof_material_header(
     }
     for (field_name, expected_value) in [
         ("objectType", VERIFIED_SETUP_PROOF_MATERIAL_OBJECT_TYPE),
-        ("setupProfileId", COLLECTIVE_BGV_SETUP_PROFILE_ID),
-        ("setupProofProfileId", SETUP_PROOF_PROFILE_ID),
         ("proofBytesEncoding", SETUP_PROOF_MATERIAL_ENCODING),
     ] {
         if value.get(field_name).and_then(Value::as_str) != Some(expected_value) {
@@ -871,7 +1085,7 @@ fn validate_supported_setup_proof_transport_family(
     if !SETUP_PROOF_TRANSPORT_FAMILIES.contains(&proof_family) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidProtocolObject,
-            format!("{object_path}.proofFamily is not in the setup proof transport profile"),
+            format!("{object_path}.proofFamily is not in the setup proof transport parameters"),
         ));
     }
 
@@ -948,6 +1162,48 @@ fn usize_field_at(value: &Value, field_name: &str, object_path: &str) -> Canonic
     })
 }
 
+fn setup_proof_transport_string_field<'a>(
+    value: &'a Value,
+    field_name: &str,
+) -> CanonicalResult<&'a str> {
+    value
+        .get(field_name)
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{field_name} must be a string"),
+            )
+        })
+}
+
+fn setup_proof_transport_u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
+    value
+        .get(field_name)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{field_name} must be a non-negative integer"),
+            )
+        })
+}
+
+fn setup_proof_transport_array_field<'a>(
+    value: &'a Value,
+    field_name: &str,
+) -> CanonicalResult<&'a Vec<Value>> {
+    value
+        .get(field_name)
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                format!("{field_name} must be an array"),
+            )
+        })
+}
+
 // Chunks are streamed unframed; the bound total length plus the enforced
 // uniform chunk size make this concatenation unambiguous, so no per-chunk length
 // prefix is needed.
@@ -1012,20 +1268,16 @@ fn setup_proof_material_chunk_manifest_root(
     chunk_hashes: &[String],
     full_object_hash: &str,
 ) -> CanonicalResult<String> {
-    derive_protocol_hash(
-        "SetupProofChunkManifestRoot",
-        &json!({
-            "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
-            "objectVersion": 1,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
-            "proofFamily": proof_family,
-            "chunkSizeBytes": chunk_size_bytes,
-            "chunkCount": chunk_count,
-            "totalByteLength": total_byte_length,
-            "chunkHashes": chunk_hashes,
-            "fullObjectHash": full_object_hash,
-        }),
-    )
+    derive_canonical_object_hash(&json!({
+        "objectType": SETUP_PROOF_MATERIAL_CHUNK_MANIFEST_OBJECT_TYPE,
+        "objectVersion": 1,
+        "proofFamily": proof_family,
+        "chunkSizeBytes": chunk_size_bytes,
+        "chunkCount": chunk_count,
+        "totalByteLength": total_byte_length,
+        "chunkHashes": chunk_hashes,
+        "fullObjectHash": full_object_hash,
+    }))
 }
 
 fn append_bytes_to_hasher(hasher: &mut Shake256, value: &[u8]) -> CanonicalResult<()> {
@@ -1054,8 +1306,6 @@ mod tests {
         let transported_proof_material = json!({
             "objectType": "SetupTransportedSameSecretProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family,
             "proofMaterialRoot": proof_material_root,
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1087,8 +1337,6 @@ mod tests {
             "verifiedSetupProofMaterials": {
                 "objectType": VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE,
                 "objectVersion": 1,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "proofMaterials": [
                     verified_setup_proof_material
                 ],
@@ -1121,8 +1369,6 @@ mod tests {
         let mut transported_proof_material = json!({
             "objectType": "SetupTransportedPublicKeyShareProofMaterial",
             "objectVersion": 1,
-            "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-            "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
             "proofFamily": proof_family,
             "proofMaterialRoot": proof_material_root,
             "chunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -1153,8 +1399,6 @@ mod tests {
             "verifiedSetupProofMaterials": {
                 "objectType": VERIFIED_SETUP_PROOF_MATERIAL_SET_OBJECT_TYPE,
                 "objectVersion": 1,
-                "setupProfileId": COLLECTIVE_BGV_SETUP_PROFILE_ID,
-                "setupProofProfileId": SETUP_PROOF_PROFILE_ID,
                 "proofMaterials": [
                     finished["verifiedSetupProofMaterial"].clone()
                 ],
