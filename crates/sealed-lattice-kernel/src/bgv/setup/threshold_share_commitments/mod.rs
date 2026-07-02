@@ -43,7 +43,6 @@ const THRESHOLD_SHARE_LIMB_COMMITMENT_OBJECT_TYPE: &str = "ThresholdShareCommitm
 const THRESHOLD_SHARE_DERIVATION_RULE: &str =
     "sum-source-trustee-polynomial-commitments-at-trustee-point";
 const SETUP_TRANSPORT_SCHEME_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
-const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
 const VSS_MATERIAL_BINARY_OBJECT_TYPE: &str = "SetupTransportedVssCoefficientCommitmentMaterial";
 const VERIFIED_VSS_MATERIAL_OBJECT_TYPE: &str = "VerifiedVssCoefficientCommitmentMaterial";
 const VSS_MATERIAL_BINARY_FORMAT: &str =

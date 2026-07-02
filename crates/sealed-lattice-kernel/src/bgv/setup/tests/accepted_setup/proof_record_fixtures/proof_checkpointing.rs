@@ -25,6 +25,25 @@ fn anchor_proof_checkpoint_path(
         .join(format!("{statement_hash_hex}.bin"))
 }
 
+pub(in super::super) fn anchor_proof_checkpoint_exists(
+    family_directory: &str,
+    statement_hash_hex: &str,
+) -> bool {
+    anchor_proof_checkpoint_path(family_directory, statement_hash_hex).exists()
+}
+
+pub(in super::super) fn persist_checkpointed_anchor_proof_bytes(
+    family_directory: &str,
+    statement_hash_hex: &str,
+    proof_bytes: &[u8],
+) {
+    if !final_package_checkpoint_resume_enabled() {
+        return;
+    }
+    let path = anchor_proof_checkpoint_path(family_directory, statement_hash_hex);
+    persist_anchor_proof_checkpoint(&path, statement_hash_hex, proof_bytes);
+}
+
 // Returns the deterministic encoded proof bytes for one inline anchor proof,
 // loading them from an on-disk checkpoint when checkpoint resume is enabled and a
 // matching file exists, and otherwise generating them and persisting them so a
@@ -48,7 +67,7 @@ pub(in super::super) fn checkpointed_anchor_proof_bytes(
         return proof_bytes;
     }
     let proof_bytes = generate_proof_bytes();
-    persist_anchor_proof_checkpoint(&path, statement_hash_hex, &proof_bytes);
+    persist_checkpointed_anchor_proof_bytes(family_directory, statement_hash_hex, &proof_bytes);
 
     proof_bytes
 }

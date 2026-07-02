@@ -1,6 +1,5 @@
 export type VendoredProtocolRuntimeEntryExport = {
     readonly exports: readonly string[];
-    readonly runtimeFacadeExports?: readonly string[];
     readonly source: string;
 };
 
@@ -37,6 +36,7 @@ export const vendoredProtocolRuntimeModules = [
     'roster/verification.ts',
     'setup/common-randomness-records.ts',
     'setup/binary-chunk-writer.ts',
+    'setup/chunked-binary-reader.ts',
     'setup/common-fields.ts',
     'setup/evaluation-key-proof-records.ts',
     'setup/evaluation-key-proof-records/constants-and-types.ts',

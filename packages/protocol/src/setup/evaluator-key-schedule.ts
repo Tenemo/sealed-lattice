@@ -3,8 +3,12 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     assertContextMatches,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
     assertProtocolHash,
     contextFields,
+    type JsonRecord,
 } from './common-fields.js';
 import type {
     PublicKeyShareProofSet,
@@ -12,8 +16,6 @@ import type {
 } from './public-key-share-records.js';
 import type { SameSecretConsistencyStatementSet } from './same-secret-consistency-records.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 export type RelinearizationLevelScheduleEntry = Readonly<{
     readonly level: number;
@@ -69,29 +71,6 @@ export type EvaluatorKeyScheduleInput = {
     readonly publicKeyShares: PublicKeyShareSet;
     readonly publicKeyShareProofs: PublicKeyShareProofSet;
     readonly requiredGaloisKeySchedule: readonly RequiredGaloisKeyScheduleEntry[];
-};
-
-const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
 };
 
 const validateRequiredGaloisSchedule = (

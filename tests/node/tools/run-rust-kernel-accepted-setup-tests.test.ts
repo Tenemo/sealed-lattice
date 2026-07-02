@@ -6,6 +6,7 @@ import {
     automaticTrusteeProofBatchKnobForLane,
     cargoTestArgumentsForFocusedFilter,
     cargoTestArgumentsForLane,
+    finalPackageCheckpointStoreIsWarmForInputs,
     heavyAcceptedSetupFinalPackageTestPattern,
     heavyAcceptedSetupTestPattern,
     normalizeFocusedTestFilter,
@@ -16,6 +17,7 @@ describe('Rust accepted setup runner arguments', () => {
     it('runs the full accepted setup lane by default', () => {
         expect(parseRustKernelAcceptedSetupArguments([])).toEqual({
             focused: false,
+            lane: 'all',
             mode: 'accelerated',
             testFilters: [heavyAcceptedSetupTestPattern],
         });
@@ -24,8 +26,31 @@ describe('Rust accepted setup runner arguments', () => {
     it('accepts an explicit CI prove-fresh mode', () => {
         expect(parseRustKernelAcceptedSetupArguments(['--ci'])).toEqual({
             focused: false,
+            lane: 'all',
             mode: 'ci',
             testFilters: [heavyAcceptedSetupTestPattern],
+        });
+    });
+
+    it('accepts the split package-script lanes through an explicit lane argument', () => {
+        expect(
+            parseRustKernelAcceptedSetupArguments(['--lane', 'fast']),
+        ).toEqual({
+            focused: false,
+            lane: 'fast',
+            mode: 'accelerated',
+            testFilters: [heavyAcceptedSetupTestPattern],
+        });
+        expect(
+            parseRustKernelAcceptedSetupArguments([
+                '--lane=final-package',
+                '--ci',
+            ]),
+        ).toEqual({
+            focused: false,
+            lane: 'final-package',
+            mode: 'ci',
+            testFilters: [heavyAcceptedSetupFinalPackageTestPattern],
         });
     });
 
@@ -90,9 +115,51 @@ describe('Rust accepted setup runner arguments', () => {
         });
     });
 
+    it('requires a current completion manifest before final package checkpoints are warm', () => {
+        const completeProofFamilyCounts = new Map([
+            ['same-secret-anchor-proof-material', 1],
+            ['public-key-share-proof-material', 1],
+            ['trustee-evaluation-key-anchor-proof-material', 1],
+        ]);
+
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: undefined,
+                proofFamilyCounts: completeProofFamilyCounts,
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(false);
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: 90,
+                proofFamilyCounts: completeProofFamilyCounts,
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(false);
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: 100,
+                proofFamilyCounts: new Map([
+                    ['same-secret-anchor-proof-material', 1],
+                    ['public-key-share-proof-material', 0],
+                    ['trustee-evaluation-key-anchor-proof-material', 1],
+                ]),
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(false);
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: 110,
+                proofFamilyCounts: completeProofFamilyCounts,
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(true);
+    });
+
     it('treats one positional filter as a focused local run', () => {
         expect(parseRustKernelAcceptedSetupArguments(['one_test'])).toEqual({
             focused: true,
+            lane: 'all',
             mode: 'accelerated',
             testFilters: ['one_test'],
         });
@@ -117,6 +184,7 @@ describe('Rust accepted setup runner arguments', () => {
     it('ignores the package-manager argument separator', () => {
         expect(parseRustKernelAcceptedSetupArguments(['--'])).toEqual({
             focused: false,
+            lane: 'all',
             mode: 'accelerated',
             testFilters: [heavyAcceptedSetupTestPattern],
         });
@@ -129,6 +197,9 @@ describe('Rust accepted setup runner arguments', () => {
         expect(() =>
             parseRustKernelAcceptedSetupArguments(['--unsupported']),
         ).toThrow('Unknown argument: --unsupported');
+        expect(() =>
+            parseRustKernelAcceptedSetupArguments(['--lane', 'unsupported']),
+        ).toThrow('Invalid accepted-setup lane');
     });
 
     it('skips final package tests only in the fast lane', () => {

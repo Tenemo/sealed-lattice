@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    testLaneGroupsForRelativePath,
-    validateTestLaneCoverage,
-} from '#tools/ci/verify-test-lane-coverage';
+import { testLaneGroupsForRelativePath } from '#tools/ci/test-lanes';
+import { validateTestLaneCoverage } from '#tools/ci/verify-test-lane-coverage';
 
 describe('test lane coverage verification', () => {
     it('classifies the current lane patterns', () => {

@@ -1,5 +1,7 @@
 use super::*;
 
+use crate::bgv::setup_helpers::is_lowercase_protocol_hash;
+
 pub(super) fn centered_integer_to_residue(value: i128, modulus: u64) -> CanonicalResult<u64> {
     let modulus_wide = i128::from(modulus);
     let residue = value.rem_euclid(modulus_wide);
@@ -245,10 +247,7 @@ pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalRes
             format!("{field_name} must be a lowercase Hash512 hex string"),
         ));
     }
-    if !hash
-        .bytes()
-        .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit())
-    {
+    if !is_lowercase_protocol_hash(hash) {
         return Err(CanonicalError::new(
             CanonicalErrorCode::InvalidFixture,
             format!("{field_name} must be lowercase hexadecimal"),

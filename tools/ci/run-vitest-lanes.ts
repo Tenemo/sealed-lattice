@@ -9,7 +9,7 @@ import {
     type CommandInvocation,
 } from './run-command.js';
 
-export const buildWorkspaceBuildCommand = (
+const buildWorkspaceBuildCommand = (
     packageManagerRunner: PackageManagerRunner,
 ): CommandInvocation =>
     createPackageManagerCommand('Build workspace packages', ['run', 'build'], {

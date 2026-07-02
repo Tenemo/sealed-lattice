@@ -15,6 +15,7 @@ import {
     BinaryChunkWriter,
     type BinaryChunkWriterFinishResult,
 } from '../binary-chunk-writer.js';
+import { ChunkedBinaryReader } from '../chunked-binary-reader.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
@@ -190,60 +191,21 @@ export const createVssBinaryChunkWriter = (
 };
 
 class BinaryChunkReader {
-    private chunkIndex = 0;
+    private readonly reader: ChunkedBinaryReader;
 
-    private chunkOffset = 0;
-
-    private bytesRead = 0;
-
-    private readonly totalByteLength: number;
-
-    public constructor(private readonly chunks: readonly Uint8Array[]) {
-        if (chunks.length === 0) {
-            throw new Error(
+    public constructor(chunks: readonly Uint8Array[]) {
+        this.reader = new ChunkedBinaryReader(chunks, {
+            emptyChunksMessage:
                 'transported VSS material requires at least one chunk.',
-            );
-        }
-        this.totalByteLength = chunks.reduce(
-            (accumulatedLength, chunk) => accumulatedLength + chunk.byteLength,
-            0,
-        );
+        });
     }
 
     public isFinished(): boolean {
-        return this.bytesRead === this.totalByteLength;
+        return this.reader.isFinished();
     }
 
     public readBytes(byteLength: number, fieldName: string): Uint8Array {
-        const outputBytes = new Uint8Array(byteLength);
-        let outputOffset = 0;
-        while (outputOffset < byteLength) {
-            const chunk = this.chunks[this.chunkIndex];
-            if (chunk === undefined) {
-                throw new Error(
-                    `${fieldName} ended before the binary object was complete.`,
-                );
-            }
-            const availableLength = chunk.byteLength - this.chunkOffset;
-            if (availableLength === 0) {
-                this.chunkIndex += 1;
-                this.chunkOffset = 0;
-                continue;
-            }
-            const copyLength = Math.min(
-                byteLength - outputOffset,
-                availableLength,
-            );
-            outputBytes.set(
-                chunk.subarray(this.chunkOffset, this.chunkOffset + copyLength),
-                outputOffset,
-            );
-            this.chunkOffset += copyLength;
-            this.bytesRead += copyLength;
-            outputOffset += copyLength;
-        }
-
-        return outputBytes;
+        return this.reader.readBytes(byteLength, fieldName);
     }
 
     // Reject non-minimal LEB128: multiple byte encodings of the same integer would let crafted chunk bytes decode identically while changing the hashed bytes, breaking the full-object and chunk-root binding.

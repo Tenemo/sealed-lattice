@@ -2,11 +2,17 @@
     "$schema": "https://unpkg.com/knip@5/schema.json",
     "workspaces": {
         ".": {
-            "entry": ["tests/**/*.ts", "tools/**/*.ts"],
-            "project": ["tests/**/*.ts", "tools/**/*.ts"],
+            "entry": [
+                "tests/**/*.ts",
+                "tools/ci/packed-package-smoke.mjs",
+                "tools/ci/vitest-progress-reporter.ts",
+            ],
+            "project": ["tests/**/*.ts", "tools/**/*.ts", "tools/**/*.mjs"],
             "ignoreDependencies": [
                 // The packed-package verifier invokes publint through the shared package-manager runner.
                 "publint",
+                // The packed-package smoke script imports the tarball-installed SDK inside a temporary consumer.
+                "sealed-lattice",
                 // The Wasm kernel build resolves binaryen's wasm-opt script by path.
                 "binaryen",
             ],

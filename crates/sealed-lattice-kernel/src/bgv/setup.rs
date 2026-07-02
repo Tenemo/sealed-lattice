@@ -6,6 +6,11 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
+// Development gate for the mobile trustee evaluation-key proving path;
+// exercised only by its tests and ignored benchmark until the consolidated
+// backend consumes it.
+#[cfg(test)]
+mod consolidated_key_switch_atom;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;

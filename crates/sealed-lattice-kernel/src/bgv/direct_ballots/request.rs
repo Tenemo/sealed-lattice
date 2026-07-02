@@ -262,12 +262,6 @@ pub(super) fn read_direct_ballot_proof_mask_randomness(
         &ballot_proof_randomness_hexes,
         "proofMaskRandomness.ballotProofRandomnessHexes",
     )?;
-    if value.get("refreshShareProofRandomnessHexes").is_some() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "proofMaskRandomness.refreshShareProofRandomnessHexes is not accepted because evaluator intermediate openings are not part of the direct ballot path",
-        ));
-    }
 
     Ok(DirectBallotProofMaskRandomness {
         source,

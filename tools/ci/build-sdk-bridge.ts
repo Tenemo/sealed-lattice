@@ -24,8 +24,17 @@ import {
 } from './public-package-policy.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
-import { collectFiles } from '#tools/internal/files.js';
+import {
+    collectFiles,
+    filesystemMaximumRetries,
+    withTransientFilesystemRetries,
+} from '#tools/internal/files.js';
 import { rewriteModuleSpecifiers } from '#tools/internal/module-specifiers.js';
+
+export {
+    filesystemMaximumRetries,
+    withTransientFilesystemRetries,
+} from '#tools/internal/files.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');
@@ -161,52 +170,6 @@ export const transpileSdkInternalSource = (
 export const transpileBridgeSource = (sourceText: string): string =>
     transpileSdkInternalSource(sourceText, bridgeSourcePath);
 
-const filesystemRetryDelayMilliseconds = 50;
-export const filesystemMaximumRetries = 12;
-
-const delayMilliseconds = (milliseconds: number): Promise<void> =>
-    new Promise((resolve) => {
-        setTimeout(resolve, milliseconds);
-    });
-
-// Concurrent filesystem activity inside a build output directory (Windows
-// antivirus and search indexers, or a heavily loaded CI run) can leave that
-// directory in a transient delete-pending or briefly non-empty state. An
-// in-place `rm -rf` and the writes that recreate it then intermittently fail
-// with ENOENT, EPERM, EBUSY, or ENOTEMPTY even though nothing is actually
-// wrong. These codes are transient, so retrying with a short linear backoff
-// lets the foreign handle close and the operation succeed.
-const transientFilesystemErrorCodes = new Set([
-    'ENOENT',
-    'EPERM',
-    'EACCES',
-    'EBUSY',
-    'ENOTEMPTY',
-    'EMFILE',
-    'ENFILE',
-]);
-
-export const withTransientFilesystemRetries = async <ResultType>(
-    operation: () => Promise<ResultType>,
-    delay: (milliseconds: number) => Promise<void> = delayMilliseconds,
-): Promise<ResultType> => {
-    for (let attempt = 1; ; attempt += 1) {
-        try {
-            return await operation();
-        } catch (error) {
-            const errorCode = (error as NodeJS.ErrnoException).code;
-            if (
-                attempt >= filesystemMaximumRetries ||
-                errorCode === undefined ||
-                !transientFilesystemErrorCodes.has(errorCode)
-            ) {
-                throw error;
-            }
-            await delay(filesystemRetryDelayMilliseconds * attempt);
-        }
-    }
-};
-
 // Recreating an output directory in place is the racy step, so deletion uses
 // Node's built-in Windows retry handling for EBUSY/EPERM/ENOTEMPTY.
 const removeOutputDirectory = (directoryPath: string): Promise<void> =>
@@ -214,7 +177,7 @@ const removeOutputDirectory = (directoryPath: string): Promise<void> =>
         recursive: true,
         force: true,
         maxRetries: filesystemMaximumRetries,
-        retryDelay: filesystemRetryDelayMilliseconds,
+        retryDelay: 50,
     });
 
 const writeOutputFile = (outputPath: string, contents: string): Promise<void> =>
@@ -222,6 +185,43 @@ const writeOutputFile = (outputPath: string, contents: string): Promise<void> =>
         await mkdir(path.dirname(outputPath), { recursive: true });
         await writeFile(outputPath, contents, 'utf8');
     });
+
+const transpileSourceFileToOutput = async (
+    sourcePath: string,
+    outputPath: string,
+): Promise<void> => {
+    const sourceText = await readFile(sourcePath, 'utf8');
+    const outputText = transpileSdkInternalSource(sourceText, sourcePath);
+
+    await writeOutputFile(outputPath, outputText);
+};
+
+const buildVendoredRuntimeTree = async (input: {
+    readonly generatedIndexSource?: string;
+    readonly outputDirectoryPath: string;
+    readonly sourceDirectoryPath: string;
+    readonly sourceRelativePaths: readonly string[];
+}): Promise<void> => {
+    await removeOutputDirectory(input.outputDirectoryPath);
+
+    await Promise.all(
+        input.sourceRelativePaths.map(async (relativeSourcePath) => {
+            await transpileSourceFileToOutput(
+                path.join(input.sourceDirectoryPath, relativeSourcePath),
+                path.join(
+                    input.outputDirectoryPath,
+                    relativeSourcePath.replace(/\.ts$/u, '.js'),
+                ),
+            );
+        }),
+    );
+    if (input.generatedIndexSource !== undefined) {
+        await writeOutputFile(
+            path.join(input.outputDirectoryPath, 'index.js'),
+            input.generatedIndexSource,
+        );
+    }
+};
 
 export const buildSdkBridge = async (): Promise<void> => {
     const sourceText = await readFile(bridgeSourcePath, 'utf8');
@@ -247,69 +247,26 @@ export const buildSdkBridge = async (): Promise<void> => {
                 bridgePartsOutputDirectoryPath,
                 relativeSourcePath.replace(/\.ts$/u, '.js'),
             );
-            const bridgePartSourceText = await readFile(sourcePath, 'utf8');
-            const bridgePartOutputText = transpileSdkInternalSource(
-                bridgePartSourceText,
-                sourcePath,
-            );
-
-            await writeOutputFile(outputPath, bridgePartOutputText);
+            await transpileSourceFileToOutput(sourcePath, outputPath);
         }),
     );
 };
 
 export const buildSdkProtocolRuntime = async (): Promise<void> => {
-    await removeOutputDirectory(electionFoundationOutputDirectoryPath);
-
-    await Promise.all(
-        sdkProtocolRuntimeSourceRelativePaths.map(
-            async (relativeSourcePath) => {
-                const sourcePath = path.join(
-                    protocolSourceDirectoryPath,
-                    relativeSourcePath,
-                );
-                const outputPath = path.join(
-                    electionFoundationOutputDirectoryPath,
-                    relativeSourcePath.replace(/\.ts$/u, '.js'),
-                );
-                const sourceText = await readFile(sourcePath, 'utf8');
-                const outputText = transpileSdkInternalSource(
-                    sourceText,
-                    sourcePath,
-                );
-
-                await writeOutputFile(outputPath, outputText);
-            },
-        ),
-    );
-    await writeOutputFile(
-        path.join(electionFoundationOutputDirectoryPath, 'index.js'),
-        sdkProtocolRuntimeIndexSource,
-    );
+    await buildVendoredRuntimeTree({
+        generatedIndexSource: sdkProtocolRuntimeIndexSource,
+        outputDirectoryPath: electionFoundationOutputDirectoryPath,
+        sourceDirectoryPath: protocolSourceDirectoryPath,
+        sourceRelativePaths: sdkProtocolRuntimeSourceRelativePaths,
+    });
 };
 
 export const buildSdkCryptoRuntime = async (): Promise<void> => {
-    await removeOutputDirectory(cryptoOutputDirectoryPath);
-
-    await Promise.all(
-        sdkCryptoRuntimeSourceRelativePaths.map(async (relativeSourcePath) => {
-            const sourcePath = path.join(
-                cryptoSourceDirectoryPath,
-                relativeSourcePath,
-            );
-            const outputPath = path.join(
-                cryptoOutputDirectoryPath,
-                relativeSourcePath.replace(/\.ts$/u, '.js'),
-            );
-            const sourceText = await readFile(sourcePath, 'utf8');
-            const outputText = transpileSdkInternalSource(
-                sourceText,
-                sourcePath,
-            );
-
-            await writeOutputFile(outputPath, outputText);
-        }),
-    );
+    await buildVendoredRuntimeTree({
+        outputDirectoryPath: cryptoOutputDirectoryPath,
+        sourceDirectoryPath: cryptoSourceDirectoryPath,
+        sourceRelativePaths: sdkCryptoRuntimeSourceRelativePaths,
+    });
 };
 
 export const computeRelativeTypesSpecifier = (

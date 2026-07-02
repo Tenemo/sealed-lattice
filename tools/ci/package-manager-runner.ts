@@ -9,7 +9,7 @@ export type PackageManagerRunner = {
     readonly kind: PackageManager;
 };
 
-export const detectPackageManager = (
+const detectPackageManager = (
     packageManagerEntryPointPath: string,
 ): PackageManager => {
     const normalizedEntryPointPath = packageManagerEntryPointPath.toLowerCase();
@@ -68,7 +68,7 @@ export const buildPackageManagerEntryPointCandidates = (
     );
 };
 
-export const resolvePackageManagerEntryPoint = (
+const resolvePackageManagerEntryPoint = (
     packageManager: PackageManager,
     packageManagerEntryPointPath = process.env.npm_execpath,
     pathEnvironment: string = process.env.PATH ?? '',

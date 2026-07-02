@@ -16,7 +16,6 @@ export type CommandLogRequest = {
 };
 
 export type ActiveLocalRunLog = {
-    readonly combinedLogPath: string;
     readonly runDirectoryPath: string;
     createCommandLogFiles(request: CommandLogRequest): CommandLogFiles;
     finish(input: {
@@ -99,7 +98,6 @@ const closeStream = async (stream: WriteStream): Promise<void> =>
     });
 
 class LocalRunLog implements ActiveLocalRunLog {
-    readonly combinedLogPath: string;
     readonly runDirectoryPath: string;
     #combinedStream: WriteStream;
     #commandSlugCounts = new Map<string, number>();
@@ -119,7 +117,6 @@ class LocalRunLog implements ActiveLocalRunLog {
         readonly startedAtMilliseconds: number;
         readonly summaryPath: string;
     }) {
-        this.combinedLogPath = input.combinedLogPath;
         this.runDirectoryPath = input.runDirectoryPath;
         this.#combinedStream = createWriteStream(input.combinedLogPath, {
             flags: 'a',

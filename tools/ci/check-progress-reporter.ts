@@ -1,10 +1,6 @@
 export type {
     CheckFailureDetail,
-    CheckProgressCommandPlan,
     CheckProgressLanePlan,
-    CheckProgressStatus,
-    CheckRunCommandTiming,
-    CheckRunLaneTiming,
     CheckRunTimingDetails,
     CheckTimingHistory,
 } from './check-progress-reporter/types.js';

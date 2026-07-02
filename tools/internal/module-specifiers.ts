@@ -14,14 +14,14 @@ import {
     type StringLiteral,
 } from 'typescript';
 
-export type ModuleSpecifierLiteral = {
+type ModuleSpecifierLiteral = {
     readonly end: number;
     readonly quote: string;
     readonly start: number;
     readonly text: string;
 };
 
-export type ModuleSpecifierRewrite = (specifier: string) => string | undefined;
+type ModuleSpecifierRewrite = (specifier: string) => string | undefined;
 
 type ModuleSpecifierReplacement = {
     readonly end: number;

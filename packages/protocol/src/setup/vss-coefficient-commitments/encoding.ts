@@ -5,7 +5,7 @@
 // and the binary material byte-length accounting.
 import { hash512Hex } from '@sealed-lattice/crypto';
 
-import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
+export { contextFields, setupContextFieldNames } from '../common-fields.js';
 
 import {
     setupCommitmentModulusLimbIndices,
@@ -17,14 +17,6 @@ import {
 } from './constants-and-types.js';
 
 const twoToTheSixtyFourth = 1n << 64n;
-
-export const setupContextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 
 export const assertPositiveSafeInteger = (
     value: number,
@@ -158,19 +150,6 @@ export const assertRandomness = (
         });
     });
 };
-
-export const contextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<
-    CollectiveBgvSetupContext,
-    (typeof setupContextFieldNames)[number]
-> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
 
 export const centeredIntegerToResidue = (
     value: number,

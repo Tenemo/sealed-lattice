@@ -2,6 +2,18 @@ import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
+    assertContextFieldPathsMatch,
+    assertJsonRecord,
+    assertJsonRecordArray,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+    contextFields,
+    setupContextFieldNames,
+    type JsonRecord,
+} from './common-fields.js';
+import {
     setupCommitmentRootPayload,
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
@@ -14,8 +26,6 @@ import {
     type VssSourceTrusteeCoefficientCommitmentRecord,
 } from './vss-coefficient-commitments.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 type ThresholdCommitmentRowHash = Readonly<{
     readonly commitmentModulusIndex: number;
@@ -120,14 +130,6 @@ type ParsedCommitmentMaterial = Readonly<{
 
 const thresholdShareDerivationRule =
     'sum-source-trustee-polynomial-commitments-at-trustee-point';
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
-const contextFieldNames = [
-    'ceremonyId',
-    'manifestHash',
-    'rosterHash',
-    'setupParametersHash',
-    'setupEpoch',
-] as const;
 
 const coefficientVectorBytes = (
     coefficients: readonly number[],
@@ -150,78 +152,6 @@ const coefficientVectorHash512 = (
     domain: string,
 ): string => hash512Hex(domain, [coefficientVectorBytes(coefficients)]);
 
-const assertProtocolHash = (
-    value: unknown,
-    fieldName: string,
-): ProtocolHash => {
-    if (typeof value !== 'string' || !protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-
-    return value;
-};
-
-const assertNonEmptyString = (value: unknown, fieldName: string): string => {
-    if (typeof value !== 'string' || value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-
-    return value;
-};
-
-const assertPositiveSafeInteger = (
-    value: unknown,
-    fieldName: string,
-): number => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value <= 0
-    ) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-
-    return value;
-};
-
-const assertNonNegativeSafeInteger = (
-    value: unknown,
-    fieldName: string,
-): number => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value < 0
-    ) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-
-    return value;
-};
-
-const assertJsonRecord = (value: unknown, fieldName: string): JsonRecord => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an object.`);
-    }
-
-    return value as JsonRecord;
-};
-
-const assertJsonRecordArray = (
-    value: unknown,
-    fieldName: string,
-): readonly JsonRecord[] => {
-    if (!Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an array.`);
-    }
-
-    return value.map((entry, entryIndex) =>
-        assertJsonRecord(entry, `${fieldName}.${String(entryIndex)}`),
-    );
-};
-
 const assertObjectType = (
     value: JsonRecord,
     fieldName: string,
@@ -236,30 +166,6 @@ const assertObjectType = (
         throw new Error(`${fieldName}.objectVersion must be 1.`);
     }
 };
-
-const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    objectPath: string,
-): void => {
-    for (const fieldName of contextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${objectPath}.${fieldName} must match setupContext.${fieldName}.`,
-            );
-        }
-    }
-};
-
-const setupContextFields = (
-    setupContext: CollectiveBgvSetupContext,
-): Pick<CollectiveBgvSetupContext, (typeof contextFieldNames)[number]> => ({
-    ceremonyId: setupContext.ceremonyId,
-    manifestHash: setupContext.manifestHash,
-    rosterHash: setupContext.rosterHash,
-    setupParametersHash: setupContext.setupParametersHash,
-    setupEpoch: setupContext.setupEpoch,
-});
 
 const sortedSourceTrusteeRecords = (
     vssCoefficientCommitments: VssCoefficientCommitmentSet,
@@ -420,7 +326,7 @@ const parseMaterialSet = (
         'vssCoefficientCommitmentMaterial',
         'VssCoefficientCommitmentMaterialSet',
     );
-    assertContextMatches(
+    assertContextFieldPathsMatch(
         setupContext,
         materialSet,
         'vssCoefficientCommitmentMaterial',
@@ -791,7 +697,7 @@ const aggregateThresholdCommitmentLimb = (
     const limbWithoutRoot = {
         objectType: 'ThresholdShareCommitment',
         objectVersion: 1,
-        ...setupContextFields(setupContext),
+        ...contextFields(setupContext),
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash,
         recipientIdentity,
@@ -834,7 +740,7 @@ const deriveRecipientCommitment = (
     const recipientWithoutRoot = {
         objectType: 'TrusteeThresholdShareCommitments',
         objectVersion: 1,
-        ...setupContextFields(setupContext),
+        ...contextFields(setupContext),
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash,
         recipientIdentity: recipientRecord.sourceTrusteeIdentity,
@@ -894,7 +800,7 @@ const rnsPrimesFromMaterial = (
 export const deriveThresholdShareCommitments = (
     input: ThresholdShareCommitmentsInput,
 ): ThresholdShareCommitmentSet => {
-    for (const fieldName of contextFieldNames) {
+    for (const fieldName of setupContextFieldNames) {
         assertNonEmptyString(
             input.setupContext[fieldName],
             `setupContext.${fieldName}`,
@@ -905,7 +811,7 @@ export const deriveThresholdShareCommitments = (
         'vssCoefficientCommitments',
         'VssCoefficientCommitmentSet',
     );
-    assertContextMatches(
+    assertContextFieldPathsMatch(
         input.setupContext,
         input.vssCoefficientCommitments,
         'vssCoefficientCommitments',
@@ -999,7 +905,7 @@ export const deriveThresholdShareCommitments = (
     const thresholdShareCommitmentsWithoutRoot = {
         objectType: 'ThresholdShareCommitmentSet',
         objectVersion: 1,
-        ...setupContextFields(input.setupContext),
+        ...contextFields(input.setupContext),
         derivationRule: thresholdShareDerivationRule,
         publicMatrixSeedHash:
             input.vssCoefficientCommitments.publicMatrixSeedHash,

@@ -46,6 +46,7 @@ use crate::{
         coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
     },
     bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE},
+    bgv::setup_helpers::{array_field, string_field},
     encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult, append_varuint},
     hashing::hash512_hex,
 };
@@ -92,27 +93,6 @@ pub(super) struct EvaluationKeyShareComponentMaterialTransportHashes {
 
 fn invalid_evaluation_key_share_material(message: impl Into<String>) -> CanonicalError {
     CanonicalError::new(CanonicalErrorCode::InvalidFixture, message)
-}
-
-fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .filter(|field| !field.is_empty())
-        .ok_or_else(|| {
-            invalid_evaluation_key_share_material(format!(
-                "{field_name} must be a non-empty string"
-            ))
-        })
-}
-
-fn array_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Vec<Value>> {
-    value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| {
-            invalid_evaluation_key_share_material(format!("{field_name} must be an array"))
-        })
 }
 
 fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {

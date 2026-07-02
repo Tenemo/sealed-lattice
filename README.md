@@ -145,7 +145,7 @@ pnpm run smoke:pack:npm
 
 Use the narrower command that matches the component being changed. Accepted-setup proof lanes are maintainer evidence for setup/proof changes; they do not change the public boundary in [SECURITY.md](SECURITY.md).
 
-Accepted-setup proof lanes default to accelerated local mode: incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode.
+Accepted-setup proof lanes default to accelerated local mode: incremental Rust compilation, proof checkpoint resume under `temp/test-checkpoints/`, and run logs under `logs/`. CI passes `--ci` to use the conservative prove-fresh mode. The final-package lane keeps cold-store libtest parallelism until one accelerated final-package run completes and writes its checkpoint completion manifest.
 
 Build and package-smoke the published SDK:
 

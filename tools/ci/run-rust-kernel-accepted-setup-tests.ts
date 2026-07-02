@@ -1,4 +1,4 @@
-import fs from 'node:fs';
+import fs, { type Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -56,6 +56,7 @@ export type RustKernelAcceptedSetupRunMode = 'accelerated' | 'ci';
 
 export type ParsedRustKernelAcceptedSetupArguments = {
     readonly focused: boolean;
+    readonly lane: RustKernelAcceptedSetupLane;
     readonly mode: RustKernelAcceptedSetupRunMode;
     readonly testFilters: readonly string[];
 };
@@ -164,15 +165,20 @@ const acceptedSetupCheckpointDirectory = path.join(
     acceptedSetupCheckpointRootDirectory,
     'accepted-setup-final-package-material-store',
 );
+const acceptedSetupFinalPackageCompletionManifestPath = path.join(
+    acceptedSetupCheckpointDirectory,
+    'accelerated-final-package-completion.json',
+);
 
 const checkpointProofFamilyDirectories = [
     'same-secret-anchor-proof-material',
     'public-key-share-proof-material',
     'trustee-evaluation-key-anchor-proof-material',
-    'trustee-evaluation-key-proof-material',
 ] as const;
 
-const checkpointFamilyHasProofMaterial = (familyDirectory: string): boolean => {
+const checkpointFamilyProofMaterialCount = (
+    familyDirectory: string,
+): number => {
     const directory = path.join(
         acceptedSetupCheckpointDirectory,
         familyDirectory,
@@ -180,22 +186,151 @@ const checkpointFamilyHasProofMaterial = (familyDirectory: string): boolean => {
     try {
         return fs
             .readdirSync(directory, { withFileTypes: true })
-            .some((entry) => entry.isFile() && entry.name.endsWith('.bin'));
+            .filter((entry) => entry.isFile() && entry.name.endsWith('.bin'))
+            .length;
     } catch {
-        return false;
+        return 0;
+    }
+};
+
+const checkpointFamilyProofMaterialCounts = (): ReadonlyMap<string, number> =>
+    new Map(
+        checkpointProofFamilyDirectories.map((familyDirectory) => [
+            familyDirectory,
+            checkpointFamilyProofMaterialCount(familyDirectory),
+        ]),
+    );
+
+const checkpointFamilyProofMaterialCountSummary = (
+    counts: ReadonlyMap<string, number>,
+): string =>
+    checkpointProofFamilyDirectories
+        .map(
+            (familyDirectory) =>
+                `${familyDirectory}: ${counts.get(familyDirectory) ?? 0}`,
+        )
+        .join(', ');
+
+const newestModificationTimeMillisecondsUnder = (
+    directoryPath: string,
+): number => {
+    let newestModificationTimeMilliseconds = 0;
+
+    const visit = (currentDirectoryPath: string): void => {
+        let entries: readonly Dirent[];
+        try {
+            entries = fs.readdirSync(currentDirectoryPath, {
+                withFileTypes: true,
+            });
+        } catch {
+            return;
+        }
+
+        for (const entry of entries) {
+            const entryPath = path.join(currentDirectoryPath, entry.name);
+            if (entry.isDirectory()) {
+                visit(entryPath);
+                continue;
+            }
+            if (!entry.isFile()) {
+                continue;
+            }
+
+            newestModificationTimeMilliseconds = Math.max(
+                newestModificationTimeMilliseconds,
+                fs.statSync(entryPath).mtimeMs,
+            );
+        }
+    };
+
+    visit(directoryPath);
+
+    return newestModificationTimeMilliseconds;
+};
+
+const acceptedSetupSourceNewestModificationTimeMilliseconds = (): number =>
+    newestModificationTimeMillisecondsUnder(
+        path.resolve(
+            process.cwd(),
+            'crates',
+            'sealed-lattice-kernel',
+            'src',
+            'bgv',
+            'setup',
+        ),
+    );
+
+export type FinalPackageCheckpointStoreWarmInputs = {
+    readonly completionManifestModifiedAtMilliseconds: number | undefined;
+    readonly proofFamilyCounts: ReadonlyMap<string, number>;
+    readonly sourceNewestModificationTimeMilliseconds: number;
+};
+
+export const finalPackageCheckpointStoreIsWarmForInputs = (
+    input: FinalPackageCheckpointStoreWarmInputs,
+): boolean =>
+    checkpointProofFamilyDirectories.every(
+        (familyDirectory) =>
+            (input.proofFamilyCounts.get(familyDirectory) ?? 0) > 0,
+    ) &&
+    input.completionManifestModifiedAtMilliseconds !== undefined &&
+    input.completionManifestModifiedAtMilliseconds >=
+        input.sourceNewestModificationTimeMilliseconds;
+
+const finalPackageCompletionManifestModifiedAtMilliseconds = ():
+    | number
+    | undefined => {
+    try {
+        return fs.statSync(acceptedSetupFinalPackageCompletionManifestPath)
+            .mtimeMs;
+    } catch {
+        return undefined;
     }
 };
 
 const finalPackageCheckpointStoreIsWarm = (): boolean =>
-    checkpointProofFamilyDirectories.every(checkpointFamilyHasProofMaterial);
+    finalPackageCheckpointStoreIsWarmForInputs({
+        completionManifestModifiedAtMilliseconds:
+            finalPackageCompletionManifestModifiedAtMilliseconds(),
+        proofFamilyCounts: checkpointFamilyProofMaterialCounts(),
+        sourceNewestModificationTimeMilliseconds:
+            acceptedSetupSourceNewestModificationTimeMilliseconds(),
+    });
+
+const writeFinalPackageCompletionManifest = (): void => {
+    fs.mkdirSync(acceptedSetupCheckpointDirectory, { recursive: true });
+    const proofFamilyCounts = Object.fromEntries(
+        checkpointFamilyProofMaterialCounts(),
+    );
+    fs.writeFileSync(
+        acceptedSetupFinalPackageCompletionManifestPath,
+        `${JSON.stringify(
+            {
+                checkpointDirectory: acceptedSetupCheckpointDirectory,
+                completedAt: new Date().toISOString(),
+                proofFamilyCounts,
+            },
+            undefined,
+            2,
+        )}\n`,
+    );
+};
 
 export type ResolvedKnob = {
     readonly value: string;
     readonly source: string;
 };
 
+type ResolvedRunKnobs = {
+    readonly rayonThreadCount: ResolvedKnob;
+    readonly testThreads: ResolvedKnob;
+    readonly trusteeProofBatchSize: ResolvedKnob;
+    readonly trusteeProofLimbBatchSize: ResolvedKnob;
+};
+
 type BuiltRustKernelAcceptedSetupCommand = {
     readonly command: CommandInvocation;
+    readonly marksFinalPackageCheckpointStoreComplete: boolean;
     readonly progressLabel: string;
     readonly setupMessages: readonly string[];
     readonly testThreadCount: number;
@@ -300,64 +435,58 @@ const testFiltersForLane = (
         ? [heavyAcceptedSetupFinalPackageTestPattern]
         : [heavyAcceptedSetupTestPattern];
 
-const laneNameForLane = (lane: RustKernelAcceptedSetupLane): string => {
-    if (lane === 'fast') {
-        return 'Rust accepted setup fast';
-    }
-    if (lane === 'final-package') {
-        return 'Rust accepted setup final package';
-    }
-
-    return 'Rust accepted setup';
+type AcceptedSetupLaneMetadata = {
+    readonly commandDescription: string;
+    readonly laneName: string;
+    readonly logFileSlug: string;
+    readonly progressLabel: string;
+    readonly scriptName: string;
 };
 
-const scriptNameForLane = (lane: RustKernelAcceptedSetupLane): string => {
-    if (lane === 'fast') {
-        return 'test:rust:kernel:accepted-setup:fast';
-    }
-    if (lane === 'final-package') {
-        return 'test:rust:kernel:accepted-setup:final-package';
-    }
+const acceptedSetupLaneMetadata = {
+    all: {
+        commandDescription: 'cargo test Rust accepted setup proofs',
+        laneName: 'Rust accepted setup',
+        logFileSlug: 'cargo-test-rust-accepted-setup',
+        progressLabel: 'accepted-setup',
+        scriptName: 'test:rust:kernel:accepted-setup',
+    },
+    fast: {
+        commandDescription: 'cargo test Rust accepted setup fast proof checks',
+        laneName: 'Rust accepted setup fast',
+        logFileSlug: 'cargo-test-rust-accepted-setup-fast',
+        progressLabel: 'accepted-setup:fast',
+        scriptName: 'test:rust:kernel:accepted-setup:fast',
+    },
+    'final-package': {
+        commandDescription: 'cargo test Rust accepted setup final package',
+        laneName: 'Rust accepted setup final package',
+        logFileSlug: 'cargo-test-rust-accepted-setup-final-package',
+        progressLabel: 'accepted-setup:final-package',
+        scriptName: 'test:rust:kernel:accepted-setup:final-package',
+    },
+} as const satisfies Record<
+    RustKernelAcceptedSetupLane,
+    AcceptedSetupLaneMetadata
+>;
 
-    return 'test:rust:kernel:accepted-setup';
-};
+const laneMetadata = (
+    lane: RustKernelAcceptedSetupLane,
+): AcceptedSetupLaneMetadata => acceptedSetupLaneMetadata[lane];
 
-const progressLabelForLane = (lane: RustKernelAcceptedSetupLane): string => {
-    if (lane === 'fast') {
-        return 'accepted-setup:fast';
-    }
-    if (lane === 'final-package') {
-        return 'accepted-setup:final-package';
-    }
+const laneNameForLane = (lane: RustKernelAcceptedSetupLane): string =>
+    laneMetadata(lane).laneName;
 
-    return 'accepted-setup';
-};
-
-const logFileSlugForLane = (lane: RustKernelAcceptedSetupLane): string => {
-    if (lane === 'fast') {
-        return 'cargo-test-rust-accepted-setup-fast';
-    }
-    if (lane === 'final-package') {
-        return 'cargo-test-rust-accepted-setup-final-package';
-    }
-
-    return 'cargo-test-rust-accepted-setup';
-};
+const scriptNameForLane = (lane: RustKernelAcceptedSetupLane): string =>
+    laneMetadata(lane).scriptName;
 
 const commandDescriptionForLane = (
     lane: RustKernelAcceptedSetupLane,
     mode: RustKernelAcceptedSetupRunMode,
-): string => {
-    const suffix = mode === 'accelerated' ? ' (accelerated local)' : '';
-    if (lane === 'fast') {
-        return `cargo test Rust accepted setup fast proof checks${suffix}`;
-    }
-    if (lane === 'final-package') {
-        return `cargo test Rust accepted setup final package${suffix}`;
-    }
-
-    return `cargo test Rust accepted setup proofs${suffix}`;
-};
+): string =>
+    `${laneMetadata(lane).commandDescription}${
+        mode === 'accelerated' ? ' (accelerated local)' : ''
+    }`;
 
 // Resolve per-lane concurrency knobs. The core-derived caps mirror the kernel's
 // final-package proving concurrency; the kernel treats the exported values as
@@ -366,12 +495,7 @@ const commandDescriptionForLane = (
 const resolveRunKnobs = (
     lane: RustKernelAcceptedSetupCommandLane,
     mode: RustKernelAcceptedSetupRunMode,
-): {
-    readonly testThreads: ResolvedKnob;
-    readonly trusteeProofBatchSize: ResolvedKnob;
-    readonly trusteeProofLimbBatchSize: ResolvedKnob;
-    readonly rayonThreadCount: ResolvedKnob;
-} => {
+): ResolvedRunKnobs => {
     const finalPackageWarmCheckpointStore =
         lane === 'final-package' &&
         mode === 'accelerated' &&
@@ -458,10 +582,40 @@ const resolveRunKnobs = (
     };
 };
 
+const buildAcceptedSetupEnvironment = (input: {
+    readonly cargoIncremental: '0' | '1';
+    readonly knobs: ResolvedRunKnobs;
+    readonly lane: RustKernelAcceptedSetupCommandLane;
+    readonly resumeCheckpoints: boolean;
+    readonly targetDirectoryPath?: string;
+}): NodeJS.ProcessEnv => ({
+    ...process.env,
+    CARGO_INCREMENTAL: input.cargoIncremental,
+    ...(input.targetDirectoryPath === undefined
+        ? {}
+        : { CARGO_TARGET_DIR: input.targetDirectoryPath }),
+    ...(input.resumeCheckpoints
+        ? {
+              SEALED_LATTICE_TEST_CHECKPOINT_ROOT:
+                  acceptedSetupCheckpointRootDirectory,
+              SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
+          }
+        : {}),
+    RAYON_NUM_THREADS: input.knobs.rayonThreadCount.value,
+    SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
+        input.knobs.trusteeProofBatchSize.value,
+    SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
+        input.knobs.trusteeProofLimbBatchSize.value,
+    ...(input.lane === 'final-package'
+        ? { SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS: '1' }
+        : {}),
+});
+
 const buildLaneCommand = (
     lane: RustKernelAcceptedSetupCommandLane,
     mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
+    const metadata = laneMetadata(lane);
     const knobs = resolveRunKnobs(lane, mode);
     const modeLabel =
         mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
@@ -495,39 +649,43 @@ const buildLaneCommand = (
                 `target directory ${acceptedSetupAcceleratedTargetDirectory}; proof checkpoints ${acceptedSetupCheckpointDirectory}; run logs stay under logs/.`,
         );
     }
+    if (lane === 'final-package' && mode === 'accelerated') {
+        const checkpointCounts = checkpointFamilyProofMaterialCounts();
+        setupMessages.push(
+            `${laneNameForLane(lane)} lane (${modeLabel}): checkpoint family counts: ` +
+                `${checkpointFamilyProofMaterialCountSummary(checkpointCounts)}.`,
+        );
+        if (!finalPackageWarmCheckpointStore) {
+            setupMessages.push(
+                `${laneNameForLane(lane)} lane (${modeLabel}): checkpoint resume is enabled, ` +
+                    `but warm-store parallelism waits for ${acceptedSetupFinalPackageCompletionManifestPath}.`,
+            );
+        }
+    }
 
     return {
         command: {
             args: cargoTestArgumentsForLane(lane, knobs.testThreads.value),
             command: 'cargo',
             description: commandDescriptionForLane(lane, mode),
-            env: {
-                ...process.env,
-                ...(mode === 'accelerated'
-                    ? {
-                          CARGO_INCREMENTAL: '1',
-                          CARGO_TARGET_DIR:
-                              acceptedSetupAcceleratedTargetDirectory,
-                          SEALED_LATTICE_TEST_CHECKPOINT_ROOT:
-                              acceptedSetupCheckpointRootDirectory,
-                          SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
-                      }
-                    : { CARGO_INCREMENTAL: '0' }),
-                RAYON_NUM_THREADS: knobs.rayonThreadCount.value,
-                SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
-                    knobs.trusteeProofBatchSize.value,
-                SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
-                    knobs.trusteeProofLimbBatchSize.value,
-                ...(lane === 'final-package'
-                    ? { SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS: '1' }
-                    : {}),
-            },
+            env: buildAcceptedSetupEnvironment({
+                cargoIncremental: mode === 'accelerated' ? '1' : '0',
+                knobs,
+                lane,
+                resumeCheckpoints: mode === 'accelerated',
+                targetDirectoryPath:
+                    mode === 'accelerated'
+                        ? acceptedSetupAcceleratedTargetDirectory
+                        : undefined,
+            }),
             logFileSlug:
                 mode === 'accelerated'
-                    ? `${logFileSlugForLane(lane)}-accelerated`
-                    : logFileSlugForLane(lane),
+                    ? `${metadata.logFileSlug}-accelerated`
+                    : metadata.logFileSlug,
         },
-        progressLabel: progressLabelForLane(lane),
+        marksFinalPackageCheckpointStoreComplete:
+            lane === 'final-package' && mode === 'accelerated',
+        progressLabel: metadata.progressLabel,
         setupMessages,
         testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
     };
@@ -588,29 +746,16 @@ const buildFocusedCommand = (
             ),
             command: 'cargo',
             description: `cargo test ${testFilter} (warm focused)`,
-            env: {
-                ...process.env,
-                CARGO_TARGET_DIR: acceptedSetupFocusedTargetDirectory,
-                // Force incremental compilation on (this mode's central per-edit
-                // saving) rather than relying on the cargo default, which an
-                // inherited environment or a cargo config could otherwise disable.
-                CARGO_INCREMENTAL: '1',
-                SEALED_LATTICE_TEST_CHECKPOINT_ROOT:
-                    acceptedSetupCheckpointRootDirectory,
-                // Resume each proof family's corpus from on-disk checkpoints instead
-                // of re-running the prover from a cold in-process fixture cache.
-                SEALED_LATTICE_RESUME_TEST_CHECKPOINTS: '1',
-                RAYON_NUM_THREADS: knobs.rayonThreadCount.value,
-                SEALED_LATTICE_TRUSTEE_PROOF_BATCH_SIZE:
-                    knobs.trusteeProofBatchSize.value,
-                SEALED_LATTICE_TRUSTEE_PROOF_LIMB_BATCH_SIZE:
-                    knobs.trusteeProofLimbBatchSize.value,
-                ...(lane === 'final-package'
-                    ? { SEALED_LATTICE_TRUSTEE_PROOF_VERIFY_PROGRESS: '1' }
-                    : {}),
-            },
+            env: buildAcceptedSetupEnvironment({
+                cargoIncremental: '1',
+                knobs,
+                lane,
+                resumeCheckpoints: true,
+                targetDirectoryPath: acceptedSetupFocusedTargetDirectory,
+            }),
             logFileSlug: 'cargo-test-rust-accepted-setup-focused',
         },
+        marksFinalPackageCheckpointStoreComplete: false,
         progressLabel: 'accepted-setup:focused',
         setupMessages,
         testThreadCount: Number.parseInt(knobs.testThreads.value, 10),
@@ -641,21 +786,50 @@ const writeRunnerSetupMessages = (
 };
 
 const usage =
-    'Usage: run-rust-kernel-accepted-setup-tests.ts [--ci] [<test name, module name, or Rust file filter>]. ' +
+    'Usage: run-rust-kernel-accepted-setup-tests.ts [--ci] [--lane all|fast|final-package] [<test name, module name, or Rust file filter>]. ' +
     'Default mode is accelerated local execution with checkpoint resume. Pass --ci for the conservative prove-fresh CI lane.';
+
+const isRustKernelAcceptedSetupLane = (
+    value: string,
+): value is RustKernelAcceptedSetupLane =>
+    value === 'all' || value === 'fast' || value === 'final-package';
 
 export const parseRustKernelAcceptedSetupArguments = (
     commandArguments: readonly string[],
+    defaultLane: RustKernelAcceptedSetupLane = 'all',
 ): ParsedRustKernelAcceptedSetupArguments => {
     const positionalArguments: string[] = [];
+    let lane = defaultLane;
     let mode: RustKernelAcceptedSetupRunMode = 'accelerated';
 
-    for (const argument of commandArguments) {
+    for (let index = 0; index < commandArguments.length; index += 1) {
+        const argument = commandArguments[index];
+        if (argument === undefined) {
+            continue;
+        }
         if (argument === '--') {
             continue;
         }
         if (argument === '--ci') {
             mode = 'ci';
+            continue;
+        }
+        if (argument === '--lane') {
+            const value = commandArguments[index + 1];
+            if (value === undefined || !isRustKernelAcceptedSetupLane(value)) {
+                throw new Error(`Invalid accepted-setup lane. ${usage}`);
+            }
+            lane = value;
+            index += 1;
+            continue;
+        }
+        const lanePrefix = '--lane=';
+        if (argument.startsWith(lanePrefix)) {
+            const value = argument.slice(lanePrefix.length);
+            if (!isRustKernelAcceptedSetupLane(value)) {
+                throw new Error(`Invalid accepted-setup lane. ${usage}`);
+            }
+            lane = value;
             continue;
         }
         if (argument.startsWith('-')) {
@@ -683,11 +857,12 @@ export const parseRustKernelAcceptedSetupArguments = (
 
     return {
         focused,
+        lane,
         mode,
         testFilters:
             normalizedFocusedFilter !== undefined
                 ? [normalizedFocusedFilter]
-                : testFiltersForLane('all'),
+                : testFiltersForLane(lane),
     };
 };
 
@@ -697,27 +872,33 @@ export const runRustKernelAcceptedSetupTests = async (input: {
     readonly scriptName?: string;
 }): Promise<void> => {
     const rawArguments = input.rawArguments ?? process.argv.slice(2);
-    const parsedArguments = parseRustKernelAcceptedSetupArguments(rawArguments);
+    const parsedArguments = parseRustKernelAcceptedSetupArguments(
+        rawArguments,
+        input.lane,
+    );
 
     const runLog = await createLocalRunLog({
         commandLineArguments: rawArguments,
         lanes: parsedArguments.focused
             ? [`Rust accepted setup focused (${parsedArguments.mode})`]
-            : authoritativeCommandLanesForLane(input.lane).map(
+            : authoritativeCommandLanesForLane(parsedArguments.lane).map(
                   (lane) =>
                       `${laneNameForLane(lane)} (${parsedArguments.mode})`,
               ),
-        scriptName: input.scriptName ?? scriptNameForLane(input.lane),
+        scriptName: input.scriptName ?? scriptNameForLane(parsedArguments.lane),
     });
 
     const builtCommands = parsedArguments.focused
         ? [
               buildFocusedCommand(
                   parsedArguments.testFilters[0] ?? '',
-                  input.lane,
+                  parsedArguments.lane,
               ),
           ]
-        : buildAuthoritativeCommands(input.lane, parsedArguments.mode);
+        : buildAuthoritativeCommands(
+              parsedArguments.lane,
+              parsedArguments.mode,
+          );
 
     let exitCode: number | undefined;
     try {
@@ -741,6 +922,14 @@ export const runRustKernelAcceptedSetupTests = async (input: {
 
             if (exitCode !== 0) {
                 break;
+            }
+            if (builtCommand.marksFinalPackageCheckpointStoreComplete) {
+                writeFinalPackageCompletionManifest();
+                const message =
+                    `Rust accepted setup final package lane (accelerated local): ` +
+                    `wrote checkpoint completion manifest ${acceptedSetupFinalPackageCompletionManifestPath}.\n`;
+                console.log(message.trimEnd());
+                runLog.writeCombinedOutput(message);
             }
         }
         process.exitCode = exitCode;

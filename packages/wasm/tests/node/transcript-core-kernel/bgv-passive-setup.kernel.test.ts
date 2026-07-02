@@ -15,7 +15,7 @@ import {
 } from '#packages/wasm/src/index';
 import type { BgvPassiveSetupPackage } from '#packages/wasm/src/transcript-core-bridge/kernel-contracts';
 
-describe('BGV passive passive BGV setup kernel commands', () => {
+describe('BGV passive setup kernel commands', () => {
     it('generates deterministic full-roster passive setup material and verifies it', async () => {
         const kernel = await loadTranscriptCoreKernel();
         const setup = kernel.generateBgvPassiveSetup(setupRequest);

@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import * as ts from 'typescript';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
+import { withTransientFilesystemRetries } from '#tools/internal/files.js';
 
 type ApiSurfaceSummary = {
     readonly declarationFiles: readonly string[];
@@ -220,22 +220,19 @@ const writeTextWithWindowsRetry = async (
     text: string,
 ): Promise<void> => {
     const temporaryPath = `${filePath}.${String(process.pid)}.tmp`;
-    let lastError: unknown;
-
-    for (let attemptIndex = 0; attemptIndex < 5; attemptIndex += 1) {
+    await withTransientFilesystemRetries(async () => {
         try {
             await fs.writeFile(temporaryPath, text, 'utf8');
             await fs.rename(temporaryPath, filePath);
-
-            return;
         } catch (error) {
-            lastError = error;
-            await fs.rm(temporaryPath, { force: true });
-            await delay(50 * (attemptIndex + 1));
+            try {
+                await fs.rm(temporaryPath, { force: true });
+            } catch {
+                // Preserve the original write or rename failure.
+            }
+            throw error;
         }
-    }
-
-    throw lastError instanceof Error ? lastError : new Error(String(lastError));
+    });
 };
 
 const main = async (): Promise<void> => {

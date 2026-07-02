@@ -1427,6 +1427,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn trustee_evaluation_key_transport_reference_uses_setup_proof_hashes() {
+        let proof_family = "trustee-evaluation-key";
+        let proof_chunks = vec![b"trustee evaluation key proof bytes".to_vec()];
+        let transport_hashes = setup_proof_material_transport_hashes(
+            proof_family,
+            &proof_chunks,
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )
+        .expect("setup proof material transport hashes");
+        let proof_material_root = valid_hash_for_test('a');
+        let proof_record = json!({
+            "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+            "proofMaterialRoot": proof_material_root,
+            "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+            "proofChunkCount": transport_hashes.chunk_hashes.len(),
+            "proofTotalByteLength": transport_hashes.total_byte_length,
+            "proofFullObjectHash": transport_hashes.full_object_hash.clone(),
+            "proofChunkRoot": transport_hashes.chunk_root.clone(),
+            "proofChunkHashes": transport_hashes.chunk_hashes.clone(),
+        });
+
+        verify_setup_proof_record_transport_reference(
+            &proof_record,
+            &transport_hashes,
+            "trustee evaluation-key proof",
+            "trustee evaluation-key proof",
+            "trusteeEvaluationKeyProof",
+        )
+        .expect("trustee evaluation-key proof transport reference");
+
+        let mut tampered_record = proof_record;
+        tampered_record["proofChunkHashes"] = json!([valid_hash_for_test('b')]);
+        let error = verify_setup_proof_record_transport_reference(
+            &tampered_record,
+            &transport_hashes,
+            "trustee evaluation-key proof",
+            "trustee evaluation-key proof",
+            "trusteeEvaluationKeyProof",
+        )
+        .expect_err("tampered trustee evaluation-key proof chunk hash must fail");
+
+        assert!(
+            error
+                .message
+                .contains("proofChunkHashes must match transported proof chunks"),
+            "unexpected error: {}",
+            error.message
+        );
+    }
+
     fn valid_hash_for_test(character: char) -> String {
         character.to_string().repeat(128)
     }

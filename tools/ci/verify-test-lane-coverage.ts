@@ -1,68 +1,14 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { testLaneGroupsForRelativePath } from '#tools/ci/test-lanes.js';
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 import { collectFiles, toPosixPath } from '#tools/internal/files.js';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const heavyKernelNodeTestDirectory =
-    'packages/wasm/tests/node/transcript-core-kernel/bgv-collective-setup/';
-
-type TestLaneGroup =
-    | 'browser'
-    | 'node-fast'
-    | 'node-kernel-fast'
-    | 'node-kernel-heavy'
-    | 'node-protocol';
 
 const normalizeRelativeTestPath = (filePath: string): string =>
     toPosixPath(path.relative(repoRoot, path.resolve(repoRoot, filePath)));
-
-export const testLaneGroupsForRelativePath = (
-    filePath: string,
-): readonly TestLaneGroup[] => {
-    const relativePath = normalizeRelativeTestPath(filePath);
-    const laneGroups: TestLaneGroup[] = [];
-
-    if (!relativePath.endsWith('.test.ts')) {
-        return laneGroups;
-    }
-
-    if (
-        relativePath.startsWith('packages/') &&
-        relativePath.includes('/tests/browser/') &&
-        relativePath.endsWith('.browser.test.ts')
-    ) {
-        laneGroups.push('browser');
-    }
-
-    if (relativePath.startsWith('packages/protocol/tests/node/')) {
-        laneGroups.push('node-protocol');
-    } else if (
-        relativePath.startsWith(heavyKernelNodeTestDirectory) &&
-        relativePath.endsWith('.kernel.test.ts')
-    ) {
-        laneGroups.push('node-kernel-heavy');
-    } else if (
-        relativePath.startsWith('packages/wasm/tests/node/') &&
-        relativePath.endsWith('.kernel.test.ts')
-    ) {
-        laneGroups.push('node-kernel-fast');
-    } else if (
-        relativePath.startsWith('tests/node/') &&
-        relativePath.endsWith('.kernel.test.ts')
-    ) {
-        laneGroups.push('node-kernel-fast');
-    } else if (
-        relativePath.startsWith('tests/node/') ||
-        (relativePath.startsWith('packages/') &&
-            relativePath.includes('/tests/node/'))
-    ) {
-        laneGroups.push('node-fast');
-    }
-
-    return laneGroups;
-};
 
 export const validateTestLaneCoverage = (
     filePaths: readonly string[],

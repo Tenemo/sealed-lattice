@@ -211,14 +211,6 @@ const validateVendoredProtocolRuntime = async (
                 entry.exports,
             ),
         );
-        if (entry.runtimeFacadeExports !== undefined) {
-            failures.push(
-                ...validateUnique(
-                    `vendoredProtocolRuntimeEntryExports ${entry.source} runtimeFacadeExports`,
-                    entry.runtimeFacadeExports,
-                ),
-            );
-        }
 
         if (!entry.source.endsWith('.js')) {
             failures.push(
@@ -236,7 +228,7 @@ const validateVendoredProtocolRuntime = async (
             );
         }
 
-        for (const exportName of entry.runtimeFacadeExports ?? entry.exports) {
+        for (const exportName of entry.exports) {
             if (!runtimeExports.has(exportName)) {
                 failures.push(
                     `vendoredProtocolRuntimeEntryExports ${entry.source} exposes "${exportName}" outside the SDK runtime facade`,

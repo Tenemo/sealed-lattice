@@ -8,6 +8,7 @@ import {
 } from '#tools/ci/package-manager-runner';
 import {
     createAbortableCommandSpawnOptions,
+    installProcessSignalChildCleanup,
     killProcessTree,
 } from '#tools/ci/run-command';
 
@@ -142,5 +143,64 @@ describe('abortable command process cleanup', () => {
             { stdio: 'ignore' },
         );
         expect(childProcess.kill).not.toHaveBeenCalled();
+    });
+
+    it('kills active child processes on terminal signals and unregisters handlers', () => {
+        const originalExitCode = process.exitCode;
+        const childProcesses = new Set([
+            {
+                kill: vi.fn(() => true),
+                pid: 41_001,
+            },
+            {
+                kill: vi.fn(() => true),
+                pid: 41_002,
+            },
+        ]);
+        const listeners = new Map<string, () => void>();
+        const processEvents = {
+            off: vi.fn((signal: string, listener: () => void) => {
+                if (listeners.get(signal) === listener) {
+                    listeners.delete(signal);
+                }
+
+                return processEvents;
+            }),
+            on: vi.fn((signal: string, listener: () => void) => {
+                listeners.set(signal, listener);
+
+                return processEvents;
+            }),
+        };
+        const killedProcessIds: number[] = [];
+
+        try {
+            const uninstall = installProcessSignalChildCleanup({
+                activeChildProcesses: childProcesses,
+                killChildProcess: (childProcess) => {
+                    if (childProcess.pid !== undefined) {
+                        killedProcessIds.push(childProcess.pid);
+                    }
+                },
+                processEvents,
+            });
+
+            listeners.get('SIGINT')?.();
+            uninstall();
+
+            expect(processEvents.on).toHaveBeenCalledWith(
+                'SIGINT',
+                expect.any(Function),
+            );
+            expect(processEvents.on).toHaveBeenCalledWith(
+                'SIGTERM',
+                expect.any(Function),
+            );
+            expect(killedProcessIds).toEqual([41_001, 41_002]);
+            expect(processEvents.off).toHaveBeenCalledTimes(2);
+            expect(listeners.size).toBe(0);
+        } finally {
+            process.exitCode = originalExitCode;
+        }
     });
 });

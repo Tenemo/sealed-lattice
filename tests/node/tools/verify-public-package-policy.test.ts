@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-    publicPackagePolicy,
-    type VendoredProtocolRuntimeEntryExport,
-} from '#tools/ci/public-package-policy';
+import { publicPackagePolicy } from '#tools/ci/public-package-policy';
 import { validatePublicPackagePolicy } from '#tools/ci/verify-public-package-policy';
 
 const emptyPackagePolicy = {
@@ -13,15 +10,11 @@ const emptyPackagePolicy = {
     vendoredProtocolRuntimeModules: [],
 } as const satisfies Parameters<typeof validatePublicPackagePolicy>[0];
 
-const runtimeFacadeExportNamesForPolicyEntry = (
-    entry: VendoredProtocolRuntimeEntryExport,
-): readonly string[] => entry.runtimeFacadeExports ?? entry.exports;
-
 describe('public package policy', () => {
     it('rejects missing protocol runtime entry exports from the SDK facade', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
-                runtimeFacadeExportNamesForPolicyEntry,
+                (entry) => entry.exports,
             );
         const failures = await validatePublicPackagePolicy(
             publicPackagePolicy,
@@ -38,7 +31,7 @@ describe('public package policy', () => {
     it('rejects unreachable vendored protocol runtime modules', async () => {
         const requiredRuntimeExports =
             publicPackagePolicy.vendoredProtocolRuntimeEntryExports.flatMap(
-                runtimeFacadeExportNamesForPolicyEntry,
+                (entry) => entry.exports,
             );
         const failures = await validatePublicPackagePolicy(
             {

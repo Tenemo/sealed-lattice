@@ -363,6 +363,10 @@ pub(super) fn move_public_key_share_succinct_proof_bytes_to_transport(
 }
 
 pub(super) fn proof_bytes_transport_chunks(proof_bytes: Vec<u8>) -> Vec<Vec<u8>> {
+    proof_bytes_transport_chunks_from_slice(&proof_bytes)
+}
+
+pub(super) fn proof_bytes_transport_chunks_from_slice(proof_bytes: &[u8]) -> Vec<Vec<u8>> {
     let chunk_size = usize::try_from(SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES)
         .expect("proof transport chunk size");
     proof_bytes.chunks(chunk_size).map(<[u8]>::to_vec).collect()

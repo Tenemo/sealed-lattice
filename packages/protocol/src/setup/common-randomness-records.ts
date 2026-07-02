@@ -9,12 +9,18 @@ import type {
     ProtocolSignatureEnvelope,
 } from '@sealed-lattice/types';
 
+import {
+    assertJsonRecord,
+    assertNonEmptyString,
+    assertNonNegativeSafeInteger,
+    assertPositiveSafeInteger,
+    assertProtocolHash,
+    type JsonRecord,
+} from './common-fields.js';
 import type {
     CollectiveBgvSetupContext,
     ProtocolRootSigner,
 } from './vss-share-verification-records.js';
-
-type JsonRecord = Record<string, unknown>;
 
 type CommonRandomnessContextFields = Readonly<{
     readonly ceremonyId: string;
@@ -132,47 +138,9 @@ export type SetupCommonRandomness = Readonly<
         }
 >;
 
-const protocolHashPattern = /^[0-9a-f]{128}$/u;
 // Each reveal contributes exactly 32 bytes (256 bits) of entropy to the joint public matrix seed.
 const revealHexPattern = /^[0-9a-f]{64}$/u;
 const textEncoder = new TextEncoder();
-
-const assertProtocolHash = (value: string, fieldName: string): void => {
-    if (!protocolHashPattern.test(value)) {
-        throw new TypeError(`${fieldName} must be a protocol hash.`);
-    }
-};
-
-const assertNonEmptyString = (value: string, fieldName: string): void => {
-    if (value.length === 0) {
-        throw new TypeError(`${fieldName} must be non-empty.`);
-    }
-};
-
-const assertNonNegativeSafeInteger = (
-    value: number,
-    fieldName: string,
-): void => {
-    if (!Number.isSafeInteger(value) || value < 0) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-};
-
-const assertPositiveSafeInteger = (value: number, fieldName: string): void => {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-};
-
-const assertJsonRecord = (value: unknown, fieldName: string): JsonRecord => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an object.`);
-    }
-
-    return value as JsonRecord;
-};
 
 const assertRevealHex = (value: string, fieldName: string): void => {
     if (!revealHexPattern.test(value)) {
@@ -409,7 +377,7 @@ const assertPublicDerivationsMatchKernelShape = (
         );
     }
     assertProtocolHash(
-        bgvPublicA.publicPolynomialRoot as string,
+        bgvPublicA.publicPolynomialRoot,
         'publicDerivations.bgvPublicA.publicPolynomialRoot',
     );
 
@@ -427,7 +395,7 @@ const assertPublicDerivationsMatchKernelShape = (
         );
     }
     assertProtocolHash(
-        publicMatrices.publicMatricesRoot as string,
+        publicMatrices.publicMatricesRoot,
         'publicDerivations.publicMatrices.publicMatricesRoot',
     );
 
@@ -442,7 +410,7 @@ const assertPublicDerivationsMatchKernelShape = (
         'commitmentMatrixCrpRoot',
     ] as const) {
         assertProtocolHash(
-            crpRoots[fieldName] as string,
+            crpRoots[fieldName],
             `publicDerivations.crpRoots.${fieldName}`,
         );
     }

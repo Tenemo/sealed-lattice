@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) use crate::bgv::setup_helpers::{
+    array_field, object_field, string_field, u64_field, usize_field,
+};
+
 use crate::bgv::setup_helpers::is_lowercase_protocol_hash;
 
 pub(super) fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
@@ -79,35 +83,6 @@ pub(super) fn setup_context_field_names() -> [&'static str; 5] {
     ]
 }
 
-pub(super) fn object_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Value> {
-    value
-        .get(field_name)
-        .filter(|field| field.is_object())
-        .ok_or_else(|| {
-            invalid_threshold_commitment_input(format!("{field_name} must be an object"))
-        })
-}
-
-pub(super) fn array_field<'a>(
-    value: &'a Value,
-    field_name: &str,
-) -> CanonicalResult<&'a Vec<Value>> {
-    value
-        .get(field_name)
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_threshold_commitment_input(format!("{field_name} must be an array")))
-}
-
-pub(super) fn string_field<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
-    value
-        .get(field_name)
-        .and_then(Value::as_str)
-        .filter(|field| !field.is_empty())
-        .ok_or_else(|| {
-            invalid_threshold_commitment_input(format!("{field_name} must be a non-empty string"))
-        })
-}
-
 pub(super) fn derivation_stream_id_field<'a>(
     value: &'a Value,
     field_name: &str,
@@ -138,23 +113,6 @@ pub(super) fn hash_string_field<'a>(
                 "{field_name} must be a protocol hash string"
             ))
         })
-}
-
-pub(super) fn u64_field(value: &Value, field_name: &str) -> CanonicalResult<u64> {
-    value
-        .get(field_name)
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            invalid_threshold_commitment_input(format!(
-                "{field_name} must be a non-negative integer"
-            ))
-        })
-}
-
-pub(super) fn usize_field(value: &Value, field_name: &str) -> CanonicalResult<usize> {
-    let field_value = u64_field(value, field_name)?;
-    usize::try_from(field_value)
-        .map_err(|_| invalid_threshold_commitment_input(format!("{field_name} does not fit usize")))
 }
 
 pub(super) fn validate_hash_string(hash: &str, field_name: &str) -> CanonicalResult<()> {
