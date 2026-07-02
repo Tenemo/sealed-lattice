@@ -77,14 +77,11 @@ pub(in super::super) fn verify_same_secret_consistency(
         }
     }
 
-    let vss_coefficient_commitment_root = setup_package
-        .get("vssCoefficientCommitments")
-        .and_then(|commitments| commitments.get("vssCoefficientCommitmentRoot"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
+    let vss_coefficient_commitment_root =
+        super::super::accepted_vss_coefficient_commitment_root(setup_package).ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "vssCoefficientCommitmentRoot was required before same-secret statement verification",
+                "an accepted VSS coefficient commitment root was required before same-secret statement verification",
             )
         })?;
     if statement_set
@@ -354,8 +351,16 @@ fn same_secret_trustee_bindings_from_vss(
     setup_package: &Value,
     expected_trustees: &BTreeMap<u64, String>,
 ) -> CanonicalResult<BTreeMap<u64, SameSecretTrusteeBinding>> {
+    // The constant coefficient commitments live in the compact commitment set:
+    // the per-source-trustee root is the compact source record root, and each
+    // commitment binds its root under coefficientCommitmentRoot.
+    let (commitment_set_field, source_root_field, commitment_root_field) = (
+        "compactVssCoefficientCommitmentSet",
+        "sourceCoefficientCommitmentRoot",
+        "coefficientCommitmentRoot",
+    );
     let source_trustee_records = setup_package
-        .get("vssCoefficientCommitments")
+        .get(commitment_set_field)
         .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
@@ -381,9 +386,11 @@ fn same_secret_trustee_bindings_from_vss(
             ));
         }
         let vss_source_trustee_commitment_root =
-            value_string(source_trustee_record, "sourceTrusteeCommitmentRoot")?.to_string();
-        let constant_commitment_roots =
-            same_secret_constant_commitment_roots_from_source_trustee(source_trustee_record)?;
+            value_string(source_trustee_record, source_root_field)?.to_string();
+        let constant_commitment_roots = same_secret_constant_commitment_roots_from_source_trustee(
+            source_trustee_record,
+            commitment_root_field,
+        )?;
         if bindings
             .insert(
                 trustee_roster_position,
@@ -408,6 +415,7 @@ fn same_secret_trustee_bindings_from_vss(
 
 fn same_secret_constant_commitment_roots_from_source_trustee(
     source_trustee_record: &Value,
+    commitment_root_field: &str,
 ) -> CanonicalResult<Vec<Value>> {
     let coefficient_commitments = source_trustee_record
         .get("coefficientCommitments")
@@ -449,7 +457,7 @@ fn same_secret_constant_commitment_roots_from_source_trustee(
             "rnsLimbIndex": rns_limb_index,
             "rnsPrime": rns_prime,
             "shamirCoefficientIndex": 0,
-            "commitmentRoot": value_string(coefficient_record, "commitmentRoot")?,
+            "commitmentRoot": value_string(coefficient_record, commitment_root_field)?,
         }));
     }
 

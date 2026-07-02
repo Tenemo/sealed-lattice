@@ -824,8 +824,15 @@ fn verify_vss_share_acceptance_context(
 pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
     setup_package: &Value,
 ) -> CanonicalResult<BTreeMap<u64, String>> {
+    // Each source trustee is identified by its compact coefficient commitment set
+    // root: the per-source-trustee root over that trustee's coefficient
+    // commitments, which the private envelopes and share acceptances bind against.
+    let (commitment_set_field, source_root_field) = (
+        "compactVssCoefficientCommitmentSet",
+        "sourceCoefficientCommitmentRoot",
+    );
     let source_trustee_records = setup_package
-        .get("vssCoefficientCommitments")
+        .get(commitment_set_field)
         .and_then(|commitment_set| commitment_set.get("sourceTrusteeRecords"))
         .and_then(Value::as_array)
         .ok_or_else(|| {
@@ -846,12 +853,12 @@ pub(super) fn source_trustee_commitment_roots_from_vss_commitments(
                 )
             })?;
         let source_trustee_commitment_root = source_trustee_record
-            .get("sourceTrusteeCommitmentRoot")
+            .get(source_root_field)
             .and_then(Value::as_str)
             .ok_or_else(|| {
                 CanonicalError::new(
                     CanonicalErrorCode::InvalidFixture,
-                    "source trustee VSS commitment record must bind sourceTrusteeCommitmentRoot",
+                    "source trustee VSS commitment record must bind its per-trustee coefficient commitment root",
                 )
             })?;
         source_trustee_roots.insert(

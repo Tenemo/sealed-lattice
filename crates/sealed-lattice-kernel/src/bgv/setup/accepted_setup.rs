@@ -1,4 +1,6 @@
 mod common_randomness;
+mod compact_same_secret_bridge_verification;
+mod compact_vss_public_material_verification;
 mod evaluation_key_material_transport;
 mod evaluation_key_proof_checks;
 mod evaluation_key_share_rounds;
@@ -37,6 +39,12 @@ pub(in crate::bgv::setup) use self::common_randomness::derive_collective_bgv_set
 use self::common_randomness::{
     derive_bgv_public_a_polynomial, derive_collective_bgv_setup_public_derivations,
     verify_common_randomness,
+};
+use self::compact_same_secret_bridge_verification::{
+    CompactSameSecretBridgeVerification, verify_optional_compact_same_secret_bridge_statement_set,
+};
+use self::compact_vss_public_material_verification::{
+    CompactVssPublicMaterialVerification, verify_optional_compact_vss_public_material,
 };
 use self::evaluation_key_material_transport::{
     evaluation_key_material_refusal,
@@ -106,16 +114,14 @@ use self::transport_policy::{
     setup_transport_chunk_manifest_root, setup_transport_vss_material_byte_length_for_roster,
     verify_transport_certificate,
 };
-use self::vss_coefficient_commitments::{
-    expected_trustees_from_phase_transcript, verify_vss_coefficient_commitment_material,
-    verify_vss_coefficient_commitments,
-};
+use self::vss_coefficient_commitments::expected_trustees_from_phase_transcript;
 use self::vss_complaints_and_acceptances::{
     source_trustee_commitment_roots_from_vss_commitments, verify_vss_complaints,
     verify_vss_share_acceptances,
 };
 
 use super::{commitment, setup_proof, threshold_share_commitments};
+use crate::bgv::setup_helpers::compare_required_string;
 
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -223,8 +229,6 @@ pub(super) const PUBLIC_EVALUATION_KEY_TRANSPORT_MATERIAL_ENCODING: &str =
     "binary-chunked-public-evaluation-key-root-manifest";
 const PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC: &[u8; 8] = b"SLEKPMV1";
 use super::trustee_evaluation_key_proof::TRUSTEE_EVALUATION_KEY_PROOF_FAMILY;
-const VSS_COEFFICIENT_COMMITMENT_MATERIAL_SET_OBJECT_TYPE: &str =
-    "VssCoefficientCommitmentMaterialSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_SET_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitmentSet";
 const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCommitment";
 const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
@@ -374,8 +378,13 @@ const REQUIRED_PHASES: &[(&str, u64)] = &[
 const REQUIRED_FINAL_OBJECTS: &[&str] = &[
     "qShare",
     "commonRandomness",
-    "vssCoefficientCommitments",
-    "vssCoefficientCommitmentMaterial",
+    "compactVssCoefficientCommitmentSet",
+    "compactVssRecipientShareCommitmentSet",
+    "compactVssAggregateThresholdCommitmentSet",
+    "compactVssShareLinkageStatement",
+    "compactVssShareLinkageProofMaterialSet",
+    "compactSameSecretBridgeStatementSet",
+    "compactSameSecretBridgeProofMaterialSet",
     "privateVssEnvelopeCommitments",
     "privateVssEnvelopeCommitmentRoot",
     "vssShareAcceptances",
@@ -435,31 +444,50 @@ enum VerificationFlow {
 }
 
 pub(crate) fn describe_collective_bgv_setup_parameters() -> CanonicalResult<Value> {
+    describe_collective_bgv_setup_parameters_for_roster(&first_closure_roster_parameters())
+}
+
+pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
+    roster: &AcceptedRosterParameters,
+) -> CanonicalResult<Value> {
     Ok(json!({
-        "setupParametersHash": setup_parameters_hash()?,
+        "setupParametersHash": setup_parameters_hash_for_roster(roster)?,
+        "canonicalTargetBasisHash": crate::bgv::evaluator::top_k::canonical_target_basis_hash()?,
         "objectType": SETUP_PACKAGE_OBJECT_TYPE,
         "adversaryModel": "active-static",
         "livenessModel": "secure-with-abort",
         "sharingModel": "recipient-verified-vss",
         "sharingDomain": "per-rns-prime",
         "completionRule": "full-roster",
-        "participantCount": FIRST_ROSTER_PARTICIPANT_COUNT,
-        "qSetupComplete": FIRST_ROSTER_SETUP_COMPLETION_QUORUM,
-        "qBallotRelease": FIRST_ROSTER_BALLOT_RELEASE_QUORUM,
-        "qFinal": FIRST_ROSTER_FINALITY_QUORUM,
-        "qDec": FIRST_ROSTER_DECRYPTION_THRESHOLD,
+        "participantCount": roster.participant_count,
+        "qSetupComplete": roster.setup_completion_quorum,
+        "qBallotRelease": roster.ballot_release_quorum,
+        "qFinal": roster.finality_quorum,
+        "qDec": roster.decryption_threshold,
         "qShare": q_share_value(),
         "carryAwareVssShareRelation": carry_aware_vss_share_relation_value(),
         "commitment": setup_commitment_parameters_value()?,
         "publicVssCommitmentMaterialSize": public_vss_commitment_material_size_value()?,
         "setupProof": setup_proof_parameters_value()?,
-        "setupTransport": setup_transport_parameters_value_for_roster(&first_closure_roster_parameters())?,
-        "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(&first_closure_roster_parameters())?,
+        "setupTransport": setup_transport_parameters_value_for_roster(roster)?,
+        "evaluatorKeySchedule": evaluator_key_schedule_value_for_roster(roster)?,
         "phaseOrder": phase_order_value(),
         "phaseOrderHash": phase_order_hash()?,
         "requiredFinalObjects": REQUIRED_FINAL_OBJECTS,
         "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
     }))
+}
+
+// The setup parameters for a reduced roster size, used by test fixtures that
+// exercise the accepted-setup path at a smaller participant count than the first
+// closure roster. The parameters hash and quorums are derived from the roster, so
+// the reduced-roster setup context binds the hash the verifier recomputes.
+pub(crate) fn describe_collective_bgv_setup_parameters_for_participant_count(
+    participant_count: u64,
+) -> CanonicalResult<Value> {
+    describe_collective_bgv_setup_parameters_for_roster(
+        &roster_parameters_from_participant_count(participant_count),
+    )
 }
 
 pub(crate) fn verify_collective_bgv_setup_package_from_request(
@@ -512,10 +540,16 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
 
     // The standalone public-derivation command carries no setup context, so it
     // falls back to the first-closure roster decryption threshold, mirroring
-    // accepted_roster_from_package when no setupContext is present.
+    // accepted_roster_from_package when no setupContext is present. A reduced
+    // roster fixture can pass its decryption threshold so the derivations match
+    // the threshold the package verifier recomputes.
+    let decryption_threshold = request
+        .get("decryptionThreshold")
+        .and_then(Value::as_u64)
+        .unwrap_or(FIRST_ROSTER_DECRYPTION_THRESHOLD);
     derive_collective_bgv_setup_public_derivations(
         public_matrix_seed_hash,
-        FIRST_ROSTER_DECRYPTION_THRESHOLD,
+        decryption_threshold,
     )
 }
 
@@ -572,12 +606,6 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_setup_package_hash(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_vss_coefficient_commitments(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_vss_coefficient_commitment_material(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
     if let Some(response) = verify_private_vss_envelope_commitments(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
@@ -590,13 +618,39 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_vss_share_acceptances(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_threshold_share_commitments(setup_package, request)? {
+    let verified_compact_vss_public_material =
+        match verify_optional_compact_vss_public_material(setup_package, request)? {
+            CompactVssPublicMaterialVerification::Absent => None,
+            CompactVssPublicMaterialVerification::Verified(verified_material) => {
+                Some(verified_material)
+            }
+            CompactVssPublicMaterialVerification::Refused(response) => {
+                return Ok(VerificationFlow::Stop(response));
+            }
+        };
+    if let Some(response) = verify_threshold_share_commitments(
+        setup_package,
+        request,
+        verified_compact_vss_public_material.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_same_secret_proofs(setup_package, request)? {
+    let verified_compact_same_secret_bridge =
+        match verify_optional_compact_same_secret_bridge_statement_set(setup_package, request)? {
+            CompactSameSecretBridgeVerification::Absent => None,
+            CompactSameSecretBridgeVerification::Verified(verified_material) => {
+                Some(verified_material)
+            }
+            CompactSameSecretBridgeVerification::Refused(response) => {
+                return Ok(VerificationFlow::Stop(response));
+            }
+        };
+    if let Some(response) =
+        verify_optional_same_secret_proofs(verified_compact_same_secret_bridge.as_ref())?
+    {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_shares(setup_package)? {
@@ -605,9 +659,11 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_public_key_share_proofs(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) =
-        verify_optional_public_key_share_succinct_proofs(setup_package, request)?
-    {
+    if let Some(response) = verify_optional_public_key_share_succinct_proofs(
+        setup_package,
+        request,
+        verified_compact_same_secret_bridge.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
@@ -619,8 +675,11 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_evaluator_key_schedule(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_pending_evaluation_key_material_boundary(setup_package, request)?
-    {
+    if let Some(response) = verify_pending_evaluation_key_material_boundary(
+        setup_package,
+        request,
+        verified_compact_same_secret_bridge.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_generic_key_switch_policy(setup_package)? {
@@ -1072,6 +1131,16 @@ fn array_value<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a Ve
         })
 }
 
+// The accepted VSS coefficient commitment root that later phases (private VSS
+// envelopes, share acceptances, transport) bind against: the compact coefficient
+// commitment set root.
+pub(super) fn accepted_vss_coefficient_commitment_root(setup_package: &Value) -> Option<&str> {
+    setup_package
+        .get("compactVssCoefficientCommitmentSet")
+        .and_then(|commitment_set| commitment_set.get("coefficientCommitmentRoot"))
+        .and_then(Value::as_str)
+}
+
 fn value_string<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
     value
         .get(field_name)
@@ -1094,6 +1163,82 @@ fn value_u64(value: &Value, field_name: &str) -> CanonicalResult<u64> {
                 format!("{field_name} must be a non-negative integer"),
             )
         })
+}
+
+// Ceremony-identifying setup-context fields a bound object must carry
+// identically so a bound artifact cannot be transplanted across ceremonies,
+// rosters, parameter sets, or epochs. Used by the compact VSS public-material
+// binding checks.
+const SETUP_CONTEXT_BINDING_FIELDS: [&str; 5] = [
+    "ceremonyId",
+    "manifestHash",
+    "rosterHash",
+    "setupParametersHash",
+    "setupEpoch",
+];
+
+fn setup_context_binding_value<'a>(value: &'a Value, field_name: &str) -> CanonicalResult<&'a str> {
+    match field_name {
+        "ceremonyId" | "setupEpoch" => value_string(value, field_name),
+        _ => hash_at_path(value, &[field_name]),
+    }
+}
+
+fn compare_required_u64_binding(
+    actual: u64,
+    expected: u64,
+    description: &str,
+) -> CanonicalResult<()> {
+    if actual != expected {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            format!("{description} does not match its setup-context binding"),
+        ));
+    }
+
+    Ok(())
+}
+
+fn compare_setup_context_binding(
+    setup_context: &Value,
+    bound_value: &Value,
+    bound_object_description: &str,
+) -> CanonicalResult<()> {
+    for field_name in SETUP_CONTEXT_BINDING_FIELDS {
+        let actual = setup_context_binding_value(bound_value, field_name)?;
+        let expected = setup_context_binding_value(setup_context, field_name)?;
+        compare_required_string(
+            actual,
+            expected,
+            &format!("{bound_object_description} {field_name}"),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn compare_setup_context_participant_count(
+    setup_context: &Value,
+    bound_value: &Value,
+    bound_object_description: &str,
+) -> CanonicalResult<()> {
+    compare_required_u64_binding(
+        value_u64(bound_value, "participantCount")?,
+        value_u64(setup_context, "participantCount")?,
+        &format!("{bound_object_description} participantCount"),
+    )
+}
+
+fn compare_setup_context_threshold_degree(
+    setup_context: &Value,
+    bound_value: &Value,
+    bound_object_description: &str,
+) -> CanonicalResult<()> {
+    compare_required_u64_binding(
+        value_u64(bound_value, "thresholdDegree")?,
+        value_u64(setup_context, "qDec")?,
+        &format!("{bound_object_description} thresholdDegree"),
+    )
 }
 
 fn validate_lowercase_hex(value: &str, field_name: &str) -> CanonicalResult<()> {

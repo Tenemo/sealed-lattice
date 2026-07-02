@@ -70,6 +70,7 @@ pub(super) fn trustee_evaluation_key_proof_generation_batch_size() -> usize {
 // fixture builders). The pub(super) re-exports keep every builder reachable
 // through the accepted_setup glob so package_fixtures / material_transport_fixtures
 // and the consuming tests import them unchanged.
+mod compact_vss_public_material;
 mod evaluation_key_share_component_material;
 mod galois_key_share_batches;
 mod proof_checkpointing;
@@ -79,6 +80,7 @@ mod relinearization_key_share_rounds;
 mod same_secret_anchor_proofs;
 mod trustee_evaluation_key_proofs;
 
+pub(super) use compact_vss_public_material::compactify_collective_setup_package;
 pub(super) use evaluation_key_share_component_material::*;
 pub(super) use galois_key_share_batches::*;
 pub(super) use proof_checkpointing::*;

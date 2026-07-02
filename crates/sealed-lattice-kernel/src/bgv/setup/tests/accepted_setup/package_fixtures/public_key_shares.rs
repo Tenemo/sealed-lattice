@@ -3,7 +3,7 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn public_key_shares_object(
+pub(in super::super) fn public_key_shares_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
@@ -97,7 +97,7 @@ pub(super) fn public_key_shares_object(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn public_key_share_proofs_object(
+pub(in super::super) fn public_key_share_proofs_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
@@ -180,7 +180,7 @@ pub(super) fn public_key_share_proofs_object(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn evaluator_key_schedule_object(
+pub(in super::super) fn evaluator_key_schedule_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,

@@ -303,17 +303,18 @@ export type BgvPassiveSetupVerification = {
 
 export type BgvCollectiveSetupParametersDescription = {
     readonly setupParametersHash: ProtocolHash;
+    readonly canonicalTargetBasisHash: ProtocolHash;
     readonly objectType: 'SetupPackage';
     readonly adversaryModel: 'active-static';
     readonly livenessModel: 'secure-with-abort';
     readonly sharingModel: 'recipient-verified-vss';
     readonly sharingDomain: 'per-rns-prime';
     readonly completionRule: 'full-roster';
-    readonly participantCount: 10;
-    readonly qSetupComplete: 10;
-    readonly qBallotRelease: 10;
-    readonly qFinal: 10;
-    readonly qDec: 4;
+    readonly participantCount: number;
+    readonly qSetupComplete: number;
+    readonly qBallotRelease: number;
+    readonly qFinal: number;
+    readonly qDec: number;
     readonly qShare: {
         readonly objectType: 'QSharePrimeList';
         readonly objectVersion: 1;
@@ -623,6 +624,29 @@ export type BgvTrusteeEvaluationKeySameSecretLinkage = {
     readonly commitments: readonly unknown[];
 };
 
+export type BgvCompactVssShareLinkageProofContext = {
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly setupEpoch: string;
+    readonly shareLinkageStatementRoot: ProtocolHash;
+};
+
+export type BgvCompactSameSecretBridgeProofContext = {
+    readonly ceremonyId: string;
+    readonly manifestHash: ProtocolHash;
+    readonly rosterHash: ProtocolHash;
+    readonly trusteeIdentity: string;
+    readonly trusteeRosterPosition: number;
+    readonly setupEpoch: string;
+    readonly compactSameSecretBridgeStatementRoot: ProtocolHash;
+    readonly sameSecretStatementRoot: ProtocolHash;
+    readonly sameSecretProofRoot: ProtocolHash;
+    readonly sameSecretProofFamilyBindingRoot: ProtocolHash;
+};
+
 export type BgvTrusteeEvaluationKeyProofGeneration = {
     readonly operation: 'generateTrusteeEvaluationKeyProof';
     readonly proofFamily:
@@ -652,6 +676,36 @@ export type BgvSetupCommitmentOpeningComputation = {
     readonly operation: 'computeSetupCommitmentFromOpening';
     readonly commitment: Record<string, unknown>;
     readonly commitmentRoot: ProtocolHash;
+};
+
+export type BgvCompactVssCommitmentOpeningComputation = {
+    readonly operation: 'computeCompactVssCommitmentFromOpening';
+    readonly commitment: Record<string, unknown>;
+    readonly commitmentRoot: ProtocolHash;
+    readonly openingRoot: ProtocolHash;
+    readonly commitmentContextHash: ProtocolHash;
+    readonly encodedCommitmentByteLength: number;
+};
+
+export type BgvCompactVssShareLinkageProofGeneration = {
+    readonly operation: 'generateCompactVssShareLinkageProof';
+    readonly proofFamily: 'compact-vss-share-linkage';
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly coefficientCommitmentCount: number;
+    readonly coefficientWitnessColumnCount: number;
+    readonly proofByteLength: number;
+    readonly proofBytesHex: string;
+};
+
+export type BgvCompactSameSecretBridgeProofGeneration = {
+    readonly operation: 'generateCompactSameSecretBridgeProof';
+    readonly proofFamily: 'compact-same-secret-bridge';
+    readonly statementHash: ProtocolHash;
+    readonly limbCount: number;
+    readonly targetRnsLimbCount: number;
+    readonly proofByteLength: number;
+    readonly proofBytesHex: string;
 };
 
 export type BgvThresholdShareCommitmentTransportDerivation = Omit<

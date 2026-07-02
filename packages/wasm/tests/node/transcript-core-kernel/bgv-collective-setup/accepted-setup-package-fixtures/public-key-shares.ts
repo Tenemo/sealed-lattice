@@ -1,7 +1,6 @@
 import { validHash } from '../../bgv-passive-setup-fixtures.js';
 import {
     coefficientVectorLittleEndianHex,
-    firstRosterParticipantCount,
     hexToBytes,
     minimumSuccinctProofFixtureRingDegree,
     publicKeyShareCoefficientVectorHash,
@@ -51,7 +50,7 @@ const acceptedPublicKeyShareMaterialContributions = (
     parameters: BgvCollectiveSetupParametersDescription,
 ): PublicKeyShareMaterialContributionInput[] =>
     Array.from(
-        { length: firstRosterParticipantCount },
+        { length: parameters.participantCount },
         (_unusedTrustee, trusteeRosterPosition) => ({
             trusteeIdentity: `trustee-${String(trusteeRosterPosition)}`,
             trusteeRosterPosition,
@@ -113,7 +112,7 @@ export function acceptedPublicKeyShares(
     return createPublicKeyShareSet({
         setupContext,
         qSharePrimes: parameters.qShare.primes,
-        participantCount: firstRosterParticipantCount,
+        participantCount: parameters.participantCount,
         publicMatrixSeedHash,
         publicKeyCrpRoot,
         publicAPolynomialRoot,
@@ -138,7 +137,7 @@ export function acceptedPublicKeyShareMaterial(
     return createPublicKeyShareMaterialSet({
         setupContext,
         qSharePrimes: parameters.qShare.primes,
-        participantCount: firstRosterParticipantCount,
+        participantCount: parameters.participantCount,
         ringDegree: minimumSuccinctProofFixtureRingDegree,
         publicMatrixSeedHash,
         publicKeyCrpRoot: String(crpRoots.publicKeyCrpRoot),
@@ -166,7 +165,7 @@ export function acceptedPublicKeyShareProofs(
     return createPublicKeyShareProofSet({
         setupContext,
         qSharePrimes: parameters.qShare.primes,
-        participantCount: firstRosterParticipantCount,
+        participantCount: parameters.participantCount,
         publicMatrixSeedHash,
         publicKeyCrpRoot,
         publicAPolynomialRoot,
@@ -205,7 +204,7 @@ export function publicKeyShareSuccinctProofsWithDriftedStatementHashes(
     return createPublicKeyShareSuccinctProofSet({
         setupContext,
         qSharePrimes: parameters.qShare.primes,
-        participantCount: firstRosterParticipantCount,
+        participantCount: parameters.participantCount,
         publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
         publicKeyCrpRoot: String(crpRoots.publicKeyCrpRoot),
         publicAPolynomialRoot: String(publicA.publicPolynomialRoot),

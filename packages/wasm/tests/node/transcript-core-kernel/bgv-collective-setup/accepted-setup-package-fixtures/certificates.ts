@@ -106,3 +106,36 @@ export function acceptedSetupTransportCertificate(
         }),
     };
 }
+
+// The compact commitment sets are embedded and proof-verified in-package, so the
+// transport certificate carries no streamed objects on the compact path.
+export function acceptedCompactSetupTransportCertificate(
+    kernel: TranscriptCoreKernel,
+    parameters: BgvCollectiveSetupParametersDescription,
+): JsonRecord {
+    const certificate = {
+        objectType: 'SetupTransportCertificate',
+        objectVersion: 1,
+        transportSchemeId: 'sealed-lattice-setup-binary-chunked-transport-v1',
+        setupParametersHash: parameters.setupParametersHash,
+        largeObjectEncoding: 'binary',
+        chunking: 'required',
+        chunkSizeBytes: setupTransportChunkSizeBytes,
+        chunkCount: 0,
+        totalByteLength: 0,
+        storageQuotaBytes: 2_147_483_648,
+        largestSingleBufferBytes: 1_572_864,
+        copyCountLimit: 2,
+        streamVerificationOrder: 'ascending-chunk-index',
+        resumePolicy: 'chunk-index-checkpointed-by-hash',
+        lazyLoadingPolicy: 'root-addressed-large-object-loading',
+        transportedObjects: [],
+    };
+
+    return {
+        ...certificate,
+        setupTransportCertificateHash: kernel.deriveCanonicalObjectHash({
+            value: certificate,
+        }),
+    };
+}

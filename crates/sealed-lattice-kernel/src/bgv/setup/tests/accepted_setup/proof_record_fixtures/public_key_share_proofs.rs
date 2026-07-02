@@ -438,7 +438,9 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                 component_b_by_digit: vec![coefficients_by_limb],
                 round_one_aggregate_diagonal: Vec::new(),
             }],
-            same_secret_linkage: Some(SameSecretLinkageStatement {
+            compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
+        same_secret_linkage: Some(SameSecretLinkageStatement {
                 public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                 commitments: vec![limb_zero_commitment],
             }),
@@ -452,6 +454,14 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
+            compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_messages: Vec::new(),
+            compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_opening_randomness: Vec::new(),
+            compact_vss_carry_witnesses: Vec::new(),
+            compact_vss_recipient_share_messages_by_item: Vec::new(),
+            compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+            compact_vss_carry_witnesses_by_item: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PublicKeyShareProofRoot",

@@ -199,9 +199,21 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
 
     /// The centered gadget idempotent for the group position of a digit's
     /// diagonal limb, as a proof-field element.
-    pub(crate) fn gadget_idempotent(&self, group_position: usize) -> &[u64; LIMB_COUNT] {
-        &self.gadget_idempotents_centered[group_position]
+    pub(crate) fn gadget_idempotent(
+        &self,
+        group_position: usize,
+    ) -> CanonicalResult<&[u64; LIMB_COUNT]> {
+        self.gadget_idempotents_centered
+            .get(group_position)
+            .ok_or_else(invalid_diagonal_group_position)
     }
+}
+
+fn invalid_diagonal_group_position() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::ComponentMismatch,
+        "diagonal group position must identify a limb in the group",
+    )
 }
 
 /// The diagonal source term of the digit atom.
@@ -319,7 +331,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
         (DigitAtomSource::NoDiagonal, None) => Ok(None),
         (DigitAtomSource::DiagonalSignedPolynomial(source), Some(group_position)) => {
             validate_signed_support(source, ring_degree, 1, "diagonal source")?;
-            let idempotent = input.group.gadget_idempotent(group_position);
+            let idempotent = input.group.gadget_idempotent(group_position)?;
             Ok(Some(
                 source
                     .iter()
@@ -336,6 +348,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
             },
             Some(group_position),
         ) => {
+            input.group.gadget_idempotent(group_position).map(|_| ())?;
             validate_signed_support(signed_polynomial, ring_degree, 1, "diagonal source")?;
             // G * lift(aggregate) centered modulo Q is the CRT recombination
             // of a limb matrix that carries the aggregate at the diagonal
@@ -748,6 +761,42 @@ mod tests {
             )
             .is_err(),
             "a wrong diagonal position must not verify"
+        );
+
+        assert!(
+            verify(
+                &atom.component_b_by_limb,
+                &atom.secret,
+                &atom.error,
+                Some(group_primes.len())
+            )
+            .is_err(),
+            "an out-of-range diagonal position must be rejected"
+        );
+
+        let off_diagonal_atom = synthetic_atom(
+            group_primes,
+            ring_degree,
+            None,
+            "out-of-range-public-product",
+        );
+        let aggregate = vec![1_u64; ring_degree];
+        assert!(
+            verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+                group: &group,
+                domain: &domain,
+                diagonal_group_position: Some(group_primes.len()),
+                component_b_by_limb: &off_diagonal_atom.component_b_by_limb,
+                public_sample_by_limb: &off_diagonal_atom.public_sample_by_limb,
+                secret_coefficients: &off_diagonal_atom.secret,
+                error_coefficients: &off_diagonal_atom.error,
+                source: DigitAtomSource::DiagonalPublicProduct {
+                    aggregate_residues: &aggregate,
+                    signed_polynomial: &off_diagonal_atom.source,
+                },
+            })
+            .is_err(),
+            "an out-of-range public-product diagonal position must not be treated as no diagonal"
         );
 
         let mut non_ternary_secret = atom.secret.clone();

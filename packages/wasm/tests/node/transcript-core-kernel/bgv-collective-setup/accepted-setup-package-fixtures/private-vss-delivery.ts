@@ -1,5 +1,4 @@
 import {
-    firstRosterParticipantCount,
     minimumSuccinctProofFixtureRingDegree,
     privateVssMailboxKeyPairForRosterPosition,
     setupTrusteeSignatureSeedLabel,
@@ -130,6 +129,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
     readonly sourceTrusteeRecord: JsonRecord;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
+    readonly participantCount: number;
 }): PrivateVssEnvelopeCommitment {
     const sourceTrusteeIdentity = `trustee-${String(
         input.sourceTrusteeRosterPosition,
@@ -142,7 +142,7 @@ function packageShapePrivateVssEnvelopeReference(input: {
         input.sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
     );
     const envelopeSequenceNumber =
-        input.sourceTrusteeRosterPosition * firstRosterParticipantCount +
+        input.sourceTrusteeRosterPosition * input.participantCount +
         input.recipientRosterPosition;
     const privateEnvelopeAad = packageShapePrivateVssEnvelopeAad({
         setupContext: input.setupContext,
@@ -243,7 +243,7 @@ export function packageShapePrivateVssEnvelopeCommitments(
     const envelopeReferences = sourceTrusteeRecords.flatMap(
         (sourceTrusteeRecord, sourceTrusteeRosterPosition) =>
             Array.from(
-                { length: firstRosterParticipantCount },
+                { length: setupParameters.participantCount },
                 (_unusedRecipient, recipientRosterPosition) =>
                     packageShapePrivateVssEnvelopeReference({
                         kernel,
@@ -254,6 +254,7 @@ export function packageShapePrivateVssEnvelopeCommitments(
                         sourceTrusteeRecord,
                         sourceTrusteeRosterPosition,
                         recipientRosterPosition,
+                        participantCount: setupParameters.participantCount,
                     }),
             ),
     );
@@ -270,7 +271,7 @@ export function packageShapePrivateVssEnvelopeCommitments(
                 setupContext as PrivateVssMailboxDeliverySetInput['setupContext'],
             publicMatrixSeedHash,
             vssCoefficientCommitmentRoot,
-            participantCount: firstRosterParticipantCount,
+            participantCount: setupParameters.participantCount,
             deliveryPhaseNumber: 6,
             verificationPhaseNumber: 7,
             envelopeReferences,
@@ -343,17 +344,18 @@ export async function acceptedVssShareAcceptances(
     const privateVssEnvelopeCommitmentRoot = String(
         privateVssEnvelopeCommitments.privateVssEnvelopeCommitmentRoot,
     );
+    const participantCount = Number(setupContext.participantCount);
     const envelopeReferences =
         privateVssEnvelopeCommitments.envelopeReferences as JsonRecord[];
     const acceptanceRecords: VssShareAcceptanceRecord[] = [];
     for (
         let sourceTrusteeRosterPosition = 0;
-        sourceTrusteeRosterPosition < 10;
+        sourceTrusteeRosterPosition < participantCount;
         sourceTrusteeRosterPosition += 1
     ) {
         for (
             let recipientRosterPosition = 0;
-            recipientRosterPosition < 10;
+            recipientRosterPosition < participantCount;
             recipientRosterPosition += 1
         ) {
             const recipientIdentity = `trustee-${String(recipientRosterPosition)}`;
@@ -362,7 +364,8 @@ export async function acceptedVssShareAcceptances(
             const keyFixture = createMlDsaKeyPairFixture(signatureSeedLabel);
             const envelopeReference =
                 envelopeReferences[
-                    sourceTrusteeRosterPosition * 10 + recipientRosterPosition
+                    sourceTrusteeRosterPosition * participantCount +
+                        recipientRosterPosition
                 ];
             if (envelopeReference === undefined) {
                 throw new Error(

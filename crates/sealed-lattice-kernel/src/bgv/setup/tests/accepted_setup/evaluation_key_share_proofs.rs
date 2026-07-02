@@ -625,7 +625,8 @@ fn heavy_accepted_setup_final_package_collective_setup_verifier_refuses_tampered
             transported_key_switch_component_material: Some(
                 &low_degree_shape_request["transportedEvaluationKeyShareComponentMaterial"],
             ),
-            transported_constant_commitments: &transported_constant_commitments,
+            transported_constant_commitments: Some(&transported_constant_commitments),
+            verified_compact_same_secret_bridge: None,
             round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals,
             trustee_roster_position,
         })
@@ -811,7 +812,8 @@ fn heavy_accepted_setup_final_package_round_two_records_with_substituted_aggrega
         trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
             setup_package: &tampered_package,
             transported_key_switch_component_material: Some(&transported_component_material),
-            transported_constant_commitments: &transported_constant_commitments,
+            transported_constant_commitments: Some(&transported_constant_commitments),
+            verified_compact_same_secret_bridge: None,
             round_one_aggregate_diagonals_by_level: &aggregates,
             trustee_roster_position: 0,
         })

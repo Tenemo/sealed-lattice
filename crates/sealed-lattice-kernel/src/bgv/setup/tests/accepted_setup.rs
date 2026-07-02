@@ -31,6 +31,7 @@ use self::package_fixtures::{
     TerminalFullRingSetupPackageFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
     collective_public_key_bearing_collective_setup_package, minimal_collective_setup_package,
+    minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_package,
     reduced_ring_streamed_collective_setup_package_fixture,
     same_secret_proof_bearing_collective_setup_package, setup_transport_certificate_fixture,

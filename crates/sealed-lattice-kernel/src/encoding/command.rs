@@ -43,6 +43,12 @@ enum TranscriptCoreCommand {
     RunDirectEncryptedBallot,
     GenerateBgvTargetDecryptionShare,
     RecombineBgvTargetDecryptionShares,
+    ComputeCompactVssCommitmentFromOpening,
+    VerifyCompactVssCommitmentOpening,
+    EncodeCompactVssCommitmentBody,
+    DecodeCompactVssCommitmentBody,
+    GenerateCompactVssShareLinkageProof,
+    GenerateCompactSameSecretBridgeProof,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -221,7 +227,13 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RunDirectEncryptedBallot
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
-        | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
+        | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares
+        | TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening
+        | TranscriptCoreCommand::VerifyCompactVssCommitmentOpening
+        | TranscriptCoreCommand::EncodeCompactVssCommitmentBody
+        | TranscriptCoreCommand::DecodeCompactVssCommitmentBody
+        | TranscriptCoreCommand::GenerateCompactVssShareLinkageProof
+        | TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof => {
             run_bgv_command(command, &request)
         }
     }
@@ -239,7 +251,7 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
         }
         TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
-            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request()
+            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
         }
         TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations => {
             crate::bgv::commands::derive_collective_bgv_setup_public_derivations(request)
@@ -324,6 +336,24 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::target_decryption::recombine_bgv_target_decryption_shares_from_request(
                 request,
             )
+        }
+        TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening => {
+            crate::bgv::commands::compute_compact_vss_commitment_from_opening(request)
+        }
+        TranscriptCoreCommand::VerifyCompactVssCommitmentOpening => {
+            crate::bgv::commands::verify_compact_vss_commitment_opening(request)
+        }
+        TranscriptCoreCommand::EncodeCompactVssCommitmentBody => {
+            crate::bgv::commands::encode_compact_vss_commitment_body(request)
+        }
+        TranscriptCoreCommand::DecodeCompactVssCommitmentBody => {
+            crate::bgv::commands::decode_compact_vss_commitment_body(request)
+        }
+        TranscriptCoreCommand::GenerateCompactVssShareLinkageProof => {
+            crate::bgv::commands::generate_compact_vss_share_linkage_proof(request)
+        }
+        TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof => {
+            crate::bgv::commands::generate_compact_same_secret_bridge_proof(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

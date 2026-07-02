@@ -6,6 +6,8 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
+mod compact_same_secret_bridge;
+mod compact_vss_commitment;
 // Development gate for the mobile trustee evaluation-key proving path;
 // exercised only by its tests and ignored benchmark until the consolidated
 // backend consumes it.
@@ -36,9 +38,24 @@ mod tests;
 
 pub(crate) use accepted_setup::{
     derive_collective_bgv_setup_public_derivations_from_request,
-    describe_collective_bgv_setup_parameters, verify_collective_bgv_setup_package_from_request,
+    describe_collective_bgv_setup_parameters,
+    describe_collective_bgv_setup_parameters_for_participant_count,
+    verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
+pub(crate) use compact_same_secret_bridge::{
+    verify_compact_vss_same_secret_bridge_proof_material_set_request,
+    verify_compact_vss_same_secret_bridge_statement_set_request,
+};
+pub(crate) use compact_vss_commitment::{
+    compute_compact_vss_commitment_from_opening_request,
+    decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
+    verify_compact_vss_aggregate_threshold_commitment_set_request,
+    verify_compact_vss_coefficient_commitment_set_request,
+    verify_compact_vss_commitment_opening_request,
+    verify_compact_vss_recipient_share_commitment_set_request,
+    verify_compact_vss_share_linkage_statement_request,
+};
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
@@ -61,6 +78,11 @@ pub(crate) use threshold_share_commitments::{
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,
     finish_threshold_share_commitment_transport_derivation_stream_request,
+};
+pub(crate) use trustee_evaluation_key_proof::verify_compact_vss_share_linkage_proof_material_set_from_request;
+pub(crate) use trustee_evaluation_key_proof::{
+    generate_compact_same_secret_bridge_proof_from_request,
+    generate_compact_vss_share_linkage_proof_from_request,
 };
 
 #[cfg(test)]

@@ -244,14 +244,11 @@ pub(super) fn verify_private_vss_envelope_commitments(
             "setupPackage.privateVssEnvelopeCommitments.publicMatrixSeedHash",
         )?));
     }
-    let vss_coefficient_commitment_root = setup_package
-        .get("vssCoefficientCommitments")
-        .and_then(|commitment_set| commitment_set.get("vssCoefficientCommitmentRoot"))
-        .and_then(Value::as_str)
+    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "vssCoefficientCommitments.vssCoefficientCommitmentRoot was required before private VSS envelope verification",
+                "an accepted VSS coefficient commitment root was required before private VSS envelope verification",
             )
         })?;
     if commitment_set
@@ -386,14 +383,11 @@ pub(super) fn private_vss_envelope_bindings_from_package(
                 "commonRandomness.publicMatrixSeedHash was required before private VSS binding extraction",
             )
         })?;
-    let vss_coefficient_commitment_root = setup_package
-        .get("vssCoefficientCommitments")
-        .and_then(|commitment_set| commitment_set.get("vssCoefficientCommitmentRoot"))
-        .and_then(Value::as_str)
+    let vss_coefficient_commitment_root = accepted_vss_coefficient_commitment_root(setup_package)
         .ok_or_else(|| {
             CanonicalError::new(
                 CanonicalErrorCode::InvalidFixture,
-                "vssCoefficientCommitments.vssCoefficientCommitmentRoot was required before private VSS binding extraction",
+                "an accepted VSS coefficient commitment root was required before private VSS binding extraction",
             )
         })?;
 

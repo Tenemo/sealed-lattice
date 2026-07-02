@@ -1,7 +1,7 @@
 use super::*;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn private_vss_envelope_commitments_object(
+pub(in super::super) fn private_vss_envelope_commitments_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
@@ -212,7 +212,7 @@ pub(super) fn private_vss_envelope_commitments_object(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn vss_share_acceptances_object(
+pub(in super::super) fn vss_share_acceptances_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,

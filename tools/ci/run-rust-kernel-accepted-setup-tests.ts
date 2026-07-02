@@ -262,6 +262,9 @@ const acceptedSetupSourceNewestModificationTimeMilliseconds = (): number =>
 
 export type FinalPackageCheckpointStoreWarmInputs = {
     readonly completionManifestModifiedAtMilliseconds: number | undefined;
+    readonly completionManifestProofFamilyCounts:
+        | ReadonlyMap<string, number>
+        | undefined;
     readonly proofFamilyCounts: ReadonlyMap<string, number>;
     readonly sourceNewestModificationTimeMilliseconds: number;
 };
@@ -269,33 +272,96 @@ export type FinalPackageCheckpointStoreWarmInputs = {
 export const finalPackageCheckpointStoreIsWarmForInputs = (
     input: FinalPackageCheckpointStoreWarmInputs,
 ): boolean =>
-    checkpointProofFamilyDirectories.every(
-        (familyDirectory) =>
-            (input.proofFamilyCounts.get(familyDirectory) ?? 0) > 0,
-    ) &&
+    checkpointProofFamilyDirectories.every((familyDirectory) => {
+        const completedCount =
+            input.completionManifestProofFamilyCounts?.get(familyDirectory) ??
+            0;
+        const currentCount = input.proofFamilyCounts.get(familyDirectory) ?? 0;
+
+        return completedCount > 0 && currentCount >= completedCount;
+    }) &&
     input.completionManifestModifiedAtMilliseconds !== undefined &&
     input.completionManifestModifiedAtMilliseconds >=
         input.sourceNewestModificationTimeMilliseconds;
 
-const finalPackageCompletionManifestModifiedAtMilliseconds = ():
-    | number
+const proofFamilyCountsFromManifestValue = (
+    value: unknown,
+): ReadonlyMap<string, number> | undefined => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return undefined;
+    }
+    const proofFamilyCountRecord = value as Readonly<Record<string, unknown>>;
+    const proofFamilyCounts = new Map<string, number>();
+    for (const familyDirectory of checkpointProofFamilyDirectories) {
+        const count = proofFamilyCountRecord[familyDirectory];
+        if (
+            typeof count !== 'number' ||
+            !Number.isSafeInteger(count) ||
+            count <= 0
+        ) {
+            return undefined;
+        }
+        proofFamilyCounts.set(familyDirectory, count);
+    }
+
+    return proofFamilyCounts;
+};
+
+const finalPackageCompletionManifest = ():
+    | Pick<
+          FinalPackageCheckpointStoreWarmInputs,
+          | 'completionManifestModifiedAtMilliseconds'
+          | 'completionManifestProofFamilyCounts'
+      >
     | undefined => {
     try {
-        return fs.statSync(acceptedSetupFinalPackageCompletionManifestPath)
-            .mtimeMs;
+        const completionManifestModifiedAtMilliseconds = fs.statSync(
+            acceptedSetupFinalPackageCompletionManifestPath,
+        ).mtimeMs;
+        const manifest = JSON.parse(
+            fs.readFileSync(
+                acceptedSetupFinalPackageCompletionManifestPath,
+                'utf8',
+            ),
+        ) as unknown;
+        if (
+            typeof manifest !== 'object' ||
+            manifest === null ||
+            Array.isArray(manifest)
+        ) {
+            return undefined;
+        }
+        const completionManifestProofFamilyCounts =
+            proofFamilyCountsFromManifestValue(
+                (manifest as Readonly<Record<string, unknown>>)
+                    .proofFamilyCounts,
+            );
+        if (completionManifestProofFamilyCounts === undefined) {
+            return undefined;
+        }
+
+        return {
+            completionManifestModifiedAtMilliseconds,
+            completionManifestProofFamilyCounts,
+        };
     } catch {
         return undefined;
     }
 };
 
-const finalPackageCheckpointStoreIsWarm = (): boolean =>
-    finalPackageCheckpointStoreIsWarmForInputs({
+const finalPackageCheckpointStoreIsWarm = (): boolean => {
+    const completionManifest = finalPackageCompletionManifest();
+
+    return finalPackageCheckpointStoreIsWarmForInputs({
         completionManifestModifiedAtMilliseconds:
-            finalPackageCompletionManifestModifiedAtMilliseconds(),
+            completionManifest?.completionManifestModifiedAtMilliseconds,
+        completionManifestProofFamilyCounts:
+            completionManifest?.completionManifestProofFamilyCounts,
         proofFamilyCounts: checkpointFamilyProofMaterialCounts(),
         sourceNewestModificationTimeMilliseconds:
             acceptedSetupSourceNewestModificationTimeMilliseconds(),
     });
+};
 
 const writeFinalPackageCompletionManifest = (): void => {
     fs.mkdirSync(acceptedSetupCheckpointDirectory, { recursive: true });

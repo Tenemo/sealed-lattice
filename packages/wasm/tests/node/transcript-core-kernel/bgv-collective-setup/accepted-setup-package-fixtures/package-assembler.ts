@@ -2,8 +2,6 @@ import { setupRequest } from '../../bgv-passive-setup-fixtures.js';
 import {
     cloneJsonRecord,
     collectiveSetupRosterHash,
-    firstRosterDecryptionThreshold,
-    firstRosterParticipantCount,
     privateVssMailboxKeyPairForRosterPosition,
     privateVssMailboxPublicKeyBytesHash,
     setupTrusteeSignatureSeedLabel,
@@ -11,13 +9,17 @@ import {
 } from '../setup-fixture-primitives.js';
 
 import {
-    acceptedSetupTransportCertificate,
+    acceptedCompactSetupTransportCertificate,
     rebindCollectiveSetupPackageHash,
 } from './certificates.js';
 import {
     acceptedCommonRandomness,
     publicPrivateVssEnvelopeCommitmentSet,
 } from './common-randomness.js';
+import {
+    acceptedCompactSameSecretBridge,
+    acceptedCompactVssMaterial,
+} from './compact-vss-material.js';
 import { acceptedEvaluatorKeySchedule } from './evaluator-schedule.js';
 import {
     acceptedVssShareAcceptances,
@@ -27,8 +29,10 @@ import {
     acceptedPublicKeyShareProofs,
     acceptedPublicKeyShares,
 } from './public-key-shares.js';
-import { acceptedSameSecretConsistency } from './same-secret.js';
-import { acceptedVssCoefficientCommitments } from './vss-commitments.js';
+import {
+    acceptedCompactSameSecretConsistency,
+    acceptedCompactSameSecretProofs,
+} from './same-secret.js';
 
 import {
     createMlDsaKeyPairFixture,
@@ -70,62 +74,69 @@ async function buildAcceptedShapedSetupPackage(
     setupParameters: BgvCollectiveSetupParametersDescription,
 ): Promise<JsonRecord> {
     let previousPhaseRoot: string | null = null;
+    const participantCount = setupParameters.participantCount;
     const setupContext = {
         ceremonyId: setupRequest.ceremonyId,
         manifestHash: setupRequest.manifestHash,
-        rosterHash: collectiveSetupRosterHash((input) =>
-            kernel.deriveCanonicalObjectHash(input),
+        rosterHash: collectiveSetupRosterHash(
+            (input) => kernel.deriveCanonicalObjectHash(input),
+            participantCount,
         ),
         setupParametersHash: setupParameters.setupParametersHash,
         setupEpoch: 'setup-epoch-1',
-        participantCount: firstRosterParticipantCount,
-        qSetupComplete: 10,
-        qBallotRelease: 10,
-        qFinal: 10,
-        qDec: firstRosterDecryptionThreshold,
+        participantCount,
+        qSetupComplete: setupParameters.qSetupComplete,
+        qBallotRelease: setupParameters.qBallotRelease,
+        qFinal: setupParameters.qFinal,
+        qDec: setupParameters.qDec,
     } satisfies CollectiveBgvSetupContext;
     const phaseTranscript: JsonRecord[] = [];
     for (const phase of setupParameters.phaseOrder) {
         const participantPhaseObjects = await Promise.all(
-            Array.from({ length: 10 }, async (_unusedSlot, rosterPosition) => {
-                const trusteeIdentity = `trustee-${String(rosterPosition)}`;
-                const signatureSeedLabel =
-                    setupTrusteeSignatureSeedLabel(trusteeIdentity);
-                const keyFixture =
-                    createMlDsaKeyPairFixture(signatureSeedLabel);
-                const mailboxKeyPair =
-                    privateVssMailboxKeyPairForRosterPosition(rosterPosition);
-                const signRoot: ProtocolRootSigner = (signedRoot) =>
-                    createProtocolSignatureFixture({
-                        profile: createMlDsaSignatureProfileFixture(),
-                        publicKeyBytesHex: keyFixture.publicKeyBytesHex,
-                        publicKeyHash: keyFixture.publicKeyHash,
-                        secretKeyBytesHex: keyFixture.secretKeyBytesHex,
-                        signedRoot,
-                    });
+            Array.from(
+                { length: participantCount },
+                async (_unusedSlot, rosterPosition) => {
+                    const trusteeIdentity = `trustee-${String(rosterPosition)}`;
+                    const signatureSeedLabel =
+                        setupTrusteeSignatureSeedLabel(trusteeIdentity);
+                    const keyFixture =
+                        createMlDsaKeyPairFixture(signatureSeedLabel);
+                    const mailboxKeyPair =
+                        privateVssMailboxKeyPairForRosterPosition(
+                            rosterPosition,
+                        );
+                    const signRoot: ProtocolRootSigner = (signedRoot) =>
+                        createProtocolSignatureFixture({
+                            profile: createMlDsaSignatureProfileFixture(),
+                            publicKeyBytesHex: keyFixture.publicKeyBytesHex,
+                            publicKeyHash: keyFixture.publicKeyHash,
+                            secretKeyBytesHex: keyFixture.secretKeyBytesHex,
+                            signedRoot,
+                        });
 
-                return createSetupPhaseParticipantObject({
-                    setupContext,
-                    phaseId: phase.phaseId,
-                    phaseNumber: phase.phaseNumber,
-                    trusteeIdentity,
-                    rosterPosition,
-                    recoveryEpoch: 0,
-                    deviceEpoch: 0,
-                    signingPublicKeyHash: keyFixture.publicKeyHash,
-                    ...(phase.phaseId === 'setupIntent'
-                        ? {
-                              privateVssMailboxPublicKeyHash:
-                                  mailboxKeyPair.publicKeyHash,
-                              privateVssMailboxPublicKeyBytesHash:
-                                  privateVssMailboxPublicKeyBytesHash(
-                                      mailboxKeyPair.publicKeyBytesHex,
-                                  ),
-                          }
-                        : {}),
-                    signRoot,
-                });
-            }),
+                    return createSetupPhaseParticipantObject({
+                        setupContext,
+                        phaseId: phase.phaseId,
+                        phaseNumber: phase.phaseNumber,
+                        trusteeIdentity,
+                        rosterPosition,
+                        recoveryEpoch: 0,
+                        deviceEpoch: 0,
+                        signingPublicKeyHash: keyFixture.publicKeyHash,
+                        ...(phase.phaseId === 'setupIntent'
+                            ? {
+                                  privateVssMailboxPublicKeyHash:
+                                      mailboxKeyPair.publicKeyHash,
+                                  privateVssMailboxPublicKeyBytesHash:
+                                      privateVssMailboxPublicKeyBytesHash(
+                                          mailboxKeyPair.publicKeyBytesHex,
+                                      ),
+                              }
+                            : {}),
+                        signRoot,
+                    });
+                },
+            ),
         );
         const phaseRecord = createSetupPhaseRecord({
             setupContext,
@@ -138,34 +149,59 @@ async function buildAcceptedShapedSetupPackage(
         previousPhaseRoot = phaseRecord.phaseRoot;
     }
     const commonRandomness = acceptedCommonRandomness(kernel, setupParameters);
-    const vssCoefficientCommitmentBundle = acceptedVssCoefficientCommitments(
+    const publicMatrixSeedHash = String(commonRandomness.publicMatrixSeedHash);
+    const compactVssMaterial = acceptedCompactVssMaterial(
+        kernel,
         setupContext,
         setupParameters,
-        String(commonRandomness.publicMatrixSeedHash),
+        publicMatrixSeedHash,
     );
-    const vssCoefficientCommitments =
-        vssCoefficientCommitmentBundle.commitmentSet;
-    const vssCoefficientCommitmentMaterial =
-        vssCoefficientCommitmentBundle.materialSet;
-    const thresholdShareCommitments = kernel.deriveThresholdShareCommitments({
+    const sameSecretConsistency = acceptedCompactSameSecretConsistency(
         setupContext,
-        publicMatrixSeedHash: String(commonRandomness.publicMatrixSeedHash),
-        sourceTrusteeCoefficientCommitmentRecords:
-            vssCoefficientCommitments.sourceTrusteeRecords.map(
-                (sourceTrusteeRecord) => sourceTrusteeRecord as JsonRecord,
+        setupParameters,
+        compactVssMaterial.coefficientCommitmentSet,
+    );
+    const sameSecretProofs = acceptedCompactSameSecretProofs(
+        kernel,
+        setupContext,
+        setupParameters,
+        publicMatrixSeedHash,
+        sameSecretConsistency,
+        compactVssMaterial.coefficientCommitmentSet.coefficientCommitmentRoot,
+        compactVssMaterial.ringDegree,
+    );
+    const compactSameSecretBridge = acceptedCompactSameSecretBridge(
+        kernel,
+        setupContext,
+        setupParameters,
+        publicMatrixSeedHash,
+        compactVssMaterial,
+        sameSecretConsistency,
+        sameSecretProofs,
+    );
+    // The private VSS envelope and share-acceptance material bind the coefficient
+    // commitment roots. On the compact path present the compact set through a view
+    // that aliases the full-VSS field name to the compact source record root.
+    const compactCoefficientCommitmentView = {
+        vssCoefficientCommitmentRoot:
+            compactVssMaterial.coefficientCommitmentSet
+                .coefficientCommitmentRoot,
+        sourceTrusteeRecords:
+            compactVssMaterial.coefficientCommitmentSet.sourceTrusteeRecords.map(
+                (sourceTrusteeRecord) => ({
+                    ...sourceTrusteeRecord,
+                    sourceTrusteeCommitmentRoot:
+                        sourceTrusteeRecord.sourceCoefficientCommitmentRoot,
+                }),
             ),
-        coefficientCommitments:
-            vssCoefficientCommitmentMaterial.coefficientCommitments.map(
-                (coefficientCommitment) => coefficientCommitment as JsonRecord,
-            ),
-    }).thresholdShareCommitments;
+    };
     const privateVssEnvelopeCommitments =
         packageShapePrivateVssEnvelopeCommitments(
             kernel,
             setupParameters,
             setupContext,
             commonRandomness,
-            vssCoefficientCommitments,
+            compactCoefficientCommitmentView,
         );
     const publicPrivateVssEnvelopeCommitments =
         publicPrivateVssEnvelopeCommitmentSet(privateVssEnvelopeCommitments);
@@ -175,11 +211,6 @@ async function buildAcceptedShapedSetupPackage(
     const vssShareAcceptances = await acceptedVssShareAcceptances(
         setupContext,
         publicPrivateVssEnvelopeCommitments,
-    );
-    const sameSecretConsistency = acceptedSameSecretConsistency(
-        setupContext,
-        setupParameters,
-        vssCoefficientCommitments,
     );
     const publicKeyShares = acceptedPublicKeyShares(
         setupContext,
@@ -202,10 +233,9 @@ async function buildAcceptedShapedSetupPackage(
         publicKeyShares,
         publicKeyShareProofs,
     );
-    const setupTransportCertificate = acceptedSetupTransportCertificate(
+    const setupTransportCertificate = acceptedCompactSetupTransportCertificate(
         kernel,
         setupParameters,
-        vssCoefficientCommitmentMaterial,
     );
     const setupPackage: JsonRecord = {
         objectType: 'SetupPackage',
@@ -214,13 +244,27 @@ async function buildAcceptedShapedSetupPackage(
         qShare: setupParameters.qShare,
         phaseTranscript,
         commonRandomness,
-        vssCoefficientCommitments,
-        vssCoefficientCommitmentMaterial,
+        compactVssCoefficientCommitmentSet:
+            compactVssMaterial.coefficientCommitmentSet,
+        compactVssRecipientShareCommitmentSet:
+            compactVssMaterial.recipientShareCommitmentSet,
+        compactVssAggregateThresholdCommitmentSet:
+            compactVssMaterial.aggregateThresholdCommitmentSet,
+        compactVssShareLinkageStatement:
+            compactVssMaterial.shareLinkageStatement,
+        compactVssShareLinkageProofMaterialSet:
+            compactVssMaterial.shareLinkageProofMaterialSet,
         privateVssEnvelopeCommitments: publicPrivateVssEnvelopeCommitments,
         privateVssEnvelopeCommitmentRoot,
         vssShareAcceptances,
-        thresholdShareCommitments,
+        thresholdShareCommitments:
+            compactVssMaterial.thresholdShareCommitmentBinding,
         sameSecretConsistency,
+        sameSecretProofs,
+        compactSameSecretBridgeStatementSet:
+            compactSameSecretBridge.bridgeStatementSet,
+        compactSameSecretBridgeProofMaterialSet:
+            compactSameSecretBridge.bridgeProofMaterialSet,
         publicKeyShares,
         publicKeyShareProofs,
         evaluatorKeySchedule,

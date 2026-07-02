@@ -6,8 +6,6 @@ static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = Onc
 static TERMINAL_FULL_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     TerminalFullRingSetupPackageFixture,
 > = OnceLock::new();
-static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
-    OnceLock::new();
 static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     serde_json::Value,
 > = OnceLock::new();
@@ -102,8 +100,10 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
-            minimal_collective_setup_package_for_participant_count(
-                FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+            super::proof_record_fixtures::compactify_collective_setup_package(
+                minimal_collective_setup_package_for_participant_count(
+                    FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+                ),
             )
         })
         .clone()
@@ -581,20 +581,14 @@ fn build_collective_setup_package_fixture_parts(
     }
 }
 
+// The compact transform binds the same-secret proofs and the compact same-secret
+// bridge that references them, so the compact minimal package is already
+// same-secret-proof-bearing: this is exactly the minimal package. Reusing its
+// cache (rather than compactifying the same base into a second cache) avoids a
+// redundant heavy compact build that would otherwise race the minimal one under
+// parallel test execution.
 pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
-    SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_same_secret_proof_bearing_collective_setup_package)
-        .clone()
-}
-
-fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = minimal_collective_setup_package_for_participant_count(
-        FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
-    );
-    package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    package
+    minimal_collective_setup_package()
 }
 
 pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
@@ -605,7 +599,7 @@ pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package()
 }
 
 fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = build_same_secret_proof_bearing_collective_setup_package();
+    let mut package = same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
@@ -640,6 +634,6 @@ mod vss_coefficient_commitments;
 pub(super) use certificates::*;
 use common_randomness::*;
 pub(super) use private_vss_envelopes::*;
-use public_key_shares::*;
-use same_secret_consistency::*;
+pub(super) use public_key_shares::*;
+pub(super) use same_secret_consistency::*;
 pub(super) use vss_coefficient_commitments::*;

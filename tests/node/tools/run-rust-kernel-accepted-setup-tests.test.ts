@@ -116,41 +116,62 @@ describe('Rust accepted setup runner arguments', () => {
     });
 
     it('requires a current completion manifest before final package checkpoints are warm', () => {
-        const completeProofFamilyCounts = new Map([
-            ['same-secret-anchor-proof-material', 1],
-            ['public-key-share-proof-material', 1],
-            ['trustee-evaluation-key-anchor-proof-material', 1],
+        const completionManifestProofFamilyCounts = new Map([
+            ['same-secret-anchor-proof-material', 4],
+            ['public-key-share-proof-material', 9],
+            ['trustee-evaluation-key-anchor-proof-material', 6],
+        ]);
+        const completeCurrentProofFamilyCounts = new Map([
+            ['same-secret-anchor-proof-material', 4],
+            ['public-key-share-proof-material', 9],
+            ['trustee-evaluation-key-anchor-proof-material', 6],
         ]);
 
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: undefined,
-                proofFamilyCounts: completeProofFamilyCounts,
+                completionManifestProofFamilyCounts: undefined,
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(false);
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: 90,
-                proofFamilyCounts: completeProofFamilyCounts,
+                completionManifestProofFamilyCounts,
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(false);
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: 100,
+                completionManifestProofFamilyCounts,
                 proofFamilyCounts: new Map([
-                    ['same-secret-anchor-proof-material', 1],
-                    ['public-key-share-proof-material', 0],
-                    ['trustee-evaluation-key-anchor-proof-material', 1],
+                    ['same-secret-anchor-proof-material', 4],
+                    ['public-key-share-proof-material', 8],
+                    ['trustee-evaluation-key-anchor-proof-material', 6],
                 ]),
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(false);
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: 100,
+                completionManifestProofFamilyCounts: new Map([
+                    ['same-secret-anchor-proof-material', 4],
+                    ['public-key-share-proof-material', 0],
+                    ['trustee-evaluation-key-anchor-proof-material', 6],
+                ]),
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(false);
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: 110,
-                proofFamilyCounts: completeProofFamilyCounts,
+                completionManifestProofFamilyCounts,
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(true);

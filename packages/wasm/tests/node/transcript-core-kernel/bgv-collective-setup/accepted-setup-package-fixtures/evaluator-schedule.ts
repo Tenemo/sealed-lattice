@@ -1,7 +1,4 @@
-import {
-    firstRosterParticipantCount,
-    type JsonRecord,
-} from '../setup-fixture-primitives.js';
+import { type JsonRecord } from '../setup-fixture-primitives.js';
 
 import {
     createEvaluatorKeySchedule,
@@ -30,7 +27,7 @@ export function acceptedEvaluatorKeySchedule(
     return createEvaluatorKeySchedule({
         setupContext,
         qSharePrimes: parameters.qShare.primes,
-        participantCount: firstRosterParticipantCount,
+        participantCount: parameters.participantCount,
         publicMatrixSeedHash,
         relinearizationCrpRoot: String(crpRoots.relinearizationCrpRoot),
         galoisKeyCrpRoot: String(crpRoots.galoisKeyCrpRoot),

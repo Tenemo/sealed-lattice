@@ -98,6 +98,64 @@ pub(crate) struct PrivateVssShareStatement {
     pub(crate) coefficient_commitments: Vec<SetupCommitmentValue>,
 }
 
+pub(crate) struct CompactVssShareLinkageStatement {
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) recipient_identity: String,
+    pub(crate) recipient_roster_position: u64,
+    pub(crate) source_coefficient_commitment_root: String,
+    pub(crate) source_recipient_share_commitment_root: String,
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) coefficient_commitment_roots: Vec<String>,
+    pub(crate) coefficient_opening_roots: Vec<String>,
+    pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) recipient_share_commitment_root: String,
+    pub(crate) recipient_share_opening_root: String,
+    pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
+    pub(crate) additional_linkage_items: Vec<CompactVssShareLinkageItem>,
+}
+
+#[derive(Clone)]
+pub(crate) struct CompactVssShareLinkageItem {
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) source_coefficient_commitment_root: String,
+    pub(crate) source_recipient_share_commitment_root: String,
+    pub(crate) recipient_identity: String,
+    pub(crate) recipient_roster_position: u64,
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) coefficient_commitment_roots: Vec<String>,
+    pub(crate) coefficient_opening_roots: Vec<String>,
+    pub(crate) coefficient_commitments: Vec<CompactVssShareLinkageCommitment>,
+    pub(crate) recipient_share_commitment_root: String,
+    pub(crate) recipient_share_opening_root: String,
+    pub(crate) recipient_share_commitment: CompactVssShareLinkageCommitment,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct CompactVssCoefficientWitnessSlot {
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) source_rns_limb_index: usize,
+    pub(crate) source_message_modulus: u64,
+    pub(crate) shamir_coefficient_index: usize,
+    pub(crate) commitment_root: String,
+    pub(crate) opening_root: String,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct CompactSameSecretBridgeStatement {
+    pub(crate) public_matrix_seed_hash: String,
+    pub(crate) source_trustee_identity: String,
+    pub(crate) source_trustee_roster_position: u64,
+    pub(crate) target_basis_hash: String,
+    pub(crate) target_rns_primes: Vec<u64>,
+    pub(crate) target_constant_commitment_roots: Vec<String>,
+    pub(crate) target_constant_commitments: Vec<CompactVssShareLinkageCommitment>,
+}
+
 // Ceremony context the proof is bound to: the shared base fields, the proof
 // family label, and the family's ordered labeled binding roots. Every field
 // enters the statement hash, so a proof transplanted to another ceremony,
@@ -127,6 +185,8 @@ pub(crate) struct TrusteeEvaluationKeyStatement {
     pub(crate) keys: Vec<EvaluationKeyShareDescriptor>,
     pub(crate) same_secret_linkage: Option<SameSecretLinkageStatement>,
     pub(crate) private_vss_share: Option<PrivateVssShareStatement>,
+    pub(crate) compact_vss_share_linkage: Option<CompactVssShareLinkageStatement>,
+    pub(crate) compact_same_secret_bridge: Option<CompactSameSecretBridgeStatement>,
 }
 
 pub(crate) struct TrusteeEvaluationKeyWitness {
@@ -134,8 +194,9 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     // error_coefficients_by_key[key][digit] follows each key's digit count.
     pub(crate) error_coefficients_by_key: Vec<Vec<Vec<i64>>>,
     // Linkage witnesses, present exactly when the statement carries the
-    // same-secret linkage: the binary negative-indicator vector and the
-    // ternary opening randomness per Q_share limb and column.
+    // same-secret linkage or compact same-secret bridge: the binary
+    // negative-indicator vector and the ternary opening randomness per bound
+    // commitment and column.
     pub(crate) negative_indicator_coefficients: Vec<i64>,
     pub(crate) opening_randomness_by_limb: Vec<Vec<Vec<i64>>>,
     // Private VSS witnesses, present exactly for the recipient-private VSS
@@ -144,6 +205,14 @@ pub(crate) struct TrusteeEvaluationKeyWitness {
     pub(crate) private_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
     pub(crate) private_vss_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
     pub(crate) private_vss_carry_witnesses: Vec<i64>,
+    pub(crate) compact_vss_coefficient_messages_by_shamir_index: Vec<Vec<i64>>,
+    pub(crate) compact_vss_recipient_share_messages: Vec<i64>,
+    pub(crate) compact_vss_coefficient_opening_randomness_by_shamir_index: Vec<Vec<Vec<i64>>>,
+    pub(crate) compact_vss_recipient_share_opening_randomness: Vec<Vec<i64>>,
+    pub(crate) compact_vss_carry_witnesses: Vec<i64>,
+    pub(crate) compact_vss_recipient_share_messages_by_item: Vec<Vec<i64>>,
+    pub(crate) compact_vss_recipient_share_opening_randomness_by_item: Vec<Vec<Vec<i64>>>,
+    pub(crate) compact_vss_carry_witnesses_by_item: Vec<Vec<i64>>,
 }
 
 impl EvaluationKeyShareDescriptor {
@@ -337,25 +406,161 @@ impl EvaluationKeyShareDescriptor {
     }
 }
 
+impl CompactVssShareLinkageStatement {
+    pub(crate) fn item_count(&self) -> usize {
+        1 + self.additional_linkage_items.len()
+    }
+
+    pub(crate) fn packed_ring_degree(&self, ring_degree: usize) -> CanonicalResult<usize> {
+        Ok(ring_degree)
+    }
+
+    fn append_coefficient_witness_slots(
+        slots: &mut Vec<CompactVssCoefficientWitnessSlot>,
+        slot_indices_by_item: &mut Vec<Vec<usize>>,
+        source_trustee_roster_position: u64,
+        source_rns_limb_index: usize,
+        source_message_modulus: u64,
+        coefficient_commitment_roots: &[String],
+        coefficient_opening_roots: &[String],
+    ) {
+        let mut item_slot_indices = Vec::with_capacity(coefficient_commitment_roots.len());
+        for (shamir_coefficient_index, (commitment_root, opening_root)) in
+            coefficient_commitment_roots
+                .iter()
+                .zip(coefficient_opening_roots.iter())
+                .enumerate()
+        {
+            let slot = CompactVssCoefficientWitnessSlot {
+                source_trustee_roster_position,
+                source_rns_limb_index,
+                source_message_modulus,
+                shamir_coefficient_index,
+                commitment_root: commitment_root.clone(),
+                opening_root: opening_root.clone(),
+            };
+            let slot_index = if let Some(existing_index) = slots
+                .iter()
+                .position(|existing_slot| existing_slot == &slot)
+            {
+                existing_index
+            } else {
+                slots.push(slot);
+                slots.len() - 1
+            };
+            item_slot_indices.push(slot_index);
+        }
+        slot_indices_by_item.push(item_slot_indices);
+    }
+
+    fn coefficient_witness_slot_layout(
+        &self,
+    ) -> (Vec<CompactVssCoefficientWitnessSlot>, Vec<Vec<usize>>) {
+        let mut slots = Vec::new();
+        let mut slot_indices_by_item = Vec::with_capacity(self.item_count());
+        Self::append_coefficient_witness_slots(
+            &mut slots,
+            &mut slot_indices_by_item,
+            self.source_trustee_roster_position,
+            self.source_rns_limb_index,
+            self.source_message_modulus,
+            &self.coefficient_commitment_roots,
+            &self.coefficient_opening_roots,
+        );
+        for item in &self.additional_linkage_items {
+            Self::append_coefficient_witness_slots(
+                &mut slots,
+                &mut slot_indices_by_item,
+                item.source_trustee_roster_position,
+                item.source_rns_limb_index,
+                item.source_message_modulus,
+                &item.coefficient_commitment_roots,
+                &item.coefficient_opening_roots,
+            );
+        }
+
+        (slots, slot_indices_by_item)
+    }
+
+    pub(crate) fn coefficient_witness_slots(&self) -> Vec<CompactVssCoefficientWitnessSlot> {
+        self.coefficient_witness_slot_layout().0
+    }
+
+    pub(crate) fn packed_message_bounds(&self) -> Vec<u64> {
+        let (coefficient_slots, _) = self.coefficient_witness_slot_layout();
+        let mut bounds = coefficient_slots
+            .iter()
+            .map(|slot| slot.source_message_modulus)
+            .collect::<Vec<_>>();
+        bounds.push(self.source_message_modulus);
+        bounds.extend(
+            self.additional_linkage_items
+                .iter()
+                .map(|item| item.source_message_modulus),
+        );
+
+        bounds
+    }
+
+    pub(crate) fn coefficient_witness_slot_indices_by_item(&self) -> Vec<Vec<usize>> {
+        self.coefficient_witness_slot_layout().1
+    }
+
+    pub(crate) fn unique_coefficient_witness_slot_count(&self) -> usize {
+        self.coefficient_witness_slot_layout().0.len()
+    }
+
+    pub(crate) fn total_coefficient_commitment_count(&self) -> usize {
+        self.coefficient_commitments.len()
+            + self
+                .additional_linkage_items
+                .iter()
+                .map(|item| item.coefficient_commitments.len())
+                .sum::<usize>()
+    }
+
+    pub(crate) fn packed_opening_randomness_column_count(&self) -> usize {
+        (self.unique_coefficient_witness_slot_count() + self.item_count())
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
+    }
+}
+
 impl TrusteeEvaluationKeyStatement {
     // The number of active limb fields: one past the highest key level. The
     // keyless same-secret linkage anchor statement is active exactly on the
     // commitment fields, where its opening relations live.
     pub(crate) fn limb_count(&self) -> usize {
-        if self.private_vss_share.is_some() {
+        if self.private_vss_share.is_some() || self.compact_vss_share_linkage.is_some() {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
         }
-        self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
-            if self.same_secret_linkage.is_some() {
-                SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            } else {
-                0
-            },
-        )
+        let key_limb_count = self.keys.iter().map(|key| key.level + 1).max();
+        if self.compact_same_secret_bridge.is_some() {
+            return key_limb_count
+                .into_iter()
+                .chain(std::iter::once(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()))
+                .max()
+                .unwrap_or(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
+        }
+        key_limb_count.unwrap_or(if self.same_secret_linkage.is_some() {
+            SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+        } else {
+            0
+        })
     }
 
-    pub(crate) fn limb_moduli(&self) -> &'static [u64] {
-        &DATA_PRIMES[..self.limb_count()]
+    pub(crate) fn proof_limb_indices(&self) -> Vec<usize> {
+        (0..self.limb_count()).collect()
+    }
+
+    pub(crate) fn limb_moduli(&self) -> Vec<u64> {
+        self.proof_limb_indices()
+            .into_iter()
+            .map(|limb_index| DATA_PRIMES[limb_index])
+            .collect()
+    }
+
+    pub(crate) fn proof_limb_count(&self) -> usize {
+        self.proof_limb_indices().len()
     }
 
     // Indices of the keys whose level reaches the given limb.
@@ -372,12 +577,18 @@ impl TrusteeEvaluationKeyStatement {
     // the linkage relations live only in the commitment fields (the first
     // three data primes).
     pub(crate) fn linkage_randomness_count(&self, limb_index: usize) -> usize {
-        match &self.same_secret_linkage {
-            Some(linkage) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH
-            }
-            _ => 0,
+        if limb_index >= SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() {
+            return 0;
         }
+        if let Some(linkage) = &self.same_secret_linkage {
+            return linkage.commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH;
+        }
+        if let Some(bridge) = &self.compact_same_secret_bridge {
+            return bridge.target_constant_commitments.len()
+                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
+        }
+
+        0
     }
 
     pub(crate) fn private_vss_randomness_count(&self, limb_index: usize) -> usize {
@@ -386,6 +597,60 @@ impl TrusteeEvaluationKeyStatement {
                 statement.coefficient_commitments.len() * SETUP_COMMITMENT_RANDOMNESS_WIDTH
             }
             _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_coefficient_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.unique_coefficient_witness_slot_count()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_coefficient_relation_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.total_coefficient_commitment_count()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_item_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.item_count()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_randomness_count(&self, limb_index: usize) -> usize {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.packed_opening_randomness_column_count()
+            }
+            _ => 0,
+        }
+    }
+
+    pub(crate) fn compact_vss_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        match &self.compact_vss_share_linkage {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.packed_message_bounds()
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    pub(crate) fn compact_same_secret_bridge_message_bounds(&self, limb_index: usize) -> Vec<u64> {
+        match &self.compact_same_secret_bridge {
+            Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
+                statement.target_rns_primes.clone()
+            }
+            _ => Vec::new(),
         }
     }
 }

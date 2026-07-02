@@ -23,6 +23,9 @@ import type {
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
     BgvRnsParametersDescription,
+    BgvCompactSameSecretBridgeProofGeneration,
+    BgvCompactVssCommitmentOpeningComputation,
+    BgvCompactVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
@@ -262,19 +265,24 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'ValidateBgvEvaluatorOperation',
                         operation: input.operation,
                     }),
-                describeCollectiveBgvSetupParameters:
-                    (): BgvCollectiveSetupParametersDescription =>
-                        executeCommand<BgvCollectiveSetupParametersDescription>(
-                            {
-                                command: 'DescribeCollectiveBgvSetupParameters',
-                            },
-                        ),
+                describeCollectiveBgvSetupParameters: (
+                    input,
+                ): BgvCollectiveSetupParametersDescription =>
+                    executeCommand<BgvCollectiveSetupParametersDescription>({
+                        command: 'DescribeCollectiveBgvSetupParameters',
+                        ...(input?.participantCount === undefined
+                            ? {}
+                            : { participantCount: input.participantCount }),
+                    }),
                 deriveCollectiveBgvSetupPublicDerivations: (
                     input,
                 ): BgvCollectiveSetupPublicDerivations =>
                     executeCommand<BgvCollectiveSetupPublicDerivations>({
                         command: 'DeriveCollectiveBgvSetupPublicDerivations',
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        ...(input.decryptionThreshold === undefined
+                            ? {}
+                            : { decryptionThreshold: input.decryptionThreshold }),
                     }),
                 generateBgvPassiveSetup: (input): BgvPassiveSetupPackage =>
                     executeCommand<BgvPassiveSetupPackage>({
@@ -441,6 +449,66 @@ export const createTranscriptCoreKernelLoader = (
                         messageCoefficients: input.messageCoefficients,
                         randomnessByColumn: input.randomnessByColumn,
                         ringDegree: input.ringDegree,
+                    }),
+                computeCompactVssCommitmentFromOpening: (
+                    input,
+                ): BgvCompactVssCommitmentOpeningComputation =>
+                    executeCommand<BgvCompactVssCommitmentOpeningComputation>({
+                        command: 'ComputeCompactVssCommitmentFromOpening',
+                        commitmentRole: input.commitmentRole,
+                        commitmentContext: input.commitmentContext,
+                        publicMatrixSeedHash: input.publicMatrixSeedHash,
+                        rnsLimbIndex: input.rnsLimbIndex,
+                        rnsPrime: input.rnsPrime,
+                        ringDegree: input.ringDegree,
+                        ...(input.messageCoefficientBound === undefined
+                            ? {}
+                            : {
+                                  messageCoefficientBound:
+                                      input.messageCoefficientBound,
+                              }),
+                        messageCoefficients: input.messageCoefficients,
+                        messageDigitColumns: input.messageDigitColumns,
+                        randomnessByColumn: input.randomnessByColumn,
+                    }),
+                generateCompactVssShareLinkageProof: (
+                    input,
+                ): BgvCompactVssShareLinkageProofGeneration =>
+                    executeCommand<BgvCompactVssShareLinkageProofGeneration>({
+                        command: 'GenerateCompactVssShareLinkageProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        compactVssShareLinkage: input.compactVssShareLinkage,
+                        coefficientMessagesByShamirIndex:
+                            input.coefficientMessagesByShamirIndex,
+                        recipientShareMessages: input.recipientShareMessages,
+                        coefficientOpeningRandomnessByShamirIndex:
+                            input.coefficientOpeningRandomnessByShamirIndex,
+                        recipientShareOpeningRandomness:
+                            input.recipientShareOpeningRandomness,
+                        carryWitnesses: input.carryWitnesses,
+                        recipientShareMessagesByItem:
+                            input.recipientShareMessagesByItem,
+                        recipientShareOpeningRandomnessByItem:
+                            input.recipientShareOpeningRandomnessByItem,
+                        carryWitnessesByItem: input.carryWitnessesByItem,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
+                    }),
+                generateCompactSameSecretBridgeProof: (
+                    input,
+                ): BgvCompactSameSecretBridgeProofGeneration =>
+                    executeCommand<BgvCompactSameSecretBridgeProofGeneration>({
+                        command: 'GenerateCompactSameSecretBridgeProof',
+                        context: input.context,
+                        ringDegree: input.ringDegree,
+                        compactSameSecretBridge: input.compactSameSecretBridge,
+                        secretCoefficients: input.secretCoefficients,
+                        negativeIndicatorCoefficients:
+                            input.negativeIndicatorCoefficients,
+                        openingRandomnessByLimb: input.openingRandomnessByLimb,
+                        proofRandomnessSeedHex: input.proofRandomnessSeedHex,
+                        proofRandomnessNonceHex: input.proofRandomnessNonceHex,
                     }),
                 deriveThresholdShareCommitments: (
                     input,

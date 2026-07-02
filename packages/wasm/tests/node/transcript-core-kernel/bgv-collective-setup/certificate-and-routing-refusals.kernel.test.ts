@@ -28,7 +28,9 @@ import {
 describe('collective BGV setup kernel commands', () => {
     it('refuses undeclared generic key-switch material', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const parameters = kernel.describeCollectiveBgvSetupParameters({
+            participantCount: 3,
+        });
         const baseSetupPackage = await acceptedShapedSetupPackage(
             kernel,
             parameters,
@@ -51,7 +53,9 @@ describe('collective BGV setup kernel commands', () => {
 
     it('refuses JSON setup transport certificates', async () => {
         const kernel = await loadTranscriptCoreKernel();
-        const parameters = kernel.describeCollectiveBgvSetupParameters();
+        const parameters = kernel.describeCollectiveBgvSetupParameters({
+            participantCount: 3,
+        });
         const baseSetupPackage = await acceptedShapedSetupPackage(
             kernel,
             parameters,

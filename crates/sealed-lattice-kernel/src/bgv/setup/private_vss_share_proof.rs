@@ -609,6 +609,8 @@ fn private_vss_share_succinct_statement(
         ring_degree: input.ring_degree,
         keys: Vec::new(),
         same_secret_linkage: None,
+        compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
         private_vss_share: Some(PrivateVssShareStatement {
             public_matrix_seed_hash: input.public_matrix_seed_hash.to_string(),
             private_envelope_aad_hash: input.private_envelope_aad_hash.to_string(),
@@ -895,6 +897,14 @@ pub(super) fn private_vss_share_succinct_proof_record(
                 })
             })
             .collect::<CanonicalResult<Vec<i64>>>()?,
+        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_messages: Vec::new(),
+        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_opening_randomness: Vec::new(),
+        compact_vss_carry_witnesses: Vec::new(),
+        compact_vss_recipient_share_messages_by_item: Vec::new(),
+        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+        compact_vss_carry_witnesses_by_item: Vec::new(),
     };
     let proof = prove_evaluation_key_share(&statement, &witness, input.proof_randomness_seed_hex)?;
     let proof_bytes = encode_trustee_evaluation_key_proof(&proof);

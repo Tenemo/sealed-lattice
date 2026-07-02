@@ -44,9 +44,15 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         qShare: input.qShare,
         phaseTranscript: input.phaseTranscript,
         commonRandomness: input.commonRandomness,
-        vssCoefficientCommitments: input.vssCoefficientCommitments,
-        vssCoefficientCommitmentMaterial:
-            input.vssCoefficientCommitmentMaterial,
+        compactVssCoefficientCommitmentSet:
+            input.compactVssCoefficientCommitmentSet,
+        compactVssRecipientShareCommitmentSet:
+            input.compactVssRecipientShareCommitmentSet,
+        compactVssAggregateThresholdCommitmentSet:
+            input.compactVssAggregateThresholdCommitmentSet,
+        compactVssShareLinkageStatement: input.compactVssShareLinkageStatement,
+        compactVssShareLinkageProofMaterialSet:
+            input.compactVssShareLinkageProofMaterialSet,
         privateVssEnvelopeCommitments,
         privateVssEnvelopeCommitmentRoot,
         ...(input.vssComplaints === undefined
@@ -56,6 +62,10 @@ export const createSetupPackage = (input: SetupPackageInput): SetupPackage => {
         thresholdShareCommitments,
         sameSecretConsistency: input.sameSecretConsistency,
         sameSecretProofs: input.sameSecretProofs,
+        compactSameSecretBridgeStatementSet:
+            input.compactSameSecretBridgeStatementSet,
+        compactSameSecretBridgeProofMaterialSet:
+            input.compactSameSecretBridgeProofMaterialSet,
         publicKeyShares: input.publicKeyShares,
         publicKeyShareProofs: input.publicKeyShareProofs,
         publicKeyShareMaterial: input.publicKeyShareMaterial,

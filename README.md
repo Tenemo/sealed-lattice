@@ -32,6 +32,8 @@ Threshold derivation is a helper, not a security certificate. The first target p
 
 The first setup/evaluator boundary is implemented as development verification evidence for the first profile. Its public verifier requires externally supplied manifest and setup-roster hashes, verifies the active-static setup package, VSS acceptances, public key, evaluation keys, proof/key transport, and setup/evaluator HE boundary, and returns an accepted setup handoff for downstream development work. The missing public workflow pieces are listed below; security caveats and audit status live in [SECURITY.md](SECURITY.md).
 
+The kernel setup verifier also implements a compact VSS commitment path alongside the full-material path: constant-size public coefficient, recipient-share, and aggregate-threshold commitments (a fixed set of field residues per commitment, independent of the ring degree) verified through succinct share-linkage and same-secret bridge proofs, with a recomputed compact threshold-share commitment binding. Acceptance stays gated purely on recomputed roots and verified proof families. This path is kernel-side development evidence only; it is not yet exposed through the public SDK, its Module-SIS binding has no recorded lattice-estimator run, and the full-material path has not been removed. See `SEC-012` in [SECURITY.md](SECURITY.md).
+
 Package tests are development evidence. Read [SECURITY.md](SECURITY.md) before treating any result as security evidence.
 
 ## Installation

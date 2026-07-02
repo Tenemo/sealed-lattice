@@ -108,7 +108,8 @@ fn trustee_evaluation_key_proofs_object_inner(
                     &TrusteeEvaluationKeyStatementInputs {
                         setup_package: package,
                         transported_key_switch_component_material: transported_component_material,
-                        transported_constant_commitments,
+                        transported_constant_commitments: Some(transported_constant_commitments),
+                        verified_compact_same_secret_bridge: None,
                         round_one_aggregate_diagonals_by_level,
                         trustee_roster_position,
                     },
@@ -604,6 +605,14 @@ pub(in super::super) fn trustee_evaluation_key_witness_for_fixture(
         private_vss_coefficient_messages_by_shamir_index: Vec::new(),
         private_vss_opening_randomness_by_shamir_index: Vec::new(),
         private_vss_carry_witnesses: Vec::new(),
+        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_messages: Vec::new(),
+        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_opening_randomness: Vec::new(),
+        compact_vss_carry_witnesses: Vec::new(),
+        compact_vss_recipient_share_messages_by_item: Vec::new(),
+        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+        compact_vss_carry_witnesses_by_item: Vec::new(),
     }
 }
 

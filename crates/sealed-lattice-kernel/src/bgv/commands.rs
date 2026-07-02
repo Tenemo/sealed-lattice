@@ -17,17 +17,22 @@ use crate::{
             absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
             begin_setup_proof_material_transport_stream_request,
             begin_threshold_share_commitment_transport_derivation_stream_request,
+            compute_compact_vss_commitment_from_opening_request,
             compute_setup_commitment_from_opening_request,
+            decode_compact_vss_commitment_body_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
-            describe_collective_bgv_setup_parameters,
+            describe_collective_bgv_setup_parameters, encode_compact_vss_commitment_body_request,
             finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
+            generate_compact_same_secret_bridge_proof_from_request,
+            generate_compact_vss_share_linkage_proof_from_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             verify_collective_bgv_setup_package_from_request,
+            verify_compact_vss_commitment_opening_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
@@ -89,8 +94,17 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
     ))
 }
 
-pub(crate) fn describe_collective_bgv_setup_parameters_from_request() -> CanonicalResult<Value> {
-    describe_collective_bgv_setup_parameters()
+pub(crate) fn describe_collective_bgv_setup_parameters_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    match request.get("participantCount").and_then(Value::as_u64) {
+        Some(participant_count) => {
+            crate::bgv::setup::describe_collective_bgv_setup_parameters_for_participant_count(
+                participant_count,
+            )
+        }
+        None => describe_collective_bgv_setup_parameters(),
+    }
 }
 
 pub(crate) fn derive_collective_bgv_setup_public_derivations(
@@ -121,6 +135,32 @@ pub(crate) fn generate_private_vss_share_proof(request: &Value) -> CanonicalResu
 
 pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
     generate_trustee_evaluation_key_proof_from_request(request)
+}
+
+pub(crate) fn compute_compact_vss_commitment_from_opening(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    compute_compact_vss_commitment_from_opening_request(request)
+}
+
+pub(crate) fn verify_compact_vss_commitment_opening(request: &Value) -> CanonicalResult<Value> {
+    verify_compact_vss_commitment_opening_request(request)
+}
+
+pub(crate) fn encode_compact_vss_commitment_body(request: &Value) -> CanonicalResult<Value> {
+    encode_compact_vss_commitment_body_request(request)
+}
+
+pub(crate) fn decode_compact_vss_commitment_body(request: &Value) -> CanonicalResult<Value> {
+    decode_compact_vss_commitment_body_request(request)
+}
+
+pub(crate) fn generate_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_compact_vss_share_linkage_proof_from_request(request)
+}
+
+pub(crate) fn generate_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_compact_same_secret_bridge_proof_from_request(request)
 }
 
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {

@@ -301,14 +301,20 @@ describe('succinct setup statement hash vectors', () => {
             keys: [
                 {
                     proofFamily: 'relinearization-round-one',
-                    level: 0,
+                    level: 2,
                     keySwitchDomain: 'relinearization-round-one',
                     keySwitchSeedHex: repeatedHash('42'),
-                    componentBByDigit: [[zeroU64Vector()]],
+                    componentBByDigit: [
+                        [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
+                        [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
+                        [zeroU64Vector(), zeroU64Vector(), zeroU64Vector()],
+                    ],
                 },
             ],
             secretCoefficients: zeroI64Vector(),
-            errorCoefficientsByKey: [[zeroI64Vector()]],
+            errorCoefficientsByKey: [
+                [zeroI64Vector(), zeroI64Vector(), zeroI64Vector()],
+            ],
             ...proofRandomnessFields,
         });
         expect(trusteeEvaluationKey.proofFamily).toBe('trustee-evaluation-key');
