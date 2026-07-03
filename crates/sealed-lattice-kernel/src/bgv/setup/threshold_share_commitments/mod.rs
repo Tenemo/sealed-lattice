@@ -119,6 +119,7 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
                 "threshold share commitment set root was not derived",
             )
         })?;
+    let derived_limb_commitment_count = vss_limb_commitment_count(roster.participant_count)?;
 
     Ok(json!({
         "operation": "deriveThresholdShareCommitments",
@@ -127,7 +128,7 @@ pub(crate) fn derive_threshold_share_commitments_from_request(
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": roster.decryption_threshold,
-        "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
+        "derivedLimbCommitmentCount": derived_limb_commitment_count,
         "thresholdShareCommitmentRoot": threshold_share_commitment_root,
         "thresholdShareCommitments": threshold_share_commitments,
     }))
@@ -166,9 +167,9 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         &source_trustee_bindings,
         &transport.chunks,
     )?;
-    let material_record_count = roster.participant_count as usize
-        * DATA_PRIMES.len()
-        * roster.decryption_threshold as usize;
+    let material_record_count =
+        vss_material_record_count(roster.participant_count, roster.decryption_threshold)?;
+    let derived_limb_commitment_count = vss_limb_commitment_count(roster.participant_count)?;
     let material_set = transported_vss_material_set_value(
         setup_context,
         public_matrix_seed_hash,
@@ -197,7 +198,7 @@ pub(crate) fn derive_threshold_share_commitments_from_transport_request(
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": roster.decryption_threshold,
-        "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
+        "derivedLimbCommitmentCount": derived_limb_commitment_count,
         "transport": {
             "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -363,9 +364,8 @@ pub(crate) fn verify_constant_vss_commitments_from_transport_request(
         &source_trustee_bindings,
         &transport.chunks,
     )?;
-    let material_record_count = roster.participant_count as usize
-        * DATA_PRIMES.len()
-        * roster.decryption_threshold as usize;
+    let material_record_count =
+        vss_material_record_count(roster.participant_count, roster.decryption_threshold)?;
     let material_set = transported_vss_material_set_value(
         setup_context,
         public_matrix_seed_hash,

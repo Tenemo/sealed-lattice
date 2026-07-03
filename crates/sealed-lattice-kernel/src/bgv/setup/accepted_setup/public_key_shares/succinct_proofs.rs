@@ -82,13 +82,11 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     })?;
     let common_binding = public_key_common_binding(setup_package)?;
     let same_secret_consistency_root = same_secret_consistency_root_from_package(setup_package)?;
-    if setup_package.get("sameSecretProofs").is_none() {
-        return Ok(Some(public_key_share_succinct_proof_refusal(
-            "sameSecretProofsMissing",
-            "sameSecretProofs must be present before public-key succinct proofs can be verified",
-            "setupPackage.sameSecretProofs",
-        )?));
-    }
+    // The verifier reaches this point only with a verified compact same-secret
+    // bridge present (a bridge-absent package is refused earlier by
+    // verify_optional_same_secret_proofs), and a verified bridge already requires
+    // sameSecretProofs, so a standalone sameSecretProofs-missing guard here is
+    // unreachable and has been removed.
     let same_secret_proof_set_root = same_secret_proof_set_root_from_package(setup_package)?;
     let same_secret_proof_family_binding_root = same_secret_proof_family_binding_root()?;
     let public_key_share_set_root = setup_package

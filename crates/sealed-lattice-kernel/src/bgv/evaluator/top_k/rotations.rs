@@ -36,24 +36,6 @@ pub(crate) fn inverse_galois_element(galois_element: usize) -> CanonicalResult<u
     Ok(usize::try_from(inverse).expect("inverse below ring order fits usize"))
 }
 
-#[cfg(test)]
-pub(crate) fn packed_rank_galois_elements(option_count: usize) -> CanonicalResult<Vec<usize>> {
-    if option_count < 2 || option_count * 2 > POLYNOMIAL_DEGREE {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "packed rank rotation set requires 2 <= option count and a valid slot window",
-        ));
-    }
-    let mut elements = Vec::with_capacity(2 * (option_count - 1));
-    for shift in 1..option_count {
-        let galois_element = galois_power(shift);
-        elements.push(galois_element);
-        elements.push(inverse_galois_element(galois_element)?);
-    }
-
-    Ok(elements)
-}
-
 pub(crate) fn generator_exponent_or_conjugated(
     galois_element: usize,
 ) -> CanonicalResult<(bool, usize)> {

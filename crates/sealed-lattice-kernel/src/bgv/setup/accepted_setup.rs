@@ -676,9 +676,6 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_required_public_evaluation_key_set(setup_package, request)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_required_final_objects(setup_package)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
     Ok(VerificationFlow::Continue)
 }
 

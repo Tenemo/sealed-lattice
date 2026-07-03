@@ -46,8 +46,50 @@ pub(super) fn expected_trustees_from_phase_transcript(
                 "phase participant object must bind trusteeIdentity",
             ));
         };
-        trustees.insert(roster_position, trustee_identity.to_string());
+        if trustees
+            .insert(roster_position, trustee_identity.to_string())
+            .is_some()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "phase participant objects contain duplicate rosterPosition",
+            ));
+        }
     }
 
     Ok(trustees)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expected_trustees_rejects_duplicate_roster_positions() {
+        let setup_package = json!({
+            "phaseTranscript": [
+                {
+                    "participantPhaseObjects": [
+                        {
+                            "rosterPosition": 0,
+                            "trusteeIdentity": "trustee-a"
+                        },
+                        {
+                            "rosterPosition": 0,
+                            "trusteeIdentity": "trustee-b"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let error = expected_trustees_from_phase_transcript(&setup_package)
+            .expect_err("duplicate roster position");
+
+        assert_eq!(error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(
+            error.message,
+            "phase participant objects contain duplicate rosterPosition"
+        );
+    }
 }

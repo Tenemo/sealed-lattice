@@ -110,7 +110,9 @@ fn verify_source_trustee_commitment_record(
     }
 
     let coefficient_commitments = array_field(source_trustee_record, "coefficientCommitments")?;
-    if coefficient_commitments.len() != DATA_PRIMES.len() * roster.decryption_threshold as usize {
+    let expected_coefficient_commitment_count =
+        vss_material_record_count(1, roster.decryption_threshold)?;
+    if coefficient_commitments.len() != expected_coefficient_commitment_count {
         return Err(invalid_threshold_commitment_input(
             "sourceTrusteeCoefficientCommitmentRecord.coefficientCommitments must contain every Q_share limb and Shamir coefficient",
         ));
@@ -238,9 +240,8 @@ pub(super) fn verify_coefficient_commitment_material(
     roster: &AcceptedRosterParameters,
     source_trustee_bindings: &BTreeMap<u64, SourceTrusteeCommitmentBinding>,
 ) -> CanonicalResult<BTreeMap<(u64, usize, u64), CoefficientCommitmentBinding>> {
-    let expected_count = roster.participant_count as usize
-        * DATA_PRIMES.len()
-        * roster.decryption_threshold as usize;
+    let expected_count =
+        vss_material_record_count(roster.participant_count, roster.decryption_threshold)?;
     if commitment_material_values.len() != expected_count {
         return Err(invalid_threshold_commitment_input(
             "coefficientCommitments must contain full public commitment material for every source trustee, Q_share limb, and Shamir coefficient",

@@ -325,10 +325,9 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
         &source_trustee_bindings,
         &derivation.observed_commitment_roots,
     )?;
-    let material_record_count = vss_material_record_count(
-        roster.participant_count,
-        roster.decryption_threshold as usize,
-    );
+    let material_record_count =
+        vss_material_record_count(roster.participant_count, roster.decryption_threshold)?;
+    let derived_limb_commitment_count = vss_limb_commitment_count(roster.participant_count)?;
     let hashes = SetupVssMaterialTransportHashes {
         full_object_hash,
         chunk_hashes: session.observed_chunk_hashes,
@@ -405,7 +404,7 @@ pub(super) fn finish_threshold_share_commitment_transport_stream(
         "participantCount": roster.participant_count,
         "rnsLimbCount": DATA_PRIMES.len(),
         "thresholdDegree": roster.decryption_threshold,
-        "derivedLimbCommitmentCount": roster.participant_count as usize * DATA_PRIMES.len(),
+        "derivedLimbCommitmentCount": derived_limb_commitment_count,
         "transport": {
             "transportSchemeId": SETUP_TRANSPORT_SCHEME_ID,
             "chunkSizeBytes": SETUP_TRANSPORT_CHUNK_SIZE_BYTES,
@@ -428,10 +427,7 @@ fn verify_observed_transport_commitment_roots(
     observed_commitment_roots: &BTreeMap<(u64, usize, u64), String>,
 ) -> CanonicalResult<()> {
     if observed_commitment_roots.len()
-        != vss_material_record_count(
-            roster.participant_count,
-            roster.decryption_threshold as usize,
-        )
+        != vss_material_record_count(roster.participant_count, roster.decryption_threshold)?
     {
         return Err(invalid_threshold_commitment_input(
             "transport stream did not observe every accepted VSS commitment coordinate",
@@ -527,8 +523,8 @@ impl StreamingVssThresholdMaterialParser {
         })?;
         let expected_record_count = vss_material_record_count(
             self.roster.participant_count,
-            self.roster.decryption_threshold as usize,
-        );
+            self.roster.decryption_threshold,
+        )?;
         if self.completed_record_count != expected_record_count {
             return Err(invalid_threshold_commitment_input(
                 "transported VSS material ended before every commitment record was supplied",
@@ -591,8 +587,8 @@ impl StreamingVssThresholdMaterialParser {
         let record_length = vss_material_binary_record_length(ring_degree)?;
         let expected_record_count = vss_material_record_count(
             self.roster.participant_count,
-            self.roster.decryption_threshold as usize,
-        );
+            self.roster.decryption_threshold,
+        )?;
         while self.completed_record_count < expected_record_count
             && self.available_byte_count() >= record_length
         {
@@ -1101,7 +1097,7 @@ fn threshold_share_commitment_set_from_transport_accumulators(
                     )
                 })?;
             let expected_root_count =
-                roster.participant_count as usize * roster.decryption_threshold as usize;
+                vss_threshold_root_count(roster.participant_count, roster.decryption_threshold)?;
             if accumulator.coefficient_commitment_roots.len() != expected_root_count {
                 return Err(invalid_threshold_commitment_input(
                     "transport threshold accumulator does not contain every coefficient root",

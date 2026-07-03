@@ -1,17 +1,5 @@
 use super::*;
 
-// Number of score bits for the certified score domain [0, score_domain_max].
-#[cfg(test)]
-pub(crate) fn score_bit_count(score_domain_max: u64) -> usize {
-    let mut bits = 0_usize;
-    let mut bound = score_domain_max;
-    while bound > 0 {
-        bits += 1;
-        bound >>= 1;
-    }
-    bits.max(1)
-}
-
 // Lagrange interpolation over the plaintext field: given f(0), f(1), ...,
 // f(n-1), return the coefficients (lowest degree first) of the unique degree
 // (n-1) interpolating polynomial.
@@ -57,20 +45,4 @@ pub(crate) fn multiply_by_linear_root(polynomial: &[u64], root: u64) -> Canonica
     }
 
     Ok(product)
-}
-
-// The bit-extraction polynomials for the certified score domain: one polynomial
-// per bit, interpolating the function x -> (x >> bit) & 1 over [0, domain_max].
-#[cfg(test)]
-pub(crate) fn bit_extraction_polynomials(score_domain_max: u64) -> CanonicalResult<Vec<Vec<u64>>> {
-    let bit_count = score_bit_count(score_domain_max);
-    let point_count = usize::try_from(score_domain_max).expect("domain fits usize") + 1;
-    (0..bit_count)
-        .map(|bit| {
-            let values = (0..point_count)
-                .map(|value| ((value as u64) >> bit) & 1)
-                .collect::<Vec<_>>();
-            interpolate_coefficients(&values)
-        })
-        .collect()
 }
