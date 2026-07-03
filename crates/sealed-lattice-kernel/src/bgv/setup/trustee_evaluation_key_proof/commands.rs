@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
@@ -20,12 +21,21 @@ use crate::bgv::setup::commitment::{
 use crate::bgv::setup::compact_vss_commitment::{
     COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
 };
+use crate::bgv::setup::setup_proof::{
+    SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+    SetupProofMaterialTransportHashes, setup_proof_material_transport_hashes,
+    verified_setup_proof_material_chunks_from_request,
+};
 use crate::hashing::{derive_canonical_object_hash, hash512_hex, to_hex};
 
 const PROOF_RANDOMNESS_SEED_BYTES: usize = 64;
 const PROOF_RANDOMNESS_NONCE_BYTES: usize = 64;
 const COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/compact-vss-share-linkage/proof-bytes-v1";
+const COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedCompactVssShareLinkageProofMaterialSet";
+const COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedCompactVssShareLinkageProofMaterial";
 
 pub(in crate::bgv::setup) struct CompactVssCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) field_name: String,
@@ -741,21 +751,13 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
             }
         }
 
-        let proof_bytes_base64 = read_string(proof_record, "proofBytesBase64")?;
-        let proof_bytes = crate::transcript_core::decode_standard_base64(
-            proof_bytes_base64,
-            "compact share-linkage proofBytesBase64",
+        let resolved_proof_bytes = resolve_compact_vss_share_linkage_proof_bytes(
+            proof_record,
+            request,
+            &coverage,
+            compact_vss_share_linkage,
         )?;
-        let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?;
-        let expected_proof_bytes_hash = hash512_hex(
-            COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        );
-        compare_string_value(
-            proof_bytes_hash,
-            &expected_proof_bytes_hash,
-            "compact share-linkage proof record proofBytesHash",
-        )?;
+        let proof_bytes = resolved_proof_bytes.proof_bytes;
         total_proof_byte_length = total_proof_byte_length
             .checked_add(proof_bytes.len())
             .ok_or_else(|| {
@@ -763,22 +765,8 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
                     "compact share-linkage proof material byte length overflowed",
                 )
             })?;
-
-        let proof_record_without_root = json!({
-            "objectType": "CompactVssShareLinkageProofRecord",
-            "objectVersion": 1,
-            "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
-            "linkageItems": coverage,
-            "compactVssShareLinkage": compact_vss_share_linkage,
-            "proofBytesHash": proof_bytes_hash,
-            "proofBytesBase64": proof_bytes_base64,
-        });
-        let expected_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
-        compare_string_value(
-            read_string(proof_record, "proofRecordRoot")?,
-            &expected_record_root,
-            "compact share-linkage proof record proofRecordRoot",
-        )?;
+        let proof_record_without_root = resolved_proof_bytes.proof_record_without_root;
+        let expected_record_root = resolved_proof_bytes.proof_record_root;
 
         let proof_request = json!({
             "context": {
@@ -879,6 +867,426 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_material_set_from_request(
         "totalProofByteLength": total_proof_byte_length,
         "proofVerificationCount": proof_verification_count,
     }))
+}
+
+// Resolved compact share-linkage proof bytes plus the canonical proof record
+// whose root binds them. The embedded form carries the proof bytes as base64
+// inside the record; the transported form streams the bytes through the shared
+// setup proof-material transport and binds the transport reference into the
+// record root instead of the base64 bytes.
+struct ResolvedCompactVssShareLinkageProofBytes {
+    proof_bytes: Vec<u8>,
+    proof_record_without_root: Value,
+    proof_record_root: String,
+}
+
+fn resolve_compact_vss_share_linkage_proof_bytes(
+    proof_record: &Value,
+    request: &Value,
+    coverage: &[Value],
+    compact_vss_share_linkage: &Value,
+) -> CanonicalResult<ResolvedCompactVssShareLinkageProofBytes> {
+    let proof_bytes_hash = read_string(proof_record, "proofBytesHash")?;
+    let proof_record_root = read_string(proof_record, "proofRecordRoot")?.to_string();
+    if proof_record.get("proofBytesBase64").is_some() {
+        if proof_record.get("proofBytesEncoding").is_some()
+            || compact_vss_share_linkage_proof_has_transport_reference(proof_record)
+        {
+            return Err(invalid_succinct_setup_proof(
+                "compact share-linkage proof record must not mix embedded proofBytesBase64 with transported proof material",
+            ));
+        }
+        let proof_bytes_base64 = read_string(proof_record, "proofBytesBase64")?;
+        let proof_bytes = crate::transcript_core::decode_standard_base64(
+            proof_bytes_base64,
+            "compact share-linkage proofBytesBase64",
+        )?;
+        let expected_proof_bytes_hash = hash512_hex(
+            COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
+            &[&proof_bytes],
+        );
+        compare_string_value(
+            proof_bytes_hash,
+            &expected_proof_bytes_hash,
+            "compact share-linkage proof record proofBytesHash",
+        )?;
+        let proof_record_without_root = json!({
+            "objectType": "CompactVssShareLinkageProofRecord",
+            "objectVersion": 1,
+            "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            "linkageItems": coverage,
+            "compactVssShareLinkage": compact_vss_share_linkage,
+            "proofBytesHash": proof_bytes_hash,
+            "proofBytesBase64": proof_bytes_base64,
+        });
+        let expected_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
+        compare_string_value(
+            &proof_record_root,
+            &expected_record_root,
+            "compact share-linkage proof record proofRecordRoot",
+        )?;
+
+        return Ok(ResolvedCompactVssShareLinkageProofBytes {
+            proof_bytes,
+            proof_record_without_root,
+            proof_record_root,
+        });
+    }
+
+    compare_string_value(
+        read_string(proof_record, "proofBytesEncoding")?,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        "compact share-linkage proof record proofBytesEncoding",
+    )?;
+    let proof_material_root = read_string(proof_record, "proofMaterialRoot")?;
+    let transported_binding =
+        transported_compact_vss_share_linkage_proof_material_binding(request, proof_material_root)?;
+    verify_compact_vss_share_linkage_proof_transport_reference(
+        proof_record,
+        &transported_binding.transport_hashes,
+    )?;
+    compare_string_value(
+        proof_bytes_hash,
+        &transported_binding.proof_bytes_hash,
+        "compact share-linkage proof record proofBytesHash",
+    )?;
+    let proof_record_without_root = json!({
+        "objectType": "CompactVssShareLinkageProofRecord",
+        "objectVersion": 1,
+        "proofFamily": COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+        "linkageItems": coverage,
+        "compactVssShareLinkage": compact_vss_share_linkage,
+        "proofBytesHash": proof_bytes_hash,
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofMaterialRoot": proof_material_root,
+        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "proofChunkCount": transported_binding.transport_hashes.chunk_hashes.len(),
+        "proofTotalByteLength": transported_binding.transport_hashes.total_byte_length,
+        "proofFullObjectHash": transported_binding.transport_hashes.full_object_hash,
+        "proofChunkRoot": transported_binding.transport_hashes.chunk_root,
+        "proofChunkHashes": transported_binding.transport_hashes.chunk_hashes,
+    });
+    let expected_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
+    compare_string_value(
+        &proof_record_root,
+        &expected_record_root,
+        "compact share-linkage proof record proofRecordRoot",
+    )?;
+
+    Ok(ResolvedCompactVssShareLinkageProofBytes {
+        proof_bytes: transported_binding.proof_bytes,
+        proof_record_without_root,
+        proof_record_root,
+    })
+}
+
+struct CompactVssShareLinkageProofTransportBinding {
+    transport_hashes: SetupProofMaterialTransportHashes,
+    proof_bytes: Vec<u8>,
+    proof_bytes_hash: String,
+}
+
+fn transported_compact_vss_share_linkage_proof_material_binding(
+    request: &Value,
+    expected_proof_material_root: &str,
+) -> CanonicalResult<CompactVssShareLinkageProofTransportBinding> {
+    let material_set = request
+        .get("transportedCompactVssShareLinkageProofMaterial")
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "transportedCompactVssShareLinkageProofMaterial is required by transported compact share-linkage proof records",
+            )
+        })?;
+    verify_transported_compact_vss_share_linkage_proof_material_set_header(material_set)?;
+    let proof_materials = material_set
+        .get("proofMaterials")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "transportedCompactVssShareLinkageProofMaterial.proofMaterials must be an array",
+            )
+        })?;
+    let mut matching_binding = None;
+    for (proof_material_index, proof_material) in proof_materials.iter().enumerate() {
+        verify_transported_compact_vss_share_linkage_proof_material_header(proof_material)?;
+        let proof_material_root = read_string(proof_material, "proofMaterialRoot")?;
+        if proof_material_root != expected_proof_material_root {
+            continue;
+        }
+        if matching_binding.is_some() {
+            return Err(invalid_succinct_setup_proof(
+                "transportedCompactVssShareLinkageProofMaterial contains duplicate proofMaterialRoot entries",
+            ));
+        }
+        let chunks = if proof_material.get("chunks").is_some() {
+            Arc::new(transported_compact_vss_share_linkage_proof_chunks(
+                proof_material,
+                proof_material_index,
+            )?)
+        } else {
+            verified_setup_proof_material_chunks_from_request(
+                request,
+                COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+                expected_proof_material_root,
+                proof_material,
+                "transportedCompactVssShareLinkageProofMaterial.proofMaterials",
+            )?
+        };
+        let transport_hashes = setup_proof_material_transport_hashes(
+            COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY,
+            chunks.as_ref(),
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )?;
+        verify_transported_compact_vss_share_linkage_proof_material_hashes(
+            proof_material,
+            &transport_hashes,
+        )?;
+        let proof_bytes = chunks.iter().flatten().copied().collect::<Vec<u8>>();
+        let proof_bytes_hash = hash512_hex(
+            COMPACT_VSS_SHARE_LINKAGE_PROOF_BYTES_HASH_DOMAIN,
+            &[&proof_bytes],
+        );
+        matching_binding = Some(CompactVssShareLinkageProofTransportBinding {
+            transport_hashes,
+            proof_bytes,
+            proof_bytes_hash,
+        });
+    }
+
+    matching_binding.ok_or_else(|| {
+        invalid_succinct_setup_proof(
+            "transportedCompactVssShareLinkageProofMaterial is missing the requested proofMaterialRoot",
+        )
+    })
+}
+
+fn verify_transported_compact_vss_share_linkage_proof_material_set_header(
+    value: &Value,
+) -> CanonicalResult<()> {
+    for (field_name, expected_value) in [
+        (
+            "objectType",
+            COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE,
+        ),
+        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
+    ] {
+        compare_string_value(
+            read_string(value, field_name)?,
+            expected_value,
+            &format!("transportedCompactVssShareLinkageProofMaterial.{field_name}"),
+        )?;
+    }
+    compare_u64_value(
+        read_u64(value, "objectVersion")?,
+        1,
+        "transportedCompactVssShareLinkageProofMaterial.objectVersion",
+    )
+}
+
+fn verify_transported_compact_vss_share_linkage_proof_material_header(
+    value: &Value,
+) -> CanonicalResult<()> {
+    for (field_name, expected_value) in [
+        (
+            "objectType",
+            COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE,
+        ),
+        ("proofFamily", COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY),
+    ] {
+        compare_string_value(
+            read_string(value, field_name)?,
+            expected_value,
+            &format!("transported compact share-linkage proof material {field_name}"),
+        )?;
+    }
+    compare_u64_value(
+        read_u64(value, "objectVersion")?,
+        1,
+        "transported compact share-linkage proof material objectVersion",
+    )?;
+    read_string(value, "proofMaterialRoot")?;
+
+    Ok(())
+}
+
+fn transported_compact_vss_share_linkage_proof_chunks(
+    value: &Value,
+    proof_material_index: usize,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    compare_u64_value(
+        read_u64(value, "chunkSizeBytes")?,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "transported compact share-linkage proof material chunkSizeBytes",
+    )?;
+    let chunk_count = usize::try_from(read_u64(value, "chunkCount")?).map_err(|_| {
+        invalid_succinct_setup_proof(
+            "transported compact share-linkage proof material chunkCount does not fit usize",
+        )
+    })?;
+    if chunk_count == 0 {
+        return Err(invalid_succinct_setup_proof(
+            "transported compact share-linkage proof material chunkCount must be positive",
+        ));
+    }
+    let chunk_values = value
+        .get("chunks")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "transported compact share-linkage proof material chunks must be an array",
+            )
+        })?;
+    if chunk_values.len() != chunk_count {
+        return Err(invalid_succinct_setup_proof(
+            "transported compact share-linkage proof material chunks length must match chunkCount",
+        ));
+    }
+    let mut chunks = Vec::with_capacity(chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        compare_u64_value(
+            read_u64(chunk_value, "chunkIndex")?,
+            expected_chunk_index as u64,
+            &format!(
+                "transportedCompactVssShareLinkageProofMaterial.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex"
+            ),
+        )?;
+        chunks.push(crate::transcript_core::decode_standard_base64(
+            read_string(chunk_value, "bytesBase64")?,
+            "transported compact share-linkage proof material bytesBase64",
+        )?);
+    }
+
+    Ok(chunks)
+}
+
+fn verify_transported_compact_vss_share_linkage_proof_material_hashes(
+    value: &Value,
+    transport_hashes: &SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    compare_u64_value(
+        read_u64(value, "totalByteLength")?,
+        transport_hashes.total_byte_length,
+        "transported compact share-linkage proof material totalByteLength",
+    )?;
+    compare_string_value(
+        read_string(value, "fullObjectHash")?,
+        &transport_hashes.full_object_hash,
+        "transported compact share-linkage proof material fullObjectHash",
+    )?;
+    compare_string_value(
+        read_string(value, "chunkRoot")?,
+        &transport_hashes.chunk_root,
+        "transported compact share-linkage proof material chunkRoot",
+    )?;
+    let chunk_hash_values = value
+        .get("chunkHashes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "transported compact share-linkage proof material chunkHashes must be an array",
+            )
+        })?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(invalid_succinct_setup_proof(
+            "transported compact share-linkage proof material chunkHashes length must match supplied chunks",
+        ));
+    }
+    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+        .enumerate()
+    {
+        let Some(chunk_hash) = chunk_hash_value.as_str() else {
+            return Err(invalid_succinct_setup_proof(format!(
+                "transported compact share-linkage proof material chunkHashes.{chunk_index} must be a string"
+            )));
+        };
+        compare_string_value(
+            chunk_hash,
+            expected_chunk_hash,
+            &format!("transported compact share-linkage proof material chunkHashes.{chunk_index}"),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn verify_compact_vss_share_linkage_proof_transport_reference(
+    proof_record: &Value,
+    transport_hashes: &SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    compare_u64_value(
+        read_u64(proof_record, "proofChunkSizeBytes")?,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "compact share-linkage proof record proofChunkSizeBytes",
+    )?;
+    compare_u64_value(
+        read_u64(proof_record, "proofChunkCount")?,
+        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+            invalid_succinct_setup_proof("compact share-linkage proof chunk count does not fit u64")
+        })?,
+        "compact share-linkage proof record proofChunkCount",
+    )?;
+    compare_u64_value(
+        read_u64(proof_record, "proofTotalByteLength")?,
+        transport_hashes.total_byte_length,
+        "compact share-linkage proof record proofTotalByteLength",
+    )?;
+    compare_string_value(
+        read_string(proof_record, "proofFullObjectHash")?,
+        &transport_hashes.full_object_hash,
+        "compact share-linkage proof record proofFullObjectHash",
+    )?;
+    compare_string_value(
+        read_string(proof_record, "proofChunkRoot")?,
+        &transport_hashes.chunk_root,
+        "compact share-linkage proof record proofChunkRoot",
+    )?;
+    let proof_chunk_hashes = proof_record
+        .get("proofChunkHashes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "compact share-linkage proof record proofChunkHashes must be an array",
+            )
+        })?;
+    if proof_chunk_hashes.len() != transport_hashes.chunk_hashes.len() {
+        return Err(invalid_succinct_setup_proof(
+            "compact share-linkage proof record proofChunkHashes length must match transported chunks",
+        ));
+    }
+    for (chunk_index, (proof_chunk_hash, expected_chunk_hash)) in proof_chunk_hashes
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+        .enumerate()
+    {
+        let Some(proof_chunk_hash) = proof_chunk_hash.as_str() else {
+            return Err(invalid_succinct_setup_proof(format!(
+                "compact share-linkage proof record proofChunkHashes.{chunk_index} must be a string"
+            )));
+        };
+        compare_string_value(
+            proof_chunk_hash,
+            expected_chunk_hash,
+            &format!("compact share-linkage proof record proofChunkHashes.{chunk_index}"),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn compact_vss_share_linkage_proof_has_transport_reference(proof_record: &Value) -> bool {
+    [
+        "proofMaterialRoot",
+        "proofChunkSizeBytes",
+        "proofChunkCount",
+        "proofTotalByteLength",
+        "proofFullObjectHash",
+        "proofChunkRoot",
+        "proofChunkHashes",
+    ]
+    .iter()
+    .any(|field_name| proof_record.get(*field_name).is_some())
 }
 
 pub(crate) fn generate_compact_same_secret_bridge_proof_from_request(

@@ -234,69 +234,6 @@ pub(crate) fn compute_compact_vss_commitment_from_opening_request(
     Ok(compact_vss_commitment_computation_response(&computation))
 }
 
-pub(crate) fn verify_compact_vss_commitment_opening_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let opening = value_at_path(request, &["opening"])?;
-    let expected_commitment_root = hash_at_path(request, &["expectedCommitmentRoot"])?;
-    let expected_opening_root = hash_at_path(request, &["expectedOpeningRoot"])?;
-    let computation = compute_compact_vss_commitment_from_opening_value(opening)?;
-    if computation.commitment_root != expected_commitment_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "compact VSS commitment opening does not match the expected commitment root",
-        ));
-    }
-    if computation.opening_root != expected_opening_root {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "compact VSS commitment opening does not match the expected opening root",
-        ));
-    }
-
-    Ok(json!({
-        "ok": true,
-        "operation": "verifyCompactVssCommitmentOpening",
-        "commitmentRoot": computation.commitment_root,
-        "openingRoot": computation.opening_root,
-    }))
-}
-
-pub(crate) fn encode_compact_vss_commitment_body_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let commitment = value_at_path(request, &["commitment"])?;
-    validate_standalone_compact_vss_commitment_body(commitment, "compact VSS commitment")?;
-    let commitment_body_bytes = encode_compact_vss_commitment_body_value(commitment)?;
-
-    Ok(json!({
-        "ok": true,
-        "operation": "encodeCompactVssCommitmentBody",
-        "binaryFormat": COMPACT_VSS_COMMITMENT_BINARY_FORMAT,
-        "encodedCommitmentByteLength": compact_vss_encoded_commitment_byte_length(),
-        "commitmentBodyBytesHex": crate::transcript_core::encode_hex(&commitment_body_bytes),
-    }))
-}
-
-pub(crate) fn decode_compact_vss_commitment_body_request(
-    request: &Value,
-) -> CanonicalResult<Value> {
-    let metadata = value_at_path(request, &["metadata"])?;
-    let commitment_body_bytes_hex = string_at_path(request, &["commitmentBodyBytesHex"])?;
-    let commitment_body_bytes = crate::transcript_core::decode_hex(commitment_body_bytes_hex)?;
-    let commitment = decode_compact_vss_commitment_body_value(metadata, &commitment_body_bytes)?;
-    let commitment_root = derive_canonical_object_hash(&commitment)?;
-
-    Ok(json!({
-        "ok": true,
-        "operation": "decodeCompactVssCommitmentBody",
-        "binaryFormat": COMPACT_VSS_COMMITMENT_BINARY_FORMAT,
-        "encodedCommitmentByteLength": compact_vss_encoded_commitment_byte_length(),
-        "commitment": commitment,
-        "commitmentRoot": commitment_root,
-    }))
-}
-
 pub(crate) fn verify_compact_vss_coefficient_commitment_set_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
@@ -1614,90 +1551,6 @@ fn verify_compact_vss_commitment_body(
     }
 
     Ok(commitment)
-}
-
-fn encode_compact_vss_commitment_body_value(commitment: &Value) -> CanonicalResult<Vec<u8>> {
-    validate_standalone_compact_vss_commitment_body(commitment, "compact VSS commitment")?;
-    let commitment_limbs = array_at_path(commitment, &["commitmentLimbs"])?;
-    let mut commitment_body_bytes =
-        Vec::with_capacity(compact_vss_encoded_commitment_byte_length());
-    for commitment_limb in commitment_limbs {
-        let coordinates = array_at_path(commitment_limb, &["coordinates"])?;
-        for coordinate in coordinates {
-            let coordinate_value = coordinate.as_u64().ok_or_else(|| {
-                invalid_compact_vss_input(
-                    "compact VSS commitment coordinate must be an unsigned integer",
-                )
-            })?;
-            commitment_body_bytes.extend_from_slice(&coordinate_value.to_le_bytes());
-        }
-    }
-
-    Ok(commitment_body_bytes)
-}
-
-fn decode_compact_vss_commitment_body_value(
-    metadata: &Value,
-    commitment_body_bytes: &[u8],
-) -> CanonicalResult<Value> {
-    let commitment_role = string_at_path(metadata, &["commitmentRole"])?;
-    validate_compact_vss_commitment_role(commitment_role)?;
-    let commitment_context_hash = hash_at_path(metadata, &["commitmentContextHash"])?;
-    let public_matrix_seed_hash = hash_at_path(metadata, &["publicMatrixSeedHash"])?;
-    let rns_limb_index = usize_at_path(metadata, &["rnsLimbIndex"])?;
-    let rns_prime = read_positive_u64_at_path(metadata, &["rnsPrime"], "metadata rnsPrime")?;
-    let ring_degree =
-        read_positive_usize_at_path(metadata, &["ringDegree"], "metadata ringDegree")?;
-    if commitment_body_bytes.len() != compact_vss_encoded_commitment_byte_length() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::MalformedLength,
-            "compact VSS encoded commitment body length must match the compact commitment profile",
-        ));
-    }
-
-    let mut offset = 0_usize;
-    let commitment_limbs = COMPACT_VSS_COMMITMENT_MODULUS_LIMB_INDICES
-        .iter()
-        .map(|commitment_modulus_index| {
-            let modulus = DATA_PRIMES[*commitment_modulus_index];
-            let mut coordinates = Vec::with_capacity(COMPACT_VSS_OUTPUT_COORDINATE_COUNT);
-            for coordinate_index in 0..COMPACT_VSS_OUTPUT_COORDINATE_COUNT {
-                let mut coordinate_bytes = [0_u8; 8];
-                coordinate_bytes.copy_from_slice(&commitment_body_bytes[offset..offset + 8]);
-                offset += 8;
-                let coordinate_value = u64::from_le_bytes(coordinate_bytes);
-                if coordinate_value >= modulus {
-                    return Err(CanonicalError::new(
-                        CanonicalErrorCode::InvalidFixture,
-                        format!(
-                            "compact VSS encoded commitment body coordinate {coordinate_index} must be below the commitment modulus"
-                        ),
-                    ));
-                }
-                coordinates.push(coordinate_value);
-            }
-
-            Ok(json!({
-                "commitmentModulusIndex": commitment_modulus_index,
-                "modulus": modulus,
-                "coordinates": coordinates,
-            }))
-        })
-        .collect::<CanonicalResult<Vec<_>>>()?;
-
-    Ok(json!({
-        "objectType": "CompactVssCommitment",
-        "objectVersion": 1,
-        "commitmentRole": commitment_role,
-        "commitmentContextHash": commitment_context_hash,
-        "publicMatrixSeedHash": public_matrix_seed_hash,
-        "rnsLimbIndex": rns_limb_index,
-        "rnsPrime": rns_prime,
-        "ringDegree": ring_degree,
-        "outputCoordinateCount": COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-        "randomnessColumnCount": COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-        "commitmentLimbs": commitment_limbs,
-    }))
 }
 
 fn verify_compact_vss_coefficient_record(
@@ -3169,16 +3022,14 @@ pub(in crate::bgv::setup) mod tests {
     use serde_json::json;
 
     use super::{
-        COMPACT_VSS_COMMITMENT_BINARY_FORMAT, COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT,
-        COMPACT_VSS_MESSAGE_DIGIT_BASE, COMPACT_VSS_OUTPUT_COORDINATE_COUNT,
-        COMPACT_VSS_RANDOMNESS_COLUMN_COUNT, CompactVssCommitmentComputation,
-        CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
+        COMPACT_VSS_MESSAGE_BASE_DIGIT_TRIT_COUNT, COMPACT_VSS_MESSAGE_DIGIT_BASE,
+        COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        CompactVssCommitmentComputation, CompactVssCommitmentOpeningInput,
+        compact_vss_canonical_message_digit_columns, compact_vss_encoded_commitment_byte_length,
         compact_vss_message_encoding_layout, compute_compact_vss_commitment_from_opening,
         compute_compact_vss_commitment_from_opening_request,
-        decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
         verify_compact_vss_aggregate_threshold_commitment_set_request,
         verify_compact_vss_coefficient_commitment_set_request,
-        verify_compact_vss_commitment_opening_request,
         verify_compact_vss_recipient_share_commitment_set_request,
         verify_compact_vss_share_linkage_statement_request,
     };
@@ -3231,25 +3082,10 @@ pub(in crate::bgv::setup) mod tests {
             128
         );
 
-        let verification = verify_compact_vss_commitment_opening_request(&json!({
-            "opening": request,
-            "expectedCommitmentRoot": response["commitmentRoot"],
-            "expectedOpeningRoot": response["openingRoot"],
-        }))?;
-        assert_eq!(
-            verification["operation"],
-            "verifyCompactVssCommitmentOpening"
-        );
-
         let mut tampered_opening = compact_opening_request();
         tampered_opening["messageCoefficients"][3] = json!(12_u64);
         assert!(
-            verify_compact_vss_commitment_opening_request(&json!({
-                "opening": tampered_opening,
-                "expectedCommitmentRoot": response["commitmentRoot"],
-                "expectedOpeningRoot": response["openingRoot"],
-            }))
-            .is_err(),
+            compute_compact_vss_commitment_from_opening_request(&tampered_opening).is_err(),
             "tampered compact opening must reject"
         );
 
@@ -3306,86 +3142,6 @@ pub(in crate::bgv::setup) mod tests {
             compute_compact_vss_commitment_from_opening_request(&mismatched_digits_request)
                 .is_err(),
             "explicit compact VSS message digit columns must decode to the declared message coefficients"
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn compact_commitment_body_binary_codec_round_trips_and_rejects_malformed_bodies()
-    -> CanonicalResult<()> {
-        let request = compact_opening_request();
-        let response = compute_compact_vss_commitment_from_opening_request(&request)?;
-        let encoded = encode_compact_vss_commitment_body_request(&json!({
-            "commitment": response["commitment"].clone(),
-        }))?;
-        let commitment_body_bytes_hex = encoded["commitmentBodyBytesHex"]
-            .as_str()
-            .expect("encoded commitment body hex")
-            .to_string();
-
-        assert_eq!(encoded["operation"], "encodeCompactVssCommitmentBody");
-        assert_eq!(
-            encoded["binaryFormat"],
-            COMPACT_VSS_COMMITMENT_BINARY_FORMAT
-        );
-        assert_eq!(encoded["encodedCommitmentByteLength"], json!(384_u64));
-        assert_eq!(commitment_body_bytes_hex.len(), 768);
-
-        let metadata = compact_commitment_body_metadata(&response["commitment"])?;
-        let decoded = decode_compact_vss_commitment_body_request(&json!({
-            "metadata": metadata,
-            "commitmentBodyBytesHex": commitment_body_bytes_hex,
-        }))?;
-
-        assert_eq!(decoded["operation"], "decodeCompactVssCommitmentBody");
-        assert_eq!(decoded["commitment"], response["commitment"]);
-        assert_eq!(decoded["commitmentRoot"], response["commitmentRoot"]);
-
-        let metadata = compact_commitment_body_metadata(&response["commitment"])?;
-        let short_body_hex = decoded["commitment"]
-            .as_object()
-            .and_then(|_| encoded["commitmentBodyBytesHex"].as_str())
-            .expect("encoded commitment body hex");
-        assert!(
-            decode_compact_vss_commitment_body_request(&json!({
-                "metadata": metadata,
-                "commitmentBodyBytesHex": &short_body_hex[..short_body_hex.len() - 16],
-            }))
-            .is_err(),
-            "short compact commitment body must reject"
-        );
-
-        let metadata = compact_commitment_body_metadata(&response["commitment"])?;
-        let mut out_of_range_body = crate::transcript_core::decode_hex(
-            encoded["commitmentBodyBytesHex"]
-                .as_str()
-                .expect("encoded commitment body hex"),
-        )?;
-        let first_modulus = response["commitment"]["commitmentLimbs"][0]["modulus"]
-            .as_u64()
-            .expect("first commitment modulus");
-        out_of_range_body[..8].copy_from_slice(&first_modulus.to_le_bytes());
-        assert!(
-            decode_compact_vss_commitment_body_request(&json!({
-                "metadata": metadata,
-                "commitmentBodyBytesHex": crate::transcript_core::encode_hex(&out_of_range_body),
-            }))
-            .is_err(),
-            "out-of-range compact commitment coordinate must reject"
-        );
-
-        let mut reordered_commitment = response["commitment"].clone();
-        reordered_commitment["commitmentLimbs"]
-            .as_array_mut()
-            .expect("commitment limbs")
-            .reverse();
-        assert!(
-            encode_compact_vss_commitment_body_request(&json!({
-                "commitment": reordered_commitment,
-            }))
-            .is_err(),
-            "non-canonical commitment limb order must reject"
         );
 
         Ok(())
@@ -3678,15 +3434,8 @@ pub(in crate::bgv::setup) mod tests {
                 "messageDigitColumns": [low_digit_column, high_digit_column],
                 "randomnessByColumn": [randomness_first, randomness_second],
             });
-            let computation = compute_compact_vss_commitment_from_opening_request(&request)?;
-            let encoded = encode_compact_vss_commitment_body_request(&json!({
-                "commitment": computation["commitment"].clone(),
-            }))?;
-            encoded_byte_lengths.push(
-                encoded["encodedCommitmentByteLength"]
-                    .as_u64()
-                    .expect("encoded commitment byte length"),
-            );
+            compute_compact_vss_commitment_from_opening_request(&request)?;
+            encoded_byte_lengths.push(compact_vss_encoded_commitment_byte_length() as u64);
         }
 
         assert_eq!(
@@ -3704,19 +3453,6 @@ pub(in crate::bgv::setup) mod tests {
         );
 
         Ok(())
-    }
-
-    fn compact_commitment_body_metadata(
-        commitment: &serde_json::Value,
-    ) -> CanonicalResult<serde_json::Value> {
-        Ok(json!({
-            "commitmentRole": commitment["commitmentRole"].clone(),
-            "commitmentContextHash": commitment["commitmentContextHash"].clone(),
-            "publicMatrixSeedHash": commitment["publicMatrixSeedHash"].clone(),
-            "rnsLimbIndex": commitment["rnsLimbIndex"].clone(),
-            "rnsPrime": commitment["rnsPrime"].clone(),
-            "ringDegree": commitment["ringDegree"].clone(),
-        }))
     }
 
     pub(in crate::bgv::setup) fn compact_coefficient_commitment_set()

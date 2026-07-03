@@ -45,6 +45,11 @@ use self::evaluation_key_material_transport::{
     verify_public_evaluation_key_set, verify_required_public_evaluation_key_set,
 };
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
+    TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
+    trustee_evaluation_key_statement_from_package,
+};
 use self::evaluation_key_share_rounds::{
     EvaluationKeyProofCommonBinding, evaluation_key_proof_common_binding,
     expected_galois_key_switch_seed, expected_relinearization_key_switch_seed,
@@ -81,8 +86,6 @@ use self::public_key_shares::{
     verify_public_key_material_acceptance_boundary, verify_public_key_share_proofs,
     verify_public_key_shares,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::same_secret_consistency::same_secret_anchor_proof_material_root;
 use self::same_secret_consistency::{
     SameSecretProofBinding, SameSecretStatementBinding, same_secret_consistency_root_from_package,
     same_secret_constant_commitment_values_from_material, same_secret_proof_bindings_from_package,

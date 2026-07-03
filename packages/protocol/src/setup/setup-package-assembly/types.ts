@@ -7,6 +7,8 @@ import type {
     CompactVssRecipientShareCommitmentSet,
     CompactVssSameSecretBridgeStatementSet,
     CompactVssShareLinkageStatement,
+    TransportedCompactSameSecretBridgeProofMaterialSet,
+    TransportedCompactVssShareLinkageProofMaterialSet,
 } from '../compact-vss-commitments.js';
 import type {
     GaloisKeyShareBatch,
@@ -157,6 +159,8 @@ export type SetupPackageVerificationInputSource = Readonly<{
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
+    readonly transportedCompactVssShareLinkageProofMaterial?: TransportedCompactVssShareLinkageProofMaterialSet;
+    readonly transportedCompactSameSecretBridgeProofMaterial?: TransportedCompactSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
     readonly verifiedSetupProofMaterials?: VerifiedSetupProofMaterialSet;

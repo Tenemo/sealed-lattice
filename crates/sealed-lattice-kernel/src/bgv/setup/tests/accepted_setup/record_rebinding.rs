@@ -198,33 +198,6 @@ pub(super) fn rebind_collective_same_secret_consistency_root(package: &mut serde
     );
 }
 
-pub(super) fn rebind_same_secret_proof_record_root(
-    package: &mut serde_json::Value,
-    proof_record_index: usize,
-) {
-    let proof_record = &mut package["sameSecretProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("same-secret proof records")[proof_record_index];
-    proof_record
-        .as_object_mut()
-        .expect("same-secret proof record")
-        .remove("sameSecretProofRoot");
-    proof_record["sameSecretProofRoot"] = serde_json::json!(
-        derive_canonical_object_hash(proof_record).expect("same-secret proof root")
-    );
-}
-
-pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_json::Value) {
-    package["sameSecretProofs"]
-        .as_object_mut()
-        .expect("same-secret proof set")
-        .remove("sameSecretProofSetRoot");
-    package["sameSecretProofs"]["sameSecretProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["sameSecretProofs"])
-            .expect("same-secret proof set root")
-    );
-}
-
 pub(super) fn rebind_collective_public_key_succinct_proof_roots(package: &mut serde_json::Value) {
     let proof_records = package["publicKeyShareSuccinctProofs"]["proofRecords"]
         .as_array_mut()

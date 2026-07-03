@@ -20,6 +20,10 @@ const COMPACT_VSS_SAME_SECRET_BRIDGE_RELATION: &str = "target-basis compact cons
 const COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "compact-same-secret-bridge";
 const COMPACT_SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN: &str =
     "sealed-lattice/setup/compact-same-secret-bridge/proof-bytes-v1";
+const COMPACT_SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE: &str =
+    "SetupTransportedCompactSameSecretBridgeProofMaterialSet";
+const COMPACT_SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE: &str =
+    "SetupTransportedCompactSameSecretBridgeProofMaterial";
 const COMPACT_VSS_SAME_SECRET_BRIDGE_INTEGER_SUPPORT: &str = "the bridge proof must show one centered ternary integer coefficient vector whose signed coefficients reduce into every bound data-basis and target-basis limb";
 const COMPACT_VSS_SAME_SECRET_BRIDGE_SIGNED_REPRESENTATIVE_CONVENTION: &str = "coefficients are interpreted as signed representatives before reduction into each data-basis or target-basis RNS prime";
 const COMPACT_VSS_SAME_SECRET_BRIDGE_TARGET_BASIS_LIMB_ORDER: &str = "target constant roots are ordered by contiguous target-basis rnsLimbIndex values starting at zero and bind the listed target-basis prime";
@@ -371,22 +375,13 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
             bridge_statement_root,
             "compact same-secret bridge proof record statement root",
         )?;
-        let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
-        let proof_bytes_base64 = string_at_path(proof_record, &["proofBytesBase64"])?;
-        let proof_bytes = crate::transcript_core::decode_standard_base64(
-            proof_bytes_base64,
-            "compact same-secret bridge proofBytesBase64",
+        let resolved_proof_bytes = resolve_compact_same_secret_bridge_proof_bytes(
+            proof_record,
+            request,
+            bridge_statement_root,
         )?;
+        let proof_bytes = resolved_proof_bytes.proof_bytes;
         let proof_byte_length = proof_bytes.len();
-        let expected_proof_bytes_hash = hash512_hex(
-            COMPACT_SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
-            &[&proof_bytes],
-        );
-        compare_required_string(
-            proof_bytes_hash,
-            &expected_proof_bytes_hash,
-            "compact same-secret bridge proof record proofBytesHash",
-        )?;
         total_proof_byte_length = total_proof_byte_length
             .checked_add(proof_byte_length)
             .ok_or_else(|| {
@@ -395,23 +390,8 @@ pub(crate) fn verify_compact_vss_same_secret_bridge_proof_material_set_request(
                     "compact same-secret bridge proof byte length overflowed",
                 )
             })?;
-
-        let proof_record_without_root = json!({
-            "objectType": "CompactVssSameSecretBridgeProofRecord",
-            "objectVersion": 1,
-            "proofFamily": COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
-            "compactSameSecretBridgeStatementRoot": bridge_statement_root,
-            "proofBytesHash": proof_bytes_hash,
-            "proofBytesBase64": proof_bytes_base64,
-        });
-        let proof_record_root = hash_at_path(proof_record, &["proofRecordRoot"])?;
-        let expected_proof_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
-        if expected_proof_record_root != proof_record_root {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::ComponentMismatch,
-                "compact same-secret bridge proof record root does not match its bound proof bytes",
-            ));
-        }
+        let proof_record_without_root = resolved_proof_bytes.proof_record_without_root;
+        let proof_record_root = resolved_proof_bytes.proof_record_root;
 
         verify_reconstructed_compact_same_secret_bridge_proof(
             ReconstructedCompactSameSecretBridgeProofVerification {
@@ -660,6 +640,395 @@ fn verify_reconstructed_compact_same_secret_bridge_proof(
     )?;
 
     Ok(())
+}
+
+// Resolved compact same-secret bridge proof bytes plus the canonical proof
+// record whose root binds them. The embedded form carries the proof bytes as
+// base64 inside the record; the transported form streams the bytes through the
+// shared setup proof-material transport and binds the transport reference into
+// the record root instead of the base64 bytes.
+struct ResolvedCompactSameSecretBridgeProofBytes {
+    proof_bytes: Vec<u8>,
+    proof_record_without_root: Value,
+    proof_record_root: String,
+}
+
+fn resolve_compact_same_secret_bridge_proof_bytes(
+    proof_record: &Value,
+    request: &Value,
+    bridge_statement_root: &str,
+) -> CanonicalResult<ResolvedCompactSameSecretBridgeProofBytes> {
+    let proof_bytes_hash = hash_at_path(proof_record, &["proofBytesHash"])?;
+    let proof_record_root = hash_at_path(proof_record, &["proofRecordRoot"])?.to_string();
+    if proof_record.get("proofBytesBase64").is_some() {
+        if proof_record.get("proofBytesEncoding").is_some()
+            || compact_same_secret_bridge_proof_has_transport_reference(proof_record)
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "compact same-secret bridge proof record must not mix embedded proofBytesBase64 with transported proof material",
+            ));
+        }
+        let proof_bytes_base64 = string_at_path(proof_record, &["proofBytesBase64"])?;
+        let proof_bytes = crate::transcript_core::decode_standard_base64(
+            proof_bytes_base64,
+            "compact same-secret bridge proofBytesBase64",
+        )?;
+        let expected_proof_bytes_hash = hash512_hex(
+            COMPACT_SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
+            &[&proof_bytes],
+        );
+        compare_required_string(
+            proof_bytes_hash,
+            &expected_proof_bytes_hash,
+            "compact same-secret bridge proof record proofBytesHash",
+        )?;
+        let proof_record_without_root = json!({
+            "objectType": "CompactVssSameSecretBridgeProofRecord",
+            "objectVersion": 1,
+            "proofFamily": COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
+            "compactSameSecretBridgeStatementRoot": bridge_statement_root,
+            "proofBytesHash": proof_bytes_hash,
+            "proofBytesBase64": proof_bytes_base64,
+        });
+        let expected_proof_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
+        if expected_proof_record_root != proof_record_root {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "compact same-secret bridge proof record root does not match its bound proof bytes",
+            ));
+        }
+
+        return Ok(ResolvedCompactSameSecretBridgeProofBytes {
+            proof_bytes,
+            proof_record_without_root,
+            proof_record_root,
+        });
+    }
+
+    compare_required_string(
+        string_at_path(proof_record, &["proofBytesEncoding"])?,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        "compact same-secret bridge proof record proofBytesEncoding",
+    )?;
+    let proof_material_root = hash_at_path(proof_record, &["proofMaterialRoot"])?;
+    let transported_binding = transported_compact_same_secret_bridge_proof_material_binding(
+        request,
+        proof_material_root,
+    )?;
+    verify_compact_same_secret_bridge_proof_transport_reference(
+        proof_record,
+        &transported_binding.transport_hashes,
+    )?;
+    compare_required_string(
+        proof_bytes_hash,
+        &transported_binding.proof_bytes_hash,
+        "compact same-secret bridge proof record proofBytesHash",
+    )?;
+    let proof_record_without_root = json!({
+        "objectType": "CompactVssSameSecretBridgeProofRecord",
+        "objectVersion": 1,
+        "proofFamily": COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
+        "compactSameSecretBridgeStatementRoot": bridge_statement_root,
+        "proofBytesHash": proof_bytes_hash,
+        "proofBytesEncoding": SETUP_PROOF_MATERIAL_ENCODING,
+        "proofMaterialRoot": proof_material_root,
+        "proofChunkSizeBytes": SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "proofChunkCount": transported_binding.transport_hashes.chunk_hashes.len(),
+        "proofTotalByteLength": transported_binding.transport_hashes.total_byte_length,
+        "proofFullObjectHash": transported_binding.transport_hashes.full_object_hash,
+        "proofChunkRoot": transported_binding.transport_hashes.chunk_root,
+        "proofChunkHashes": transported_binding.transport_hashes.chunk_hashes,
+    });
+    let expected_proof_record_root = derive_canonical_object_hash(&proof_record_without_root)?;
+    if expected_proof_record_root != proof_record_root {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "compact same-secret bridge proof record root does not match its transported proof material",
+        ));
+    }
+
+    Ok(ResolvedCompactSameSecretBridgeProofBytes {
+        proof_bytes: transported_binding.proof_bytes,
+        proof_record_without_root,
+        proof_record_root,
+    })
+}
+
+struct CompactSameSecretBridgeProofTransportBinding {
+    transport_hashes: SetupProofMaterialTransportHashes,
+    proof_bytes: Vec<u8>,
+    proof_bytes_hash: String,
+}
+
+fn transported_compact_same_secret_bridge_proof_material_binding(
+    request: &Value,
+    expected_proof_material_root: &str,
+) -> CanonicalResult<CompactSameSecretBridgeProofTransportBinding> {
+    let material_set = value_at_path(request, &["transportedCompactSameSecretBridgeProofMaterial"])
+        .map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "transportedCompactSameSecretBridgeProofMaterial is required by transported compact same-secret bridge proof records",
+            )
+        })?;
+    verify_transported_compact_same_secret_bridge_proof_material_set_header(material_set)?;
+    let proof_materials = array_at_path(material_set, &["proofMaterials"])?;
+    let mut matching_binding = None;
+    for (proof_material_index, proof_material) in proof_materials.iter().enumerate() {
+        verify_transported_compact_same_secret_bridge_proof_material_header(proof_material)?;
+        let proof_material_root = hash_at_path(proof_material, &["proofMaterialRoot"])?;
+        if proof_material_root != expected_proof_material_root {
+            continue;
+        }
+        if matching_binding.is_some() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "transportedCompactSameSecretBridgeProofMaterial contains duplicate proofMaterialRoot entries",
+            ));
+        }
+        let chunks = if proof_material.get("chunks").is_some() {
+            Arc::new(transported_compact_same_secret_bridge_proof_chunks(
+                proof_material,
+                proof_material_index,
+            )?)
+        } else {
+            verified_setup_proof_material_chunks_from_request(
+                request,
+                COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
+                expected_proof_material_root,
+                proof_material,
+                "transportedCompactSameSecretBridgeProofMaterial.proofMaterials",
+            )?
+        };
+        let transport_hashes = setup_proof_material_transport_hashes(
+            COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY,
+            chunks.as_ref(),
+            SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        )?;
+        verify_transported_compact_same_secret_bridge_proof_material_hashes(
+            proof_material,
+            &transport_hashes,
+        )?;
+        let proof_bytes = chunks.iter().flatten().copied().collect::<Vec<u8>>();
+        let proof_bytes_hash = hash512_hex(
+            COMPACT_SAME_SECRET_BRIDGE_PROOF_BYTES_HASH_DOMAIN,
+            &[&proof_bytes],
+        );
+        matching_binding = Some(CompactSameSecretBridgeProofTransportBinding {
+            transport_hashes,
+            proof_bytes,
+            proof_bytes_hash,
+        });
+    }
+
+    matching_binding.ok_or_else(|| {
+        CanonicalError::new(
+            CanonicalErrorCode::ComponentMismatch,
+            "transportedCompactSameSecretBridgeProofMaterial is missing the requested proofMaterialRoot",
+        )
+    })
+}
+
+fn verify_transported_compact_same_secret_bridge_proof_material_set_header(
+    value: &Value,
+) -> CanonicalResult<()> {
+    for (field_name, expected_value) in [
+        (
+            "objectType",
+            COMPACT_SAME_SECRET_BRIDGE_TRANSPORT_SET_OBJECT_TYPE,
+        ),
+        ("proofFamily", COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY),
+    ] {
+        compare_required_string(
+            string_at_path(value, &[field_name])?,
+            expected_value,
+            &format!("transportedCompactSameSecretBridgeProofMaterial.{field_name}"),
+        )?;
+    }
+    compare_required_u64(
+        unsigned_at_path(value, &["objectVersion"])?,
+        1,
+        "transportedCompactSameSecretBridgeProofMaterial.objectVersion",
+    )
+}
+
+fn verify_transported_compact_same_secret_bridge_proof_material_header(
+    value: &Value,
+) -> CanonicalResult<()> {
+    for (field_name, expected_value) in [
+        (
+            "objectType",
+            COMPACT_SAME_SECRET_BRIDGE_TRANSPORT_OBJECT_TYPE,
+        ),
+        ("proofFamily", COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY),
+    ] {
+        compare_required_string(
+            string_at_path(value, &[field_name])?,
+            expected_value,
+            &format!("transported compact same-secret bridge proof material {field_name}"),
+        )?;
+    }
+    compare_required_u64(
+        unsigned_at_path(value, &["objectVersion"])?,
+        1,
+        "transported compact same-secret bridge proof material objectVersion",
+    )?;
+    hash_at_path(value, &["proofMaterialRoot"])?;
+
+    Ok(())
+}
+
+fn transported_compact_same_secret_bridge_proof_chunks(
+    value: &Value,
+    proof_material_index: usize,
+) -> CanonicalResult<Vec<Vec<u8>>> {
+    compare_required_u64(
+        unsigned_at_path(value, &["chunkSizeBytes"])?,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "transported compact same-secret bridge proof material chunkSizeBytes",
+    )?;
+    let chunk_count = read_positive_usize_at_path(
+        value,
+        &["chunkCount"],
+        "transported compact same-secret bridge proof material chunkCount",
+    )?;
+    let chunk_values = array_at_path(value, &["chunks"])?;
+    if chunk_values.len() != chunk_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported compact same-secret bridge proof material chunks length must match chunkCount",
+        ));
+    }
+    let mut chunks = Vec::with_capacity(chunk_count);
+    for (expected_chunk_index, chunk_value) in chunk_values.iter().enumerate() {
+        compare_required_u64(
+            unsigned_at_path(chunk_value, &["chunkIndex"])?,
+            expected_chunk_index as u64,
+            &format!(
+                "transportedCompactSameSecretBridgeProofMaterial.proofMaterials.{proof_material_index}.chunks.{expected_chunk_index}.chunkIndex"
+            ),
+        )?;
+        chunks.push(crate::transcript_core::decode_standard_base64(
+            string_at_path(chunk_value, &["bytesBase64"])?,
+            "transported compact same-secret bridge proof material bytesBase64",
+        )?);
+    }
+
+    Ok(chunks)
+}
+
+fn verify_transported_compact_same_secret_bridge_proof_material_hashes(
+    value: &Value,
+    transport_hashes: &SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    compare_required_u64(
+        unsigned_at_path(value, &["totalByteLength"])?,
+        transport_hashes.total_byte_length,
+        "transported compact same-secret bridge proof material totalByteLength",
+    )?;
+    compare_required_string(
+        hash_at_path(value, &["fullObjectHash"])?,
+        &transport_hashes.full_object_hash,
+        "transported compact same-secret bridge proof material fullObjectHash",
+    )?;
+    compare_required_string(
+        hash_at_path(value, &["chunkRoot"])?,
+        &transport_hashes.chunk_root,
+        "transported compact same-secret bridge proof material chunkRoot",
+    )?;
+    let chunk_hash_values = array_at_path(value, &["chunkHashes"])?;
+    if chunk_hash_values.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "transported compact same-secret bridge proof material chunkHashes length must match supplied chunks",
+        ));
+    }
+    for (chunk_index, (chunk_hash_value, expected_chunk_hash)) in chunk_hash_values
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+        .enumerate()
+    {
+        compare_required_string(
+            hash_at_path(chunk_hash_value, &[])?,
+            expected_chunk_hash,
+            &format!(
+                "transported compact same-secret bridge proof material chunkHashes.{chunk_index}"
+            ),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn verify_compact_same_secret_bridge_proof_transport_reference(
+    proof_record: &Value,
+    transport_hashes: &SetupProofMaterialTransportHashes,
+) -> CanonicalResult<()> {
+    compare_required_u64(
+        unsigned_at_path(proof_record, &["proofChunkSizeBytes"])?,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
+        "compact same-secret bridge proof record proofChunkSizeBytes",
+    )?;
+    compare_required_u64(
+        unsigned_at_path(proof_record, &["proofChunkCount"])?,
+        u64::try_from(transport_hashes.chunk_hashes.len()).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact same-secret bridge proof chunk count does not fit u64",
+            )
+        })?,
+        "compact same-secret bridge proof record proofChunkCount",
+    )?;
+    compare_required_u64(
+        unsigned_at_path(proof_record, &["proofTotalByteLength"])?,
+        transport_hashes.total_byte_length,
+        "compact same-secret bridge proof record proofTotalByteLength",
+    )?;
+    compare_required_string(
+        hash_at_path(proof_record, &["proofFullObjectHash"])?,
+        &transport_hashes.full_object_hash,
+        "compact same-secret bridge proof record proofFullObjectHash",
+    )?;
+    compare_required_string(
+        hash_at_path(proof_record, &["proofChunkRoot"])?,
+        &transport_hashes.chunk_root,
+        "compact same-secret bridge proof record proofChunkRoot",
+    )?;
+    let proof_chunk_hashes = array_at_path(proof_record, &["proofChunkHashes"])?;
+    if proof_chunk_hashes.len() != transport_hashes.chunk_hashes.len() {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact same-secret bridge proof record proofChunkHashes length must match transported chunks",
+        ));
+    }
+    for (chunk_index, (proof_chunk_hash, expected_chunk_hash)) in proof_chunk_hashes
+        .iter()
+        .zip(transport_hashes.chunk_hashes.iter())
+        .enumerate()
+    {
+        compare_required_string(
+            hash_at_path(proof_chunk_hash, &[])?,
+            expected_chunk_hash,
+            &format!("compact same-secret bridge proof record proofChunkHashes.{chunk_index}"),
+        )?;
+    }
+
+    Ok(())
+}
+
+fn compact_same_secret_bridge_proof_has_transport_reference(proof_record: &Value) -> bool {
+    [
+        "proofMaterialRoot",
+        "proofChunkSizeBytes",
+        "proofChunkCount",
+        "proofTotalByteLength",
+        "proofFullObjectHash",
+        "proofChunkRoot",
+        "proofChunkHashes",
+    ]
+    .iter()
+    .any(|field_name| proof_record.get(*field_name).is_some())
 }
 
 fn verify_same_secret_evidence_sets(

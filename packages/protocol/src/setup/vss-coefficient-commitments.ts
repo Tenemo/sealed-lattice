@@ -2,10 +2,10 @@
 // lives in the cohesive sub-modules under ./vss-coefficient-commitments/, grouped
 // by the domain problem each part solves: shared vocabulary and types, stateless
 // encoding and sampling primitives, per-source-trustee opening-state generation,
-// BDLOP commitment value shaping, transported-material decoding, and the
-// embedded commitment bundle constructor. The commitments built here are the
-// data basis the same-secret proof family opens; the compact VSS commitment
-// sets replace them as the transported public setup material.
+// BDLOP commitment value shaping, and the embedded commitment bundle constructor.
+// The commitments built here are the data basis the same-secret proof family
+// opens; the compact VSS commitment sets replace them as the transported public
+// setup material.
 export {
     setupCommitmentRandomnessWidth,
     acceptedBgvFullRingDegree,
@@ -31,7 +31,6 @@ export {
     type SetupTransportedVssCoefficientCommitmentMaterial,
     type SetupTransportedVssCoefficientCommitmentMaterialReference,
     type SetupTransportedVssCoefficientCommitmentMaterialLike,
-    type BinaryChunkedVssCoefficientCommitmentMaterialSet,
     type SetupPackageVssCoefficientCommitmentMaterialSet,
     type VerifiedVssCoefficientCommitmentMaterial,
     type VssSourceTrusteeOpeningMaterial,
@@ -44,14 +43,7 @@ export {
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
 } from './vss-coefficient-commitments/opening-state.js';
-export { setupCommitmentRootPayload } from './vss-coefficient-commitments/commitment-values.js';
 export {
-    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
-    materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
-} from './vss-coefficient-commitments/binary-transport.js';
-export {
-    createBinaryChunkedVssCoefficientCommitmentBundle,
-    createStreamingBinaryChunkedVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
 } from './vss-coefficient-commitments/commitment-bundles.js';

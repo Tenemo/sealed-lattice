@@ -42,6 +42,13 @@ pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
     "public-key-share",
     "same-secret-linkage-anchor",
     "trustee-evaluation-key",
+    // Compact public VSS material proof families. At production roster sizes the
+    // compact share-linkage and same-secret bridge proof material are the largest
+    // objects in the setup package, so they stream through the same sidecar
+    // transport as the four families above instead of riding embedded in the
+    // package JSON (which overflows the canonical string encoder at n=10).
+    "compact-vss-share-linkage",
+    "compact-same-secret-bridge",
 ];
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {

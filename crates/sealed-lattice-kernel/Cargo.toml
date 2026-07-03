@@ -7,9 +7,6 @@ publish = false
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-[features]
-target-decryption-development-commands = []
-
 [dependencies]
 fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-65"] }
 num-bigint = "0.4"

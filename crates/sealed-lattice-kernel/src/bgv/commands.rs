@@ -19,10 +19,9 @@ use crate::{
             begin_threshold_share_commitment_transport_derivation_stream_request,
             compute_compact_vss_commitment_from_opening_request,
             compute_setup_commitment_from_opening_request,
-            decode_compact_vss_commitment_body_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
-            describe_collective_bgv_setup_parameters, encode_compact_vss_commitment_body_request,
+            describe_collective_bgv_setup_parameters,
             finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
             generate_compact_same_secret_bridge_proof_from_request,
@@ -32,7 +31,6 @@ use crate::{
             generate_private_vss_share_proof_from_request,
             generate_trustee_evaluation_key_proof_from_request,
             verify_collective_bgv_setup_package_from_request,
-            verify_compact_vss_commitment_opening_request,
             verify_local_trustee_setup_state_from_request,
             verify_passive_setup_package_from_request,
             verify_private_vss_share_envelope_from_request,
@@ -140,18 +138,6 @@ pub(crate) fn compute_compact_vss_commitment_from_opening(
     request: &Value,
 ) -> CanonicalResult<Value> {
     compute_compact_vss_commitment_from_opening_request(request)
-}
-
-pub(crate) fn verify_compact_vss_commitment_opening(request: &Value) -> CanonicalResult<Value> {
-    verify_compact_vss_commitment_opening_request(request)
-}
-
-pub(crate) fn encode_compact_vss_commitment_body(request: &Value) -> CanonicalResult<Value> {
-    encode_compact_vss_commitment_body_request(request)
-}
-
-pub(crate) fn decode_compact_vss_commitment_body(request: &Value) -> CanonicalResult<Value> {
-    decode_compact_vss_commitment_body_request(request)
 }
 
 pub(crate) fn generate_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {

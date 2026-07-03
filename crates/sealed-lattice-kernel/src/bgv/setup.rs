@@ -48,10 +48,8 @@ pub(crate) use compact_same_secret_bridge::{
 };
 pub(crate) use compact_vss_commitment::{
     compute_compact_vss_commitment_from_opening_request,
-    decode_compact_vss_commitment_body_request, encode_compact_vss_commitment_body_request,
     verify_compact_vss_aggregate_threshold_commitment_set_request,
     verify_compact_vss_coefficient_commitment_set_request,
-    verify_compact_vss_commitment_opening_request,
     verify_compact_vss_recipient_share_commitment_set_request,
     verify_compact_vss_share_linkage_statement_request,
 };

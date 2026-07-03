@@ -30,7 +30,7 @@ pub(super) enum CompactVssPublicMaterialVerification {
 
 pub(super) fn verify_optional_compact_vss_public_material(
     setup_package: &Value,
-    _request: &Value,
+    request: &Value,
 ) -> CanonicalResult<CompactVssPublicMaterialVerification> {
     let compact_public_material_fields = [
         COMPACT_VSS_COEFFICIENT_COMMITMENT_SET_FIELD,
@@ -66,7 +66,7 @@ pub(super) fn verify_optional_compact_vss_public_material(
         ));
     }
 
-    match verify_compact_vss_public_material_binding(setup_package) {
+    match verify_compact_vss_public_material_binding(setup_package, request) {
         Ok(verified_material) => Ok(CompactVssPublicMaterialVerification::Verified(
             verified_material,
         )),
@@ -85,6 +85,7 @@ pub(super) fn verify_optional_compact_vss_public_material(
 
 fn verify_compact_vss_public_material_binding(
     setup_package: &Value,
+    request: &Value,
 ) -> CanonicalResult<VerifiedCompactVssPublicMaterial> {
     let coefficient_set = setup_package
         .get(COMPACT_VSS_COEFFICIENT_COMMITMENT_SET_FIELD)
@@ -217,15 +218,33 @@ fn verify_compact_vss_public_material_binding(
         "compact VSS share-linkage statement aggregateThresholdCommitmentRoot",
     )?;
 
+    let mut proof_material_request = serde_json::Map::from_iter([
+        ("statement".to_string(), statement.clone()),
+        (
+            "coefficientCommitmentSet".to_string(),
+            coefficient_set.clone(),
+        ),
+        (
+            "recipientShareCommitmentSet".to_string(),
+            recipient_share_set.clone(),
+        ),
+        (
+            "aggregateThresholdCommitmentSet".to_string(),
+            aggregate_threshold_set.clone(),
+        ),
+        ("proofMaterialSet".to_string(), proof_material_set.clone()),
+    ]);
+    for field_name in [
+        "transportedCompactVssShareLinkageProofMaterial",
+        "verifiedSetupProofMaterials",
+    ] {
+        if let Some(value) = request.get(field_name) {
+            proof_material_request.insert(field_name.to_string(), value.clone());
+        }
+    }
     let proof_material_verification =
         crate::bgv::setup::verify_compact_vss_share_linkage_proof_material_set_from_request(
-            &json!({
-                "statement": statement,
-                "coefficientCommitmentSet": coefficient_set,
-                "recipientShareCommitmentSet": recipient_share_set,
-                "aggregateThresholdCommitmentSet": aggregate_threshold_set,
-                "proofMaterialSet": proof_material_set,
-            }),
+            &Value::Object(proof_material_request),
         )?;
     compare_required_string(
         hash_at_path(&proof_material_verification, &["proofMaterialSetRoot"])?,

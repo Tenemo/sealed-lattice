@@ -44,9 +44,6 @@ enum TranscriptCoreCommand {
     GenerateBgvTargetDecryptionShare,
     RecombineBgvTargetDecryptionShares,
     ComputeCompactVssCommitmentFromOpening,
-    VerifyCompactVssCommitmentOpening,
-    EncodeCompactVssCommitmentBody,
-    DecodeCompactVssCommitmentBody,
     GenerateCompactVssShareLinkageProof,
     GenerateCompactSameSecretBridgeProof,
 }
@@ -229,9 +226,6 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
         | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares
         | TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening
-        | TranscriptCoreCommand::VerifyCompactVssCommitmentOpening
-        | TranscriptCoreCommand::EncodeCompactVssCommitmentBody
-        | TranscriptCoreCommand::DecodeCompactVssCommitmentBody
         | TranscriptCoreCommand::GenerateCompactVssShareLinkageProof
         | TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof => {
             run_bgv_command(command, &request)
@@ -339,15 +333,6 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         }
         TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening => {
             crate::bgv::commands::compute_compact_vss_commitment_from_opening(request)
-        }
-        TranscriptCoreCommand::VerifyCompactVssCommitmentOpening => {
-            crate::bgv::commands::verify_compact_vss_commitment_opening(request)
-        }
-        TranscriptCoreCommand::EncodeCompactVssCommitmentBody => {
-            crate::bgv::commands::encode_compact_vss_commitment_body(request)
-        }
-        TranscriptCoreCommand::DecodeCompactVssCommitmentBody => {
-            crate::bgv::commands::decode_compact_vss_commitment_body(request)
         }
         TranscriptCoreCommand::GenerateCompactVssShareLinkageProof => {
             crate::bgv::commands::generate_compact_vss_share_linkage_proof(request)

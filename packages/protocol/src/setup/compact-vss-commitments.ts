@@ -11,6 +11,14 @@ import type {
     SameSecretConsistencyStatementSet,
     SameSecretProofSet,
 } from './same-secret-consistency-records.js';
+import {
+    setupProofMaterialRecordTransportMetadataFields,
+    setupProofMaterialReferenceFields,
+    setupProofMaterialTransportChunks,
+    setupProofMaterialTransportMetadata,
+    setupTransportedProofMaterialFields,
+    type TransportedSetupProofMaterialSet,
+} from './setup-proof-material-transport.js';
 import type { CollectiveBgvSetupContext } from './vss-share-verification-records.js';
 
 // Two base-3^17 message digits per coefficient. The kernel validates that the
@@ -1901,3 +1909,246 @@ export const createCompactVssSameSecretBridgeProofMaterialSet = (input: {
         ),
     };
 };
+
+type JsonRecord = Record<string, unknown>;
+
+// Standard RFC 4648 base64 with padding, the inverse of the local
+// encodeStandardBase64 the compact proof records use for their embedded proof
+// bytes. Decoding recovers the exact proof bytes so the transport hashes bind
+// the same object the embedded record committed to.
+const bytesFromStandardBase64 = (
+    encoded: string,
+    fieldName: string,
+): Uint8Array => {
+    if (encoded.length % 4 !== 0) {
+        throw new Error(
+            `${fieldName} must have a base64 length multiple of 4.`,
+        );
+    }
+    const paddingLength = encoded.endsWith('==')
+        ? 2
+        : encoded.endsWith('=')
+          ? 1
+          : 0;
+    const symbolCount = encoded.length - paddingLength;
+    const byteLength = (encoded.length / 4) * 3 - paddingLength;
+    const bytes = new Uint8Array(byteLength);
+    let byteIndex = 0;
+    let accumulator = 0;
+    let accumulatedBits = 0;
+    for (let symbolIndex = 0; symbolIndex < symbolCount; symbolIndex += 1) {
+        const symbolValue = standardBase64Alphabet.indexOf(
+            encoded[symbolIndex],
+        );
+        if (symbolValue < 0) {
+            throw new Error(`${fieldName} must be valid standard base64.`);
+        }
+        accumulator = (accumulator << 6) | symbolValue;
+        accumulatedBits += 6;
+        if (accumulatedBits >= 8) {
+            accumulatedBits -= 8;
+            bytes[byteIndex] = (accumulator >> accumulatedBits) & 0xff;
+            byteIndex += 1;
+        }
+    }
+
+    return bytes;
+};
+
+export type TransportedCompactVssShareLinkageProofMaterialSet = Readonly<
+    TransportedSetupProofMaterialSet & {
+        readonly objectType: 'SetupTransportedCompactVssShareLinkageProofMaterialSet';
+        readonly proofFamily: typeof compactVssShareLinkageProofFamily;
+    }
+>;
+
+export type TransportedCompactSameSecretBridgeProofMaterialSet = Readonly<
+    TransportedSetupProofMaterialSet & {
+        readonly objectType: 'SetupTransportedCompactSameSecretBridgeProofMaterialSet';
+        readonly proofFamily: typeof compactSameSecretBridgeProofFamily;
+    }
+>;
+
+type CompactProofMaterialTransportParameters = Readonly<{
+    readonly proofFamily: string;
+    readonly proofBytesHashDomain: string;
+    readonly transportSetObjectType: string;
+    readonly transportMaterialObjectType: string;
+}>;
+
+// Move every compact proof record's embedded base64 proof bytes onto the shared
+// setup proof-material transport. Each record keeps its identity fields but drops
+// proofBytesBase64 for the transport reference fields and a recomputed
+// proofRecordRoot, exactly as the kernel verifier rebuilds it, and its proof
+// bytes travel as streamable chunks in the returned transported material set.
+// The proof material set root is rebound over the rewritten records because it
+// canonically binds the per-record proof-bytes encoding. This mirrors the kernel
+// fixture move helpers so a transported set verifies identically to the embedded
+// set it replaces, while staying small enough for the canonical string encoder
+// at production roster sizes.
+const moveCompactProofBytesToTransport = (
+    proofMaterialSet: JsonRecord,
+    parameters: CompactProofMaterialTransportParameters,
+): Readonly<{
+    readonly proofMaterialSet: JsonRecord;
+    readonly transportedProofMaterialSet: TransportedSetupProofMaterialSet;
+}> => {
+    const embeddedProofRecords = proofMaterialSet.proofRecords;
+    if (!Array.isArray(embeddedProofRecords)) {
+        throw new TypeError(
+            `${parameters.proofFamily} proof material set proofRecords must be an array.`,
+        );
+    }
+
+    const transportedProofMaterials: JsonRecord[] = [];
+    const transportedProofRecords = embeddedProofRecords.map(
+        (proofRecordValue, proofIndex) => {
+            const proofRecord = proofRecordValue as JsonRecord;
+            const proofBytesBase64 = proofRecord.proofBytesBase64;
+            if (
+                typeof proofBytesBase64 !== 'string' ||
+                proofBytesBase64.length === 0
+            ) {
+                throw new TypeError(
+                    `${parameters.proofFamily} proofRecords.${String(proofIndex)}.proofBytesBase64 must be non-empty.`,
+                );
+            }
+            const proofBytes = bytesFromStandardBase64(
+                proofBytesBase64,
+                `${parameters.proofFamily} proofRecords.${String(proofIndex)}.proofBytesBase64`,
+            );
+            const expectedProofBytesHash = hash512Hex(
+                parameters.proofBytesHashDomain,
+                [proofBytes],
+            );
+            if (proofRecord.proofBytesHash !== expectedProofBytesHash) {
+                throw new Error(
+                    `${parameters.proofFamily} proofRecords.${String(proofIndex)}.proofBytesHash must match proofBytesBase64 before transport.`,
+                );
+            }
+            const proofMaterialTransport = setupProofMaterialTransportMetadata(
+                parameters.proofFamily,
+                proofBytes,
+                `${parameters.proofFamily} proofRecords.${String(proofIndex)}.proofBytesBase64 must produce at least one transported chunk.`,
+            );
+            const proofMaterialRoot = deriveCanonicalObjectHash({
+                objectType: 'CompactSetupProofMaterialReference',
+                objectVersion: 1,
+                proofFamily: parameters.proofFamily,
+                proofBytesHash: proofRecord.proofBytesHash,
+                ...setupProofMaterialReferenceFields(proofMaterialTransport),
+            });
+            transportedProofMaterials.push({
+                objectType: parameters.transportMaterialObjectType,
+                objectVersion: 1,
+                proofFamily: parameters.proofFamily,
+                ...setupTransportedProofMaterialFields(
+                    proofMaterialTransport,
+                    proofMaterialRoot,
+                ),
+                chunks: setupProofMaterialTransportChunks(
+                    proofMaterialTransport,
+                ),
+            });
+
+            const {
+                proofBytesBase64: omittedProofBytesBase64,
+                proofRecordRoot: omittedProofRecordRoot,
+                ...proofRecordIdentity
+            } = proofRecord;
+            void omittedProofBytesBase64;
+            void omittedProofRecordRoot;
+            const transportedProofRecordWithoutRoot = {
+                ...proofRecordIdentity,
+                proofBytesEncoding: 'binary-chunked-proof-bytes',
+                proofMaterialRoot,
+                ...setupProofMaterialRecordTransportMetadataFields(
+                    proofMaterialTransport,
+                ),
+            };
+
+            return {
+                ...transportedProofRecordWithoutRoot,
+                proofRecordRoot: deriveCanonicalObjectHash(
+                    transportedProofRecordWithoutRoot,
+                ),
+            };
+        },
+    );
+
+    const {
+        proofMaterialSetRoot: omittedProofMaterialSetRoot,
+        ...proofMaterialSetIdentity
+    } = proofMaterialSet;
+    void omittedProofMaterialSetRoot;
+    const transportedProofMaterialSetWithoutRoot = {
+        ...proofMaterialSetIdentity,
+        proofRecords: transportedProofRecords,
+    };
+
+    return {
+        proofMaterialSet: {
+            ...transportedProofMaterialSetWithoutRoot,
+            proofMaterialSetRoot: deriveCanonicalObjectHash(
+                transportedProofMaterialSetWithoutRoot,
+            ),
+        },
+        transportedProofMaterialSet: {
+            objectType: parameters.transportSetObjectType,
+            objectVersion: 1,
+            proofFamily: parameters.proofFamily,
+            proofMaterials: transportedProofMaterials,
+        },
+    };
+};
+
+export type BinaryChunkedCompactVssShareLinkageProofMaterialTransport =
+    Readonly<{
+        readonly proofMaterialSet: JsonRecord;
+        readonly transportedCompactVssShareLinkageProofMaterial: TransportedCompactVssShareLinkageProofMaterialSet;
+    }>;
+
+export const createBinaryChunkedCompactVssShareLinkageProofMaterialTransport = (
+    proofMaterialSet: JsonRecord,
+): BinaryChunkedCompactVssShareLinkageProofMaterialTransport => {
+    const moved = moveCompactProofBytesToTransport(proofMaterialSet, {
+        proofFamily: compactVssShareLinkageProofFamily,
+        proofBytesHashDomain: compactVssShareLinkageProofBytesHashDomain,
+        transportSetObjectType:
+            'SetupTransportedCompactVssShareLinkageProofMaterialSet',
+        transportMaterialObjectType:
+            'SetupTransportedCompactVssShareLinkageProofMaterial',
+    });
+
+    return {
+        proofMaterialSet: moved.proofMaterialSet,
+        transportedCompactVssShareLinkageProofMaterial:
+            moved.transportedProofMaterialSet as TransportedCompactVssShareLinkageProofMaterialSet,
+    };
+};
+
+export type BinaryChunkedCompactSameSecretBridgeProofMaterialTransport =
+    Readonly<{
+        readonly proofMaterialSet: JsonRecord;
+        readonly transportedCompactSameSecretBridgeProofMaterial: TransportedCompactSameSecretBridgeProofMaterialSet;
+    }>;
+
+export const createBinaryChunkedCompactSameSecretBridgeProofMaterialTransport =
+    (
+        proofMaterialSet: JsonRecord,
+    ): BinaryChunkedCompactSameSecretBridgeProofMaterialTransport => {
+        const moved = moveCompactProofBytesToTransport(proofMaterialSet, {
+            proofFamily: compactSameSecretBridgeProofFamily,
+            proofBytesHashDomain: compactSameSecretBridgeProofBytesHashDomain,
+            transportSetObjectType:
+                'SetupTransportedCompactSameSecretBridgeProofMaterialSet',
+            transportMaterialObjectType:
+                'SetupTransportedCompactSameSecretBridgeProofMaterial',
+        });
+
+        return {
+            proofMaterialSet: moved.proofMaterialSet,
+            transportedCompactSameSecretBridgeProofMaterial:
+                moved.transportedProofMaterialSet as TransportedCompactSameSecretBridgeProofMaterialSet,
+        };
+    };

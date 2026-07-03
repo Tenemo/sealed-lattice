@@ -79,7 +79,6 @@ export const vendoredProtocolRuntimeModules = [
     'setup/vss-coefficient-commitments/encoding.ts',
     'setup/vss-coefficient-commitments/opening-state.ts',
     'setup/vss-coefficient-commitments/commitment-values.ts',
-    'setup/vss-coefficient-commitments/binary-transport.ts',
     'setup/vss-coefficient-commitments/commitment-bundles.ts',
     'setup/vss-share-verification-records.ts',
 ] as const;

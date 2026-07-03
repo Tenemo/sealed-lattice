@@ -6,6 +6,10 @@
 mod component_material;
 
 pub(super) use self::component_material::component_b_vectors_from_record;
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::component_material::{
+    evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
+};
 
 use std::{
     collections::BTreeMap,

@@ -12,6 +12,8 @@ const expectedManifestHash = '1'.repeat(128);
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
+    | 'transportedCompactVssShareLinkageProofMaterial'
+    | 'transportedCompactSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportCase = Readonly<{
@@ -19,14 +21,20 @@ type SetupProofMaterialTransportCase = Readonly<{
     readonly materialSetObjectType:
         | 'SetupTransportedSameSecretProofMaterialSet'
         | 'SetupTransportedPublicKeyShareProofMaterialSet'
+        | 'SetupTransportedCompactVssShareLinkageProofMaterialSet'
+        | 'SetupTransportedCompactSameSecretBridgeProofMaterialSet'
         | 'SetupTransportedEvaluationKeyShareProofMaterialSet';
     readonly materialObjectType:
         | 'SetupTransportedSameSecretProofMaterial'
         | 'SetupTransportedPublicKeyShareProofMaterial'
+        | 'SetupTransportedCompactVssShareLinkageProofMaterial'
+        | 'SetupTransportedCompactSameSecretBridgeProofMaterial'
         | 'SetupTransportedEvaluationKeyShareProofMaterial';
     readonly proofFamily:
         | 'same-secret-linkage-anchor'
         | 'public-key-share'
+        | 'compact-vss-share-linkage'
+        | 'compact-same-secret-bridge'
         | 'trustee-evaluation-key';
 }>;
 
@@ -42,6 +50,22 @@ const setupProofMaterialTransportCases = [
         materialSetObjectType: 'SetupTransportedPublicKeyShareProofMaterialSet',
         materialObjectType: 'SetupTransportedPublicKeyShareProofMaterial',
         proofFamily: 'public-key-share',
+    },
+    {
+        fieldName: 'transportedCompactVssShareLinkageProofMaterial',
+        materialSetObjectType:
+            'SetupTransportedCompactVssShareLinkageProofMaterialSet',
+        materialObjectType:
+            'SetupTransportedCompactVssShareLinkageProofMaterial',
+        proofFamily: 'compact-vss-share-linkage',
+    },
+    {
+        fieldName: 'transportedCompactSameSecretBridgeProofMaterial',
+        materialSetObjectType:
+            'SetupTransportedCompactSameSecretBridgeProofMaterialSet',
+        materialObjectType:
+            'SetupTransportedCompactSameSecretBridgeProofMaterial',
+        proofFamily: 'compact-same-secret-bridge',
     },
     {
         fieldName: 'transportedEvaluationKeyShareProofMaterial',
@@ -79,15 +103,6 @@ let streamedProofMaterialReferences: Map<string, JsonRecord>;
 type VerifySetupPackageInput = Parameters<
     typeof publicPackage.verifySetupPackage
 >[0];
-type TransportedSameSecretProofMaterialSet = NonNullable<
-    VerifySetupPackageInput['transportedSameSecretProofMaterial']
->;
-type TransportedPublicKeyShareProofMaterialSet = NonNullable<
-    VerifySetupPackageInput['transportedPublicKeyShareProofMaterial']
->;
-type TransportedEvaluationKeyShareProofMaterialSet = NonNullable<
-    VerifySetupPackageInput['transportedEvaluationKeyShareProofMaterial']
->;
 
 const transportedSetupProofMaterialSet = (
     transportCase: SetupProofMaterialTransportCase,
@@ -117,24 +132,6 @@ const transportedSetupProofMaterialSet = (
             },
         ],
     }) as const;
-
-const transportedSameSecretProofMaterialSet =
-    (): TransportedSameSecretProofMaterialSet =>
-        transportedSetupProofMaterialSet(
-            setupProofMaterialTransportCases[0],
-        ) as TransportedSameSecretProofMaterialSet;
-
-const transportedPublicKeyShareProofMaterialSet =
-    (): TransportedPublicKeyShareProofMaterialSet =>
-        transportedSetupProofMaterialSet(
-            setupProofMaterialTransportCases[1],
-        ) as TransportedPublicKeyShareProofMaterialSet;
-
-const transportedEvaluationKeyShareProofMaterialSet =
-    (): TransportedEvaluationKeyShareProofMaterialSet =>
-        transportedSetupProofMaterialSet(
-            setupProofMaterialTransportCases[2],
-        ) as TransportedEvaluationKeyShareProofMaterialSet;
 
 const verifiedSetupProofMaterials = (
     transportCase: SetupProofMaterialTransportCase,
@@ -367,12 +364,12 @@ describe('setup proof material streaming in the public package', () => {
                 objectVersion: 1,
             },
             ...setupVerificationBindings,
-            transportedSameSecretProofMaterial:
-                transportedSameSecretProofMaterialSet(),
-            transportedPublicKeyShareProofMaterial:
-                transportedPublicKeyShareProofMaterialSet(),
-            transportedEvaluationKeyShareProofMaterial:
-                transportedEvaluationKeyShareProofMaterialSet(),
+            ...Object.fromEntries(
+                setupProofMaterialTransportCases.map((transportCase) => [
+                    transportCase.fieldName,
+                    transportedSetupProofMaterialSet(transportCase),
+                ]),
+            ),
         });
 
         expect(

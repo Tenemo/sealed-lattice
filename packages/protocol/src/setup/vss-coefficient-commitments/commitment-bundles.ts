@@ -1,16 +1,11 @@
 // VSS coefficient-commitment bundle assembly: common input validation, the
-// per-source-trustee contribution builder and its retained and provider-backed
-// opening-material sources, and the embedded bundle constructor.
+// per-source-trustee contribution builder and its retained opening-material
+// source, and the embedded bundle constructor.
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 
-import { createBinaryChunkedVssCoefficientCommitmentMaterialTransport } from './binary-transport.js';
 import { computeSetupCommitmentWithKernel } from './commitment-values.js';
 import {
     acceptedBgvFullRingDegree,
-    type BinaryChunkedVssCoefficientCommitmentBundle,
-    type SetupTransportedVssCoefficientCommitmentMaterialReference,
-    type StreamingBinaryChunkedVssCoefficientCommitmentBundle,
-    type ThresholdShareCommitmentTransportStreamComputer,
     type VssCoefficientCommitmentBundle,
     type VssCoefficientCommitmentBundleInput,
     type VssCoefficientCommitmentMaterialRecord,
@@ -258,88 +253,6 @@ const retainedSourceTrusteeOpeningMaterialSource = (
     };
 };
 
-const sourceTrusteeOpeningMaterialSourceFromProvider = (
-    input: VssCoefficientCommitmentBundleInput,
-    sourceTrusteeRecords: readonly VssSourceTrusteeCoefficientCommitmentRecord[],
-): VssSourceTrusteeOpeningMaterialSource => {
-    const sourceTrusteeOpeningStateProvider =
-        sourceTrusteeOpeningStateProviderFromInput(input);
-    const sourceTrusteeRecordByRosterPosition = new Map<
-        number,
-        VssSourceTrusteeCoefficientCommitmentRecord
-    >();
-    sourceTrusteeRecords.forEach((sourceTrusteeRecord) => {
-        sourceTrusteeRecordByRosterPosition.set(
-            sourceTrusteeRecord.sourceTrusteeRosterPosition,
-            sourceTrusteeRecord,
-        );
-    });
-    const sourceTrusteeReferences = sourceTrusteeRecords.map(
-        (sourceTrusteeRecord) => ({
-            sourceTrusteeIdentity: sourceTrusteeRecord.sourceTrusteeIdentity,
-            sourceTrusteeRosterPosition:
-                sourceTrusteeRecord.sourceTrusteeRosterPosition,
-            sourceTrusteeCommitmentRoot:
-                sourceTrusteeRecord.sourceTrusteeCommitmentRoot,
-        }),
-    );
-
-    return {
-        sourceTrusteeReferences,
-        loadSourceTrusteeOpeningMaterial: (sourceTrusteeReference) => {
-            const sourceTrusteeRecord = sourceTrusteeRecordByRosterPosition.get(
-                sourceTrusteeReference.sourceTrusteeRosterPosition,
-            );
-            if (sourceTrusteeRecord === undefined) {
-                throw new Error(
-                    'source trustee commitment record is missing for the requested opening material.',
-                );
-            }
-            if (
-                sourceTrusteeRecord.sourceTrusteeIdentity !==
-                    sourceTrusteeReference.sourceTrusteeIdentity ||
-                sourceTrusteeRecord.sourceTrusteeCommitmentRoot !==
-                    sourceTrusteeReference.sourceTrusteeCommitmentRoot
-            ) {
-                throw new Error(
-                    'source trustee commitment record must match the requested opening material reference.',
-                );
-            }
-            const sourceTrusteeOpeningState = loadSourceTrusteeOpeningState(
-                sourceTrusteeOpeningStateProvider,
-                sourceTrusteeReference,
-            );
-            const contribution =
-                createVssSourceTrusteeCoefficientCommitmentContributionWithOptions(
-                    {
-                        setupContext: input.setupContext,
-                        publicMatrixSeedHash: input.publicMatrixSeedHash,
-                        setupCommitmentComputer: input.setupCommitmentComputer,
-                        qSharePrimes: input.qSharePrimes,
-                        ringDegree: input.ringDegree,
-                        participantCount: input.participantCount,
-                        thresholdDegree: input.thresholdDegree,
-                        sourceTrusteeOpeningState,
-                    },
-                    {
-                        retainMaterialRecords: true,
-                        setupCommitmentComputer: input.setupCommitmentComputer,
-                    },
-                );
-            if (
-                contribution.sourceTrusteeRecord.sourceTrusteeCommitmentRoot !==
-                sourceTrusteeReference.sourceTrusteeCommitmentRoot
-            ) {
-                throw new Error(
-                    'loaded source trustee opening material must rebuild the accepted source trustee commitment root.',
-                );
-            }
-
-            return contribution.privateOpeningMaterial;
-        },
-    };
-};
-
 export const createVssCoefficientCommitmentBundle = (
     input: VssCoefficientCommitmentBundleInput,
 ): VssCoefficientCommitmentBundle => {
@@ -441,108 +354,5 @@ export const createVssCoefficientCommitmentBundle = (
             retainedSourceTrusteeOpeningMaterialSource(
                 privateOpeningMaterialBySourceTrustee,
             ),
-    };
-};
-
-const stripMaterialRecordsFromOpeningMaterial = (
-    sourceTrusteeOpeningMaterial: VssSourceTrusteeOpeningMaterial,
-): VssSourceTrusteeOpeningMaterial => ({
-    ...sourceTrusteeOpeningMaterial,
-    sourceTrusteeCoefficientCommitmentMaterialRecords: [],
-});
-
-const transportedMaterialReference = (
-    transportedMaterial: BinaryChunkedVssCoefficientCommitmentBundle['transportedVssCoefficientCommitmentMaterial'],
-): SetupTransportedVssCoefficientCommitmentMaterialReference => {
-    const { chunks: _chunks, ...reference } = transportedMaterial;
-
-    return reference;
-};
-
-export const createBinaryChunkedVssCoefficientCommitmentBundle = (
-    input: VssCoefficientCommitmentBundleInput,
-): BinaryChunkedVssCoefficientCommitmentBundle => {
-    const embeddedBundle = createVssCoefficientCommitmentBundle(input);
-    const materialTransport =
-        createBinaryChunkedVssCoefficientCommitmentMaterialTransport(
-            embeddedBundle.materialSet,
-        );
-    const privateOpeningMaterialBySourceTrustee =
-        input.sourceTrusteeOpeningStateProvider === undefined
-            ? embeddedBundle.privateOpeningMaterialBySourceTrustee.map(
-                  stripMaterialRecordsFromOpeningMaterial,
-              )
-            : [];
-
-    return {
-        commitmentSet: embeddedBundle.commitmentSet,
-        materialSet: materialTransport.materialSet,
-        transportedVssCoefficientCommitmentMaterial:
-            materialTransport.transportedVssCoefficientCommitmentMaterial,
-        privateOpeningMaterialBySourceTrustee,
-        sourceTrusteeOpeningMaterialSource:
-            input.sourceTrusteeOpeningStateProvider === undefined
-                ? retainedSourceTrusteeOpeningMaterialSource(
-                      privateOpeningMaterialBySourceTrustee,
-                  )
-                : sourceTrusteeOpeningMaterialSourceFromProvider(
-                      input,
-                      embeddedBundle.commitmentSet.sourceTrusteeRecords,
-                  ),
-    };
-};
-
-export const createStreamingBinaryChunkedVssCoefficientCommitmentBundle = (
-    input: VssCoefficientCommitmentBundleInput & {
-        readonly thresholdShareCommitmentTransportStreamer: ThresholdShareCommitmentTransportStreamComputer;
-    },
-): StreamingBinaryChunkedVssCoefficientCommitmentBundle => {
-    const binaryBundle =
-        createBinaryChunkedVssCoefficientCommitmentBundle(input);
-    const derivationId =
-        binaryBundle.materialSet.vssCoefficientCommitmentMaterialRoot;
-    const transportedReference = transportedMaterialReference(
-        binaryBundle.transportedVssCoefficientCommitmentMaterial,
-    );
-    input.thresholdShareCommitmentTransportStreamer.beginThresholdShareCommitmentsFromTransportStream(
-        {
-            derivationId,
-            setupContext: input.setupContext,
-            publicMatrixSeedHash: input.publicMatrixSeedHash,
-            transportedVssCoefficientCommitmentMaterial: transportedReference,
-        },
-    );
-    for (const chunk of binaryBundle.transportedVssCoefficientCommitmentMaterial
-        .chunks) {
-        input.thresholdShareCommitmentTransportStreamer.absorbThresholdShareCommitmentsFromTransportStreamChunk(
-            {
-                derivationId,
-                chunkIndex: chunk.chunkIndex,
-                bytesHex: chunk.bytesHex,
-            },
-        );
-    }
-    const streamResult =
-        input.thresholdShareCommitmentTransportStreamer.finishThresholdShareCommitmentsFromTransportStream(
-            {
-                derivationId,
-                vssCoefficientCommitmentRoot:
-                    binaryBundle.commitmentSet.vssCoefficientCommitmentRoot,
-                sourceTrusteeCoefficientCommitmentRecords:
-                    binaryBundle.commitmentSet.sourceTrusteeRecords,
-            },
-        );
-
-    return {
-        commitmentSet: binaryBundle.commitmentSet,
-        materialSet: binaryBundle.materialSet,
-        transportedVssCoefficientCommitmentMaterial: transportedReference,
-        verifiedVssCoefficientCommitmentMaterial:
-            streamResult.verifiedVssCoefficientCommitmentMaterial,
-        privateOpeningMaterialBySourceTrustee:
-            binaryBundle.privateOpeningMaterialBySourceTrustee,
-        sourceTrusteeOpeningMaterialSource:
-            binaryBundle.sourceTrusteeOpeningMaterialSource,
-        thresholdShareCommitments: streamResult.thresholdShareCommitments,
     };
 };

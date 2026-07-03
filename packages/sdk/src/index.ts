@@ -27,6 +27,8 @@ import type {
     VerifiedSetupProofMaterialSet as ProtocolVerifiedSetupProofMaterialSet,
     TransportedSameSecretProofMaterialSet as ProtocolTransportedSameSecretProofMaterialSet,
     TransportedPublicKeyShareProofMaterialSet as ProtocolTransportedPublicKeyShareProofMaterialSet,
+    TransportedCompactVssShareLinkageProofMaterialSet as ProtocolTransportedCompactVssShareLinkageProofMaterialSet,
+    TransportedCompactSameSecretBridgeProofMaterialSet as ProtocolTransportedCompactSameSecretBridgeProofMaterialSet,
     TransportedEvaluationKeyShareComponentMaterialSet as ProtocolTransportedEvaluationKeyShareComponentMaterialSet,
     TransportedEvaluationKeyShareProofMaterialSet as ProtocolTransportedEvaluationKeyShareProofMaterialSet,
     TransportedPublicEvaluationKeyMaterialSet as ProtocolTransportedPublicEvaluationKeyMaterialSet,
@@ -248,6 +250,10 @@ export type TransportedSameSecretProofMaterialSet =
     ProtocolTransportedSameSecretProofMaterialSet;
 export type TransportedPublicKeyShareProofMaterialSet =
     ProtocolTransportedPublicKeyShareProofMaterialSet;
+export type TransportedCompactVssShareLinkageProofMaterialSet =
+    ProtocolTransportedCompactVssShareLinkageProofMaterialSet;
+export type TransportedCompactSameSecretBridgeProofMaterialSet =
+    ProtocolTransportedCompactSameSecretBridgeProofMaterialSet;
 export type TransportedEvaluationKeyShareProofMaterialSet =
     ProtocolTransportedEvaluationKeyShareProofMaterialSet;
 export type TransportedEvaluationKeyShareComponentMaterialSet =
@@ -265,6 +271,8 @@ export type VerifySetupPackageInput = Readonly<{
     readonly transportedSameSecretProofMaterial?: TransportedSameSecretProofMaterialSet;
     readonly transportedPublicKeyShareMaterial?: SetupTransportedPublicKeyShareMaterial;
     readonly transportedPublicKeyShareProofMaterial?: TransportedPublicKeyShareProofMaterialSet;
+    readonly transportedCompactVssShareLinkageProofMaterial?: TransportedCompactVssShareLinkageProofMaterialSet;
+    readonly transportedCompactSameSecretBridgeProofMaterial?: TransportedCompactSameSecretBridgeProofMaterialSet;
     readonly transportedEvaluationKeyShareProofMaterial?: TransportedEvaluationKeyShareProofMaterialSet;
     readonly transportedEvaluationKeyShareComponentMaterial?: TransportedEvaluationKeyShareComponentMaterialSet;
     readonly transportedPublicEvaluationKeyMaterial?: TransportedPublicEvaluationKeyMaterialSet;
@@ -434,11 +442,15 @@ export const createSetupPackageVerificationInput = (
 type SetupProofMaterialTransportFieldName =
     | 'transportedSameSecretProofMaterial'
     | 'transportedPublicKeyShareProofMaterial'
+    | 'transportedCompactVssShareLinkageProofMaterial'
+    | 'transportedCompactSameSecretBridgeProofMaterial'
     | 'transportedEvaluationKeyShareProofMaterial';
 
 type SetupProofMaterialTransportSet =
     | TransportedSameSecretProofMaterialSet
     | TransportedPublicKeyShareProofMaterialSet
+    | TransportedCompactVssShareLinkageProofMaterialSet
+    | TransportedCompactSameSecretBridgeProofMaterialSet
     | TransportedEvaluationKeyShareProofMaterialSet;
 
 type SetupProofMaterialChunk = Readonly<{
@@ -449,6 +461,8 @@ type SetupProofMaterialChunk = Readonly<{
 const setupProofMaterialTransportFieldNames = [
     'transportedSameSecretProofMaterial',
     'transportedPublicKeyShareProofMaterial',
+    'transportedCompactVssShareLinkageProofMaterial',
+    'transportedCompactSameSecretBridgeProofMaterial',
     'transportedEvaluationKeyShareProofMaterial',
 ] as const satisfies readonly SetupProofMaterialTransportFieldName[];
 

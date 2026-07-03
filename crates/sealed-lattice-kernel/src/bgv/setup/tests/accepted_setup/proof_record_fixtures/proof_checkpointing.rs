@@ -8,6 +8,8 @@ pub(in super::super) const SAME_SECRET_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
     "same-secret-anchor-proof-material";
 pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "public-key-share-proof-material";
+pub(in super::super) const TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
+    "trustee-evaluation-key-anchor-proof-material";
 
 fn anchor_proof_checkpoint_path(
     family_directory: &str,

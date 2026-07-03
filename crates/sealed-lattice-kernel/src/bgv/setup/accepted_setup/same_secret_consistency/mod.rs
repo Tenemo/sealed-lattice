@@ -4,8 +4,6 @@ mod accessors;
 mod anchor_proofs;
 mod consistency;
 mod family_binding;
-#[cfg(test)]
-mod proof_transport;
 
 pub(super) use accessors::{
     same_secret_consistency_root_from_package,
@@ -19,8 +17,6 @@ pub(super) use consistency::verify_same_secret_consistency;
 pub(super) use family_binding::{
     same_secret_proof_family_binding_root, verify_same_secret_context,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use proof_transport::same_secret_anchor_proof_material_root;
 
 struct SameSecretTrusteeBinding {
     trustee_identity: String,

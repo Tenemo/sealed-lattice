@@ -67,6 +67,8 @@ pub(in crate::bgv::setup) use proof_codec::decode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
+#[cfg(test)]
+pub(in crate::bgv::setup) use relation::public_key_switch_sample;
 pub(in crate::bgv::setup) use relation::{
     CompactSameSecretBridgeStatement, EvaluationKeyShareDescriptor, EvaluationKeyShareKind,
     PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, PrivateVssShareStatement, SameSecretLinkageStatement,

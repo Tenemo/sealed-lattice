@@ -3,8 +3,8 @@
 // BGV-RNS ring, RNS, NTT, and coefficient arithmetic. This oracle is a
 // developer sanity tool: its build, output, and any roots it prints are never
 // runtime code, public SDK inputs, or protocol evidence. The pinned Lattigo
-// commit and its archive SHA-256 integrity check live in
-// tools/lattigo-oracle/Dockerfile, which is the single source of truth.
+// commit lives in tools/lattigo-oracle/go.mod + go.sum as an ordinary
+// commit-pinned Go module dependency.
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 

@@ -372,6 +372,7 @@ fn compact_same_secret_bridge_verification_request(
     }
     for field_name in [
         "transportedSameSecretProofMaterial",
+        "transportedCompactSameSecretBridgeProofMaterial",
         "verifiedSetupProofMaterials",
     ] {
         if let Some(value) = request.get(field_name) {
