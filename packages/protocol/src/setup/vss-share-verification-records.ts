@@ -10,7 +10,7 @@ import type {
 } from '@sealed-lattice/types';
 
 import {
-    assertContextFieldPathsMatch,
+    assertContextMatches,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     type JsonRecord,
@@ -272,7 +272,7 @@ const assertDistinctSourceTrusteeRecipientPairs = (
 export const createVssShareAcceptanceRecord = async (
     input: VssShareAcceptanceRecordInput,
 ): Promise<VssShareAcceptanceRecord> => {
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         input.envelopeReference,
         'envelopeReference',
@@ -376,7 +376,7 @@ export const createVssShareAcceptanceSet = (input: {
 export const createVssShareComplaintRecord = async (
     input: VssShareComplaintRecordInput,
 ): Promise<VssShareComplaintRecord> => {
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         input.envelopeReference,
         'envelopeReference',
@@ -448,7 +448,7 @@ export const createVssShareComplaintRecord = async (
 export const createVssShareComplaintRecordFromLocalVerification = async (
     input: VssShareComplaintFromLocalVerificationInput,
 ): Promise<VssShareComplaintRecord> => {
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         input.envelopeReference,
         'envelopeReference',

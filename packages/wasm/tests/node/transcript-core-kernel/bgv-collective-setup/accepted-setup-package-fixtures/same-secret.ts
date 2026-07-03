@@ -138,11 +138,10 @@ const compactSameSecretDataBasisRandomness = (
     );
 
 // The same-secret proofs on the compact path stay data-basis proofs: each trustee
-// commits its constant (secret) coefficient into every RNS prime with the full
-// setup commitment and proves those open to one short ternary secret. These
-// data-basis anchor commitments are computed directly (not through the removed
-// full VSS material), and the compact same-secret bridge links them to the
-// compact target-basis constant commitments through that same secret.
+// commits its constant (secret) coefficient into every RNS prime with the setup
+// commitment and proves those commitments open to one short ternary secret. The
+// compact same-secret bridge links these data-basis anchors to the compact
+// target-basis constant commitments through that same secret.
 export function acceptedCompactSameSecretProofs(
     kernel: TranscriptCoreKernel,
     setupContext: CollectiveBgvSetupContext,
@@ -153,9 +152,8 @@ export function acceptedCompactSameSecretProofs(
     ringDegree: number,
 ): SameSecretProofSet {
     const qSharePrimes = parameters.qShare.primes;
-    // The data-basis anchor material is computed here rather than transported, so
-    // bind a deterministic anchor root; it is never recomputed against absent
-    // full VSS material on the compact path.
+    // The data-basis anchor material is computed here, so bind a deterministic
+    // anchor root for the compact path.
     const dataBasisAnchorMaterialRoot = kernel.deriveCanonicalObjectHash({
         value: {
             objectType: 'CompactVssDataBasisSameSecretAnchorMaterial',

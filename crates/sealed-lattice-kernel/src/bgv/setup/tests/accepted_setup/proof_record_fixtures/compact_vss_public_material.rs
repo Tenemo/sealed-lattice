@@ -1618,11 +1618,9 @@ fn compact_vss_public_material_fixture_verifies_generated_fields() {
     assert_eq!(bridge_proof_verification["ok"], serde_json::json!(true));
 }
 
-// Replace a setup package's public VSS coefficient material with the compact
-// commitment sets, the compact same-secret bridge, and a
-// CompactThresholdShareCommitmentBinding, and rebind every downstream phase that
-// bound the full-VSS coefficient roots to the compact roots, so the package is
-// accepted through the compact path of the collective setup verifier. The
+// Rebind a setup package to the compact coefficient commitment sets, the compact
+// same-secret bridge, and a CompactThresholdShareCommitmentBinding so the package
+// is accepted through the compact path of the collective setup verifier. The
 // participant count is read from the package, so this drives any supported
 // roster size.
 pub(in super::super) fn compactify_collective_setup_package(
@@ -1941,9 +1939,9 @@ fn minimal_compact_collective_setup_package_passes_compact_acceptance() {
         "{}",
         context()
     );
-    // The compact commitment sets satisfy the coefficient-commitment requirement,
-    // so the removed public material is not reported missing; only the terminal
-    // runtime objects a pre-terminal setup package lacks may remain.
+    // The compact commitment sets satisfy the coefficient-commitment requirement;
+    // only the terminal runtime objects a pre-terminal setup package lacks may
+    // remain.
     let missing_objects = result["missingObjects"]
         .as_array()
         .cloned()

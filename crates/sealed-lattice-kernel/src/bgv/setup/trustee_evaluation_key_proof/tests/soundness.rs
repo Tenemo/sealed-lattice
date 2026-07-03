@@ -323,14 +323,13 @@ fn private_vss_statement_rejects_noncanonical_context_and_hash_fields() {
     );
 }
 
-// Option A invariant: the private-VSS message (Shamir coefficient) columns are
-// committed witnesses (they appear in the logical column set and the opening
-// lincheck) but they carry no cross-field consistency claim. Only the carry and
-// the opening-randomness columns are claimed, so the consistency set is exactly
-// the logical set minus the message columns. This is what bounds the disclosed
-// smudging leakage to the carry-driven figure instead of the full-range message
-// figure. If the consistency set ever silently re-includes the message columns,
-// the leakage accounting and the mask sizing both regress, so pin the shape.
+// Private-VSS message (Shamir coefficient) columns are committed witnesses
+// covered by the opening lincheck, but they carry no cross-field consistency
+// claim. Only carry and opening-randomness columns are claimed, so the
+// consistency set is exactly the logical set minus the message columns. This
+// bounds the disclosed smudging leakage to the carry-driven figure. If the
+// consistency set includes message columns, the leakage accounting and mask
+// sizing both regress, so pin the shape.
 #[test]
 fn private_vss_consistency_set_excludes_committed_message_columns() {
     let statement = private_vss_statement_for_context_tests();
@@ -365,12 +364,9 @@ fn private_vss_consistency_set_excludes_committed_message_columns() {
         layout.private_vss_coefficient_columns,
         "exactly the message columns are committed without a consistency assertion"
     );
-    // The carry must stay in the consistency set: it is essential to the
-    // global sharing-soundness argument that replaces the removed message assertions
-    // (carry consistency + the public range-checked share pin the polynomial
-    // evaluation per recipient). Dropping it the way
-    // the message claims were dropped would silently break soundness, so pin that
-    // exactly one non-randomness consistency vector (the carry) remains.
+    // The carry must stay in the consistency set: carry consistency plus the
+    // public range-checked share pin the polynomial evaluation per recipient.
+    // Exactly one non-randomness consistency vector (the carry) must remain.
     assert_eq!(
         layout.consistency_vector_count() - layout.private_vss_randomness_columns,
         1,

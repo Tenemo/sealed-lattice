@@ -1,5 +1,5 @@
-//! Negacyclic number-theoretic transform over a consolidated-atom proof
-//! field, for products in Z_p[X]/(X^size + 1).
+//! Negacyclic number-theoretic transform over a digit-atom proof field, for
+//! products in Z_p[X]/(X^size + 1).
 //!
 //! The forward transform pre-scales by powers of psi (a primitive
 //! 2*size-th root of unity) and runs a cyclic decimation-in-time transform

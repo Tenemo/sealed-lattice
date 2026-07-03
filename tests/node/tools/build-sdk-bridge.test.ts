@@ -4,15 +4,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
     computeRelativeTypesSpecifier,
-    filesystemMaximumRetries,
     sdkCryptoRuntimeSourceRelativePaths,
     rewriteTypesImports,
     sdkProtocolRuntimeSourceRelativePaths,
     stripSdkExcludedTypesPackageExports,
     transpileBridgeSource,
     transpileSdkInternalSource,
-    withTransientFilesystemRetries,
 } from '#tools/ci/build-sdk-bridge';
+import {
+    filesystemMaximumRetries,
+    withTransientFilesystemRetries,
+} from '#tools/internal/files';
 
 const distRoot = path.resolve('/fake-repo/packages/sdk/dist');
 const typesRuntime = path.resolve(distRoot, 'internal/types.js');

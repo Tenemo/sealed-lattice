@@ -64,9 +64,6 @@ pub(super) struct DirectBallotRelationProofGeneration {
     pub(super) challenge: String,
     pub(super) relation_commitment_bytes: usize,
     pub(super) response_bytes: usize,
-    pub(super) relation_commitment_polynomial_count: usize,
-    pub(super) shared_response_polynomial_count: usize,
-    pub(super) shared_response_scalar_count: usize,
 }
 
 #[derive(Clone)]

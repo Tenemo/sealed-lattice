@@ -7,7 +7,6 @@ use super::super::*;
 use super::claim_masking::{mask_digit_columns, masked_half_coefficients};
 use super::salted_tree::{SaltedTree, commit_salted_extension_row_pairs};
 use super::*;
-use crate::bgv::evaluator::engine::negacyclic_mul;
 use crate::bgv::evaluator::prg::DeterministicSampler;
 use crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH;
 

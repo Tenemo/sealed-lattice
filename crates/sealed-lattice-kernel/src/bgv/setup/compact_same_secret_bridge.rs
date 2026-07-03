@@ -6,6 +6,7 @@ use super::setup_proof::{
 };
 use super::*;
 use crate::bgv::setup_helpers::compare_required_string;
+use std::sync::Arc;
 
 const SAME_SECRET_PROOF_FAMILY: &str = "same-secret-linkage-anchor";
 const SAME_SECRET_ANCHOR_PROOF_BYTES_HASH_DOMAIN: &str =
@@ -740,9 +741,12 @@ fn verify_same_secret_consistency_evidence(
         ));
     }
     let mut verified_statement_records = Vec::with_capacity(statement_records.len());
-    for expected_position in 0..input.participant_count {
-        let statement_record = &statement_records[expected_position];
-        let bridge_statement = &input.bridge_statement_records[expected_position];
+    for (expected_position, (statement_record, bridge_statement)) in statement_records
+        .iter()
+        .zip(input.bridge_statement_records.iter())
+        .enumerate()
+        .take(input.participant_count)
+    {
         compare_required_string(
             string_at_path(statement_record, &["objectType"])?,
             "SameSecretConsistencyStatement",
@@ -887,10 +891,13 @@ fn verify_same_secret_proof_evidence(
         ));
     }
 
-    for expected_position in 0..input.participant_count {
-        let proof_record = &proof_records[expected_position];
-        let statement_record = &same_secret_statement_records[expected_position];
-        let bridge_statement = &input.bridge_statement_records[expected_position];
+    for (expected_position, ((proof_record, statement_record), bridge_statement)) in proof_records
+        .iter()
+        .zip(same_secret_statement_records.iter())
+        .zip(input.bridge_statement_records.iter())
+        .enumerate()
+        .take(input.participant_count)
+    {
         compare_required_string(
             string_at_path(proof_record, &["objectType"])?,
             "SameSecretProof",
@@ -1049,7 +1056,10 @@ fn transported_same_secret_proof_material_binding(
             ));
         }
         let chunks = if proof_material.get("chunks").is_some() {
-            transported_same_secret_proof_chunks(proof_material, proof_material_index)?
+            Arc::new(transported_same_secret_proof_chunks(
+                proof_material,
+                proof_material_index,
+            )?)
         } else {
             verified_setup_proof_material_chunks_from_request(
                 request,
@@ -1061,7 +1071,7 @@ fn transported_same_secret_proof_material_binding(
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             SAME_SECRET_PROOF_FAMILY,
-            &chunks,
+            chunks.as_ref(),
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         verify_transported_same_secret_proof_material_hashes(proof_material, &transport_hashes)?;

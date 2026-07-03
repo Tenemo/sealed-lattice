@@ -6,7 +6,7 @@ use crate::{
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         parameters::{
             BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_value,
-            batch_layout_binding_value, bgv_parameters_hash, bgv_parameters_value,
+            bgv_parameters_hash, bgv_parameters_value,
         },
         serialization::{
             BgvObjectKind, canonical_bytes_hex, ciphertext_root, parse_bgv_object_hex,
@@ -46,7 +46,6 @@ pub(crate) fn describe_bgv_rns_parameters() -> CanonicalResult<Value> {
     Ok(json!({
         "parameters": bgv_parameters_value(),
         "bgvParametersHash": bgv_parameters_hash()?,
-        "batchLayoutBinding": batch_layout_binding_value()?,
     }))
 }
 
@@ -218,7 +217,6 @@ pub(crate) fn generate_bgv_evaluation_key_material_from_request(
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
-    validate_batch_layout_binding(request)?;
     let slots = read_slots(request)?;
     let level = request
         .get("level")
@@ -270,24 +268,6 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
     }
 
     Ok(value)
-}
-
-fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
-    let supplied_binding = request.get("layoutBinding").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV batch encoder requires explicit direct encrypted ballot aggregate layout binding",
-        )
-    })?;
-    let expected_binding = batch_layout_binding_value()?;
-    if supplied_binding != &expected_binding {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "BGV batch encoder layout binding does not match the selected direct encrypted ballot aggregate layout",
-        ));
-    }
-
-    Ok(())
 }
 
 pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
@@ -466,8 +446,15 @@ mod tests {
         assert_eq!(encoded["validation"]["isValid"], true);
         assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
-                "slots": [1, 2, 3],
+                "slots": [1, 2, 65_537],
                 "level": 0
+            }))
+            .is_err()
+        );
+        assert!(
+            encode_bgv_batch_plaintext_from_request(&serde_json::json!({
+                "slots": [1, 2, 3],
+                "level": crate::bgv::parameters::DATA_PRIMES.len()
             }))
             .is_err()
         );

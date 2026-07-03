@@ -1,27 +1,11 @@
 // Public key-switch component material for evaluation-key share records: the
-// canonical component-vector encoding, the chunked binary transport, and the
-// deterministic fixture algebra used to build share material in tests. The
+// canonical component-vector encoding and the chunked binary transport. The
 // correctness proof over this material is the per-trustee succinct argument
 // in trustee_evaluation_key_proof; this module carries no proof logic.
 
 mod component_material;
-#[cfg(test)]
-mod ring_algebra;
 
 pub(super) use self::component_material::component_b_vectors_from_record;
-#[cfg(test)]
-pub(super) use self::component_material::{
-    KeySwitchComponentBFixtureInput, encode_evaluation_key_share_component_vectors,
-    evaluation_key_share_component_material_reference_root,
-    evaluation_key_share_component_material_transport_hashes,
-    evaluation_key_share_component_vector_hash, evaluation_key_share_component_vector_root,
-    key_switch_component_b_for_evaluation_key_fixture,
-    register_verified_evaluation_key_share_component_material_chunks,
-};
-#[cfg(test)]
-pub(super) use self::ring_algebra::automorphism_i128_for_evaluation_key_fixture;
-#[cfg(test)]
-use self::ring_algebra::{deterministic_key_switch_public_sample, signed_i128_residue_u64};
 
 use std::{
     collections::BTreeMap,
@@ -30,17 +14,9 @@ use std::{
     path::PathBuf,
     sync::{Mutex, OnceLock},
 };
-#[cfg(test)]
-use std::{fs, io::Write};
 
 use serde_json::{Value, json};
 
-#[cfg(test)]
-use crate::bgv::evaluator::key_switch::{KEY_SWITCH_SAMPLE_DOMAIN, PLAINTEXT_MODULUS_I64};
-#[cfg(test)]
-use crate::bgv::evaluator::prg::DeterministicSampler;
-#[cfg(test)]
-use crate::bgv::modular_arithmetic::{add_mod, mul_mod, sub_mod};
 use crate::{
     bgv::coefficient_codec::{
         coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
@@ -51,8 +27,6 @@ use crate::{
     hashing::hash512_hex,
 };
 
-#[cfg(test)]
-use super::sampling::negacyclic_product_mod;
 use super::setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
 
 pub(super) const EVALUATION_KEY_SHARE_COMPONENT_VECTOR_HASH_DOMAIN: &str =
@@ -123,21 +97,6 @@ fn validate_hex_string(value: &str, field_name: &str) -> CanonicalResult<()> {
     Ok(())
 }
 
-#[cfg(test)]
-fn validate_lowercase_hash(hash: &str, field_name: &str) -> CanonicalResult<()> {
-    if hash.len() == 128
-        && hash
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return Ok(());
-    }
-
-    Err(invalid_evaluation_key_share_material(format!(
-        "{field_name} must be lowercase 512-bit hex"
-    )))
-}
-
 fn read_u64(material_bytes: &[u8], cursor: &mut usize) -> CanonicalResult<u64> {
     let bytes = read_fixed::<8>(material_bytes, cursor)?;
     Ok(u64::from_le_bytes(bytes))
@@ -157,9 +116,4 @@ fn read_fixed<const LENGTH: usize>(
     output.copy_from_slice(bytes);
     *cursor = end;
     Ok(output)
-}
-
-#[cfg(test)]
-fn write_u64(output: &mut Vec<u8>, value: u64) {
-    output.extend_from_slice(&value.to_le_bytes());
 }

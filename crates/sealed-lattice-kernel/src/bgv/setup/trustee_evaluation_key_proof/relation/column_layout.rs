@@ -53,7 +53,6 @@ fn compact_vss_message_position_for_encoding_column(
 // layout is: secret halves, then per active key per digit the error halves,
 // then the matching error-square halves, then the claim-mask digit halves.
 pub(crate) struct LimbColumnLayout {
-    pub(crate) limb_index: usize,
     pub(crate) base_ring_degree: usize,
     pub(crate) ring_degree: usize,
     pub(crate) trace_size: usize,
@@ -229,7 +228,6 @@ impl LimbColumnLayout {
         let mask_column_count = mask_slot_count.div_ceil(ring_degree);
 
         Ok(Self {
-            limb_index,
             base_ring_degree,
             ring_degree,
             trace_size: ring_degree / TRACE_SPLIT,

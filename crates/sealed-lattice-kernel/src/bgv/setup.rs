@@ -8,14 +8,13 @@ mod certificates;
 mod commitment;
 mod compact_same_secret_bridge;
 mod compact_vss_commitment;
-// Development gate for the mobile trustee evaluation-key proving path;
-// exercised only by its tests and ignored benchmark until the consolidated
-// backend consumes it.
-#[cfg(test)]
-mod consolidated_key_switch_atom;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
+// Test-only key-switch digit-atom machinery used by its unit tests and ignored
+// prover-cost benchmark.
+#[cfg(test)]
+mod limb_group_key_switch_atom;
 mod local_trustee_state;
 mod package_builder;
 mod participant_material;

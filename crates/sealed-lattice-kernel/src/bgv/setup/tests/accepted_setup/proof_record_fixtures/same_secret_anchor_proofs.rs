@@ -249,9 +249,13 @@ fn same_secret_constant_commitments_from_deterministic_fixture(
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
+    // Compact fixtures take their ring degree from the compact coefficient
+    // commitment set. The deterministic reconstruction is material-independent:
+    // commitments come from accepted_vss_coefficient_message_fixture.
     let ring_degree = package["vssCoefficientCommitmentMaterial"]["ringDegree"]
         .as_u64()
-        .expect("VSS material ring degree") as usize;
+        .or_else(|| package["compactVssCoefficientCommitmentSet"]["ringDegree"].as_u64())
+        .expect("VSS material or compact coefficient ring degree") as usize;
     DATA_PRIMES
         .iter()
         .copied()

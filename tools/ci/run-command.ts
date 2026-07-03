@@ -162,6 +162,13 @@ type ProcessSignalEventSource = {
     ) => ProcessSignalEventSource;
 };
 
+type ProcessSignalEscalationScheduler = (
+    callback: () => void,
+    delayMilliseconds: number,
+) => unknown;
+
+const forceKillDelayMilliseconds = 5_000;
+
 export const createAbortableCommandSpawnOptions = (
     env: NodeJS.ProcessEnv,
     stdio: SpawnOptions['stdio'],
@@ -177,6 +184,7 @@ export const killProcessTree = (
     input: {
         readonly platform?: NodeJS.Platform;
         readonly processGroupKiller?: ProcessGroupKiller;
+        readonly signal?: NodeJS.Signals;
         readonly windowsTaskKiller?: WindowsTaskKiller;
     } = {},
 ): void => {
@@ -197,17 +205,23 @@ export const killProcessTree = (
         );
         return;
     }
+    const signal = input.signal ?? 'SIGTERM';
     try {
-        (input.processGroupKiller ?? process.kill)(-processId, 'SIGTERM');
+        (input.processGroupKiller ?? process.kill)(-processId, signal);
     } catch {
-        childProcess.kill('SIGTERM');
+        childProcess.kill(signal);
     }
 };
 
 export const installProcessSignalChildCleanup = (input: {
     readonly activeChildProcesses: ReadonlySet<KillableChildProcess>;
+    readonly clearScheduledForceKill?: (timer: unknown) => void;
+    readonly forceKillChildProcess?: (
+        childProcess: KillableChildProcess,
+    ) => void;
     readonly killChildProcess?: (childProcess: KillableChildProcess) => void;
     readonly processEvents?: ProcessSignalEventSource;
+    readonly scheduleForceKill?: ProcessSignalEscalationScheduler;
 }): (() => void) => {
     const processEvents = input.processEvents ?? process;
     const killChildProcess =
@@ -215,7 +229,33 @@ export const installProcessSignalChildCleanup = (input: {
         ((childProcess: KillableChildProcess): void => {
             killProcessTree(childProcess);
         });
+    const forceKillChildProcess =
+        input.forceKillChildProcess ??
+        ((childProcess: KillableChildProcess): void => {
+            killProcessTree(childProcess, { signal: 'SIGKILL' });
+        });
+    const scheduleForceKill =
+        input.scheduleForceKill ??
+        ((callback: () => void, delayMilliseconds: number) =>
+            setTimeout(callback, delayMilliseconds));
+    const clearScheduledForceKill =
+        input.clearScheduledForceKill ??
+        ((timer: unknown) => {
+            clearTimeout(timer as ReturnType<typeof setTimeout>);
+        });
     const signalHandlers = new Map<ProcessSignalName, () => void>();
+    let scheduledForceKill: unknown;
+    let handlersAreInstalled = true;
+
+    const removeSignalHandlers = (): void => {
+        if (!handlersAreInstalled) {
+            return;
+        }
+        handlersAreInstalled = false;
+        for (const [signal, signalHandler] of signalHandlers) {
+            processEvents.off(signal, signalHandler);
+        }
+    };
 
     for (const signal of ['SIGINT', 'SIGTERM'] as const) {
         const signalHandler = (): void => {
@@ -223,14 +263,23 @@ export const installProcessSignalChildCleanup = (input: {
             for (const childProcess of input.activeChildProcesses) {
                 killChildProcess(childProcess);
             }
+            scheduledForceKill ??= scheduleForceKill(() => {
+                scheduledForceKill = undefined;
+                for (const childProcess of input.activeChildProcesses) {
+                    forceKillChildProcess(childProcess);
+                }
+            }, forceKillDelayMilliseconds);
+            removeSignalHandlers();
         };
         signalHandlers.set(signal, signalHandler);
         processEvents.on(signal, signalHandler);
     }
 
     return (): void => {
-        for (const [signal, signalHandler] of signalHandlers) {
-            processEvents.off(signal, signalHandler);
+        removeSignalHandlers();
+        if (scheduledForceKill !== undefined) {
+            clearScheduledForceKill(scheduledForceKill);
+            scheduledForceKill = undefined;
         }
     };
 };

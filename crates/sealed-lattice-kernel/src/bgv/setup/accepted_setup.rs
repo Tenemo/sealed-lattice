@@ -17,19 +17,6 @@ mod transport_policy;
 mod vss_coefficient_commitments;
 mod vss_complaints_and_acceptances;
 
-#[cfg(test)]
-pub(super) use self::evaluation_key_material_transport::encode_public_evaluation_key_material_manifest;
-#[cfg(test)]
-pub(super) use self::evaluation_key_material_transport::{
-    accepted_setup_public_galois_keys_from_transport,
-    accepted_setup_public_relinearization_keys_from_transport,
-    public_evaluation_key_material_manifest, public_evaluation_key_material_reference_root,
-    public_evaluation_key_material_transport_hashes,
-};
-#[cfg(test)]
-pub(super) use self::public_key_share_material::{
-    accepted_setup_collective_public_key_from_package, public_key_share_material_transport_hashes,
-};
 pub(super) use self::transport_policy::{
     verify_full_ring_material, verify_terminal_setup_transport_policy,
 };
@@ -43,6 +30,12 @@ use self::common_randomness::{
 use self::compact_same_secret_bridge_verification::{
     CompactSameSecretBridgeVerification, verify_optional_compact_same_secret_bridge_statement_set,
 };
+// Re-exported for compact-bound terminal proof fixtures, which build
+// public-key-share and trustee evaluation-key statements against the verified
+// compact same-secret bridge material that the accepted-setup verifier
+// reconstructs.
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::compact_same_secret_bridge_verification::verified_compact_same_secret_bridge_material_from_package;
 use self::compact_vss_public_material_verification::{
     CompactVssPublicMaterialVerification, verify_optional_compact_vss_public_material,
 };
@@ -52,14 +45,6 @@ use self::evaluation_key_material_transport::{
     verify_public_evaluation_key_set, verify_required_public_evaluation_key_set,
 };
 use self::evaluation_key_proof_checks::verify_trustee_evaluation_key_proofs;
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::evaluation_key_proof_checks::{
-    TrusteeEvaluationKeyStatementInputs, accepted_key_switch_decomposition_hash,
-    register_verified_trustee_evaluation_key_proof_material_chunks,
-    round_one_public_aggregate_diagonals_from_package,
-    stored_verified_trustee_evaluation_key_proof_material_chunks_for_test,
-    trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
-};
 use self::evaluation_key_share_rounds::{
     EvaluationKeyProofCommonBinding, evaluation_key_proof_common_binding,
     expected_galois_key_switch_seed, expected_relinearization_key_switch_seed,
@@ -82,14 +67,14 @@ use self::private_vss_envelopes::{
     verify_private_vss_envelope_commitments,
 };
 #[cfg(test)]
+pub(in crate::bgv::setup) use self::public_key_share_material::accepted_setup_collective_public_key_from_package;
+#[cfg(test)]
 pub(in crate::bgv::setup) use self::public_key_share_material::public_key_share_coefficient_vector_hash;
 use self::public_key_share_material::{
     PublicKeyShareMaterialBinding, public_key_share_material_uses_transport,
     verify_collective_public_key_material, verify_collective_public_key_pair_consistency,
     verify_public_key_share_material_set,
 };
-#[cfg(test)]
-pub(in crate::bgv::setup) use self::public_key_shares::public_key_share_succinct_proof_material_root;
 use self::public_key_shares::{
     PublicKeyCommonBinding, public_key_common_binding, public_key_share_proof_refusal,
     public_key_share_records_by_roster_position, verify_optional_public_key_share_succinct_proofs,
@@ -123,6 +108,8 @@ use self::vss_complaints_and_acceptances::{
 use super::{commitment, setup_proof, threshold_share_commitments};
 use crate::bgv::setup_helpers::compare_required_string;
 
+#[cfg(test)]
+use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
@@ -130,10 +117,6 @@ use std::{
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
 };
-#[cfg(test)]
-use std::{fs, io::Write};
-
-use serde_json::{Value, json};
 use unicode_normalization::UnicodeNormalization;
 
 use super::*;
@@ -152,8 +135,8 @@ use super::{
     },
     setup_proof::{
         SETUP_PROOF_BYTES_DOMAIN, SETUP_PROOF_MATERIAL_ENCODING, SETUP_PROOF_SERIALIZATION,
-        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, setup_proof_material_transport_hashes,
-        verified_setup_proof_material_chunks_from_request,
+        SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES, SetupProofMaterialChunks,
+        setup_proof_material_transport_hashes, verified_setup_proof_material_chunks_from_request,
     },
     threshold_share_commitments::{
         derive_threshold_share_commitment_set_from_parts,
@@ -178,9 +161,6 @@ const SETUP_PACKAGE_OBJECT_TYPE: &str = "SetupPackage";
 const SAME_SECRET_CONSISTENCY_OBJECT_TYPE: &str = "SameSecretConsistencyStatementSet";
 const SAME_SECRET_STATEMENT_OBJECT_TYPE: &str = "SameSecretConsistencyStatement";
 const SAME_SECRET_PROOF_FAMILY_BINDING_OBJECT_TYPE: &str = "SameSecretProofFamilyBinding";
-const SAME_SECRET_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
-    "SetupTransportedSameSecretProofMaterialSet";
-const SAME_SECRET_PROOF_TRANSPORT_OBJECT_TYPE: &str = "SetupTransportedSameSecretProofMaterial";
 const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedPublicKeyShareProofMaterialSet";
 const PUBLIC_KEY_SHARE_PROOF_TRANSPORT_OBJECT_TYPE: &str =
@@ -234,9 +214,6 @@ const PRIVATE_VSS_ENVELOPE_COMMITMENT_OBJECT_TYPE: &str = "PrivateVssEnvelopeCom
 const PRIVATE_VSS_ENVELOPE_AAD_OBJECT_TYPE: &str = "PrivateVssEnvelopeAad";
 const ENCRYPTED_PRIVATE_VSS_ENVELOPE_OBJECT_TYPE: &str = "EncryptedPrivateVssShareEnvelope";
 const FIRST_ROSTER_PARTICIPANT_COUNT: u64 = 10;
-const FIRST_ROSTER_SETUP_COMPLETION_QUORUM: u64 = 10;
-const FIRST_ROSTER_BALLOT_RELEASE_QUORUM: u64 = 10;
-const FIRST_ROSTER_FINALITY_QUORUM: u64 = 10;
 const FIRST_ROSTER_DECRYPTION_THRESHOLD: u64 = 4;
 // Supported parameterized roster range. The first setup/evaluator roster
 // (n = 10) is the only benchmarked and certified instance; supported-phone
@@ -249,8 +226,7 @@ pub(super) const MAXIMUM_SUPPORTED_PARTICIPANT_COUNT: u64 = 20;
 
 /// Validated roster parameters for a collective BGV setup. Every field is a
 /// pure function of `participant_count`, so the setup-parameters hash is a
-/// roster family: distinct per n, byte-identical to the historical first-roster
-/// binding at n = 10.
+/// roster family with one distinct binding per supported roster size.
 #[derive(Clone, Copy)]
 pub(super) struct AcceptedRosterParameters {
     pub(super) participant_count: u64,
@@ -293,7 +269,7 @@ pub(super) fn first_closure_roster_parameters() -> AcceptedRosterParameters {
 /// Roster parameters for the roster size declared in a verified setup context.
 /// `verify_context` validates `participantCount` (range and derived quorums)
 /// before any sub-verifier runs, so reading it back here is safe; the
-/// first-closure fallback keeps callers total if the context is absent.
+/// n = 10 fallback keeps callers total if the context is absent.
 pub(super) fn accepted_roster_from_setup_context(
     setup_context: &Value,
 ) -> AcceptedRosterParameters {
@@ -485,9 +461,9 @@ pub(crate) fn describe_collective_bgv_setup_parameters_for_roster(
 pub(crate) fn describe_collective_bgv_setup_parameters_for_participant_count(
     participant_count: u64,
 ) -> CanonicalResult<Value> {
-    describe_collective_bgv_setup_parameters_for_roster(
-        &roster_parameters_from_participant_count(participant_count),
-    )
+    describe_collective_bgv_setup_parameters_for_roster(&roster_parameters_from_participant_count(
+        participant_count,
+    ))
 }
 
 pub(crate) fn verify_collective_bgv_setup_package_from_request(
@@ -539,26 +515,14 @@ pub(crate) fn derive_collective_bgv_setup_public_derivations_from_request(
     validate_hash_string(public_matrix_seed_hash, "publicMatrixSeedHash")?;
 
     // The standalone public-derivation command carries no setup context, so it
-    // falls back to the first-closure roster decryption threshold, mirroring
-    // accepted_roster_from_package when no setupContext is present. A reduced
-    // roster fixture can pass its decryption threshold so the derivations match
-    // the threshold the package verifier recomputes.
+    // uses the n = 10 decryption threshold. Reduced-roster fixtures can pass
+    // their decryption threshold so derivations match what the package verifier
+    // recomputes.
     let decryption_threshold = request
         .get("decryptionThreshold")
         .and_then(Value::as_u64)
         .unwrap_or(FIRST_ROSTER_DECRYPTION_THRESHOLD);
-    derive_collective_bgv_setup_public_derivations(
-        public_matrix_seed_hash,
-        decryption_threshold,
-    )
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn verify_required_public_evaluation_key_set_for_test(
-    setup_package: &Value,
-    request: &Value,
-) -> CanonicalResult<Option<Value>> {
-    verify_required_public_evaluation_key_set(setup_package, request)
+    derive_collective_bgv_setup_public_derivations(public_matrix_seed_hash, decryption_threshold)
 }
 
 fn verify_collective_setup_package(
@@ -815,8 +779,7 @@ pub(super) fn setup_parameters_hash_for_roster(
 // relation, commitment, setup-proof, transport, evaluator key schedule), the
 // inlined Q_share primes and public VSS commitment material sizing, and the BGV
 // parameters hash. Each part is a deterministic function of the roster and fixed
-// parameters, so this hash subsumes the former collection of per-component setup
-// parameter hashes.
+// parameters, so this hash is the setup-parameter identity checked by verifiers.
 pub(super) fn setup_parameters_value(roster: &AcceptedRosterParameters) -> CanonicalResult<Value> {
     Ok(json!({
         "objectType": "SetupParameters",

@@ -5,8 +5,7 @@
 // and Galois-batch share-record families, the per-trustee succinct evaluation-
 // key proofs and their binary proof transport, binary chunked transport of the
 // embedded key-switch component vectors, and public evaluation-key assembly
-// with its binary material transport. This file keeps the original import path
-// and public surface unchanged.
+// with its binary material transport.
 export {
     evaluationKeyShareComponentMaterialEncoding,
     trusteeEvaluationKeyProofFamily,

@@ -1,4 +1,4 @@
-import fs, { type Dirent } from 'node:fs';
+import fs, { type Dirent, type Stats } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -174,6 +174,7 @@ const checkpointProofFamilyDirectories = [
     'same-secret-anchor-proof-material',
     'public-key-share-proof-material',
     'trustee-evaluation-key-anchor-proof-material',
+    'trustee-evaluation-key-proof-material',
 ] as const;
 
 const checkpointFamilyProofMaterialCount = (
@@ -211,17 +212,33 @@ const checkpointFamilyProofMaterialCountSummary = (
         )
         .join(', ');
 
-const newestModificationTimeMillisecondsUnder = (
-    directoryPath: string,
+type FileTreeStat = Pick<Stats, 'isDirectory' | 'isFile' | 'mtimeMs'>;
+
+type FileTreeReader = {
+    readonly readDirectory?: (
+        directoryPath: string,
+    ) => readonly Pick<Dirent, 'isDirectory' | 'isFile' | 'name'>[];
+    readonly statPath?: (path: string) => FileTreeStat;
+};
+
+export const newestModificationTimeMillisecondsUnder = (
+    rootPath: string,
+    reader: FileTreeReader = {},
 ): number => {
     let newestModificationTimeMilliseconds = 0;
+    const statPath =
+        reader.statPath ?? ((entryPath: string) => fs.statSync(entryPath));
+    const readDirectory =
+        reader.readDirectory ??
+        ((directoryPath: string) =>
+            fs.readdirSync(directoryPath, {
+                withFileTypes: true,
+            }));
 
     const visit = (currentDirectoryPath: string): void => {
-        let entries: readonly Dirent[];
+        let entries: readonly Pick<Dirent, 'isDirectory' | 'isFile' | 'name'>[];
         try {
-            entries = fs.readdirSync(currentDirectoryPath, {
-                withFileTypes: true,
-            });
+            entries = readDirectory(currentDirectoryPath);
         } catch {
             return;
         }
@@ -236,28 +253,62 @@ const newestModificationTimeMillisecondsUnder = (
                 continue;
             }
 
-            newestModificationTimeMilliseconds = Math.max(
-                newestModificationTimeMilliseconds,
-                fs.statSync(entryPath).mtimeMs,
-            );
+            try {
+                newestModificationTimeMilliseconds = Math.max(
+                    newestModificationTimeMilliseconds,
+                    statPath(entryPath).mtimeMs,
+                );
+            } catch {
+                continue;
+            }
         }
     };
 
-    visit(directoryPath);
+    try {
+        const rootStatus = statPath(rootPath);
+        if (rootStatus.isFile()) {
+            return rootStatus.mtimeMs;
+        }
+        if (!rootStatus.isDirectory()) {
+            return 0;
+        }
+    } catch {
+        return 0;
+    }
+
+    visit(rootPath);
 
     return newestModificationTimeMilliseconds;
 };
 
+export const newestModificationTimeMillisecondsAcross = (
+    sourcePaths: readonly string[],
+    reader: FileTreeReader = {},
+): number =>
+    sourcePaths.reduce(
+        (newestModificationTimeMilliseconds, sourcePath) =>
+            Math.max(
+                newestModificationTimeMilliseconds,
+                newestModificationTimeMillisecondsUnder(sourcePath, reader),
+            ),
+        0,
+    );
+
+export const acceptedSetupCheckpointSourcePaths = (): readonly string[] => [
+    path.resolve(process.cwd(), 'crates', 'sealed-lattice-kernel', 'src'),
+    path.resolve(
+        process.cwd(),
+        'crates',
+        'sealed-lattice-kernel',
+        'Cargo.toml',
+    ),
+    path.resolve(process.cwd(), 'Cargo.toml'),
+    path.resolve(process.cwd(), 'Cargo.lock'),
+];
+
 const acceptedSetupSourceNewestModificationTimeMilliseconds = (): number =>
-    newestModificationTimeMillisecondsUnder(
-        path.resolve(
-            process.cwd(),
-            'crates',
-            'sealed-lattice-kernel',
-            'src',
-            'bgv',
-            'setup',
-        ),
+    newestModificationTimeMillisecondsAcross(
+        acceptedSetupCheckpointSourcePaths(),
     );
 
 export type FinalPackageCheckpointStoreWarmInputs = {
@@ -362,6 +413,28 @@ const finalPackageCheckpointStoreIsWarm = (): boolean => {
             acceptedSetupSourceNewestModificationTimeMilliseconds(),
     });
 };
+
+type FinalPackageCheckpointStoreWarmSnapshot = {
+    readonly checkpointCounts: ReadonlyMap<string, number>;
+    readonly isWarm: boolean;
+};
+
+const finalPackageCheckpointStoreWarmSnapshot =
+    (): FinalPackageCheckpointStoreWarmSnapshot => {
+        const completionManifest = finalPackageCompletionManifest();
+        const checkpointCounts = checkpointFamilyProofMaterialCounts();
+        const isWarm = finalPackageCheckpointStoreIsWarmForInputs({
+            completionManifestModifiedAtMilliseconds:
+                completionManifest?.completionManifestModifiedAtMilliseconds,
+            completionManifestProofFamilyCounts:
+                completionManifest?.completionManifestProofFamilyCounts,
+            proofFamilyCounts: checkpointCounts,
+            sourceNewestModificationTimeMilliseconds:
+                acceptedSetupSourceNewestModificationTimeMilliseconds(),
+        });
+
+        return { checkpointCounts, isWarm };
+    };
 
 const writeFinalPackageCompletionManifest = (): void => {
     fs.mkdirSync(acceptedSetupCheckpointDirectory, { recursive: true });
@@ -561,11 +634,10 @@ const commandDescriptionForLane = (
 const resolveRunKnobs = (
     lane: RustKernelAcceptedSetupCommandLane,
     mode: RustKernelAcceptedSetupRunMode,
-): ResolvedRunKnobs => {
-    const finalPackageWarmCheckpointStore =
-        lane === 'final-package' &&
+    finalPackageWarmCheckpointStore = lane === 'final-package' &&
         mode === 'accelerated' &&
-        finalPackageCheckpointStoreIsWarm();
+        finalPackageCheckpointStoreIsWarm(),
+): ResolvedRunKnobs => {
     const automaticTestThreads = automaticTestThreadKnobForLane(
         lane,
         automaticTestThreadCountForLane(
@@ -682,13 +754,15 @@ const buildLaneCommand = (
     mode: RustKernelAcceptedSetupRunMode,
 ): BuiltRustKernelAcceptedSetupCommand => {
     const metadata = laneMetadata(lane);
-    const knobs = resolveRunKnobs(lane, mode);
+    const warmCheckpointSnapshot =
+        lane === 'final-package' && mode === 'accelerated'
+            ? finalPackageCheckpointStoreWarmSnapshot()
+            : undefined;
+    const finalPackageWarmCheckpointStore =
+        warmCheckpointSnapshot?.isWarm ?? false;
+    const knobs = resolveRunKnobs(lane, mode, finalPackageWarmCheckpointStore);
     const modeLabel =
         mode === 'accelerated' ? 'accelerated local' : 'CI prove-fresh';
-    const finalPackageWarmCheckpointStore =
-        lane === 'final-package' &&
-        mode === 'accelerated' &&
-        finalPackageCheckpointStoreIsWarm();
     const approximateGigabytesPerTest = approximateGigabytesPerTestForLane(
         lane,
         mode,
@@ -716,7 +790,9 @@ const buildLaneCommand = (
         );
     }
     if (lane === 'final-package' && mode === 'accelerated') {
-        const checkpointCounts = checkpointFamilyProofMaterialCounts();
+        const checkpointCounts =
+            warmCheckpointSnapshot?.checkpointCounts ??
+            checkpointFamilyProofMaterialCounts();
         setupMessages.push(
             `${laneNameForLane(lane)} lane (${modeLabel}): checkpoint family counts: ` +
                 `${checkpointFamilyProofMaterialCountSummary(checkpointCounts)}.`,

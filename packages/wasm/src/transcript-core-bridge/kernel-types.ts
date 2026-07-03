@@ -324,7 +324,6 @@ export type TranscriptCoreKernel = {
     encodeBgvBatchPlaintext(input: {
         readonly slots: readonly number[];
         readonly level?: number;
-        readonly layoutBinding: unknown;
         readonly includeCanonicalBytesHex?: boolean;
     }): BgvBatchPlaintextEncoding | BgvOperationRejection;
     validateBgvPlaintextObject(input: {
@@ -612,7 +611,6 @@ type TranscriptCoreKernelCommand =
           readonly command: 'EncodeBgvBatchPlaintext';
           readonly slots: readonly number[];
           readonly level?: number;
-          readonly layoutBinding: unknown;
           readonly includeCanonicalBytesHex?: boolean;
       }
     | {

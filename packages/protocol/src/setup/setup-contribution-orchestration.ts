@@ -2,7 +2,7 @@ import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    assertContextFieldPathsMatch,
+    assertContextMatches,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
@@ -137,11 +137,7 @@ const privateVssEnvelopeRootReferences = (
         )
         .map((reference, referenceIndex) => {
             const objectPath = `privateVssEnvelopeReferences.${String(referenceIndex)}`;
-            assertContextFieldPathsMatch(
-                input.setupContext,
-                reference,
-                objectPath,
-            );
+            assertContextMatches(input.setupContext, reference, objectPath);
             assertTrusteeMatches(
                 input,
                 reference,
@@ -188,11 +184,7 @@ const issuedAcceptanceRoots = (
         )
         .map((acceptance, acceptanceIndex) => {
             const objectPath = `vssShareAcceptanceRecords.${String(acceptanceIndex)}`;
-            assertContextFieldPathsMatch(
-                input.setupContext,
-                acceptance,
-                objectPath,
-            );
+            assertContextMatches(input.setupContext, acceptance, objectPath);
             assertTrusteeMatches(
                 input,
                 acceptance,
@@ -219,11 +211,7 @@ const issuedComplaintRoots = (
         )
         .map((complaint, complaintIndex) => {
             const objectPath = `vssShareComplaintRecords.${String(complaintIndex)}`;
-            assertContextFieldPathsMatch(
-                input.setupContext,
-                complaint,
-                objectPath,
-            );
+            assertContextMatches(input.setupContext, complaint, objectPath);
             assertTrusteeMatches(
                 input,
                 complaint,
@@ -270,7 +258,7 @@ export const createSetupContributionAssembly = (
             ? null
             : input.vssSourceTrusteeRecord.sourceTrusteeCommitmentRoot;
     if (input.vssSourceTrusteeRecord !== undefined) {
-        assertContextFieldPathsMatch(
+        assertContextMatches(
             input.setupContext,
             input.vssSourceTrusteeRecord,
             'vssSourceTrusteeRecord',
@@ -288,7 +276,7 @@ export const createSetupContributionAssembly = (
         );
     }
     if (input.localStateCommitment !== undefined) {
-        assertContextFieldPathsMatch(
+        assertContextMatches(
             input.setupContext,
             input.localStateCommitment,
             'localStateCommitment',
@@ -302,7 +290,7 @@ export const createSetupContributionAssembly = (
         );
     }
     if (input.publicKeyShareRecord !== undefined) {
-        assertContextFieldPathsMatch(
+        assertContextMatches(
             input.setupContext,
             input.publicKeyShareRecord,
             'publicKeyShareRecord',
@@ -316,7 +304,7 @@ export const createSetupContributionAssembly = (
         );
     }
     if (input.publicKeyShareProofRecord !== undefined) {
-        assertContextFieldPathsMatch(
+        assertContextMatches(
             input.setupContext,
             input.publicKeyShareProofRecord,
             'publicKeyShareProofRecord',

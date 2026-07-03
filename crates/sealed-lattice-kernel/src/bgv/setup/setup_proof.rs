@@ -1,7 +1,9 @@
 mod material_transport;
 
 pub(super) use self::material_transport::setup_proof_record_binding_value;
-pub(in crate::bgv::setup) use self::material_transport::verified_setup_proof_material_chunks_from_request;
+pub(in crate::bgv::setup) use self::material_transport::{
+    SetupProofMaterialChunks, verified_setup_proof_material_chunks_from_request,
+};
 pub(crate) use self::material_transport::{
     SetupProofMaterialTransportHashes, absorb_setup_proof_material_transport_stream_chunk_request,
     begin_setup_proof_material_transport_stream_request,

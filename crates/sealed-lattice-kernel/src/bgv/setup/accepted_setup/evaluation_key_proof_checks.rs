@@ -978,7 +978,7 @@ fn trustee_evaluation_key_proof_bytes_from_record(
         transported_trustee_evaluation_key_proof_material_chunks(request, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        &chunks,
+        chunks.as_ref(),
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_trustee_evaluation_key_proof_transport_reference(proof_record, &transport_hashes)?;
@@ -998,8 +998,8 @@ fn trustee_evaluation_key_proof_bytes_from_record(
             )
         })?,
     );
-    for chunk in chunks {
-        proof_bytes.extend_from_slice(&chunk);
+    for chunk in chunks.iter() {
+        proof_bytes.extend_from_slice(chunk);
     }
 
     Ok(proof_bytes)
@@ -1080,7 +1080,7 @@ fn verify_trustee_evaluation_key_proof_transport_reference(
 fn transported_trustee_evaluation_key_proof_material_chunks(
     request: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<SetupProofMaterialChunks> {
     let material_set = request
         .get("transportedEvaluationKeyShareProofMaterial")
         .ok_or_else(|| {
@@ -1142,13 +1142,15 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                     "transported trustee evaluation-key proof material chunks must be an array",
                 )
             })?;
-            chunk_values
-                .iter()
-                .map(|chunk| {
-                    let bytes_hex = value_string(chunk, "bytesHex")?;
-                    decode_hex(bytes_hex)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?
+            Arc::new(
+                chunk_values
+                    .iter()
+                    .map(|chunk| {
+                        let bytes_hex = value_string(chunk, "bytesHex")?;
+                        decode_hex(bytes_hex)
+                    })
+                    .collect::<CanonicalResult<Vec<_>>>()?,
+            )
         } else if request.get("verifiedSetupProofMaterials").is_some() {
             verified_setup_proof_material_chunks_from_request(
                 request,
@@ -1158,13 +1160,15 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                 "transportedEvaluationKeyShareProofMaterial.proofMaterials",
             )?
         } else {
-            stored_verified_trustee_evaluation_key_proof_material_chunks(
-                expected_proof_material_root,
-            )?
+            Arc::new(
+                stored_verified_trustee_evaluation_key_proof_material_chunks(
+                    expected_proof_material_root,
+                )?,
+            )
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &chunks,
+            chunks.as_ref(),
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         if value_u64(proof_material, "proofChunkSizeBytes")?
@@ -1204,39 +1208,6 @@ fn verified_trustee_evaluation_key_proof_material_chunks()
         .get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-#[cfg(test)]
-pub(in crate::bgv::setup) fn register_verified_trustee_evaluation_key_proof_material_chunks(
-    proof_material_root: &str,
-    chunks: Vec<Vec<u8>>,
-) -> CanonicalResult<()> {
-    validate_hash_string(
-        proof_material_root,
-        "verifiedTrusteeEvaluationKeyProofMaterial.proofMaterialRoot",
-    )?;
-    let store_entry =
-        write_verified_trustee_evaluation_key_proof_material_chunks(proof_material_root, &chunks)?;
-    let mut stored_chunks = verified_trustee_evaluation_key_proof_material_chunks()
-        .lock()
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "verified trustee evaluation-key proof material store is unavailable",
-            )
-        })?;
-    if let Some(existing_chunks) = stored_chunks.get(proof_material_root)
-        && (existing_chunks.path != store_entry.path
-            || existing_chunks.total_byte_length != store_entry.total_byte_length)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "verified trustee evaluation-key proof material root is already bound to different material storage",
-        ));
-    }
-    stored_chunks.insert(proof_material_root.to_string(), store_entry);
-
-    Ok(())
-}
-
 fn stored_verified_trustee_evaluation_key_proof_material_chunks(
     proof_material_root: &str,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
@@ -1260,93 +1231,6 @@ fn stored_verified_trustee_evaluation_key_proof_material_chunks(
     drop(stored_chunks);
 
     read_verified_trustee_evaluation_key_proof_material_chunks(&store_entry)
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn stored_verified_trustee_evaluation_key_proof_material_chunks_for_test(
-    proof_material_root: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
-    stored_verified_trustee_evaluation_key_proof_material_chunks(proof_material_root)
-}
-
-#[cfg(test)]
-fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
-    super::super::accepted_setup_final_package_material_store_checkpoint_directory()
-        .join("trustee-evaluation-key-proof-material")
-}
-
-#[cfg(test)]
-fn write_verified_trustee_evaluation_key_proof_material_chunks(
-    proof_material_root: &str,
-    chunks: &[Vec<u8>],
-) -> CanonicalResult<VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry> {
-    let total_byte_length = chunks.iter().try_fold(0_u64, |total, chunk| {
-        total
-            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "verified trustee evaluation-key proof material chunk length does not fit u64",
-                )
-            })?)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "verified trustee evaluation-key proof material byte length overflowed",
-                )
-            })
-    })?;
-    let directory = verified_trustee_evaluation_key_proof_material_store_directory();
-    fs::create_dir_all(&directory).map_err(|error| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "verified trustee evaluation-key proof material store could not be created: {error}"
-            ),
-        )
-    })?;
-    let path = directory.join(format!("{proof_material_root}.bin"));
-    if path.exists() {
-        let observed_byte_length = fs::metadata(&path)
-            .map_err(|error| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "verified trustee evaluation-key proof material store entry could not be read: {error}",
-                    ),
-                )
-            })?
-            .len();
-        if observed_byte_length != total_byte_length {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "verified trustee evaluation-key proof material store entry length does not match the registered chunks",
-            ));
-        }
-    } else {
-        let mut file = File::create(&path).map_err(|error| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "verified trustee evaluation-key proof material store entry could not be created: {error}",
-                ),
-            )
-        })?;
-        for chunk in chunks {
-            file.write_all(chunk).map_err(|error| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "verified trustee evaluation-key proof material store entry could not be written: {error}",
-                    ),
-                )
-            })?;
-        }
-    }
-
-    Ok(VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry {
-        path,
-        total_byte_length,
-    })
 }
 
 fn read_verified_trustee_evaluation_key_proof_material_chunks(

@@ -159,29 +159,6 @@ pub(crate) fn inverse_mod(value: u64, modulus: u64) -> CanonicalResult<u64> {
     Ok(normalized as u64)
 }
 
-// Failure modes of `signed_i128_residue_u64`, kept separate so callers can map
-// each one to their own module-specific error message.
-#[cfg(test)]
-pub(crate) enum SignedResidueFailure {
-    Overflowed,
-    DoesNotFitU64,
-}
-
-#[cfg(test)]
-pub(crate) fn signed_i128_residue_u64(
-    value: i128,
-    modulus: u64,
-) -> Result<u64, SignedResidueFailure> {
-    let modulus_wide = i128::from(modulus);
-    let mut residue = value % modulus_wide;
-    if residue < 0 {
-        residue = residue
-            .checked_add(modulus_wide)
-            .ok_or(SignedResidueFailure::Overflowed)?;
-    }
-    u64::try_from(residue).map_err(|_| SignedResidueFailure::DoesNotFitU64)
-}
-
 pub(crate) fn integer_square_root_ceil(value: usize) -> usize {
     let mut root = 1_usize;
     while root.saturating_mul(root) < value {

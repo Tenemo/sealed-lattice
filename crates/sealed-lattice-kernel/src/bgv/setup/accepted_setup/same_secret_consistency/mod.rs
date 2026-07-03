@@ -4,6 +4,7 @@ mod accessors;
 mod anchor_proofs;
 mod consistency;
 mod family_binding;
+#[cfg(test)]
 mod proof_transport;
 
 pub(super) use accessors::{

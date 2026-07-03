@@ -1,12 +1,11 @@
 import type { ProtocolHash } from '@sealed-lattice/types';
 
-import {
-    assertContextFieldPathsMatch,
-    setupContextFieldNames,
-} from '../common-fields.js';
+import { setupContextFieldNames } from '../common-fields.js';
 import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import type { JsonRecord } from './types.js';
+
+export { assertContextMatches } from '../common-fields.js';
 
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
 const setupContextTokenPattern = /^[A-Za-z0-9._:/@+-]{1,128}$/u;
@@ -85,12 +84,6 @@ export const assertContext = (
         );
     }
 };
-
-export const assertContextMatches = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
-    objectPath: string,
-): void => assertContextFieldPathsMatch(setupContext, value, objectPath);
 
 const objectTypeAt = (
     value: Readonly<Record<string, unknown>>,

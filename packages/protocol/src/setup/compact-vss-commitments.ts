@@ -16,10 +16,10 @@ import type { CollectiveBgvSetupContext } from './vss-share-verification-records
 // Two base-3^17 message digits per coefficient. The kernel validates that the
 // canonical digit columns reproduce the message coefficients, so they must be
 // derived exactly this way (little-endian digits, transposed into columns).
-export const compactVssMessageDigitBase = 3 ** 17;
-export const compactVssMessageDigitCount = 2;
+const compactVssMessageDigitBase = 3 ** 17;
+const compactVssMessageDigitCount = 2;
 
-export const compactVssCanonicalMessageDigitColumns = (
+const compactVssCanonicalMessageDigitColumns = (
     messageCoefficients: readonly number[],
 ): number[][] => {
     const ringDegree = messageCoefficients.length;
@@ -206,7 +206,7 @@ export type CompactVssSourceTrusteeOpeningState = {
     readonly coefficientOpenings: readonly CompactVssCoefficientOpening[];
 };
 
-export type CompactVssCoefficientOpeningRandomnessProvider = (input: {
+type CompactVssCoefficientOpeningRandomnessProvider = (input: {
     readonly trusteeIdentity: string;
     readonly trusteeRosterPosition: number;
     readonly rnsLimbIndex: number;
@@ -228,7 +228,7 @@ export type CompactVssCoefficientCredential = {
     readonly randomnessByColumn: readonly (readonly number[])[];
 };
 
-export type CompactVssCoefficientCommitmentBundle = {
+type CompactVssCoefficientCommitmentBundle = {
     readonly coefficientCommitmentSet: CompactVssCoefficientCommitmentSet;
     readonly coefficientCredentials: readonly CompactVssCoefficientCredential[];
 };
@@ -421,7 +421,7 @@ export const createCompactVssCoefficientCommitmentSet = (input: {
     };
 };
 
-export type CompactVssRecipientShareOpeningRandomnessProvider = (input: {
+type CompactVssRecipientShareOpeningRandomnessProvider = (input: {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
@@ -430,7 +430,7 @@ export type CompactVssRecipientShareOpeningRandomnessProvider = (input: {
     readonly ringDegree: number;
 }) => readonly (readonly number[])[];
 
-export type CompactVssRecipientShareCredential = {
+type CompactVssRecipientShareCredential = {
     readonly sourceTrusteeIdentity: string;
     readonly sourceTrusteeRosterPosition: number;
     readonly recipientRosterPosition: number;
@@ -444,7 +444,7 @@ export type CompactVssRecipientShareCredential = {
     readonly commitment: CompactVssCommitmentValue;
 };
 
-export type CompactVssRecipientShareCommitmentBundle = {
+type CompactVssRecipientShareCommitmentBundle = {
     readonly recipientShareCommitmentSet: CompactVssRecipientShareCommitmentSet;
     readonly recipientShareCredentials: readonly CompactVssRecipientShareCredential[];
 };
@@ -1069,7 +1069,7 @@ export type CompactVssShareLinkageProofComputer = (input: {
 // Fresh prover blinding randomness per proof record. The share-linkage proof is
 // zero-knowledge, so this is independent per (source trustee, proof record) and
 // binds nothing the verifier recomputes.
-export type CompactVssShareLinkageProofRandomnessProvider = (input: {
+type CompactVssShareLinkageProofRandomnessProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
     readonly proofRecordIndex: number;
 }) => { readonly seedHex: string; readonly nonceHex: string };
@@ -1710,18 +1710,18 @@ export type CompactSameSecretBridgeProofComputer = (input: {
 // The source trustee's centered ternary secret coefficient vector, the same
 // secret the data-basis same-secret proof binds. The bridge proves the compact
 // target-basis constant commitments open to this exact vector.
-export type CompactSameSecretBridgeSecretProvider = (input: {
+type CompactSameSecretBridgeSecretProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => { readonly secretCoefficients: readonly number[] };
 
-export type CompactSameSecretBridgeProofRandomnessProvider = (input: {
+type CompactSameSecretBridgeProofRandomnessProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => { readonly seedHex: string; readonly nonceHex: string };
 
 // Optional per-trustee transported same-secret proof material, present only when
 // the data-basis same-secret proof is delivered by transport rather than
 // embedded; the bridge proof binds it so both bases reference one proof.
-export type CompactSameSecretBridgeTransportedProofMaterialProvider = (input: {
+type CompactSameSecretBridgeTransportedProofMaterialProvider = (input: {
     readonly sourceTrusteeRosterPosition: number;
 }) => Record<string, unknown> | undefined;
 

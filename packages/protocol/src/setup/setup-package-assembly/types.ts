@@ -2,6 +2,13 @@ import type { ProtocolHash } from '@sealed-lattice/types';
 
 import type { SetupCommonRandomness } from '../common-randomness-records.js';
 import type {
+    CompactVssAggregateThresholdCommitmentSet,
+    CompactVssCoefficientCommitmentSet,
+    CompactVssRecipientShareCommitmentSet,
+    CompactVssSameSecretBridgeStatementSet,
+    CompactVssShareLinkageStatement,
+} from '../compact-vss-commitments.js';
+import type {
     GaloisKeyShareBatch,
     PublicEvaluationKeySet,
     RelinearizationKeyShareRounds,
@@ -27,13 +34,6 @@ import type {
 } from '../same-secret-consistency-records.js';
 import type { SetupCertificatesInput } from '../setup-certificates.js';
 import type { SetupPhaseRecord } from '../setup-phase-records.js';
-import type {
-    CompactVssAggregateThresholdCommitmentSet,
-    CompactVssCoefficientCommitmentSet,
-    CompactVssRecipientShareCommitmentSet,
-    CompactVssSameSecretBridgeStatementSet,
-    CompactVssShareLinkageStatement,
-} from '../compact-vss-commitments.js';
 import type { VerifiedSetupProofMaterialSet } from '../setup-proof-material-transport.js';
 import type {
     CollectiveBgvSetupContext,

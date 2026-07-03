@@ -3,7 +3,7 @@
 // domain problem each part solves: shared vocabulary and types, low-level
 // encoding helpers, the share/proof statement families, embedded and binary
 // chunked share material, collective public-key aggregation, and the succinct
-// proof family. This file keeps the original import path available.
+// proof family.
 export {
     publicKeyShareProofFamily,
     publicKeyShareMaterialEncoding,

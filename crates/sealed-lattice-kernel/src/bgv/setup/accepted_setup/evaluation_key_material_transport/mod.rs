@@ -11,20 +11,6 @@ pub(super) use set_verification::{
     verify_public_evaluation_key_set, verify_required_public_evaluation_key_set,
 };
 
-#[cfg(test)]
-pub(in crate::bgv::setup) use manifest::encode_public_evaluation_key_material_manifest;
-#[cfg(test)]
-pub(in crate::bgv::setup) use manifest::public_evaluation_key_material_manifest;
-#[cfg(test)]
-pub(in crate::bgv::setup) use material_transport::{
-    public_evaluation_key_material_reference_root, public_evaluation_key_material_transport_hashes,
-};
-#[cfg(test)]
-pub(in crate::bgv::setup) use public_key_reconstruction::{
-    accepted_setup_public_galois_keys_from_transport,
-    accepted_setup_public_relinearization_keys_from_transport,
-};
-
 #[derive(Debug, Clone)]
 pub(in crate::bgv::setup) struct PublicEvaluationKeyMaterialTransportHashes {
     pub(in crate::bgv::setup) full_object_hash: String,

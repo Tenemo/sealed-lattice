@@ -6,7 +6,7 @@ type BinaryChunkWriterInput = Readonly<{
     readonly consumeChunk?: (chunkIndex: number, chunk: Uint8Array) => void;
 }>;
 
-export type BinaryChunkWriterFinishResult = Readonly<{
+type BinaryChunkWriterFinishResult = Readonly<{
     readonly chunks: readonly Uint8Array[];
     readonly chunkCount: number;
     readonly totalByteLength: number;

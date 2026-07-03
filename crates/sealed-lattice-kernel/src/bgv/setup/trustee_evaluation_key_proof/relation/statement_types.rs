@@ -552,6 +552,7 @@ impl TrusteeEvaluationKeyStatement {
         (0..self.limb_count()).collect()
     }
 
+    #[cfg(test)]
     pub(crate) fn limb_moduli(&self) -> Vec<u64> {
         self.proof_limb_indices()
             .into_iter()

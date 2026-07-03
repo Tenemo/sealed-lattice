@@ -117,12 +117,11 @@ fn heavy_accepted_setup_collective_setup_verifier_checks_same_secret_proofs_from
         result["isValid"], false,
         "unexpected verifier result: {result}"
     );
-    // The fixture transport certificate (setup_transport_certificate_fixture)
-    // declares a roster-and-ring-derived byte length that matches the transported
-    // material's actual dimensions but a placeholder full-object hash that never
-    // matches it, so the transported-material reference mismatch is caught on the
-    // content hash. The numeric-metadata check runs and passes first; it still
-    // refuses a genuine dimension mismatch.
+    // The fixture transport certificate declares a roster-and-ring-derived byte
+    // length that matches the transported material's dimensions and a fixed
+    // mismatch full-object hash, so the transported-material reference mismatch
+    // is caught on the content hash. The numeric-metadata check runs and passes
+    // first; it still refuses a genuine dimension mismatch.
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"], "vssMaterialTransportReferenceHashMismatch",
         "unexpected verifier result: {result}"

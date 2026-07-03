@@ -31,11 +31,6 @@ import {
 } from '#tools/internal/files.js';
 import { rewriteModuleSpecifiers } from '#tools/internal/module-specifiers.js';
 
-export {
-    filesystemMaximumRetries,
-    withTransientFilesystemRetries,
-} from '#tools/internal/files.js';
-
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sdkDistDirectoryPath = path.resolve(repoRoot, 'packages', 'sdk', 'dist');
 const bridgeSourcePath = path.resolve(

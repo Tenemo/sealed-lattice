@@ -1,9 +1,9 @@
 use super::common::*;
 
+use super::super::compact_same_secret_bridge_verification::VerifiedCompactSameSecretBridgeMaterial;
 use super::shares::*;
 use super::succinct_proof_transport::*;
 use super::*;
-use super::super::compact_same_secret_bridge_verification::VerifiedCompactSameSecretBridgeMaterial;
 use crate::hashing::derive_canonical_object_hash;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -122,10 +122,12 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     let transported_constant_commitments = if verified_compact_same_secret_bridge.is_some() {
         None
     } else {
-        Some(same_secret_transported_constant_commitments_by_roster_position(
-            setup_package,
-            request,
-        )?)
+        Some(
+            same_secret_transported_constant_commitments_by_roster_position(
+                setup_package,
+                request,
+            )?,
+        )
     };
     if public_key_share_material_uses_transport(material_set)
         && request.get("transportedPublicKeyShareMaterial").is_none()
@@ -273,7 +275,7 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         same_secret_records: &same_secret_records,
         same_secret_proof_bindings: &same_secret_proof_bindings,
         material_bindings: &material_bindings,
-        transported_constant_commitments: transported_constant_commitments.as_ref(),
+        transported_constant_commitments: transported_constant_commitments.as_deref(),
         verified_compact_same_secret_bridge,
     };
     let mut roster_position_counts: BTreeMap<u64, usize> = BTreeMap::new();
@@ -546,14 +548,13 @@ fn verify_public_key_share_succinct_proof_record(
         ));
     }
     // The pk relation opens exactly the limb-zero constant commitment the
-    // same-secret proof binds. On the compact path that commitment is carried by
-    // the compact same-secret bridge statement (whose binding must match the
-    // accepted same-secret proof), so the proof no longer needs the full-VSS BDLOP
-    // constant commitments. On the full-VSS path the limb-zero BDLOP commitment
-    // is rebuilt from the transported material as before.
+    // same-secret proof binds. Compact packages carry that commitment through
+    // the compact same-secret bridge statement; full-VSS packages rebuild the
+    // limb-zero BDLOP commitment from transported material.
     let (ring_degree, same_secret_linkage, compact_same_secret_bridge) = if let Some(
         verified_compact_same_secret_bridge,
-    ) = context.verified_compact_same_secret_bridge
+    ) =
+        context.verified_compact_same_secret_bridge
     {
         let compact_bridge_binding = verified_compact_same_secret_bridge
             .statement_for_roster_position(trustee_roster_position)?;
@@ -572,13 +573,17 @@ fn verify_public_key_share_succinct_proof_record(
                 "compact same-secret bridge statement must match the verified same-secret proof binding",
             ));
         }
-        let ring_degree = usize::try_from(value_u64(proof_record, "ringDegree")?).map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::MalformedLength,
-                "public-key share succinct proof ringDegree does not fit usize",
-            )
-        })?;
-        if compact_bridge_binding.statement.target_rns_primes.is_empty()
+        let ring_degree =
+            usize::try_from(value_u64(proof_record, "ringDegree")?).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public-key share succinct proof ringDegree does not fit usize",
+                )
+            })?;
+        if compact_bridge_binding
+            .statement
+            .target_rns_primes
+            .is_empty()
             || compact_bridge_binding
                 .statement
                 .target_constant_commitment_roots

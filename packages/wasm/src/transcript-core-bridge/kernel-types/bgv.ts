@@ -151,15 +151,6 @@ export type BgvRnsParametersDescription = {
         readonly allowedOperations: readonly string[];
     };
     readonly bgvParametersHash: ProtocolHash;
-    readonly batchLayoutBinding: {
-        readonly scoreRange: {
-            readonly minimum: number;
-            readonly maximum: number;
-        };
-        readonly bucketCount: number;
-        readonly slotCount: number;
-        readonly coordinatesPerOption: number;
-    };
 };
 
 export type BgvObjectValidation = {

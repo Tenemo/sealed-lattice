@@ -138,8 +138,5 @@ pub(crate) fn evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pa
         "batched packed-rank evaluation did not produce rank terms",
     )?;
 
-    Ok(PackedRankEvaluation {
-        packed_ranks,
-        exact_rank_indicators: Vec::new(),
-    })
+    Ok(PackedRankEvaluation { packed_ranks })
 }

@@ -134,7 +134,7 @@ fn public_key_share_proof_round_trips_with_compact_same_secret_bridge() {
     );
     assert!(
         statement.same_secret_linkage.is_none(),
-        "compact-bound public-key share must not carry the old same-secret linkage"
+        "compact-bound public-key share must use the compact same-secret bridge"
     );
     assert!(
         statement.compact_same_secret_bridge.is_some(),
@@ -214,7 +214,7 @@ fn trustee_evaluation_key_proof_round_trips_with_compact_same_secret_bridge() {
     );
     assert!(
         statement.same_secret_linkage.is_none(),
-        "compact-bound evaluation-key proof must not carry the old same-secret linkage"
+        "compact-bound evaluation-key proof must use the compact same-secret bridge"
     );
     assert_eq!(
         statement.proof_limb_count(),

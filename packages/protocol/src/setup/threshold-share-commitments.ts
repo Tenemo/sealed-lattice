@@ -2,7 +2,7 @@ import { deriveCanonicalObjectHash, hash512Hex } from '@sealed-lattice/crypto';
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    assertContextFieldPathsMatch,
+    assertContextMatches,
     assertJsonRecord,
     assertJsonRecordArray,
     assertNonEmptyString,
@@ -326,7 +326,7 @@ const parseMaterialSet = (
         'vssCoefficientCommitmentMaterial',
         'VssCoefficientCommitmentMaterialSet',
     );
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         setupContext,
         materialSet,
         'vssCoefficientCommitmentMaterial',
@@ -811,7 +811,7 @@ export const deriveThresholdShareCommitments = (
         'vssCoefficientCommitments',
         'VssCoefficientCommitmentSet',
     );
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         input.vssCoefficientCommitments,
         'vssCoefficientCommitments',

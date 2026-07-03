@@ -1,5 +1,4 @@
-//! Fixed-width Montgomery arithmetic over the consolidated-atom proof
-//! fields.
+//! Fixed-width Montgomery arithmetic over the digit-atom proof fields.
 //!
 //! Both selected proof primes are generalized Fermat primes p = b^64 + 1
 //! with even b, which makes them simultaneously NTT-friendly (2^16 divides
@@ -25,8 +24,8 @@ pub(crate) struct ProofFieldParameters<const LIMB_COUNT: usize> {
 }
 
 /// The 16-limb-group proof field: p = 4166^64 + 1 (770 bits, 13 limbs).
-/// Large enough for the consolidated integer relation over the full active
-/// level-15 limb group (16 data primes) at ring degree 32768.
+/// Large enough for the limb-group integer relation over the full active
+/// level-15 group (16 data primes) at ring degree 32768.
 pub(crate) const SIXTEEN_LIMB_GROUP_FIELD_LIMBS: usize = 13;
 
 pub(crate) fn sixteen_limb_group_field_parameters()

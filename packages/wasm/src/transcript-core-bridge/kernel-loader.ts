@@ -282,7 +282,10 @@ export const createTranscriptCoreKernelLoader = (
                         publicMatrixSeedHash: input.publicMatrixSeedHash,
                         ...(input.decryptionThreshold === undefined
                             ? {}
-                            : { decryptionThreshold: input.decryptionThreshold }),
+                            : {
+                                  decryptionThreshold:
+                                      input.decryptionThreshold,
+                              }),
                     }),
                 generateBgvPassiveSetup: (input): BgvPassiveSetupPackage =>
                     executeCommand<BgvPassiveSetupPackage>({
@@ -608,7 +611,6 @@ export const createTranscriptCoreKernelLoader = (
                         command: 'EncodeBgvBatchPlaintext',
                         slots: input.slots,
                         level: input.level,
-                        layoutBinding: input.layoutBinding,
                         includeCanonicalBytesHex:
                             input.includeCanonicalBytesHex,
                     }),

@@ -2,9 +2,10 @@
 // lives in the cohesive sub-modules under ./vss-coefficient-commitments/, grouped
 // by the domain problem each part solves: shared vocabulary and types, stateless
 // encoding and sampling primitives, per-source-trustee opening-state generation,
-// BDLOP commitment value shaping, binary chunked material transport, and the
-// commitment bundle constructors. This file keeps the original import path and
-// public surface unchanged.
+// BDLOP commitment value shaping, transported-material decoding, and the
+// embedded commitment bundle constructor. The commitments built here are the
+// data basis the same-secret proof family opens; the compact VSS commitment
+// sets replace them as the transported public setup material.
 export {
     setupCommitmentRandomnessWidth,
     acceptedBgvFullRingDegree,
@@ -49,8 +50,8 @@ export {
     materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
 } from './vss-coefficient-commitments/binary-transport.js';
 export {
-    createVssSourceTrusteeCoefficientCommitmentContribution,
-    createVssCoefficientCommitmentBundle,
     createBinaryChunkedVssCoefficientCommitmentBundle,
     createStreamingBinaryChunkedVssCoefficientCommitmentBundle,
+    createVssSourceTrusteeCoefficientCommitmentContribution,
+    createVssCoefficientCommitmentBundle,
 } from './vss-coefficient-commitments/commitment-bundles.js';

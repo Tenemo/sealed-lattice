@@ -123,13 +123,9 @@ pub(super) fn verify_merkle_opening(
 }
 
 // Batched Merkle opening: the deduplicated authentication nodes that, together
-// with a set of opened leaves, recompute the tree root. A proof that opens many
-// leaves of one tree (every query position of the low-degree test, or every
-// folded-layer pair) otherwise repeats the internal nodes near the root in every
-// per-leaf path. Sending each required internal node once removes that
-// redundancy. The commitment is unchanged: the verifier still recomputes the
-// same root from the same leaves, so binding and hiding are exactly as before;
-// only the redundant re-transmission of shared nodes is removed.
+// with a set of opened leaves, recompute the tree root. The verifier consumes
+// each required internal node once and still binds the opened leaves to the
+// same salted commitment root.
 pub(super) struct BatchedMerkleOpening {
     pub(super) authentication_nodes: Vec<MerkleDigest>,
 }

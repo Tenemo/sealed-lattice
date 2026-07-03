@@ -22,10 +22,9 @@
 // degree-four challenge extension of the limb field, the masked claims are
 // integer-bound across the active proof fields, and every theorem row
 // carries its closure argument with one explicitly named conjecture (the CS25
-// entropy-capacity FRI proximity-gap bound; see accounting.rs for the 2026
-// Option B re-basing off the disproved up-to-capacity conjecture), CMS19 QROM
-// accounting at the achieved setup-proof level, and a bounded-leakage smudging
-// scope rather than 128-bit zero-knowledge.
+// entropy-capacity FRI proximity-gap bound), CMS19 QROM accounting at the
+// achieved setup-proof level, and a bounded-leakage smudging scope rather than
+// 128-bit zero-knowledge.
 //
 // Argument shape per limb field F_{q_l} (one trace commitment and one batched
 // FRI instance per limb, shared by every listed key):
@@ -58,7 +57,6 @@ pub(crate) use commands::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
     verify_compact_same_secret_bridge_proof_from_request,
-    verify_compact_vss_share_linkage_proof_from_request,
     verify_compact_vss_share_linkage_proof_material_set_from_request,
 };
 
@@ -101,6 +99,7 @@ pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(crate) const COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "compact-vss-share-linkage";
 pub(crate) const COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "compact-same-secret-bridge";
 // Canonical hash of transported same-secret linkage anchor proof bytes.
+#[cfg(test)]
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
     hash512_hex(
         "sealed-lattice/setup/same-secret-linkage-anchor/proof-bytes-v1",
@@ -179,10 +178,9 @@ pub(in crate::bgv::setup) const COMPACT_VSS_CONSISTENCY_COEFFICIENT_BITS: u32 = 
 // Each consistency claim is one shared integer (clear bounded combination plus
 // a family-selected mask committed digit-wise in base-3 mask columns) published
 // as its residue in every proof field carrying that claim. Setup proof families
-// use 58 base-3 digits (the same ~2^92 mask bound the earlier ninety-two-bit
-// binary columns carried), which preserves the existing two-field lift window
-// while cutting mask columns; per-claim leakage stays the clear bound over the
-// mask bound, about 2^-68. This is not a 128-bit zero-knowledge row.
+// use 58 base-3 digits, giving a ~2^92 mask bound inside the two-field lift
+// window; per-claim leakage stays the clear bound over the mask bound, about
+// 2^-68. This is not a 128-bit zero-knowledge row.
 pub(in crate::bgv::setup) const CLAIM_MASK_RADIX: u64 = 3;
 pub(in crate::bgv::setup) const CLAIM_MASK_DIGIT_COUNT: usize = 58;
 pub(in crate::bgv::setup) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize = 75;
@@ -191,13 +189,11 @@ pub(in crate::bgv::setup) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize 
 // window while keeping the digit-claim mask margin comparable to the carry
 // claim margin.
 pub(in crate::bgv::setup) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
-// FRI query count at rate 1/2. CHANGE (2026, Option B): the per-query
-// soundness is no longer the disproved one-bit (1 - rho) up-to-capacity bound
-// but the CS25 entropy-capacity bound (about 0.938 bit per query for the prime
-// base field). The selected 168 queries record 156 bits before the union
-// allowance and 140 after it, clearing 128 with margin. The proven BCIKS20
-// Johnson fallback (half a bit per query) would need roughly 288 queries. See
-// accounting.rs for the full re-basing. No grinding is applied.
+// FRI query count at rate 1/2. The CS25 entropy-capacity bound gives about
+// 0.938 bit per query for the prime base field. The selected 168 queries record
+// 156 bits before the union allowance and 140 after it, clearing 128 with
+// margin. The proven BCIKS20 Johnson fallback (half a bit per query) would need
+// roughly 288 queries. No grinding is applied.
 pub(super) const LOW_DEGREE_QUERY_COUNT: usize = 168;
 pub(super) const MINIMUM_CONJECTURED_CLASSICAL_SOUNDNESS_AFTER_UNION_BITS: i64 = 128;
 pub(super) const MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE: &[u8] = b"batched-column-degree-v1";

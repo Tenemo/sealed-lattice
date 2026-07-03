@@ -23,8 +23,7 @@ pub(crate) use root_parameters::{
 // the ring parameters, the ballot/score/layout data, the aggregate/comparison
 // flags, the ciphertext convention flags, and the evaluator operation policy.
 // Every part is a pure deterministic function of the fixed parameters, so one
-// hash over the whole set is the strongest identity and replaces the former
-// collection of per-component hashes.
+// hash over the whole set is the strongest identity.
 pub(crate) fn bgv_parameters_value() -> Value {
     json!({
         "objectType": "BgvParameters",
@@ -60,20 +59,6 @@ pub(crate) fn bgv_parameters_hash() -> CanonicalResult<String> {
     derive_canonical_object_hash(&bgv_parameters_value())
 }
 
-// Layout data only, with no embedded sub-hashes. Used by the encode command's
-// layout-binding equality check.
-pub(crate) fn batch_layout_binding_value() -> CanonicalResult<Value> {
-    Ok(json!({
-        "scoreRange": {
-            "minimum": 1,
-            "maximum": 10
-        },
-        "bucketCount": 10,
-        "slotCount": POLYNOMIAL_DEGREE,
-        "coordinatesPerOption": 11,
-    }))
-}
-
 const ALLOWED_EVALUATOR_OPERATIONS: &[&str] = &[
     "encodeDirectEncryptedBallotAggregate",
     "validateCoefficientDomainPlaintext",
@@ -98,8 +83,7 @@ mod tests {
     use super::root_parameters::moduli_bit_length_sum;
     use super::{
         BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE, SPECIAL_PRIME,
-        batch_layout_binding_value, data_basis_modulus_bits, extended_basis_modulus_bits,
-        root_parameters_for_modulus,
+        data_basis_modulus_bits, extended_basis_modulus_bits, root_parameters_for_modulus,
     };
     use crate::bgv::modular_arithmetic::is_prime_for_tests;
 
@@ -296,14 +280,5 @@ mod tests {
                 + usize::try_from(u64::BITS - SPECIAL_PRIME.leading_zeros())
                     .expect("bit length fits usize")
         );
-    }
-
-    #[test]
-    fn batch_layout_binding_rejects_scalar_only_layouts_by_construction() {
-        let binding = batch_layout_binding_value().expect("layout binding");
-
-        assert_eq!(binding["bucketCount"], 10);
-        assert_eq!(binding["slotCount"], POLYNOMIAL_DEGREE);
-        assert_eq!(binding["coordinatesPerOption"], 11);
     }
 }

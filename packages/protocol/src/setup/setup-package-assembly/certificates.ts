@@ -33,8 +33,6 @@ export const resolveSetupCertificateRecords = (
 
         return createSetupCertificates({
             ...input.setupCertificateInput,
-            vssCoefficientCommitmentMaterial:
-                input.vssCoefficientCommitmentMaterial,
             transport:
                 transportedObjects.length === 0
                     ? input.setupCertificateInput.transport

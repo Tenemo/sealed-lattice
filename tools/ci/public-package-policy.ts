@@ -73,7 +73,7 @@ export const vendoredProtocolRuntimeModules = [
     'setup/setup-package-assembly/certificates.ts',
     'setup/setup-package-assembly/assembly.ts',
     'setup/setup-phase-records.ts',
-    'setup/threshold-share-commitments.ts',
+    'setup/compact-vss-commitments.ts',
     'setup/vss-coefficient-commitments.ts',
     'setup/vss-coefficient-commitments/constants-and-types.ts',
     'setup/vss-coefficient-commitments/encoding.ts',

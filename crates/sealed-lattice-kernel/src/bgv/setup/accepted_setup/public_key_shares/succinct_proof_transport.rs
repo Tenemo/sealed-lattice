@@ -47,7 +47,7 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
     let chunks = transported_public_key_share_proof_material_chunks(request, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
         "public-key-share",
-        &chunks,
+        chunks.as_ref(),
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_public_key_share_succinct_proof_transport_reference(proof_record, &transport_hashes)?;
@@ -68,8 +68,8 @@ pub(super) fn public_key_share_succinct_proof_bytes_from_record(
             )
         })?,
     );
-    for chunk in chunks {
-        proof_bytes.extend_from_slice(&chunk);
+    for chunk in chunks.iter() {
+        proof_bytes.extend_from_slice(chunk);
     }
 
     Ok(proof_bytes)
@@ -116,7 +116,7 @@ fn verify_public_key_share_succinct_proof_transport_reference(
 fn transported_public_key_share_proof_material_chunks(
     request: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<SetupProofMaterialChunks> {
     let material_set = request
         .get("transportedPublicKeyShareProofMaterial")
         .ok_or_else(|| {
@@ -146,7 +146,7 @@ fn transported_public_key_share_proof_material_chunks(
             ));
         }
         let chunks = if proof_material.get("chunks").is_some() {
-            transported_public_key_share_proof_chunks(proof_material)?
+            Arc::new(transported_public_key_share_proof_chunks(proof_material)?)
         } else {
             verified_setup_proof_material_chunks_from_request(
                 request,
@@ -158,7 +158,7 @@ fn transported_public_key_share_proof_material_chunks(
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             PUBLIC_KEY_SHARE_PROOF_FAMILY,
-            &chunks,
+            chunks.as_ref(),
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         verify_transported_public_key_share_proof_material_hashes(

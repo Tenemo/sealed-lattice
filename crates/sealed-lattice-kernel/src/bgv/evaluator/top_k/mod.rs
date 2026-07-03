@@ -83,7 +83,6 @@ const GENERATOR_SUBGROUP_ORDER: usize = POLYNOMIAL_DEGREE / 2;
 
 pub(crate) struct PackedRankEvaluation {
     pub(crate) packed_ranks: Ciphertext,
-    exact_rank_indicators: Vec<Ciphertext>,
 }
 
 // Encrypted sparse target projection result.

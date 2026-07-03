@@ -388,29 +388,6 @@ const freshProofRandomnessHex = (): string => {
     return bytesToHex(bytes);
 };
 
-const privateVssProofChunkManifestRoot = (
-    kernel: PrivateVssMailboxDeliveryKernel,
-): Parameters<typeof setupProofMaterialTransportMetadata>[3] => ({
-    deriveChunkManifestRoot: ({
-        proofFamily,
-        chunkHashes,
-        fullObjectHash,
-        totalByteLength,
-    }) =>
-        kernel.deriveCanonicalObjectHash({
-            value: {
-                objectType: 'SetupProofMaterialChunkManifest',
-                objectVersion: 1,
-                proofFamily,
-                chunkSizeBytes: setupProofTransportChunkSizeBytes,
-                chunkCount: chunkHashes.length,
-                totalByteLength,
-                chunkHashes,
-                fullObjectHash,
-            },
-        }),
-});
-
 const sortedByRosterPosition = <Entry>(
     entries: readonly Entry[],
     rosterPosition: (entry: Entry) => number,
@@ -652,7 +629,6 @@ const transportPrivateVssShareProofMaterial = (
         privateVssShareProofFamily,
         proofBytes,
         'privateVssShareProof proofBytesHex must produce at least one transported chunk.',
-        privateVssProofChunkManifestRoot(kernel),
     );
     const statementHash = assertProtocolHash(
         proofRecord.statementHash,

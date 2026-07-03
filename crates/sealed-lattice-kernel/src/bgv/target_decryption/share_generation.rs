@@ -167,7 +167,12 @@ pub(super) fn derive_threshold_secret_share_limb(
     Ok(share)
 }
 
-// PROTOTYPE GAP (labeled, not a hidden flaw): partial shares are released as bare c1*s_i with no smudging / noise-flooding term. Threshold-BGV simulation security requires adding flooding noise E_i super-polynomially larger than the decryption noise; without it the released shares leak c1*s_i exactly. There is no producer-set flag gating this path; read_setup_binding in bindings.rs accepts the setup package by recomputed parameter-binding hashes and roots alone, and the gap is disclosed only in prose, not in any bound status field. The C1-C4 smudging/noise closure is the open work.
+// Target-decryption partial shares are bare c1*s_i values. Threshold-BGV
+// simulation security requires flooding noise E_i super-polynomially larger
+// than the decryption noise; without it, shares reveal c1*s_i exactly. No
+// producer-set flag gates this path: setup acceptance is still based on
+// recomputed parameter-binding hashes and roots, while this limitation remains
+// prose-only rather than a bound artifact field.
 pub(super) fn partial_decryption_by_limb(
     ciphertext: &Ciphertext,
     secret_share_by_limb: &[Vec<u64>],

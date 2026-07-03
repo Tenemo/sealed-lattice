@@ -1,18 +1,18 @@
-//! Full-ring gate benchmark for the consolidated key-switch atom path.
+//! Full-ring gate benchmark for the limb-group key-switch digit atom path.
 //!
 //! Run explicitly (single-threaded process, optimized test profile):
 //!
 //! ```text
-//! cargo test -p sealed-lattice-kernel consolidated_key_switch_atom \
+//! cargo test -p sealed-lattice-kernel limb_group_atom_full_ring_gate_benchmark \
 //!     -- --ignored --nocapture --test-threads=1
 //! ```
 //!
 //! The benchmark verifies real level-15 kernel keygen material against the
-//! consolidated digit atoms, measures the proof-field primitives that
-//! dominate a Buckler-style prover (big-field NTT, CRT recombination,
-//! witness digit encoding, Ajtai commitment folds), and prints a projection
-//! of per-atom, per-key, and per-trustee prover cost from an explicit
-//! operation-count model. Timings are printed, never asserted.
+//! limb-group digit atoms, measures the proof-field primitives that dominate a
+//! Buckler-style prover (big-field NTT, CRT recombination, witness digit
+//! encoding, Ajtai commitment folds), and prints a projection of per-atom,
+//! per-key, and per-trustee prover cost from an explicit operation-count model.
+//! Timings are printed, never asserted.
 
 use std::time::{Duration, Instant};
 
@@ -20,8 +20,8 @@ use super::commitment_round::{
     COMMITMENT_RING_MODULUS, COMMITMENT_RING_PRIMITIVE_65536TH_ROOT, commit_digit_message,
     measurement_scale_configuration,
 };
-use super::consolidated_statement::{
-    ConsolidatedDigitAtomInput, DigitAtomSource, LimbGroupContext, verify_consolidated_digit_atom,
+use super::limb_group_statement::{
+    DigitAtomSource, LimbGroupContext, LimbGroupDigitAtomInput, verify_limb_group_digit_atom,
 };
 use super::negacyclic_transform::NegacyclicDomain;
 use super::proof_field::{
@@ -38,13 +38,12 @@ use crate::bgv::parameters::{DATA_PRIMES, POLYNOMIAL_DEGREE};
 
 const GATE_LEVEL: usize = 15;
 const GALOIS_ELEMENT: usize = 3;
-const GATE_SEED: &str = "consolidated-atom-gate-benchmark-seed";
+const GATE_SEED: &str = "limb-group-atom-gate-benchmark-seed";
 
-/// Operation-count model for one consolidated digit atom inside a
-/// Buckler-style prover: committed polynomials per atom, forward/inverse
-/// transforms for randomized encoding and commitment, quotient-phase
-/// transforms, and opening-replay transforms. The counts follow the phase
-/// structure measured on the scratch Go backend.
+/// Operation-count model for one limb-group digit atom inside a Buckler-style
+/// prover: committed polynomials per atom, forward/inverse transforms for
+/// randomized encoding and commitment, quotient-phase transforms, and
+/// opening-replay transforms.
 const MODEL_COMMITTED_POLYNOMIALS_PER_ATOM: usize = 12;
 const MODEL_TRANSFORMS_PER_POLYNOMIAL: usize = 4;
 const MODEL_QUOTIENT_TRANSFORMS_PER_ATOM: usize = 8;
@@ -57,8 +56,8 @@ fn milliseconds(duration: Duration) -> f64 {
 
 #[test]
 #[ignore = "full-ring gate benchmark; run explicitly with --ignored --nocapture"]
-fn consolidated_atom_full_ring_gate_benchmark() {
-    println!("== consolidated key-switch atom gate benchmark ==");
+fn limb_group_atom_full_ring_gate_benchmark() {
+    println!("== limb-group key-switch atom gate benchmark ==");
     println!(
         "ring degree {POLYNOMIAL_DEGREE}, level {GATE_LEVEL}, limb group {} primes",
         GATE_LEVEL + 1
@@ -140,7 +139,7 @@ fn consolidated_atom_full_ring_gate_benchmark() {
         derivation_total += derivation_start.elapsed();
 
         let verification_start = Instant::now();
-        let report = verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+        let report = verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
             group: &group,
             domain: &domain,
             diagonal_group_position: Some(digit_index),
@@ -150,14 +149,14 @@ fn consolidated_atom_full_ring_gate_benchmark() {
             error_coefficients: &error,
             source: DigitAtomSource::DiagonalSignedPolynomial(&rotated_secret),
         })
-        .expect("kernel level-15 digit material satisfies the consolidated atom");
+        .expect("kernel level-15 digit material satisfies the limb-group atom");
         let atom_elapsed = verification_start.elapsed();
         verification_total += atom_elapsed;
         slowest_atom = slowest_atom.max(atom_elapsed);
         maximum_carry = maximum_carry.max(report.maximum_carry_magnitude);
     }
     let digit_count = galois_key.components.len();
-    println!("all {digit_count} consolidated digit atoms verified against kernel keygen material");
+    println!("all {digit_count} limb-group digit atoms verified against kernel keygen material");
     println!(
         "witness/sample re-derivation: {:.0} ms total ({:.0} ms per digit)",
         milliseconds(derivation_total),
@@ -165,7 +164,7 @@ fn consolidated_atom_full_ring_gate_benchmark() {
     );
     let relation_check_ms = milliseconds(verification_total) / digit_count as f64;
     println!(
-        "consolidated relation check: {:.0} ms per digit atom (slowest {:.0} ms), maximum carry magnitude {maximum_carry} (bound {})",
+        "limb-group relation check: {:.0} ms per digit atom (slowest {:.0} ms), maximum carry magnitude {maximum_carry} (bound {})",
         relation_check_ms,
         milliseconds(slowest_atom),
         POLYNOMIAL_DEGREE + 1

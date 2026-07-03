@@ -107,20 +107,6 @@ export const contextFields = (
 export const assertContextMatches = (
     setupContext: CollectiveBgvSetupContext,
     value: Readonly<Record<string, unknown>>,
-    valueName: string,
-): void => {
-    for (const fieldName of setupContextFieldNames) {
-        if (value[fieldName] !== setupContext[fieldName]) {
-            throw new Error(
-                `${valueName}.${fieldName} must match setupContext.`,
-            );
-        }
-    }
-};
-
-export const assertContextFieldPathsMatch = (
-    setupContext: CollectiveBgvSetupContext,
-    value: Readonly<Record<string, unknown>>,
     objectPath: string,
 ): void => {
     for (const fieldName of setupContextFieldNames) {
