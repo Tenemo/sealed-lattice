@@ -80,7 +80,7 @@ pub(in super::super) fn draw_limb_challenges(
             modulus,
             layout.compact_vss_relation_count(),
         )
-    } else if layout.compact_same_secret_bridge_active() {
+    } else if layout.compact_same_secret_bridge_material_active() {
         transcript.challenge_extension_elements(
             "compact-same-secret-bridge-alpha",
             modulus,
@@ -416,7 +416,31 @@ pub(in super::super) fn build_limb_public_vectors(
     }
 
     let mut linkage_vectors = Vec::new();
-    if layout.linkage_active() {
+    if layout.compact_same_secret_bridge_material_active() {
+        let compact_same_secret_bridge =
+            statement
+                .compact_same_secret_bridge
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof("limb layout expects a compact bridge statement")
+                })?;
+        let (compact_bridge_claim, vectors) = build_compact_same_secret_bridge_public_vectors(
+            CompactSameSecretBridgePublicVectorInput {
+                public_matrix_seed_hash: &compact_same_secret_bridge.public_matrix_seed_hash,
+                commitment_modulus_index: limb_index,
+                modulus,
+                ring_degree,
+                target_rns_primes: &compact_same_secret_bridge.target_rns_primes,
+                target_constant_commitments: &compact_same_secret_bridge
+                    .target_constant_commitments,
+                relation_alpha: &challenges.linkage_alpha,
+                u_power_vectors: &u_powers,
+            },
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &compact_bridge_claim);
+        linkage_vectors = vectors;
+    } else if layout.linkage_active() {
         let linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
             invalid_succinct_setup_proof(
                 "limb layout expects a same-secret linkage on the statement",

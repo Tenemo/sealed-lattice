@@ -215,6 +215,72 @@ fn terminal_transport_policy_reports_missing_stream_verified_vss_handle() {
     );
 }
 
+#[test]
+fn terminal_transport_policy_accepts_compact_vss_setup_without_vss_sidecar() {
+    let package = terminal_transport_policy_compact_vss_package();
+
+    let response = verify_terminal_setup_transport_policy(&package, &serde_json::json!({}))
+        .expect("terminal transport policy");
+
+    assert!(response.is_none());
+}
+
+#[test]
+fn terminal_transport_policy_refuses_compact_vss_setup_with_verified_vss_handle() {
+    let package = terminal_transport_policy_compact_vss_package();
+    let request = serde_json::json!({
+        "verifiedVssCoefficientCommitmentMaterial": {
+            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "verifiedMaterialId": "self-attested-material",
+        },
+    });
+
+    let response = verify_terminal_setup_transport_policy(&package, &request)
+        .expect("terminal transport policy")
+        .expect("caller-supplied VSS handle must refuse on compact path");
+
+    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(
+        response["refusedObjects"][0]["reasonCode"],
+        "terminalCompactVssHandleNotUsed"
+    );
+}
+
+#[test]
+fn terminal_transport_policy_refuses_compact_vss_setup_with_raw_vss_chunks() {
+    let package = terminal_transport_policy_compact_vss_package();
+    let request = serde_json::json!({
+        "transportedVssCoefficientCommitmentMaterial": {
+            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
+            "objectVersion": 1,
+            "binaryFormat": "sealed-lattice-vss-coefficient-commitment-material-binary-v1",
+            "chunkSizeBytes": 1_048_576,
+            "chunkCount": 1,
+            "totalByteLength": 64,
+            "fullObjectHash": valid_hash('5'),
+            "chunkHashes": [valid_hash('6')],
+            "chunkRoot": valid_hash('7'),
+            "chunks": [
+                {
+                    "chunkIndex": 0,
+                    "bytesHex": "00",
+                }
+            ],
+        },
+    });
+
+    let response = verify_terminal_setup_transport_policy(&package, &request)
+        .expect("terminal transport policy")
+        .expect("raw VSS chunks must refuse at final setup boundary");
+
+    assert_eq!(response["verifierStatus"], "refused");
+    assert_eq!(
+        response["refusedObjects"][0]["reasonCode"],
+        "terminalVssMaterialHandleRequired"
+    );
+}
+
 fn terminal_transport_policy_package_with_material_encodings(
     vss_material_encoding: &str,
     public_key_share_material_encoding: &str,
@@ -278,6 +344,29 @@ fn terminal_transport_policy_package_with_material_encodings(
             ],
         },
     })
+}
+
+fn terminal_transport_policy_compact_vss_package() -> serde_json::Value {
+    let mut package = terminal_transport_policy_package_with_material_encodings(
+        "binary-chunked-full-public-setup-commitment-values",
+        PUBLIC_KEY_SHARE_MATERIAL_TRANSPORT_ENCODING,
+        SETUP_PROOF_MATERIAL_ENCODING,
+        EVALUATION_KEY_SHARE_COMPONENT_MATERIAL_ENCODING,
+    );
+    package["thresholdShareCommitments"] = serde_json::json!({
+        "objectType": "CompactThresholdShareCommitmentBinding",
+    });
+    for field_name in [
+        "compactVssCoefficientCommitmentSet",
+        "compactVssRecipientShareCommitmentSet",
+        "compactVssAggregateThresholdCommitmentSet",
+        "compactVssShareLinkageStatement",
+        "compactVssShareLinkageProofMaterialSet",
+    ] {
+        package[field_name] = serde_json::json!({});
+    }
+
+    package
 }
 
 #[test]

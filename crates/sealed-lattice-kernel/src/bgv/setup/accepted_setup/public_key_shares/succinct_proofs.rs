@@ -37,6 +37,7 @@ fn public_key_share_succinct_proofs_have_terminal_dependents(setup_package: &Val
 pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     setup_package: &Value,
     request: &Value,
+    verified_compact_same_secret_bridge: Option<&VerifiedCompactSameSecretBridgeMaterial>,
 ) -> CanonicalResult<Option<Value>> {
     let material_set = setup_package.get("publicKeyShareMaterial");
     let proof_set = setup_package.get("publicKeyShareSuccinctProofs");
@@ -120,8 +121,25 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
     let proof_records = public_key_share_proof_records_by_roster_position(setup_package)?;
     let same_secret_records = same_secret_statement_records_by_roster_position(setup_package)?;
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    let transported_constant_commitments =
-        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    if super::super::setup_package_uses_compact_vss_setup_path(setup_package)
+        && verified_compact_same_secret_bridge.is_none()
+    {
+        return Ok(Some(public_key_share_succinct_proof_refusal(
+            "publicKeyShareCompactAnchorRebindingRequired",
+            "compact setup packages require public-key share proof records that bind compact same-secret evidence instead of full VSS constant commitments",
+            "setupPackage.publicKeyShareSuccinctProofs",
+        )?));
+    }
+    let transported_constant_commitments = if verified_compact_same_secret_bridge.is_some() {
+        None
+    } else {
+        Some(
+            same_secret_transported_constant_commitments_by_roster_position(
+                setup_package,
+                request,
+            )?,
+        )
+    };
     if public_key_share_material_uses_transport(material_set)
         && request.get("transportedPublicKeyShareMaterial").is_none()
     {
@@ -274,8 +292,9 @@ pub(in super::super) fn verify_optional_public_key_share_succinct_proofs(
         public_key_share_proof_records: &proof_records,
         same_secret_records: &same_secret_records,
         same_secret_proof_bindings: &same_secret_proof_bindings,
+        verified_compact_same_secret_bridge,
         material_bindings: &material_bindings,
-        transported_constant_commitments: &transported_constant_commitments,
+        transported_constant_commitments: transported_constant_commitments.as_deref(),
     };
     let mut roster_position_counts: BTreeMap<u64, usize> = BTreeMap::new();
     for succinct_proof_record in proof_records_array {
@@ -385,9 +404,10 @@ struct PublicKeyShareSuccinctProofVerificationContext<'a> {
     public_key_share_proof_records: &'a BTreeMap<u64, Value>,
     same_secret_records: &'a BTreeMap<u64, Value>,
     same_secret_proof_bindings: &'a BTreeMap<u64, SameSecretProofBinding>,
+    verified_compact_same_secret_bridge: Option<&'a VerifiedCompactSameSecretBridgeMaterial>,
     material_bindings: &'a BTreeMap<u64, PublicKeyShareMaterialBinding>,
     transported_constant_commitments:
-        &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
+        Option<&'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>>,
 }
 
 fn verify_public_key_share_succinct_proof_record(
@@ -579,29 +599,97 @@ fn verify_public_key_share_succinct_proof_record(
             "public-key share succinct proofBytesHash must match supplied proof bytes",
         ));
     }
-    // The pk relation opens exactly the limb-zero accepted BDLOP constant
-    // commitment, the same commitment the same-secret linkage anchor verified,
-    // so the proven share secret is provably the committed trustee secret.
-    let mut constant_commitments = same_secret_constant_commitment_values_from_material(
-        context.setup_package,
-        trustee_roster_position,
-        context.transported_constant_commitments,
-    )?;
-    if constant_commitments.is_empty() {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof requires the limb-zero constant commitment opening",
-        ));
-    }
-    // One commitment opening suffices: congruence over the commitment modulus product plus ternary support re-identifies the share secret as the anchor's short secret, so only the limb-zero constant commitment is replayed here.
-    let limb_zero_commitment = constant_commitments.remove(0);
-    let ring_degree = limb_zero_commitment.ring_degree;
-    if value_u64(proof_record, "ringDegree")? != ring_degree as u64 {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "public-key share succinct proof ringDegree must match the rebuilt statement",
-        ));
-    }
+    let (ring_degree, same_secret_linkage, compact_same_secret_bridge) = if let Some(
+        verified_compact_same_secret_bridge,
+    ) =
+        context.verified_compact_same_secret_bridge
+    {
+        let compact_bridge_binding = verified_compact_same_secret_bridge
+            .statement_for_roster_position(trustee_roster_position)?;
+        if compact_bridge_binding.trustee_identity != same_secret_proof_binding.trustee_identity
+            || compact_bridge_binding.trustee_secret_commitment_root
+                != same_secret_proof_binding.trustee_secret_commitment_root
+            || compact_bridge_binding.same_secret_statement_root
+                != same_secret_proof_binding.same_secret_statement_root
+            || compact_bridge_binding.same_secret_proof_root
+                != same_secret_proof_binding.same_secret_proof_root
+            || compact_bridge_binding.same_secret_proof_family_binding_root
+                != same_secret_proof_binding.same_secret_proof_family_binding_root
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ProfileComponentMismatch,
+                "compact same-secret bridge statement must match the verified same-secret proof binding",
+            ));
+        }
+        let ring_degree =
+            usize::try_from(value_u64(proof_record, "ringDegree")?).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "public-key share succinct proof ringDegree does not fit usize",
+                )
+            })?;
+        if compact_bridge_binding
+            .statement
+            .target_rns_primes
+            .is_empty()
+            || compact_bridge_binding
+                .statement
+                .target_constant_commitment_roots
+                .is_empty()
+            || compact_bridge_binding
+                .statement
+                .target_constant_commitments
+                .is_empty()
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact same-secret bridge statement must carry the limb-zero target commitment",
+            ));
+        }
+        (
+            ring_degree,
+            None,
+            Some(compact_bridge_binding.statement.clone()),
+        )
+    } else {
+        let transported_constant_commitments =
+                context.transported_constant_commitments.ok_or_else(|| {
+                    CanonicalError::new(
+                        CanonicalErrorCode::InvalidFixture,
+                        "transported same-secret constant commitments were required for full-VSS public-key proof verification",
+                    )
+                })?;
+        // The pk relation opens exactly the limb-zero accepted BDLOP
+        // constant commitment, the same commitment the same-secret linkage
+        // anchor verified.
+        let mut constant_commitments = same_secret_constant_commitment_values_from_material(
+            context.setup_package,
+            trustee_roster_position,
+            transported_constant_commitments,
+        )?;
+        if constant_commitments.is_empty() {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share succinct proof requires the limb-zero constant commitment opening",
+            ));
+        }
+        let limb_zero_commitment = constant_commitments.remove(0);
+        let ring_degree = limb_zero_commitment.ring_degree;
+        if value_u64(proof_record, "ringDegree")? != ring_degree as u64 {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::InvalidFixture,
+                "public-key share succinct proof ringDegree must match the rebuilt statement",
+            ));
+        }
+        (
+            ring_degree,
+            Some(SameSecretLinkageStatement {
+                public_matrix_seed_hash: context.public_matrix_seed_hash.to_string(),
+                commitments: vec![limb_zero_commitment],
+            }),
+            None,
+        )
+    };
     let statement = TrusteeEvaluationKeyStatement {
         context: SuccinctSetupProofContext {
             proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
@@ -632,13 +720,10 @@ fn verify_public_key_share_succinct_proof_record(
             component_b_by_digit: vec![material_binding.coefficients_by_limb.clone()],
             round_one_aggregate_diagonal: Vec::new(),
         }],
-        same_secret_linkage: Some(SameSecretLinkageStatement {
-            public_matrix_seed_hash: context.public_matrix_seed_hash.to_string(),
-            commitments: vec![limb_zero_commitment],
-        }),
+        same_secret_linkage,
         private_vss_share: None,
         compact_vss_share_linkage: None,
-        compact_same_secret_bridge: None,
+        compact_same_secret_bridge,
         target_decryption_share: None,
     };
     let statement_hash_hex = statement
@@ -701,4 +786,211 @@ fn public_key_share_proof_records_by_roster_position(
     }
 
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hash_for_test(fill: char) -> String {
+        fill.to_string().repeat(128)
+    }
+
+    fn setup_context_for_test() -> Value {
+        json!({
+            "ceremonyId": "compact-public-key-test",
+            "manifestHash": hash_for_test('1'),
+            "rosterHash": hash_for_test('2'),
+            "setupProfileHash": hash_for_test('3'),
+            "qShareHash": hash_for_test('4'),
+            "carryAwareVssShareRelationProfileHash": hash_for_test('5'),
+            "commitmentProfileHash": hash_for_test('6'),
+            "setupEpoch": "compact-public-key-test-epoch",
+            "participantCount": 1,
+        })
+    }
+
+    fn public_key_proof_set_for_test(
+        setup_context: &Value,
+        public_matrix_seed_hash: &str,
+        public_key_crp_root: &str,
+        public_a_polynomial_root: &str,
+        same_secret_consistency_root: &str,
+        same_secret_proof_set_root: &str,
+        same_secret_proof_family_binding_root: &str,
+        public_key_share_set_root: &str,
+        public_key_share_proof_set_root: &str,
+        public_key_share_material_set_root: &str,
+    ) -> CanonicalResult<Value> {
+        let mut proof_set = setup_context.clone();
+        let proof_set_object = proof_set.as_object_mut().expect("setup context object");
+        proof_set_object.insert(
+            "objectType".to_string(),
+            json!(PUBLIC_KEY_SHARE_SUCCINCT_PROOF_SET_OBJECT_TYPE),
+        );
+        proof_set_object.insert("objectVersion".to_string(), json!(1));
+        proof_set_object.insert(
+            "setupProfileId".to_string(),
+            json!(COLLECTIVE_BGV_SETUP_PROFILE_ID),
+        );
+        proof_set_object.insert(
+            "setupProofProfileId".to_string(),
+            json!(SETUP_PROOF_PROFILE_ID),
+        );
+        proof_set_object.insert(
+            "proofFamily".to_string(),
+            json!(PUBLIC_KEY_SHARE_PROOF_FAMILY),
+        );
+        proof_set_object.insert(
+            "proofAccountingHash".to_string(),
+            json!(succinct_public_key_share_accounting_hash()?),
+        );
+        proof_set_object.insert("participantCount".to_string(), json!(1));
+        proof_set_object.insert("rnsLimbCount".to_string(), json!(DATA_PRIMES.len() as u64));
+        proof_set_object.insert(
+            "publicMatrixSeedHash".to_string(),
+            json!(public_matrix_seed_hash),
+        );
+        proof_set_object.insert("publicKeyCrpRoot".to_string(), json!(public_key_crp_root));
+        proof_set_object.insert(
+            "publicAPolynomialRoot".to_string(),
+            json!(public_a_polynomial_root),
+        );
+        proof_set_object.insert(
+            "sameSecretConsistencyRoot".to_string(),
+            json!(same_secret_consistency_root),
+        );
+        proof_set_object.insert(
+            "sameSecretProofSetRoot".to_string(),
+            json!(same_secret_proof_set_root),
+        );
+        proof_set_object.insert(
+            "sameSecretProofFamilyBindingRoot".to_string(),
+            json!(same_secret_proof_family_binding_root),
+        );
+        proof_set_object.insert(
+            "publicKeyShareSetRoot".to_string(),
+            json!(public_key_share_set_root),
+        );
+        proof_set_object.insert(
+            "publicKeyShareProofSetRoot".to_string(),
+            json!(public_key_share_proof_set_root),
+        );
+        proof_set_object.insert(
+            "publicKeyShareMaterialSetRoot".to_string(),
+            json!(public_key_share_material_set_root),
+        );
+
+        Ok(proof_set)
+    }
+
+    fn compact_setup_package_with_public_key_proofs() -> CanonicalResult<Value> {
+        let setup_context = setup_context_for_test();
+        let public_matrix_seed_hash = hash_for_test('7');
+        let public_key_crp_root = hash_for_test('8');
+        let public_a_polynomial_root = hash_for_test('9');
+        let same_secret_consistency_root = hash_for_test('a');
+        let same_secret_proof_set_root = hash_for_test('b');
+        let same_secret_statement_root = hash_for_test('c');
+        let trustee_secret_commitment_root = hash_for_test('d');
+        let same_secret_proof_family_binding_root = same_secret_proof_family_binding_root()?;
+        let same_secret_proof_root = hash_for_test('e');
+        let public_key_share_set_root = hash_for_test('f');
+        let public_key_share_proof_set_root = hash_for_test('0');
+        let public_key_share_material_set_root = hash_for_test('1');
+
+        Ok(json!({
+            "setupContext": setup_context,
+            "thresholdShareCommitments": {
+                "objectType": "CompactThresholdShareCommitmentBinding",
+            },
+            "compactVssCoefficientCommitmentSet": {},
+            "compactVssRecipientShareCommitmentSet": {},
+            "compactVssAggregateThresholdCommitmentSet": {},
+            "compactVssShareLinkageStatement": {},
+            "compactVssShareLinkageProofMaterialSet": {},
+            "commonRandomness": {
+                "publicMatrixSeedHash": public_matrix_seed_hash,
+                "publicDerivations": {
+                    "crpRoots": {
+                        "publicKeyCrpRoot": public_key_crp_root,
+                    },
+                    "bgvPublicA": {
+                        "publicPolynomialRoot": public_a_polynomial_root,
+                    },
+                },
+            },
+            "sameSecretConsistency": {
+                "sameSecretConsistencyRoot": same_secret_consistency_root,
+                "statementRecords": [
+                    {
+                        "trusteeRosterPosition": 0,
+                        "trusteeIdentity": "trustee-0",
+                        "trusteeSecretCommitmentRoot": trustee_secret_commitment_root,
+                        "sameSecretStatementRoot": same_secret_statement_root,
+                    }
+                ],
+            },
+            "sameSecretProofs": {
+                "sameSecretProofSetRoot": same_secret_proof_set_root,
+                "proofRecords": [
+                    {
+                        "trusteeRosterPosition": 0,
+                        "trusteeIdentity": "trustee-0",
+                        "trusteeSecretCommitmentRoot": trustee_secret_commitment_root,
+                        "sameSecretStatementRoot": same_secret_statement_root,
+                        "sameSecretProofFamilyBindingRoot": same_secret_proof_family_binding_root,
+                        "sameSecretProofRoot": same_secret_proof_root,
+                    }
+                ],
+            },
+            "publicKeyShares": {
+                "publicKeyShareSetRoot": public_key_share_set_root,
+                "shareRecords": [
+                    {
+                        "trusteeRosterPosition": 0,
+                    }
+                ],
+            },
+            "publicKeyShareProofs": {
+                "publicKeyShareProofSetRoot": public_key_share_proof_set_root,
+                "proofRecords": [
+                    {
+                        "trusteeRosterPosition": 0,
+                    }
+                ],
+            },
+            "publicKeyShareMaterial": {
+                "publicKeyShareMaterialSetRoot": public_key_share_material_set_root,
+            },
+            "publicKeyShareSuccinctProofs": public_key_proof_set_for_test(
+                &setup_context,
+                &public_matrix_seed_hash,
+                &public_key_crp_root,
+                &public_a_polynomial_root,
+                &same_secret_consistency_root,
+                &same_secret_proof_set_root,
+                &same_secret_proof_family_binding_root,
+                &public_key_share_set_root,
+                &public_key_share_proof_set_root,
+                &public_key_share_material_set_root,
+            )?,
+        }))
+    }
+
+    #[test]
+    fn compact_setup_refuses_old_public_key_share_anchor_dependency() -> CanonicalResult<()> {
+        let package = compact_setup_package_with_public_key_proofs()?;
+
+        let response =
+            verify_optional_public_key_share_succinct_proofs(&package, &json!({}), None)?
+                .expect("compact setup old public-key share proof anchor must refuse");
+
+        assert_eq!(response["verifierStatus"], json!("refused"));
+        assert_eq!(
+            response["refusedObjects"][0]["reasonCode"],
+            json!("publicKeyShareCompactAnchorRebindingRequired")
+        );
+        Ok(())
+    }
 }

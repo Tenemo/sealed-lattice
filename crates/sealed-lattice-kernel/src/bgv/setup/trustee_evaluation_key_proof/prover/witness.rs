@@ -213,8 +213,6 @@ pub(super) fn build_limb_witness_commitment(
                 "compact VSS coefficient randomness witness count does not match the statement",
             ));
         }
-        let base_ring_degree = layout.base_ring_degree;
-        let packed_ring_degree = layout.ring_degree;
         let item_count = compact_vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
             compact_vss_share_linkage.coefficient_witness_slot_indices_by_item();
@@ -237,139 +235,93 @@ pub(super) fn build_limb_witness_commitment(
                 "compact VSS packed message bounds do not match the column layout",
             ));
         }
-        let copy_item_lane = |target: &mut [i64],
-                              item_index: usize,
-                              source: &[i64],
-                              field_name: &str|
-         -> CanonicalResult<()> {
-            if source.len() != base_ring_degree {
-                return Err(invalid_succinct_setup_proof(format!(
-                    "{field_name} length does not match the base ring degree"
-                )));
-            }
-            let lane_offset = item_index.checked_mul(base_ring_degree).ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS packed lane offset overflowed")
-            })?;
-            let lane_end = lane_offset.checked_add(base_ring_degree).ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS packed lane end overflowed")
-            })?;
-            if lane_end > target.len() {
-                return Err(invalid_succinct_setup_proof(
-                    "compact VSS packed lane is outside the witness column",
-                ));
-            }
-            target[lane_offset..lane_end].copy_from_slice(source);
-            Ok(())
-        };
-        for (message_position, message_bound) in message_bounds
+        let validate_compact_vss_vector =
+            |source: &[i64], field_name: &str| -> CanonicalResult<()> {
+                if source.len() != layout.base_ring_degree {
+                    return Err(invalid_succinct_setup_proof(format!(
+                        "{field_name} length does not match the base ring degree"
+                    )));
+                }
+
+                Ok(())
+            };
+        for (coefficient_slot_index, message_bound) in message_bounds
             .iter()
             .copied()
             .take(layout.compact_vss_coefficient_columns)
             .enumerate()
         {
-            let mut packed_messages = vec![0_i64; packed_ring_degree];
-            for (item_index, coefficient_slot_indices) in
-                coefficient_slot_indices_by_item.iter().enumerate()
-            {
-                if let Some(coefficient_slot_index) = coefficient_slot_indices.get(message_position)
-                {
-                    let coefficient_messages = witness
-                        .compact_vss_coefficient_messages_by_shamir_index
-                        .get(*coefficient_slot_index)
-                        .ok_or_else(|| {
-                            invalid_succinct_setup_proof(
-                                "compact VSS coefficient witness slot is outside the witness",
-                            )
-                        })?;
-                    copy_item_lane(
-                        &mut packed_messages,
-                        item_index,
-                        coefficient_messages,
-                        "compact VSS coefficient message witness",
-                    )?;
-                }
-            }
+            let coefficient_messages = witness
+                .compact_vss_coefficient_messages_by_shamir_index
+                .get(coefficient_slot_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "compact VSS coefficient witness slot is outside the witness",
+                    )
+                })?;
+            validate_compact_vss_vector(
+                coefficient_messages,
+                "compact VSS coefficient message witness",
+            )?;
             for logical_vector in compact_vss_message_encoding_vectors_with_layout(
-                &packed_messages,
+                coefficient_messages,
                 message_bound,
                 modulus,
-                layout.compact_vss_message_encoding_layout(message_position),
+                layout.compact_vss_message_encoding_layout(coefficient_slot_index),
             )? {
                 append_logical_vector(&logical_vector);
             }
         }
-        let recipient_message_position = layout.compact_vss_coefficient_columns;
-        let mut packed_recipient_messages = vec![0_i64; packed_ring_degree];
         for (item_index, recipient_messages) in recipient_messages_by_item.iter().enumerate() {
-            copy_item_lane(
-                &mut packed_recipient_messages,
-                item_index,
+            validate_compact_vss_vector(
                 recipient_messages,
                 "compact VSS recipient message witness",
             )?;
-        }
-        for logical_vector in compact_vss_message_encoding_vectors_with_layout(
-            &packed_recipient_messages,
-            message_bounds[recipient_message_position],
-            modulus,
-            layout.compact_vss_message_encoding_layout(recipient_message_position),
-        )? {
-            append_logical_vector(&logical_vector);
-        }
-        let mut packed_carry_witnesses = vec![0_i64; packed_ring_degree];
-        for (item_index, carry_witnesses) in carry_witnesses_by_item.iter().enumerate() {
-            copy_item_lane(
-                &mut packed_carry_witnesses,
-                item_index,
-                carry_witnesses,
-                "compact VSS carry witness",
-            )?;
-        }
-        let carry_vector = signed_residue_vector(&packed_carry_witnesses, modulus);
-        append_logical_vector(&carry_vector);
-
-        let compact_vss_randomness_column_count =
-            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
-        for coefficient_position in 0..layout.compact_vss_coefficient_columns {
-            for randomness_column_index in 0..compact_vss_randomness_column_count {
-                let mut packed_randomness = vec![0_i64; packed_ring_degree];
-                for (item_index, coefficient_slot_indices) in
-                    coefficient_slot_indices_by_item.iter().enumerate()
-                {
-                    if let Some(coefficient_slot_index) =
-                        coefficient_slot_indices.get(coefficient_position)
-                    {
-                        let randomness_columns = witness
-                            .compact_vss_coefficient_opening_randomness_by_shamir_index
-                            .get(*coefficient_slot_index)
-                            .ok_or_else(|| {
-                                invalid_succinct_setup_proof(
-                                    "compact VSS coefficient randomness slot is outside the witness",
-                                )
-                            })?;
-                        let randomness_column = randomness_columns
-                            .get(randomness_column_index)
-                            .ok_or_else(|| {
-                                invalid_succinct_setup_proof(
-                                    "compact VSS coefficient randomness column is missing",
-                                )
-                            })?;
-                        copy_item_lane(
-                            &mut packed_randomness,
-                            item_index,
-                            randomness_column,
-                            "compact VSS coefficient randomness witness",
-                        )?;
-                    }
-                }
-                let logical_vector = signed_residue_vector(&packed_randomness, modulus);
+            let recipient_message_position = layout.compact_vss_coefficient_columns + item_index;
+            for logical_vector in compact_vss_message_encoding_vectors_with_layout(
+                recipient_messages,
+                message_bounds[recipient_message_position],
+                modulus,
+                layout.compact_vss_message_encoding_layout(recipient_message_position),
+            )? {
                 append_logical_vector(&logical_vector);
             }
         }
-        for randomness_column_index in 0..compact_vss_randomness_column_count {
-            let mut packed_randomness = vec![0_i64; packed_ring_degree];
-            for (item_index, randomness_columns) in recipient_randomness_by_item.iter().enumerate()
-            {
+        for carry_witnesses in carry_witnesses_by_item {
+            validate_compact_vss_vector(carry_witnesses, "compact VSS carry witness")?;
+            let carry_vector = signed_residue_vector(carry_witnesses, modulus);
+            append_logical_vector(&carry_vector);
+        }
+
+        let compact_vss_randomness_column_count =
+            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT;
+        for coefficient_slot_index in 0..layout.compact_vss_coefficient_columns {
+            for randomness_column_index in 0..compact_vss_randomness_column_count {
+                let randomness_columns = witness
+                    .compact_vss_coefficient_opening_randomness_by_shamir_index
+                    .get(coefficient_slot_index)
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "compact VSS coefficient randomness slot is outside the witness",
+                        )
+                    })?;
+                let randomness_column = randomness_columns
+                    .get(randomness_column_index)
+                    .ok_or_else(|| {
+                        invalid_succinct_setup_proof(
+                            "compact VSS coefficient randomness column is missing",
+                        )
+                    })?;
+                validate_compact_vss_vector(
+                    randomness_column,
+                    "compact VSS coefficient randomness witness",
+                )?;
+                let logical_vector = signed_residue_vector(randomness_column, modulus);
+                append_logical_vector(&logical_vector);
+            }
+        }
+        for randomness_columns in recipient_randomness_by_item {
+            for randomness_column_index in 0..compact_vss_randomness_column_count {
                 let randomness_column = randomness_columns
                     .get(randomness_column_index)
                     .ok_or_else(|| {
@@ -377,15 +329,13 @@ pub(super) fn build_limb_witness_commitment(
                             "compact VSS recipient randomness column is missing",
                         )
                     })?;
-                copy_item_lane(
-                    &mut packed_randomness,
-                    item_index,
+                validate_compact_vss_vector(
                     randomness_column,
                     "compact VSS recipient randomness witness",
                 )?;
+                let logical_vector = signed_residue_vector(randomness_column, modulus);
+                append_logical_vector(&logical_vector);
             }
-            let logical_vector = signed_residue_vector(&packed_randomness, modulus);
-            append_logical_vector(&logical_vector);
         }
     } else if layout.compact_same_secret_bridge_active() {
         let bridge = statement
@@ -494,6 +444,34 @@ pub(super) fn build_limb_witness_commitment(
             let negative_indicator_vector =
                 signed_residue_vector(&witness.negative_indicator_coefficients, modulus);
             append_logical_vector(&negative_indicator_vector);
+            if let Some(bridge) = &statement.compact_same_secret_bridge {
+                for target_rns_prime in &bridge.target_rns_primes {
+                    let target_message_coefficients = witness
+                        .secret_coefficients
+                        .iter()
+                        .zip(witness.negative_indicator_coefficients.iter())
+                        .map(|(secret_coefficient, negative_indicator)| {
+                            let target_message = i128::from(*secret_coefficient)
+                                + i128::from(*target_rns_prime) * i128::from(*negative_indicator);
+                            u64::try_from(target_message).map_err(|_| {
+                                invalid_succinct_setup_proof(
+                                    "compact same-secret bridge target message coefficient is negative",
+                                )
+                            })
+                        })
+                        .collect::<CanonicalResult<Vec<_>>>()?;
+                    for logical_vector in compact_vss_message_encoding_vectors_from_unsigned(
+                        &target_message_coefficients,
+                        *target_rns_prime,
+                        modulus,
+                        crate::bgv::setup::compact_vss_commitment::compact_vss_message_encoding_layout(
+                            *target_rns_prime,
+                        )?,
+                    )? {
+                        append_logical_vector(&logical_vector);
+                    }
+                }
+            }
             for randomness_columns in &witness.opening_randomness_by_limb {
                 for column in randomness_columns {
                     let logical_vector = signed_residue_vector(column, modulus);
@@ -592,7 +570,9 @@ pub(super) fn validate_witness_support(
             statement.ring_degree,
         );
     }
-    if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge {
+    if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge
+        && statement.keys.is_empty()
+    {
         if !witness.error_coefficients_by_key.is_empty()
             || !witness
                 .private_vss_coefficient_messages_by_shamir_index
@@ -703,8 +683,11 @@ pub(super) fn validate_witness_support(
             ));
         }
     }
-    match &statement.same_secret_linkage {
-        Some(linkage) => {
+    match (
+        &statement.same_secret_linkage,
+        &statement.compact_same_secret_bridge,
+    ) {
+        (Some(linkage), None) => {
             validate_linkage_witness(
                 linkage.commitments.len(),
                 crate::bgv::setup::commitment::SETUP_COMMITMENT_RANDOMNESS_WIDTH,
@@ -712,7 +695,15 @@ pub(super) fn validate_witness_support(
                 statement.ring_degree,
             )?;
         }
-        None => {
+        (None, Some(compact_same_secret_bridge)) => {
+            validate_compact_same_secret_bridge_witness(
+                compact_same_secret_bridge.target_constant_commitments.len(),
+                crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+                witness,
+                statement.ring_degree,
+            )?;
+        }
+        (None, None) => {
             if !witness.negative_indicator_coefficients.is_empty()
                 || !witness.opening_randomness_by_limb.is_empty()
                 || !witness
@@ -744,6 +735,11 @@ pub(super) fn validate_witness_support(
                     "witness linkage material requires a same-secret linkage statement",
                 ));
             }
+        }
+        (Some(_), Some(_)) => {
+            return Err(invalid_succinct_setup_proof(
+                "witness must not carry both same-secret linkage forms",
+            ));
         }
     }
 

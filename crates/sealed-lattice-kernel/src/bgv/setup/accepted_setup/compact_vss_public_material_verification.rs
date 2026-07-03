@@ -9,10 +9,29 @@ const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_FIELD: &str = "compactVssShareLinkageS
 const COMPACT_VSS_SHARE_LINKAGE_PROOF_MATERIAL_SET_FIELD: &str =
     "compactVssShareLinkageProofMaterialSet";
 
+#[derive(Debug, Clone)]
+pub(super) struct VerifiedCompactVssPublicMaterial {
+    pub(super) public_matrix_seed_hash: String,
+    pub(super) aggregate_threshold_commitment_root: String,
+    pub(super) statement_root: String,
+    pub(super) proof_material_set_root: String,
+    pub(super) participant_count: u64,
+    pub(super) target_rns_limb_count: u64,
+    pub(super) threshold_degree: u64,
+    pub(super) ring_degree: u64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) enum CompactVssPublicMaterialVerification {
+    Absent,
+    Verified(VerifiedCompactVssPublicMaterial),
+    Refused(Value),
+}
+
 pub(super) fn verify_optional_compact_vss_public_material(
     setup_package: &Value,
     _request: &Value,
-) -> CanonicalResult<Option<Value>> {
+) -> CanonicalResult<CompactVssPublicMaterialVerification> {
     let compact_public_material_fields = [
         COMPACT_VSS_COEFFICIENT_COMMITMENT_SET_FIELD,
         COMPACT_VSS_RECIPIENT_SHARE_COMMITMENT_SET_FIELD,
@@ -25,7 +44,7 @@ pub(super) fn verify_optional_compact_vss_public_material(
         .filter(|field_name| setup_package.get(**field_name).is_some())
         .count();
     if present_field_count == 0 {
-        return Ok(None);
+        return Ok(CompactVssPublicMaterialVerification::Absent);
     }
 
     if present_field_count != compact_public_material_fields.len() {
@@ -36,30 +55,37 @@ pub(super) fn verify_optional_compact_vss_public_material(
             .collect::<Vec<_>>()
             .join(", ");
 
-        return Ok(Some(compact_vss_public_material_refusal(
-            "compactVssPublicMaterialIncomplete",
-            format!(
-                "compact VSS public material requires all compact commitment sets, the share-linkage statement, and its proof material set; missing {missing_fields}"
-            ),
-            "setupPackage",
-        )?));
+        return Ok(CompactVssPublicMaterialVerification::Refused(
+            compact_vss_public_material_refusal(
+                "compactVssPublicMaterialIncomplete",
+                format!(
+                    "compact VSS public material requires all compact commitment sets, the share-linkage statement, and its proof material set; missing {missing_fields}"
+                ),
+                "setupPackage",
+            )?,
+        ));
     }
 
-    if let Err(error) = verify_compact_vss_public_material_binding(setup_package) {
-        return Ok(Some(compact_vss_public_material_refusal(
-            "compactVssPublicMaterialMalformed",
-            format!(
-                "compact VSS public material is malformed: {}",
-                error.message
-            ),
-            "setupPackage",
-        )?));
+    match verify_compact_vss_public_material_binding(setup_package) {
+        Ok(verified_material) => Ok(CompactVssPublicMaterialVerification::Verified(
+            verified_material,
+        )),
+        Err(error) => Ok(CompactVssPublicMaterialVerification::Refused(
+            compact_vss_public_material_refusal(
+                "compactVssPublicMaterialMalformed",
+                format!(
+                    "compact VSS public material is malformed: {}",
+                    error.message
+                ),
+                "setupPackage",
+            )?,
+        )),
     }
-
-    Ok(None)
 }
 
-fn verify_compact_vss_public_material_binding(setup_package: &Value) -> CanonicalResult<()> {
+fn verify_compact_vss_public_material_binding(
+    setup_package: &Value,
+) -> CanonicalResult<VerifiedCompactVssPublicMaterial> {
     let coefficient_set = setup_package
         .get(COMPACT_VSS_COEFFICIENT_COMMITMENT_SET_FIELD)
         .ok_or_else(|| compact_public_material_error("compact coefficient commitment set"))?;
@@ -191,14 +217,43 @@ fn verify_compact_vss_public_material_binding(setup_package: &Value) -> Canonica
         "compact VSS share-linkage statement aggregateThresholdCommitmentRoot",
     )?;
 
-    crate::bgv::setup::verify_compact_vss_share_linkage_proof_material_set_from_request(&json!({
-        "statement": statement,
-        "coefficientCommitmentSet": coefficient_set,
-        "recipientShareCommitmentSet": recipient_share_set,
-        "aggregateThresholdCommitmentSet": aggregate_threshold_set,
-        "proofMaterialSet": proof_material_set,
-    }))?;
-    Ok(())
+    let proof_material_verification =
+        crate::bgv::setup::verify_compact_vss_share_linkage_proof_material_set_from_request(
+            &json!({
+                "statement": statement,
+                "coefficientCommitmentSet": coefficient_set,
+                "recipientShareCommitmentSet": recipient_share_set,
+                "aggregateThresholdCommitmentSet": aggregate_threshold_set,
+                "proofMaterialSet": proof_material_set,
+            }),
+        )?;
+    compare_required_string(
+        hash_at_path(&proof_material_verification, &["proofMaterialSetRoot"])?,
+        hash_at_path(proof_material_set, &["proofMaterialSetRoot"])?,
+        "compact VSS share-linkage proof material set root",
+    )?;
+
+    Ok(VerifiedCompactVssPublicMaterial {
+        public_matrix_seed_hash: accepted_public_matrix_seed_hash.to_string(),
+        aggregate_threshold_commitment_root: hash_at_path(
+            &aggregate_threshold_verification,
+            &["aggregateThresholdCommitmentRoot"],
+        )?
+        .to_string(),
+        statement_root: hash_at_path(&statement_verification, &["statementRoot"])?.to_string(),
+        proof_material_set_root: hash_at_path(
+            &proof_material_verification,
+            &["proofMaterialSetRoot"],
+        )?
+        .to_string(),
+        participant_count: unsigned_at_path(
+            &aggregate_threshold_verification,
+            &["participantCount"],
+        )?,
+        target_rns_limb_count: unsigned_at_path(&statement_verification, &["targetRnsLimbCount"])?,
+        threshold_degree: unsigned_at_path(&statement_verification, &["thresholdDegree"])?,
+        ring_degree: unsigned_at_path(&aggregate_threshold_verification, &["ringDegree"])?,
+    })
 }
 
 fn compact_public_material_error(message: &'static str) -> CanonicalError {
@@ -227,19 +282,25 @@ mod tests {
     fn optional_compact_vss_public_material_is_absent_by_default() -> CanonicalResult<()> {
         let response = verify_optional_compact_vss_public_material(&json!({}), &json!({}))?;
 
-        assert!(response.is_none());
+        assert!(matches!(
+            response,
+            CompactVssPublicMaterialVerification::Absent
+        ));
         Ok(())
     }
 
     #[test]
     fn optional_compact_vss_public_material_requires_complete_field_group() -> CanonicalResult<()> {
-        let response = verify_optional_compact_vss_public_material(
-            &json!({
-                "compactVssCoefficientCommitmentSet": {},
-            }),
-            &json!({}),
-        )?
-        .expect("partial compact VSS public material must refuse");
+        let CompactVssPublicMaterialVerification::Refused(response) =
+            verify_optional_compact_vss_public_material(
+                &json!({
+                    "compactVssCoefficientCommitmentSet": {},
+                }),
+                &json!({}),
+            )?
+        else {
+            panic!("partial compact VSS public material must refuse");
+        };
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
@@ -251,16 +312,19 @@ mod tests {
 
     #[test]
     fn optional_compact_vss_public_material_requires_proof_material() -> CanonicalResult<()> {
-        let response = verify_optional_compact_vss_public_material(
-            &json!({
-                "compactVssCoefficientCommitmentSet": {},
-                "compactVssRecipientShareCommitmentSet": {},
-                "compactVssAggregateThresholdCommitmentSet": {},
-                "compactVssShareLinkageStatement": {},
-            }),
-            &json!({}),
-        )?
-        .expect("complete compact VSS public material must refuse");
+        let CompactVssPublicMaterialVerification::Refused(response) =
+            verify_optional_compact_vss_public_material(
+                &json!({
+                    "compactVssCoefficientCommitmentSet": {},
+                    "compactVssRecipientShareCommitmentSet": {},
+                    "compactVssAggregateThresholdCommitmentSet": {},
+                    "compactVssShareLinkageStatement": {},
+                }),
+                &json!({}),
+            )?
+        else {
+            panic!("complete compact VSS public material must refuse");
+        };
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(
@@ -279,18 +343,21 @@ mod tests {
     #[test]
     fn optional_compact_vss_public_material_rejects_malformed_complete_field_group()
     -> CanonicalResult<()> {
-        let response = verify_optional_compact_vss_public_material(
-            &json!({
-                "compactVssCoefficientCommitmentSet": {},
-                "compactVssRecipientShareCommitmentSet": {},
-                "compactVssAggregateThresholdCommitmentSet": {},
-                "compactVssShareLinkageStatement": {},
-                "compactVssShareLinkageProofMaterialSet": {},
-            }),
-            &json!({}),
-        )
-        .expect("complete compact VSS public material refusal")
-        .expect("complete compact VSS public material must refuse");
+        let CompactVssPublicMaterialVerification::Refused(response) =
+            verify_optional_compact_vss_public_material(
+                &json!({
+                    "compactVssCoefficientCommitmentSet": {},
+                    "compactVssRecipientShareCommitmentSet": {},
+                    "compactVssAggregateThresholdCommitmentSet": {},
+                    "compactVssShareLinkageStatement": {},
+                    "compactVssShareLinkageProofMaterialSet": {},
+                }),
+                &json!({}),
+            )
+            .expect("complete compact VSS public material refusal")
+        else {
+            panic!("complete compact VSS public material must refuse");
+        };
 
         assert_eq!(response["verifierStatus"], json!("refused"));
         assert_eq!(

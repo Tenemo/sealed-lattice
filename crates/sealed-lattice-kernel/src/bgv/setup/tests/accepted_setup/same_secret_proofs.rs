@@ -302,17 +302,9 @@ fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_same_secret_
         valid_hash('7'),
     );
 
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-        "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-        "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-        "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-        "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-        "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-        "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-    }))
-    .expect("verification response");
+    let request = transported_public_setup_verification_request(companions);
+    let result =
+        verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
     assert_eq!(
         result["verifierStatus"],

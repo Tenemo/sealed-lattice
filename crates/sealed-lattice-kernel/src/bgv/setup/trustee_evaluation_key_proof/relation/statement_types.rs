@@ -145,6 +145,7 @@ pub(crate) struct CompactVssCoefficientWitnessSlot {
     pub(crate) opening_root: String,
 }
 
+#[derive(Clone, PartialEq, Eq)]
 pub(crate) struct CompactSameSecretBridgeStatement {
     pub(crate) public_matrix_seed_hash: String,
     pub(crate) source_trustee_identity: String,
@@ -453,16 +454,8 @@ impl CompactVssShareLinkageStatement {
         1 + self.additional_linkage_items.len()
     }
 
-    pub(crate) fn packed_item_lane_count(&self) -> usize {
-        self.item_count().next_power_of_two()
-    }
-
     pub(crate) fn packed_ring_degree(&self, ring_degree: usize) -> CanonicalResult<usize> {
-        ring_degree
-            .checked_mul(self.packed_item_lane_count())
-            .ok_or_else(|| {
-                invalid_succinct_setup_proof("compact VSS packed ring degree overflowed")
-            })
+        Ok(ring_degree)
     }
 
     fn append_coefficient_witness_slots(
@@ -536,31 +529,20 @@ impl CompactVssShareLinkageStatement {
         self.coefficient_witness_slot_layout().0
     }
 
-    pub(crate) fn maximum_coefficient_commitment_count(&self) -> usize {
-        std::iter::once(self.coefficient_commitments.len())
-            .chain(
-                self.additional_linkage_items
-                    .iter()
-                    .map(|item| item.coefficient_commitments.len()),
-            )
-            .max()
-            .unwrap_or(0)
-    }
-
-    fn maximum_source_message_modulus(&self) -> u64 {
-        std::iter::once(self.source_message_modulus)
-            .chain(
-                self.additional_linkage_items
-                    .iter()
-                    .map(|item| item.source_message_modulus),
-            )
-            .max()
-            .unwrap_or(self.source_message_modulus)
-    }
-
     pub(crate) fn packed_message_bounds(&self) -> Vec<u64> {
-        let message_bound = self.maximum_source_message_modulus();
-        vec![message_bound; self.maximum_coefficient_commitment_count() + 1]
+        let (coefficient_slots, _) = self.coefficient_witness_slot_layout();
+        let mut bounds = coefficient_slots
+            .iter()
+            .map(|slot| slot.source_message_modulus)
+            .collect::<Vec<_>>();
+        bounds.push(self.source_message_modulus);
+        bounds.extend(
+            self.additional_linkage_items
+                .iter()
+                .map(|item| item.source_message_modulus),
+        );
+
+        bounds
     }
 
     pub(crate) fn coefficient_witness_slot_indices_by_item(&self) -> Vec<Vec<usize>> {
@@ -581,7 +563,7 @@ impl CompactVssShareLinkageStatement {
     }
 
     pub(crate) fn packed_opening_randomness_column_count(&self) -> usize {
-        (self.maximum_coefficient_commitment_count() + 1)
+        (self.unique_coefficient_witness_slot_count() + self.item_count())
             * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_RANDOMNESS_COLUMN_COUNT
     }
 }
@@ -594,11 +576,16 @@ impl TrusteeEvaluationKeyStatement {
     // keyless same-secret linkage anchor statement is active exactly on the
     // commitment fields, where its opening relations live.
     pub(crate) fn limb_count(&self) -> usize {
-        if self.private_vss_share.is_some()
-            || self.compact_vss_share_linkage.is_some()
-            || self.compact_same_secret_bridge.is_some()
-        {
+        if self.private_vss_share.is_some() || self.compact_vss_share_linkage.is_some() {
             return SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
+        }
+        let key_limb_count = self.keys.iter().map(|key| key.level + 1).max();
+        if self.compact_same_secret_bridge.is_some() {
+            return key_limb_count
+                .into_iter()
+                .chain(std::iter::once(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()))
+                .max()
+                .unwrap_or(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
         }
         if let Some(target_decryption_share) = &self.target_decryption_share {
             return target_decryption_share
@@ -609,13 +596,11 @@ impl TrusteeEvaluationKeyStatement {
                 .max()
                 .unwrap_or(SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len());
         }
-        self.keys.iter().map(|key| key.level + 1).max().unwrap_or(
-            if self.same_secret_linkage.is_some() {
-                SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
-            } else {
-                0
-            },
-        )
+        key_limb_count.unwrap_or(if self.same_secret_linkage.is_some() {
+            SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len()
+        } else {
+            0
+        })
     }
 
     pub(crate) fn proof_limb_indices(&self) -> Vec<usize> {
@@ -677,7 +662,7 @@ impl TrusteeEvaluationKeyStatement {
     pub(crate) fn compact_vss_coefficient_count(&self, limb_index: usize) -> usize {
         match &self.compact_vss_share_linkage {
             Some(statement) if limb_index < SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len() => {
-                statement.maximum_coefficient_commitment_count()
+                statement.unique_coefficient_witness_slot_count()
             }
             _ => 0,
         }

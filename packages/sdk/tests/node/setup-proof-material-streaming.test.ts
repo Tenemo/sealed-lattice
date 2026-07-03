@@ -52,6 +52,16 @@ const setupProofMaterialTransportCases = [
 ] as const satisfies readonly SetupProofMaterialTransportCase[];
 
 let mockKernel: {
+    readonly beginThresholdShareCommitmentsFromTransportStream: ReturnType<
+        typeof vi.fn
+    >;
+    readonly absorbThresholdShareCommitmentsFromTransportStreamChunk: ReturnType<
+        typeof vi.fn
+    >;
+    readonly finishThresholdShareCommitmentsFromTransportStream: ReturnType<
+        typeof vi.fn
+    >;
+    readonly releaseVerifiedTransportedVssMaterial: ReturnType<typeof vi.fn>;
     readonly beginSetupProofMaterialTransportStream: ReturnType<typeof vi.fn>;
     readonly absorbSetupProofMaterialTransportStreamChunk: ReturnType<
         typeof vi.fn
@@ -67,6 +77,7 @@ vi.mock('../../dist/kernel.js', () => ({
 const publicPackage = await import('../../dist/index.js');
 
 let streamedProofMaterialReferences: Map<string, JsonRecord>;
+let streamedVssMaterialReferences: Map<string, JsonRecord>;
 
 type VerifySetupPackageInput = Parameters<
     typeof publicPackage.verifySetupPackage
@@ -164,7 +175,77 @@ const verifiedSetupProofMaterials = (
 describe('setup proof material streaming in the public package', () => {
     beforeEach(() => {
         streamedProofMaterialReferences = new Map();
+        streamedVssMaterialReferences = new Map();
         mockKernel = {
+            beginThresholdShareCommitmentsFromTransportStream: vi.fn(
+                (input: {
+                    readonly derivationId: string;
+                    readonly transportedVssCoefficientCommitmentMaterial: JsonRecord;
+                }) => {
+                    streamedVssMaterialReferences.set(
+                        input.derivationId,
+                        input.transportedVssCoefficientCommitmentMaterial,
+                    );
+
+                    return {
+                        ok: true,
+                        operation:
+                            'beginThresholdShareCommitmentsFromTransportStream',
+                    };
+                },
+            ),
+            absorbThresholdShareCommitmentsFromTransportStreamChunk: vi.fn(
+                () => ({
+                    ok: true,
+                    operation:
+                        'absorbThresholdShareCommitmentsFromTransportStreamChunk',
+                }),
+            ),
+            finishThresholdShareCommitmentsFromTransportStream: vi.fn(
+                (input: { readonly derivationId: string }) => {
+                    const transportedMaterial =
+                        streamedVssMaterialReferences.get(input.derivationId);
+
+                    return {
+                        ok: true,
+                        operation:
+                            'finishThresholdShareCommitmentsFromTransportStream',
+                        derivationId: input.derivationId,
+                        verifiedVssCoefficientCommitmentMaterial: {
+                            objectType:
+                                'VerifiedVssCoefficientCommitmentMaterial',
+                            objectVersion: 1,
+                            setupProfileId: 'CollectiveBgvSetup-v1',
+                            verificationId: input.derivationId,
+                            materialBinaryFormat:
+                                transportedMaterial?.binaryFormat,
+                            publicMatrixSeedHash: proofHash,
+                            vssCoefficientCommitmentRoot: alternateProofHash,
+                            vssCoefficientCommitmentMaterialRoot:
+                                transportedMaterial?.fullObjectHash,
+                            thresholdShareCommitmentRoot: proofHash,
+                            transportProfileId:
+                                'sealed-lattice-setup-binary-chunked-transport-v1',
+                            transportChunkSizeBytes:
+                                transportedMaterial?.chunkSizeBytes,
+                            transportChunkCount:
+                                transportedMaterial?.chunkCount,
+                            transportTotalByteLength:
+                                transportedMaterial?.totalByteLength,
+                            transportFullObjectHash:
+                                transportedMaterial?.fullObjectHash,
+                            transportChunkRoot: transportedMaterial?.chunkRoot,
+                            transportChunkHashes:
+                                transportedMaterial?.chunkHashes,
+                        },
+                    };
+                },
+            ),
+            releaseVerifiedTransportedVssMaterial: vi.fn(() => ({
+                ok: true,
+                operation: 'releaseVerifiedTransportedVssMaterial',
+                released: true,
+            })),
             beginSetupProofMaterialTransportStream: vi.fn(
                 (input: {
                     readonly verificationId: string;
@@ -419,6 +500,143 @@ describe('setup proof material streaming in the public package', () => {
             setupProofProfileId,
             proofMaterials: expectedVerifiedProofMaterials,
         });
+    });
+
+    it('streams VSS material before final setup verification and ignores caller-supplied VSS handles', async () => {
+        const sourceTrusteeRecords = [
+            {
+                sourceTrusteeRosterPosition: 0,
+                sourceTrusteeCoefficientCommitmentRoot: proofHash,
+            },
+        ];
+        const transportedVssCoefficientCommitmentMaterial = {
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            binaryFormat:
+                'sealed-lattice-vss-coefficient-commitment-material-binary-v1',
+            chunkSizeBytes: 1_048_576,
+            chunkCount: 2,
+            totalByteLength: 4,
+            fullObjectHash: proofHash,
+            chunkHashes: [proofHash, alternateProofHash],
+            chunkRoot: alternateProofHash,
+            chunks: [
+                {
+                    chunkIndex: 0,
+                    bytesHex: '0102',
+                },
+                {
+                    chunkIndex: 1,
+                    bytesHex: '0304',
+                },
+            ],
+        } as const;
+        const callerSuppliedVssHandle = {
+            objectType: 'VerifiedVssCoefficientCommitmentMaterial',
+            objectVersion: 1,
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            verificationId: 'caller-supplied-vss-handle',
+            vssCoefficientCommitmentMaterialRoot: alternateProofHash,
+        } as const;
+
+        await publicPackage.verifySetupPackage({
+            setupPackage: {
+                objectType: 'SetupPackage',
+                objectVersion: 1,
+                setupContext: {
+                    manifestHash: proofHash,
+                    rosterHash: alternateProofHash,
+                },
+                commonRandomness: {
+                    publicMatrixSeedHash: proofHash,
+                },
+                vssCoefficientCommitments: {
+                    vssCoefficientCommitmentRoot: alternateProofHash,
+                    sourceTrusteeRecords,
+                },
+            },
+            transportedVssCoefficientCommitmentMaterial,
+            verifiedVssCoefficientCommitmentMaterial: callerSuppliedVssHandle,
+        });
+
+        expect(
+            mockKernel.beginThresholdShareCommitmentsFromTransportStream,
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({
+                publicMatrixSeedHash: proofHash,
+                transportedVssCoefficientCommitmentMaterial:
+                    expect.objectContaining({
+                        objectType:
+                            'SetupTransportedVssCoefficientCommitmentMaterial',
+                        fullObjectHash: proofHash,
+                    }),
+            }),
+        );
+        const beginInput = mockKernel
+            .beginThresholdShareCommitmentsFromTransportStream.mock
+            .calls[0]?.[0] as JsonRecord | undefined;
+        expect(
+            beginInput?.transportedVssCoefficientCommitmentMaterial,
+        ).not.toHaveProperty('chunks');
+        expect(
+            mockKernel.absorbThresholdShareCommitmentsFromTransportStreamChunk,
+        ).toHaveBeenCalledTimes(2);
+        expect(
+            mockKernel.absorbThresholdShareCommitmentsFromTransportStreamChunk,
+        ).toHaveBeenNthCalledWith(
+            1,
+            expect.objectContaining({
+                chunkIndex: 0,
+                bytesHex: '0102',
+            }),
+        );
+        expect(
+            mockKernel.finishThresholdShareCommitmentsFromTransportStream,
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({
+                vssCoefficientCommitmentRoot: alternateProofHash,
+                sourceTrusteeCoefficientCommitmentRecords: sourceTrusteeRecords,
+            }),
+        );
+
+        const finalVerifyInput = mockKernel.verifyCollectiveBgvSetup.mock
+            .calls[0]?.[0] as JsonRecord | undefined;
+        const finalVerifiedVssMaterial =
+            finalVerifyInput?.verifiedVssCoefficientCommitmentMaterial as
+                | JsonRecord
+                | undefined;
+        expect(
+            finalVerifyInput?.transportedVssCoefficientCommitmentMaterial,
+        ).toMatchObject({
+            objectType: 'SetupTransportedVssCoefficientCommitmentMaterial',
+            fullObjectHash: proofHash,
+        });
+        expect(
+            finalVerifyInput?.transportedVssCoefficientCommitmentMaterial,
+        ).not.toHaveProperty('chunks');
+        expect(
+            finalVerifyInput?.verifiedVssCoefficientCommitmentMaterial,
+        ).toMatchObject({
+            objectType: 'VerifiedVssCoefficientCommitmentMaterial',
+            verificationId: expect.stringMatching(/^sdk-vss-material-/u),
+            vssCoefficientCommitmentMaterialRoot: proofHash,
+        });
+        expect(
+            finalVerifyInput?.verifiedVssCoefficientCommitmentMaterial,
+        ).not.toBe(callerSuppliedVssHandle);
+        expect(
+            mockKernel.releaseVerifiedTransportedVssMaterial,
+        ).toHaveBeenCalledWith(
+            expect.objectContaining({
+                verificationId: finalVerifiedVssMaterial?.verificationId,
+            }),
+        );
+        expect(
+            mockKernel.verifyCollectiveBgvSetup.mock.invocationCallOrder[0],
+        ).toBeLessThan(
+            mockKernel.releaseVerifiedTransportedVssMaterial.mock
+                .invocationCallOrder[0] ?? 0,
+        );
     });
 
     it.each(setupProofMaterialTransportCases)(

@@ -20,7 +20,7 @@ const COMPACT_VSS_PROJECTION_INDEX_HASH_DOMAIN: &str =
 const COMPACT_VSS_OPENING_PAYLOAD_HASH_DOMAIN: &str =
     "sealed-lattice-compact-vss-commitment/opening-payload-v2";
 const COMPACT_VSS_SHARE_LINKAGE_STATEMENT_RELATION: &str = "recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments";
-const COMPACT_VSS_SHARE_LINKAGE_PROOF_BATCHING_RULE: &str = "one public share-linkage statement record is bound per source trustee, batching every recipient and target-basis limb for that source";
+const COMPACT_VSS_SHARE_LINKAGE_PROOF_BATCHING_RULE: &str = "public share-linkage proof records are grouped by source trustee and split into bounded recipient-limb batches whose packed proof ring fits the supported evaluation domain";
 const COMPACT_VSS_SHARE_LINKAGE_SHAMIR_EVALUATION_RULE: &str = "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point";
 const COMPACT_VSS_SHARE_LINKAGE_AGGREGATE_THRESHOLD_RULE: &str = "aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb";
 const COMPACT_VSS_SHARE_LINKAGE_COMMON_KEY_RULE: &str = "coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile";
@@ -3820,7 +3820,7 @@ pub(in crate::bgv::setup) mod tests {
         );
         assert_eq!(
             verification["proofBatchingRule"],
-            "one public share-linkage statement record is bound per source trustee, batching every recipient and target-basis limb for that source"
+            "public share-linkage proof records are grouped by source trustee and split into bounded recipient-limb batches whose packed proof ring fits the supported evaluation domain"
         );
 
         let mut forged_source_statement = statement.clone();
@@ -4498,7 +4498,7 @@ pub(in crate::bgv::setup) mod tests {
                     "recipientShareOpeningRoots": recipient_share_opening_roots,
                     "aggregateThresholdCommitmentRoot": aggregate_set["aggregateThresholdCommitmentRoot"].clone(),
                     "relation": "recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments",
-                    "proofBatchingRule": "one public share-linkage statement record is bound per source trustee, batching every recipient and target-basis limb for that source",
+                    "proofBatchingRule": "public share-linkage proof records are grouped by source trustee and split into bounded recipient-limb batches whose packed proof ring fits the supported evaluation domain",
                     "shamirEvaluationRule": "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point",
                     "aggregateThresholdRule": "aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb",
                     "commonKeyRule": "coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile",
@@ -4537,7 +4537,7 @@ pub(in crate::bgv::setup) mod tests {
             "recipientShareCommitmentRoot": recipient_set["recipientShareCommitmentRoot"].clone(),
             "aggregateThresholdCommitmentRoot": aggregate_set["aggregateThresholdCommitmentRoot"].clone(),
             "relation": "recipient share commitments open to Shamir evaluations of the coefficient commitments, and aggregate threshold commitments are the public sum of recipient share commitments",
-            "proofBatchingRule": "one public share-linkage statement record is bound per source trustee, batching every recipient and target-basis limb for that source",
+            "proofBatchingRule": "public share-linkage proof records are grouped by source trustee and split into bounded recipient-limb batches whose packed proof ring fits the supported evaluation domain",
             "shamirEvaluationRule": "recipient-share commitments must open to the Shamir evaluation of the source trustee coefficient commitments at the recipient trustee point",
             "aggregateThresholdRule": "aggregate threshold commitments must be the public sum of source-to-recipient share commitments for the same recipient and target-basis limb",
             "commonKeyRule": "coefficient, recipient-share, and aggregate threshold compact commitments must use the same public matrix seed hash and compact commitment profile",

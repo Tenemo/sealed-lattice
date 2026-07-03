@@ -103,6 +103,38 @@ export type ThresholdShareCommitmentSet = Readonly<
     }
 >;
 
+export type CompactThresholdShareCommitmentBinding = Readonly<
+    JsonRecord & {
+        readonly objectType: 'CompactThresholdShareCommitmentBinding';
+        readonly objectVersion: 1;
+        readonly setupProfileId: 'CollectiveBgvSetup-v1';
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly participantCount: number;
+        readonly thresholdDegree: number;
+        readonly targetRnsLimbCount: number;
+        readonly ringDegree: number;
+        readonly aggregateThresholdCommitmentRoot: ProtocolHash;
+        readonly shareLinkageStatementRoot: ProtocolHash;
+        readonly shareLinkageProofMaterialSetRoot: ProtocolHash;
+        readonly thresholdShareCommitmentRoot: ProtocolHash;
+    }
+>;
+
+export type ThresholdShareCommitments =
+    | ThresholdShareCommitmentSet
+    | CompactThresholdShareCommitmentBinding;
+
+export type CompactThresholdShareCommitmentBindingInput = Readonly<{
+    readonly publicMatrixSeedHash: ProtocolHash;
+    readonly participantCount: number;
+    readonly thresholdDegree: number;
+    readonly targetRnsLimbCount: number;
+    readonly ringDegree: number;
+    readonly aggregateThresholdCommitmentRoot: ProtocolHash;
+    readonly shareLinkageStatementRoot: ProtocolHash;
+    readonly shareLinkageProofMaterialSetRoot: ProtocolHash;
+}>;
+
 type ThresholdShareCommitmentsInput = Readonly<{
     readonly setupContext: CollectiveBgvSetupContext;
     readonly vssCoefficientCommitments: VssCoefficientCommitmentSet;
@@ -132,6 +164,8 @@ type ParsedCommitmentMaterial = Readonly<{
 }>;
 
 const setupProfileId = 'CollectiveBgvSetup-v1';
+const compactThresholdShareCommitmentBindingObjectType =
+    'CompactThresholdShareCommitmentBinding';
 const thresholdShareDerivationRule =
     'sum-source-trustee-polynomial-commitments-at-trustee-point';
 const protocolHashPattern = /^[0-9a-f]{128}$/u;
@@ -917,6 +951,59 @@ const rnsPrimesFromMaterial = (
 
         return material.record.rnsPrime;
     });
+
+export const createCompactThresholdShareCommitmentBinding = (
+    input: CompactThresholdShareCommitmentBindingInput,
+): CompactThresholdShareCommitmentBinding => {
+    const bindingWithoutRoot = {
+        objectType: compactThresholdShareCommitmentBindingObjectType,
+        objectVersion: 1,
+        setupProfileId,
+        publicMatrixSeedHash: assertProtocolHash(
+            input.publicMatrixSeedHash,
+            'compactThresholdShareCommitmentBinding.publicMatrixSeedHash',
+        ),
+        participantCount: assertPositiveSafeInteger(
+            input.participantCount,
+            'compactThresholdShareCommitmentBinding.participantCount',
+        ),
+        thresholdDegree: assertPositiveSafeInteger(
+            input.thresholdDegree,
+            'compactThresholdShareCommitmentBinding.thresholdDegree',
+        ),
+        targetRnsLimbCount: assertPositiveSafeInteger(
+            input.targetRnsLimbCount,
+            'compactThresholdShareCommitmentBinding.targetRnsLimbCount',
+        ),
+        ringDegree: assertPositiveSafeInteger(
+            input.ringDegree,
+            'compactThresholdShareCommitmentBinding.ringDegree',
+        ),
+        aggregateThresholdCommitmentRoot: assertProtocolHash(
+            input.aggregateThresholdCommitmentRoot,
+            'compactThresholdShareCommitmentBinding.aggregateThresholdCommitmentRoot',
+        ),
+        shareLinkageStatementRoot: assertProtocolHash(
+            input.shareLinkageStatementRoot,
+            'compactThresholdShareCommitmentBinding.shareLinkageStatementRoot',
+        ),
+        shareLinkageProofMaterialSetRoot: assertProtocolHash(
+            input.shareLinkageProofMaterialSetRoot,
+            'compactThresholdShareCommitmentBinding.shareLinkageProofMaterialSetRoot',
+        ),
+    } as const satisfies Omit<
+        CompactThresholdShareCommitmentBinding,
+        'thresholdShareCommitmentRoot'
+    >;
+
+    return {
+        ...bindingWithoutRoot,
+        thresholdShareCommitmentRoot: deriveProtocolHash(
+            'ThresholdShareCommitmentRoot',
+            bindingWithoutRoot,
+        ),
+    };
+};
 
 export const deriveThresholdShareCommitments = (
     input: ThresholdShareCommitmentsInput,

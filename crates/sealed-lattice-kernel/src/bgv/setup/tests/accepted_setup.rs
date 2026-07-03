@@ -35,6 +35,7 @@ use self::package_fixtures::{
     TerminalProfileRingSetupPackageFixture, accepted_vss_coefficient_message_fixture,
     accepted_vss_randomness_fixture, accepted_vss_secret_coefficient_fixture,
     collective_public_key_bearing_collective_setup_package, minimal_collective_setup_package,
+    minimal_collective_setup_package_for_participant_count,
     public_key_share_succinct_proof_bearing_collective_setup_package,
     reduced_ring_streamed_collective_setup_package_fixture,
     same_secret_proof_bearing_collective_setup_package, setup_transport_certificate_fixture,
@@ -45,9 +46,15 @@ use self::package_fixtures::{
 use self::proof_record_fixtures::{
     EvaluationKeyShareFixtureMaterial, RelinearizationKeyShareRoundsFixture,
     add_public_evaluation_key_material_transport, collective_public_key_object,
-    evaluation_key_share_fixture_material, galois_key_share_batches_object_with_terminal_transport,
-    public_evaluation_key_set_object, public_key_share_material_object,
-    public_key_share_succinct_proofs_object,
+    compact_same_secret_bridge_proof_material_set_object,
+    compact_same_secret_bridge_statement_set_object,
+    compact_vss_aggregate_threshold_commitment_set_object,
+    compact_vss_coefficient_commitment_set_object,
+    compact_vss_recipient_share_commitment_set_object,
+    compact_vss_share_linkage_proof_material_set_object,
+    compact_vss_share_linkage_statement_object, evaluation_key_share_fixture_material,
+    galois_key_share_batches_object_with_terminal_transport, public_evaluation_key_set_object,
+    public_key_share_material_object, public_key_share_succinct_proofs_object,
     relinearization_key_share_rounds_fixture_with_terminal_transport,
     relinearization_key_switch_seed_for_test,
     relinearization_round_two_source_by_digit_for_fixture,
@@ -98,8 +105,8 @@ use super::super::accepted_setup::{
     setup_proof_accounting_certificate_hash, setup_proof_accounting_certificate_value,
     stored_verified_trustee_evaluation_key_proof_material_chunks_for_test,
     trustee_evaluation_key_proof_material_root, trustee_evaluation_key_statement_from_package,
-    verify_collective_bgv_setup_package, verify_profile_ring_material,
-    verify_required_public_evaluation_key_set_for_test,
+    verified_compact_same_secret_bridge_material_from_package, verify_collective_bgv_setup_package,
+    verify_profile_ring_material, verify_required_public_evaluation_key_set_for_test,
     verify_setup_key_correctness_certificate_for_test, verify_terminal_setup_transport_policy,
 };
 use super::super::evaluation_key_share_material::{
@@ -121,7 +128,9 @@ use super::super::setup_proof::{
 };
 use super::super::trustee_evaluation_key_proof::{
     EvaluationKeyShareKind, FIELD_RESIDUE_BIT_WIDTH, TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof, prove_evaluation_key_share,
+    TrusteeEvaluationKeyWitness, encode_trustee_evaluation_key_proof,
+    generate_compact_same_secret_bridge_proof_from_request,
+    generate_compact_vss_share_linkage_proof_from_request, prove_evaluation_key_share,
     public_key_share_succinct_proof_bytes_hash, succinct_evaluation_key_proof_accounting_hash,
     trustee_evaluation_key_proof_bytes_hash,
 };
@@ -207,8 +216,6 @@ fn transported_public_setup_verification_request(
     companions: TransportedPublicSetupCompanions,
 ) -> serde_json::Value {
     serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
         "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
         "transportedPublicKeyShareMaterial": companions.public_key_share_material,
         "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
@@ -285,8 +292,6 @@ fn public_setup_verification_input_from_package_and_companions(
     companions: &TransportedPublicSetupCompanions,
 ) -> serde_json::Value {
     let request = serde_json::json!({
-        "transportedVssCoefficientCommitmentMaterial": companions.chunked_vss_coefficient_commitment_material.clone(),
-        "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material.clone(),
         "transportedSameSecretProofMaterial": companions.same_secret_proof_material.clone(),
         "transportedPublicKeyShareMaterial": companions.public_key_share_material.clone(),
         "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material.clone(),
@@ -358,22 +363,34 @@ fn public_setup_verification_input_recomputes_expected_bindings(input: &serde_js
         && recomputed_setup_package_hash_matches(setup_package)
 }
 
-fn public_setup_verification_input_carries_streamable_vss_material(
+fn public_setup_verification_input_uses_vss_free_compact_material(
     input: &serde_json::Value,
 ) -> bool {
-    match input
-        .get("transportedVssCoefficientCommitmentMaterial")
-        .and_then(|transported_material| transported_material.get("chunks"))
-        .and_then(serde_json::Value::as_array)
-    {
-        Some(chunks) => !chunks.is_empty(),
-        None => false,
-    }
+    let Some(setup_package) = input.get("setupPackage") else {
+        return false;
+    };
+    let compact_fields_present = [
+        "compactVssCoefficientCommitmentSet",
+        "compactVssRecipientShareCommitmentSet",
+        "compactVssAggregateThresholdCommitmentSet",
+        "compactVssShareLinkageStatement",
+        "compactVssShareLinkageProofMaterialSet",
+    ]
+    .iter()
+    .all(|field_name| setup_package.get(*field_name).is_some());
+
+    compact_fields_present
+        && input
+            .get("transportedVssCoefficientCommitmentMaterial")
+            .is_none()
+        && input
+            .get("verifiedVssCoefficientCommitmentMaterial")
+            .is_none()
 }
 
 fn public_setup_verification_input_checkpoint_is_current(input: &serde_json::Value) -> bool {
     public_setup_verification_input_recomputes_expected_bindings(input)
-        && public_setup_verification_input_carries_streamable_vss_material(input)
+        && public_setup_verification_input_uses_vss_free_compact_material(input)
 }
 
 fn public_setup_verification_input_checkpoint_path() -> std::path::PathBuf {
@@ -554,35 +571,20 @@ fn public_setup_verification_input_export_normalizes_base64_chunks_to_hex() {
 }
 
 #[test]
-fn public_setup_verification_input_export_keeps_streamable_vss_chunks() {
+fn public_setup_verification_input_export_omits_vss_material_for_compact_route() {
     let package = serde_json::json!({
         "setupPackageHash": valid_hash('a'),
         "setupContext": {
             "manifestHash": valid_hash('b'),
             "rosterHash": valid_hash('c'),
         },
+        "compactVssCoefficientCommitmentSet": {},
+        "compactVssRecipientShareCommitmentSet": {},
+        "compactVssAggregateThresholdCommitmentSet": {},
+        "compactVssShareLinkageStatement": {},
+        "compactVssShareLinkageProofMaterialSet": {},
     });
     let companions = TransportedPublicSetupCompanions {
-        vss_coefficient_commitment_material: serde_json::json!({
-            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
-            "chunkCount": 1,
-        }),
-        chunked_vss_coefficient_commitment_material: serde_json::json!({
-            "objectType": "SetupTransportedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
-            "chunkCount": 1,
-            "chunks": [
-                {
-                    "chunkIndex": 0,
-                    "bytesHex": "0102",
-                },
-            ],
-        }),
-        verified_vss_coefficient_commitment_material: serde_json::json!({
-            "objectType": "VerifiedVssCoefficientCommitmentMaterial",
-            "objectVersion": 1,
-        }),
         same_secret_proof_material: serde_json::json!({}),
         public_key_share_material: serde_json::json!({}),
         public_key_share_proof_material: serde_json::json!({}),
@@ -595,16 +597,30 @@ fn public_setup_verification_input_export_keeps_streamable_vss_chunks() {
         public_setup_verification_input_from_package_and_companions(&package, &companions);
 
     assert!(
-        terminal_request["transportedVssCoefficientCommitmentMaterial"]["chunks"].is_null(),
-        "terminal setup request must stay reference-only"
+        terminal_request
+            .get("transportedVssCoefficientCommitmentMaterial")
+            .is_none(),
+        "terminal setup request must not carry raw VSS material on the compact route"
     );
-    assert_eq!(
-        public_sdk_input["transportedVssCoefficientCommitmentMaterial"]["chunks"][0]["bytesHex"],
-        "0102"
+    assert!(
+        terminal_request
+            .get("verifiedVssCoefficientCommitmentMaterial")
+            .is_none(),
+        "terminal setup request must not carry a caller-supplied VSS handle on the compact route"
     );
-    assert!(public_setup_verification_input_carries_streamable_vss_material(
-        &public_sdk_input
-    ));
+    assert!(
+        public_sdk_input
+            .get("transportedVssCoefficientCommitmentMaterial")
+            .is_none(),
+        "public setup input must not carry raw VSS chunks on the compact route"
+    );
+    assert!(
+        public_sdk_input
+            .get("verifiedVssCoefficientCommitmentMaterial")
+            .is_none(),
+        "public setup input must not carry a caller-supplied VSS handle on the compact route"
+    );
+    assert!(public_setup_verification_input_uses_vss_free_compact_material(&public_sdk_input));
 }
 
 #[test]

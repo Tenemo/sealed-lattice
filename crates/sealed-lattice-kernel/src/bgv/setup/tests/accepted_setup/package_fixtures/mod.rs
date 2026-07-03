@@ -20,6 +20,7 @@ const TERMINAL_PROFILE_RING_SETUP_FIXTURE_CHECKPOINT_FILE: &str =
 #[derive(Clone)]
 pub(super) struct TerminalProfileRingSetupPackageFixture {
     pub(super) package: serde_json::Value,
+    pub(super) setup_ring_degree: usize,
     pub(super) transported_vss_coefficient_commitment_material: serde_json::Value,
     pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
 }
@@ -34,6 +35,7 @@ struct VssMaterialPackageComponents {
 
 struct CollectiveSetupPackageFixture {
     package: serde_json::Value,
+    setup_ring_degree: usize,
     transported_vss_coefficient_commitment_material: Option<serde_json::Value>,
     verified_vss_coefficient_commitment_material: Option<serde_json::Value>,
 }
@@ -132,6 +134,7 @@ pub(super) fn terminal_profile_ring_minimal_collective_setup_package_fixture()
             );
             let fixture = TerminalProfileRingSetupPackageFixture {
                 package: package_fixture.package,
+                setup_ring_degree: package_fixture.setup_ring_degree,
                 transported_vss_coefficient_commitment_material: package_fixture
                     .transported_vss_coefficient_commitment_material
                     .expect("profile-ring VSS transport reference"),
@@ -162,6 +165,11 @@ fn terminal_profile_ring_setup_fixture_from_checkpoint()
     let checkpoint: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     let fixture = TerminalProfileRingSetupPackageFixture {
         package: checkpoint.get("package")?.clone(),
+        setup_ring_degree: checkpoint
+            .get("setupRingDegree")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|ring_degree| usize::try_from(ring_degree).ok())
+            .unwrap_or(POLYNOMIAL_DEGREE),
         transported_vss_coefficient_commitment_material: checkpoint
             .get("transportedVssCoefficientCommitmentMaterial")?
             .clone(),
@@ -192,6 +200,7 @@ fn terminal_profile_ring_setup_fixture_recomputes_bindings(
     let setup_context = &package["setupContext"];
 
     setup_context["participantCount"].as_u64() == Some(FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT)
+        && fixture.setup_ring_degree == POLYNOMIAL_DEGREE
         && setup_context["manifestHash"].is_string()
         && setup_context["rosterHash"].is_string()
         && package["vssCoefficientCommitmentMaterial"]["vssCoefficientCommitmentMaterialRoot"]
@@ -217,6 +226,7 @@ fn persist_terminal_profile_ring_setup_fixture_checkpoint(
     std::fs::create_dir_all(parent).expect("terminal setup fixture checkpoint directory");
     let checkpoint = serde_json::json!({
         "package": fixture.package.clone(),
+        "setupRingDegree": fixture.setup_ring_degree,
         "transportedVssCoefficientCommitmentMaterial": fixture.transported_vss_coefficient_commitment_material.clone(),
         "verifiedVssCoefficientCommitmentMaterial": fixture.verified_vss_coefficient_commitment_material.clone(),
     });
@@ -251,6 +261,7 @@ pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
     );
     TerminalProfileRingSetupPackageFixture {
         package: package_fixture.package,
+        setup_ring_degree: package_fixture.setup_ring_degree,
         transported_vss_coefficient_commitment_material: package_fixture
             .transported_vss_coefficient_commitment_material
             .expect("reduced-ring streamed VSS transport reference"),
@@ -744,6 +755,7 @@ fn build_collective_setup_package_fixture_parts(
 
     CollectiveSetupPackageFixture {
         package,
+        setup_ring_degree: vss_material_ring_degree,
         transported_vss_coefficient_commitment_material: vss_components
             .transported_vss_coefficient_commitment_material,
         verified_vss_coefficient_commitment_material: vss_components
@@ -779,7 +791,8 @@ fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> s
     let mut package = build_same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
+    package["publicKeyShareSuccinctProofs"] =
+        public_key_share_succinct_proofs_object(&package, None);
     rebind_active_static_setup_theorem_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 

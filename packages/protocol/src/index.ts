@@ -93,7 +93,10 @@ export {
 } from './setup/common-randomness-records.js';
 export { createSetupContributionAssembly } from './setup/setup-contribution-orchestration.js';
 export { createSetupCertificates } from './setup/setup-certificates.js';
-export { deriveThresholdShareCommitments } from './setup/threshold-share-commitments.js';
+export {
+    createCompactThresholdShareCommitmentBinding,
+    deriveThresholdShareCommitments,
+} from './setup/threshold-share-commitments.js';
 export {
     createSetupPackage,
     createSetupPackageVerificationInput,
@@ -294,9 +297,12 @@ export type {
     SetupKeyCorrectnessCertificate,
 } from './setup/setup-package-assembly.js';
 export type {
+    CompactThresholdShareCommitmentBinding,
+    CompactThresholdShareCommitmentBindingInput,
     ThresholdShareCommitmentLimb,
     ThresholdShareCommitmentRecipient,
     ThresholdShareCommitmentSet,
+    ThresholdShareCommitments,
 } from './setup/threshold-share-commitments.js';
 export type {
     BinaryChunkedSameSecretProofMaterialTransport,

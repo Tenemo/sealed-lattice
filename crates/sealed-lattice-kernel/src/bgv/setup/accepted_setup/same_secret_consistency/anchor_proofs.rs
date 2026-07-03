@@ -16,6 +16,7 @@ use crate::bgv::setup::trustee_evaluation_key_proof::{
 pub(in super::super) fn verify_optional_same_secret_proofs(
     setup_package: &Value,
     request: &Value,
+    verified_compact_same_secret_bridge: Option<&VerifiedCompactSameSecretBridgeMaterial>,
 ) -> CanonicalResult<Option<Value>> {
     let Some(proof_set) = setup_package.get("sameSecretProofs") else {
         return Ok(None);
@@ -100,6 +101,17 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
             "setupPackage.sameSecretProofs",
         )?));
     }
+    if super::super::setup_package_uses_compact_vss_setup_path(setup_package) {
+        if verified_compact_same_secret_bridge.is_some() {
+            return Ok(None);
+        }
+        return Ok(Some(same_secret_proof_refusal(
+            "sameSecretCompactAnchorRebindingRequired",
+            "compact setup packages require verified compact same-secret bridge proof material before old full-VSS same-secret anchors are bypassed",
+            "setupPackage.compactSameSecretBridgeProofMaterialSet",
+        )?));
+    }
+
     let material_root = setup_package
         .get("vssCoefficientCommitmentMaterial")
         .and_then(|material| material.get("vssCoefficientCommitmentMaterialRoot"))
@@ -124,7 +136,19 @@ pub(in super::super) fn verify_optional_same_secret_proofs(
 
     let statement_records = same_secret_statement_records_by_roster_position(setup_package)?;
     let transported_constant_commitments =
-        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+        match same_secret_transported_constant_commitments_by_roster_position(
+            setup_package,
+            request,
+        ) {
+            Ok(commitments) => commitments,
+            Err(error) => {
+                return Ok(Some(same_secret_proof_refusal(
+                    "sameSecretAnchorMaterialUnavailable",
+                    error.message,
+                    "setupPackage.sameSecretProofs",
+                )?));
+            }
+        };
     let Some(proof_records) = proof_set.get("proofRecords").and_then(Value::as_array) else {
         return Ok(Some(same_secret_proof_refusal(
             "sameSecretProofRecordsMissing",
@@ -415,4 +439,111 @@ fn verify_same_secret_anchor_proof_record(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hash_for_test(fill: char) -> String {
+        fill.to_string().repeat(128)
+    }
+
+    fn setup_context_for_test() -> Value {
+        json!({
+            "ceremonyId": "compact-anchor-test",
+            "manifestHash": hash_for_test('1'),
+            "rosterHash": hash_for_test('2'),
+            "setupProfileHash": hash_for_test('3'),
+            "qShareHash": hash_for_test('4'),
+            "carryAwareVssShareRelationProfileHash": hash_for_test('5'),
+            "commitmentProfileHash": hash_for_test('6'),
+            "setupEpoch": "compact-anchor-test-epoch",
+            "participantCount": 1,
+        })
+    }
+
+    fn compact_setup_package_with_same_secret_proofs() -> CanonicalResult<Value> {
+        let setup_context = setup_context_for_test();
+        let same_secret_consistency_root = hash_for_test('7');
+        let same_secret_proof_family_binding_root = same_secret_proof_family_binding_root()?;
+        let vss_material_root = hash_for_test('8');
+        let mut same_secret_proofs = setup_context.clone();
+        same_secret_proofs
+            .as_object_mut()
+            .expect("setup context object")
+            .extend(serde_json::Map::from_iter([
+                ("objectType".to_string(), json!("SameSecretProofSet")),
+                ("objectVersion".to_string(), json!(1)),
+                (
+                    "setupProfileId".to_string(),
+                    json!(COLLECTIVE_BGV_SETUP_PROFILE_ID),
+                ),
+                (
+                    "commitmentProfileId".to_string(),
+                    json!(SETUP_COMMITMENT_PROFILE_ID),
+                ),
+                (
+                    "setupProofProfileId".to_string(),
+                    json!(SETUP_PROOF_PROFILE_ID),
+                ),
+                (
+                    "proofFamily".to_string(),
+                    json!(SAME_SECRET_LINKAGE_ANCHOR_PROOF_FAMILY),
+                ),
+                (
+                    "proofAccountingHash".to_string(),
+                    json!(succinct_same_secret_linkage_anchor_accounting_hash()?),
+                ),
+                ("participantCount".to_string(), json!(1)),
+                ("rnsLimbCount".to_string(), json!(DATA_PRIMES.len() as u64)),
+                (
+                    "sameSecretConsistencyRoot".to_string(),
+                    json!(same_secret_consistency_root),
+                ),
+                (
+                    "sameSecretProofFamilyBindingRoot".to_string(),
+                    json!(same_secret_proof_family_binding_root),
+                ),
+                (
+                    "vssCoefficientCommitmentMaterialRoot".to_string(),
+                    json!(vss_material_root),
+                ),
+            ]));
+
+        Ok(json!({
+            "setupContext": setup_context,
+            "thresholdShareCommitments": {
+                "objectType": "CompactThresholdShareCommitmentBinding",
+            },
+            "compactVssCoefficientCommitmentSet": {},
+            "compactVssRecipientShareCommitmentSet": {},
+            "compactVssAggregateThresholdCommitmentSet": {},
+            "compactVssShareLinkageStatement": {},
+            "compactVssShareLinkageProofMaterialSet": {},
+            "sameSecretConsistency": {
+                "sameSecretConsistencyRoot": hash_for_test('7'),
+            },
+            "vssCoefficientCommitmentMaterial": {
+                "materialEncoding": "binary-chunked-full-public-setup-commitment-values",
+                "vssCoefficientCommitmentMaterialRoot": hash_for_test('8'),
+            },
+            "sameSecretProofs": same_secret_proofs,
+        }))
+    }
+
+    #[test]
+    fn compact_setup_refuses_old_same_secret_anchor_dependency() -> CanonicalResult<()> {
+        let package = compact_setup_package_with_same_secret_proofs()?;
+
+        let response = verify_optional_same_secret_proofs(&package, &json!({}), None)?
+            .expect("compact setup old same-secret anchor must refuse");
+
+        assert_eq!(response["verifierStatus"], json!("refused"));
+        assert_eq!(
+            response["refusedObjects"][0]["reasonCode"],
+            json!("sameSecretCompactAnchorRebindingRequired")
+        );
+        Ok(())
+    }
 }

@@ -1,5 +1,5 @@
-import { canonicalJson, deriveProtocolHash } from "@sealed-lattice/crypto";
-import type { ProtocolHash } from "@sealed-lattice/types";
+import { canonicalJson, deriveProtocolHash } from '@sealed-lattice/crypto';
+import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     verifyCompactVssShareLinkageProofMaterialSet,
@@ -8,21 +8,22 @@ import {
     type CompactVssRecipientShareCommitmentSet,
     type CompactVssShareLinkageProofMaterialSet,
     type CompactVssShareLinkageStatement,
-} from "../compact-vss-commitments.js";
-import type { RequiredGaloisKeyScheduleEntry } from "../evaluator-key-schedule.js";
+} from '../compact-vss-commitments.js';
+import type { RequiredGaloisKeyScheduleEntry } from '../evaluator-key-schedule.js';
 import {
     verifyCompactVssSameSecretBridgeProofMaterialSet,
     type CompactVssSameSecretBridgeProofMaterialSet,
     type CompactVssSameSecretBridgeStatementSet,
     type SameSecretProofSet,
     type TransportedSameSecretProofMaterialSet,
-} from "../same-secret-consistency-records.js";
-import type { SetupPhaseRecord } from "../setup-phase-records.js";
+} from '../same-secret-consistency-records.js';
+import type { SetupPhaseRecord } from '../setup-phase-records.js';
 import {
+    createCompactThresholdShareCommitmentBinding,
     deriveThresholdShareCommitments,
-    type ThresholdShareCommitmentSet,
-} from "../threshold-share-commitments.js";
-import type { CollectiveBgvSetupContext } from "../vss-share-verification-records.js";
+    type ThresholdShareCommitments,
+} from '../threshold-share-commitments.js';
+import type { CollectiveBgvSetupContext } from '../vss-share-verification-records.js';
 
 import {
     assertCommonRandomnessContextMatches,
@@ -33,11 +34,11 @@ import {
     hashField,
     requiredSetupPhases,
     setupProfileId,
-} from "./constants-and-assertions.js";
+} from './constants-and-assertions.js';
 import type {
     SetupPackageCertificateRecords,
     SetupPackageInput,
-} from "./types.js";
+} from './types.js';
 
 const assertPhaseTranscript = (
     setupContext: CollectiveBgvSetupContext,
@@ -45,7 +46,7 @@ const assertPhaseTranscript = (
 ): void => {
     if (phaseTranscript.length !== requiredSetupPhases.length) {
         throw new Error(
-            "phaseTranscript must contain the complete accepted setup phase order.",
+            'phaseTranscript must contain the complete accepted setup phase order.',
         );
     }
     let previousPhaseRoot: ProtocolHash | null = null;
@@ -67,225 +68,225 @@ const assertPhaseTranscript = (
             );
         }
         assertContextMatches(setupContext, phaseRecord, objectPath);
-        previousPhaseRoot = hashField(phaseRecord, "phaseRoot", objectPath);
+        previousPhaseRoot = hashField(phaseRecord, 'phaseRoot', objectPath);
     }
 };
 
 const assertCommonBindings = (input: SetupPackageInput): void => {
     assertContext(input.setupContext);
-    assertObjectType(input.qShare, "qShare", "QSharePrimeList");
+    assertObjectType(input.qShare, 'qShare', 'QSharePrimeList');
     if (
-        deriveProtocolHash("QSharePrimeListHash", input.qShare) !==
+        deriveProtocolHash('QSharePrimeListHash', input.qShare) !==
         input.setupContext.qShareHash
     ) {
-        throw new Error("qShare must match setupContext.qShareHash.");
+        throw new Error('qShare must match setupContext.qShareHash.');
     }
     assertPhaseTranscript(input.setupContext, input.phaseTranscript);
     assertObjectType(
         input.commonRandomness,
-        "commonRandomness",
-        "SetupCommonRandomness",
+        'commonRandomness',
+        'SetupCommonRandomness',
     );
     assertCommonRandomnessContextMatches(
         input.setupContext,
         input.commonRandomness,
-        "commonRandomness",
+        'commonRandomness',
     );
     hashField(
         input.commonRandomness,
-        "commonRandomnessRoot",
-        "commonRandomness",
+        'commonRandomnessRoot',
+        'commonRandomness',
     );
     assertObjectType(
         input.vssCoefficientCommitments,
-        "vssCoefficientCommitments",
-        "VssCoefficientCommitmentSet",
+        'vssCoefficientCommitments',
+        'VssCoefficientCommitmentSet',
     );
     assertContextMatches(
         input.setupContext,
         input.vssCoefficientCommitments,
-        "vssCoefficientCommitments",
+        'vssCoefficientCommitments',
     );
     hashField(
         input.vssCoefficientCommitments,
-        "vssCoefficientCommitmentRoot",
-        "vssCoefficientCommitments",
+        'vssCoefficientCommitmentRoot',
+        'vssCoefficientCommitments',
     );
     assertObjectType(
         input.vssCoefficientCommitmentMaterial,
-        "vssCoefficientCommitmentMaterial",
-        "VssCoefficientCommitmentMaterialSet",
+        'vssCoefficientCommitmentMaterial',
+        'VssCoefficientCommitmentMaterialSet',
     );
     hashField(
         input.vssCoefficientCommitmentMaterial,
-        "vssCoefficientCommitmentMaterialRoot",
-        "vssCoefficientCommitmentMaterial",
+        'vssCoefficientCommitmentMaterialRoot',
+        'vssCoefficientCommitmentMaterial',
     );
     assertObjectType(
         input.privateVssEnvelopeCommitments,
-        "privateVssEnvelopeCommitments",
-        "PrivateVssEnvelopeCommitmentSet",
+        'privateVssEnvelopeCommitments',
+        'PrivateVssEnvelopeCommitmentSet',
     );
     hashField(
         input.privateVssEnvelopeCommitments,
-        "privateVssEnvelopeCommitmentRoot",
-        "privateVssEnvelopeCommitments",
+        'privateVssEnvelopeCommitmentRoot',
+        'privateVssEnvelopeCommitments',
     );
     assertObjectType(
         input.vssShareAcceptances,
-        "vssShareAcceptances",
-        "VssShareAcceptanceSet",
+        'vssShareAcceptances',
+        'VssShareAcceptanceSet',
     );
     assertContextMatches(
         input.setupContext,
         input.vssShareAcceptances,
-        "vssShareAcceptances",
+        'vssShareAcceptances',
     );
     hashField(
         input.vssShareAcceptances,
-        "vssShareAcceptanceRoot",
-        "vssShareAcceptances",
+        'vssShareAcceptanceRoot',
+        'vssShareAcceptances',
     );
     if (input.vssComplaints !== undefined) {
         assertObjectType(
             input.vssComplaints,
-            "vssComplaints",
-            "VssComplaintSet",
+            'vssComplaints',
+            'VssComplaintSet',
         );
-        hashField(input.vssComplaints, "vssComplaintRoot", "vssComplaints");
+        hashField(input.vssComplaints, 'vssComplaintRoot', 'vssComplaints');
     }
 };
 
 const assertKeyRecordBindings = (input: SetupPackageInput): void => {
     assertObjectType(
         input.sameSecretConsistency,
-        "sameSecretConsistency",
-        "SameSecretConsistencyStatementSet",
+        'sameSecretConsistency',
+        'SameSecretConsistencyStatementSet',
     );
     hashField(
         input.sameSecretConsistency,
-        "sameSecretConsistencyRoot",
-        "sameSecretConsistency",
+        'sameSecretConsistencyRoot',
+        'sameSecretConsistency',
     );
     assertObjectType(
         input.sameSecretProofs,
-        "sameSecretProofs",
-        "SameSecretProofSet",
+        'sameSecretProofs',
+        'SameSecretProofSet',
     );
     hashField(
         input.sameSecretProofs,
-        "sameSecretProofSetRoot",
-        "sameSecretProofs",
+        'sameSecretProofSetRoot',
+        'sameSecretProofs',
     );
     assertObjectType(
         input.publicKeyShares,
-        "publicKeyShares",
-        "PublicKeyShareSet",
+        'publicKeyShares',
+        'PublicKeyShareSet',
     );
     hashField(
         input.publicKeyShares,
-        "publicKeyShareSetRoot",
-        "publicKeyShares",
+        'publicKeyShareSetRoot',
+        'publicKeyShares',
     );
     assertObjectType(
         input.publicKeyShareProofs,
-        "publicKeyShareProofs",
-        "PublicKeyShareProofSet",
+        'publicKeyShareProofs',
+        'PublicKeyShareProofSet',
     );
     hashField(
         input.publicKeyShareProofs,
-        "publicKeyShareProofSetRoot",
-        "publicKeyShareProofs",
+        'publicKeyShareProofSetRoot',
+        'publicKeyShareProofs',
     );
     assertObjectType(
         input.publicKeyShareMaterial,
-        "publicKeyShareMaterial",
-        "PublicKeyShareMaterialSet",
+        'publicKeyShareMaterial',
+        'PublicKeyShareMaterialSet',
     );
     hashField(
         input.publicKeyShareMaterial,
-        "publicKeyShareMaterialSetRoot",
-        "publicKeyShareMaterial",
+        'publicKeyShareMaterialSetRoot',
+        'publicKeyShareMaterial',
     );
     assertObjectType(
         input.publicKeyShareSuccinctProofs,
-        "publicKeyShareSuccinctProofs",
-        "PublicKeyShareSuccinctProofSet",
+        'publicKeyShareSuccinctProofs',
+        'PublicKeyShareSuccinctProofSet',
     );
     hashField(
         input.publicKeyShareSuccinctProofs,
-        "publicKeyShareSuccinctProofSetRoot",
-        "publicKeyShareSuccinctProofs",
+        'publicKeyShareSuccinctProofSetRoot',
+        'publicKeyShareSuccinctProofs',
     );
     assertObjectType(
         input.evaluatorKeySchedule,
-        "evaluatorKeySchedule",
-        "EvaluatorKeySchedule",
+        'evaluatorKeySchedule',
+        'EvaluatorKeySchedule',
     );
     hashField(
         input.evaluatorKeySchedule,
-        "evaluatorKeyScheduleRoot",
-        "evaluatorKeySchedule",
+        'evaluatorKeyScheduleRoot',
+        'evaluatorKeySchedule',
     );
     assertObjectType(
         input.relinearizationKeyShareRounds,
-        "relinearizationKeyShareRounds",
-        "RelinearizationKeyShareRounds",
+        'relinearizationKeyShareRounds',
+        'RelinearizationKeyShareRounds',
     );
     hashField(
         input.relinearizationKeyShareRounds,
-        "relinearizationKeyShareRoundsRoot",
-        "relinearizationKeyShareRounds",
+        'relinearizationKeyShareRoundsRoot',
+        'relinearizationKeyShareRounds',
     );
     for (const [batchIndex, batch] of input.galoisKeyShareBatches.entries()) {
         const objectPath = `galoisKeyShareBatches.${String(batchIndex)}`;
-        assertObjectType(batch, objectPath, "GaloisKeyShareBatch");
-        hashField(batch, "galoisKeyShareBatchRoot", objectPath);
+        assertObjectType(batch, objectPath, 'GaloisKeyShareBatch');
+        hashField(batch, 'galoisKeyShareBatchRoot', objectPath);
     }
     assertObjectType(
         input.trusteeEvaluationKeyProofs,
-        "trusteeEvaluationKeyProofs",
-        "TrusteeEvaluationKeyProofSet",
+        'trusteeEvaluationKeyProofs',
+        'TrusteeEvaluationKeyProofSet',
     );
     hashField(
         input.trusteeEvaluationKeyProofs,
-        "trusteeEvaluationKeyProofSetRoot",
-        "trusteeEvaluationKeyProofs",
+        'trusteeEvaluationKeyProofSetRoot',
+        'trusteeEvaluationKeyProofs',
     );
     if (
         input.trusteeEvaluationKeyProofs.relinearizationKeyShareRoundsRoot !==
         input.relinearizationKeyShareRounds.relinearizationKeyShareRoundsRoot
     ) {
         throw new Error(
-            "trusteeEvaluationKeyProofs must bind the supplied relinearization share-record container.",
+            'trusteeEvaluationKeyProofs must bind the supplied relinearization share-record container.',
         );
     }
     assertObjectType(
         input.evaluationKeys,
-        "evaluationKeys",
-        "PublicEvaluationKeySet",
+        'evaluationKeys',
+        'PublicEvaluationKeySet',
     );
-    hashField(input.evaluationKeys, "evaluationKeySetHash", "evaluationKeys");
+    hashField(input.evaluationKeys, 'evaluationKeySetHash', 'evaluationKeys');
 };
 
 const compactVssPublicMaterialFieldNames = [
-    "compactVssCoefficientCommitmentSet",
-    "compactVssRecipientShareCommitmentSet",
-    "compactVssAggregateThresholdCommitmentSet",
-    "compactVssShareLinkageStatement",
-    "compactVssShareLinkageProofMaterialSet",
+    'compactVssCoefficientCommitmentSet',
+    'compactVssRecipientShareCommitmentSet',
+    'compactVssAggregateThresholdCommitmentSet',
+    'compactVssShareLinkageStatement',
+    'compactVssShareLinkageProofMaterialSet',
 ] as const satisfies readonly (keyof SetupPackageInput)[];
 
 const compactSameSecretBridgeFieldNames = [
-    "compactSameSecretBridgeStatementSet",
-    "compactSameSecretBridgeProofMaterialSet",
+    'compactSameSecretBridgeStatementSet',
+    'compactSameSecretBridgeProofMaterialSet',
 ] as const satisfies readonly (keyof SetupPackageInput)[];
 
 const compactSameSecretBridgeEvidenceFieldNames = [
-    "compactSameSecretBridgeStatementSet",
-    "compactSameSecretBridgeProofMaterialSet",
-    "sameSecretConsistency",
-    "sameSecretProofs",
+    'compactSameSecretBridgeStatementSet',
+    'compactSameSecretBridgeProofMaterialSet',
+    'sameSecretConsistency',
+    'sameSecretProofs',
 ] as const satisfies readonly (keyof SetupPackageInput)[];
 
 const assertCompleteOptionalFieldGroup = <
@@ -306,7 +307,7 @@ const assertCompleteOptionalFieldGroup = <
     );
     if (missingFieldNames.length > 0) {
         throw new Error(
-            `${groupDescription} requires ${missingFieldNames.join(", ")} when any related field is supplied.`,
+            `${groupDescription} requires ${missingFieldNames.join(', ')} when any related field is supplied.`,
         );
     }
 };
@@ -350,7 +351,7 @@ const assertSetupContextNumberMatches = (
         positiveSafeIntegerField(
             setupContext,
             setupContextFieldName,
-            "setupContext",
+            'setupContext',
         )
     ) {
         throw new Error(
@@ -397,10 +398,10 @@ export const assertRootBoundCertificateHash = (
 export const assertCompactSameSecretBridgeEvidenceFieldGroup = (
     input: Pick<
         SetupPackageInput,
-        | "compactSameSecretBridgeStatementSet"
-        | "compactSameSecretBridgeProofMaterialSet"
-        | "sameSecretConsistency"
-        | "sameSecretProofs"
+        | 'compactSameSecretBridgeStatementSet'
+        | 'compactSameSecretBridgeProofMaterialSet'
+        | 'sameSecretConsistency'
+        | 'sameSecretProofs'
     >,
 ): void => {
     const presentCompactBridgeFieldNames =
@@ -416,7 +417,7 @@ export const assertCompactSameSecretBridgeEvidenceFieldGroup = (
     );
     if (missingFieldNames.length > 0) {
         throw new Error(
-            `compact same-secret bridge material requires ${missingFieldNames.join(", ")} when any compact bridge field is supplied.`,
+            `compact same-secret bridge material requires ${missingFieldNames.join(', ')} when any compact bridge field is supplied.`,
         );
     }
 };
@@ -427,7 +428,7 @@ const assertOptionalCompactVssPublicMaterial = (
     assertCompleteOptionalFieldGroup(
         input,
         compactVssPublicMaterialFieldNames,
-        "compact VSS public material",
+        'compact VSS public material',
     );
     if (input.compactVssCoefficientCommitmentSet === undefined) {
         return;
@@ -435,8 +436,8 @@ const assertOptionalCompactVssPublicMaterial = (
 
     const commonRandomnessPublicMatrixSeedHash = hashField(
         input.commonRandomness,
-        "publicMatrixSeedHash",
-        "commonRandomness",
+        'publicMatrixSeedHash',
+        'commonRandomness',
     );
     const coefficientCommitmentSet =
         input.compactVssCoefficientCommitmentSet as CompactVssCoefficientCommitmentSet;
@@ -452,59 +453,59 @@ const assertOptionalCompactVssPublicMaterial = (
     assertContextMatches(
         input.setupContext,
         statement,
-        "compactVssShareLinkageStatement",
+        'compactVssShareLinkageStatement',
     );
     for (const [objectPath, compactObject] of [
-        ["compactVssCoefficientCommitmentSet", coefficientCommitmentSet],
-        ["compactVssRecipientShareCommitmentSet", recipientShareCommitmentSet],
+        ['compactVssCoefficientCommitmentSet', coefficientCommitmentSet],
+        ['compactVssRecipientShareCommitmentSet', recipientShareCommitmentSet],
         [
-            "compactVssAggregateThresholdCommitmentSet",
+            'compactVssAggregateThresholdCommitmentSet',
             aggregateThresholdCommitmentSet,
         ],
-        ["compactVssShareLinkageStatement", statement],
+        ['compactVssShareLinkageStatement', statement],
     ] as const) {
         assertSetupContextNumberMatches(
             input.setupContext,
             compactObject,
-            "participantCount",
-            "participantCount",
+            'participantCount',
+            'participantCount',
             objectPath,
         );
     }
     assertSetupContextNumberMatches(
         input.setupContext,
         coefficientCommitmentSet,
-        "thresholdDegree",
-        "qDec",
-        "compactVssCoefficientCommitmentSet",
+        'thresholdDegree',
+        'qDec',
+        'compactVssCoefficientCommitmentSet',
     );
     assertSetupContextNumberMatches(
         input.setupContext,
         statement,
-        "thresholdDegree",
-        "qDec",
-        "compactVssShareLinkageStatement",
+        'thresholdDegree',
+        'qDec',
+        'compactVssShareLinkageStatement',
     );
     assertBoundValueMatches(
         statement.coefficientCommitmentRoot,
         coefficientCommitmentSet.coefficientCommitmentRoot,
-        "compactVssShareLinkageStatement",
-        "coefficientCommitmentRoot",
-        "compactVssCoefficientCommitmentSet",
+        'compactVssShareLinkageStatement',
+        'coefficientCommitmentRoot',
+        'compactVssCoefficientCommitmentSet',
     );
     assertBoundValueMatches(
         statement.recipientShareCommitmentRoot,
         recipientShareCommitmentSet.recipientShareCommitmentRoot,
-        "compactVssShareLinkageStatement",
-        "recipientShareCommitmentRoot",
-        "compactVssRecipientShareCommitmentSet",
+        'compactVssShareLinkageStatement',
+        'recipientShareCommitmentRoot',
+        'compactVssRecipientShareCommitmentSet',
     );
     assertBoundValueMatches(
         statement.aggregateThresholdCommitmentRoot,
         aggregateThresholdCommitmentSet.aggregateThresholdCommitmentRoot,
-        "compactVssShareLinkageStatement",
-        "aggregateThresholdCommitmentRoot",
-        "compactVssAggregateThresholdCommitmentSet",
+        'compactVssShareLinkageStatement',
+        'aggregateThresholdCommitmentRoot',
+        'compactVssAggregateThresholdCommitmentSet',
     );
 
     verifyCompactVssShareLinkageProofMaterialSet({
@@ -516,20 +517,20 @@ const assertOptionalCompactVssPublicMaterial = (
     });
     for (const [objectPath, publicMatrixSeedHash] of [
         [
-            "compactVssCoefficientCommitmentSet",
+            'compactVssCoefficientCommitmentSet',
             coefficientCommitmentSet.publicMatrixSeedHash,
         ],
         [
-            "compactVssRecipientShareCommitmentSet",
+            'compactVssRecipientShareCommitmentSet',
             recipientShareCommitmentSet.publicMatrixSeedHash,
         ],
         [
-            "compactVssAggregateThresholdCommitmentSet",
+            'compactVssAggregateThresholdCommitmentSet',
             aggregateThresholdCommitmentSet.publicMatrixSeedHash,
         ],
-        ["compactVssShareLinkageStatement", statement.publicMatrixSeedHash],
+        ['compactVssShareLinkageStatement', statement.publicMatrixSeedHash],
         [
-            "compactVssShareLinkageProofMaterialSet",
+            'compactVssShareLinkageProofMaterialSet',
             proofMaterialSet.publicMatrixSeedHash,
         ],
     ] as const) {
@@ -551,8 +552,8 @@ const assertOptionalCompactSameSecretBridge = (
 
     const commonRandomnessPublicMatrixSeedHash = hashField(
         input.commonRandomness,
-        "publicMatrixSeedHash",
-        "commonRandomness",
+        'publicMatrixSeedHash',
+        'commonRandomness',
     );
     const statementSet =
         input.compactSameSecretBridgeStatementSet as CompactVssSameSecretBridgeStatementSet;
@@ -560,7 +561,7 @@ const assertOptionalCompactSameSecretBridge = (
         input.compactSameSecretBridgeProofMaterialSet as CompactVssSameSecretBridgeProofMaterialSet;
     if (input.compactVssCoefficientCommitmentSet === undefined) {
         throw new Error(
-            "compact same-secret bridge material requires compactVssCoefficientCommitmentSet.",
+            'compact same-secret bridge material requires compactVssCoefficientCommitmentSet.',
         );
     }
     const coefficientCommitmentSet =
@@ -569,43 +570,43 @@ const assertOptionalCompactSameSecretBridge = (
     assertContextMatches(
         input.setupContext,
         statementSet,
-        "compactSameSecretBridgeStatementSet",
+        'compactSameSecretBridgeStatementSet',
     );
     assertSetupContextNumberMatches(
         input.setupContext,
         statementSet,
-        "participantCount",
-        "participantCount",
-        "compactSameSecretBridgeStatementSet",
+        'participantCount',
+        'participantCount',
+        'compactSameSecretBridgeStatementSet',
     );
     assertSetupContextNumberMatches(
         input.setupContext,
         statementSet,
-        "thresholdDegree",
-        "qDec",
-        "compactSameSecretBridgeStatementSet",
+        'thresholdDegree',
+        'qDec',
+        'compactSameSecretBridgeStatementSet',
     );
     assertBoundValueMatches(
         statementSet.compactCoefficientCommitmentRoot,
         coefficientCommitmentSet.coefficientCommitmentRoot,
-        "compactSameSecretBridgeStatementSet",
-        "compactCoefficientCommitmentRoot",
-        "compactVssCoefficientCommitmentSet",
-        "coefficientCommitmentRoot",
+        'compactSameSecretBridgeStatementSet',
+        'compactCoefficientCommitmentRoot',
+        'compactVssCoefficientCommitmentSet',
+        'coefficientCommitmentRoot',
     );
     assertBoundValueMatches(
         statementSet.sameSecretConsistencyRoot,
         input.sameSecretConsistency.sameSecretConsistencyRoot,
-        "compactSameSecretBridgeStatementSet",
-        "sameSecretConsistencyRoot",
-        "sameSecretConsistency",
+        'compactSameSecretBridgeStatementSet',
+        'sameSecretConsistencyRoot',
+        'sameSecretConsistency',
     );
     assertBoundValueMatches(
         statementSet.sameSecretProofSetRoot,
         (input.sameSecretProofs as SameSecretProofSet).sameSecretProofSetRoot,
-        "compactSameSecretBridgeStatementSet",
-        "sameSecretProofSetRoot",
-        "sameSecretProofs",
+        'compactSameSecretBridgeStatementSet',
+        'sameSecretProofSetRoot',
+        'sameSecretProofs',
     );
 
     verifyCompactVssSameSecretBridgeProofMaterialSet({
@@ -621,12 +622,12 @@ const assertOptionalCompactSameSecretBridge = (
     assertPublicMatrixSeedMatchesCommonRandomness(
         commonRandomnessPublicMatrixSeedHash,
         statementSet.publicMatrixSeedHash,
-        "compactSameSecretBridgeStatementSet",
+        'compactSameSecretBridgeStatementSet',
     );
     assertPublicMatrixSeedMatchesCommonRandomness(
         commonRandomnessPublicMatrixSeedHash,
         proofMaterialSet.publicMatrixSeedHash,
-        "compactSameSecretBridgeProofMaterialSet",
+        'compactSameSecretBridgeProofMaterialSet',
     );
 };
 
@@ -635,44 +636,44 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
 ): void => {
     const publicMatrixSeedHash = hashField(
         input.commonRandomness,
-        "publicMatrixSeedHash",
-        "commonRandomness",
+        'publicMatrixSeedHash',
+        'commonRandomness',
     );
     const publicDerivations = assertObjectRecord(
         input.commonRandomness.publicDerivations,
-        "commonRandomness.publicDerivations",
+        'commonRandomness.publicDerivations',
     );
     if (
-        publicDerivations.objectType !== "SetupPublicDerivations" ||
+        publicDerivations.objectType !== 'SetupPublicDerivations' ||
         publicDerivations.objectVersion !== 1 ||
         publicDerivations.setupProfileId !== setupProfileId ||
         publicDerivations.publicMatrixSeedHash !== publicMatrixSeedHash
     ) {
         throw new Error(
-            "commonRandomness.publicDerivations must match the accepted setup public derivation profile.",
+            'commonRandomness.publicDerivations must match the accepted setup public derivation profile.',
         );
     }
 
     const crpRoots = assertObjectRecord(
         publicDerivations.crpRoots,
-        "commonRandomness.publicDerivations.crpRoots",
+        'commonRandomness.publicDerivations.crpRoots',
     );
     const bgvPublicA = assertObjectRecord(
         publicDerivations.bgvPublicA,
-        "commonRandomness.publicDerivations.bgvPublicA",
+        'commonRandomness.publicDerivations.bgvPublicA',
     );
     const publicKeyShareMaterial = assertObjectRecord(
         input.publicKeyShareMaterial,
-        "publicKeyShareMaterial",
+        'publicKeyShareMaterial',
     );
     if (publicKeyShareMaterial.publicMatrixSeedHash !== publicMatrixSeedHash) {
         throw new Error(
-            "publicKeyShareMaterial.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.",
+            'publicKeyShareMaterial.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.',
         );
     }
     if (publicKeyShareMaterial.publicKeyCrpRoot !== crpRoots.publicKeyCrpRoot) {
         throw new Error(
-            "publicKeyShareMaterial.publicKeyCrpRoot must match commonRandomness public derivations.",
+            'publicKeyShareMaterial.publicKeyCrpRoot must match commonRandomness public derivations.',
         );
     }
     if (
@@ -680,17 +681,17 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
         bgvPublicA.publicPolynomialRoot
     ) {
         throw new Error(
-            "publicKeyShareMaterial.publicAPolynomialRoot must match commonRandomness public derivations.",
+            'publicKeyShareMaterial.publicAPolynomialRoot must match commonRandomness public derivations.',
         );
     }
 
     const evaluatorKeySchedule = assertObjectRecord(
         input.evaluatorKeySchedule,
-        "evaluatorKeySchedule",
+        'evaluatorKeySchedule',
     );
     if (evaluatorKeySchedule.publicMatrixSeedHash !== publicMatrixSeedHash) {
         throw new Error(
-            "evaluatorKeySchedule.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.",
+            'evaluatorKeySchedule.publicMatrixSeedHash must match commonRandomness.publicMatrixSeedHash.',
         );
     }
     if (
@@ -698,19 +699,19 @@ const assertCommonRandomnessPublicDerivationsBindPackageInput = (
         crpRoots.relinearizationCrpRoot
     ) {
         throw new Error(
-            "evaluatorKeySchedule.relinearizationCrpRoot must match commonRandomness public derivations.",
+            'evaluatorKeySchedule.relinearizationCrpRoot must match commonRandomness public derivations.',
         );
     }
     if (evaluatorKeySchedule.galoisKeyCrpRoot !== crpRoots.galoisKeyCrpRoot) {
         throw new Error(
-            "evaluatorKeySchedule.galoisKeyCrpRoot must match commonRandomness public derivations.",
+            'evaluatorKeySchedule.galoisKeyCrpRoot must match commonRandomness public derivations.',
         );
     }
 };
 
 export const resolveThresholdShareCommitments = (
     input: SetupPackageInput,
-): ThresholdShareCommitmentSet => {
+): ThresholdShareCommitments => {
     const materialEncoding = (
         input.vssCoefficientCommitmentMaterial as Readonly<
             Record<string, unknown>
@@ -718,10 +719,73 @@ export const resolveThresholdShareCommitments = (
     ).materialEncoding;
     if (
         materialEncoding ===
-            "binary-chunked-full-public-setup-commitment-values" &&
+            'binary-chunked-full-public-setup-commitment-values' &&
         input.thresholdShareCommitments !== undefined
     ) {
-        return input.thresholdShareCommitments as ThresholdShareCommitmentSet;
+        return input.thresholdShareCommitments as ThresholdShareCommitments;
+    }
+    if (
+        materialEncoding ===
+            'binary-chunked-full-public-setup-commitment-values' &&
+        input.thresholdShareCommitments === undefined &&
+        compactVssPublicMaterialFieldNames.every(
+            (fieldName) => input[fieldName] !== undefined,
+        )
+    ) {
+        const aggregateThresholdCommitmentSet = assertObjectRecord(
+            input.compactVssAggregateThresholdCommitmentSet,
+            'compactVssAggregateThresholdCommitmentSet',
+        );
+        const statement = assertObjectRecord(
+            input.compactVssShareLinkageStatement,
+            'compactVssShareLinkageStatement',
+        );
+        const proofMaterialSet = assertObjectRecord(
+            input.compactVssShareLinkageProofMaterialSet,
+            'compactVssShareLinkageProofMaterialSet',
+        );
+        return createCompactThresholdShareCommitmentBinding({
+            publicMatrixSeedHash: hashField(
+                input.commonRandomness,
+                'publicMatrixSeedHash',
+                'commonRandomness',
+            ),
+            participantCount: positiveSafeIntegerField(
+                aggregateThresholdCommitmentSet,
+                'participantCount',
+                'compactVssAggregateThresholdCommitmentSet',
+            ),
+            thresholdDegree: positiveSafeIntegerField(
+                statement,
+                'thresholdDegree',
+                'compactVssShareLinkageStatement',
+            ),
+            targetRnsLimbCount: positiveSafeIntegerField(
+                statement,
+                'targetRnsLimbCount',
+                'compactVssShareLinkageStatement',
+            ),
+            ringDegree: positiveSafeIntegerField(
+                aggregateThresholdCommitmentSet,
+                'ringDegree',
+                'compactVssAggregateThresholdCommitmentSet',
+            ),
+            aggregateThresholdCommitmentRoot: hashField(
+                aggregateThresholdCommitmentSet,
+                'aggregateThresholdCommitmentRoot',
+                'compactVssAggregateThresholdCommitmentSet',
+            ),
+            shareLinkageStatementRoot: hashField(
+                statement,
+                'statementRoot',
+                'compactVssShareLinkageStatement',
+            ),
+            shareLinkageProofMaterialSetRoot: hashField(
+                proofMaterialSet,
+                'proofMaterialSetRoot',
+                'compactVssShareLinkageProofMaterialSet',
+            ),
+        });
     }
     const derivedThresholdShareCommitments = deriveThresholdShareCommitments({
         setupContext: input.setupContext,
@@ -743,7 +807,7 @@ export const resolveThresholdShareCommitments = (
         canonicalJson(derivedThresholdShareCommitments)
     ) {
         throw new Error(
-            "thresholdShareCommitments must match the verifier-derived commitments from VSS coefficient material.",
+            'thresholdShareCommitments must match the verifier-derived commitments from VSS coefficient material.',
         );
     }
 
@@ -755,47 +819,47 @@ const assertCertificateBindings = (
 ): void => {
     assertObjectType(
         certificates.setupCommitmentSecurityCertificate,
-        "setupCommitmentSecurityCertificate",
-        "SetupCommitmentSecurityCertificate",
+        'setupCommitmentSecurityCertificate',
+        'SetupCommitmentSecurityCertificate',
     );
     assertRootBoundCertificateHash(
         certificates.setupCommitmentSecurityCertificate,
-        "setupCommitmentSecurityCertificateHash",
-        "SetupCommitmentSecurityCertificateHash",
-        "setupCommitmentSecurityCertificate",
+        'setupCommitmentSecurityCertificateHash',
+        'SetupCommitmentSecurityCertificateHash',
+        'setupCommitmentSecurityCertificate',
     );
     assertObjectType(
         certificates.setupTransportCertificate,
-        "setupTransportCertificate",
-        "SetupTransportCertificate",
+        'setupTransportCertificate',
+        'SetupTransportCertificate',
     );
     assertRootBoundCertificateHash(
         certificates.setupTransportCertificate,
-        "setupTransportCertificateHash",
-        "SetupTransportCertificateHash",
-        "setupTransportCertificate",
+        'setupTransportCertificateHash',
+        'SetupTransportCertificateHash',
+        'setupTransportCertificate',
     );
     assertObjectType(
         certificates.setupProofAccountingCertificate,
-        "setupProofAccountingCertificate",
-        "SetupProofAccountingCertificate",
+        'setupProofAccountingCertificate',
+        'SetupProofAccountingCertificate',
     );
     assertRootBoundCertificateHash(
         certificates.setupProofAccountingCertificate,
-        "setupProofAccountingCertificateHash",
-        "SetupProofAccountingCertificateHash",
-        "setupProofAccountingCertificate",
+        'setupProofAccountingCertificateHash',
+        'SetupProofAccountingCertificateHash',
+        'setupProofAccountingCertificate',
     );
     assertObjectType(
         certificates.heSecurityCertificate,
-        "heSecurityCertificate",
-        "BgvHeSecurityCertificate",
+        'heSecurityCertificate',
+        'BgvHeSecurityCertificate',
     );
     assertRootBoundCertificateHash(
         certificates.heSecurityCertificate,
-        "heSecurityCertificateHash",
-        "BGVHeSecurityCertificateHash",
-        "heSecurityCertificate",
+        'heSecurityCertificateHash',
+        'BGVHeSecurityCertificateHash',
+        'heSecurityCertificate',
     );
 };
 
@@ -804,7 +868,7 @@ const assertGaloisScheduleCovered = (input: SetupPackageInput): void => {
         input.evaluatorKeySchedule.requiredGaloisKeySchedule;
     if (!Array.isArray(requiredGaloisKeySchedule)) {
         throw new TypeError(
-            "evaluatorKeySchedule.requiredGaloisKeySchedule must be an array.",
+            'evaluatorKeySchedule.requiredGaloisKeySchedule must be an array.',
         );
     }
     const availableBatchKeys = new Set(
@@ -830,18 +894,29 @@ const assertGaloisScheduleCovered = (input: SetupPackageInput): void => {
 export const validateInput = (
     input: SetupPackageInput,
     certificates: SetupPackageCertificateRecords,
-    thresholdShareCommitments: ThresholdShareCommitmentSet,
+    thresholdShareCommitments: ThresholdShareCommitments,
 ): void => {
     assertCommonBindings(input);
-    assertObjectType(
-        thresholdShareCommitments,
-        "thresholdShareCommitments",
-        "ThresholdShareCommitmentSet",
-    );
+    if (
+        thresholdShareCommitments.objectType ===
+        'CompactThresholdShareCommitmentBinding'
+    ) {
+        assertObjectType(
+            thresholdShareCommitments,
+            'thresholdShareCommitments',
+            'CompactThresholdShareCommitmentBinding',
+        );
+    } else {
+        assertObjectType(
+            thresholdShareCommitments,
+            'thresholdShareCommitments',
+            'ThresholdShareCommitmentSet',
+        );
+    }
     hashField(
         thresholdShareCommitments,
-        "thresholdShareCommitmentRoot",
-        "thresholdShareCommitments",
+        'thresholdShareCommitmentRoot',
+        'thresholdShareCommitments',
     );
     assertKeyRecordBindings(input);
     assertCommonRandomnessPublicDerivationsBindPackageInput(input);

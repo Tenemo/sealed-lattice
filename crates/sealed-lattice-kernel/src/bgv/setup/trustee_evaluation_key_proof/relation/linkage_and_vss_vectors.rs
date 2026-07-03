@@ -289,9 +289,17 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         }
     } else if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
+        let total_error_vectors = statement
+            .keys
+            .iter()
+            .map(|key| key.digit_count())
+            .sum::<usize>();
+        let bridge_digit_start = 1 + total_error_vectors + 1;
         let bridge_digit_vector_count = compact_same_secret_bridge.target_rns_primes.len()
             * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-        if (2..2 + bridge_digit_vector_count).contains(&global_vector_index) {
+        if (bridge_digit_start..bridge_digit_start + bridge_digit_vector_count)
+            .contains(&global_vector_index)
+        {
             COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT
         } else {
             family_shape.claim_mask_digit_count()
@@ -339,21 +347,20 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
         None => match &statement.compact_vss_share_linkage {
             Some(compact_vss_share_linkage) => {
                 let global_vector_index = global_claim_id as usize / consistency_repetitions;
-                if global_vector_index == 0 {
-                    let primary_carry_bound = private_vss_share_lifted_carry_bound(
-                        compact_vss_share_linkage.recipient_roster_position,
-                        compact_vss_share_linkage.coefficient_commitments.len(),
-                    )?;
-                    let carry_bound = compact_vss_share_linkage
-                        .additional_linkage_items
-                        .iter()
-                        .try_fold(primary_carry_bound, |current_bound, item| {
-                            private_vss_share_lifted_carry_bound(
-                                item.recipient_roster_position,
-                                item.coefficient_commitments.len(),
-                            )
-                            .map(|item_bound| current_bound.max(item_bound))
-                        })?;
+                if global_vector_index < compact_vss_share_linkage.item_count() {
+                    let carry_bound = if global_vector_index == 0 {
+                        private_vss_share_lifted_carry_bound(
+                            compact_vss_share_linkage.recipient_roster_position,
+                            compact_vss_share_linkage.coefficient_commitments.len(),
+                        )?
+                    } else {
+                        let item = &compact_vss_share_linkage.additional_linkage_items
+                            [global_vector_index - 1];
+                        private_vss_share_lifted_carry_bound(
+                            item.recipient_roster_position,
+                            item.coefficient_commitments.len(),
+                        )?
+                    };
                     carry_bound.max(1)
                 } else {
                     i128::from(
@@ -365,10 +372,18 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
             None => {
                 if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge {
                     let global_vector_index = global_claim_id as usize / consistency_repetitions;
+                    let total_error_vectors = statement
+                        .keys
+                        .iter()
+                        .map(|key| key.digit_count())
+                        .sum::<usize>();
+                    let bridge_digit_start = 1 + total_error_vectors + 1;
                     let bridge_digit_vector_count =
                         compact_same_secret_bridge.target_rns_primes.len()
                             * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
-                    if (2..2 + bridge_digit_vector_count).contains(&global_vector_index) {
+                    if (bridge_digit_start..bridge_digit_start + bridge_digit_vector_count)
+                        .contains(&global_vector_index)
+                    {
                         i128::from(
                             crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE
                                 - 1,

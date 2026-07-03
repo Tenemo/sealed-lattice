@@ -7,46 +7,23 @@ pub(in super::super) fn trustee_evaluation_key_proofs_object_with_terminal_trans
     transported_component_material: &serde_json::Value,
     round_one_aggregate_diagonals_by_level: &BTreeMap<u64, Vec<Vec<u64>>>,
     terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
+    transported_same_secret_proof_material: Option<&serde_json::Value>,
 ) -> serde_json::Value {
-    // The terminal flow keeps the package VSS material binary-chunked, so the
-    // statement rebuild needs the per-trustee constant commitments through
-    // the transported map, exactly like the package verifier receives them.
-    let transported_constant_commitments = package["sameSecretProofs"]["proofRecords"]
-        .as_array()
-        .expect("same-secret proof records")
-        .iter()
-        .map(|proof_record| {
-            let trustee_roster_position = proof_record["trusteeRosterPosition"]
-                .as_u64()
-                .expect("trustee roster position");
-            (
-                trustee_roster_position,
-                same_secret_constant_commitments_from_fixture_package(
-                    package,
-                    trustee_roster_position,
-                ),
-            )
-        })
-        .collect::<BTreeMap<_, _>>();
-
     trustee_evaluation_key_proofs_object_inner(
         package,
         Some(transported_component_material),
-        &transported_constant_commitments,
         Some(round_one_aggregate_diagonals_by_level),
         Some(terminal_transport),
+        transported_same_secret_proof_material,
     )
 }
 
 fn trustee_evaluation_key_proofs_object_inner(
     package: &serde_json::Value,
     transported_component_material: Option<&serde_json::Value>,
-    transported_constant_commitments: &BTreeMap<
-        u64,
-        Vec<crate::bgv::setup::commitment::SetupCommitmentValue>,
-    >,
     precomputed_round_one_aggregate_diagonals_by_level: Option<&BTreeMap<u64, Vec<Vec<u64>>>>,
     mut terminal_transport: Option<&mut TerminalEvaluationKeyTransportSinks>,
+    transported_same_secret_proof_material: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
@@ -65,8 +42,49 @@ fn trustee_evaluation_key_proofs_object_inner(
                 );
             &computed_round_one_aggregate_diagonals_by_level
         };
-    let ring_degree =
-        same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree;
+    let verified_compact_same_secret_bridge =
+        package.get("compactSameSecretBridgeStatementSet").map(|_| {
+            let request = compact_same_secret_bridge_request_for_fixture(
+                transported_same_secret_proof_material,
+            );
+            verified_compact_same_secret_bridge_material_from_package(package, &request)
+                .expect("compact same-secret bridge material")
+        });
+    // The terminal flow keeps the package VSS material binary-chunked. The
+    // fallback full-VSS statement rebuild needs the per-trustee constant
+    // commitments through the transported map, exactly like the package verifier
+    // receives them. The compact bridge path does not consume that map.
+    let transported_constant_commitments = if verified_compact_same_secret_bridge.is_some() {
+        None
+    } else {
+        Some(
+            package["sameSecretProofs"]["proofRecords"]
+                .as_array()
+                .expect("same-secret proof records")
+                .iter()
+                .map(|proof_record| {
+                    let trustee_roster_position = proof_record["trusteeRosterPosition"]
+                        .as_u64()
+                        .expect("trustee roster position");
+                    (
+                        trustee_roster_position,
+                        same_secret_constant_commitments_from_fixture_package(
+                            package,
+                            trustee_roster_position,
+                        ),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>(),
+        )
+    };
+    let ring_degree = package
+        .get("compactSameSecretBridgeStatementSet")
+        .and_then(|statement_set| statement_set.get("ringDegree"))
+        .and_then(serde_json::Value::as_u64)
+        .map(|ring_degree| ring_degree as usize)
+        .unwrap_or_else(|| {
+            same_secret_constant_commitments_from_fixture_package(package, 0)[0].ring_degree
+        });
     let checkpoint_resume_enabled =
         terminal_transport.is_some() && terminal_accepted_setup_checkpoint_resume_enabled();
     let compact_terminal_proof_transport = terminal_transport.is_some();
@@ -108,7 +126,8 @@ fn trustee_evaluation_key_proofs_object_inner(
                     &TrusteeEvaluationKeyStatementInputs {
                         setup_package: package,
                         transported_key_switch_component_material: transported_component_material,
-                        transported_constant_commitments,
+                        transported_constant_commitments: transported_constant_commitments.as_ref(),
+                        verified_compact_same_secret_bridge: verified_compact_same_secret_bridge.as_ref(),
                         round_one_aggregate_diagonals_by_level,
                         trustee_roster_position,
                     },

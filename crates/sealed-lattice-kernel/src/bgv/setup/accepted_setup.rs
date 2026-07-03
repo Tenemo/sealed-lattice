@@ -61,8 +61,15 @@ use self::common_randomness::{
     derive_bgv_public_a_polynomial, derive_collective_bgv_setup_public_derivations,
     verify_common_randomness,
 };
-use self::compact_same_secret_bridge_verification::verify_optional_compact_same_secret_bridge_statement_set;
-use self::compact_vss_public_material_verification::verify_optional_compact_vss_public_material;
+#[cfg(test)]
+pub(in crate::bgv::setup) use self::compact_same_secret_bridge_verification::verified_compact_same_secret_bridge_material_from_package;
+use self::compact_same_secret_bridge_verification::{
+    CompactSameSecretBridgeVerification, VerifiedCompactSameSecretBridgeMaterial,
+    verify_optional_compact_same_secret_bridge_statement_set,
+};
+use self::compact_vss_public_material_verification::{
+    CompactVssPublicMaterialVerification, verify_optional_compact_vss_public_material,
+};
 use self::evaluation_key_material_transport::{
     evaluation_key_material_refusal,
     transported_evaluation_key_share_component_material_from_request,
@@ -344,6 +351,24 @@ pub(super) fn accepted_roster_from_package(setup_package: &Value) -> AcceptedRos
         .map(accepted_roster_from_setup_context)
         .unwrap_or_else(first_closure_roster_parameters)
 }
+
+pub(super) fn setup_package_uses_compact_vss_setup_path(setup_package: &Value) -> bool {
+    setup_package
+        .get("thresholdShareCommitments")
+        .and_then(|threshold_share_commitments| threshold_share_commitments.get("objectType"))
+        .and_then(Value::as_str)
+        == Some("CompactThresholdShareCommitmentBinding")
+        && [
+            "compactVssCoefficientCommitmentSet",
+            "compactVssRecipientShareCommitmentSet",
+            "compactVssAggregateThresholdCommitmentSet",
+            "compactVssShareLinkageStatement",
+            "compactVssShareLinkageProofMaterialSet",
+        ]
+        .iter()
+        .all(|field_name| setup_package.get(*field_name).is_some())
+}
+
 const SETUP_TRANSPORT_PROFILE_ID: &str = "sealed-lattice-setup-binary-chunked-transport-v1";
 const SETUP_TRANSPORT_CERTIFICATE_OBJECT_TYPE: &str = "SetupTransportCertificate";
 const SETUP_TRANSPORT_CHUNK_MANIFEST_OBJECT_TYPE: &str = "SetupTransportChunkManifest";
@@ -720,21 +745,41 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_vss_share_acceptances(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_threshold_share_commitments(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) = verify_optional_compact_vss_public_material(setup_package, request)? {
+    let verified_compact_vss_public_material =
+        match verify_optional_compact_vss_public_material(setup_package, request)? {
+            CompactVssPublicMaterialVerification::Absent => None,
+            CompactVssPublicMaterialVerification::Verified(verified_material) => {
+                Some(verified_material)
+            }
+            CompactVssPublicMaterialVerification::Refused(response) => {
+                return Ok(VerificationFlow::Stop(response));
+            }
+        };
+    if let Some(response) = verify_threshold_share_commitments(
+        setup_package,
+        request,
+        verified_compact_vss_public_material.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_same_secret_consistency(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_optional_same_secret_proofs(setup_package, request)? {
-        return Ok(VerificationFlow::Stop(response));
-    }
-    if let Some(response) =
-        verify_optional_compact_same_secret_bridge_statement_set(setup_package, request)?
-    {
+    let verified_compact_same_secret_bridge =
+        match verify_optional_compact_same_secret_bridge_statement_set(setup_package, request)? {
+            CompactSameSecretBridgeVerification::Absent => None,
+            CompactSameSecretBridgeVerification::Verified(verified_material) => {
+                Some(verified_material)
+            }
+            CompactSameSecretBridgeVerification::Refused(response) => {
+                return Ok(VerificationFlow::Stop(response));
+            }
+        };
+    if let Some(response) = verify_optional_same_secret_proofs(
+        setup_package,
+        request,
+        verified_compact_same_secret_bridge.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_public_key_shares(setup_package)? {
@@ -743,9 +788,11 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_public_key_share_proofs(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) =
-        verify_optional_public_key_share_succinct_proofs(setup_package, request)?
-    {
+    if let Some(response) = verify_optional_public_key_share_succinct_proofs(
+        setup_package,
+        request,
+        verified_compact_same_secret_bridge.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_collective_public_key_material(setup_package, request)? {
@@ -757,8 +804,11 @@ fn verify_collective_setup_package(
     if let Some(response) = verify_evaluator_key_schedule(setup_package)? {
         return Ok(VerificationFlow::Stop(response));
     }
-    if let Some(response) = verify_pending_evaluation_key_material_boundary(setup_package, request)?
-    {
+    if let Some(response) = verify_pending_evaluation_key_material_boundary(
+        setup_package,
+        request,
+        verified_compact_same_secret_bridge.as_ref(),
+    )? {
         return Ok(VerificationFlow::Stop(response));
     }
     if let Some(response) = verify_generic_key_switch_policy(setup_package)? {

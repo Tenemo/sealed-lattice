@@ -54,6 +54,9 @@ mod relation;
 mod verifier;
 
 pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
+pub(in crate::bgv::setup) use commands::{
+    CompactVssCommandCommitmentExpectation, compact_vss_share_linkage_commitment_from_value,
+};
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use commands::{
     describe_target_decryption_share_proof_layout_from_request,
@@ -84,9 +87,9 @@ pub(in crate::bgv::setup) use proof_codec::encode_trustee_evaluation_key_proof;
 pub(in crate::bgv::setup) use prover::prove_evaluation_key_share;
 pub(in crate::bgv::setup) use relation::TrusteeEvaluationKeyWitness;
 pub(in crate::bgv::setup) use relation::{
-    EvaluationKeyShareDescriptor, EvaluationKeyShareKind, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
-    PrivateVssShareStatement, SameSecretLinkageStatement, SuccinctSetupProofContext,
-    TrusteeEvaluationKeyStatement,
+    CompactSameSecretBridgeStatement, EvaluationKeyShareDescriptor, EvaluationKeyShareKind,
+    PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL, PrivateVssShareStatement, SameSecretLinkageStatement,
+    SuccinctSetupProofContext, TrusteeEvaluationKeyStatement,
 };
 pub(in crate::bgv::setup) use verifier::verify_evaluation_key_share;
 

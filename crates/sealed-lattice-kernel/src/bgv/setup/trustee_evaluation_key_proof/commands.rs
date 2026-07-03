@@ -56,14 +56,14 @@ pub(crate) struct GeneratedTargetDecryptionShareProofBytes {
     pub(crate) proof_bytes: Vec<u8>,
 }
 
-struct CompactVssCommandCommitmentExpectation<'a> {
-    field_name: String,
-    root: &'a str,
-    role: &'a str,
-    public_matrix_seed_hash: &'a str,
-    rns_limb_index: usize,
-    rns_prime: u64,
-    ring_degree: usize,
+pub(in crate::bgv::setup) struct CompactVssCommandCommitmentExpectation<'a> {
+    pub(in crate::bgv::setup) field_name: String,
+    pub(in crate::bgv::setup) root: &'a str,
+    pub(in crate::bgv::setup) role: &'a str,
+    pub(in crate::bgv::setup) public_matrix_seed_hash: &'a str,
+    pub(in crate::bgv::setup) rns_limb_index: usize,
+    pub(in crate::bgv::setup) rns_prime: u64,
+    pub(in crate::bgv::setup) ring_degree: usize,
 }
 
 // The accounting object each migrated family carries on its command responses.
@@ -277,7 +277,7 @@ pub(crate) fn generate_compact_vss_share_linkage_proof_from_request(
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "coefficientCommitmentCount": compact_statement.total_coefficient_commitment_count(),
-        "coefficientWitnessColumnCount": compact_statement.maximum_coefficient_commitment_count(),
+        "coefficientWitnessColumnCount": compact_statement.unique_coefficient_witness_slot_count(),
         "proofByteLength": proof_bytes.len(),
         "proofBytesHex": to_hex(&proof_bytes),
     }))
@@ -302,7 +302,7 @@ pub(crate) fn verify_compact_vss_share_linkage_proof_from_request(
         "statementHash": to_hex(&statement.statement_hash()),
         "limbCount": statement.proof_limb_count(),
         "coefficientCommitmentCount": compact_statement.total_coefficient_commitment_count(),
-        "coefficientWitnessColumnCount": compact_statement.maximum_coefficient_commitment_count(),
+        "coefficientWitnessColumnCount": compact_statement.unique_coefficient_witness_slot_count(),
         "proofByteLength": proof_bytes.len(),
     }))
 }
@@ -2124,7 +2124,7 @@ fn compact_vss_share_linkage_item_from_value(
     })
 }
 
-fn compact_vss_share_linkage_commitment_from_value(
+pub(in crate::bgv::setup) fn compact_vss_share_linkage_commitment_from_value(
     value: &Value,
     expected: CompactVssCommandCommitmentExpectation<'_>,
 ) -> CanonicalResult<CompactVssShareLinkageCommitment> {

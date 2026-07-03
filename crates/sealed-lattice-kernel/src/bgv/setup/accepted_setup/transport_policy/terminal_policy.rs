@@ -126,29 +126,55 @@ pub(in crate::bgv::setup) fn verify_terminal_setup_transport_policy(
             "setupPackage.evaluationKeys.publicEvaluationKeyMaterialEncoding",
         )?));
     }
-    if let Some(response) = verify_terminal_vss_material_handle_policy(request)? {
+    if let Some(response) = verify_terminal_vss_material_handle_policy(setup_package, request)? {
         return Ok(Some(response));
     }
 
     Ok(None)
 }
 
-fn verify_terminal_vss_material_handle_policy(request: &Value) -> CanonicalResult<Option<Value>> {
-    let Some(transported_material) = request.get("transportedVssCoefficientCommitmentMaterial")
-    else {
+fn verify_terminal_vss_material_handle_policy(
+    setup_package: &Value,
+    request: &Value,
+) -> CanonicalResult<Option<Value>> {
+    let compact_setup_path = setup_package_uses_compact_vss_setup_path(setup_package);
+    if request
+        .get("transportedVssCoefficientCommitmentMaterial")
+        .and_then(|transported_material| transported_material.get("chunks"))
+        .is_some()
+    {
+        return Ok(Some(terminal_transport_policy_refusal(
+            "terminalVssMaterialHandleRequired",
+            "terminal accepted setup refuses raw VSS chunks at the final setup boundary",
+            "transportedVssCoefficientCommitmentMaterial.chunks",
+        )?));
+    }
+
+    if compact_setup_path {
+        if request
+            .get("verifiedVssCoefficientCommitmentMaterial")
+            .is_some()
+        {
+            return Ok(Some(terminal_transport_policy_refusal(
+                "terminalCompactVssHandleNotUsed",
+                "compact terminal setup verification must not depend on a caller-supplied VSS material handle",
+                "verifiedVssCoefficientCommitmentMaterial",
+            )?));
+        }
+
+        return Ok(None);
+    }
+
+    if request
+        .get("transportedVssCoefficientCommitmentMaterial")
+        .is_none()
+    {
         return Ok(Some(verification_response(
             VerifierStatus::Pending,
             Some("setupPackageVerification"),
             vec!["transportedVssCoefficientCommitmentMaterial".to_string()],
             Vec::new(),
             Vec::new(),
-        )?));
-    };
-    if transported_material.get("chunks").is_some() {
-        return Ok(Some(terminal_transport_policy_refusal(
-            "terminalVssMaterialHandleRequired",
-            "terminal accepted setup requires a chunkless VSS material transport reference plus a stream-verified VSS material handle",
-            "transportedVssCoefficientCommitmentMaterial.chunks",
         )?));
     }
     if request

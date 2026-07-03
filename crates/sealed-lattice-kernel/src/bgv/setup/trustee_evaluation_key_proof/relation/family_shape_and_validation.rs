@@ -614,8 +614,7 @@ impl TrusteeEvaluationKeyStatement {
             return Ok(SuccinctSetupProofFamilyShape::CompactVssShareLinkage);
         }
         if self.compact_same_secret_bridge.is_some() {
-            if !self.keys.is_empty()
-                || self.same_secret_linkage.is_some()
+            if self.same_secret_linkage.is_some()
                 || self.private_vss_share.is_some()
                 || self.compact_vss_share_linkage.is_some()
                 || self.target_decryption_share.is_some()
@@ -624,7 +623,9 @@ impl TrusteeEvaluationKeyStatement {
                     "compact same-secret bridge statement must not mix proof families",
                 ));
             }
-            return Ok(SuccinctSetupProofFamilyShape::CompactSameSecretBridge);
+            if self.keys.is_empty() {
+                return Ok(SuccinctSetupProofFamilyShape::CompactSameSecretBridge);
+            }
         }
         if self.target_decryption_share.is_some() {
             if !self.keys.is_empty()
@@ -677,7 +678,13 @@ impl TrusteeEvaluationKeyStatement {
                 // One constant-commitment opening links the share secret to
                 // the anchored secret by congruence over the commitment
                 // modulus product plus ternary support.
-                if linkage_commitment_count != Some(1) {
+                if self.compact_same_secret_bridge.is_some() {
+                    if self.same_secret_linkage.is_some() {
+                        return Err(invalid_succinct_setup_proof(
+                            "public-key share statement must not carry both same-secret linkage forms",
+                        ));
+                    }
+                } else if linkage_commitment_count != Some(1) {
                     return Err(invalid_succinct_setup_proof(
                         "the public-key share statement requires exactly one constant-commitment opening",
                     ));
@@ -737,7 +744,18 @@ impl TrusteeEvaluationKeyStatement {
                     ));
                 }
             }
-            SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {}
+            SuccinctSetupProofFamilyShape::TrusteeEvaluationKey => {
+                if self.same_secret_linkage.is_none() && self.compact_same_secret_bridge.is_none() {
+                    return Err(invalid_succinct_setup_proof(
+                        "trustee evaluation-key statement requires a same-secret linkage form",
+                    ));
+                }
+                if self.same_secret_linkage.is_some() && self.compact_same_secret_bridge.is_some() {
+                    return Err(invalid_succinct_setup_proof(
+                        "trustee evaluation-key statement must not carry both same-secret linkage forms",
+                    ));
+                }
+            }
         }
         self.context.validate_for_statement(shape)?;
         if !self.ring_degree.is_power_of_two()

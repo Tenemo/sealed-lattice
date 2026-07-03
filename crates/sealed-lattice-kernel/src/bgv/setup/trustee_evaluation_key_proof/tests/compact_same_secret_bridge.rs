@@ -1,6 +1,8 @@
+use super::super::relation::{SuccinctSetupProofFamilyShape, TrusteeEvaluationKeyWitness};
 use super::*;
 use crate::bgv::evaluator::top_k::canonical_target_basis_hash;
 use crate::bgv::setup::compact_vss_commitment::{
+    COMPACT_VSS_MESSAGE_DIGIT_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
     CompactVssCommitmentOpeningInput, compact_vss_canonical_message_digit_columns,
     compute_compact_vss_commitment_from_opening,
 };
@@ -111,6 +113,127 @@ fn compact_same_secret_bridge_proof_round_trips_and_rejects_tampering() {
         wrong_target_basis_statement.validate_shape().is_err(),
         "compact same-secret bridge statements must bind the canonical target basis hash"
     );
+}
+
+#[test]
+fn public_key_share_proof_round_trips_with_compact_same_secret_bridge() {
+    let (statement, witness) =
+        generate_development_public_key_share_instance("c0ffee01", SMALL_RING_DEGREE)
+            .expect("public-key share instance");
+    let (statement, witness) =
+        attach_compact_same_secret_bridge_to_key_statement(statement, witness, DATA_PRIMES.len());
+
+    assert_eq!(
+        statement.family_shape().expect("statement shape"),
+        SuccinctSetupProofFamilyShape::PublicKeyShare
+    );
+    assert!(
+        statement.same_secret_linkage.is_none(),
+        "compact-bound public-key share must not carry the old same-secret linkage"
+    );
+    assert!(
+        statement.compact_same_secret_bridge.is_some(),
+        "public-key share must carry compact bridge material"
+    );
+    assert_eq!(statement.limb_count(), DATA_PRIMES.len());
+
+    let setup_field_layout =
+        LimbColumnLayout::new(&statement, 0).expect("compact public-key setup-field layout");
+    assert!(setup_field_layout.compact_same_secret_bridge_material_active());
+    let bridge_digit_count = DATA_PRIMES.len() * COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+    assert_eq!(
+        setup_field_layout.consistency_vector_count(),
+        1 + statement.keys[0].digit_count()
+            + 1
+            + bridge_digit_count
+            + setup_field_layout.linkage_randomness_columns,
+        "setup commitment fields must claim key errors and compact bridge witnesses together"
+    );
+    assert_eq!(
+        setup_field_layout.compact_same_secret_bridge_relation_count(),
+        DATA_PRIMES.len()
+            * (crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_OUTPUT_COORDINATE_COUNT
+                + LINCHECK_REPETITIONS)
+            + setup_field_layout.compact_same_secret_bridge_decoder_digit_count()
+                * LINCHECK_REPETITIONS,
+    );
+
+    let key_only_limb_index = SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len();
+    assert!(
+        key_only_limb_index < DATA_PRIMES.len(),
+        "the public-key share fixture should exercise key-only limbs after setup commitment fields"
+    );
+    let key_only_layout = LimbColumnLayout::new(&statement, key_only_limb_index)
+        .expect("compact public-key key-only layout");
+    assert!(!key_only_layout.compact_same_secret_bridge_material_active());
+    assert_eq!(key_only_layout.linkage_randomness_columns, 0);
+    assert_eq!(
+        key_only_layout.consistency_vector_count(),
+        1 + statement.keys[0].digit_count(),
+        "later public-key limbs should carry only the key relation claims"
+    );
+
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    verify_evaluation_key_share(&statement, &proof).expect("verify compact-bound public-key share");
+
+    let mut tampered_statement = statement;
+    let coordinate = &mut tampered_statement
+        .compact_same_secret_bridge
+        .as_mut()
+        .expect("compact bridge statement")
+        .target_constant_commitments[0]
+        .coordinates_by_commitment_modulus[0][0];
+    *coordinate = (*coordinate + 1) % DATA_PRIMES[0];
+    assert!(
+        verify_evaluation_key_share(&tampered_statement, &proof).is_err(),
+        "tampering with compact bridge material must reject the public-key share proof"
+    );
+}
+
+#[test]
+fn trustee_evaluation_key_proof_round_trips_with_compact_same_secret_bridge() {
+    let (statement, witness) = generate_development_trustee_instance_with_linkage(
+        "facefeed",
+        &[round_one(2)],
+        SMALL_RING_DEGREE,
+        Some(DATA_PRIMES.len()),
+    )
+    .expect("trustee evaluation-key instance");
+    let (statement, witness) =
+        attach_compact_same_secret_bridge_to_key_statement(statement, witness, DATA_PRIMES.len());
+
+    assert_eq!(
+        statement.family_shape().expect("statement shape"),
+        SuccinctSetupProofFamilyShape::TrusteeEvaluationKey
+    );
+    assert!(
+        statement.same_secret_linkage.is_none(),
+        "compact-bound evaluation-key proof must not carry the old same-secret linkage"
+    );
+    assert_eq!(
+        statement.proof_limb_count(),
+        SETUP_COMMITMENT_MODULUS_LIMB_INDICES.len(),
+        "the focused evaluation-key fixture keeps proof limbs on the setup commitment fields"
+    );
+    let layout = LimbColumnLayout::new(&statement, 0)
+        .expect("compact trustee evaluation-key setup-field layout");
+    assert!(layout.compact_same_secret_bridge_material_active());
+    assert_eq!(layout.active_keys.len(), 1);
+    assert_eq!(layout.total_error_columns, statement.keys[0].digit_count());
+    assert_eq!(
+        layout.consistency_vector_count(),
+        1 + statement.keys[0].digit_count()
+            + 1
+            + DATA_PRIMES.len() * COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            + DATA_PRIMES.len() * COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+        "evaluation-key compact bridge fields must claim the key, bridge digits, and compact opening randomness"
+    );
+
+    let proof =
+        prove_evaluation_key_share(&statement, &witness, PROOF_RANDOMNESS_SEED).expect("prove");
+    verify_evaluation_key_share(&statement, &proof)
+        .expect("verify compact-bound trustee evaluation-key proof");
 }
 
 fn compact_same_secret_bridge_instance() -> (
@@ -229,6 +352,73 @@ fn compact_same_secret_bridge_instance() -> (
         target_decryption_message_vectors: Vec::new(),
         target_decryption_opening_randomness_by_commitment: Vec::new(),
     };
+
+    (statement, witness)
+}
+
+fn attach_compact_same_secret_bridge_to_key_statement(
+    mut statement: TrusteeEvaluationKeyStatement,
+    mut witness: TrusteeEvaluationKeyWitness,
+    target_rns_limb_count: usize,
+) -> (TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness) {
+    assert!((1..=DATA_PRIMES.len()).contains(&target_rns_limb_count));
+    let public_matrix_seed_hash = statement
+        .same_secret_linkage
+        .as_ref()
+        .map(|linkage| linkage.public_matrix_seed_hash.clone())
+        .unwrap_or_else(|| repeated_hash("cd"));
+    let target_basis_hash = canonical_target_basis_hash().expect("canonical target basis hash");
+    let target_rns_primes = DATA_PRIMES[..target_rns_limb_count].to_vec();
+    let opening_randomness_by_limb = target_rns_primes
+        .iter()
+        .enumerate()
+        .map(|(target_rns_limb_index, _target_rns_prime)| {
+            compact_bridge_randomness_columns(
+                statement.ring_degree,
+                101 + target_rns_limb_index as i64,
+            )
+        })
+        .collect::<Vec<_>>();
+    let target_constant_commitments = target_rns_primes
+        .iter()
+        .enumerate()
+        .map(|(target_rns_limb_index, target_rns_prime)| {
+            let message_coefficients = bridge_message_coefficients(
+                &witness.secret_coefficients,
+                &witness.negative_indicator_coefficients,
+                *target_rns_prime,
+            );
+            CompactVssShareLinkageCommitment {
+                coordinates_by_commitment_modulus: compact_bridge_coordinates_by_modulus_for_test(
+                    &public_matrix_seed_hash,
+                    target_rns_limb_index,
+                    *target_rns_prime,
+                    statement.ring_degree,
+                    &message_coefficients,
+                    &opening_randomness_by_limb[target_rns_limb_index],
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+
+    statement.same_secret_linkage = None;
+    statement.compact_same_secret_bridge = Some(CompactSameSecretBridgeStatement {
+        public_matrix_seed_hash,
+        source_trustee_identity: statement.context.trustee_identity.clone(),
+        source_trustee_roster_position: statement.context.trustee_roster_position,
+        target_basis_hash,
+        target_rns_primes,
+        target_constant_commitment_roots: (0..target_rns_limb_count)
+            .map(|target_rns_limb_index| {
+                repeated_hash(&format!("{:02x}", 0xe0 + target_rns_limb_index))
+            })
+            .collect(),
+        target_constant_commitments,
+    });
+    witness.opening_randomness_by_limb = opening_randomness_by_limb;
+    statement
+        .validate_shape()
+        .expect("compact-bound key statement shape");
 
     (statement, witness)
 }

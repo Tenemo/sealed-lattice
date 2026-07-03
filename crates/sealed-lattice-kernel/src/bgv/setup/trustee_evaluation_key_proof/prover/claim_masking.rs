@@ -84,15 +84,24 @@ pub(in super::super) fn global_claim_id(
         }
         remaining -= digit_count;
     }
-    // Linkage vectors: the negative indicator, then the opening-randomness
-    // columns, indexed after every statement-global error vector.
+    // Linkage vectors: the negative indicator, optional compact bridge message
+    // digits, then the opening-randomness columns, indexed after every
+    // statement-global error vector.
     let total_error_vectors: usize = statement
         .keys
         .iter()
         .map(|key| key.digit_count())
         .sum::<usize>();
     let linkage_position = remaining;
-    debug_assert!(linkage_position < 1 + layout.linkage_randomness_columns);
+    if let Some(bridge) = &statement.compact_same_secret_bridge {
+        let bridge_digit_vector_count = bridge.target_rns_primes.len()
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        debug_assert!(
+            linkage_position < 1 + bridge_digit_vector_count + layout.linkage_randomness_columns
+        );
+    } else {
+        debug_assert!(linkage_position < 1 + layout.linkage_randomness_columns);
+    }
     ((1 + total_error_vectors + linkage_position) * layout.consistency_repetitions + repetition)
         as u64
 }
@@ -224,16 +233,13 @@ pub(super) fn global_claim_integers(
             }
         }
     } else if let Some(compact_vss_share_linkage) = &statement.compact_vss_share_linkage {
-        // Compact share-linkage claims one packed lifted-carry vector followed
-        // by every packed compact-message digit. Opening randomness stays
+        // Compact share-linkage claims each lifted-carry vector followed by
+        // every compact-message digit vector. Opening randomness stays
         // committed, ternary row-checked, and consumed by the opening lincheck,
         // but it does not carry a separate cross-field integer-equality claim.
         // This order must match consistency_vector_count and the compact branch
-        // of batched_sumcheck_value ([packed_carry, packed_message_digits...]).
+        // of batched_sumcheck_value ([carries..., message_digits...]).
         let base_ring_degree = statement.ring_degree;
-        let packed_ring_degree = compact_vss_share_linkage
-            .packed_ring_degree(base_ring_degree)
-            .expect("compact VSS packed ring degree is validated before claim masking");
         let item_count = compact_vss_share_linkage.item_count();
         let coefficient_slot_indices_by_item =
             compact_vss_share_linkage.coefficient_witness_slot_indices_by_item();
@@ -255,67 +261,38 @@ pub(super) fn global_claim_integers(
             item_count,
             "compact VSS carry witness count matches the item count"
         );
-        let copy_item_lane = |target: &mut [i64], item_index: usize, source: &[i64]| {
+        let validate_compact_vss_vector = |source: &[i64]| {
             assert_eq!(
                 source.len(),
                 base_ring_degree,
                 "compact VSS witness vector length matches the base ring degree"
             );
-            let lane_offset = item_index
-                .checked_mul(base_ring_degree)
-                .expect("compact VSS packed lane offset does not overflow");
-            let lane_end = lane_offset
-                .checked_add(base_ring_degree)
-                .expect("compact VSS packed lane end does not overflow");
-            assert!(
-                lane_end <= target.len(),
-                "compact VSS packed lane is inside the claim vector"
-            );
-            target[lane_offset..lane_end].copy_from_slice(source);
         };
 
-        let mut packed_carry_witnesses = vec![0_i64; packed_ring_degree];
-        for (item_index, carry_witnesses) in carry_witnesses_by_item.iter().enumerate() {
-            copy_item_lane(&mut packed_carry_witnesses, item_index, carry_witnesses);
+        for carry_witnesses in &carry_witnesses_by_item {
+            validate_compact_vss_vector(carry_witnesses);
+            owned_compact_vss_claim_vectors.push((*carry_witnesses).to_vec());
         }
-        owned_compact_vss_claim_vectors.push(packed_carry_witnesses);
 
-        for coefficient_position in
-            0..compact_vss_share_linkage.maximum_coefficient_commitment_count()
+        for coefficient_slot_index in
+            0..compact_vss_share_linkage.unique_coefficient_witness_slot_count()
         {
-            let mut packed_coefficient_messages = vec![0_i64; packed_ring_degree];
-            for (item_index, coefficient_slot_indices) in
-                coefficient_slot_indices_by_item.iter().enumerate()
-            {
-                if let Some(coefficient_slot_index) =
-                    coefficient_slot_indices.get(coefficient_position)
-                {
-                    copy_item_lane(
-                        &mut packed_coefficient_messages,
-                        item_index,
-                        &witness.compact_vss_coefficient_messages_by_shamir_index
-                            [*coefficient_slot_index],
-                    );
-                }
-            }
+            let coefficient_messages =
+                &witness.compact_vss_coefficient_messages_by_shamir_index[coefficient_slot_index];
+            validate_compact_vss_vector(coefficient_messages);
             append_compact_vss_digit_vectors(
                 &mut owned_compact_vss_claim_vectors,
-                &packed_coefficient_messages,
+                coefficient_messages,
             );
         }
 
-        let mut packed_recipient_messages = vec![0_i64; packed_ring_degree];
-        for (item_index, recipient_messages) in recipient_messages_by_item.iter().enumerate() {
-            copy_item_lane(
-                &mut packed_recipient_messages,
-                item_index,
+        for recipient_messages in &recipient_messages_by_item {
+            validate_compact_vss_vector(recipient_messages);
+            append_compact_vss_digit_vectors(
+                &mut owned_compact_vss_claim_vectors,
                 recipient_messages,
             );
         }
-        append_compact_vss_digit_vectors(
-            &mut owned_compact_vss_claim_vectors,
-            &packed_recipient_messages,
-        );
 
         for claim_vector in &owned_compact_vss_claim_vectors {
             signed_vectors.push(claim_vector);

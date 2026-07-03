@@ -195,7 +195,8 @@ fn manual_accepted_setup_collective_setup_verifier_accepts_all_transported_publi
     let _accepted_setup_test_timing = accepted_setup_test_timing(
         "manual_accepted_setup_collective_setup_verifier_accepts_all_transported_public_setup_companions",
     );
-    let (package, request) = transported_public_setup_package_and_request();
+    let (package, companions) = setup_package_with_transported_public_setup_companions();
+    let request = transported_public_setup_verification_request(companions.clone());
 
     let result =
         verify_collective_bgv_setup_package(&package, &request).expect("verification response");
@@ -228,16 +229,7 @@ fn manual_accepted_setup_refuses_every_recomputed_accepted_root_drift() {
     let verify = |candidate: &serde_json::Value| {
         verify_collective_bgv_setup_package(
             candidate,
-            &serde_json::json!({
-                "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-                "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-                "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-                "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-                "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-                "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-                "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-                "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-            }),
+            &transported_public_setup_verification_request(companions.clone()),
         )
         .expect("verification response")
     };
@@ -312,20 +304,9 @@ fn manual_accepted_setup_collective_setup_verifier_refuses_terminal_trustee_proo
     rebind_setup_key_correctness_certificate(&mut package);
     rebind_collective_setup_package_hash(&mut package);
 
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-            "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-            "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-            "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-            "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-            "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-            "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-            "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-        }),
-    )
-    .expect("verification response");
+    let request = transported_public_setup_verification_request(companions);
+    let result =
+        verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 
     assert_eq!(
         result["verifierStatus"],
@@ -1043,7 +1024,8 @@ fn heavy_accepted_setup_round_two_records_with_substituted_aggregate_source_cann
         trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
             setup_package: &tampered_package,
             transported_key_switch_component_material: Some(&transported_component_material),
-            transported_constant_commitments: &transported_constant_commitments,
+            transported_constant_commitments: Some(&transported_constant_commitments),
+            verified_compact_same_secret_bridge: None,
             round_one_aggregate_diagonals_by_level: &aggregates,
             trustee_roster_position: 0,
         })
@@ -1138,16 +1120,7 @@ fn accepted_setup_reduced_ring_dynamic_roster_n3_and_n20_reach_profile_ring_clai
             "n={participant_count}: decryption threshold must be floor(n/3)+1",
         );
 
-        let request = serde_json::json!({
-            "transportedVssCoefficientCommitmentMaterial": companions.vss_coefficient_commitment_material,
-            "verifiedVssCoefficientCommitmentMaterial": companions.verified_vss_coefficient_commitment_material,
-            "transportedSameSecretProofMaterial": companions.same_secret_proof_material,
-            "transportedPublicKeyShareMaterial": companions.public_key_share_material,
-            "transportedPublicKeyShareProofMaterial": companions.public_key_share_proof_material,
-            "transportedEvaluationKeyShareComponentMaterial": companions.evaluation_key_share_component_material,
-            "transportedEvaluationKeyShareProofMaterial": companions.evaluation_key_share_proof_material,
-            "transportedPublicEvaluationKeyMaterial": companions.public_evaluation_key_material,
-        });
+        let request = transported_public_setup_verification_request(companions);
         let result =
             verify_collective_bgv_setup_package(&package, &request).expect("verification response");
 

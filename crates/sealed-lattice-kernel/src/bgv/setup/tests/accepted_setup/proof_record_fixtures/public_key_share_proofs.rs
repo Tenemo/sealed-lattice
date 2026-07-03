@@ -328,6 +328,7 @@ fn accepted_public_key_error_coefficient_fixture(
 
 pub(in super::super) fn public_key_share_succinct_proofs_object(
     package: &serde_json::Value,
+    transported_same_secret_proof_material: Option<&serde_json::Value>,
 ) -> serde_json::Value {
     use crate::bgv::setup::trustee_evaluation_key_proof::{
         EvaluationKeyShareDescriptor, PUBLIC_KEY_SHARE_COMMON_REFERENCE_LABEL,
@@ -362,6 +363,14 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
     let material_records = package["publicKeyShareMaterial"]["shareMaterialRecords"]
         .as_array()
         .expect("public-key material records");
+    let verified_compact_same_secret_bridge =
+        package.get("compactSameSecretBridgeStatementSet").map(|_| {
+            let request = compact_same_secret_bridge_request_for_fixture(
+                transported_same_secret_proof_material,
+            );
+            verified_compact_same_secret_bridge_material_from_package(package, &request)
+                .expect("compact same-secret bridge material")
+        });
     let participant_count = participant_count_from_package(package);
     let per_trustee_records = (0..participant_count)
         .into_par_iter()
@@ -372,20 +381,98 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
         let share_record = &share_records[trustee_roster_position as usize];
         let proof_statement_record = &proof_statement_records[trustee_roster_position as usize];
         let material_record = &material_records[trustee_roster_position as usize];
-        let mut constant_commitments =
-            same_secret_constant_commitments_from_fixture_package(package, trustee_roster_position);
-        let ring_degree = constant_commitments
-            .first()
-            .expect("constant commitment")
-            .ring_degree;
+        let (ring_degree, same_secret_linkage, compact_same_secret_bridge, opening_randomness_by_limb) =
+            if let Some(verified_compact_same_secret_bridge) =
+                verified_compact_same_secret_bridge.as_ref()
+            {
+                let compact_bridge_binding = verified_compact_same_secret_bridge
+                    .statement_for_roster_position(trustee_roster_position)
+                    .expect("compact same-secret bridge statement binding");
+                assert_eq!(compact_bridge_binding.trustee_identity, trustee_identity);
+                assert_eq!(
+                    compact_bridge_binding.trustee_secret_commitment_root.as_str(),
+                    statement_record["trusteeSecretCommitmentRoot"]
+                        .as_str()
+                        .expect("trustee secret commitment root")
+                );
+                assert_eq!(
+                    compact_bridge_binding.same_secret_statement_root.as_str(),
+                    statement_record["sameSecretStatementRoot"]
+                        .as_str()
+                        .expect("same-secret statement root")
+                );
+                assert_eq!(
+                    compact_bridge_binding.same_secret_proof_root.as_str(),
+                    same_secret_proof_record["sameSecretProofRoot"]
+                        .as_str()
+                        .expect("same-secret proof root")
+                );
+                assert_eq!(
+                    compact_bridge_binding
+                        .same_secret_proof_family_binding_root
+                        .as_str(),
+                    same_secret_proof_record["sameSecretProofFamilyBindingRoot"]
+                        .as_str()
+                        .expect("same-secret proof family binding root")
+                );
+                let ring_degree = package["compactSameSecretBridgeStatementSet"]["ringDegree"]
+                    .as_u64()
+                    .expect("compact same-secret bridge ring degree")
+                    as usize;
+                let opening_randomness_by_limb = (0..compact_bridge_binding
+                    .statement
+                    .target_rns_primes
+                    .len())
+                    .map(|rns_limb_index| {
+                        compact_vss_coefficient_randomness_i64_fixture(
+                            trustee_roster_position,
+                            rns_limb_index,
+                            0,
+                            ring_degree,
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                (
+                    ring_degree,
+                    None,
+                    Some(compact_bridge_binding.statement.clone()),
+                    opening_randomness_by_limb,
+                )
+            } else {
+                let mut constant_commitments = same_secret_constant_commitments_from_fixture_package(
+                    package,
+                    trustee_roster_position,
+                );
+                let ring_degree = constant_commitments
+                    .first()
+                    .expect("constant commitment")
+                    .ring_degree;
+                // The pk relation opens only the limb-zero constant commitment.
+                let limb_zero_commitment = constant_commitments.remove(0);
+                let limb_zero_opening_randomness = accepted_vss_randomness_i64_fixture(
+                    trustee_roster_position,
+                    0,
+                    0,
+                    ring_degree,
+                );
+
+                (
+                    ring_degree,
+                    Some(SameSecretLinkageStatement {
+                        public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+                        commitments: vec![limb_zero_commitment],
+                    }),
+                    None,
+                    vec![limb_zero_opening_randomness],
+                )
+            };
         let (coefficients_by_limb, error_coefficients) =
             public_key_share_coefficients_and_errors_for_fixture(
                 public_matrix_seed_hash,
                 trustee_roster_position,
                 ring_degree,
             );
-        // The pk relation opens only the limb-zero constant commitment.
-        let limb_zero_commitment = constant_commitments.remove(0);
         let secret_coefficients = (0..ring_degree)
             .map(|coefficient_position| {
                 accepted_vss_secret_coefficient_fixture(
@@ -398,16 +485,6 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             .iter()
             .map(|coefficient| i64::from(*coefficient < 0))
             .collect::<Vec<_>>();
-        let limb_zero_opening_randomness =
-            accepted_vss_randomness_fixture(trustee_roster_position, 0, 0, ring_degree)
-                .into_iter()
-                .map(|column| {
-                    column
-                        .into_iter()
-                        .map(|value| i64::try_from(value).expect("ternary randomness fits i64"))
-                        .collect::<Vec<i64>>()
-                })
-                .collect::<Vec<Vec<i64>>>();
         let statement = TrusteeEvaluationKeyStatement {
             context: SuccinctSetupProofContext {
                 proof_family: PUBLIC_KEY_SHARE_PROOF_FAMILY.to_string(),
@@ -455,20 +532,17 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
                 component_b_by_digit: vec![coefficients_by_limb],
                 round_one_aggregate_diagonal: Vec::new(),
             }],
-            same_secret_linkage: Some(SameSecretLinkageStatement {
-                public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
-                commitments: vec![limb_zero_commitment],
-            }),
+            same_secret_linkage,
             private_vss_share: None,
             compact_vss_share_linkage: None,
-            compact_same_secret_bridge: None,
+            compact_same_secret_bridge,
             target_decryption_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients,
             error_coefficients_by_key: vec![vec![error_coefficients]],
             negative_indicator_coefficients,
-            opening_randomness_by_limb: vec![limb_zero_opening_randomness],
+            opening_randomness_by_limb,
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),

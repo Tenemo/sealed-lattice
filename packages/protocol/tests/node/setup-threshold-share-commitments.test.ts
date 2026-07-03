@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
     createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
+    createCompactThresholdShareCommitmentBinding,
     createVssCoefficientCommitmentBundle,
     deriveThresholdShareCommitments,
     type VssCoefficientOpeningInput,
@@ -177,6 +178,41 @@ const aggregateRowsForRecipient = (
 };
 
 describe('threshold-share commitment derivation', () => {
+    it('creates a compact threshold-share binding over verified compact roots', () => {
+        const binding = createCompactThresholdShareCommitmentBinding({
+            publicMatrixSeedHash: fixtureHash('public-matrix-seed'),
+            participantCount,
+            thresholdDegree,
+            targetRnsLimbCount: 2,
+            ringDegree,
+            aggregateThresholdCommitmentRoot: fixtureHash(
+                'compact-aggregate-threshold-root',
+            ),
+            shareLinkageStatementRoot: fixtureHash(
+                'compact-share-linkage-statement-root',
+            ),
+            shareLinkageProofMaterialSetRoot: fixtureHash(
+                'compact-share-linkage-proof-material-root',
+            ),
+        });
+        const { thresholdShareCommitmentRoot, ...bindingWithoutRoot } = binding;
+
+        expect(binding).toMatchObject({
+            objectType: 'CompactThresholdShareCommitmentBinding',
+            setupProfileId: 'CollectiveBgvSetup-v1',
+            participantCount,
+            thresholdDegree,
+            targetRnsLimbCount: 2,
+            ringDegree,
+        });
+        expect(thresholdShareCommitmentRoot).toBe(
+            deriveProtocolHash(
+                'ThresholdShareCommitmentRoot',
+                bindingWithoutRoot,
+            ),
+        );
+    });
+
     it('derives recipient commitments from public VSS coefficient material', () => {
         const commitmentBundle = createVssCoefficientCommitmentBundle({
             setupContext,

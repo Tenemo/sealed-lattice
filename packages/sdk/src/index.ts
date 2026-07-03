@@ -901,13 +901,15 @@ const prepareSetupPackageVerificationInputForKernel = (
                     verificationInput.transportedPublicKeyShareProofMaterial,
                     verifiedSetupProofMaterials,
                 ),
-            transportedEvaluationKeyShareProofMaterial: compactSetupProofMaterialSet(
-                verificationInput.transportedEvaluationKeyShareProofMaterial,
-                verifiedSetupProofMaterials,
-            ),
+            transportedEvaluationKeyShareProofMaterial:
+                compactSetupProofMaterialSet(
+                    verificationInput.transportedEvaluationKeyShareProofMaterial,
+                    verifiedSetupProofMaterials,
+                ),
             verifiedSetupProofMaterials,
         },
-        liveVssMaterialVerificationId: streamVerifiedVssMaterial?.verificationId,
+        liveVssMaterialVerificationId:
+            streamVerifiedVssMaterial?.verificationId,
     };
 };
 
@@ -918,21 +920,32 @@ export const verifySetupPackage = async (
     const kernel = await loadTranscriptCoreKernel();
     const { verificationInput, liveVssMaterialVerificationId } =
         prepareSetupPackageVerificationInputForKernel(kernel, input);
-
-    try {
-        const verification = kernel.verifyCollectiveBgvSetup(verificationInput);
+    const releaseLiveVssMaterial = (): void => {
         if (liveVssMaterialVerificationId !== undefined) {
             kernel.releaseVerifiedTransportedVssMaterial({
                 verificationId: liveVssMaterialVerificationId,
             });
         }
+    };
+
+    try {
+        const verification = kernel.verifyCollectiveBgvSetup(verificationInput);
+        releaseLiveVssMaterial();
 
         return verification;
     } catch (error) {
-        if (liveVssMaterialVerificationId !== undefined) {
-            kernel.releaseVerifiedTransportedVssMaterial({
-                verificationId: liveVssMaterialVerificationId,
-            });
+        try {
+            releaseLiveVssMaterial();
+        } catch (releaseError) {
+            const setupVerificationMessage =
+                error instanceof Error ? error.message : String(error);
+            const releaseMessage =
+                releaseError instanceof Error
+                    ? releaseError.message
+                    : String(releaseError);
+            throw new Error(
+                `Setup verification failed: ${setupVerificationMessage}; live VSS material cleanup also failed: ${releaseMessage}`,
+            );
         }
         throw error;
     }

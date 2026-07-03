@@ -598,9 +598,6 @@ static TRANSPORTED_PUBLIC_SETUP_COMPANIONS_CACHE: OnceLock<(
 
 #[derive(Clone)]
 pub(super) struct TransportedPublicSetupCompanions {
-    pub(super) vss_coefficient_commitment_material: serde_json::Value,
-    pub(super) chunked_vss_coefficient_commitment_material: serde_json::Value,
-    pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
     pub(super) same_secret_proof_material: serde_json::Value,
     pub(super) public_key_share_material: serde_json::Value,
     pub(super) public_key_share_proof_material: serde_json::Value,
@@ -689,6 +686,7 @@ fn assemble_transported_public_setup_companions(
 ) -> (serde_json::Value, TransportedPublicSetupCompanions) {
     let terminal_profile_ring_fixture = base_fixture;
     let mut package = terminal_profile_ring_fixture.package.clone();
+    let setup_ring_degree = terminal_profile_ring_fixture.setup_ring_degree;
     let transported_vss_material = terminal_profile_ring_fixture
         .transported_vss_coefficient_commitment_material
         .clone();
@@ -713,10 +711,29 @@ fn assemble_transported_public_setup_companions(
         "same-secret-proof-material",
         DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
     );
+    package["compactVssCoefficientCommitmentSet"] =
+        compact_vss_coefficient_commitment_set_object(&package, setup_ring_degree);
+    package["compactVssRecipientShareCommitmentSet"] =
+        compact_vss_recipient_share_commitment_set_object(&package);
+    package["compactVssAggregateThresholdCommitmentSet"] =
+        compact_vss_aggregate_threshold_commitment_set_object(&package);
+    package["compactVssShareLinkageStatement"] =
+        compact_vss_share_linkage_statement_object(&package);
+    package["compactVssShareLinkageProofMaterialSet"] =
+        compact_vss_share_linkage_proof_material_set_object(&package);
+    package["compactSameSecretBridgeStatementSet"] =
+        compact_same_secret_bridge_statement_set_object(&package);
+    package["compactSameSecretBridgeProofMaterialSet"] =
+        compact_same_secret_bridge_proof_material_set_object(
+            &package,
+            Some(&same_secret_proof_material),
+        );
+    terminal_phase("generated compact coefficient and same-secret bridge material");
 
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
-    package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
+    package["publicKeyShareSuccinctProofs"] =
+        public_key_share_succinct_proofs_object(&package, Some(&same_secret_proof_material));
     terminal_phase("generated public-key material and proofs");
     let public_key_share_proof_material =
         move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
@@ -772,6 +789,7 @@ fn assemble_transported_public_setup_companions(
             &evaluation_key_share_component_material,
             &round_one_aggregate_diagonals_by_level,
             &mut evaluation_key_transport_sinks,
+            Some(&same_secret_proof_material),
         );
     terminal_phase("generated trustee evaluation-key proofs");
     package["evaluationKeys"] = public_evaluation_key_set_object(&package);
@@ -815,12 +833,6 @@ fn assemble_transported_public_setup_companions(
     (
         package,
         TransportedPublicSetupCompanions {
-            vss_coefficient_commitment_material: transported_material_reference_value(
-                &transported_vss_material,
-            ),
-            chunked_vss_coefficient_commitment_material: transported_vss_material,
-            verified_vss_coefficient_commitment_material: terminal_profile_ring_fixture
-                .verified_vss_coefficient_commitment_material,
             same_secret_proof_material,
             public_key_share_material,
             public_key_share_proof_material,
