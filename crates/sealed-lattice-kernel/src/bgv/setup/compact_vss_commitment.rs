@@ -1426,7 +1426,7 @@ struct CompactVssCommitmentBodyInput<'a> {
     field_name: &'a str,
 }
 
-fn validate_standalone_compact_vss_commitment_body(
+pub(crate) fn validate_standalone_compact_vss_commitment_body(
     commitment: &Value,
     field_name: &str,
 ) -> CanonicalResult<Value> {
@@ -2537,6 +2537,58 @@ pub(crate) fn compact_vss_canonical_message_digit_columns(
     }
 
     Ok(columns)
+}
+
+pub(in crate::bgv::setup) fn compact_vss_message_digit_only_encoding_layout()
+-> CompactVssMessageEncodingLayout {
+    CompactVssMessageEncodingLayout {
+        low_digit_trit_count: 0,
+        high_digit_trit_count: 0,
+    }
+}
+
+pub(in crate::bgv::setup) fn compact_vss_message_digit_bound(
+    message_bound_exclusive: u64,
+    digit_index: usize,
+) -> CanonicalResult<u64> {
+    if message_bound_exclusive == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS message coefficient bound must be positive",
+        ));
+    }
+    let maximum_coefficient = u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE)
+        .checked_pow(COMPACT_VSS_MESSAGE_DIGIT_COUNT as u32)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact VSS message digit range overflowed",
+            )
+        })?;
+    if u128::from(message_bound_exclusive) > maximum_coefficient {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS message coefficient bound exceeds the two-digit message range",
+        ));
+    }
+
+    match digit_index {
+        0 => Ok(message_bound_exclusive.min(COMPACT_VSS_MESSAGE_DIGIT_BASE)),
+        1 => {
+            let high_digit_bound = u128::from(message_bound_exclusive)
+                .div_ceil(u128::from(COMPACT_VSS_MESSAGE_DIGIT_BASE));
+            u64::try_from(high_digit_bound).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "compact VSS high digit bound overflowed",
+                )
+            })
+        }
+        _ => Err(CanonicalError::new(
+            CanonicalErrorCode::InvalidFixture,
+            "compact VSS message digit index is outside the selected profile",
+        )),
+    }
 }
 
 pub(in crate::bgv::setup) fn compact_vss_message_encoding_layout(

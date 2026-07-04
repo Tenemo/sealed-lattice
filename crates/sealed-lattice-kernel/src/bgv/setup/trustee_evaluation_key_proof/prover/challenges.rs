@@ -2,9 +2,10 @@ use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensio
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::relation::{
     CompactSameSecretBridgePublicVectorInput, LimbColumnLayout, SumcheckErrorWeights,
-    TrusteeEvaluationKeyStatement, build_compact_same_secret_bridge_public_vectors,
+    TargetDecryptionSharePublicVectorInput, TrusteeEvaluationKeyStatement,
+    build_compact_same_secret_bridge_public_vectors,
     build_compact_vss_share_linkage_batch_public_vectors, build_linkage_public_vectors,
-    build_private_vss_public_vectors,
+    build_private_vss_public_vectors, build_target_decryption_share_public_vectors,
 };
 use super::super::*;
 use super::polynomial::{extension_powers, negacyclic_transpose_product_extension_matrix};
@@ -84,6 +85,12 @@ pub(in super::super) fn draw_limb_challenges(
             "compact-same-secret-bridge-alpha",
             modulus,
             layout.compact_same_secret_bridge_relation_count(),
+        )
+    } else if layout.target_decryption_active() {
+        transcript.challenge_extension_elements(
+            "target-decryption-share-alpha",
+            modulus,
+            layout.target_decryption_relation_count,
         )
     } else if layout.linkage_active() {
         let commitment_count =
@@ -258,6 +265,53 @@ pub(in super::super) fn build_limb_public_vectors(
                 &tower,
             )?;
         combined_claim = tower.add(&combined_claim, &compact_bridge_claim);
+
+        return Ok(LimbPublicVectors {
+            secret_factor: Vec::new(),
+            u_powers,
+            mask_selectors,
+            linkage_vectors: relation_vectors,
+            error_weights: SumcheckErrorWeights {
+                weights: vec![Vec::new(); LINCHECK_REPETITIONS],
+            },
+            lincheck_claim: combined_claim,
+        });
+    }
+    if layout.target_decryption_active() {
+        let target_decryption_share =
+            statement.target_decryption_share.as_ref().ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "target-decryption layout requires a target share statement",
+                )
+            })?;
+        let mut combined_claim = ChallengeExtensionTower::zero();
+        let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
+        for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
+            combined_claim = tower.add(
+                &combined_claim,
+                &tower.scale_base(alpha_value, masked_claims[local_claim]),
+            );
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
+                let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
+                let position = half * layout.trace_size + half_position;
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
+                mask_selectors[column][position] =
+                    tower.add(&mask_selectors[column][position], &digit_weight);
+            }
+        }
+        let (target_claim, relation_vectors) = build_target_decryption_share_public_vectors(
+            TargetDecryptionSharePublicVectorInput {
+                proof_statement: statement,
+                statement: target_decryption_share,
+                limb_index,
+                modulus,
+                ring_degree,
+                relation_alpha: &challenges.linkage_alpha,
+                u_power_vectors: &u_powers,
+            },
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &target_claim);
 
         return Ok(LimbPublicVectors {
             secret_factor: Vec::new(),

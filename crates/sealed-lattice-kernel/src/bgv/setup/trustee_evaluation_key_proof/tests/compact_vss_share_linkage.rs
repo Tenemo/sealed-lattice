@@ -186,6 +186,7 @@ fn compact_vss_share_linkage_instance() -> (
             ],
         }),
         compact_same_secret_bridge: None,
+        target_decryption_share: None,
     };
     statement
         .validate_shape()
@@ -331,6 +332,8 @@ fn compact_vss_share_linkage_instance() -> (
             same_source_additional_item.recipient_share_carry_values,
             additional_item.recipient_share_carry_values,
         ],
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     };
 
     (statement, witness)

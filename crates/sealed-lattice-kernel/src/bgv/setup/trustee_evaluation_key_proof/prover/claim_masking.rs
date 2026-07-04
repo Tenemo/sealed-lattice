@@ -40,6 +40,23 @@ pub(in super::super) fn global_claim_id(
 ) -> u64 {
     let repetition = local_claim_index % layout.consistency_repetitions;
     let vector_index = local_claim_index / layout.consistency_repetitions;
+    if layout.target_decryption_active() {
+        let local_message_digit_vectors = layout.target_decryption_message_columns
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        debug_assert!(vector_index < local_message_digit_vectors);
+        let local_message_index = vector_index
+            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        let digit_index = vector_index
+            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        let global_message_index = statement
+            .target_decryption_message_global_index(layout.limb_index, local_message_index)
+            .expect("target-decryption message column is in the layout");
+        let global_vector_index = global_message_index
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            + digit_index;
+
+        return (global_vector_index * layout.consistency_repetitions + repetition) as u64;
+    }
     if layout.private_vss_active() || layout.compact_vss_active() {
         debug_assert!(
             statement.private_vss_share.is_some() || statement.compact_vss_share_linkage.is_some()
@@ -277,6 +294,16 @@ pub(super) fn global_claim_integers(
             );
         }
 
+        for claim_vector in &owned_compact_vss_claim_vectors {
+            signed_vectors.push(claim_vector);
+        }
+    } else if statement.target_decryption_share.is_some() {
+        // Target-decryption masked consistency claims bind direct message
+        // digits. Opening randomness stays committed, ternary row-checked, and
+        // consumed by the compact-opening equations on setup commitment fields.
+        for message_vector in &witness.target_decryption_message_vectors {
+            append_compact_vss_digit_vectors(&mut owned_compact_vss_claim_vectors, message_vector);
+        }
         for claim_vector in &owned_compact_vss_claim_vectors {
             signed_vectors.push(claim_vector);
         }

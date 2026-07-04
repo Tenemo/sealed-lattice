@@ -63,6 +63,7 @@ use self::evaluator_key_schedule::{
     verify_pending_evaluation_key_material_boundary,
 };
 use self::nested_hash::{optional_nested_hash_value, package_nested_hash};
+pub(crate) use self::phase_transcript::accepted_setup_participant_roster_from_package;
 use self::phase_transcript::{
     setup_context_string, verify_abort_absence, verify_phase_transcript,
     verify_setup_intent_roster_hash,

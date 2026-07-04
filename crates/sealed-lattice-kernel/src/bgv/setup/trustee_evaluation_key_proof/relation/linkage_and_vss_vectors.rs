@@ -259,7 +259,28 @@ pub(crate) fn claim_mask_digit_count_for_global_claim(
         .family_shape()
         .expect("statement shape validated before claim masking");
     let consistency_repetitions = family_shape.consistency_repetitions();
-    if statement.compact_vss_share_linkage.is_some() {
+    if statement.target_decryption_share.is_some() {
+        let global_vector_index = global_claim_id as usize / consistency_repetitions;
+        let target_message_digit_vector_count =
+            statement.target_decryption_total_message_digit_count();
+        if global_vector_index < target_message_digit_vector_count {
+            let global_message_index = global_vector_index
+                / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+            match statement
+                .target_decryption_message_claim_kind(global_message_index)
+                .expect("target-decryption message claim id is in range")
+            {
+                TargetDecryptionMessageClaimKind::AggregateOpening => {
+                    TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
+                }
+                TargetDecryptionMessageClaimKind::SmudgingOpening => {
+                    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT
+                }
+            }
+        } else {
+            unreachable!("target-decryption global claims only carry message digits")
+        }
+    } else if statement.compact_vss_share_linkage.is_some() {
         let global_vector_index = global_claim_id as usize / consistency_repetitions;
         if global_vector_index == 0 {
             COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT
@@ -369,6 +390,25 @@ pub(crate) fn masked_claim_bounds_for_global_claim(
                         )
                     } else {
                         2
+                    }
+                } else if statement.target_decryption_share.is_some() {
+                    let global_vector_index = global_claim_id as usize / consistency_repetitions;
+                    let target_message_digit_vector_count =
+                        statement.target_decryption_total_message_digit_count();
+                    if global_vector_index < target_message_digit_vector_count {
+                        let global_message_index = global_vector_index
+                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_index = global_vector_index
+                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_bound = statement
+                            .target_decryption_message_digit_bound(
+                                global_message_index,
+                                digit_index,
+                            )
+                            .expect("target-decryption digit claim id is in range");
+                        i128::from(digit_bound.saturating_sub(1))
+                    } else {
+                        unreachable!("target-decryption global claims only carry message digits")
                     }
                 } else {
                     2

@@ -53,6 +53,12 @@ mod relation;
 mod verifier;
 
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
+pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
+#[cfg(test)]
+pub(crate) use commands::{
+    describe_target_decryption_share_proof_layout_from_request,
+    generate_target_decryption_share_proof_bytes_from_request,
+};
 pub(crate) use commands::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,
@@ -100,6 +106,7 @@ pub(crate) const PUBLIC_KEY_SHARE_PROOF_FAMILY: &str = "public-key-share";
 pub(crate) const PRIVATE_VSS_SHARE_PROOF_FAMILY: &str = "vss-opening-carry";
 pub(crate) const COMPACT_VSS_SHARE_LINKAGE_PROOF_FAMILY: &str = "compact-vss-share-linkage";
 pub(crate) const COMPACT_SAME_SECRET_BRIDGE_PROOF_FAMILY: &str = "compact-same-secret-bridge";
+pub(crate) const TARGET_DECRYPTION_SHARE_PROOF_FAMILY: &str = "target-decryption-share";
 // Canonical hash of transported same-secret linkage anchor proof bytes.
 #[cfg(test)]
 pub(in crate::bgv::setup) fn same_secret_anchor_proof_bytes_hash(proof_bytes: &[u8]) -> String {
@@ -191,6 +198,20 @@ pub(in crate::bgv::setup) const COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT: usize 
 // window while keeping the digit-claim mask margin comparable to the carry
 // claim margin.
 pub(in crate::bgv::setup) const COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT: usize = 87;
+// Target-decryption message claims need wider masks than the setup families
+// because lifted aggregate-message openings have a much larger clear range. That
+// clear range is fixed by the largest active target prime, which is
+// DATA_PRIMES[0] at every canonical target level because the data primes
+// decrease monotonically, so the aggregate-message bound is independent of how
+// many target limbs are active. One hundred forty-two base-3 digits keep the
+// aggregate mask inside the five-field aggregate CRT lift window with margin at
+// the canonical target level. Target smudging-message claims have smaller
+// witness ranges and use the shorter one hundred fourteen digit mask inside a
+// four-field lift.
+pub(in crate::bgv::setup) const TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
+    142;
+pub(in crate::bgv::setup) const TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT: usize =
+    114;
 // FRI query count at rate 1/2. The CS25 entropy-capacity bound gives about
 // 0.938 bit per query for the prime base field. The selected 168 queries record
 // 156 bits before the union allowance and 140 after it, clearing 128 with

@@ -786,6 +786,7 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
         compact_same_secret_bridge,
         same_secret_linkage,
         private_vss_share: None,
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 

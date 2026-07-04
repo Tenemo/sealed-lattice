@@ -32,13 +32,19 @@ use super::{
 // `accounting`, `prover`, and the command/family items are re-exported here so
 // the sibling tests can keep referencing them through `super::` unchanged after
 // the move under this `tests/` directory.
-use super::{accounting, generate_trustee_evaluation_key_proof_from_request, prover};
+use super::{
+    accounting, describe_target_decryption_share_proof_layout_from_request,
+    generate_target_decryption_share_proof_bytes_from_request,
+    generate_trustee_evaluation_key_proof_from_request, prover,
+    verify_target_decryption_share_proof_bytes_from_request,
+};
 
 mod codec_and_commands;
 mod compact_same_secret_bridge;
 mod compact_vss_share_linkage;
 mod relation_algebra;
 mod soundness;
+mod target_decryption_share;
 mod verification;
 
 const SMALL_RING_DEGREE: usize = 128;
@@ -136,6 +142,7 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
         compact_vss_share_linkage: None,
         compact_same_secret_bridge: None,
         same_secret_linkage: None,
+        target_decryption_share: None,
         private_vss_share: Some(PrivateVssShareStatement {
             public_matrix_seed_hash: repeated_hash("66"),
             private_envelope_aad_hash,

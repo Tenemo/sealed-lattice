@@ -1,73 +1,141 @@
-use std::collections::BTreeSet;
 mod bindings;
 mod ciphertext_codec;
 mod command;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+mod compact_opening;
 mod json_fields;
-mod recombination;
+mod proof_material;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+mod proof_relation;
+mod proof_slice;
+mod result_release;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 mod share_generation;
 mod share_records;
+mod share_statement;
+
 use bindings::*;
 pub(crate) use ciphertext_codec::direct_target_ciphertext_hash;
 use ciphertext_codec::*;
 pub(crate) use command::{
-    generate_bgv_target_decryption_share_from_request,
-    recombine_bgv_target_decryption_shares_from_request,
+    absorb_bgv_target_decryption_result_release_share_from_request,
+    begin_bgv_target_decryption_result_release_from_request,
+    derive_bgv_target_decryption_result_release_setup_context_from_request,
+    finish_bgv_target_decryption_result_release_from_request,
 };
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use command::{
+    derive_bgv_target_decryption_share_proof_statement_from_request,
+    generate_bgv_target_decryption_share_from_local_share_request,
+    generate_bgv_target_decryption_share_proof_material_from_local_witness_request,
+    verify_bgv_target_decryption_share_proof_material_from_request,
+    verify_bgv_target_decryption_share_proof_statement_binding_from_request,
+};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use compact_opening::*;
 use json_fields::*;
-use recombination::*;
+use proof_material::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use proof_relation::*;
+use proof_slice::*;
+use result_release::*;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 use share_generation::*;
 use share_records::*;
+use share_statement::*;
 
-use serde_json::{Value, json};
+use serde_json::Value;
+use serde_json::json;
+
+use crate::{
+    bgv::evaluator::top_k::TIE_POLICY, encoding::CanonicalResult,
+    hashing::derive_canonical_object_hash,
+};
 
 use crate::{
     bgv::{
-        coefficient_codec::{
-            coefficient_vector_from_le_hex, coefficient_vector_hash512, coefficient_vector_le_hex,
-        },
+        coefficient_codec::{coefficient_vector_from_le_hex, coefficient_vector_hash512},
         evaluator::{
-            engine::{
-                Ciphertext, DevelopmentBgvKey, decryption_accumulator_to_coefficients,
-                negacyclic_mul, signed_residue,
-            },
-            prg::DeterministicSampler,
+            engine::{Ciphertext, decryption_accumulator_to_coefficients},
             records::MAXIMUM_OPTION_COUNT,
-            top_k::{TIE_POLICY, packed_score_slot},
+            top_k::{canonical_target_basis_hash, packed_score_slot},
         },
-        modular_arithmetic::{add_mod, add_mod_fast, inverse_mod, mul_mod, mul_mod_fast},
+        modular_arithmetic::{add_mod_fast, inverse_mod, mul_mod, mul_mod_fast, sub_mod},
         ntt::forward_negacyclic_ntt,
-        parameters::{BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE},
+        parameters::{BgvBasisKind, DATA_PRIMES, PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE},
         serialization::{BgvObjectKind, ciphertext_root, parse_bgv_object},
         setup::{
-            development_evaluator_key_from_passive_setup_package,
-            validate_passive_setup_package_for_encrypted_evaluation,
+            TARGET_DECRYPTION_SHARE_PROOF_FAMILY, accepted_setup_participant_roster_from_package,
+            canonical_target_decryption_parameter_hashes,
+            collective_bgv_setup_context_hashes_from_package,
+            verify_compact_vss_aggregate_threshold_commitment_set_request,
         },
         setup_helpers::{
-            array_at_path, hash_at_path, string_at_path, unsigned_at_path, usize_at_path,
-            value_at_path,
+            array_at_path, hash_at_path, integer_at_path, string_at_path, unsigned_at_path,
+            usize_at_path, value_at_path,
         },
     },
-    encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult},
-    hashing::derive_canonical_object_hash,
-    transcript_core::decode_hex,
+    encoding::{CanonicalError, CanonicalErrorCode},
+    transcript_core::{decode_hex, decode_standard_base64},
 };
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::bgv::coefficient_codec::{signed_byte_vector_from_hex, signed_byte_vector_hex};
+#[cfg(test)]
+use crate::bgv::setup::compact_vss_canonical_message_digit_columns;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::bgv::setup::development_evaluator_key_from_passive_setup_package;
+use crate::bgv::setup::{COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::bgv::setup::{
+    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::bgv::{
+    coefficient_codec::coefficient_vector_le_hex,
+    evaluator::{
+        engine::{DevelopmentBgvKey, negacyclic_mul, signed_residue},
+        prg::DeterministicSampler,
+    },
+};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::hashing::hash512_hex;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::transcript_core::encode_standard_base64;
+
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    any(feature = "target-decryption-development-commands", test)
+))]
 use rayon::prelude::*;
 
 const TARGET_SHARE_PAYLOAD_ENCODING: &str =
     "coefficient-domain-u64-little-endian-partial-decryption-limbs";
 const TARGET_PARTIAL_DECRYPTION_LIMB_HASH_DOMAIN: &str =
     "sealed-lattice-bgv-rns/target-partial-decryption-limb-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+const TARGET_DECRYPTION_SMUDGING_SEED_HASH_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-smudging-seed-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+const TARGET_DECRYPTION_SMUDGING_ZERO_SHARE_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-smudging-zero-share-v1";
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+const TARGET_DECRYPTION_SMUDGING_COMMITMENT_RANDOMNESS_DOMAIN: &str =
+    "sealed-lattice-bgv-rns/target-decryption-smudging-commitment-randomness-v1";
+pub(super) const TARGET_DECRYPTION_SMUDGING_COEFFICIENT_BOUND: i64 = 16;
+const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
+    "target-decryption-smudging-polynomial-coefficient";
+const TARGET_DECRYPTION_SMUDGING_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
 #[derive(Clone)]
-struct TargetShareParameters {
+struct TargetShareProfile {
     decryption_threshold: usize,
     minimum_shares_for_interpolation: usize,
     decryption_share_quorum: usize,
     hash: String,
 }
 
+#[derive(Clone)]
 struct ParticipantBinding {
     trustee_identity: String,
     roster_position: usize,
@@ -75,25 +143,42 @@ struct ParticipantBinding {
     interpolation_point: u64,
     recovery_epoch: u64,
     device_epoch: u64,
-    trustee_threshold_verification_key_hash: String,
 }
 
-struct ThresholdVerificationBinding {
-    threshold_share_verification_key_root: String,
-    threshold_share_verification_key_hash: String,
-}
-
+#[derive(Clone)]
 struct SetupBinding {
     setup_package_hash: String,
     ceremony_id: String,
     election_manifest_hash: String,
-    threshold_parameters_hash: String,
-    target_decryption_parameters_hash: String,
-    target_decryption_parameters_binding_hash: String,
+    roster_hash: String,
+    setup_parameters_hash: String,
+    target_decryption_profile_hash: String,
+    target_decryption_profile_binding_hash: String,
+    public_matrix_seed_hash: String,
+    compact_share_linkage_statement_root: Option<String>,
     participants: Vec<ParticipantBinding>,
-    threshold_verification: ThresholdVerificationBinding,
+    compact_aggregate_threshold_commitment_set:
+        Option<CompactAggregateThresholdCommitmentSetBinding>,
 }
 
+#[derive(Clone)]
+struct CompactAggregateThresholdCommitmentSetBinding {
+    aggregate_threshold_commitment_root: String,
+    rns_limb_count: usize,
+    recipient_records: Vec<Vec<CompactAggregateThresholdCommitmentRecordBinding>>,
+}
+
+#[derive(Clone)]
+struct CompactAggregateThresholdCommitmentRecordBinding {
+    rns_prime: u64,
+    aggregate_commitment_root: String,
+    aggregate_opening_root: String,
+    aggregate_commitment: Value,
+    source_share_commitment_roots: Vec<String>,
+    source_share_opening_roots: Vec<String>,
+}
+
+#[derive(Clone)]
 struct TargetAcceptedBinding {
     target_accepted_record_hash: String,
     target_proposal_hash: String,
@@ -104,10 +189,11 @@ struct TargetAcceptedBinding {
     target_context_hash: String,
     target_ciphertext_hash: String,
     target_layout_hash: String,
-    target_decryption_parameters_hash: String,
+    target_decryption_profile_hash: String,
     target_basis_hash: String,
 }
 
+#[derive(Clone)]
 struct TargetCiphertextPair {
     target_id: Ciphertext,
     target_order: Ciphertext,
@@ -115,16 +201,32 @@ struct TargetCiphertextPair {
     target_order_root: String,
     target_ciphertext_hash: String,
     target_ciphertext_binding_hash: String,
+    top_count: usize,
 }
 
-#[derive(Clone)]
-struct PartialDecryptionShare {
-    record: Value,
-    target_id_partials: Vec<Vec<u64>>,
-    target_order_partials: Vec<Vec<u64>>,
-    roster_position: usize,
-    board_position: usize,
-    interpolation_point: u64,
+fn compact_aggregate_message_coefficient_bound(
+    rns_prime: u64,
+    participant_count: usize,
+) -> CanonicalResult<u64> {
+    if participant_count == 0 {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "compact aggregate opening participant count must be positive",
+        ));
+    }
+    rns_prime
+        .checked_mul(u64::try_from(participant_count).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact aggregate opening participant count does not fit u64",
+            )
+        })?)
+        .ok_or_else(|| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact aggregate opening message coefficient bound overflowed",
+            )
+        })
 }
 
 #[cfg(test)]

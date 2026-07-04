@@ -125,7 +125,7 @@ pub(super) fn build_passive_setup_package(input: &PassiveSetupInput) -> Canonica
         "thresholdVerificationMaterial": threshold_verification_material,
         "evaluationKeys": evaluation_keys,
         "certificates": certificates,
-        "targetDecryptionStatus": {
+        "targetDecryptionParameters": {
             "targetDecryptionParametersHash": target_decryption_parameters_hash,
             "targetDecryptionParametersBindingHash": target_decryption_parameters_binding_hash,
         },

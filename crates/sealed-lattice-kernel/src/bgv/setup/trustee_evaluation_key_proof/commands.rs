@@ -13,6 +13,11 @@ use super::relation::{
     SameSecretLinkageStatement, SuccinctSetupProofContext, SuccinctSetupProofFamilyShape,
     TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
 };
+use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TargetDecryptionMessageClaimKind};
+use super::relation::{
+    TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
+    TargetDecryptionShareStatement,
+};
 use super::*;
 use crate::bgv::parameters::DATA_PRIMES;
 use crate::bgv::setup::commitment::{
@@ -36,6 +41,9 @@ const COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_SET_OBJECT_TYPE: &str =
     "SetupTransportedCompactVssShareLinkageProofMaterialSet";
 const COMPACT_VSS_SHARE_LINKAGE_TRANSPORT_OBJECT_TYPE: &str =
     "SetupTransportedCompactVssShareLinkageProofMaterial";
+const TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE: &str =
+    "target-decryption-smudging-polynomial-coefficient";
+const TARGET_DECRYPTION_PROOF_TARGET_ROLES: [&str; 2] = ["targetId", "targetOrder"];
 
 pub(in crate::bgv::setup) struct CompactVssCommandCommitmentExpectation<'a> {
     pub(in crate::bgv::setup) field_name: String,
@@ -86,6 +94,8 @@ pub(crate) fn generate_trustee_evaluation_key_proof_from_request(
         compact_vss_recipient_share_messages_by_item: Vec::new(),
         compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
         compact_vss_carry_witnesses_by_item: Vec::new(),
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     };
     let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
     let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
@@ -1347,6 +1357,103 @@ pub(crate) fn verify_compact_same_secret_bridge_proof_from_request(
     }))
 }
 
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct GeneratedTargetDecryptionShareProofBytes {
+    pub(crate) target_roles: Vec<String>,
+    pub(crate) target_rns_limb_indices: Vec<usize>,
+    pub(crate) proof_bytes: Vec<u8>,
+}
+
+#[cfg(test)]
+pub(crate) fn generate_target_decryption_share_proof_bytes_from_request(
+    request: &Value,
+) -> CanonicalResult<GeneratedTargetDecryptionShareProofBytes> {
+    let statement = target_decryption_share_statement_from_request(request)?;
+    let witness = target_decryption_share_witness_from_request(request)?;
+    let proof_randomness_seed_hex = read_string(request, "proofRandomnessSeedHex")?;
+    let proof_randomness_nonce_hex = read_string(request, "proofRandomnessNonceHex")?;
+    let bound_proof_randomness_seed_hex = statement_bound_proof_randomness_seed_hex(
+        &statement,
+        proof_randomness_seed_hex,
+        proof_randomness_nonce_hex,
+    )?;
+    let proof = prove_evaluation_key_share(&statement, &witness, &bound_proof_randomness_seed_hex)?;
+    let proof_bytes = encode_trustee_evaluation_key_proof(&proof);
+    let target_statement = statement
+        .target_decryption_share
+        .as_ref()
+        .ok_or_else(|| invalid_succinct_setup_proof("target-decryption share statement missing"))?;
+
+    Ok(GeneratedTargetDecryptionShareProofBytes {
+        target_roles: target_statement
+            .limb_statements
+            .first()
+            .into_iter()
+            .flat_map(|limb_statement| limb_statement.role_statements.iter())
+            .map(|role_statement| role_statement.target_role.clone())
+            .collect(),
+        target_rns_limb_indices: target_statement
+            .limb_statements
+            .iter()
+            .map(|limb_statement| limb_statement.target_rns_limb_index)
+            .collect(),
+        proof_bytes,
+    })
+}
+
+pub(crate) fn verify_target_decryption_share_proof_bytes_from_request(
+    request: &Value,
+    proof_bytes: &[u8],
+) -> CanonicalResult<Value> {
+    let statement = target_decryption_share_statement_from_request(request)?;
+    let proof = decode_trustee_evaluation_key_proof(&statement, proof_bytes)?;
+    verify_evaluation_key_share(&statement, &proof)?;
+    let target_statement = statement
+        .target_decryption_share
+        .as_ref()
+        .ok_or_else(|| invalid_succinct_setup_proof("target-decryption share statement missing"))?;
+
+    let target_roles = target_statement
+        .limb_statements
+        .first()
+        .into_iter()
+        .flat_map(|limb_statement| limb_statement.role_statements.iter())
+        .map(|role_statement| role_statement.target_role.clone())
+        .collect::<Vec<_>>();
+    let single_target_role = target_roles
+        .first()
+        .filter(|_| target_roles.len() == 1)
+        .cloned();
+    let target_rns_limb_indices = target_statement
+        .limb_statements
+        .iter()
+        .map(|limb_statement| limb_statement.target_rns_limb_index)
+        .collect::<Vec<_>>();
+    let single_target_limb_index = target_rns_limb_indices
+        .first()
+        .filter(|_| target_rns_limb_indices.len() == 1)
+        .copied();
+    let mut response = json!({
+        "ok": true,
+        "operation": "verifyTargetDecryptionProofBytes",
+        "proofFamily": statement.context.proof_family,
+        "statementHash": to_hex(&statement.statement_hash()),
+        "limbCount": statement.proof_limb_count(),
+        "targetRoles": target_roles,
+        "targetRnsLimbIndices": target_rns_limb_indices,
+        "proofByteLength": proof_bytes.len(),
+    });
+    if let Some(target_role) = single_target_role {
+        response["targetRole"] = json!(target_role);
+    }
+    if let Some(target_rns_limb_index) = single_target_limb_index {
+        response["targetRnsLimbIndex"] = json!(target_rns_limb_index);
+    }
+
+    Ok(response)
+}
+
 fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
     let context_value = request
         .get("context")
@@ -1395,6 +1502,7 @@ fn statement_from_request(request: &Value) -> CanonicalResult<TrusteeEvaluationK
         private_vss_share: None,
         compact_vss_share_linkage: None,
         compact_same_secret_bridge: None,
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -1501,6 +1609,7 @@ fn compact_vss_share_linkage_statement_from_request(
             additional_linkage_items,
         }),
         compact_same_secret_bridge: None,
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -1544,6 +1653,8 @@ fn compact_vss_share_linkage_witness_from_request(
             request,
             "carryWitnessesByItem",
         )?,
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     })
 }
 
@@ -1646,6 +1757,7 @@ fn compact_same_secret_bridge_statement_from_request(
             target_constant_commitment_roots,
             target_constant_commitments,
         }),
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -1671,6 +1783,8 @@ fn compact_same_secret_bridge_witness_from_request(
         compact_vss_recipient_share_messages_by_item: Vec::new(),
         compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
         compact_vss_carry_witnesses_by_item: Vec::new(),
+        target_decryption_message_vectors: Vec::new(),
+        target_decryption_opening_randomness_by_commitment: Vec::new(),
     })
 }
 
@@ -1775,6 +1889,520 @@ fn compact_vss_share_linkage_item_from_value(
         recipient_share_commitment_root,
         recipient_share_opening_root,
         recipient_share_commitment,
+    })
+}
+
+fn target_decryption_share_statement_from_request(
+    request: &Value,
+) -> CanonicalResult<TrusteeEvaluationKeyStatement> {
+    let context_value = request
+        .get("context")
+        .ok_or_else(|| invalid_succinct_setup_proof("context must be present"))?;
+    let ring_degree = usize::try_from(read_u64(request, "ringDegree")?)
+        .map_err(|_| invalid_succinct_setup_proof("ringDegree does not fit usize"))?;
+    let target_value = request
+        .get("targetDecryptionShare")
+        .ok_or_else(|| invalid_succinct_setup_proof("targetDecryptionShare must be present"))?;
+    let context = proof_context_from_value(
+        context_value,
+        SuccinctSetupProofFamilyShape::TargetDecryptionShare,
+    )?;
+    let target_share_proof_statement_root =
+        read_string(target_value, "targetShareProofStatementRoot")?;
+    if context.binding_roots[0].1 != target_share_proof_statement_root {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share context root must match the target share proof statement root",
+        ));
+    }
+
+    let public_matrix_seed_hash = read_string(target_value, "publicMatrixSeedHash")?.to_string();
+    let target_basis_hash = read_string(target_value, "targetBasisHash")?.to_string();
+    let trustee_identity = read_string(target_value, "trusteeIdentity")?.to_string();
+    let trustee_roster_position = read_u64(target_value, "trusteeRosterPosition")?;
+    let smudging_commitment_set = target_value
+        .get("smudgingCommitmentSet")
+        .ok_or_else(|| invalid_succinct_setup_proof("smudgingCommitmentSet must be present"))?;
+    let smudging_commitment_set_root =
+        validated_target_decryption_smudging_commitment_set_root(smudging_commitment_set)?;
+    if context.binding_roots[2].1 != smudging_commitment_set_root {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share context root must match the smudging commitment set root",
+        ));
+    }
+    if read_string(smudging_commitment_set, "publicMatrixSeedHash")? != public_matrix_seed_hash
+        || read_string(smudging_commitment_set, "targetBasisHash")? != target_basis_hash
+        || read_u64(smudging_commitment_set, "ringDegree")? != ring_degree as u64
+        || read_string(smudging_commitment_set, "commitmentRole")?
+            != TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE
+    {
+        return Err(invalid_succinct_setup_proof(
+            "smudging commitment set metadata must match the target-decryption share statement",
+        ));
+    }
+    let smudging_active_limb_count =
+        usize::try_from(read_u64(smudging_commitment_set, "activeRnsLimbCount")?)
+            .map_err(|_| invalid_succinct_setup_proof("activeRnsLimbCount does not fit usize"))?;
+    let smudging_polynomial_degree = usize::try_from(read_u64(
+        smudging_commitment_set,
+        "smudgingPolynomialDegree",
+    )?)
+    .map_err(|_| invalid_succinct_setup_proof("smudgingPolynomialDegree does not fit usize"))?;
+    let smudging_coefficient_bound = read_i64(smudging_commitment_set, "smudgingCoefficientBound")?;
+    let smudging_signed_coefficient_offset =
+        read_i64(smudging_commitment_set, "signedCoefficientOffset")?;
+    let smudging_message_coefficient_bound =
+        read_u64(smudging_commitment_set, "messageCoefficientBound")?;
+    let active_credential_binding_root =
+        read_string(target_value, "activeCredentialBindingRoot")?.to_string();
+    if context.binding_roots[1].1 != active_credential_binding_root {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption share context root must match the active aggregate credential binding root",
+        ));
+    }
+    let limb_statements = target_decryption_share_limb_statements_from_request(
+        target_value,
+        smudging_commitment_set,
+        &public_matrix_seed_hash,
+        ring_degree,
+        smudging_polynomial_degree,
+    )?;
+    if limb_statements.len() != smudging_active_limb_count
+        || limb_statements
+            .iter()
+            .enumerate()
+            .any(|(expected_limb_index, limb_statement)| {
+                limb_statement.target_rns_limb_index != expected_limb_index
+            })
+    {
+        return Err(invalid_succinct_setup_proof(
+            "target-decryption proof must cover every active target limb in canonical order",
+        ));
+    }
+
+    let statement = TrusteeEvaluationKeyStatement {
+        context,
+        ring_degree,
+        keys: Vec::new(),
+        same_secret_linkage: None,
+        private_vss_share: None,
+        compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
+        target_decryption_share: Some(TargetDecryptionShareStatement {
+            public_matrix_seed_hash,
+            target_basis_hash,
+            trustee_identity,
+            trustee_roster_position,
+            active_credential_binding_root,
+            interpolation_point: read_u64(target_value, "interpolationPoint")?,
+            aggregate_message_coefficient_bound: read_u64(
+                target_value,
+                "aggregateMessageCoefficientBound",
+            )?,
+            smudging_commitment_set_root,
+            limb_statements,
+            smudging_polynomial_degree,
+            smudging_coefficient_bound,
+            smudging_signed_coefficient_offset,
+            smudging_message_coefficient_bound,
+            plaintext_multiple: read_u64(target_value, "plaintextMultiple")?,
+        }),
+    };
+    statement.validate_shape()?;
+
+    Ok(statement)
+}
+
+#[cfg(test)]
+pub(crate) fn describe_target_decryption_share_proof_layout_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    let statement = target_decryption_share_statement_from_request(request)?;
+    let target_statement = statement.target_decryption_share.as_ref().ok_or_else(|| {
+        invalid_succinct_setup_proof("target-decryption share statement must be present")
+    })?;
+    let proof_limb_indices = statement.proof_limb_indices();
+    let mut limb_summaries = Vec::with_capacity(proof_limb_indices.len());
+    for proof_limb_index in &proof_limb_indices {
+        let layout = LimbColumnLayout::new(&statement, *proof_limb_index)?;
+        let mut message_summaries = Vec::with_capacity(layout.target_decryption_message_columns);
+        for local_message_index in 0..layout.target_decryption_message_columns {
+            let global_message_index = statement
+                .target_decryption_message_global_index(*proof_limb_index, local_message_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption layout message index is outside the statement",
+                    )
+                })?;
+            let claim_kind = match statement
+                .target_decryption_message_claim_kind(global_message_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption layout message claim kind is missing",
+                    )
+                })? {
+                TargetDecryptionMessageClaimKind::AggregateOpening => "aggregateOpening",
+                TargetDecryptionMessageClaimKind::SmudgingOpening => "smudgingOpening",
+            };
+            let message_bound = statement
+                .target_decryption_message_bound(global_message_index)
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "target-decryption layout message bound is missing",
+                    )
+                })?;
+            let low_digit_trit_count =
+                layout.target_decryption_message_trit_count(local_message_index, 0);
+            let high_digit_trit_count =
+                layout.target_decryption_message_trit_count(local_message_index, 1);
+            let total_trit_count = low_digit_trit_count + high_digit_trit_count;
+            message_summaries.push(json!({
+                "localMessageIndex": local_message_index,
+                "globalMessageIndex": global_message_index,
+                "claimKind": claim_kind,
+                "messageBound": message_bound,
+                "encodingColumnCount": crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT + total_trit_count,
+                "lowDigitTritCount": low_digit_trit_count,
+                "highDigitTritCount": high_digit_trit_count,
+                "totalTritCount": total_trit_count,
+            }));
+        }
+        limb_summaries.push(json!({
+            "proofLimbIndex": proof_limb_index,
+            "traceSize": layout.trace_size,
+            "targetDecryptionMessageColumns": layout.target_decryption_message_columns,
+            "targetDecryptionRandomnessColumns": layout.target_decryption_randomness_columns,
+            "targetDecryptionMessageEncodingColumns": layout.target_decryption_message_encoding_columns(),
+            "claimCount": layout.claim_count(),
+            "maskColumnCount": layout.mask_column_count,
+            "phaseOnePhysicalColumnCount": layout.phase_one_physical_count(),
+            "totalColumnCount": layout.phase_one_physical_count() + PHASE_TWO_COLUMN_COUNT,
+            "messages": message_summaries,
+        }));
+    }
+
+    Ok(json!({
+        "objectType": "BgvTargetDecryptionShareProofLayoutDescription",
+        "objectVersion": 1,
+        "ringDegree": statement.ring_degree,
+        "proofLimbIndices": proof_limb_indices,
+        "aggregateMessageCoefficientBound": target_statement.aggregate_message_coefficient_bound,
+        "smudgingMessageCoefficientBound": target_statement.smudging_message_coefficient_bound,
+        "totalMessageCount": statement.target_decryption_total_message_count(),
+        "totalMessageDigitCount": statement.target_decryption_total_message_digit_count(),
+        "limbs": limb_summaries,
+    }))
+}
+
+fn target_decryption_share_limb_statements_from_request(
+    target_value: &Value,
+    smudging_commitment_set: &Value,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    smudging_polynomial_degree: usize,
+) -> CanonicalResult<Vec<TargetDecryptionShareLimbStatement>> {
+    let limb_statement_values = target_value
+        .get("targetRnsLimbStatements")
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRnsLimbStatements must be present"))?
+        .as_array()
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRnsLimbStatements must be an array"))?;
+    if limb_statement_values.is_empty() {
+        return Err(invalid_succinct_setup_proof(
+            "targetRnsLimbStatements must not be empty",
+        ));
+    }
+
+    limb_statement_values
+        .iter()
+        .map(|limb_statement_value| {
+            target_decryption_share_limb_statement_from_value(
+                limb_statement_value,
+                smudging_commitment_set,
+                public_matrix_seed_hash,
+                ring_degree,
+                smudging_polynomial_degree,
+            )
+        })
+        .collect()
+}
+
+fn target_decryption_share_limb_statement_from_value(
+    limb_statement_value: &Value,
+    smudging_commitment_set: &Value,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    smudging_polynomial_degree: usize,
+) -> CanonicalResult<TargetDecryptionShareLimbStatement> {
+    let target_rns_limb_index =
+        usize::try_from(read_u64(limb_statement_value, "targetRnsLimbIndex")?)
+            .map_err(|_| invalid_succinct_setup_proof("targetRnsLimbIndex does not fit usize"))?;
+    let target_rns_prime = read_u64(limb_statement_value, "targetRnsPrime")?;
+    let aggregate_commitment_root =
+        read_string(limb_statement_value, "aggregateCommitmentRoot")?.to_string();
+    let aggregate_opening_root =
+        read_string(limb_statement_value, "aggregateOpeningRoot")?.to_string();
+    let aggregate_commitment_value = limb_statement_value
+        .get("aggregateCommitment")
+        .ok_or_else(|| invalid_succinct_setup_proof("aggregateCommitment must be present"))?;
+    let aggregate_commitment = compact_vss_share_linkage_commitment_from_value(
+        aggregate_commitment_value,
+        CompactVssCommandCommitmentExpectation {
+            field_name: "targetDecryptionShare.aggregateCommitment".to_string(),
+            root: &aggregate_commitment_root,
+            role: "aggregate-threshold-share",
+            public_matrix_seed_hash,
+            rns_limb_index: target_rns_limb_index,
+            rns_prime: target_rns_prime,
+            ring_degree,
+        },
+    )?;
+    let role_statements = target_decryption_share_role_statements_from_request(
+        limb_statement_value,
+        smudging_commitment_set,
+        target_rns_limb_index,
+        target_rns_prime,
+        public_matrix_seed_hash,
+        ring_degree,
+        smudging_polynomial_degree,
+    )?;
+
+    Ok(TargetDecryptionShareLimbStatement {
+        target_rns_limb_index,
+        target_rns_prime,
+        aggregate_commitment_root,
+        aggregate_opening_root,
+        aggregate_commitment,
+        role_statements,
+    })
+}
+
+fn target_decryption_share_role_statements_from_request(
+    target_value: &Value,
+    smudging_commitment_set: &Value,
+    target_rns_limb_index: usize,
+    target_rns_prime: u64,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    smudging_polynomial_degree: usize,
+) -> CanonicalResult<Vec<TargetDecryptionShareRoleStatement>> {
+    let role_statement_values = target_value
+        .get("targetRoleStatements")
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRoleStatements must be present"))?
+        .as_array()
+        .ok_or_else(|| invalid_succinct_setup_proof("targetRoleStatements must be an array"))?;
+    if role_statement_values.len() != TARGET_DECRYPTION_PROOF_TARGET_ROLES.len() {
+        return Err(invalid_succinct_setup_proof(
+            "targetRoleStatements must cover the canonical target roles",
+        ));
+    }
+
+    role_statement_values
+        .iter()
+        .enumerate()
+        .map(|(target_role_index, role_statement_value)| {
+            let expected_target_role = TARGET_DECRYPTION_PROOF_TARGET_ROLES[target_role_index];
+            if read_string(role_statement_value, "targetRole")? != expected_target_role {
+                return Err(invalid_succinct_setup_proof(
+                    "targetRoleStatements must be in canonical target-role order",
+                ));
+            }
+            target_decryption_share_role_statement_from_value(
+                role_statement_value,
+                smudging_commitment_set,
+                target_rns_limb_index,
+                target_rns_prime,
+                public_matrix_seed_hash,
+                ring_degree,
+                smudging_polynomial_degree,
+            )
+        })
+        .collect()
+}
+
+fn target_decryption_share_role_statement_from_value(
+    role_statement_value: &Value,
+    smudging_commitment_set: &Value,
+    target_rns_limb_index: usize,
+    target_rns_prime: u64,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    smudging_polynomial_degree: usize,
+) -> CanonicalResult<TargetDecryptionShareRoleStatement> {
+    let target_role = read_string(role_statement_value, "targetRole")?.to_string();
+    let (smudging_commitment_roots, smudging_commitments) =
+        target_decryption_smudging_commitments_from_set(
+            smudging_commitment_set,
+            &target_role,
+            target_rns_limb_index,
+            target_rns_prime,
+            public_matrix_seed_hash,
+            ring_degree,
+            smudging_polynomial_degree,
+        )?;
+
+    Ok(TargetDecryptionShareRoleStatement {
+        target_role,
+        target_ciphertext_component_one: read_u64_array(
+            role_statement_value,
+            "targetCiphertextComponentOne",
+        )?,
+        released_partial_decryption: read_u64_array(
+            role_statement_value,
+            "releasedPartialDecryption",
+        )?,
+        smudging_commitment_roots,
+        smudging_commitments,
+    })
+}
+
+fn validated_target_decryption_smudging_commitment_set_root(
+    smudging_commitment_set: &Value,
+) -> CanonicalResult<String> {
+    if read_string(smudging_commitment_set, "objectType")?
+        != "TargetDecryptionSmudgingCommitmentSet"
+        || read_u64(smudging_commitment_set, "objectVersion")? != 1
+    {
+        return Err(invalid_succinct_setup_proof(
+            "smudgingCommitmentSet must be TargetDecryptionSmudgingCommitmentSet version 1",
+        ));
+    }
+    let root = read_string(smudging_commitment_set, "smudgingCommitmentSetRoot")?;
+    let mut without_root = smudging_commitment_set.clone();
+    without_root
+        .as_object_mut()
+        .ok_or_else(|| invalid_succinct_setup_proof("smudgingCommitmentSet must be an object"))?
+        .remove("smudgingCommitmentSetRoot")
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("smudgingCommitmentSet must include its root")
+        })?;
+    let expected_root = derive_canonical_object_hash(&without_root)?;
+    if root != expected_root {
+        return Err(invalid_succinct_setup_proof(
+            "smudgingCommitmentSetRoot does not match its canonical payload",
+        ));
+    }
+
+    Ok(root.to_string())
+}
+
+fn target_decryption_smudging_commitments_from_set(
+    smudging_commitment_set: &Value,
+    target_role: &str,
+    target_rns_limb_index: usize,
+    target_rns_prime: u64,
+    public_matrix_seed_hash: &str,
+    ring_degree: usize,
+    smudging_polynomial_degree: usize,
+) -> CanonicalResult<(Vec<String>, Vec<CompactVssShareLinkageCommitment>)> {
+    let records = smudging_commitment_set
+        .get("commitmentRecords")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof("smudgingCommitmentSet.commitmentRecords must be an array")
+        })?;
+    let mut roots_by_degree = vec![None; smudging_polynomial_degree];
+    let mut commitments_by_degree = vec![None; smudging_polynomial_degree];
+
+    for (record_index, record) in records.iter().enumerate() {
+        if read_string(record, "objectType")? != "TargetDecryptionSmudgingCommitment"
+            || read_u64(record, "objectVersion")? != 1
+        {
+            return Err(invalid_succinct_setup_proof(
+                "smudging commitment records must be TargetDecryptionSmudgingCommitment version 1",
+            ));
+        }
+        let record_role = read_string(record, "role")?;
+        let record_limb_index = usize::try_from(read_u64(record, "rnsLimbIndex")?)
+            .map_err(|_| invalid_succinct_setup_proof("rnsLimbIndex does not fit usize"))?;
+        let record_rns_prime = read_u64(record, "rnsPrime")?;
+        let polynomial_degree = usize::try_from(read_u64(record, "polynomialDegree")?)
+            .map_err(|_| invalid_succinct_setup_proof("polynomialDegree does not fit usize"))?;
+        if record_role != target_role
+            || record_limb_index != target_rns_limb_index
+            || record_rns_prime != target_rns_prime
+        {
+            continue;
+        }
+        if polynomial_degree == 0 || polynomial_degree > smudging_polynomial_degree {
+            return Err(invalid_succinct_setup_proof(
+                "smudging commitment record polynomial degree is outside the statement range",
+            ));
+        }
+        let degree_index = polynomial_degree - 1;
+        if roots_by_degree[degree_index].is_some() {
+            return Err(invalid_succinct_setup_proof(
+                "smudging commitment set has duplicate records for the target slice",
+            ));
+        }
+        let commitment_root = read_string(record, "commitmentRoot")?.to_string();
+        let commitment_value = record.get("commitment").ok_or_else(|| {
+            invalid_succinct_setup_proof("smudging commitment record must include a commitment")
+        })?;
+        let commitment = compact_vss_share_linkage_commitment_from_value(
+            commitment_value,
+            CompactVssCommandCommitmentExpectation {
+                field_name: format!(
+                    "smudgingCommitmentSet.commitmentRecords.{record_index}.commitment"
+                ),
+                root: &commitment_root,
+                role: TARGET_DECRYPTION_SMUDGING_COMMITMENT_ROLE,
+                public_matrix_seed_hash,
+                rns_limb_index: target_rns_limb_index,
+                rns_prime: target_rns_prime,
+                ring_degree,
+            },
+        )?;
+        roots_by_degree[degree_index] = Some(commitment_root);
+        commitments_by_degree[degree_index] = Some(commitment);
+    }
+
+    let roots = roots_by_degree
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "smudging commitment set is missing a target-slice polynomial degree",
+            )
+        })?;
+    let commitments = commitments_by_degree
+        .into_iter()
+        .collect::<Option<Vec<_>>>()
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(
+                "smudging commitment set is missing a target-slice commitment",
+            )
+        })?;
+
+    Ok((roots, commitments))
+}
+
+#[cfg(test)]
+fn target_decryption_share_witness_from_request(
+    request: &Value,
+) -> CanonicalResult<TrusteeEvaluationKeyWitness> {
+    Ok(TrusteeEvaluationKeyWitness {
+        secret_coefficients: Vec::new(),
+        error_coefficients_by_key: Vec::new(),
+        negative_indicator_coefficients: Vec::new(),
+        opening_randomness_by_limb: Vec::new(),
+        private_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        private_vss_opening_randomness_by_shamir_index: Vec::new(),
+        private_vss_carry_witnesses: Vec::new(),
+        compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_messages: Vec::new(),
+        compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+        compact_vss_recipient_share_opening_randomness: Vec::new(),
+        compact_vss_carry_witnesses: Vec::new(),
+        compact_vss_recipient_share_messages_by_item: Vec::new(),
+        compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+        compact_vss_carry_witnesses_by_item: Vec::new(),
+        target_decryption_message_vectors: read_i64_matrix2(
+            request,
+            "targetDecryptionMessageVectors",
+        )?,
+        target_decryption_opening_randomness_by_commitment: read_i64_matrix(
+            request,
+            "targetDecryptionOpeningRandomnessByCommitment",
+        )?,
     })
 }
 
@@ -2071,6 +2699,15 @@ fn read_i64_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<i64>> 
             })
         })
         .collect()
+}
+
+fn read_i64(value: &Value, field_name: &str) -> CanonicalResult<i64> {
+    value
+        .get(field_name)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            invalid_succinct_setup_proof(format!("{field_name} must be a signed integer"))
+        })
 }
 
 fn read_string_array(value: &Value, field_name: &str) -> CanonicalResult<Vec<String>> {

@@ -35,10 +35,11 @@ describe('BGV passive setup kernel commands', () => {
         expect(setup.setupPackageHash).toMatch(/^[a-f0-9]{128}$/u);
         expect(repeated.setupPackageHash).toBe(setup.setupPackageHash);
         expect(
-            setup.targetDecryptionStatus.targetDecryptionParametersHash,
+            setup.targetDecryptionParameters.targetDecryptionParametersHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(
-            setup.targetDecryptionStatus.targetDecryptionParametersBindingHash,
+            setup.targetDecryptionParameters
+                .targetDecryptionParametersBindingHash,
         ).toMatch(/^[a-f0-9]{128}$/u);
         expect(certificates.publicRlweSamplesByBasis.QData).toMatchObject({
             publicKeyShares: 3,

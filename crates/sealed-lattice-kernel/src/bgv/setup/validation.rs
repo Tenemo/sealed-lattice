@@ -67,14 +67,17 @@ pub(super) fn validate_setup_package_internal_bindings(
     }))?;
     compare_hash_at_path(
         setup_package,
-        &["targetDecryptionStatus", "targetDecryptionParametersHash"],
+        &[
+            "targetDecryptionParameters",
+            "targetDecryptionParametersHash",
+        ],
         &target_decryption_parameters_hash,
         "target decryption parameters hash",
     )?;
     compare_hash_at_path(
         setup_package,
         &[
-            "targetDecryptionStatus",
+            "targetDecryptionParameters",
             "targetDecryptionParametersBindingHash",
         ],
         &target_decryption_parameters_binding_hash,

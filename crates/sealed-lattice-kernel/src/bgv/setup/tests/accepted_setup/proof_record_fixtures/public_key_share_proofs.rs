@@ -535,6 +535,7 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             compact_same_secret_bridge,
             same_secret_linkage,
             private_vss_share: None,
+            target_decryption_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients,
@@ -552,6 +553,8 @@ pub(in super::super) fn public_key_share_succinct_proofs_object(
             compact_vss_recipient_share_messages_by_item: Vec::new(),
             compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
             compact_vss_carry_witnesses_by_item: Vec::new(),
+            target_decryption_message_vectors: Vec::new(),
+            target_decryption_opening_randomness_by_commitment: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "PublicKeyShareProofRoot",

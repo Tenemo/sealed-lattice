@@ -281,7 +281,7 @@ export type BgvPassiveSetupPackage = {
         readonly rotSet: unknown;
     };
     readonly certificates: Readonly<Record<string, unknown>>;
-    readonly targetDecryptionStatus: {
+    readonly targetDecryptionParameters: {
         readonly targetDecryptionParametersHash: ProtocolHash;
         readonly targetDecryptionParametersBindingHash: ProtocolHash;
     };
