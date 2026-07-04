@@ -13,6 +13,7 @@ use crate::bgv::modular_arithmetic::{add_mod, mul_mod, pow_mod};
 use crate::bgv::parameters::{PLAINTEXT_MODULUS, POLYNOMIAL_DEGREE};
 
 mod interpolation;
+mod level_budget_probe;
 mod packing_and_rotations;
 mod rank_evaluation;
 
