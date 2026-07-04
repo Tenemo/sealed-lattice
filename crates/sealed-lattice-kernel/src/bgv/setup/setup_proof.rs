@@ -1,7 +1,9 @@
 mod material_transport;
 
 pub(super) use self::material_transport::setup_proof_record_binding_value;
-pub(in crate::bgv::setup) use self::material_transport::verified_setup_proof_material_chunks_from_request;
+pub(in crate::bgv::setup) use self::material_transport::{
+    SetupProofMaterialChunks, verified_setup_proof_material_chunks_from_request,
+};
 pub(crate) use self::material_transport::{
     SetupProofMaterialTransportHashes, absorb_setup_proof_material_transport_stream_chunk_request,
     begin_setup_proof_material_transport_stream_request,
@@ -40,6 +42,13 @@ pub(super) const SETUP_PROOF_TRANSPORT_FAMILIES: &[&str] = &[
     "public-key-share",
     "same-secret-linkage-anchor",
     "trustee-evaluation-key",
+    // Compact public VSS material proof families. At production roster sizes the
+    // compact share-linkage and same-secret bridge proof material are the largest
+    // objects in the setup package, so they stream through the same sidecar
+    // transport as the four families above instead of riding embedded in the
+    // package JSON (which overflows the canonical string encoder at n=10).
+    "compact-vss-share-linkage",
+    "compact-same-secret-bridge",
 ];
 
 fn setup_proof_error(message: impl Into<String>) -> CanonicalError {

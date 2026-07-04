@@ -16,5 +16,3 @@ require (
 	golang.org/x/sys v0.38.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/tuneinsight/lattigo/v6 => ../../temp/lattigo/upstream/lattigo-5dbffbdea05394de2ca3a432ed5318aa832e3f40

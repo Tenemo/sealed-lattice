@@ -1,5 +1,4 @@
 import { deriveCanonicalObjectHash } from '@sealed-lattice/crypto';
-import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
     setupTransportChunkSizeBytes,
@@ -11,35 +10,15 @@ import {
     setupTransportStorageQuotaBytes,
     setupTransportStreamOrder,
 } from './constants.js';
-import { assertProtocolHash, hashField } from './field-helpers.js';
+import { assertProtocolHash } from './field-helpers.js';
 import type {
     CollectiveBgvSetupParametersForCertificates,
-    JsonRecord,
     SetupCertificateTransportedObjectInput,
     SetupCertificateTransportInput,
     SetupTransportCertificate,
     SetupTransportCertificateBody,
     SetupTransportedObjectRecord,
 } from './types.js';
-
-function setupTransportChunkManifestRoot(
-    input: Readonly<{
-        readonly chunkCount: number;
-        readonly totalByteLength: number;
-        readonly chunkHashes: readonly ProtocolHash[];
-        readonly fullObjectHash: ProtocolHash;
-    }>,
-): ProtocolHash {
-    return deriveCanonicalObjectHash({
-        objectType: 'SetupTransportChunkManifest',
-        objectVersion: 1,
-        chunkSizeBytes: setupTransportChunkSizeBytes,
-        chunkCount: input.chunkCount,
-        totalByteLength: input.totalByteLength,
-        chunkHashes: input.chunkHashes,
-        fullObjectHash: input.fullObjectHash,
-    });
-}
 
 function transportedObjectRecords(
     transportedObjectInputs: readonly SetupCertificateTransportedObjectInput[],
@@ -110,32 +89,13 @@ function transportedObjectRecords(
 
 const setupTransportCertificateBody = (
     setupParameters: CollectiveBgvSetupParametersForCertificates,
-    vssCoefficientCommitmentMaterial: JsonRecord,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificateBody => {
-    const publicVssMaterialSizeParameters =
-        setupParameters.publicVssCommitmentMaterialSize;
+    // On the compact path the public VSS coefficient material is no longer
+    // transported (the commitments are compact), so the transport certificate
+    // binds only the companion transported objects (public-key share, proof, and
+    // evaluation-key materials) rather than a primary VSS material object.
     const transportedObjects = transportedObjectRecords([
-        {
-            objectName: 'vssCoefficientCommitmentMaterial',
-            objectRole: 'public-vss-coefficient-commitment-material',
-            objectRoot: hashField(
-                vssCoefficientCommitmentMaterial,
-                'vssCoefficientCommitmentMaterialRoot',
-                'vssCoefficientCommitmentMaterial',
-            ),
-            byteLength:
-                publicVssMaterialSizeParameters.fullMaterialCoefficientBytes,
-            fullObjectHash: transportInput.fullObjectHash,
-            chunkRoot: setupTransportChunkManifestRoot({
-                chunkCount: transportInput.chunkHashes.length,
-                totalByteLength:
-                    publicVssMaterialSizeParameters.fullMaterialCoefficientBytes,
-                chunkHashes: transportInput.chunkHashes,
-                fullObjectHash: transportInput.fullObjectHash,
-            }),
-            chunkHashes: transportInput.chunkHashes,
-        },
         ...(transportInput.transportedObjects ?? []),
     ]);
     const totalByteLength = transportedObjects.reduce(
@@ -170,12 +130,10 @@ const setupTransportCertificateBody = (
 
 export const createSetupTransportCertificate = (
     setupParameters: CollectiveBgvSetupParametersForCertificates,
-    vssCoefficientCommitmentMaterial: JsonRecord,
     transportInput: SetupCertificateTransportInput,
 ): SetupTransportCertificate => {
     const certificateBody = setupTransportCertificateBody(
         setupParameters,
-        vssCoefficientCommitmentMaterial,
         transportInput,
     );
 

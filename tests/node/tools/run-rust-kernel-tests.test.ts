@@ -1,3 +1,5 @@
+import os from 'node:os';
+
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -7,6 +9,7 @@ import {
 import {
     cargoTestArgumentsForRustKernelFast,
     heavyAcceptedSetupTestPattern,
+    memoryBoundedFastTestThreadCount,
     normalizeRustTestFilter,
 } from '#tools/ci/rust-kernel-test-arguments';
 
@@ -36,6 +39,25 @@ describe('Rust kernel runner arguments', () => {
             '--',
             '--skip',
             heavyAcceptedSetupTestPattern,
+            '--show-output',
+        ]);
+    });
+
+    it('memory-bounds the fast lane libtest thread count', () => {
+        const threadCount = memoryBoundedFastTestThreadCount();
+        expect(Number.isInteger(threadCount)).toBe(true);
+        expect(threadCount).toBeGreaterThanOrEqual(1);
+        expect(threadCount).toBeLessThanOrEqual(os.cpus().length);
+
+        expect(cargoTestArgumentsForRustKernelFast(undefined, 4)).toEqual([
+            'test',
+            '-p',
+            'sealed-lattice-kernel',
+            '--',
+            '--skip',
+            heavyAcceptedSetupTestPattern,
+            '--test-threads',
+            '4',
             '--show-output',
         ]);
     });
@@ -70,13 +92,16 @@ describe('Rust kernel runner arguments', () => {
     });
 
     it('builds the cargo command for the package script', () => {
-        const command = buildRustKernelTestCommand({
-            testFilter: 'request_validation',
-        });
+        const command = buildRustKernelTestCommand(
+            {
+                testFilter: 'request_validation',
+            },
+            4,
+        );
 
         expect(command.command).toBe('cargo');
         expect(command.args).toEqual(
-            cargoTestArgumentsForRustKernelFast('request_validation'),
+            cargoTestArgumentsForRustKernelFast('request_validation', 4),
         );
         expect(command.description).toBe(
             'cargo test Rust kernel fast (request_validation)',

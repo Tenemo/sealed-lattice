@@ -1,7 +1,7 @@
 use super::*;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn private_vss_envelope_commitments_object(
+pub(in super::super) fn private_vss_envelope_commitments_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
@@ -212,7 +212,7 @@ pub(super) fn private_vss_envelope_commitments_object(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn vss_share_acceptances_object(
+pub(in super::super) fn vss_share_acceptances_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,
@@ -350,143 +350,4 @@ pub(super) fn vss_share_acceptances_object(
     );
 
     acceptance_set
-}
-
-pub(in super::super) fn vss_complaints_object(
-    setup_context: &serde_json::Value,
-    private_vss_envelope_commitments: &serde_json::Value,
-    vss_coefficient_commitments: &serde_json::Value,
-    source_trustee_roster_position: u64,
-    recipient_roster_position: u64,
-) -> serde_json::Value {
-    let private_vss_envelope_commitment_root =
-        private_vss_envelope_commitments["privateVssEnvelopeCommitmentRoot"]
-            .as_str()
-            .expect("private VSS envelope commitment root");
-    let ceremony_id = setup_context["ceremonyId"].as_str().expect("ceremony id");
-    let manifest_hash = setup_context["manifestHash"]
-        .as_str()
-        .expect("manifest hash");
-    let roster_hash = setup_context["rosterHash"].as_str().expect("roster hash");
-    let setup_parameters_hash = setup_context["setupParametersHash"]
-        .as_str()
-        .expect("setup parameters hash");
-    let setup_epoch = setup_context["setupEpoch"].as_str().expect("setup epoch");
-    let source_trustee_identity = format!("trustee-{source_trustee_roster_position}");
-    let recipient_identity = format!("trustee-{recipient_roster_position}");
-    let source_trustee_commitment_root = vss_coefficient_commitments["sourceTrusteeRecords"]
-        [source_trustee_roster_position as usize]["sourceTrusteeCommitmentRoot"]
-        .as_str()
-        .expect("source trustee commitment root");
-    let envelope_sequence_number =
-        (source_trustee_roster_position * 10 + recipient_roster_position) as usize;
-    let private_envelope_hash = private_vss_envelope_commitments["envelopeReferences"]
-        [envelope_sequence_number]["privateEnvelopeHash"]
-        .as_str()
-        .expect("private envelope hash");
-    let complaint_reason_code = "privateVssEnvelopeInvalidOpening";
-    let complaint_evidence_root = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "PrivateVssLocalVerificationRoot",
-        "fixture": "recipient-vss-complaint-evidence",
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "recipientRosterPosition": recipient_roster_position,
-        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-        "privateEnvelopeHash": private_envelope_hash,
-        "complaintReasonCode": complaint_reason_code,
-    }))
-    .expect("complaint evidence root");
-    let signature_seed_label = setup_trustee_signature_seed_label(&recipient_identity);
-    let signing_public_key_hash = create_ml_dsa_public_key_hash_fixture(&signature_seed_label)
-        .expect("signature key fixture");
-    let complaint_payload = serde_json::json!({
-        "objectType": "VssShareComplaint",
-        "objectVersion": 1,
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "sourceTrusteeIdentity": source_trustee_identity.as_str(),
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "recipientIdentity": recipient_identity.as_str(),
-        "recipientRosterPosition": recipient_roster_position,
-        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-        "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
-        "privateEnvelopeHash": private_envelope_hash,
-        "complaintEvidenceRoot": complaint_evidence_root.as_str(),
-        "complaintReasonCode": complaint_reason_code,
-        "recoveryEpoch": 0,
-        "deviceEpoch": 0,
-        "signingPublicKeyHash": signing_public_key_hash,
-    });
-    let complaint_root = derive_canonical_object_hash(&complaint_payload).expect("complaint root");
-    let complaint_byte_length = u64::try_from(
-        canonical_json(&complaint_payload)
-            .expect("complaint payload")
-            .len(),
-    )
-    .expect("complaint payload length");
-    let complaint_context_hash = derive_canonical_object_hash(&serde_json::json!({
-        "objectType": "VssShareComplaintSignatureContext",
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "sourceTrusteeIdentity": source_trustee_identity.as_str(),
-        "sourceTrusteeRosterPosition": source_trustee_roster_position,
-        "recipientIdentity": recipient_identity.as_str(),
-        "recipientRosterPosition": recipient_roster_position,
-        "sourceTrusteeCommitmentRoot": source_trustee_commitment_root,
-        "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
-        "privateEnvelopeHash": private_envelope_hash,
-        "complaintEvidenceRoot": complaint_evidence_root.as_str(),
-        "complaintReasonCode": complaint_reason_code,
-        "complaintRoot": complaint_root.as_str(),
-    }))
-    .expect("complaint context hash");
-    let signature_fixture = create_protocol_signature_fixture(
-        &signature_seed_label,
-        serde_json::json!({
-            "objectType": "VssShareComplaint",
-            "objectVersion": 1,
-            "ceremonyId": ceremony_id,
-            "manifestHash": manifest_hash,
-            "boardHeadHash": null,
-            "objectRoot": complaint_root.as_str(),
-            "chunkMerkleRoot": null,
-            "byteLength": complaint_byte_length,
-            "signerRole": "Trustee",
-            "signerIdentity": recipient_identity.as_str(),
-            "recoveryEpoch": 0,
-            "deviceEpoch": 0,
-            "contextHash": complaint_context_hash,
-        }),
-    )
-    .expect("complaint signature fixture");
-    let signature_envelope = signature_fixture.envelope;
-    let signature_envelope_hash = signature_envelope["signatureHash"].clone();
-    let mut complaint_record = complaint_payload;
-    complaint_record["complaintRoot"] = serde_json::json!(complaint_root);
-    complaint_record["complaintByteLength"] = serde_json::json!(complaint_byte_length);
-    complaint_record["complaintContextHash"] = serde_json::json!(complaint_context_hash);
-    complaint_record["signatureEnvelopeHash"] = signature_envelope_hash;
-    complaint_record["signatureEnvelope"] = signature_envelope;
-
-    let mut complaint_set = serde_json::json!({
-        "objectType": "VssComplaintSet",
-        "objectVersion": 1,
-        "ceremonyId": ceremony_id,
-        "manifestHash": manifest_hash,
-        "rosterHash": roster_hash,
-        "setupParametersHash": setup_parameters_hash,
-        "setupEpoch": setup_epoch,
-        "privateVssEnvelopeCommitmentRoot": private_vss_envelope_commitment_root,
-        "complaintRecords": [complaint_record],
-    });
-    complaint_set["vssComplaintRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&complaint_set).expect("VSS complaint set root")
-    );
-
-    complaint_set
 }

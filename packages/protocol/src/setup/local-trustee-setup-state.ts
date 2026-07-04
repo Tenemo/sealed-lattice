@@ -10,9 +10,9 @@ import {
 import type { ProtocolHash } from '@sealed-lattice/types';
 
 import {
-    assertContextFieldPathsMatch,
-    assertJsonRecord as jsonRecord,
-    assertJsonRecordArray as jsonRecordArray,
+    assertContextMatches,
+    assertJsonRecord,
+    assertJsonRecordArray,
     assertNonEmptyString,
     assertNonNegativeSafeInteger,
     assertProtocolHash,
@@ -272,16 +272,16 @@ export const createLocalTrusteeSetupStateCommitment = (
 const thresholdShareCommitmentRecipientRoot = (
     input: GeneratedLocalTrusteeSetupStateInput,
 ): ProtocolHash => {
-    const thresholdShareCommitments = jsonRecord(
+    const thresholdShareCommitments = assertJsonRecord(
         input.thresholdShareCommitments,
         'thresholdShareCommitments',
     );
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         thresholdShareCommitments,
         'thresholdShareCommitments',
     );
-    const recipientRecords = jsonRecordArray(
+    const recipientRecords = assertJsonRecordArray(
         thresholdShareCommitments.recipientRecords,
         'thresholdShareCommitments.recipientRecords',
     ).filter(
@@ -310,11 +310,11 @@ const thresholdShareCommitmentRecipientRoot = (
 const recipientEnvelopeReferences = (
     input: GeneratedLocalTrusteeSetupStateInput,
 ): readonly PrivateVssEnvelopeVerificationReference[] => {
-    const privateVssEnvelopeCommitments = jsonRecord(
+    const privateVssEnvelopeCommitments = assertJsonRecord(
         input.privateVssEnvelopeCommitments,
         'privateVssEnvelopeCommitments',
     );
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         privateVssEnvelopeCommitments,
         'privateVssEnvelopeCommitments',
@@ -329,7 +329,7 @@ const recipientEnvelopeReferences = (
             'privateVssEnvelopeCommitments.participantCount must be positive.',
         );
     }
-    const envelopeReferences = jsonRecordArray(
+    const envelopeReferences = assertJsonRecordArray(
         privateVssEnvelopeCommitments.envelopeReferences,
         'privateVssEnvelopeCommitments.envelopeReferences',
     )
@@ -350,7 +350,7 @@ const recipientEnvelopeReferences = (
     }
     envelopeReferences.forEach((reference, referenceIndex) => {
         const objectPath = `privateVssEnvelopeCommitments.envelopeReferences.${String(referenceIndex)}`;
-        assertContextFieldPathsMatch(input.setupContext, reference, objectPath);
+        assertContextMatches(input.setupContext, reference, objectPath);
         if (reference.sourceTrusteeRosterPosition !== referenceIndex) {
             throw new Error(
                 'private VSS envelope references for a trustee must cover contiguous source trustee roster positions.',
@@ -379,16 +379,16 @@ const issuedVssAcceptanceRoot = (
     privateVssEnvelopeCommitmentRoot: ProtocolHash,
     expectedAcceptanceCount: number,
 ): ProtocolHash => {
-    const vssShareAcceptances = jsonRecord(
+    const vssShareAcceptances = assertJsonRecord(
         input.vssShareAcceptances,
         'vssShareAcceptances',
     );
-    assertContextFieldPathsMatch(
+    assertContextMatches(
         input.setupContext,
         vssShareAcceptances,
         'vssShareAcceptances',
     );
-    const acceptanceRoots = jsonRecordArray(
+    const acceptanceRoots = assertJsonRecordArray(
         vssShareAcceptances.acceptanceRecords,
         'vssShareAcceptances.acceptanceRecords',
     )
@@ -403,11 +403,7 @@ const issuedVssAcceptanceRoot = (
         )
         .map((record, recordIndex) => {
             const objectPath = `vssShareAcceptances.acceptanceRecords.${String(recordIndex)}`;
-            assertContextFieldPathsMatch(
-                input.setupContext,
-                record,
-                objectPath,
-            );
+            assertContextMatches(input.setupContext, record, objectPath);
             if (record.recipientIdentity !== input.trusteeIdentity) {
                 throw new Error(
                     `${objectPath}.recipientIdentity must match the trustee identity.`,
@@ -448,14 +444,13 @@ const issuedVssComplaintRoots = (
     if (input.vssComplaints === undefined) {
         return [];
     }
-    const vssComplaints = jsonRecord(input.vssComplaints, 'vssComplaints');
-    assertContextFieldPathsMatch(
-        input.setupContext,
-        vssComplaints,
+    const vssComplaints = assertJsonRecord(
+        input.vssComplaints,
         'vssComplaints',
     );
+    assertContextMatches(input.setupContext, vssComplaints, 'vssComplaints');
 
-    return jsonRecordArray(
+    return assertJsonRecordArray(
         vssComplaints.complaintRecords,
         'vssComplaints.complaintRecords',
     )
@@ -470,11 +465,7 @@ const issuedVssComplaintRoots = (
         )
         .map((record, recordIndex) => {
             const objectPath = `vssComplaints.complaintRecords.${String(recordIndex)}`;
-            assertContextFieldPathsMatch(
-                input.setupContext,
-                record,
-                objectPath,
-            );
+            assertContextMatches(input.setupContext, record, objectPath);
             if (record.recipientIdentity !== input.trusteeIdentity) {
                 throw new Error(
                     `${objectPath}.recipientIdentity must match the trustee identity.`,
@@ -537,11 +528,7 @@ const assertPrivateEnvelopeMatchesReference = (
     privateEnvelopeHash: ProtocolHash,
     envelopeReference: PrivateVssEnvelopeVerificationReference,
 ): void => {
-    assertContextFieldPathsMatch(
-        setupContext,
-        privateEnvelope,
-        'privateEnvelope',
-    );
+    assertContextMatches(setupContext, privateEnvelope, 'privateEnvelope');
     if (privateEnvelopeHash !== envelopeReference.privateEnvelopeHash) {
         throw new Error(
             'verified private VSS envelope hash must match the public envelope reference.',
@@ -571,7 +558,7 @@ const aggregateVerifiedPrivateVssMaterial = (
 }> => {
     const privateEnvelopeByHash = new Map<ProtocolHash, JsonRecord>();
     for (const privateEnvelopeValue of input.verifiedPrivateVssShareEnvelopes) {
-        const privateEnvelope = jsonRecord(
+        const privateEnvelope = assertJsonRecord(
             privateEnvelopeValue,
             'verifiedPrivateVssShareEnvelopes',
         );
@@ -600,7 +587,7 @@ const aggregateVerifiedPrivateVssMaterial = (
             envelopeReference.privateEnvelopeHash,
             envelopeReference,
         );
-        const rnsShareOpenings = jsonRecordArray(
+        const rnsShareOpenings = assertJsonRecordArray(
             privateEnvelope.rnsShareOpenings,
             'privateEnvelope.rnsShareOpenings',
         );
@@ -726,7 +713,7 @@ export const createEncryptedLocalTrusteeSetupStateFromVerifiedShares = async (
         thresholdShareCommitmentRecipientRoot(input);
     const envelopeReferences = recipientEnvelopeReferences(input);
     const privateVssEnvelopeCommitmentRoot = protocolHashField(
-        jsonRecord(
+        assertJsonRecord(
             input.privateVssEnvelopeCommitments,
             'privateVssEnvelopeCommitments',
         ),

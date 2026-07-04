@@ -1,6 +1,6 @@
 use super::extension_field::ChallengeExtensionElement;
 use super::low_degree_proof::LowDegreeProof;
-use super::merkle_commitment::BatchedMerkleOpening;
+use super::merkle_commitment::{BatchedMerkleOpening, MerkleDigest};
 
 mod challenges;
 mod claim_masking;
@@ -25,8 +25,8 @@ pub(crate) struct SuccinctEvaluationKeyProof {
 }
 
 pub(super) struct LimbProof {
-    pub(super) witness_tree_root: [u8; 64],
-    pub(super) quotient_tree_root: [u8; 64],
+    pub(super) witness_tree_root: MerkleDigest,
+    pub(super) quotient_tree_root: MerkleDigest,
     // Smudging-masked consistency claims in local claim order (consistency
     // vector major, repetition minor).
     pub(super) masked_consistency_claims: Vec<u64>,
@@ -37,29 +37,19 @@ pub(super) struct LimbProof {
     pub(super) low_degree: LowDegreeProof,
     pub(super) sumcheck_residual_low_degree: LowDegreeProof,
     pub(super) query_openings: Vec<PhaseQueryOpening>,
-    pub(super) sumcheck_residual_query_openings: Vec<PhaseTwoQueryOpening>,
-    // One batched authentication opening per phase tree, covering every queried
-    // position and its coset partner at once instead of an independent path per
-    // query slot.
+    // One batched authentication opening per phase tree. The phase-two opening
+    // authenticates the shared positions used by the main and residual
+    // low-degree openings.
     pub(super) witness_batch_opening: BatchedMerkleOpening,
     pub(super) quotient_batch_opening: BatchedMerkleOpening,
-    pub(super) sumcheck_residual_batch_opening: BatchedMerkleOpening,
 }
 
-// Openings of both phase trees at the queried extension pair positions,
-// including the leaf salts. The authentication nodes live in the per-tree
-// batched openings on `LimbProof`, not here.
+// Openings of both phase trees at the queried extension pair positions. Each
+// phase tree leaf binds the ordered row pair with one salt; authentication
+// nodes live in the per-tree batched openings on `LimbProof`, not here.
 pub(super) struct PhaseQueryOpening {
     pub(super) phase_one_rows: [Vec<u64>; 2],
-    pub(super) phase_one_salts: [Vec<u8>; 2],
+    pub(super) phase_one_pair_salt: Vec<u8>,
     pub(super) phase_two_rows: [Vec<u64>; 2],
-    pub(super) phase_two_salts: [Vec<u8>; 2],
-}
-
-// Openings of the phase-two tree at the residual low-degree query positions.
-// The residual FRI instance authenticates only the fourth logical phase-two
-// column, but the Merkle leaf still binds the whole phase-two row.
-pub(super) struct PhaseTwoQueryOpening {
-    pub(super) phase_two_rows: [Vec<u64>; 2],
-    pub(super) phase_two_salts: [Vec<u8>; 2],
+    pub(super) phase_two_pair_salt: Vec<u8>,
 }

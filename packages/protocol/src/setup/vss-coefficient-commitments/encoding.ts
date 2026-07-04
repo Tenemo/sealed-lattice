@@ -1,9 +1,7 @@
 // Stateless encoding, assertion, hashing, and sampling primitives shared across
-// the VSS coefficient-commitment builders: integer and hex guards, centered
-// ternary and uniform residue sampling, the little-endian coefficient vector
-// encoding and its hash, varuint helpers, the setup-context field projection,
-// and the binary material byte-length accounting.
-import { hash512Hex } from '@sealed-lattice/crypto';
+// the VSS coefficient-commitment builders: integer guards, centered ternary and
+// uniform residue sampling, varuint helpers, the setup-context field
+// projection, and the binary material byte-length accounting.
 
 export { contextFields, setupContextFieldNames } from '../common-fields.js';
 
@@ -12,7 +10,6 @@ import {
     setupCommitmentRandomnessWidth,
     setupCommitmentRowCount,
     vssCoefficientCommitmentMaterialBinaryMagic,
-    type JsonRecord,
     type VssOpeningRandomByteSource,
 } from './constants-and-types.js';
 
@@ -161,35 +158,6 @@ export const centeredIntegerToResidue = (
     return Number(residue < 0n ? residue + modulusWide : residue);
 };
 
-const coefficientVectorBytes = (
-    coefficients: readonly number[],
-): Uint8Array => {
-    const bytes = new Uint8Array(coefficients.length * 8);
-    coefficients.forEach((coefficient, coefficientIndex) => {
-        let value = BigInt(coefficient);
-        for (let byteIndex = 0; byteIndex < 8; byteIndex += 1) {
-            bytes[coefficientIndex * 8 + byteIndex] = Number(value & 0xffn);
-            value >>= 8n;
-        }
-    });
-
-    return bytes;
-};
-
-export const coefficientVectorHash512 = (
-    coefficients: readonly number[],
-    domain: string,
-): string => hash512Hex(domain, [coefficientVectorBytes(coefficients)]);
-
-const hexToBytes = (hex: string): Uint8Array => {
-    const bytes = new Uint8Array(hex.length / 2);
-    for (let index = 0; index < bytes.length; index += 1) {
-        bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
-    }
-
-    return bytes;
-};
-
 const littleEndianU64 = (bytes: Uint8Array): bigint => {
     let value = 0n;
     for (let byteIndex = bytes.length - 1; byteIndex >= 0; byteIndex -= 1) {
@@ -267,44 +235,6 @@ export const sampleCommitmentOpeningRandomness = (
         sampleCenteredTernaryVector(sampler, ringDegree),
     );
 
-export const bytesToHex = (bytes: Uint8Array): string =>
-    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-
-export const hexToBytesStrict = (
-    hex: string,
-    fieldName: string,
-): Uint8Array => {
-    if (!/^(?:[0-9a-f]{2})*$/u.test(hex)) {
-        throw new TypeError(`${fieldName} must be lowercase hex bytes.`);
-    }
-
-    return hexToBytes(hex);
-};
-
-export const assertJsonRecord = (
-    value: unknown,
-    fieldName: string,
-): JsonRecord => {
-    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an object.`);
-    }
-
-    return value as JsonRecord;
-};
-
-export const assertJsonRecordArray = (
-    value: unknown,
-    fieldName: string,
-): readonly JsonRecord[] => {
-    if (!Array.isArray(value)) {
-        throw new TypeError(`${fieldName} must be an array.`);
-    }
-
-    return value.map((entry, entryIndex) =>
-        assertJsonRecord(entry, `${fieldName}.${String(entryIndex)}`),
-    );
-};
-
 const appendVaruint = (outputBytes: number[], value: number): void => {
     if (!Number.isSafeInteger(value) || value < 0) {
         throw new TypeError(
@@ -325,7 +255,7 @@ const appendVaruint = (outputBytes: number[], value: number): void => {
     }
 };
 
-export const varuintBytes = (value: number): Uint8Array => {
+const varuintBytes = (value: number): Uint8Array => {
     const outputBytes: number[] = [];
     appendVaruint(outputBytes, value);
 
@@ -371,36 +301,4 @@ export const binaryVssCoefficientCommitmentMaterialByteLength = (input: {
     );
 
     return headerByteLength + materialRecordCount * recordByteLength;
-};
-
-export const positiveSafeIntegerField = (
-    value: unknown,
-    fieldName: string,
-): number => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value <= 0
-    ) {
-        throw new TypeError(`${fieldName} must be a positive safe integer.`);
-    }
-
-    return value;
-};
-
-export const nonNegativeSafeIntegerField = (
-    value: unknown,
-    fieldName: string,
-): number => {
-    if (
-        typeof value !== 'number' ||
-        !Number.isSafeInteger(value) ||
-        value < 0
-    ) {
-        throw new TypeError(
-            `${fieldName} must be a non-negative safe integer.`,
-        );
-    }
-
-    return value;
 };

@@ -1,33 +1,64 @@
 use super::*;
-use crate::hashing::hash512;
+use crate::hashing::hash256;
 
-const LEAF_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-leaf-v1";
-const NODE_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-node-v1";
+const LEAF_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-leaf-v2";
+const PHASE_PAIR_LEAF_DOMAIN: &str =
+    "sealed-lattice/setup/trustee-evaluation-key/phase-pair-merkle-leaf-v1";
+const NODE_DOMAIN: &str = "sealed-lattice/setup/trustee-evaluation-key/merkle-node-v2";
+
+pub(super) const MERKLE_DIGEST_BYTES: usize = 32;
+pub(super) type MerkleDigest = [u8; MERKLE_DIGEST_BYTES];
 
 // Merkle commitment over a power-of-two leaf count. Leaves are rows of u64
 // values (one row per evaluation position across all committed columns).
 pub(super) struct MerkleTree {
-    levels: Vec<Vec<[u8; 64]>>,
+    levels: Vec<Vec<MerkleDigest>>,
 }
 
 pub(super) const LEAF_SALT_BYTES: usize = 32;
 
 // Salted leaf: the salt statistically hides unopened sibling rows so the
 // commitment is hiding, not only binding.
-pub(super) fn leaf_hash(index: usize, salt: &[u8], row_values: &[u64]) -> [u8; 64] {
+pub(super) fn leaf_hash(index: usize, salt: &[u8], row_values: &[u64]) -> MerkleDigest {
     let mut row_bytes = Vec::with_capacity(row_values.len() * 8);
     for value in row_values {
         row_bytes.extend_from_slice(&value.to_le_bytes());
     }
 
-    hash512(
+    merkle_digest(
         LEAF_DOMAIN,
         &[&(index as u64).to_le_bytes(), salt, &row_bytes],
     )
 }
 
+// Phase queries always open the ordered pair (position, position + half). A
+// separate leaf domain binds both rows and their row boundary under one salt,
+// while keeping low-degree folded-layer leaves in their existing domain.
+pub(super) fn phase_pair_leaf_hash(
+    pair_index: usize,
+    salt: &[u8],
+    first_row_values: &[u64],
+    second_row_values: &[u64],
+) -> MerkleDigest {
+    let mut row_bytes = Vec::with_capacity((first_row_values.len() + second_row_values.len()) * 8);
+    for value in first_row_values.iter().chain(second_row_values.iter()) {
+        row_bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    merkle_digest(
+        PHASE_PAIR_LEAF_DOMAIN,
+        &[
+            &(pair_index as u64).to_le_bytes(),
+            &(first_row_values.len() as u64).to_le_bytes(),
+            &(second_row_values.len() as u64).to_le_bytes(),
+            salt,
+            &row_bytes,
+        ],
+    )
+}
+
 impl MerkleTree {
-    pub(super) fn from_leaf_hashes(leaf_hashes: Vec<[u8; 64]>) -> CanonicalResult<Self> {
+    pub(super) fn from_leaf_hashes(leaf_hashes: Vec<MerkleDigest>) -> CanonicalResult<Self> {
         if leaf_hashes.is_empty() || !leaf_hashes.len().is_power_of_two() {
             return Err(invalid_succinct_setup_proof(
                 "Merkle leaf count must be a non-empty power of two",
@@ -38,7 +69,7 @@ impl MerkleTree {
             let previous = levels.last().expect("levels are non-empty");
             let mut next = Vec::with_capacity(previous.len() / 2);
             for pair in previous.chunks_exact(2) {
-                next.push(hash512(NODE_DOMAIN, &[&pair[0], &pair[1]]));
+                next.push(merkle_digest(NODE_DOMAIN, &[&pair[0], &pair[1]]));
             }
             levels.push(next);
         }
@@ -46,12 +77,12 @@ impl MerkleTree {
         Ok(Self { levels })
     }
 
-    pub(super) fn root(&self) -> [u8; 64] {
+    pub(super) fn root(&self) -> MerkleDigest {
         self.levels.last().expect("levels are non-empty")[0]
     }
 
     #[cfg(test)]
-    pub(super) fn open(&self, leaf_index: usize) -> Vec<[u8; 64]> {
+    pub(super) fn open(&self, leaf_index: usize) -> Vec<MerkleDigest> {
         let mut path = Vec::with_capacity(self.levels.len() - 1);
         let mut index = leaf_index;
         for level in &self.levels[..self.levels.len() - 1] {
@@ -63,20 +94,24 @@ impl MerkleTree {
     }
 }
 
+fn merkle_digest(domain: &str, parts: &[&[u8]]) -> MerkleDigest {
+    hash256(domain, parts)
+}
+
 #[cfg(test)]
 pub(super) fn verify_merkle_opening(
-    root: &[u8; 64],
+    root: &MerkleDigest,
     leaf_index: usize,
-    leaf: &[u8; 64],
-    path: &[[u8; 64]],
+    leaf: &MerkleDigest,
+    path: &[MerkleDigest],
 ) -> bool {
     let mut node = *leaf;
     let mut index = leaf_index;
     for sibling in path {
         node = if index & 1 == 0 {
-            hash512(NODE_DOMAIN, &[&node, sibling])
+            merkle_digest(NODE_DOMAIN, &[&node, sibling])
         } else {
-            hash512(NODE_DOMAIN, &[sibling, &node])
+            merkle_digest(NODE_DOMAIN, &[sibling, &node])
         };
         index >>= 1;
     }
@@ -88,15 +123,11 @@ pub(super) fn verify_merkle_opening(
 }
 
 // Batched Merkle opening: the deduplicated authentication nodes that, together
-// with a set of opened leaves, recompute the tree root. A proof that opens many
-// leaves of one tree (every query position of the low-degree test, or every
-// folded-layer pair) otherwise repeats the internal nodes near the root in every
-// per-leaf path. Sending each required internal node once removes that
-// redundancy. The commitment is unchanged: the verifier still recomputes the
-// same root from the same leaves, so binding and hiding are exactly as before;
-// only the redundant re-transmission of shared nodes is removed.
+// with a set of opened leaves, recompute the tree root. The verifier consumes
+// each required internal node once and still binds the opened leaves to the
+// same salted commitment root.
 pub(super) struct BatchedMerkleOpening {
-    pub(super) authentication_nodes: Vec<[u8; 64]>,
+    pub(super) authentication_nodes: Vec<MerkleDigest>,
 }
 
 // Sorted, unique leaf indices from a possibly unsorted, repeating index list.
@@ -114,8 +145,8 @@ pub(super) fn sorted_unique_indices(indices: impl IntoIterator<Item = usize>) ->
 // to two different values across queries and have only one of them bound to the
 // committed root; returning None forces the verifier to reject that.
 pub(super) fn consistent_sorted_leaves(
-    leaves: impl IntoIterator<Item = (usize, [u8; 64])>,
-) -> Option<Vec<(usize, [u8; 64])>> {
+    leaves: impl IntoIterator<Item = (usize, MerkleDigest)>,
+) -> Option<Vec<(usize, MerkleDigest)>> {
     let mut leaves_by_index = std::collections::BTreeMap::new();
     for (index, leaf) in leaves {
         match leaves_by_index.entry(index) {
@@ -178,15 +209,15 @@ impl MerkleTree {
 // the recomputed root matches and every supplied node was consumed, so neither a
 // short nor a padded node list is accepted.
 pub(super) fn verify_merkle_batch(
-    root: &[u8; 64],
+    root: &MerkleDigest,
     depth: usize,
-    sorted_unique_leaves: &[(usize, [u8; 64])],
+    sorted_unique_leaves: &[(usize, MerkleDigest)],
     opening: &BatchedMerkleOpening,
 ) -> bool {
     let mut current = sorted_unique_leaves.to_vec();
     let mut node_cursor = 0;
     for _level in 0..depth {
-        let mut parents: Vec<(usize, [u8; 64])> = Vec::new();
+        let mut parents: Vec<(usize, MerkleDigest)> = Vec::new();
         let mut index_cursor = 0;
         while index_cursor < current.len() {
             let (node_index, node_hash) = current[index_cursor];
@@ -210,7 +241,7 @@ pub(super) fn verify_merkle_batch(
                 (sibling_hash, node_hash)
             };
             let parent_index = node_index >> 1;
-            let parent_hash = hash512(NODE_DOMAIN, &[&left, &right]);
+            let parent_hash = merkle_digest(NODE_DOMAIN, &[&left, &right]);
             if parents.last().map(|(index, _)| *index) != Some(parent_index) {
                 parents.push((parent_index, parent_hash));
             }
@@ -228,13 +259,13 @@ pub(super) fn verify_merkle_batch(
 mod tests {
     use super::*;
 
-    fn deterministic_leaves(count: usize) -> Vec<[u8; 64]> {
+    fn deterministic_leaves(count: usize) -> Vec<MerkleDigest> {
         (0..count)
-            .map(|index| hash512(LEAF_DOMAIN, &[&(index as u64).to_le_bytes()]))
+            .map(|index| merkle_digest(LEAF_DOMAIN, &[&(index as u64).to_le_bytes()]))
             .collect()
     }
 
-    fn opened_leaf_set(leaves: &[[u8; 64]], indices: &[usize]) -> Vec<(usize, [u8; 64])> {
+    fn opened_leaf_set(leaves: &[MerkleDigest], indices: &[usize]) -> Vec<(usize, MerkleDigest)> {
         consistent_sorted_leaves(indices.iter().map(|index| (*index, leaves[*index])))
             .expect("consistent leaves")
     }
@@ -323,7 +354,7 @@ mod tests {
 
         // A padded node list is rejected because not every node is consumed.
         let mut long_nodes = opening.authentication_nodes.clone();
-        long_nodes.push([0_u8; 64]);
+        long_nodes.push([0_u8; MERKLE_DIGEST_BYTES]);
         assert!(!verify_merkle_batch(
             &tree.root(),
             depth,

@@ -64,8 +64,10 @@ struct SetupProofMaterialTransportStreamSession {
 #[derive(Debug, Clone)]
 struct VerifiedSetupProofMaterial {
     reference: Value,
-    chunks: Arc<Vec<Vec<u8>>>,
+    chunks: SetupProofMaterialChunks,
 }
+
+pub(in crate::bgv::setup) type SetupProofMaterialChunks = Arc<Vec<Vec<u8>>>;
 
 pub(in crate::bgv::setup) fn setup_proof_record_binding_value(
     setup_parameters_hash: &str,
@@ -185,7 +187,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
     expected_proof_material_root: &str,
     transported_proof_material: &Value,
     transported_material_path: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<SetupProofMaterialChunks> {
     validate_supported_setup_proof_transport_family(proof_family, "proofFamily")?;
     validate_hash_string(
         expected_proof_material_root,
@@ -253,7 +255,7 @@ pub(in crate::bgv::setup) fn verified_setup_proof_material_chunks_from_request(
                 "verified setup proof material handle does not match the stream-verified metadata",
             ));
         }
-        matching_chunks = Some(stored_material.chunks.as_ref().clone());
+        matching_chunks = Some(Arc::clone(&stored_material.chunks));
     }
 
     matching_chunks.ok_or_else(|| {
@@ -1352,7 +1354,7 @@ mod tests {
         )
         .expect("verified setup proof material chunks");
 
-        assert_eq!(recovered_chunks, proof_chunks);
+        assert_eq!(recovered_chunks.as_ref(), &proof_chunks);
     }
 
     #[test]

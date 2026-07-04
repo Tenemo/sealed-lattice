@@ -14,10 +14,6 @@ export const createSetupCertificates = (
     const setupParameters = setupParametersForCertificates(
         input.setupParameters,
     );
-    const vssCoefficientCommitmentMaterial = assertObjectRecord(
-        input.vssCoefficientCommitmentMaterial,
-        'vssCoefficientCommitmentMaterial',
-    );
     const transport = assertObjectRecord(input.transport, 'transport');
     const transportInput = {
         fullObjectHash: hashField(transport, 'fullObjectHash', 'transport'),
@@ -28,7 +24,6 @@ export const createSetupCertificates = (
     return {
         setupTransportCertificate: createSetupTransportCertificate(
             setupParameters,
-            vssCoefficientCommitmentMaterial,
             transportInput,
         ),
     };

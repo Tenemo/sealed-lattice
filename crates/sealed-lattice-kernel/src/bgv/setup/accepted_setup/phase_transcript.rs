@@ -825,6 +825,28 @@ pub(super) fn setup_intent_trustee_registrations_from_phase_transcript(
     setup_intent_trustee_registrations_from_phase_value(setup_intent_phase)
 }
 
+// Roster used by the target-decryption reader: the accepted package carries no
+// top-level participants array, so the trustee identities and roster positions
+// come from the verified setupIntent registrations. Returned sorted by roster
+// position (BTreeMap order); board position, interpolation abscissa, and epochs
+// are derived canonically by the caller.
+pub(crate) fn accepted_setup_participant_roster_from_package(
+    setup_package: &Value,
+) -> CanonicalResult<Vec<(usize, String)>> {
+    setup_intent_trustee_registrations_from_phase_transcript(setup_package)?
+        .into_iter()
+        .map(|(roster_position, registration)| {
+            let roster_position = usize::try_from(roster_position).map_err(|_| {
+                CanonicalError::new(
+                    CanonicalErrorCode::MalformedLength,
+                    "accepted setup roster position does not fit usize",
+                )
+            })?;
+            Ok((roster_position, registration.trustee_identity))
+        })
+        .collect()
+}
+
 pub(super) fn verify_setup_intent_roster_hash(
     setup_package: &Value,
 ) -> CanonicalResult<Option<Value>> {

@@ -1,9 +1,4 @@
 import { chunklessSetupProofMaterialSetForVerificationInput } from '../setup-proof-material-transport.js';
-import type {
-    SetupTransportedVssCoefficientCommitmentMaterial,
-    SetupTransportedVssCoefficientCommitmentMaterialLike,
-    VerifiedVssCoefficientCommitmentMaterial,
-} from '../vss-coefficient-commitments.js';
 
 import {
     assertObjectRecord,
@@ -17,40 +12,12 @@ import type {
     SetupPackageVerificationInputSource,
 } from './types.js';
 
-const publicVssMaterialReferenceForVerificationInput = (
-    transportedMaterial:
-        | SetupTransportedVssCoefficientCommitmentMaterialLike
-        | undefined,
-    verifiedMaterial: VerifiedVssCoefficientCommitmentMaterial | undefined,
-): SetupTransportedVssCoefficientCommitmentMaterialLike | undefined => {
-    if (transportedMaterial === undefined) {
-        return undefined;
-    }
-    if (
-        verifiedMaterial === undefined ||
-        !Object.prototype.hasOwnProperty.call(transportedMaterial, 'chunks')
-    ) {
-        return transportedMaterial;
-    }
-
-    const { chunks: omittedChunks, ...transportedMaterialReference } =
-        transportedMaterial as SetupTransportedVssCoefficientCommitmentMaterial;
-    void omittedChunks;
-
-    return transportedMaterialReference;
-};
-
 export const createSetupPackageVerificationInput = (
     input: SetupPackageVerificationInputSource,
 ): SetupPackageVerificationInput => {
     assertProtocolHash(input.expectedManifestHash, 'expectedManifestHash');
     assertProtocolHash(input.expectedRosterHash, 'expectedRosterHash');
 
-    const transportedVssCoefficientCommitmentMaterial =
-        publicVssMaterialReferenceForVerificationInput(
-            input.transportedVssCoefficientCommitmentMaterial,
-            input.verifiedVssCoefficientCommitmentMaterial,
-        );
     const transportedSameSecretProofMaterial =
         chunklessSetupProofMaterialSetForVerificationInput(
             input.transportedSameSecretProofMaterial,
@@ -66,22 +33,21 @@ export const createSetupPackageVerificationInput = (
             input.transportedEvaluationKeyShareProofMaterial,
             input.verifiedSetupProofMaterials,
         );
+    const transportedCompactVssShareLinkageProofMaterial =
+        chunklessSetupProofMaterialSetForVerificationInput(
+            input.transportedCompactVssShareLinkageProofMaterial,
+            input.verifiedSetupProofMaterials,
+        );
+    const transportedCompactSameSecretBridgeProofMaterial =
+        chunklessSetupProofMaterialSetForVerificationInput(
+            input.transportedCompactSameSecretBridgeProofMaterial,
+            input.verifiedSetupProofMaterials,
+        );
 
     return {
         setupPackage: input.setupPackage,
         expectedManifestHash: input.expectedManifestHash,
         expectedRosterHash: input.expectedRosterHash,
-        ...(transportedVssCoefficientCommitmentMaterial === undefined
-            ? {}
-            : {
-                  transportedVssCoefficientCommitmentMaterial,
-              }),
-        ...(input.verifiedVssCoefficientCommitmentMaterial === undefined
-            ? {}
-            : {
-                  verifiedVssCoefficientCommitmentMaterial:
-                      input.verifiedVssCoefficientCommitmentMaterial,
-              }),
         ...(transportedSameSecretProofMaterial === undefined
             ? {}
             : {
@@ -105,6 +71,18 @@ export const createSetupPackageVerificationInput = (
             : {
                   transportedEvaluationKeyShareProofMaterial:
                       transportedEvaluationKeyShareProofMaterial,
+              }),
+        ...(transportedCompactVssShareLinkageProofMaterial === undefined
+            ? {}
+            : {
+                  transportedCompactVssShareLinkageProofMaterial:
+                      transportedCompactVssShareLinkageProofMaterial,
+              }),
+        ...(transportedCompactSameSecretBridgeProofMaterial === undefined
+            ? {}
+            : {
+                  transportedCompactSameSecretBridgeProofMaterial:
+                      transportedCompactSameSecretBridgeProofMaterial,
               }),
         ...(input.transportedEvaluationKeyShareComponentMaterial === undefined
             ? {}

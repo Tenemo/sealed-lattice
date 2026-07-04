@@ -24,7 +24,10 @@ import {
     runCommandsInSeries,
     type CommandInvocation,
 } from './run-command.js';
-import { cargoTestArgumentsForRustKernelFast } from './rust-kernel-test-arguments.js';
+import {
+    cargoTestArgumentsForRustKernelFast,
+    memoryBoundedFastTestThreadCount,
+} from './rust-kernel-test-arguments.js';
 
 import { isDirectlyInvokedModule } from '#tools/internal/entry-point.js';
 
@@ -194,7 +197,10 @@ const buildRustKernelLane = (): ValidationLane => ({
         ),
         createCargoCommand(
             'cargo test (optimized test profile, fast)',
-            cargoTestArgumentsForRustKernelFast(),
+            cargoTestArgumentsForRustKernelFast(
+                undefined,
+                memoryBoundedFastTestThreadCount(),
+            ),
             'cargo-test',
         ),
     ],

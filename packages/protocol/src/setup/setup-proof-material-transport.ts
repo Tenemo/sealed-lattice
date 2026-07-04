@@ -187,39 +187,10 @@ export const setupProofChunkManifestRoot = (
         fullObjectHash,
     });
 
-type SetupProofChunkManifestRootInput = Readonly<{
-    readonly proofFamily: string;
-    readonly chunkHashes: readonly ProtocolHash[];
-    readonly fullObjectHash: ProtocolHash;
-    readonly totalByteLength: number;
-}>;
-
-type SetupProofChunkManifestRootDeriver = (
-    input: SetupProofChunkManifestRootInput,
-) => ProtocolHash;
-
-type SetupProofMaterialTransportMetadataOptions = Readonly<{
-    readonly deriveChunkManifestRoot?: SetupProofChunkManifestRootDeriver;
-}>;
-
-const defaultSetupProofChunkManifestRoot = ({
-    proofFamily,
-    chunkHashes,
-    fullObjectHash,
-    totalByteLength,
-}: SetupProofChunkManifestRootInput): ProtocolHash =>
-    setupProofChunkManifestRoot(
-        proofFamily,
-        chunkHashes,
-        fullObjectHash,
-        totalByteLength,
-    );
-
 export const setupProofMaterialTransportMetadata = (
     proofFamily: string,
     proofBytes: Uint8Array,
     emptyProofBytesMessage: string,
-    options: SetupProofMaterialTransportMetadataOptions = {},
 ): SetupProofMaterialTransportMetadata => {
     const chunks = splitProofBytesIntoChunks(proofBytes);
     if (chunks.length === 0) {
@@ -239,14 +210,12 @@ export const setupProofMaterialTransportMetadata = (
             chunk,
         ),
     );
-    const chunkRoot = (
-        options.deriveChunkManifestRoot ?? defaultSetupProofChunkManifestRoot
-    )({
+    const chunkRoot = setupProofChunkManifestRoot(
         proofFamily,
         chunkHashes,
         fullObjectHash,
         totalByteLength,
-    });
+    );
 
     return {
         chunks,

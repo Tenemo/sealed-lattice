@@ -116,9 +116,8 @@ fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()> {
     string_field(setup_context, "ceremonyId")?;
     string_field(setup_context, "setupEpoch")?;
     // The setup parameters hash is a roster family, so it must match the hash
-    // derived from this setup context's roster, not the first-closure n = 10
-    // hash. It subsumes the former per-component parameter hashes (Q_share,
-    // carry-aware VSS relation, commitment) and the BGV parameters.
+    // derived from this setup context's roster. It binds Q_share, the
+    // carry-aware VSS relation, commitment, and BGV parameters.
     let roster = accepted_roster_from_setup_context(setup_context);
     if setup_context
         .get("setupParametersHash")

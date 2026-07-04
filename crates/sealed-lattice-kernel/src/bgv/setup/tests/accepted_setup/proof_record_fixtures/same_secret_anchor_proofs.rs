@@ -60,13 +60,16 @@ pub(in super::super) fn same_secret_proofs_object(
             },
             ring_degree,
             keys: Vec::new(),
-            same_secret_linkage: Some(
+            compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
+        same_secret_linkage: Some(
                 crate::bgv::setup::trustee_evaluation_key_proof::SameSecretLinkageStatement {
                     public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
                     commitments: constant_commitments,
                 },
             ),
             private_vss_share: None,
+            target_decryption_share: None,
         };
         let witness = TrusteeEvaluationKeyWitness {
             secret_coefficients: (0..ring_degree)
@@ -111,6 +114,16 @@ pub(in super::super) fn same_secret_proofs_object(
             private_vss_coefficient_messages_by_shamir_index: Vec::new(),
             private_vss_opening_randomness_by_shamir_index: Vec::new(),
             private_vss_carry_witnesses: Vec::new(),
+            compact_vss_coefficient_messages_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_messages: Vec::new(),
+            compact_vss_coefficient_opening_randomness_by_shamir_index: Vec::new(),
+            compact_vss_recipient_share_opening_randomness: Vec::new(),
+            compact_vss_carry_witnesses: Vec::new(),
+            compact_vss_recipient_share_messages_by_item: Vec::new(),
+            compact_vss_recipient_share_opening_randomness_by_item: Vec::new(),
+            compact_vss_carry_witnesses_by_item: Vec::new(),
+            target_decryption_message_vectors: Vec::new(),
+            target_decryption_opening_randomness_by_commitment: Vec::new(),
         };
         let proof_randomness_seed_hex = derive_canonical_object_hash(&serde_json::json!({
             "objectType": "SameSecretProofRoot",
@@ -239,9 +252,13 @@ fn same_secret_constant_commitments_from_deterministic_fixture(
     let public_matrix_seed_hash = package["commonRandomness"]["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
+    // Compact fixtures take their ring degree from the compact coefficient
+    // commitment set. The deterministic reconstruction is material-independent:
+    // commitments come from accepted_vss_coefficient_message_fixture.
     let ring_degree = package["vssCoefficientCommitmentMaterial"]["ringDegree"]
         .as_u64()
-        .expect("VSS material ring degree") as usize;
+        .or_else(|| package["compactVssCoefficientCommitmentSet"]["ringDegree"].as_u64())
+        .expect("VSS material or compact coefficient ring degree") as usize;
     DATA_PRIMES
         .iter()
         .copied()

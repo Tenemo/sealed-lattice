@@ -32,19 +32,25 @@ use super::{
 // `accounting`, `prover`, and the command/family items are re-exported here so
 // the sibling tests can keep referencing them through `super::` unchanged after
 // the move under this `tests/` directory.
-use super::{accounting, generate_trustee_evaluation_key_proof_from_request, prover};
+use super::{
+    accounting, describe_target_decryption_share_proof_layout_from_request,
+    generate_target_decryption_share_proof_bytes_from_request,
+    generate_trustee_evaluation_key_proof_from_request, prover,
+    verify_target_decryption_share_proof_bytes_from_request,
+};
 
-mod command_surface;
-mod cross_language_vectors;
-mod proof_codec;
-mod prove_verify_round_trip;
-mod public_key_share;
+mod codec_and_commands;
+mod compact_same_secret_bridge;
+mod compact_vss_share_linkage;
 mod relation_algebra;
-mod same_secret_linkage;
-mod soundness_rejection;
-mod statement_validation;
+mod soundness;
+mod target_decryption_share;
+mod verification;
 
 const SMALL_RING_DEGREE: usize = 128;
+// Smallest ring whose rate-1/2 low-degree claim bound folds past the adaptive
+// final-coefficient cap, so proofs commit at least one folded Merkle layer.
+const FOLDED_LAYER_RING_DEGREE: usize = 8192;
 const PROOF_RANDOMNESS_SEED: &str = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
 const PROOF_RANDOMNESS_NONCE: &str = "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100";
 
@@ -133,7 +139,10 @@ fn private_vss_statement_for_context_tests() -> TrusteeEvaluationKeyStatement {
         },
         ring_degree: SMALL_RING_DEGREE,
         keys: Vec::new(),
+        compact_vss_share_linkage: None,
+        compact_same_secret_bridge: None,
         same_secret_linkage: None,
+        target_decryption_share: None,
         private_vss_share: Some(PrivateVssShareStatement {
             public_matrix_seed_hash: repeated_hash("66"),
             private_envelope_aad_hash,
@@ -367,13 +376,17 @@ fn trustee_evaluation_key_statement_hash_vector_request() -> serde_json::Value {
         "ringDegree": SMALL_RING_DEGREE,
         "keys": [{
             "proofFamily": "relinearization-round-one",
-            "level": 0,
+            "level": 2,
             "keySwitchDomain": "relinearization-round-one",
             "keySwitchSeedHex": repeated_hash("42"),
-            "componentBByDigit": [[zero_u64_vector()]],
+            "componentBByDigit": [
+                [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
+                [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
+                [zero_u64_vector(), zero_u64_vector(), zero_u64_vector()],
+            ],
         }],
         "secretCoefficients": zero_i64_vector(),
-        "errorCoefficientsByKey": [[zero_i64_vector()]],
+        "errorCoefficientsByKey": [[zero_i64_vector(), zero_i64_vector(), zero_i64_vector()]],
     });
     proof_randomness_fields(&mut request);
     request

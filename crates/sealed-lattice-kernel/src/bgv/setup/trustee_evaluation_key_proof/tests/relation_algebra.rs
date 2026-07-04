@@ -1,7 +1,9 @@
 use super::super::evaluation_domain::EvaluationDomainPlan;
 use super::super::extension_field::ChallengeExtensionTower;
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
-use super::super::low_degree_proof::{LowDegreeParameters, prove_low_degree};
+use super::super::low_degree_proof::{
+    LowDegreeParameters, commit_low_degree, open_low_degree_at_positions,
+};
 use super::*;
 use crate::bgv::modular_arithmetic::pow_mod;
 use crate::bgv::parameters::POLYNOMIAL_DEGREE;
@@ -123,6 +125,13 @@ fn full_ring_low_degree_proof_accepts_degree_below_main_bound() {
         super::super::MAIN_LOW_DEGREE_TRANSCRIPT_PURPOSE,
     );
 
-    prove_low_degree(&mut transcript, &parameters, &initial_layer)
-        .expect("full-ring degree-below-bound polynomial must prove");
+    let state = commit_low_degree(&mut transcript, &parameters, &initial_layer)
+        .expect("full-ring degree-below-bound polynomial must commit");
+    let query_positions = transcript.challenge_positions(
+        "shared-query-position",
+        plan.extension_size / 2,
+        super::super::LOW_DEGREE_QUERY_COUNT,
+    );
+    open_low_degree_at_positions(state, &query_positions)
+        .expect("full-ring degree-below-bound polynomial must open");
 }

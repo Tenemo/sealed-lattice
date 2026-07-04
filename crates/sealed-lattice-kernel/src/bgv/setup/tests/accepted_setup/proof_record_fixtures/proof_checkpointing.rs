@@ -8,11 +8,6 @@ pub(in super::super) const SAME_SECRET_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
     "same-secret-anchor-proof-material";
 pub(in super::super) const PUBLIC_KEY_SHARE_PROOF_CHECKPOINT_DIRECTORY: &str =
     "public-key-share-proof-material";
-// The trustee evaluation-key family also persists transported proof material
-// under `trustee-evaluation-key-proof-material` during the final-package transport
-// flow. This sibling directory is the statement-keyed raw-proof store used by the
-// non-transport container build that the heavy accepted-setup tests consume,
-// which never enters the transported-material resume path.
 pub(in super::super) const TRUSTEE_EVALUATION_KEY_ANCHOR_PROOF_CHECKPOINT_DIRECTORY: &str =
     "trustee-evaluation-key-anchor-proof-material";
 
@@ -23,13 +18,6 @@ fn anchor_proof_checkpoint_path(
     crate::bgv::setup::accepted_setup_final_package_material_store_checkpoint_directory()
         .join(family_directory)
         .join(format!("{statement_hash_hex}.bin"))
-}
-
-pub(in super::super) fn anchor_proof_checkpoint_exists(
-    family_directory: &str,
-    statement_hash_hex: &str,
-) -> bool {
-    anchor_proof_checkpoint_path(family_directory, statement_hash_hex).exists()
 }
 
 pub(in super::super) fn persist_checkpointed_anchor_proof_bytes(

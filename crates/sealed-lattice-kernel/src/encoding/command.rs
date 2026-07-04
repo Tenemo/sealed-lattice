@@ -41,8 +41,23 @@ enum TranscriptCoreCommand {
     GenerateBgvBaseConversionFixture,
     AnalyzeBgvCanonicalObject,
     RunDirectEncryptedBallot,
-    GenerateBgvTargetDecryptionShare,
-    RecombineBgvTargetDecryptionShares,
+    #[cfg(feature = "target-decryption-development-commands")]
+    GenerateBgvTargetDecryptionShareFromLocalShare,
+    #[cfg(feature = "target-decryption-development-commands")]
+    DeriveBgvTargetDecryptionShareProofStatement,
+    #[cfg(feature = "target-decryption-development-commands")]
+    GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness,
+    #[cfg(feature = "target-decryption-development-commands")]
+    VerifyBgvTargetDecryptionShareProofMaterial,
+    #[cfg(feature = "target-decryption-development-commands")]
+    VerifyBgvTargetDecryptionShareProofStatementBinding,
+    DeriveBgvTargetDecryptionResultReleaseSetupContext,
+    BeginBgvTargetDecryptionResultRelease,
+    AbsorbBgvTargetDecryptionResultReleaseShare,
+    FinishBgvTargetDecryptionResultRelease,
+    ComputeCompactVssCommitmentFromOpening,
+    GenerateCompactVssShareLinkageProof,
+    GenerateCompactSameSecretBridgeProof,
 }
 
 fn parse_transcript_core_command(command_name: &str) -> CanonicalResult<TranscriptCoreCommand> {
@@ -220,8 +235,21 @@ pub(super) fn run_transcript_core_command_inner(input: &[u8]) -> CanonicalResult
         | TranscriptCoreCommand::GenerateBgvBaseConversionFixture
         | TranscriptCoreCommand::AnalyzeBgvCanonicalObject
         | TranscriptCoreCommand::RunDirectEncryptedBallot
-        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShare
-        | TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
+        | TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext
+        | TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease
+        | TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare
+        | TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease
+        | TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening
+        | TranscriptCoreCommand::GenerateCompactVssShareLinkageProof
+        | TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof => {
+            run_bgv_command(command, &request)
+        }
+        #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare
+        | TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement
+        | TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness
+        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofMaterial
+        | TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding => {
             run_bgv_command(command, &request)
         }
     }
@@ -239,7 +267,7 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
             crate::bgv::commands::validate_bgv_evaluator_operation_from_request(request)
         }
         TranscriptCoreCommand::DescribeCollectiveBgvSetupParameters => {
-            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request()
+            crate::bgv::commands::describe_collective_bgv_setup_parameters_from_request(request)
         }
         TranscriptCoreCommand::DeriveCollectiveBgvSetupPublicDerivations => {
             crate::bgv::commands::derive_collective_bgv_setup_public_derivations(request)
@@ -315,15 +343,64 @@ fn run_bgv_command(command: TranscriptCoreCommand, request: &Value) -> Canonical
         TranscriptCoreCommand::RunDirectEncryptedBallot => {
             crate::bgv::direct_ballots::run_direct_encrypted_ballot(request)
         }
-        TranscriptCoreCommand::GenerateBgvTargetDecryptionShare => {
-            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_request(
+        #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareFromLocalShare => {
+            crate::bgv::target_decryption::generate_bgv_target_decryption_share_from_local_share_request(
                 request,
             )
         }
-        TranscriptCoreCommand::RecombineBgvTargetDecryptionShares => {
-            crate::bgv::target_decryption::recombine_bgv_target_decryption_shares_from_request(
+        #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::DeriveBgvTargetDecryptionShareProofStatement => {
+            crate::bgv::target_decryption::derive_bgv_target_decryption_share_proof_statement_from_request(
                 request,
             )
+        }
+        #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::GenerateBgvTargetDecryptionShareProofMaterialFromLocalWitness => {
+            crate::bgv::target_decryption::generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
+                request,
+            )
+        }
+        #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofMaterial => {
+            crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_material_from_request(
+                request,
+            )
+        }
+        #[cfg(feature = "target-decryption-development-commands")]
+        TranscriptCoreCommand::VerifyBgvTargetDecryptionShareProofStatementBinding => {
+            crate::bgv::target_decryption::verify_bgv_target_decryption_share_proof_statement_binding_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::DeriveBgvTargetDecryptionResultReleaseSetupContext => {
+            crate::bgv::target_decryption::derive_bgv_target_decryption_result_release_setup_context_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::BeginBgvTargetDecryptionResultRelease => {
+            crate::bgv::target_decryption::begin_bgv_target_decryption_result_release_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::AbsorbBgvTargetDecryptionResultReleaseShare => {
+            crate::bgv::target_decryption::absorb_bgv_target_decryption_result_release_share_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::FinishBgvTargetDecryptionResultRelease => {
+            crate::bgv::target_decryption::finish_bgv_target_decryption_result_release_from_request(
+                request,
+            )
+        }
+        TranscriptCoreCommand::ComputeCompactVssCommitmentFromOpening => {
+            crate::bgv::commands::compute_compact_vss_commitment_from_opening(request)
+        }
+        TranscriptCoreCommand::GenerateCompactVssShareLinkageProof => {
+            crate::bgv::commands::generate_compact_vss_share_linkage_proof(request)
+        }
+        TranscriptCoreCommand::GenerateCompactSameSecretBridgeProof => {
+            crate::bgv::commands::generate_compact_same_secret_bridge_proof(request)
         }
         _ => unreachable!("non-BGV command dispatched to BGV handler"),
     }

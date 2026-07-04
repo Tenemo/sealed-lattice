@@ -230,14 +230,9 @@ fn verify_setup_transported_objects(
             )));
         }
     };
-    if transported_object_values.is_empty() {
-        return Ok(Err(Refusal::new(
-            "transportedObjectsEmpty",
-            "setupTransportCertificate.transportedObjects must bind at least the full public VSS material object",
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    }
-
+    // The compact setup path embeds the compact commitment sets in-package and has
+    // no large public VSS material to stream, so its transport certificate may
+    // carry no transported objects.
     let mut transported_objects = Vec::with_capacity(transported_object_values.len());
     let mut seen_object_roots = BTreeSet::new();
     let mut expected_chunk_start_index = 0_u64;
@@ -284,60 +279,6 @@ fn verify_setup_transported_objects(
                         )
                     })
             })?;
-    let vss_material_root = package_nested_hash(
-        setup_package,
-        "vssCoefficientCommitmentMaterial",
-        "vssCoefficientCommitmentMaterialRoot",
-    )?;
-    // The transported VSS material byte length is a function of the validated
-    // roster and the material's ring degree, so the expectation is derived from
-    // this package's roster and VSS material ring degree. The verifier already
-    // validated participantCount and the roster-derived quorums in verify_context
-    // before any transport check runs, and the material ring degree is bound by
-    // the VSS material set the commitment-material root above recomputes.
-    let transport_roster = super::super::accepted_roster_from_package(setup_package);
-    let vss_material_ring_degree = setup_package
-        .get("vssCoefficientCommitmentMaterial")
-        .and_then(|material_set| material_set.get("ringDegree"))
-        .and_then(Value::as_u64)
-        .ok_or_else(|| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "vssCoefficientCommitmentMaterial.ringDegree was required before setup transport verification",
-            )
-        })?;
-    let expected_vss_material_byte_length = setup_transport_vss_material_byte_length_for_roster(
-        &transport_roster,
-        vss_material_ring_degree,
-    )?;
-    let expected_vss_chunk_count = setup_transport_chunk_count(expected_vss_material_byte_length)?;
-    let Some(vss_object) = transported_objects.iter().find(|transported_object| {
-        transported_object.object_name == SETUP_TRANSPORTED_VSS_MATERIAL_NAME
-            && transported_object.object_role == SETUP_TRANSPORTED_VSS_MATERIAL_ROLE
-            && transported_object.object_root == vss_material_root
-    }) else {
-        return Ok(Err(Refusal::new(
-            "transportedVssObjectMissing",
-            "setupTransportCertificate.transportedObjects must bind vssCoefficientCommitmentMaterial",
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    };
-    if vss_object.byte_length != expected_vss_material_byte_length
-        || vss_object.chunk_count != expected_vss_chunk_count
-    {
-        return Ok(Err(Refusal::new(
-            "transportedVssObjectMetadataMismatch",
-            "vssCoefficientCommitmentMaterial transported object metadata must match the accepted setup parameters",
-            "setupPackage.setupTransportCertificate.transportedObjects",
-        )));
-    }
-    transport_canonical_try!(verify_binary_vss_material_transport_reference(
-        setup_package,
-        vss_object.byte_length,
-        vss_object.chunk_count,
-        &vss_object.chunk_root,
-        &vss_object.full_object_hash,
-    ));
     transport_canonical_try!(verify_setup_transport_request_bindings(
         setup_package,
         request,

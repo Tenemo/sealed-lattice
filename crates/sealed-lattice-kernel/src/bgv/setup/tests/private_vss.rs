@@ -225,12 +225,11 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
 }
 
 // Multi-recipient consistency is what makes the reduced message-claim set sound:
-// with the message consistency claims removed, a single recipient's proof does
-// not pin the Shamir coefficients across the RNS commitment fields, so soundness
-// comes from >= t honest recipients each verifying the same source commitment. This
-// test exercises that structure: one committed degree-(t-1) polynomial, verified
-// at the four distinct recipient points of the first-roster decryption threshold
-// (t_secret = 4), all accepting. The shares differ per recipient (distinct
+// a single recipient's proof does not pin the Shamir coefficients across the RNS
+// commitment fields, so soundness comes from >= t honest recipients each
+// verifying the same source commitment. This test exercises that structure: one
+// committed degree-(t-1) polynomial, verified at four distinct recipient points
+// for threshold t = 4, all accepting. The shares differ per recipient (distinct
 // evaluation points) yet every proof binds the identical coefficient commitments.
 //
 // The dual negative direction - a single recipient accepting an inconsistent or
@@ -239,8 +238,7 @@ fn private_vss_succinct_proof_verifier_accepts_canonical_record() {
 // integer message per coefficient, reduced consistently into each commitment
 // field, so it structurally cannot emit per-field-inconsistent messages.
 // Demonstrating that requires constructing the committed columns below the prover
-// (bypassing validate_private_vss_witness), and is the recorded gold-standard
-// follow-up.
+// (bypassing validate_private_vss_witness).
 #[test]
 fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients() {
     let ring_degree = PRIVATE_VSS_SUCCINCT_TEST_RING_DEGREE;
@@ -300,8 +298,8 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
         .map(|commitment| setup_commitment_root(commitment).expect("commitment root"))
         .collect::<Vec<_>>();
 
-    // Four distinct recipient points (the first-roster decryption threshold),
-    // each inside the first accepted roster (positions < 10).
+    // Four distinct recipient points for threshold t = 4, each inside the
+    // n = 10 accepted roster fixture.
     for recipient_roster_position in [1_usize, 3, 5, 8] {
         let (share_values, carry_strings) = share_values_and_carries(
             &coefficient_messages_by_shamir_index,
@@ -390,18 +388,17 @@ fn private_vss_succinct_proof_accepts_one_polynomial_across_threshold_recipients
     }
 }
 
-// Decisive Option A soundness gate. Option A drops the per-field consistency
-// assertions on the Shamir coefficient message columns, leaving the commitment
-// opening lincheck as the message column's only binding. This test confirms that
-// binding is essential: a coefficient message that disagrees with what its
-// commitment opens to cannot be packaged into an accepted proof. The tamper
-// keeps the recipient-share Shamir relation satisfied (so the witness-relation
-// self-check and shape checks pass) and leaves the randomness, the carry, and the
-// commitments themselves intact; only the witness message diverges from the zero
-// message the commitment binds. Proof construction enforces exactly the lincheck
-// the verifier checks, so an inconsistent message is rejected at the sumcheck/
-// lincheck stage. If this ever succeeded, the message would be unbound and Option
-// A would be unsound, requiring a revert to a message-binding consistency claim.
+// The Shamir coefficient message columns carry no per-field consistency
+// assertion, so the commitment opening lincheck is the message column's only
+// binding. This test confirms that binding is essential: a coefficient message
+// that disagrees with what its commitment opens to cannot be packaged into an
+// accepted proof. The tamper keeps the recipient-share Shamir relation satisfied
+// (so the witness-relation self-check and shape checks pass) and leaves the
+// randomness, the carry, and the commitments themselves intact; only the witness
+// message diverges from the zero message the commitment binds. Proof construction
+// enforces exactly the lincheck the verifier checks, so an inconsistent message
+// is rejected at the sumcheck/lincheck stage. If this ever succeeded, the message
+// would be unbound.
 // The honest baseline (identical setup, untampered) is covered by
 // private_vss_succinct_proof_verifier_accepts_canonical_record above.
 #[test]

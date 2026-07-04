@@ -176,9 +176,6 @@ pub(crate) fn run_direct_encrypted_ballot(request: &Value) -> CanonicalResult<Va
                 "proofParametersHash": direct_ballot_relation_proof_parameters_hash()?
             },
             "proofMaskRandomness": proof_mask_randomness.report_value(),
-            "relationCommitmentPolynomialCount": first_proof.relation_commitment_polynomial_count,
-            "sharedResponsePolynomialCount": first_proof.shared_response_polynomial_count,
-            "sharedScoreResponseScalarCount": first_proof.shared_response_scalar_count,
             "provingTimeMilliseconds": total_proving_time_milliseconds.report_value(),
             "verificationTimeMilliseconds": total_verification_time_milliseconds.report_value()
         },

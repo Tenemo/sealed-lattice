@@ -3,7 +3,7 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 #[allow(clippy::too_many_arguments)]
-pub(super) fn same_secret_consistency_object(
+pub(in super::super) fn same_secret_consistency_object(
     ceremony_id: &str,
     manifest_hash: &str,
     roster_hash: &str,

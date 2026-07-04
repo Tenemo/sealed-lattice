@@ -17,16 +17,15 @@ use crate::bgv::setup::sampling::{
 use rayon::prelude::*;
 mod collective_key_material;
 mod evaluation_binding;
-mod evaluation_stream;
 mod public_evaluation_keys;
 mod relation_checks;
 mod rotation_schedule;
 mod threshold_verification;
 pub(super) use collective_key_material::*;
 pub(super) use evaluation_binding::*;
-pub(super) use evaluation_stream::*;
 pub(super) use public_evaluation_keys::*;
 use relation_checks::*;
+pub(super) use rotation_schedule::evaluation_key_stream_seed;
 use rotation_schedule::*;
 pub(super) use threshold_verification::*;
 

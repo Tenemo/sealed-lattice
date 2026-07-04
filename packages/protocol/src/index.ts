@@ -62,16 +62,11 @@ export {
     acceptedBgvSetupQShare,
     acceptedBgvSetupQSharePrimes,
     binaryVssCoefficientCommitmentMaterialByteLength,
-    createBinaryChunkedVssCoefficientCommitmentBundle,
-    createBinaryChunkedVssCoefficientCommitmentMaterialTransport,
-    createStreamingBinaryChunkedVssCoefficientCommitmentBundle,
     createVssSourceTrusteeCoefficientOpeningState,
     createVssSourceTrusteeCoefficientOpeningStateProvider,
     createVssSourceTrusteeCoefficientCommitmentContribution,
     createVssCoefficientCommitmentBundle,
-    materialRecordsFromTransportedVssCoefficientCommitmentMaterial,
     setupCommitmentRandomnessWidth,
-    setupCommitmentRootPayload,
     setupTransportChunkSizeBytes,
     setupTransportSchemeId,
     vssCoefficientCommitmentMaterialBinaryFormat,
@@ -96,7 +91,6 @@ export {
 } from './setup/common-randomness-records.js';
 export { createSetupContributionAssembly } from './setup/setup-contribution-orchestration.js';
 export { createSetupCertificates } from './setup/setup-certificates.js';
-export { deriveThresholdShareCommitments } from './setup/threshold-share-commitments.js';
 export {
     createSetupPackage,
     createSetupPackageVerificationInput,
@@ -110,6 +104,10 @@ export {
     sameSecretProofFamily,
     sameSecretRelation,
 } from './setup/same-secret-consistency-records.js';
+export {
+    createBinaryChunkedCompactSameSecretBridgeProofMaterialTransport,
+    createBinaryChunkedCompactVssShareLinkageProofMaterialTransport,
+} from './setup/compact-vss-commitments.js';
 export {
     createVssComplaintSet,
     createVssShareAcceptanceRecord,
@@ -218,7 +216,6 @@ export type {
     PublicKeyShareSetInput,
 } from './setup/public-key-share-records.js';
 export type {
-    BinaryChunkedVssCoefficientCommitmentMaterialSet,
     SetupPackageVssCoefficientCommitmentMaterialSet,
     SetupCommitmentLimbValue,
     SetupCommitmentValue,
@@ -290,11 +287,6 @@ export type {
     SetupPackageVerificationInputSource,
 } from './setup/setup-package-assembly.js';
 export type {
-    ThresholdShareCommitmentLimb,
-    ThresholdShareCommitmentRecipient,
-    ThresholdShareCommitmentSet,
-} from './setup/threshold-share-commitments.js';
-export type {
     BinaryChunkedSameSecretProofMaterialTransport,
     SameSecretConsistencyStatementRecord,
     SameSecretConsistencyStatementSet,
@@ -313,6 +305,12 @@ export type {
     VerifiedSetupProofMaterial,
     VerifiedSetupProofMaterialSet,
 } from './setup/setup-proof-material-transport.js';
+export type {
+    BinaryChunkedCompactSameSecretBridgeProofMaterialTransport,
+    BinaryChunkedCompactVssShareLinkageProofMaterialTransport,
+    TransportedCompactSameSecretBridgeProofMaterialSet,
+    TransportedCompactVssShareLinkageProofMaterialSet,
+} from './setup/compact-vss-commitments.js';
 export type {
     CollectiveBgvSetupContext,
     PrivateVssLocalVerificationFailure,

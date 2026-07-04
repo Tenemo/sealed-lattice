@@ -1,8 +1,7 @@
-//! The consolidated key-switch digit atom.
+//! Key-switch digit atom over a limb-group modulus.
 //!
-//! Production trustee evaluation-key material satisfies, for one key at
-//! level L, every digit j and limb l (kernel keygen in
-//! `bgv::evaluator::key_switch`):
+//! Trustee evaluation-key material satisfies, for one key at level L, every
+//! digit j and limb l (kernel keygen in `bgv::evaluator::key_switch`):
 //!
 //! ```text
 //! b[j][l] + a[j][l] * s - t * e_j - [l == j] * source = 0   in R_{q_l}
@@ -13,9 +12,9 @@
 //! source a small signed polynomial (round one: s; Galois: the automorphism
 //! image of s) or a public product with s (round two).
 //!
-//! Because CRT is a ring isomorphism, the per-limb congruences of digit j
-//! over a limb group with modulus Q = prod(q_l) hold with the shared small
-//! witnesses if and only if the single congruence
+//! CRT recombines the limb congruences for digit j into the limb-group modulus
+//! Q = prod(q_l). With the shared small witnesses, the atom checks the integer
+//! congruence
 //!
 //! ```text
 //! B_j + A_j * s - t * e_j - G_j * source = Q * c   over the integers,
@@ -33,12 +32,10 @@
 use super::negacyclic_transform::NegacyclicDomain;
 use super::proof_field::ProofFieldParameters;
 use super::wide_unsigned::{
-    is_less_than, multiply_word_accumulate, multiply_word_in_place, remainder_word,
+    add_in_place, is_less_than, multiply_word_accumulate, multiply_word_in_place, remainder_word,
     shift_right_one_in_place, subtract_in_place, to_u64,
 };
 use crate::encoding::{CanonicalError, CanonicalErrorCode, CanonicalResult};
-
-pub(crate) const PLAINTEXT_MODULUS: i64 = 65_537;
 
 /// A limb group with its CRT constants over a proof field. The reduced CRT
 /// basis constants double as the key-switch gadget idempotents: C_l is one
@@ -78,9 +75,8 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
                 ));
             }
         }
-        // The field must hold the full relation bound 2 * (Q/2 + N*Q/2 +
-        // 2t + N*Q/2) before the congruence check is meaningful; the caller
-        // checks the ring degree, this constructor checks Q < p.
+        // This constructor checks only Q < p. Each verifier call checks the
+        // degree-dependent exactness bound before using the mod-p relation.
         if !is_less_than(&group_modulus, &parameters.modulus) {
             return Err(CanonicalError::new(
                 CanonicalErrorCode::MalformedLength,
@@ -199,9 +195,21 @@ impl<const LIMB_COUNT: usize> LimbGroupContext<LIMB_COUNT> {
 
     /// The centered gadget idempotent for the group position of a digit's
     /// diagonal limb, as a proof-field element.
-    pub(crate) fn gadget_idempotent(&self, group_position: usize) -> &[u64; LIMB_COUNT] {
-        &self.gadget_idempotents_centered[group_position]
+    pub(crate) fn gadget_idempotent(
+        &self,
+        group_position: usize,
+    ) -> CanonicalResult<&[u64; LIMB_COUNT]> {
+        self.gadget_idempotents_centered
+            .get(group_position)
+            .ok_or_else(invalid_diagonal_group_position)
     }
+}
+
+fn invalid_diagonal_group_position() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::ComponentMismatch,
+        "diagonal group position must identify a limb in the group",
+    )
 }
 
 /// The diagonal source term of the digit atom.
@@ -219,7 +227,7 @@ pub(crate) enum DigitAtomSource<'a> {
     NoDiagonal,
 }
 
-pub(crate) struct ConsolidatedDigitAtomInput<'a, const LIMB_COUNT: usize> {
+pub(crate) struct LimbGroupDigitAtomInput<'a, const LIMB_COUNT: usize> {
     pub(crate) group: &'a LimbGroupContext<LIMB_COUNT>,
     pub(crate) domain: &'a NegacyclicDomain<'a, LIMB_COUNT>,
     /// Position of the digit's diagonal limb inside the group, when present.
@@ -231,12 +239,12 @@ pub(crate) struct ConsolidatedDigitAtomInput<'a, const LIMB_COUNT: usize> {
     pub(crate) source: DigitAtomSource<'a>,
 }
 
-pub(crate) struct ConsolidatedDigitAtomReport {
+pub(crate) struct LimbGroupDigitAtomReport {
     pub(crate) maximum_carry_magnitude: u64,
     pub(crate) carry_bound: u64,
 }
 
-/// Checks the consolidated digit congruence with an exact carry bound.
+/// Checks the limb-group digit congruence with an exact carry bound.
 ///
 /// Bound derivation, per coefficient over the integers, with N the ring
 /// degree, Q the group modulus, and t the plaintext modulus:
@@ -244,16 +252,19 @@ pub(crate) struct ConsolidatedDigitAtomReport {
 /// N terms), |t * e| <= 2t, and the diagonal term is either
 /// |G * source| <= Q/2 (signed source, |source| <= 1 after centering G) or
 /// |P * s| <= N * Q/2 (round two, P centered modulo Q before the product).
-/// So |D| < Q * (N + 1) + 2t and the exact carry c = D / Q satisfies
-/// |c| <= N + 1. The proof field was selected with p > 2 * max |D|, so the
-/// mod-p computation of D equals the integer D and the check is exact.
-pub(crate) fn verify_consolidated_digit_atom<const LIMB_COUNT: usize>(
-    input: ConsolidatedDigitAtomInput<'_, LIMB_COUNT>,
-) -> CanonicalResult<ConsolidatedDigitAtomReport> {
+/// So |D| < Q * (N + 1/2) + 2t for the largest round-two shape and the exact
+/// carry c = D / Q satisfies |c| <= N + 1. The proof field is checked with
+/// p > Q * (2N + 1) + 4t, so the mod-p computation of D equals the integer D
+/// and the check is exact.
+pub(crate) fn verify_limb_group_digit_atom<const LIMB_COUNT: usize>(
+    input: LimbGroupDigitAtomInput<'_, LIMB_COUNT>,
+) -> CanonicalResult<LimbGroupDigitAtomReport> {
     let parameters = input.domain.parameters;
     let ring_degree = input.domain.size;
+    validate_limb_group_exactness_bound(parameters, &input.group.group_modulus, ring_degree)?;
     validate_signed_support(input.secret_coefficients, ring_degree, 1, "secret")?;
     validate_signed_support(input.error_coefficients, ring_degree, 2, "error")?;
+    let plaintext_modulus = plaintext_modulus_i64();
 
     let component_b =
         input
@@ -283,7 +294,7 @@ pub(crate) fn verify_consolidated_digit_atom<const LIMB_COUNT: usize>(
             &sample_secret_product[coefficient_index],
         );
         let scaled_error = parameters.signed_word_to_element(
-            input.error_coefficients[coefficient_index] * PLAINTEXT_MODULUS,
+            input.error_coefficients[coefficient_index] * plaintext_modulus,
         );
         difference = parameters.subtract(&difference, &scaled_error);
         if let Some(term) = &diagonal_term {
@@ -298,20 +309,70 @@ pub(crate) fn verify_consolidated_digit_atom<const LIMB_COUNT: usize>(
             None => {
                 return Err(CanonicalError::new(
                     CanonicalErrorCode::ComponentMismatch,
-                    "consolidated key-switch digit congruence does not hold: the carry lift exceeds its integer bound",
+                    "limb-group key-switch digit congruence does not hold: the carry lift exceeds its integer bound",
                 ));
             }
         }
     }
 
-    Ok(ConsolidatedDigitAtomReport {
+    Ok(LimbGroupDigitAtomReport {
         maximum_carry_magnitude,
         carry_bound,
     })
 }
 
+fn validate_limb_group_exactness_bound<const LIMB_COUNT: usize>(
+    parameters: &ProofFieldParameters<LIMB_COUNT>,
+    group_modulus: &[u64; LIMB_COUNT],
+    ring_degree: usize,
+) -> CanonicalResult<()> {
+    let relation_degree_factor = ring_degree
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .and_then(|value| u64::try_from(value).ok())
+        .ok_or_else(limb_group_exactness_bound_overflow)?;
+    let plaintext_error_bound = crate::bgv::parameters::PLAINTEXT_MODULUS
+        .checked_mul(4)
+        .ok_or_else(limb_group_exactness_bound_overflow)?;
+
+    let mut relation_bound = *group_modulus;
+    if multiply_word_in_place(&mut relation_bound, relation_degree_factor) != 0 {
+        return Err(limb_group_exactness_bound_overflow());
+    }
+
+    let mut error_bound = [0_u64; LIMB_COUNT];
+    error_bound[0] = plaintext_error_bound;
+    if add_in_place(&mut relation_bound, &error_bound) != 0 {
+        return Err(limb_group_exactness_bound_overflow());
+    }
+
+    if multiply_word_in_place(&mut relation_bound, 2) != 0 {
+        return Err(limb_group_exactness_bound_overflow());
+    }
+
+    if !is_less_than(&relation_bound, &parameters.modulus) {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            "limb-group exact relation bound does not fit below the proof field modulus",
+        ));
+    }
+
+    Ok(())
+}
+
+fn limb_group_exactness_bound_overflow() -> CanonicalError {
+    CanonicalError::new(
+        CanonicalErrorCode::MalformedLength,
+        "limb-group exact relation bound exceeds the proof field limb width",
+    )
+}
+
+fn plaintext_modulus_i64() -> i64 {
+    i64::try_from(crate::bgv::parameters::PLAINTEXT_MODULUS).expect("plaintext modulus fits i64")
+}
+
 fn diagonal_term<const LIMB_COUNT: usize>(
-    input: &ConsolidatedDigitAtomInput<'_, LIMB_COUNT>,
+    input: &LimbGroupDigitAtomInput<'_, LIMB_COUNT>,
 ) -> CanonicalResult<Option<Vec<[u64; LIMB_COUNT]>>> {
     let parameters = input.domain.parameters;
     let ring_degree = input.domain.size;
@@ -319,7 +380,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
         (DigitAtomSource::NoDiagonal, None) => Ok(None),
         (DigitAtomSource::DiagonalSignedPolynomial(source), Some(group_position)) => {
             validate_signed_support(source, ring_degree, 1, "diagonal source")?;
-            let idempotent = input.group.gadget_idempotent(group_position);
+            let idempotent = input.group.gadget_idempotent(group_position)?;
             Ok(Some(
                 source
                     .iter()
@@ -336,6 +397,7 @@ fn diagonal_term<const LIMB_COUNT: usize>(
             },
             Some(group_position),
         ) => {
+            input.group.gadget_idempotent(group_position).map(|_| ())?;
             validate_signed_support(signed_polynomial, ring_degree, 1, "diagonal source")?;
             // G * lift(aggregate) centered modulo Q is the CRT recombination
             // of a limb matrix that carries the aggregate at the diagonal
@@ -467,6 +529,22 @@ mod tests {
         }
     }
 
+    fn group_modulus_for_primes<const LIMB_COUNT: usize>(
+        group_primes: &[u64],
+    ) -> [u64; LIMB_COUNT] {
+        let mut group_modulus = [0_u64; LIMB_COUNT];
+        group_modulus[0] = 1;
+        for prime in group_primes {
+            assert_eq!(
+                multiply_word_in_place(&mut group_modulus, *prime),
+                0,
+                "test group modulus must fit the selected limb width"
+            );
+        }
+
+        group_modulus
+    }
+
     fn schoolbook_negacyclic_mod(left: &[u64], right_signed: &[i64], modulus: u64) -> Vec<u64> {
         let size = left.len();
         let mut product = vec![0_u64; size];
@@ -506,28 +584,29 @@ mod tests {
         seed: &str,
     ) -> SyntheticAtom {
         let mut secret_sampler =
-            DeterministicSampler::new("consolidated-atom-test-secret", &[seed.as_bytes()]);
+            DeterministicSampler::new("limb-group-atom-test-secret", &[seed.as_bytes()]);
         let secret = secret_sampler
             .centered_binomial_eta2(ring_degree)
             .into_iter()
             .map(|value| value.clamp(-1, 1))
             .collect::<Vec<_>>();
         let source = secret.iter().map(|value| -value).collect::<Vec<_>>();
-        let error = DeterministicSampler::new("consolidated-atom-test-error", &[seed.as_bytes()])
+        let error = DeterministicSampler::new("limb-group-atom-test-error", &[seed.as_bytes()])
             .centered_binomial_eta2(ring_degree);
+        let plaintext_modulus = plaintext_modulus_i64();
         let mut public_sample_by_limb = Vec::new();
         let mut component_b_by_limb = Vec::new();
         for (group_position, prime) in group_primes.iter().enumerate() {
             let prime_bytes = prime.to_le_bytes();
             let sample = DeterministicSampler::new(
-                "consolidated-atom-test-sample",
+                "limb-group-atom-test-sample",
                 &[seed.as_bytes(), &prime_bytes],
             )
             .uniform_residues(*prime, ring_degree);
             let sample_secret = schoolbook_negacyclic_mod(&sample, &secret, *prime);
             let component_b = (0..ring_degree)
                 .map(|index| {
-                    let scaled_error = signed_residue(error[index] * PLAINTEXT_MODULUS, *prime);
+                    let scaled_error = signed_residue(error[index] * plaintext_modulus, *prime);
                     let mut value = (scaled_error + *prime - sample_secret[index]) % *prime;
                     if diagonal_group_position == Some(group_position) {
                         value = (value + signed_residue(source[index], *prime)) % *prime;
@@ -561,6 +640,35 @@ mod tests {
                 assert_eq!(remainder_word(constant, *prime), expected);
             }
         }
+    }
+
+    #[test]
+    fn exactness_bound_rejects_a_group_that_no_longer_fits_the_ring_degree() {
+        let parameters = eight_limb_group_field_parameters();
+        let group_modulus = group_modulus_for_primes::<7>(&DATA_PRIMES[..9]);
+
+        let error = validate_limb_group_exactness_bound(
+            &parameters,
+            &group_modulus,
+            crate::bgv::parameters::POLYNOMIAL_DEGREE,
+        )
+        .expect_err("nine data primes exceed the eight-limb proof field exactness bound");
+
+        assert_eq!(error.code, CanonicalErrorCode::MalformedLength);
+    }
+
+    #[test]
+    fn exactness_bound_accepts_the_full_sixteen_limb_group() {
+        let parameters = sixteen_limb_group_field_parameters();
+        let group = LimbGroupContext::new(&parameters, &DATA_PRIMES[..16])
+            .expect("full group modulus fits below the proof field");
+
+        validate_limb_group_exactness_bound(
+            &parameters,
+            &group.group_modulus,
+            crate::bgv::parameters::POLYNOMIAL_DEGREE,
+        )
+        .expect("active full group fits the proof field exactness bound");
     }
 
     #[test]
@@ -627,7 +735,7 @@ mod tests {
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
         let atom = synthetic_atom(group_primes, ring_degree, Some(5), "diagonal");
-        let report = verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+        let report = verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
             group: &group,
             domain: &domain,
             diagonal_group_position: Some(5),
@@ -650,7 +758,7 @@ mod tests {
         let group = LimbGroupContext::new(&parameters, group_primes).expect("group builds");
         let domain = NegacyclicDomain::new(&parameters, ring_degree).expect("domain builds");
         let atom = synthetic_atom(group_primes, ring_degree, None, "off-diagonal");
-        verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+        verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
             group: &group,
             domain: &domain,
             diagonal_group_position: None,
@@ -674,7 +782,7 @@ mod tests {
         let diagonal_prime = group_primes[diagonal_group_position];
 
         let mut base = synthetic_atom(group_primes, ring_degree, None, "round-two");
-        let aggregate = DeterministicSampler::new("consolidated-atom-test-aggregate", &[b"agg"])
+        let aggregate = DeterministicSampler::new("limb-group-atom-test-aggregate", &[b"agg"])
             .uniform_residues(diagonal_prime, ring_degree);
         // Add the diagonal contribution source * aggregate at the diagonal
         // limb only, matching the round-two component shape.
@@ -686,7 +794,7 @@ mod tests {
         {
             *value = (*value + *contribution) % diagonal_prime;
         }
-        verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+        verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
             group: &group,
             domain: &domain,
             diagonal_group_position: Some(diagonal_group_position),
@@ -713,7 +821,7 @@ mod tests {
 
         let verify =
             |component_b: &[Vec<u64>], secret: &[i64], error: &[i64], position: Option<usize>| {
-                verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+                verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
                     group: &group,
                     domain: &domain,
                     diagonal_group_position: position,
@@ -748,6 +856,42 @@ mod tests {
             )
             .is_err(),
             "a wrong diagonal position must not verify"
+        );
+
+        assert!(
+            verify(
+                &atom.component_b_by_limb,
+                &atom.secret,
+                &atom.error,
+                Some(group_primes.len())
+            )
+            .is_err(),
+            "an out-of-range diagonal position must be rejected"
+        );
+
+        let off_diagonal_atom = synthetic_atom(
+            group_primes,
+            ring_degree,
+            None,
+            "out-of-range-public-product",
+        );
+        let aggregate = vec![1_u64; ring_degree];
+        assert!(
+            verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
+                group: &group,
+                domain: &domain,
+                diagonal_group_position: Some(group_primes.len()),
+                component_b_by_limb: &off_diagonal_atom.component_b_by_limb,
+                public_sample_by_limb: &off_diagonal_atom.public_sample_by_limb,
+                secret_coefficients: &off_diagonal_atom.secret,
+                error_coefficients: &off_diagonal_atom.error,
+                source: DigitAtomSource::DiagonalPublicProduct {
+                    aggregate_residues: &aggregate,
+                    signed_polynomial: &off_diagonal_atom.source,
+                },
+            })
+            .is_err(),
+            "an out-of-range public-product diagonal position must not be treated as no diagonal"
         );
 
         let mut non_ternary_secret = atom.secret.clone();
@@ -799,10 +943,10 @@ mod tests {
     }
 
     /// The load-bearing cross-check: material generated by the production
-    /// kernel key-switch keygen satisfies the consolidated digit atom with
-    /// the witnesses re-derived from the same deterministic seeds.
+    /// kernel key-switch keygen satisfies the limb-group digit atom with the
+    /// witnesses re-derived from the same deterministic seeds.
     #[test]
-    fn kernel_galois_keygen_material_satisfies_the_consolidated_atom() {
+    fn kernel_galois_keygen_material_satisfies_the_limb_group_atom() {
         use crate::bgv::evaluator::engine::DevelopmentBgvKey;
         use crate::bgv::evaluator::key_switch::generate_galois_key;
         use crate::bgv::parameters::POLYNOMIAL_DEGREE;
@@ -810,7 +954,7 @@ mod tests {
         let parameters = sixteen_limb_group_field_parameters();
         let level = 1;
         let galois_element = 3;
-        let seed_hex = "consolidated-atom-cross-check-seed";
+        let seed_hex = "limb-group-atom-cross-check-seed";
         let key = DevelopmentBgvKey::generate("00112233445566778899aabbccddeeff")
             .expect("development key generates");
         let galois_key = generate_galois_key(&key, galois_element, level, seed_hex)
@@ -867,7 +1011,7 @@ mod tests {
                 })
                 .collect::<Vec<_>>();
 
-            let report = verify_consolidated_digit_atom(ConsolidatedDigitAtomInput {
+            let report = verify_limb_group_digit_atom(LimbGroupDigitAtomInput {
                 group: &group,
                 domain: &domain,
                 diagonal_group_position: Some(digit_index),
@@ -877,7 +1021,7 @@ mod tests {
                 error_coefficients: &error,
                 source: DigitAtomSource::DiagonalSignedPolynomial(&rotated_secret),
             })
-            .expect("kernel-generated digit material satisfies the consolidated atom");
+            .expect("kernel-generated digit material satisfies the limb-group atom");
             assert!(report.maximum_carry_magnitude <= report.carry_bound);
         }
     }

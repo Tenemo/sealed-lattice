@@ -146,182 +146,6 @@ fn heavy_accepted_setup_collective_setup_verifier_refuses_malformed_public_key_p
 
 #[test]
 #[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_from_transported_proof_material()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_succinct_proofs_from_transported_proof_material",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let transported_proof_material =
-        move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
-    append_transport_certificate_entries_from_material_set(
-        &mut package,
-        &transported_proof_material,
-        "proofMaterials",
-        "proofMaterialRoot",
-        "publicKeyShareProofMaterial",
-        "public-key-share-proof-material",
-        DIRECT_TRANSPORT_CERTIFICATE_FIELDS,
-    );
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedPublicKeyShareProofMaterial": transported_proof_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["missingObjects"],
-        serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_succinct_proof_chunk()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_succinct_proof_chunk",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let mut transported_proof_material =
-        move_public_key_share_succinct_proof_bytes_to_transport(&mut package);
-    transported_proof_material["proofMaterials"][0]["chunks"][0]["bytesHex"] =
-        serde_json::json!("00");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedPublicKeyShareProofMaterial": transported_proof_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareSuccinctProofVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_public_key_share_material()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_reports_pending_transported_public_key_share_material",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    move_public_key_share_material_to_transport(&mut package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
-        .expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["missingObjects"],
-        serde_json::json!(["transportedPublicKeyShareMaterial"])
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_material_from_transport()
-{
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_checks_public_key_share_material_from_transport",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let transported_public_key_share_material =
-        move_public_key_share_material_to_transport(&mut package);
-    let public_key_share_material_set_root =
-        package["publicKeyShareMaterial"]["publicKeyShareMaterialSetRoot"]
-            .as_str()
-            .expect("public-key share material set root")
-            .to_string();
-    append_setup_transport_certificate_object(
-        &mut package,
-        SetupTransportCertificateObjectFixture {
-            object_name: "publicKeyShareMaterial",
-            object_role: "public-key-share-material",
-            object_root: public_key_share_material_set_root,
-            byte_length: transported_public_key_share_material["totalByteLength"]
-                .as_u64()
-                .expect("transported material byte length"),
-            full_object_hash: transported_public_key_share_material["fullObjectHash"]
-                .as_str()
-                .expect("transported material full object hash")
-                .to_string(),
-            chunk_root: transported_public_key_share_material["chunkRoot"]
-                .as_str()
-                .expect("transported material chunk root")
-                .to_string(),
-            chunk_hashes: transported_public_key_share_material["chunkHashes"]
-                .as_array()
-                .expect("transported material chunk hashes")
-                .iter()
-                .map(|chunk_hash| {
-                    chunk_hash
-                        .as_str()
-                        .expect("transported material chunk hash")
-                        .to_string()
-                })
-                .collect(),
-        },
-    );
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedPublicKeyShareMaterial": transported_public_key_share_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["missingObjects"],
-        serde_json::json!(["collectivePublicKey", "collectivePublicKeyRoot"])
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
-fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_material()
- {
-    let _accepted_setup_test_timing = accepted_setup_test_timing(
-        "heavy_accepted_setup_collective_setup_verifier_refuses_tampered_transported_public_key_share_material",
-    );
-    let mut package = public_key_share_succinct_proof_bearing_collective_setup_package();
-    let mut transported_public_key_share_material =
-        move_public_key_share_material_to_transport(&mut package);
-    transported_public_key_share_material["chunks"][0]["bytesHex"] = serde_json::json!("00");
-    rebind_collective_setup_package_hash(&mut package);
-
-    let result = verify_collective_bgv_setup_package(
-        &package,
-        &serde_json::json!({
-            "transportedPublicKeyShareMaterial": transported_public_key_share_material,
-        }),
-    )
-    .expect("verification response");
-
-    assert_eq!(result["isValid"], false);
-    assert_eq!(
-        result["refusedObjects"][0]["reasonCode"],
-        "publicKeyShareMaterialVerificationFailed"
-    );
-}
-
-#[test]
-#[ignore = "heavy accepted setup test"]
 fn heavy_accepted_setup_collective_setup_verifier_refuses_tampered_public_key_share_succinct_material()
  {
     let _accepted_setup_test_timing = accepted_setup_test_timing(
@@ -369,15 +193,16 @@ fn heavy_accepted_setup_collective_setup_verifier_requires_same_secret_proofs_be
     let result = verify_collective_bgv_setup_package(&package, &serde_json::json!({}))
         .expect("verification response");
 
+    // The compact same-secret bridge now provides this gate: a package that
+    // carries the compact bridge material but drops the same-secret proofs is
+    // refused as incomplete bridge evidence before any public-key succinct
+    // proof can be accepted.
     assert_eq!(result["isValid"], false);
     assert_eq!(
         result["refusedObjects"][0]["reasonCode"],
-        "sameSecretProofsMissing"
+        "compactSameSecretBridgeEvidenceIncomplete"
     );
-    assert_eq!(
-        result["refusedObjects"][0]["objectPath"],
-        "setupPackage.sameSecretProofs"
-    );
+    assert_eq!(result["refusedObjects"][0]["objectPath"], "setupPackage");
     assert!(result["acceptedSetupHandoff"].is_null());
 }
 

@@ -5,9 +5,11 @@ mod mutations;
 mod rng;
 mod types;
 
+#[cfg(test)]
+pub use codec::encode_standard_base64;
 pub use codec::{
-    analyze_canonical_object, analyze_canonical_object_hex, decode_hex, encode_hex,
-    parse_transcript_core_object,
+    analyze_canonical_object, analyze_canonical_object_hex, decode_hex, decode_standard_base64,
+    encode_hex, parse_transcript_core_object,
 };
 #[cfg(test)]
 pub use codec::{canonical_transcript_core_object, serialize_transcript_core_object};

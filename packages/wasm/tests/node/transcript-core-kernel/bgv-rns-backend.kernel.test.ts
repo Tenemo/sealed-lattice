@@ -76,12 +76,6 @@ describe('BGV-RNS backend kernel commands', () => {
         });
         expect(parameters.parameters.dataPrimes).toHaveLength(17);
         expectProtocolHash(parameters.bgvParametersHash, 'bgvParametersHash');
-        expect(parameters.batchLayoutBinding).toMatchObject({
-            scoreRange: { minimum: 1, maximum: 10 },
-            bucketCount: 10,
-            slotCount: 32_768,
-            coordinatesPerOption: 11,
-        });
         expect(operationRegistry.bgvParametersHash).toBe(
             parameters.bgvParametersHash,
         );
@@ -96,7 +90,6 @@ describe('BGV-RNS backend kernel commands', () => {
         const encodedResult = kernel.encodeBgvBatchPlaintext({
             slots: [0, 1, 65_536, 17, 99],
             level: 0,
-            layoutBinding: parameters.batchLayoutBinding,
             includeCanonicalBytesHex: true,
         });
 
@@ -145,41 +138,6 @@ describe('BGV-RNS backend kernel commands', () => {
             'ComponentMismatch',
             /plaintext root/u,
         );
-
-        const layoutMutations: readonly Record<string, unknown>[] = [
-            {
-                ...parameters.batchLayoutBinding,
-                bucketCount: 9,
-            },
-            {
-                ...parameters.batchLayoutBinding,
-                coordinatesPerOption: 12,
-            },
-            {
-                ...parameters.batchLayoutBinding,
-                slotCount: 16_384,
-            },
-            {
-                ...parameters.batchLayoutBinding,
-                scoreRange: { minimum: 0, maximum: 10 },
-            },
-            {
-                ...parameters.batchLayoutBinding,
-                unexpectedLayoutField: 'rejected',
-            },
-        ];
-        for (const layoutBinding of layoutMutations) {
-            expectKernelCommandError(
-                () =>
-                    kernel.encodeBgvBatchPlaintext({
-                        slots: [1, 2, 3],
-                        level: 0,
-                        layoutBinding,
-                    }),
-                'ComponentMismatch',
-                /layout binding/u,
-            );
-        }
     });
 
     it('rejects evaluator operations outside the selected registry', async () => {

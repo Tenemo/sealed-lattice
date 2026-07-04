@@ -1,14 +1,13 @@
 //! Ajtai commitment round over the spike commitment ring, for prover-cost
-//! measurement of the consolidated-atom path.
+//! measurement of the limb-group digit-atom path.
 //!
 //! Encoded witness digits are packed into ring elements over
 //! Z_q[X]/(X^d + 1) and committed as t[row] = sum_k A[row][k] * m_k +
 //! sum_v B[row][v] * r_v in the NTT domain. The module rank, randomness
-//! width, and ring dimension here are measurement-scale placeholders for
-//! throughput and working-set shape, not a security parameter selection,
-//! and the matrix expansion uses a non-cryptographic mixer so the timing
-//! reflects arithmetic rather than hash throughput (a production expander
-//! would be a seeded XOF).
+//! width, and ring dimension are measurement-scale values for throughput and
+//! working-set shape, not a security parameter selection. Matrix expansion uses
+//! a non-cryptographic mixer so the timing reflects arithmetic rather than hash
+//! throughput; a security-sized expander would be a seeded XOF.
 
 use super::negacyclic_transform::NegacyclicDomain;
 use super::proof_field::ProofFieldParameters;

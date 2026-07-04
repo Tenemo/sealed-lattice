@@ -1,6 +1,9 @@
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import {
+    acceptedSetupCheckpointSourcePaths,
     authoritativeCommandLanesForLane,
     automaticTestThreadKnobForLane,
     automaticTrusteeProofBatchKnobForLane,
@@ -9,6 +12,7 @@ import {
     finalPackageCheckpointStoreIsWarmForInputs,
     heavyAcceptedSetupFinalPackageTestPattern,
     heavyAcceptedSetupTestPattern,
+    newestModificationTimeMillisecondsUnder,
     normalizeFocusedTestFilter,
     parseRustKernelAcceptedSetupArguments,
 } from '#tools/ci/run-rust-kernel-accepted-setup-tests';
@@ -116,44 +120,142 @@ describe('Rust accepted setup runner arguments', () => {
     });
 
     it('requires a current completion manifest before final package checkpoints are warm', () => {
-        const completeProofFamilyCounts = new Map([
-            ['same-secret-anchor-proof-material', 1],
-            ['public-key-share-proof-material', 1],
-            ['trustee-evaluation-key-anchor-proof-material', 1],
+        const completionManifestProofFamilyCounts = new Map([
+            ['same-secret-anchor-proof-material', 4],
+            ['public-key-share-proof-material', 9],
+            ['trustee-evaluation-key-anchor-proof-material', 6],
+            ['trustee-evaluation-key-proof-material', 10],
+        ]);
+        const completeCurrentProofFamilyCounts = new Map([
+            ['same-secret-anchor-proof-material', 4],
+            ['public-key-share-proof-material', 9],
+            ['trustee-evaluation-key-anchor-proof-material', 6],
+            ['trustee-evaluation-key-proof-material', 10],
         ]);
 
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: undefined,
-                proofFamilyCounts: completeProofFamilyCounts,
+                completionManifestProofFamilyCounts: undefined,
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(false);
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: 90,
-                proofFamilyCounts: completeProofFamilyCounts,
+                completionManifestProofFamilyCounts,
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(false);
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: 100,
+                completionManifestProofFamilyCounts,
                 proofFamilyCounts: new Map([
-                    ['same-secret-anchor-proof-material', 1],
-                    ['public-key-share-proof-material', 0],
-                    ['trustee-evaluation-key-anchor-proof-material', 1],
+                    ['same-secret-anchor-proof-material', 4],
+                    ['public-key-share-proof-material', 8],
+                    ['trustee-evaluation-key-anchor-proof-material', 6],
+                    ['trustee-evaluation-key-proof-material', 10],
                 ]),
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(false);
         expect(
             finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: 100,
+                completionManifestProofFamilyCounts: new Map([
+                    ['same-secret-anchor-proof-material', 4],
+                    ['public-key-share-proof-material', 0],
+                    ['trustee-evaluation-key-anchor-proof-material', 6],
+                    ['trustee-evaluation-key-proof-material', 10],
+                ]),
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(false);
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
                 completionManifestModifiedAtMilliseconds: 110,
-                proofFamilyCounts: completeProofFamilyCounts,
+                completionManifestProofFamilyCounts,
+                proofFamilyCounts: completeCurrentProofFamilyCounts,
                 sourceNewestModificationTimeMilliseconds: 100,
             }),
         ).toBe(true);
+    });
+
+    it('keeps final package checkpoints cold until the transported trustee proof store is complete', () => {
+        const completionManifestProofFamilyCounts = new Map([
+            ['same-secret-anchor-proof-material', 4],
+            ['public-key-share-proof-material', 9],
+            ['trustee-evaluation-key-anchor-proof-material', 6],
+            ['trustee-evaluation-key-proof-material', 10],
+        ]);
+
+        expect(
+            finalPackageCheckpointStoreIsWarmForInputs({
+                completionManifestModifiedAtMilliseconds: 110,
+                completionManifestProofFamilyCounts,
+                proofFamilyCounts: new Map([
+                    ['same-secret-anchor-proof-material', 4],
+                    ['public-key-share-proof-material', 9],
+                    ['trustee-evaluation-key-anchor-proof-material', 6],
+                    ['trustee-evaluation-key-proof-material', 9],
+                ]),
+                sourceNewestModificationTimeMilliseconds: 100,
+            }),
+        ).toBe(false);
+    });
+
+    it('tracks the full kernel source tree for final package checkpoint staleness', () => {
+        expect(acceptedSetupCheckpointSourcePaths()).toContain(
+            path.resolve(
+                process.cwd(),
+                'crates',
+                'sealed-lattice-kernel',
+                'src',
+            ),
+        );
+    });
+
+    it('ignores files that disappear during source modification-time scanning', () => {
+        const rootPath = path.resolve('kernel-source');
+        const childPath = path.join(rootPath, 'child.rs');
+        const deletedPath = path.join(rootPath, 'deleted.rs');
+
+        const directoryEntry = (
+            name: string,
+            type: 'directory' | 'file',
+        ): {
+            readonly isDirectory: () => boolean;
+            readonly isFile: () => boolean;
+            readonly name: string;
+        } => ({
+            isDirectory: () => type === 'directory',
+            isFile: () => type === 'file',
+            name,
+        });
+
+        expect(
+            newestModificationTimeMillisecondsUnder(rootPath, {
+                readDirectory: () => [
+                    directoryEntry('child.rs', 'file'),
+                    directoryEntry('deleted.rs', 'file'),
+                ],
+                statPath: (filePath) => {
+                    if (filePath === deletedPath) {
+                        throw new Error('file disappeared');
+                    }
+
+                    return {
+                        isDirectory: () => filePath === rootPath,
+                        isFile: () => filePath === childPath,
+                        mtimeMs: filePath === childPath ? 250 : 100,
+                    };
+                },
+            }),
+        ).toBe(250);
     });
 
     it('treats one positional filter as a focused local run', () => {

@@ -244,9 +244,40 @@ pub(super) fn try_read_varuint_from_pending(
 
 pub(super) fn vss_material_record_count(
     participant_count: u64,
-    decryption_threshold: usize,
-) -> usize {
-    participant_count as usize * DATA_PRIMES.len() * decryption_threshold
+    decryption_threshold: u64,
+) -> CanonicalResult<usize> {
+    let decryption_threshold = usize::try_from(decryption_threshold).map_err(|_| {
+        invalid_threshold_commitment_input("decryption threshold does not fit usize")
+    })?;
+    vss_limb_commitment_count(participant_count)?
+        .checked_mul(decryption_threshold)
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input("transported VSS material record count overflowed")
+        })
+}
+
+pub(super) fn vss_limb_commitment_count(participant_count: u64) -> CanonicalResult<usize> {
+    let participant_count = usize::try_from(participant_count)
+        .map_err(|_| invalid_threshold_commitment_input("participant count does not fit usize"))?;
+    participant_count
+        .checked_mul(DATA_PRIMES.len())
+        .ok_or_else(|| {
+            invalid_threshold_commitment_input("derived VSS limb commitment count overflowed")
+        })
+}
+
+pub(super) fn vss_threshold_root_count(
+    participant_count: u64,
+    decryption_threshold: u64,
+) -> CanonicalResult<usize> {
+    let participant_count = usize::try_from(participant_count)
+        .map_err(|_| invalid_threshold_commitment_input("participant count does not fit usize"))?;
+    let decryption_threshold = usize::try_from(decryption_threshold).map_err(|_| {
+        invalid_threshold_commitment_input("decryption threshold does not fit usize")
+    })?;
+    participant_count
+        .checked_mul(decryption_threshold)
+        .ok_or_else(|| invalid_threshold_commitment_input("VSS threshold root count overflowed"))
 }
 
 pub(super) fn vss_material_binary_record_length(ring_degree: usize) -> CanonicalResult<usize> {
@@ -778,4 +809,43 @@ pub(super) fn finalize_streaming_hash512_hex(hasher: Shake256) -> String {
     reader.read(&mut output);
 
     to_hex(&output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vss_checked_counts_match_material_layout() {
+        let participant_count = 10_u64;
+        let decryption_threshold = 4_u64;
+
+        assert_eq!(
+            vss_limb_commitment_count(participant_count).expect("limb count"),
+            participant_count as usize * DATA_PRIMES.len()
+        );
+        assert_eq!(
+            vss_material_record_count(participant_count, decryption_threshold)
+                .expect("record count"),
+            participant_count as usize * DATA_PRIMES.len() * decryption_threshold as usize
+        );
+        assert_eq!(
+            vss_threshold_root_count(participant_count, decryption_threshold).expect("root count"),
+            participant_count as usize * decryption_threshold as usize
+        );
+    }
+
+    #[test]
+    fn vss_checked_counts_reject_overflow() {
+        let record_count_error =
+            vss_material_record_count(u64::MAX, u64::MAX).expect_err("record count overflow");
+        let limb_count_error =
+            vss_limb_commitment_count(u64::MAX).expect_err("limb count overflow");
+        let root_count_error =
+            vss_threshold_root_count(u64::MAX, u64::MAX).expect_err("root count overflow");
+
+        assert_eq!(record_count_error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(limb_count_error.code, CanonicalErrorCode::InvalidFixture);
+        assert_eq!(root_count_error.code, CanonicalErrorCode::InvalidFixture);
+    }
 }

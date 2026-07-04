@@ -1,5 +1,6 @@
 use super::*;
 
+use super::compact_same_secret_bridge_verification::VerifiedCompactSameSecretBridgeMaterial;
 use crate::bgv::setup::setup_proof::setup_proof_record_has_transport_reference;
 use crate::hashing::derive_canonical_object_hash;
 
@@ -43,6 +44,7 @@ fn trustee_evaluation_key_verify_progress(_message: impl FnOnce() -> String) {}
 pub(super) fn verify_trustee_evaluation_key_proofs(
     setup_package: &Value,
     request: &Value,
+    verified_compact_same_secret_bridge: Option<&VerifiedCompactSameSecretBridgeMaterial>,
 ) -> CanonicalResult<Option<Value>> {
     let rounds_present = setup_package
         .get("relinearizationKeyShareRounds")
@@ -89,7 +91,12 @@ pub(super) fn verify_trustee_evaluation_key_proofs(
             "setupPackage.trusteeEvaluationKeyProofs",
         )?));
     }
-    if let Err(error) = verify_trustee_evaluation_key_proof_set(setup_package, request, proof_set) {
+    if let Err(error) = verify_trustee_evaluation_key_proof_set(
+        setup_package,
+        request,
+        proof_set,
+        verified_compact_same_secret_bridge,
+    ) {
         return Ok(Some(evaluation_key_material_refusal(
             "trusteeEvaluationKeyProofVerificationFailed",
             error.message,
@@ -108,6 +115,7 @@ fn verify_trustee_evaluation_key_proof_set(
     setup_package: &Value,
     request: &Value,
     proof_set: &Value,
+    verified_compact_same_secret_bridge: Option<&VerifiedCompactSameSecretBridgeMaterial>,
 ) -> CanonicalResult<()> {
     if proof_set.get("objectType").and_then(Value::as_str)
         != Some(TRUSTEE_EVALUATION_KEY_PROOF_SET_OBJECT_TYPE)
@@ -291,8 +299,20 @@ fn verify_trustee_evaluation_key_proof_set(
 
     trustee_evaluation_key_verify_progress(|| "shared-inputs-start".to_string());
     let same_secret_proof_bindings = same_secret_proof_bindings_from_package(setup_package)?;
-    let transported_constant_commitments =
-        same_secret_transported_constant_commitments_by_roster_position(setup_package, request)?;
+    // On the compact path the trustee evaluation-key statements anchor to the
+    // compact same-secret bridge's target constant commitments, so the full
+    // transported same-secret constant commitments are neither present nor
+    // rebuilt. On the full-VSS path they remain the anchor.
+    let transported_constant_commitments = if verified_compact_same_secret_bridge.is_some() {
+        None
+    } else {
+        Some(
+            same_secret_transported_constant_commitments_by_roster_position(
+                setup_package,
+                request,
+            )?,
+        )
+    };
     let transported_key_switch_component_material =
         transported_evaluation_key_share_component_material_from_request(request)?;
     let transported_key_switch_component_material = request
@@ -313,7 +333,8 @@ fn verify_trustee_evaluation_key_proof_set(
             trustee_evaluation_key_statement_from_package(&TrusteeEvaluationKeyStatementInputs {
                 setup_package,
                 transported_key_switch_component_material,
-                transported_constant_commitments: &transported_constant_commitments,
+                transported_constant_commitments: transported_constant_commitments.as_deref(),
+                verified_compact_same_secret_bridge,
                 round_one_aggregate_diagonals_by_level: &round_one_aggregate_diagonals_by_level,
                 trustee_roster_position,
             })?;
@@ -491,7 +512,9 @@ pub(in crate::bgv::setup) struct TrusteeEvaluationKeyStatementInputs<'a> {
     pub(in crate::bgv::setup) setup_package: &'a Value,
     pub(in crate::bgv::setup) transported_key_switch_component_material: Option<&'a Value>,
     pub(in crate::bgv::setup) transported_constant_commitments:
-        &'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>,
+        Option<&'a BTreeMap<u64, Vec<super::commitment::SetupCommitmentValue>>>,
+    pub(in crate::bgv::setup) verified_compact_same_secret_bridge:
+        Option<&'a VerifiedCompactSameSecretBridgeMaterial>,
     pub(in crate::bgv::setup) round_one_aggregate_diagonals_by_level:
         &'a BTreeMap<u64, Vec<Vec<u64>>>,
     pub(in crate::bgv::setup) trustee_roster_position: u64,
@@ -668,30 +691,102 @@ pub(in crate::bgv::setup) fn trustee_evaluation_key_statement_from_package(
                 "commonRandomness.publicMatrixSeedHash was required for trustee evaluation-key statement assembly",
             )
         })?;
-    let mut constant_commitments = same_secret_constant_commitment_values_from_material(
-        setup_package,
-        inputs.trustee_roster_position,
-        inputs.transported_constant_commitments,
-    )?;
     // The trustee evaluation-key linkage binds one commitment per active
     // key-switch limb (the working-level RNS limbs the relinearization and
-    // Galois keys operate over), not every Q_share limb. The keyless
-    // same-secret anchor separately opens every Q_share constant commitment, so
-    // the shared material source returns the full Q_share commitment set and
-    // this evaluation-key statement selects the active key-switch prefix that
-    // the per-limb prover and verifier iterate over.
-    // Safe because the keyless same-secret anchor already binds the secret across all Q_share limbs; this statement only re-opens the active-level prefix the keys use, so the truncation cannot admit a second secret in the dropped limbs.
+    // Galois keys operate over), not every Q_share limb.
     let active_key_switch_limb_count = keys.iter().map(|key| key.level + 1).max().unwrap_or(0);
-    constant_commitments.truncate(active_key_switch_limb_count);
+    let (same_secret_linkage, compact_same_secret_bridge) = if let Some(
+        verified_compact_same_secret_bridge,
+    ) =
+        inputs.verified_compact_same_secret_bridge
+    {
+        // Compact path: the trustee's key schedule is proven against the compact
+        // same-secret bridge's target constant commitments. The bridge is only a
+        // valid anchor if its binding matches the same-secret proof already
+        // accepted for this trustee, which is in turn bound (through the bridge
+        // statement set root and the compact coefficient commitment root) to the
+        // verified compact VSS material. This ties the evaluation keys to the
+        // exact secret committed in the compact VSS coefficients.
+        let compact_bridge_binding = verified_compact_same_secret_bridge
+            .statement_for_roster_position(inputs.trustee_roster_position)?;
+        if compact_bridge_binding.trustee_identity != same_secret_binding.trustee_identity
+            || compact_bridge_binding.trustee_secret_commitment_root
+                != same_secret_binding.trustee_secret_commitment_root
+            || compact_bridge_binding.same_secret_statement_root
+                != same_secret_binding.same_secret_statement_root
+            || compact_bridge_binding.same_secret_proof_root
+                != same_secret_binding.same_secret_proof_root
+            || compact_bridge_binding.same_secret_proof_family_binding_root
+                != same_secret_binding.same_secret_proof_family_binding_root
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::ComponentMismatch,
+                "compact same-secret bridge statement must match the accepted same-secret proof binding",
+            ));
+        }
+        let mut compact_bridge_statement = compact_bridge_binding.statement.clone();
+        if compact_bridge_statement.target_rns_primes.len() < active_key_switch_limb_count
+            || compact_bridge_statement
+                .target_constant_commitment_roots
+                .len()
+                < active_key_switch_limb_count
+            || compact_bridge_statement.target_constant_commitments.len()
+                < active_key_switch_limb_count
+        {
+            return Err(CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "compact same-secret bridge statement does not cover every active key-switch limb",
+            ));
+        }
+        compact_bridge_statement
+            .target_rns_primes
+            .truncate(active_key_switch_limb_count);
+        compact_bridge_statement
+            .target_constant_commitment_roots
+            .truncate(active_key_switch_limb_count);
+        compact_bridge_statement
+            .target_constant_commitments
+            .truncate(active_key_switch_limb_count);
+        (None, Some(compact_bridge_statement))
+    } else {
+        // Full-VSS path: the keyless same-secret anchor separately opens every
+        // Q_share constant commitment, so the shared material source returns the
+        // full Q_share commitment set and this evaluation-key statement selects
+        // the active key-switch prefix that the per-limb prover and verifier
+        // iterate over. Safe because the keyless same-secret anchor already binds
+        // the secret across all Q_share limbs; this statement only re-opens the
+        // active-level prefix the keys use, so the truncation cannot admit a
+        // second secret in the dropped limbs.
+        let transported_constant_commitments =
+            inputs.transported_constant_commitments.ok_or_else(|| {
+                CanonicalError::new(
+                    CanonicalErrorCode::InvalidFixture,
+                    "transported same-secret constant commitments were required for full-VSS evaluation-key proof verification",
+                )
+            })?;
+        let mut constant_commitments = same_secret_constant_commitment_values_from_material(
+            setup_package,
+            inputs.trustee_roster_position,
+            transported_constant_commitments,
+        )?;
+        constant_commitments.truncate(active_key_switch_limb_count);
+        (
+            Some(SameSecretLinkageStatement {
+                public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
+                commitments: constant_commitments,
+            }),
+            None,
+        )
+    };
     let statement = TrusteeEvaluationKeyStatement {
         context,
         ring_degree,
         keys,
-        same_secret_linkage: Some(SameSecretLinkageStatement {
-            public_matrix_seed_hash: public_matrix_seed_hash.to_string(),
-            commitments: constant_commitments,
-        }),
+        compact_vss_share_linkage: None,
+        compact_same_secret_bridge,
+        same_secret_linkage,
         private_vss_share: None,
+        target_decryption_share: None,
     };
     statement.validate_shape()?;
 
@@ -884,7 +979,7 @@ fn trustee_evaluation_key_proof_bytes_from_record(
         transported_trustee_evaluation_key_proof_material_chunks(request, proof_material_root)?;
     let transport_hashes = setup_proof_material_transport_hashes(
         TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-        &chunks,
+        chunks.as_ref(),
         SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
     )?;
     verify_trustee_evaluation_key_proof_transport_reference(proof_record, &transport_hashes)?;
@@ -904,8 +999,8 @@ fn trustee_evaluation_key_proof_bytes_from_record(
             )
         })?,
     );
-    for chunk in chunks {
-        proof_bytes.extend_from_slice(&chunk);
+    for chunk in chunks.iter() {
+        proof_bytes.extend_from_slice(chunk);
     }
 
     Ok(proof_bytes)
@@ -986,7 +1081,7 @@ fn verify_trustee_evaluation_key_proof_transport_reference(
 fn transported_trustee_evaluation_key_proof_material_chunks(
     request: &Value,
     expected_proof_material_root: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
+) -> CanonicalResult<SetupProofMaterialChunks> {
     let material_set = request
         .get("transportedEvaluationKeyShareProofMaterial")
         .ok_or_else(|| {
@@ -1048,13 +1143,15 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                     "transported trustee evaluation-key proof material chunks must be an array",
                 )
             })?;
-            chunk_values
-                .iter()
-                .map(|chunk| {
-                    let bytes_hex = value_string(chunk, "bytesHex")?;
-                    decode_hex(bytes_hex)
-                })
-                .collect::<CanonicalResult<Vec<_>>>()?
+            Arc::new(
+                chunk_values
+                    .iter()
+                    .map(|chunk| {
+                        let bytes_hex = value_string(chunk, "bytesHex")?;
+                        decode_hex(bytes_hex)
+                    })
+                    .collect::<CanonicalResult<Vec<_>>>()?,
+            )
         } else if request.get("verifiedSetupProofMaterials").is_some() {
             verified_setup_proof_material_chunks_from_request(
                 request,
@@ -1064,13 +1161,15 @@ fn transported_trustee_evaluation_key_proof_material_chunks(
                 "transportedEvaluationKeyShareProofMaterial.proofMaterials",
             )?
         } else {
-            stored_verified_trustee_evaluation_key_proof_material_chunks(
-                expected_proof_material_root,
-            )?
+            Arc::new(
+                stored_verified_trustee_evaluation_key_proof_material_chunks(
+                    expected_proof_material_root,
+                )?,
+            )
         };
         let transport_hashes = setup_proof_material_transport_hashes(
             TRUSTEE_EVALUATION_KEY_PROOF_FAMILY,
-            &chunks,
+            chunks.as_ref(),
             SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES,
         )?;
         if value_u64(proof_material, "proofChunkSizeBytes")?
@@ -1110,39 +1209,6 @@ fn verified_trustee_evaluation_key_proof_material_chunks()
         .get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
-#[cfg(test)]
-pub(in crate::bgv::setup) fn register_verified_trustee_evaluation_key_proof_material_chunks(
-    proof_material_root: &str,
-    chunks: Vec<Vec<u8>>,
-) -> CanonicalResult<()> {
-    validate_hash_string(
-        proof_material_root,
-        "verifiedTrusteeEvaluationKeyProofMaterial.proofMaterialRoot",
-    )?;
-    let store_entry =
-        write_verified_trustee_evaluation_key_proof_material_chunks(proof_material_root, &chunks)?;
-    let mut stored_chunks = verified_trustee_evaluation_key_proof_material_chunks()
-        .lock()
-        .map_err(|_| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "verified trustee evaluation-key proof material store is unavailable",
-            )
-        })?;
-    if let Some(existing_chunks) = stored_chunks.get(proof_material_root)
-        && (existing_chunks.path != store_entry.path
-            || existing_chunks.total_byte_length != store_entry.total_byte_length)
-    {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "verified trustee evaluation-key proof material root is already bound to different material storage",
-        ));
-    }
-    stored_chunks.insert(proof_material_root.to_string(), store_entry);
-
-    Ok(())
-}
-
 fn stored_verified_trustee_evaluation_key_proof_material_chunks(
     proof_material_root: &str,
 ) -> CanonicalResult<Vec<Vec<u8>>> {
@@ -1166,93 +1232,6 @@ fn stored_verified_trustee_evaluation_key_proof_material_chunks(
     drop(stored_chunks);
 
     read_verified_trustee_evaluation_key_proof_material_chunks(&store_entry)
-}
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn stored_verified_trustee_evaluation_key_proof_material_chunks_for_test(
-    proof_material_root: &str,
-) -> CanonicalResult<Vec<Vec<u8>>> {
-    stored_verified_trustee_evaluation_key_proof_material_chunks(proof_material_root)
-}
-
-#[cfg(test)]
-fn verified_trustee_evaluation_key_proof_material_store_directory() -> PathBuf {
-    super::super::accepted_setup_final_package_material_store_checkpoint_directory()
-        .join("trustee-evaluation-key-proof-material")
-}
-
-#[cfg(test)]
-fn write_verified_trustee_evaluation_key_proof_material_chunks(
-    proof_material_root: &str,
-    chunks: &[Vec<u8>],
-) -> CanonicalResult<VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry> {
-    let total_byte_length = chunks.iter().try_fold(0_u64, |total, chunk| {
-        total
-            .checked_add(u64::try_from(chunk.len()).map_err(|_| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "verified trustee evaluation-key proof material chunk length does not fit u64",
-                )
-            })?)
-            .ok_or_else(|| {
-                CanonicalError::new(
-                    CanonicalErrorCode::MalformedLength,
-                    "verified trustee evaluation-key proof material byte length overflowed",
-                )
-            })
-    })?;
-    let directory = verified_trustee_evaluation_key_proof_material_store_directory();
-    fs::create_dir_all(&directory).map_err(|error| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            format!(
-                "verified trustee evaluation-key proof material store could not be created: {error}"
-            ),
-        )
-    })?;
-    let path = directory.join(format!("{proof_material_root}.bin"));
-    if path.exists() {
-        let observed_byte_length = fs::metadata(&path)
-            .map_err(|error| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "verified trustee evaluation-key proof material store entry could not be read: {error}",
-                    ),
-                )
-            })?
-            .len();
-        if observed_byte_length != total_byte_length {
-            return Err(CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                "verified trustee evaluation-key proof material store entry length does not match the registered chunks",
-            ));
-        }
-    } else {
-        let mut file = File::create(&path).map_err(|error| {
-            CanonicalError::new(
-                CanonicalErrorCode::InvalidFixture,
-                format!(
-                    "verified trustee evaluation-key proof material store entry could not be created: {error}",
-                ),
-            )
-        })?;
-        for chunk in chunks {
-            file.write_all(chunk).map_err(|error| {
-                CanonicalError::new(
-                    CanonicalErrorCode::InvalidFixture,
-                    format!(
-                        "verified trustee evaluation-key proof material store entry could not be written: {error}",
-                    ),
-                )
-            })?;
-        }
-    }
-
-    Ok(VerifiedTrusteeEvaluationKeyProofMaterialChunkStoreEntry {
-        path,
-        total_byte_length,
-    })
 }
 
 fn read_verified_trustee_evaluation_key_proof_material_chunks(

@@ -3,36 +3,20 @@ use super::*;
 use crate::hashing::derive_canonical_object_hash;
 
 static MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> = OnceLock::new();
-static TERMINAL_FULL_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
-    TerminalFullRingSetupPackageFixture,
-> = OnceLock::new();
-static SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
-    OnceLock::new();
 static PUBLIC_KEY_SHARE_SUCCINCT_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<
     serde_json::Value,
 > = OnceLock::new();
 static COLLECTIVE_PUBLIC_KEY_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE: OnceLock<serde_json::Value> =
     OnceLock::new();
 
-#[derive(Clone)]
-pub(super) struct TerminalFullRingSetupPackageFixture {
-    pub(super) package: serde_json::Value,
-    pub(super) transported_vss_coefficient_commitment_material: serde_json::Value,
-    pub(super) verified_vss_coefficient_commitment_material: serde_json::Value,
-}
-
 struct VssMaterialPackageComponents {
     vss_coefficient_commitments: serde_json::Value,
     vss_coefficient_commitment_material: serde_json::Value,
     threshold_share_commitments: serde_json::Value,
-    transported_vss_coefficient_commitment_material: Option<serde_json::Value>,
-    verified_vss_coefficient_commitment_material: Option<serde_json::Value>,
 }
 
 struct CollectiveSetupPackageFixture {
     package: serde_json::Value,
-    transported_vss_coefficient_commitment_material: Option<serde_json::Value>,
-    verified_vss_coefficient_commitment_material: Option<serde_json::Value>,
 }
 
 fn private_vss_mailbox_public_key_hash(roster_position: u64) -> String {
@@ -83,17 +67,8 @@ fn collective_setup_roster_hash_fixture(participant_count: u64) -> String {
     .expect("collective setup roster hash")
 }
 
-/// The first-closure roster size (n = 10). The minimal package and every
-/// historical fixture path use this, so its bytes stay identical.
+/// The n = 10 fixture roster size used by the minimal package.
 const FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT: u64 = 10;
-
-/// Internal fixture toggle that forces the streamed VSS coefficient commitment
-/// material path at the reduced development ring. The streamed path is what
-/// produces the transported coefficient commitment material the terminal
-/// accepted-setup verifier streams, so the reduced-ring dynamic-roster accept
-/// fixture uses it. The production-recorded ring status the derivation writes
-/// is still "development-reduced-ring"; this string never leaves the fixtures.
-const DEVELOPMENT_REDUCED_RING_STREAMED_STATUS: &str = "development-reduced-ring-streamed";
 
 pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // The reduced development ring must stay provable by the trustee
@@ -102,8 +77,10 @@ pub(super) fn minimal_collective_setup_package() -> serde_json::Value {
     // hundred twenty-eight.
     MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
         .get_or_init(|| {
-            minimal_collective_setup_package_for_participant_count(
-                FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+            super::proof_record_fixtures::compactify_collective_setup_package(
+                minimal_collective_setup_package_for_participant_count(
+                    FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
+                ),
             )
         })
         .clone()
@@ -119,57 +96,6 @@ pub(super) fn minimal_collective_setup_package_for_participant_count(
     build_collective_setup_package_fixture(128, "development-reduced-ring", participant_count)
 }
 
-pub(super) fn terminal_full_ring_minimal_collective_setup_package_fixture()
--> TerminalFullRingSetupPackageFixture {
-    TERMINAL_FULL_RING_MINIMAL_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(|| {
-            let package_fixture = build_collective_setup_package_fixture_parts(
-                POLYNOMIAL_DEGREE,
-                "full-ring",
-                FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
-                None,
-            );
-            TerminalFullRingSetupPackageFixture {
-                package: package_fixture.package,
-                transported_vss_coefficient_commitment_material: package_fixture
-                    .transported_vss_coefficient_commitment_material
-                    .expect("full-ring VSS transport reference"),
-                verified_vss_coefficient_commitment_material: package_fixture
-                    .verified_vss_coefficient_commitment_material
-                    .expect("full-ring verified VSS material reference"),
-            }
-        })
-        .clone()
-}
-
-/// Reduced development-ring (128) collective setup package for roster size n,
-/// built through the streamed VSS coefficient commitment material path so it
-/// carries the transported and verified coefficient commitment material the
-/// final-package accepted-setup verifier streams. Used by the dynamic-roster fixture
-/// to drive every roster-dependent binding for any supported n without the
-/// heavy full ring. At n = 10 the package shape matches the first-closure
-/// streamed path.
-pub(super) fn reduced_ring_streamed_collective_setup_package_fixture(
-    participant_count: u64,
-    stream_derivation_purpose: &str,
-) -> TerminalFullRingSetupPackageFixture {
-    let package_fixture = build_collective_setup_package_fixture_parts(
-        128,
-        DEVELOPMENT_REDUCED_RING_STREAMED_STATUS,
-        participant_count,
-        Some(stream_derivation_purpose),
-    );
-    TerminalFullRingSetupPackageFixture {
-        package: package_fixture.package,
-        transported_vss_coefficient_commitment_material: package_fixture
-            .transported_vss_coefficient_commitment_material
-            .expect("reduced-ring streamed VSS transport reference"),
-        verified_vss_coefficient_commitment_material: package_fixture
-            .verified_vss_coefficient_commitment_material
-            .expect("reduced-ring streamed verified VSS material reference"),
-    }
-}
-
 fn build_collective_setup_package_fixture(
     vss_material_ring_degree: usize,
     vss_material_ring_degree_status: &str,
@@ -179,7 +105,6 @@ fn build_collective_setup_package_fixture(
         vss_material_ring_degree,
         vss_material_ring_degree_status,
         participant_count,
-        None,
     )
     .package
 }
@@ -217,7 +142,6 @@ fn build_collective_setup_package_fixture_parts(
     vss_material_ring_degree: usize,
     vss_material_ring_degree_status: &str,
     participant_count: u64,
-    stream_derivation_purpose: Option<&str>,
 ) -> CollectiveSetupPackageFixture {
     let setup_parameters = describe_collective_bgv_setup_parameters().expect("setup parameters");
     let ceremony_id = "ceremony-main";
@@ -227,13 +151,11 @@ fn build_collective_setup_package_fixture_parts(
     }))
     .expect("manifest hash");
     let roster_hash = collective_setup_roster_hash_fixture(participant_count);
-    // The setup parameters hash is a roster family: distinct per n,
-    // byte-identical to the historical first-closure binding at n = 10. It
-    // subsumes the former per-component parameter hashes (Q_share, carry-aware VSS
-    // relation, commitment, setup proof, transport, evaluator key schedule) and
-    // the BGV parameters. The verifier checks setupContext.setupParametersHash
-    // against setup_parameters_hash_for_roster, so the fixture binds the
-    // roster-derived hash here.
+    // The setup parameters hash is a roster family, distinct per n. It binds
+    // Q_share, the carry-aware VSS relation, commitment, setup proof, transport,
+    // evaluator key schedule, and BGV parameters. The verifier checks
+    // setupContext.setupParametersHash against setup_parameters_hash_for_roster,
+    // so the fixture binds the roster-derived hash here.
     let setup_parameters_hash =
         crate::bgv::setup::accepted_setup::setup_parameters_hash_for_roster(
             &crate::bgv::setup::accepted_setup::roster_parameters_from_participant_count(
@@ -396,36 +318,7 @@ fn build_collective_setup_package_fixture_parts(
     let public_matrix_seed_hash = common_randomness["publicMatrixSeedHash"]
         .as_str()
         .expect("public matrix seed hash");
-    // Both the full-ring terminal path and the reduced-ring dynamic-roster
-    // accept path need the streamed VSS material so the package carries the
-    // transported coefficient commitment material the accepted-setup verifier
-    // streams. Reduced-ring tests pass a purpose so repeated fixture builds at
-    // the same roster size never share live derivation state.
-    let stream_vss_material = (vss_material_ring_degree == POLYNOMIAL_DEGREE
-        && vss_material_ring_degree_status == "full-ring")
-        || vss_material_ring_degree_status == DEVELOPMENT_REDUCED_RING_STREAMED_STATUS;
-    let vss_components = if stream_vss_material {
-        let derivation_id = if vss_material_ring_degree_status == "full-ring" {
-            "terminal-full-ring-vss-material-stream".to_string()
-        } else {
-            let stream_derivation_purpose =
-                stream_derivation_purpose.expect("reduced-ring streamed VSS fixture purpose");
-            format!(
-                "development-reduced-ring-vss-material-stream-{stream_derivation_purpose}-n{participant_count}-r{vss_material_ring_degree}"
-            )
-        };
-        streamed_vss_coefficient_commitments_object(
-            ceremony_id,
-            &manifest_hash,
-            &roster_hash,
-            setup_parameters_hash,
-            setup_epoch,
-            public_matrix_seed_hash,
-            vss_material_ring_degree,
-            &derivation_id,
-            participant_count,
-        )
-    } else {
+    let vss_components = {
         let (vss_coefficient_commitments, vss_coefficient_commitment_material) =
             vss_coefficient_commitments_object(
                 ceremony_id,
@@ -451,8 +344,6 @@ fn build_collective_setup_package_fixture_parts(
             vss_coefficient_commitments,
             vss_coefficient_commitment_material,
             threshold_share_commitments,
-            transported_vss_coefficient_commitment_material: None,
-            verified_vss_coefficient_commitment_material: None,
         }
     };
     let vss_coefficient_commitments = vss_components.vss_coefficient_commitments.clone();
@@ -527,20 +418,10 @@ fn build_collective_setup_package_fixture_parts(
         &public_key_share_proofs,
         participant_count,
     );
-    let setup_transport_certificate =
-        match &vss_components.transported_vss_coefficient_commitment_material {
-            Some(transported_vss_coefficient_commitment_material) => {
-                setup_transport_certificate_for_transported_vss_material(
-                    &setup_parameters,
-                    &vss_coefficient_commitment_material,
-                    transported_vss_coefficient_commitment_material,
-                )
-            }
-            None => setup_transport_certificate_fixture(
-                &setup_parameters,
-                &vss_coefficient_commitment_material,
-            ),
-        };
+    let setup_transport_certificate = setup_transport_certificate_fixture(
+        &setup_parameters,
+        &vss_coefficient_commitment_material,
+    );
     let setup_transport_certificate_hash = setup_transport_certificate
         .get("setupTransportCertificateHash")
         .and_then(serde_json::Value::as_str)
@@ -572,29 +453,17 @@ fn build_collective_setup_package_fixture_parts(
     });
     rebind_collective_setup_package_hash(&mut package);
 
-    CollectiveSetupPackageFixture {
-        package,
-        transported_vss_coefficient_commitment_material: vss_components
-            .transported_vss_coefficient_commitment_material,
-        verified_vss_coefficient_commitment_material: vss_components
-            .verified_vss_coefficient_commitment_material,
-    }
+    CollectiveSetupPackageFixture { package }
 }
 
+// The compact transform binds the same-secret proofs and the compact same-secret
+// bridge that references them, so the compact minimal package is already
+// same-secret-proof-bearing: this is exactly the minimal package. Reusing its
+// cache (rather than compactifying the same base into a second cache) avoids a
+// redundant heavy compact build that would otherwise race the minimal one under
+// parallel test execution.
 pub(super) fn same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
-    SAME_SECRET_PROOF_BEARING_COLLECTIVE_SETUP_PACKAGE_CACHE
-        .get_or_init(build_same_secret_proof_bearing_collective_setup_package)
-        .clone()
-}
-
-fn build_same_secret_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = minimal_collective_setup_package_for_participant_count(
-        FIXTURE_FIRST_CLOSURE_PARTICIPANT_COUNT,
-    );
-    package["sameSecretProofs"] = same_secret_proofs_object(&package);
-    rebind_collective_setup_package_hash(&mut package);
-
-    package
+    minimal_collective_setup_package()
 }
 
 pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value
@@ -605,7 +474,7 @@ pub(super) fn public_key_share_succinct_proof_bearing_collective_setup_package()
 }
 
 fn build_public_key_share_succinct_proof_bearing_collective_setup_package() -> serde_json::Value {
-    let mut package = build_same_secret_proof_bearing_collective_setup_package();
+    let mut package = same_secret_proof_bearing_collective_setup_package();
     replace_public_key_share_hashes_with_material_hashes(&mut package);
     package["publicKeyShareMaterial"] = public_key_share_material_object(&package);
     package["publicKeyShareSuccinctProofs"] = public_key_share_succinct_proofs_object(&package);
@@ -640,6 +509,6 @@ mod vss_coefficient_commitments;
 pub(super) use certificates::*;
 use common_randomness::*;
 pub(super) use private_vss_envelopes::*;
-use public_key_shares::*;
-use same_secret_consistency::*;
+pub(super) use public_key_shares::*;
+pub(super) use same_secret_consistency::*;
 pub(super) use vss_coefficient_commitments::*;

@@ -23,9 +23,8 @@ pub(super) fn verify_setup_context(setup_context: &Value) -> CanonicalResult<()>
 
     // The setup parameters hash is a roster family (distinct per participant
     // count), so it must be compared against the hash derived from this setup
-    // context's roster, not the first-closure n = 10 hash. It subsumes the
-    // former per-component parameter hashes (Q_share, carry-aware VSS relation,
-    // commitment) and the BGV parameters.
+    // context's roster. It binds Q_share, the carry-aware VSS relation,
+    // commitment, and BGV parameters.
     let roster = accepted_roster_from_setup_context(setup_context);
     if setup_context
         .get("setupParametersHash")

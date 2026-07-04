@@ -119,6 +119,33 @@ describe('abortable command process cleanup', () => {
         expect(childProcess.kill).toHaveBeenCalledWith('SIGTERM');
     });
 
+    it('can force-kill a non-Windows process group after graceful shutdown fails', () => {
+        const childProcess = {
+            kill: vi.fn(() => true),
+            pid: 32_103,
+        };
+        const processGroupSignals: {
+            readonly processIdentifier: number;
+            readonly signal: NodeJS.Signals;
+        }[] = [];
+
+        killProcessTree(childProcess, {
+            platform: 'linux',
+            processGroupKiller: (processIdentifier, signal) => {
+                processGroupSignals.push({ processIdentifier, signal });
+            },
+            signal: 'SIGKILL',
+        });
+
+        expect(processGroupSignals).toEqual([
+            {
+                processIdentifier: -32_103,
+                signal: 'SIGKILL',
+            },
+        ]);
+        expect(childProcess.kill).not.toHaveBeenCalled();
+    });
+
     it('keeps using taskkill for Windows process trees', () => {
         const childProcess = {
             kill: vi.fn(() => true),
@@ -173,19 +200,34 @@ describe('abortable command process cleanup', () => {
             }),
         };
         const killedProcessIds: number[] = [];
+        const forceKilledProcessIds: number[] = [];
+        let scheduledForceKill: (() => void) | undefined;
 
         try {
             const uninstall = installProcessSignalChildCleanup({
                 activeChildProcesses: childProcesses,
+                clearScheduledForceKill: vi.fn(),
+                forceKillChildProcess: (childProcess) => {
+                    if (childProcess.pid !== undefined) {
+                        forceKilledProcessIds.push(childProcess.pid);
+                    }
+                },
                 killChildProcess: (childProcess) => {
                     if (childProcess.pid !== undefined) {
                         killedProcessIds.push(childProcess.pid);
                     }
                 },
                 processEvents,
+                scheduleForceKill: (callback, delayMilliseconds) => {
+                    expect(delayMilliseconds).toBe(5_000);
+                    scheduledForceKill = callback;
+
+                    return 'force-kill-timer';
+                },
             });
 
             listeners.get('SIGINT')?.();
+            scheduledForceKill?.();
             uninstall();
 
             expect(processEvents.on).toHaveBeenCalledWith(
@@ -197,6 +239,7 @@ describe('abortable command process cleanup', () => {
                 expect.any(Function),
             );
             expect(killedProcessIds).toEqual([41_001, 41_002]);
+            expect(forceKilledProcessIds).toEqual([41_001, 41_002]);
             expect(processEvents.off).toHaveBeenCalledTimes(2);
             expect(listeners.size).toBe(0);
         } finally {

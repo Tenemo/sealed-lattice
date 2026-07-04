@@ -11,24 +11,18 @@ use crate::bgv::parameters::DATA_PRIMES;
 // proximity-gap bound at rate one half) is named with its insufficient proven
 // fallback at the current query count.
 //
-// CHANGE (2026, Option B): the named conjecture was re-based onto CS25 "Our
-// Conjecture 3" (mutual correlated agreement up to the q-ary list-decoding
-// capacity for prime fields). The earlier accounting counted one bit per query,
-// the up-to-capacity proximity-gap radius 1 - rho of BCI+23 Conjecture 8.4,
-// which Crites-Stewart (CS25) and BCHKS26 DISPROVED in 2025. The repaired
-// entropy-capacity radius costs about 1/log2(q) of distance over the base limb
-// field, lowering per-query soundness from one bit to about 0.938 bit, so the
-// fixed 168-query count now records about 140 effective bits after the union
-// allowance rather than 144. The proven BCIKS20 Johnson fallback is unchanged.
+// The FRI row uses CS25 "Our Conjecture 3" (mutual correlated agreement up to
+// the q-ary list-decoding capacity for prime fields). The entropy-capacity
+// radius costs about 1/log2(q) of distance over the base limb field, giving
+// about 0.938 bit of soundness per query and about 140 effective bits after
+// the union allowance at the fixed 168-query count. The proven BCIKS20 Johnson
+// fallback requires a larger query count.
 //
-// This conjecture is an admissible soundness foundation under the
-// project's proximity-gap policy: a repaired below-capacity conjecture may carry
-// post-quantum soundness, the disproved up-to-capacity one may not.
-// The residual is a disclosed small-medium research risk, not a soundness gap: CS25
-// Our Conjecture 3 is a recent (2025) conjecture and could be weakened by future
-// work, though it is the best-pedigreed standing one (its authors disproved the
-// prior conjecture). The proven BCIKS20 Johnson fallback at a larger query count
-// removes that research risk entirely.
+// This conjecture is an admissible soundness foundation under the project's
+// proximity-gap policy. The residual is a disclosed small-medium research risk,
+// not a soundness gap: CS25 Our Conjecture 3 is a recent conjecture and could be
+// weakened by future work. The proven BCIKS20 Johnson fallback at a larger
+// query count removes that research risk entirely.
 //
 // The QROM row now carries the computed CMS19 reduction loss (state-restoration
 // framework): the achieved quantum soundness is the Grover square-root of the

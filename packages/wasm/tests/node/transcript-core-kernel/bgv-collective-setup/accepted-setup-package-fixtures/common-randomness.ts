@@ -92,10 +92,15 @@ export function acceptedCommonRandomness(
     const commitRecords: JsonRecord[] = [];
     const revealRecords: JsonRecord[] = [];
     const orderedRevealHashes: string[] = [];
-    const rosterHash = collectiveSetupRosterHash((input) =>
-        kernel.deriveCanonicalObjectHash(input),
+    const rosterHash = collectiveSetupRosterHash(
+        (input) => kernel.deriveCanonicalObjectHash(input),
+        setupParameters.participantCount,
     );
-    for (let rosterPosition = 0; rosterPosition < 10; rosterPosition += 1) {
+    for (
+        let rosterPosition = 0;
+        rosterPosition < setupParameters.participantCount;
+        rosterPosition += 1
+    ) {
         const trusteeIdentity = `trustee-${String(rosterPosition)}`;
         const revealHex = kernel
             .deriveCanonicalObjectHash({
@@ -189,6 +194,7 @@ export function acceptedCommonRandomness(
     });
     const publicDerivations = kernel.deriveCollectiveBgvSetupPublicDerivations({
         publicMatrixSeedHash,
+        decryptionThreshold: setupParameters.qDec,
     });
     expect(
         publicDerivations.publicMatrices.commitmentMatrix.sampledEntries[0]

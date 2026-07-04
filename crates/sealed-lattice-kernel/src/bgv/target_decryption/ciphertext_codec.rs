@@ -60,6 +60,7 @@ pub(super) fn read_target_ciphertext_pair(
     Ok(TargetCiphertextPair {
         target_id: target_id.ciphertext,
         target_order: target_order.ciphertext,
+        top_count,
         target_id_root: target_id.root,
         target_order_root: target_order.root,
         target_ciphertext_hash,

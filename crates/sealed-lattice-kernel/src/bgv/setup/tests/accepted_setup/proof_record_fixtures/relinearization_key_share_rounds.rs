@@ -1,18 +1,19 @@
 use super::*;
 use rayon::prelude::*;
 
+use crate::bgv::setup::evaluation_key_share_material::EvaluationKeyShareProofFamily;
 use crate::hashing::derive_canonical_object_hash;
 
-pub(in super::super) fn relinearization_key_share_rounds_fixture_with_terminal_transport(
+// Builds the relinearization key-share rounds container the accepted-setup
+// verifier's `verify_relinearization_key_share_rounds` recomputes: two-round
+// collective relinearization with round-one shares of the trustee secret, the
+// public round-one aggregate diagonals, and round-two shares against that
+// aggregate. Component vectors are embedded (the accepted-setup verifier accepts
+// the `embedded-full-key-switch-component-vectors` encoding directly), and every
+// record and aggregate root is a canonical object hash with no profile-identifier
+// fields, matching the verifier's recompute exactly.
+pub(in super::super) fn relinearization_key_share_rounds_fixture(
     package: &serde_json::Value,
-    terminal_transport: &mut TerminalEvaluationKeyTransportSinks,
-) -> RelinearizationKeyShareRoundsFixture {
-    relinearization_key_share_rounds_object_inner(package, Some(terminal_transport))
-}
-
-fn relinearization_key_share_rounds_object_inner(
-    package: &serde_json::Value,
-    mut terminal_transport: Option<&mut TerminalEvaluationKeyTransportSinks>,
 ) -> RelinearizationKeyShareRoundsFixture {
     let setup_context = &package["setupContext"];
     let schedule = &package["evaluatorKeySchedule"];
@@ -116,26 +117,10 @@ fn relinearization_key_share_rounds_object_inner(
                 "keySwitchSeedHex": key_switch_seed_hex,
                 "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
+                "keySwitchComponentVectors": serde_json::Value::Array(
+                    fixture_material.component_vector_entries.clone(),
+                ),
             });
-            if terminal_transport.is_none() {
-                record["keySwitchComponentVectors"] =
-                    serde_json::Value::Array(fixture_material.component_vector_entries.clone());
-            }
-            if let Some(sinks) = terminal_transport.as_deref_mut() {
-                let transported_component_material_set =
-                    move_evaluation_key_share_component_vectors_to_compact_transport(
-                        &mut record,
-                        EvaluationKeyShareProofFamily::Relinearization,
-                        &fixture_material,
-                    );
-                sinks.component_materials.extend(
-                    transported_component_material_set["componentMaterials"]
-                        .as_array()
-                        .expect("component materials")
-                        .iter()
-                        .cloned(),
-                );
-            }
             record["roundOneRecordRoot"] = serde_json::json!(
                 derive_canonical_object_hash(&record).expect("round-one record root")
             );
@@ -252,26 +237,10 @@ fn relinearization_key_share_rounds_object_inner(
                 "keySwitchSeedHex": key_switch_seed_hex,
                 "ringDegree": ring_degree,
                 "keySwitchComponentVectorRoot": fixture_material.component_vector_root,
+                "keySwitchComponentVectors": serde_json::Value::Array(
+                    fixture_material.component_vector_entries.clone(),
+                ),
             });
-            if terminal_transport.is_none() {
-                record["keySwitchComponentVectors"] =
-                    serde_json::Value::Array(fixture_material.component_vector_entries.clone());
-            }
-            if let Some(sinks) = terminal_transport.as_deref_mut() {
-                let transported_component_material_set =
-                    move_evaluation_key_share_component_vectors_to_compact_transport(
-                        &mut record,
-                        EvaluationKeyShareProofFamily::Relinearization,
-                        &fixture_material,
-                    );
-                sinks.component_materials.extend(
-                    transported_component_material_set["componentMaterials"]
-                        .as_array()
-                        .expect("component materials")
-                        .iter()
-                        .cloned(),
-                );
-            }
             record["roundTwoRecordRoot"] = serde_json::json!(
                 derive_canonical_object_hash(&record).expect("round-two record root")
             );

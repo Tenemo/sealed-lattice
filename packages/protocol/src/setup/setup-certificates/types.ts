@@ -74,7 +74,6 @@ export type SetupCertificatesInput = Readonly<{
         | CollectiveBgvSetupParametersForCertificates
         | JsonRecord;
     readonly bgvParameters: BgvRnsParametersForCertificates | JsonRecord;
-    readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
 }>;
 

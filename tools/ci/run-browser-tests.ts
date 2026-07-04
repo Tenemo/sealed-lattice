@@ -1,8 +1,5 @@
 import { type PackageManagerRunner } from './package-manager-runner.js';
-import {
-    createPackageManagerCommand,
-    type CommandInvocation,
-} from './run-command.js';
+import { type CommandInvocation } from './run-command.js';
 import {
     buildVitestProjectCommand,
     runWorkspaceBuildThenParallelCommands,
@@ -32,27 +29,12 @@ const buildBrowserTestCommands = (
         });
     });
 
-const buildInternalWasmKernelCommand = (
-    packageManagerRunner: PackageManagerRunner,
-): CommandInvocation =>
-    createPackageManagerCommand(
-        'Build internal WASM kernel artifact',
-        ['--filter', '@sealed-lattice/wasm', 'run', 'build:wasm'],
-        {
-            logFileSlug: 'build-internal-wasm-kernel',
-            packageManagerRunner,
-        },
-    );
-
 const main = async (): Promise<void> => {
     const rawArguments = process.argv.slice(2);
     parseBrowserTestArguments(rawArguments);
     await runWorkspaceBuildThenParallelCommands({
         buildCommands: buildBrowserTestCommands,
         commandLineArguments: rawArguments,
-        extraGateCommands: (packageManagerRunner) => [
-            buildInternalWasmKernelCommand(packageManagerRunner),
-        ],
         lanes: ['desktop', 'mobile'],
         scriptName: 'test:browser',
     });

@@ -43,3 +43,37 @@ pub(in crate::bgv) fn coefficient_vector_from_le_hex(
 pub(in crate::bgv) fn coefficient_vector_hash512(coefficients: &[u64], domain: &str) -> String {
     hash512_hex(domain, &[&coefficient_vector_bytes(coefficients)])
 }
+
+pub(in crate::bgv) fn signed_byte_vector_hex(coefficients: &[i64]) -> CanonicalResult<String> {
+    let mut bytes = Vec::with_capacity(coefficients.len());
+    for coefficient in coefficients {
+        let byte = i8::try_from(*coefficient).map_err(|_| {
+            CanonicalError::new(
+                CanonicalErrorCode::MalformedLength,
+                "signed coefficient does not fit a single signed byte",
+            )
+        })?;
+        bytes.push(byte.to_ne_bytes()[0]);
+    }
+
+    Ok(encode_hex(&bytes))
+}
+
+pub(in crate::bgv) fn signed_byte_vector_from_hex(
+    value: &str,
+    expected_coefficient_count: usize,
+    length_error_message: &'static str,
+) -> CanonicalResult<Vec<i64>> {
+    let bytes = decode_hex(value)?;
+    if bytes.len() != expected_coefficient_count {
+        return Err(CanonicalError::new(
+            CanonicalErrorCode::MalformedLength,
+            length_error_message,
+        ));
+    }
+
+    Ok(bytes
+        .into_iter()
+        .map(|byte| i64::from(i8::from_ne_bytes([byte])))
+        .collect())
+}

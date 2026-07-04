@@ -189,14 +189,3 @@ pub(super) fn decode_public_evaluation_key_material_manifest(
 
     Ok(manifest)
 }
-
-#[cfg(test)]
-pub(in crate::bgv::setup) fn encode_public_evaluation_key_material_manifest(
-    manifest: &Value,
-) -> CanonicalResult<Vec<u8>> {
-    let mut material_bytes = Vec::new();
-    material_bytes.extend_from_slice(PUBLIC_EVALUATION_KEY_MATERIAL_MAGIC);
-    material_bytes.extend_from_slice(canonical_json(manifest)?.as_bytes());
-
-    Ok(material_bytes)
-}

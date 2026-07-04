@@ -30,6 +30,11 @@ import type {
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
     BgvRnsParametersDescription,
+    BgvCompactSameSecretBridgeProofContext,
+    BgvCompactSameSecretBridgeProofGeneration,
+    BgvCompactVssCommitmentOpeningComputation,
+    BgvCompactVssShareLinkageProofContext,
+    BgvCompactVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
@@ -68,6 +73,11 @@ export type {
     BgvPrivateVssShareProofGeneration,
     BgvOperationRejection,
     BgvRnsParametersDescription,
+    BgvCompactSameSecretBridgeProofContext,
+    BgvCompactSameSecretBridgeProofGeneration,
+    BgvCompactVssCommitmentOpeningComputation,
+    BgvCompactVssShareLinkageProofContext,
+    BgvCompactVssShareLinkageProofGeneration,
     BgvSetupCommitmentOpeningComputation,
     BgvSetupProofMaterialTransportStreamBegin,
     BgvSetupProofMaterialTransportStreamChunkAbsorption,
@@ -121,9 +131,12 @@ export type TranscriptCoreKernel = {
     ): TranscriptCoreFixtureVerification;
     describeBgvRnsParameters(): BgvRnsParametersDescription;
     describeBgvOperationRegistry(): unknown;
-    describeCollectiveBgvSetupParameters(): BgvCollectiveSetupParametersDescription;
+    describeCollectiveBgvSetupParameters(input?: {
+        readonly participantCount?: number;
+    }): BgvCollectiveSetupParametersDescription;
     deriveCollectiveBgvSetupPublicDerivations(input: {
         readonly publicMatrixSeedHash: ProtocolHash;
+        readonly decryptionThreshold?: number;
     }): BgvCollectiveSetupPublicDerivations;
     generateBgvPassiveSetup(input: {
         readonly ceremonyId: string;
@@ -231,6 +244,43 @@ export type TranscriptCoreKernel = {
         readonly randomnessByColumn: readonly (readonly number[])[];
         readonly ringDegree: number;
     }): BgvSetupCommitmentOpeningComputation;
+    computeCompactVssCommitmentFromOpening(input: {
+        readonly commitmentRole: string;
+        readonly commitmentContext: Record<string, unknown>;
+        readonly publicMatrixSeedHash: ProtocolHash;
+        readonly rnsLimbIndex: number;
+        readonly rnsPrime: number;
+        readonly ringDegree: number;
+        readonly messageCoefficientBound?: number;
+        readonly messageCoefficients: readonly number[];
+        readonly messageDigitColumns: readonly (readonly number[])[];
+        readonly randomnessByColumn: readonly (readonly number[])[];
+    }): BgvCompactVssCommitmentOpeningComputation;
+    generateCompactVssShareLinkageProof(input: {
+        readonly context: BgvCompactVssShareLinkageProofContext;
+        readonly ringDegree: number;
+        readonly compactVssShareLinkage: Record<string, unknown>;
+        readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+        readonly recipientShareMessages: readonly number[];
+        readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+        readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
+        readonly carryWitnesses: readonly number[];
+        readonly recipientShareMessagesByItem?: readonly (readonly number[])[];
+        readonly recipientShareOpeningRandomnessByItem?: readonly (readonly (readonly number[])[])[];
+        readonly carryWitnessesByItem?: readonly (readonly number[])[];
+        readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
+    }): BgvCompactVssShareLinkageProofGeneration;
+    generateCompactSameSecretBridgeProof(input: {
+        readonly context: BgvCompactSameSecretBridgeProofContext;
+        readonly ringDegree: number;
+        readonly compactSameSecretBridge: Record<string, unknown>;
+        readonly secretCoefficients: readonly number[];
+        readonly negativeIndicatorCoefficients: readonly number[];
+        readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+        readonly proofRandomnessSeedHex: string;
+        readonly proofRandomnessNonceHex: string;
+    }): BgvCompactSameSecretBridgeProofGeneration;
     deriveThresholdShareCommitments(input: {
         readonly setupContext: unknown;
         readonly publicMatrixSeedHash: ProtocolHash;
@@ -274,7 +324,6 @@ export type TranscriptCoreKernel = {
     encodeBgvBatchPlaintext(input: {
         readonly slots: readonly number[];
         readonly level?: number;
-        readonly layoutBinding: unknown;
         readonly includeCanonicalBytesHex?: boolean;
     }): BgvBatchPlaintextEncoding | BgvOperationRejection;
     validateBgvPlaintextObject(input: {
@@ -349,10 +398,12 @@ type TranscriptCoreKernelCommand =
       }
     | {
           readonly command: 'DescribeCollectiveBgvSetupParameters';
+          readonly participantCount?: number;
       }
     | {
           readonly command: 'DeriveCollectiveBgvSetupPublicDerivations';
           readonly publicMatrixSeedHash: ProtocolHash;
+          readonly decryptionThreshold?: number;
       }
     | {
           readonly command: 'GenerateBgvPassiveSetup';
@@ -469,6 +520,46 @@ type TranscriptCoreKernelCommand =
           readonly ringDegree: number;
       }
     | {
+          readonly command: 'ComputeCompactVssCommitmentFromOpening';
+          readonly commitmentRole: string;
+          readonly commitmentContext: Record<string, unknown>;
+          readonly publicMatrixSeedHash: ProtocolHash;
+          readonly rnsLimbIndex: number;
+          readonly rnsPrime: number;
+          readonly ringDegree: number;
+          readonly messageCoefficientBound?: number;
+          readonly messageCoefficients: readonly number[];
+          readonly messageDigitColumns: readonly (readonly number[])[];
+          readonly randomnessByColumn: readonly (readonly number[])[];
+      }
+    | {
+          readonly command: 'GenerateCompactVssShareLinkageProof';
+          readonly context: BgvCompactVssShareLinkageProofContext;
+          readonly ringDegree: number;
+          readonly compactVssShareLinkage: Record<string, unknown>;
+          readonly coefficientMessagesByShamirIndex: readonly (readonly number[])[];
+          readonly recipientShareMessages: readonly number[];
+          readonly coefficientOpeningRandomnessByShamirIndex: readonly (readonly (readonly number[])[])[];
+          readonly recipientShareOpeningRandomness: readonly (readonly number[])[];
+          readonly carryWitnesses: readonly number[];
+          readonly recipientShareMessagesByItem?: readonly (readonly number[])[];
+          readonly recipientShareOpeningRandomnessByItem?: readonly (readonly (readonly number[])[])[];
+          readonly carryWitnessesByItem?: readonly (readonly number[])[];
+          readonly proofRandomnessSeedHex: string;
+          readonly proofRandomnessNonceHex: string;
+      }
+    | {
+          readonly command: 'GenerateCompactSameSecretBridgeProof';
+          readonly context: BgvCompactSameSecretBridgeProofContext;
+          readonly ringDegree: number;
+          readonly compactSameSecretBridge: Record<string, unknown>;
+          readonly secretCoefficients: readonly number[];
+          readonly negativeIndicatorCoefficients: readonly number[];
+          readonly openingRandomnessByLimb: readonly (readonly (readonly number[])[])[];
+          readonly proofRandomnessSeedHex: string;
+          readonly proofRandomnessNonceHex: string;
+      }
+    | {
           readonly command: 'DeriveThresholdShareCommitments';
           readonly setupContext: unknown;
           readonly publicMatrixSeedHash: ProtocolHash;
@@ -520,7 +611,6 @@ type TranscriptCoreKernelCommand =
           readonly command: 'EncodeBgvBatchPlaintext';
           readonly slots: readonly number[];
           readonly level?: number;
-          readonly layoutBinding: unknown;
           readonly includeCanonicalBytesHex?: boolean;
       }
     | {

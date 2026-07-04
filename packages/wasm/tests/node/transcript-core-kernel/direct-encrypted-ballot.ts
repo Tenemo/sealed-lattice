@@ -101,7 +101,6 @@ export type DirectEncryptedBallotResult = {
         readonly rnsLimbCount: number;
         readonly responseEncoding: string;
         readonly responsePolynomialDegree: number;
-        readonly sharedResponsePolynomialCount: number;
         readonly proofSizeBytes: number;
         readonly totalProofBytes: number;
         readonly proofBytesHash: string;

@@ -1,8 +1,11 @@
 use super::super::extension_field::{ChallengeExtensionElement, ChallengeExtensionTower};
 use super::super::fiat_shamir_transcript::FiatShamirTranscript;
 use super::super::relation::{
-    LimbColumnLayout, SumcheckErrorWeights, TrusteeEvaluationKeyStatement,
-    build_linkage_public_vectors, build_private_vss_public_vectors,
+    CompactSameSecretBridgePublicVectorInput, LimbColumnLayout, SumcheckErrorWeights,
+    TargetDecryptionSharePublicVectorInput, TrusteeEvaluationKeyStatement,
+    build_compact_same_secret_bridge_public_vectors,
+    build_compact_vss_share_linkage_batch_public_vectors, build_linkage_public_vectors,
+    build_private_vss_public_vectors, build_target_decryption_share_public_vectors,
 };
 use super::super::*;
 use super::polynomial::{extension_powers, negacyclic_transpose_product_extension_matrix};
@@ -35,6 +38,17 @@ pub(in super::super) struct LimbChallenges {
     pub(in super::super) beta: Vec<ChallengeExtensionElement>,
 }
 
+fn mask_digit_weight(
+    tower: &ChallengeExtensionTower,
+    alpha_value: &ChallengeExtensionElement,
+    digit_index: usize,
+) -> CanonicalResult<ChallengeExtensionElement> {
+    Ok(tower.scale_base(
+        alpha_value,
+        pow_mod(CLAIM_MASK_RADIX, digit_index as u64, tower.modulus)?,
+    ))
+}
+
 pub(in super::super) fn draw_limb_challenges(
     transcript: &mut FiatShamirTranscript,
     layout: &LimbColumnLayout,
@@ -59,6 +73,24 @@ pub(in super::super) fn draw_limb_challenges(
             "private-vss-relation-alpha",
             modulus,
             layout.private_vss_relation_count() * LINCHECK_REPETITIONS,
+        )
+    } else if layout.compact_vss_active() {
+        transcript.challenge_extension_elements(
+            "compact-vss-share-linkage-alpha",
+            modulus,
+            layout.compact_vss_relation_count(),
+        )
+    } else if layout.compact_same_secret_bridge_material_active() {
+        transcript.challenge_extension_elements(
+            "compact-same-secret-bridge-alpha",
+            modulus,
+            layout.compact_same_secret_bridge_relation_count(),
+        )
+    } else if layout.target_decryption_active() {
+        transcript.challenge_extension_elements(
+            "target-decryption-share-alpha",
+            modulus,
+            layout.target_decryption_relation_count,
         )
     } else if layout.linkage_active() {
         let commitment_count =
@@ -98,7 +130,7 @@ pub(in super::super) fn build_limb_public_vectors(
     masked_claims: &[u64],
 ) -> CanonicalResult<LimbPublicVectors> {
     let tower = ChallengeExtensionTower::for_modulus(modulus)?;
-    let ring_degree = statement.ring_degree;
+    let ring_degree = layout.ring_degree;
     let u_powers = challenges
         .lincheck_challenges
         .iter()
@@ -116,11 +148,10 @@ pub(in super::super) fn build_limb_public_vectors(
                 &combined_claim,
                 &tower.scale_base(alpha_value, masked_claims[local_claim]),
             );
-            for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
                 let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
                 let position = half * layout.trace_size + half_position;
-                let digit_weight =
-                    tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
                 mask_selectors[column][position] =
                     tower.add(&mask_selectors[column][position], &digit_weight);
             }
@@ -133,6 +164,154 @@ pub(in super::super) fn build_limb_public_vectors(
             &challenges.linkage_alpha,
         )?;
         combined_claim = tower.add(&combined_claim, &private_vss_claim);
+
+        return Ok(LimbPublicVectors {
+            secret_factor: Vec::new(),
+            u_powers,
+            mask_selectors,
+            linkage_vectors: relation_vectors,
+            error_weights: SumcheckErrorWeights {
+                weights: vec![Vec::new(); LINCHECK_REPETITIONS],
+            },
+            lincheck_claim: combined_claim,
+        });
+    }
+    if layout.compact_vss_active() {
+        let compact_vss_share_linkage =
+            statement
+                .compact_vss_share_linkage
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "compact VSS layout requires a compact share-linkage statement",
+                    )
+                })?;
+        let mut combined_claim = ChallengeExtensionTower::zero();
+        let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
+        for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
+            combined_claim = tower.add(
+                &combined_claim,
+                &tower.scale_base(alpha_value, masked_claims[local_claim]),
+            );
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
+                let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
+                let position = half * layout.trace_size + half_position;
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
+                mask_selectors[column][position] =
+                    tower.add(&mask_selectors[column][position], &digit_weight);
+            }
+        }
+        let (compact_vss_claim, relation_vectors) =
+            build_compact_vss_share_linkage_batch_public_vectors(
+                compact_vss_share_linkage,
+                limb_index,
+                modulus,
+                layout.base_ring_degree,
+                &challenges.linkage_alpha,
+                &u_powers,
+                &tower,
+            )?;
+        combined_claim = tower.add(&combined_claim, &compact_vss_claim);
+
+        return Ok(LimbPublicVectors {
+            secret_factor: Vec::new(),
+            u_powers,
+            mask_selectors,
+            linkage_vectors: relation_vectors,
+            error_weights: SumcheckErrorWeights {
+                weights: vec![Vec::new(); LINCHECK_REPETITIONS],
+            },
+            lincheck_claim: combined_claim,
+        });
+    }
+    if layout.compact_same_secret_bridge_active() {
+        let compact_same_secret_bridge =
+            statement
+                .compact_same_secret_bridge
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof(
+                        "compact same-secret bridge layout requires a compact bridge statement",
+                    )
+                })?;
+        let mut combined_claim = ChallengeExtensionTower::zero();
+        let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
+        for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
+            combined_claim = tower.add(
+                &combined_claim,
+                &tower.scale_base(alpha_value, masked_claims[local_claim]),
+            );
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
+                let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
+                let position = half * layout.trace_size + half_position;
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
+                mask_selectors[column][position] =
+                    tower.add(&mask_selectors[column][position], &digit_weight);
+            }
+        }
+        let (compact_bridge_claim, relation_vectors) =
+            build_compact_same_secret_bridge_public_vectors(
+                CompactSameSecretBridgePublicVectorInput {
+                    public_matrix_seed_hash: &compact_same_secret_bridge.public_matrix_seed_hash,
+                    commitment_modulus_index: limb_index,
+                    modulus,
+                    ring_degree,
+                    target_rns_primes: &compact_same_secret_bridge.target_rns_primes,
+                    target_constant_commitments: &compact_same_secret_bridge
+                        .target_constant_commitments,
+                    relation_alpha: &challenges.linkage_alpha,
+                    u_power_vectors: &u_powers,
+                },
+                &tower,
+            )?;
+        combined_claim = tower.add(&combined_claim, &compact_bridge_claim);
+
+        return Ok(LimbPublicVectors {
+            secret_factor: Vec::new(),
+            u_powers,
+            mask_selectors,
+            linkage_vectors: relation_vectors,
+            error_weights: SumcheckErrorWeights {
+                weights: vec![Vec::new(); LINCHECK_REPETITIONS],
+            },
+            lincheck_claim: combined_claim,
+        });
+    }
+    if layout.target_decryption_active() {
+        let target_decryption_share =
+            statement.target_decryption_share.as_ref().ok_or_else(|| {
+                invalid_succinct_setup_proof(
+                    "target-decryption layout requires a target share statement",
+                )
+            })?;
+        let mut combined_claim = ChallengeExtensionTower::zero();
+        let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
+        for (local_claim, alpha_value) in challenges.consistency_alpha.iter().enumerate() {
+            combined_claim = tower.add(
+                &combined_claim,
+                &tower.scale_base(alpha_value, masked_claims[local_claim]),
+            );
+            for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
+                let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
+                let position = half * layout.trace_size + half_position;
+                let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
+                mask_selectors[column][position] =
+                    tower.add(&mask_selectors[column][position], &digit_weight);
+            }
+        }
+        let (target_claim, relation_vectors) = build_target_decryption_share_public_vectors(
+            TargetDecryptionSharePublicVectorInput {
+                proof_statement: statement,
+                statement: target_decryption_share,
+                limb_index,
+                modulus,
+                ring_degree,
+                relation_alpha: &challenges.linkage_alpha,
+                u_power_vectors: &u_powers,
+            },
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &target_claim);
 
         return Ok(LimbPublicVectors {
             secret_factor: Vec::new(),
@@ -218,7 +397,7 @@ pub(in super::super) fn build_limb_public_vectors(
         }
         error_cursor += digit_count;
     }
-    // Mask selector combinations: each claim contributes alpha' * 2^digit at
+    // Mask selector combinations: each claim contributes alpha' * radix^digit at
     // its mask slots, and alpha' * masked claim to the combined sum.
     let mut mask_selectors = vec![extension_zero_vector(); layout.mask_column_count];
     let mut combined_claim = lincheck_claim;
@@ -227,18 +406,41 @@ pub(in super::super) fn build_limb_public_vectors(
             &combined_claim,
             &tower.scale_base(alpha_value, masked_claims[local_claim]),
         );
-        for digit_index in 0..CLAIM_MASK_DIGIT_COUNT {
+        for digit_index in 0..layout.claim_mask_digit_count(local_claim) {
             let (column, half, half_position) = layout.mask_slot(local_claim, digit_index);
             let position = half * layout.trace_size + half_position;
-            let digit_weight =
-                tower.scale_base(alpha_value, pow_mod(2, digit_index as u64, modulus)?);
+            let digit_weight = mask_digit_weight(&tower, alpha_value, digit_index)?;
             mask_selectors[column][position] =
                 tower.add(&mask_selectors[column][position], &digit_weight);
         }
     }
 
     let mut linkage_vectors = Vec::new();
-    if layout.linkage_active() {
+    if layout.compact_same_secret_bridge_material_active() {
+        let compact_same_secret_bridge =
+            statement
+                .compact_same_secret_bridge
+                .as_ref()
+                .ok_or_else(|| {
+                    invalid_succinct_setup_proof("limb layout expects a compact bridge statement")
+                })?;
+        let (compact_bridge_claim, vectors) = build_compact_same_secret_bridge_public_vectors(
+            CompactSameSecretBridgePublicVectorInput {
+                public_matrix_seed_hash: &compact_same_secret_bridge.public_matrix_seed_hash,
+                commitment_modulus_index: limb_index,
+                modulus,
+                ring_degree,
+                target_rns_primes: &compact_same_secret_bridge.target_rns_primes,
+                target_constant_commitments: &compact_same_secret_bridge
+                    .target_constant_commitments,
+                relation_alpha: &challenges.linkage_alpha,
+                u_power_vectors: &u_powers,
+            },
+            &tower,
+        )?;
+        combined_claim = tower.add(&combined_claim, &compact_bridge_claim);
+        linkage_vectors = vectors;
+    } else if layout.linkage_active() {
         let linkage = statement.same_secret_linkage.as_ref().ok_or_else(|| {
             invalid_succinct_setup_proof(
                 "limb layout expects a same-secret linkage on the statement",

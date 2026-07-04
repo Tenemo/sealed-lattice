@@ -64,6 +64,29 @@ pub fn hash512_hex(domain: &str, parts: &[&[u8]]) -> String {
     to_hex(&hash512(domain, parts))
 }
 
+/// Computes the protocol's domain-separated 32-byte SHAKE256 hash output with
+/// the same length-framed preimage shape as `hash512`, under its own fixed
+/// prefix. Used for internal Merkle commitment nodes where the 256-bit width
+/// is the disclosed binding length.
+pub(crate) fn hash256(domain: &str, parts: &[&[u8]]) -> [u8; 32] {
+    const HASH256_PREIMAGE_PREFIX: &[u8] = b"sealed.vote/v1/hash256";
+    let mut preimage = Vec::new();
+    preimage.extend(HASH256_PREIMAGE_PREFIX);
+    append_bytes(&mut preimage, domain.as_bytes());
+    append_varuint(&mut preimage, parts.len() as u64);
+    for part in parts {
+        append_bytes(&mut preimage, part);
+    }
+
+    let mut hasher = Shake256::default();
+    hasher.update(&preimage);
+    let mut reader = hasher.finalize_xof();
+    let mut output = [0_u8; 32];
+    reader.read(&mut output);
+
+    output
+}
+
 fn update_varuint(hasher: &mut Shake256, value: u64) {
     for byte in encode_varuint_for_hash(value) {
         hasher.update(&[byte]);

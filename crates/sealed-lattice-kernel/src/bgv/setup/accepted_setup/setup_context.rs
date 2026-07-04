@@ -177,9 +177,9 @@ pub(super) fn verify_context(
     }
     // The setup parameters hash is a roster family (distinct per participant
     // count), so it is compared against the hash derived from this setup
-    // context's roster. It subsumes the former per-component parameter hashes
-    // (Q_share, carry-aware VSS relation, commitment, setup proof, transport,
-    // evaluator key schedule) and the BGV parameters.
+    // context's roster. It binds Q_share, the carry-aware VSS relation,
+    // commitment, setup proof, transport, evaluator key schedule, and BGV
+    // parameters.
     let expected_setup_parameters_hash = setup_parameters_hash_for_roster(&roster)?;
     if setup_context
         .get("setupParametersHash")

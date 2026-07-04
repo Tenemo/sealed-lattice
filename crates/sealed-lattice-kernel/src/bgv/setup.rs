@@ -6,14 +6,15 @@ use unicode_normalization::UnicodeNormalization;
 mod accepted_setup;
 mod certificates;
 mod commitment;
-// Development gate for the mobile trustee evaluation-key proving path;
-// exercised only by its tests and ignored benchmark until the consolidated
-// backend consumes it.
-#[cfg(test)]
-mod consolidated_key_switch_atom;
+mod compact_same_secret_bridge;
+mod compact_vss_commitment;
 mod evaluation_key_share_material;
 mod input;
 mod key_material;
+// Test-only key-switch digit-atom machinery used by its unit tests and ignored
+// prover-cost benchmark.
+#[cfg(test)]
+mod limb_group_key_switch_atom;
 mod local_trustee_state;
 mod package_builder;
 mod participant_material;
@@ -35,10 +36,29 @@ pub(super) const SETUP_TRANSPORT_CHUNK_SIZE_BYTES: u64 = 1_048_576;
 mod tests;
 
 pub(crate) use accepted_setup::{
+    accepted_setup_participant_roster_from_package,
     derive_collective_bgv_setup_public_derivations_from_request,
-    describe_collective_bgv_setup_parameters, verify_collective_bgv_setup_package_from_request,
+    describe_collective_bgv_setup_parameters,
+    describe_collective_bgv_setup_parameters_for_participant_count,
+    verify_collective_bgv_setup_package_from_request,
 };
 pub(crate) use commitment::compute_setup_commitment_from_opening_request;
+pub(crate) use compact_same_secret_bridge::{
+    verify_compact_vss_same_secret_bridge_proof_material_set_request,
+    verify_compact_vss_same_secret_bridge_statement_set_request,
+};
+#[cfg(test)]
+pub(crate) use compact_vss_commitment::compact_vss_canonical_message_digit_columns;
+pub(crate) use compact_vss_commitment::{
+    COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
+    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
+    compute_compact_vss_commitment_from_opening_request,
+    validate_standalone_compact_vss_commitment_body,
+    verify_compact_vss_aggregate_threshold_commitment_set_request,
+    verify_compact_vss_coefficient_commitment_set_request,
+    verify_compact_vss_recipient_share_commitment_set_request,
+    verify_compact_vss_share_linkage_statement_request,
+};
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
     generate_private_vss_share_proof_from_request, verify_private_vss_share_envelope_from_request,
@@ -51,6 +71,7 @@ pub(crate) use public_evaluation_key_material::{
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
+pub(crate) use setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
 pub(crate) use setup_proof::{
     absorb_setup_proof_material_transport_stream_chunk_request,
     begin_setup_proof_material_transport_stream_request,
@@ -61,6 +82,18 @@ pub(crate) use threshold_share_commitments::{
     begin_threshold_share_commitment_transport_derivation_stream_request,
     derive_threshold_share_commitments_from_request,
     finish_threshold_share_commitment_transport_derivation_stream_request,
+};
+pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
+pub(crate) use trustee_evaluation_key_proof::verify_compact_vss_share_linkage_proof_material_set_from_request;
+pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
+#[cfg(test)]
+pub(crate) use trustee_evaluation_key_proof::{
+    describe_target_decryption_share_proof_layout_from_request,
+    generate_target_decryption_share_proof_bytes_from_request,
+};
+pub(crate) use trustee_evaluation_key_proof::{
+    generate_compact_same_secret_bridge_proof_from_request,
+    generate_compact_vss_share_linkage_proof_from_request,
 };
 
 #[cfg(test)]
@@ -310,6 +343,68 @@ pub(crate) fn development_evaluator_key_from_passive_setup_package(
         public_b,
         public_a,
     )
+}
+
+// The roster-derived context hashes that target-decryption commitment contexts
+// and proof statements bind to. The roster hash is read from the accepted setup
+// package (from setupContext.rosterHash, falling back to setupInputs.rosterHash);
+// the setup-parameters and Q_share hashes are the deterministic roster-derived
+// identities recomputed from the accepted-setup parameter set, so a target
+// decryption verified against a package pins the same setup identity the setup
+// acceptance established.
+pub(crate) struct CollectiveBgvSetupContextHashes {
+    pub(crate) roster_hash: String,
+    pub(crate) setup_parameters_hash: String,
+}
+
+pub(crate) fn collective_bgv_setup_context_hashes_from_package(
+    setup_package: &Value,
+) -> CanonicalResult<CollectiveBgvSetupContextHashes> {
+    let roster_hash = if let Some(setup_context) = setup_package.get("setupContext") {
+        hash_at_path(setup_context, &["rosterHash"])?.to_string()
+    } else {
+        hash_at_path(setup_package, &["setupInputs", "rosterHash"])?.to_string()
+    };
+    let roster = accepted_setup::accepted_roster_from_package(setup_package);
+
+    Ok(CollectiveBgvSetupContextHashes {
+        roster_hash,
+        setup_parameters_hash: accepted_setup::setup_parameters_hash_for_roster(&roster)?,
+    })
+}
+
+// Roster-derived setupParametersHash for a supported participant count, matching
+// what collective_bgv_setup_context_hashes_from_package recomputes from an
+// accepted package's setupContext.participantCount. Target-decryption test
+// fixtures use it to bind an accepted SetupPackage whose setupContext agrees with
+// the reader without hand-copying the derivation.
+#[cfg(test)]
+pub(crate) fn accepted_setup_target_decryption_setup_parameters_hash(
+    participant_count: u64,
+) -> CanonicalResult<String> {
+    accepted_setup::setup_parameters_hash_for_roster(
+        &accepted_setup::roster_parameters_from_participant_count(participant_count),
+    )
+}
+
+// Kernel-canonical target-decryption parameter identities. These are fixed
+// functions of the bound BGV parameters (level 6, K_top = 20 target scope), not
+// caller-supplied package fields, so the target-decryption reader recomputes
+// them rather than trusting a passive `targetDecryptionParameters` block.
+pub(crate) fn canonical_target_decryption_parameter_hashes() -> CanonicalResult<(String, String)> {
+    let bgv_parameters_hash = bgv_parameters_hash()?;
+    let target_decryption_parameters =
+        certificates::target_decryption_parameters(&bgv_parameters_hash)?;
+    let target_decryption_parameters_hash =
+        derive_canonical_object_hash(&target_decryption_parameters)?;
+    let target_decryption_parameters_binding_hash = derive_canonical_object_hash(&json!({
+        "objectType": "TargetDecryptionParametersBinding",
+        "targetDecryptionParametersHash": target_decryption_parameters_hash,
+    }))?;
+    Ok((
+        target_decryption_parameters_hash,
+        target_decryption_parameters_binding_hash,
+    ))
 }
 
 use input::read_passive_setup_input;

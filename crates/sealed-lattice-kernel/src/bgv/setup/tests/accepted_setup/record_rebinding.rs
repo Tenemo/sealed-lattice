@@ -7,7 +7,7 @@ pub(super) fn rebind_collective_setup_package_hash(package: &mut serde_json::Val
         .remove("setupPackageHash");
     // Compute the canonical hash input in place instead of cloning the whole
     // package. The embedded proof and key-switch material can be multiple
-    // gigabytes, so the previous clone dominated each heavy test's peak memory.
+    // gigabytes, so a clone would dominate each heavy test's peak memory.
     // Detaching the large private VSS envelopes (which the hash input excludes),
     // hashing by reference, and restoring them yields the identical hash without
     // the copy. Key order is irrelevant because the protocol hash canonicalizes.
@@ -83,54 +83,6 @@ pub(super) fn rebind_collective_phase_roots(package: &mut serde_json::Value) {
         phase["phaseRoot"] = serde_json::json!(phase_root.clone());
         previous_phase_root = serde_json::json!(phase_root);
     }
-}
-
-pub(super) fn rebind_collective_vss_commitment_roots(package: &mut serde_json::Value) {
-    let source_trustee_records = package["vssCoefficientCommitments"]["sourceTrusteeRecords"]
-        .as_array_mut()
-        .expect("source trustee records");
-    for source_trustee_record in source_trustee_records {
-        source_trustee_record
-            .as_object_mut()
-            .expect("source trustee record")
-            .remove("sourceTrusteeCommitmentRoot");
-        source_trustee_record["sourceTrusteeCommitmentRoot"] = serde_json::json!(
-            derive_canonical_object_hash(source_trustee_record)
-                .expect("source trustee commitment root")
-        );
-    }
-    package["vssCoefficientCommitments"]
-        .as_object_mut()
-        .expect("VSS commitment set")
-        .remove("vssCoefficientCommitmentRoot");
-    package["vssCoefficientCommitments"]["vssCoefficientCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["vssCoefficientCommitments"])
-            .expect("VSS commitment set root")
-    );
-}
-
-pub(super) fn rebind_collective_vss_coefficient_commitment_material_root(
-    package: &mut serde_json::Value,
-) {
-    package["vssCoefficientCommitmentMaterial"]
-        .as_object_mut()
-        .expect("VSS coefficient commitment material set")
-        .remove("vssCoefficientCommitmentMaterialRoot");
-    package["vssCoefficientCommitmentMaterial"]["vssCoefficientCommitmentMaterialRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["vssCoefficientCommitmentMaterial"])
-            .expect("VSS coefficient commitment material root")
-    );
-}
-
-pub(super) fn rebind_collective_threshold_share_commitment_root(package: &mut serde_json::Value) {
-    package["thresholdShareCommitments"]
-        .as_object_mut()
-        .expect("threshold-share commitment set")
-        .remove("thresholdShareCommitmentRoot");
-    package["thresholdShareCommitments"]["thresholdShareCommitmentRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["thresholdShareCommitments"])
-            .expect("threshold-share commitment root")
-    );
 }
 
 pub(super) fn rebind_collective_private_vss_envelope_commitment_root(
@@ -219,16 +171,6 @@ pub(super) fn rebind_collective_vss_acceptance_root(package: &mut serde_json::Va
     );
 }
 
-pub(super) fn rebind_collective_vss_complaint_root(package: &mut serde_json::Value) {
-    package["vssComplaints"]
-        .as_object_mut()
-        .expect("VSS complaint set")
-        .remove("vssComplaintRoot");
-    package["vssComplaints"]["vssComplaintRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["vssComplaints"]).expect("VSS complaint set root")
-    );
-}
-
 pub(super) fn rebind_collective_same_secret_statement_roots(package: &mut serde_json::Value) {
     let statement_records = package["sameSecretConsistency"]["statementRecords"]
         .as_array_mut()
@@ -253,33 +195,6 @@ pub(super) fn rebind_collective_same_secret_consistency_root(package: &mut serde
     package["sameSecretConsistency"]["sameSecretConsistencyRoot"] = serde_json::json!(
         derive_canonical_object_hash(&package["sameSecretConsistency"])
             .expect("same-secret consistency root")
-    );
-}
-
-pub(super) fn rebind_same_secret_proof_record_root(
-    package: &mut serde_json::Value,
-    proof_record_index: usize,
-) {
-    let proof_record = &mut package["sameSecretProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("same-secret proof records")[proof_record_index];
-    proof_record
-        .as_object_mut()
-        .expect("same-secret proof record")
-        .remove("sameSecretProofRoot");
-    proof_record["sameSecretProofRoot"] = serde_json::json!(
-        derive_canonical_object_hash(proof_record).expect("same-secret proof root")
-    );
-}
-
-pub(super) fn rebind_collective_same_secret_proof_set_root(package: &mut serde_json::Value) {
-    package["sameSecretProofs"]
-        .as_object_mut()
-        .expect("same-secret proof set")
-        .remove("sameSecretProofSetRoot");
-    package["sameSecretProofs"]["sameSecretProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["sameSecretProofs"])
-            .expect("same-secret proof set root")
     );
 }
 
@@ -373,32 +288,5 @@ pub(super) fn rebind_collective_evaluator_key_schedule_root(package: &mut serde_
     package["evaluatorKeySchedule"]["evaluatorKeyScheduleRoot"] = serde_json::json!(
         derive_canonical_object_hash(&package["evaluatorKeySchedule"])
             .expect("evaluator key schedule root")
-    );
-}
-
-pub(super) fn rebind_trustee_evaluation_key_proof_set_root(package: &mut serde_json::Value) {
-    package["trusteeEvaluationKeyProofs"]
-        .as_object_mut()
-        .expect("trustee evaluation-key proof set")
-        .remove("trusteeEvaluationKeyProofSetRoot");
-    package["trusteeEvaluationKeyProofs"]["trusteeEvaluationKeyProofSetRoot"] = serde_json::json!(
-        derive_canonical_object_hash(&package["trusteeEvaluationKeyProofs"])
-            .expect("trustee evaluation-key proof set root")
-    );
-}
-
-pub(super) fn rebind_trustee_evaluation_key_proof_record_root(
-    package: &mut serde_json::Value,
-    proof_record_index: usize,
-) {
-    let proof_record = &mut package["trusteeEvaluationKeyProofs"]["proofRecords"]
-        .as_array_mut()
-        .expect("trustee evaluation-key proof records")[proof_record_index];
-    proof_record
-        .as_object_mut()
-        .expect("trustee evaluation-key proof record")
-        .remove("trusteeEvaluationKeyProofRoot");
-    proof_record["trusteeEvaluationKeyProofRoot"] = serde_json::json!(
-        derive_canonical_object_hash(proof_record).expect("trustee evaluation-key proof root")
     );
 }

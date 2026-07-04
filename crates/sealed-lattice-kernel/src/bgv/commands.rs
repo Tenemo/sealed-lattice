@@ -6,7 +6,7 @@ use crate::{
         encoding::{decode_batch_plaintext_polynomial, encode_batch_plaintext_slots},
         parameters::{
             BgvBasisKind, DATA_PRIMES, POLYNOMIAL_DEGREE, allowed_operation_registry_value,
-            batch_layout_binding_value, bgv_parameters_hash, bgv_parameters_value,
+            bgv_parameters_hash, bgv_parameters_value,
         },
         serialization::{
             BgvObjectKind, canonical_bytes_hex, ciphertext_root, parse_bgv_object_hex,
@@ -17,12 +17,15 @@ use crate::{
             absorb_threshold_share_commitment_transport_derivation_stream_chunk_request,
             begin_setup_proof_material_transport_stream_request,
             begin_threshold_share_commitment_transport_derivation_stream_request,
+            compute_compact_vss_commitment_from_opening_request,
             compute_setup_commitment_from_opening_request,
             derive_collective_bgv_setup_public_derivations_from_request,
             derive_threshold_share_commitments_from_request,
             describe_collective_bgv_setup_parameters,
             finish_setup_proof_material_transport_stream_request,
             finish_threshold_share_commitment_transport_derivation_stream_request,
+            generate_compact_same_secret_bridge_proof_from_request,
+            generate_compact_vss_share_linkage_proof_from_request,
             generate_passive_setup_package_from_request,
             generate_passive_setup_public_evaluation_key_material_from_request,
             generate_private_vss_share_proof_from_request,
@@ -41,7 +44,6 @@ pub(crate) fn describe_bgv_rns_parameters() -> CanonicalResult<Value> {
     Ok(json!({
         "parameters": bgv_parameters_value(),
         "bgvParametersHash": bgv_parameters_hash()?,
-        "batchLayoutBinding": batch_layout_binding_value()?,
     }))
 }
 
@@ -89,8 +91,17 @@ pub(crate) fn validate_bgv_evaluator_operation_from_request(
     ))
 }
 
-pub(crate) fn describe_collective_bgv_setup_parameters_from_request() -> CanonicalResult<Value> {
-    describe_collective_bgv_setup_parameters()
+pub(crate) fn describe_collective_bgv_setup_parameters_from_request(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    match request.get("participantCount").and_then(Value::as_u64) {
+        Some(participant_count) => {
+            crate::bgv::setup::describe_collective_bgv_setup_parameters_for_participant_count(
+                participant_count,
+            )
+        }
+        None => describe_collective_bgv_setup_parameters(),
+    }
 }
 
 pub(crate) fn derive_collective_bgv_setup_public_derivations(
@@ -121,6 +132,20 @@ pub(crate) fn generate_private_vss_share_proof(request: &Value) -> CanonicalResu
 
 pub(crate) fn generate_trustee_evaluation_key_proof(request: &Value) -> CanonicalResult<Value> {
     generate_trustee_evaluation_key_proof_from_request(request)
+}
+
+pub(crate) fn compute_compact_vss_commitment_from_opening(
+    request: &Value,
+) -> CanonicalResult<Value> {
+    compute_compact_vss_commitment_from_opening_request(request)
+}
+
+pub(crate) fn generate_compact_vss_share_linkage_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_compact_vss_share_linkage_proof_from_request(request)
+}
+
+pub(crate) fn generate_compact_same_secret_bridge_proof(request: &Value) -> CanonicalResult<Value> {
+    generate_compact_same_secret_bridge_proof_from_request(request)
 }
 
 pub(crate) fn compute_setup_commitment_from_opening(request: &Value) -> CanonicalResult<Value> {
@@ -178,7 +203,6 @@ pub(crate) fn generate_bgv_evaluation_key_material_from_request(
 }
 
 pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
-    validate_batch_layout_binding(request)?;
     let slots = read_slots(request)?;
     let level = request
         .get("level")
@@ -230,24 +254,6 @@ pub(crate) fn encode_bgv_batch_plaintext_from_request(request: &Value) -> Canoni
     }
 
     Ok(value)
-}
-
-fn validate_batch_layout_binding(request: &Value) -> CanonicalResult<()> {
-    let supplied_binding = request.get("layoutBinding").ok_or_else(|| {
-        CanonicalError::new(
-            CanonicalErrorCode::InvalidFixture,
-            "BGV batch encoder requires explicit direct encrypted ballot aggregate layout binding",
-        )
-    })?;
-    let expected_binding = batch_layout_binding_value()?;
-    if supplied_binding != &expected_binding {
-        return Err(CanonicalError::new(
-            CanonicalErrorCode::ComponentMismatch,
-            "BGV batch encoder layout binding does not match the selected direct encrypted ballot aggregate layout",
-        ));
-    }
-
-    Ok(())
 }
 
 pub(crate) fn validate_bgv_plaintext_from_request(request: &Value) -> CanonicalResult<Value> {
@@ -426,8 +432,15 @@ mod tests {
         assert_eq!(encoded["validation"]["isValid"], true);
         assert!(
             encode_bgv_batch_plaintext_from_request(&serde_json::json!({
-                "slots": [1, 2, 3],
+                "slots": [1, 2, 65_537],
                 "level": 0
+            }))
+            .is_err()
+        );
+        assert!(
+            encode_bgv_batch_plaintext_from_request(&serde_json::json!({
+                "slots": [1, 2, 3],
+                "level": crate::bgv::parameters::DATA_PRIMES.len()
             }))
             .is_err()
         );

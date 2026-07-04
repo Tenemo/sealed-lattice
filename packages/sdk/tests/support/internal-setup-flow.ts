@@ -42,8 +42,6 @@ import type {
     PublicKeyShareProofSetInput as ProtocolPublicKeyShareProofSetInput,
     PublicKeyShareSet as ProtocolPublicKeyShareSet,
     PublicKeyShareSetInput as ProtocolPublicKeyShareSetInput,
-    SetupPackageVssCoefficientCommitmentMaterialSet as ProtocolSetupPackageVssCoefficientCommitmentMaterialSet,
-    SetupTransportedVssCoefficientCommitmentMaterial as ProtocolSetupTransportedVssCoefficientCommitmentMaterial,
     RelinearizationKeyShareRounds as ProtocolRelinearizationKeyShareRounds,
     RelinearizationKeyShareRoundsInput as ProtocolRelinearizationKeyShareRoundsInput,
     SameSecretProofMaterial as ProtocolSameSecretProofMaterial,
@@ -477,7 +475,6 @@ export type SetupCertificateTransportedObjectInput =
 export type SetupCertificatesInput = Readonly<{
     readonly setupParameters: JsonRecord;
     readonly bgvParameters: JsonRecord;
-    readonly vssCoefficientCommitmentMaterial: JsonRecord;
     readonly transport: SetupCertificateTransportInput;
 }>;
 
@@ -489,15 +486,17 @@ export type SetupPackageInput = Readonly<{
     readonly qShare: JsonRecord;
     readonly phaseTranscript: readonly JsonRecord[];
     readonly commonRandomness: JsonRecord;
-    readonly vssCoefficientCommitments: JsonRecord;
-    readonly vssCoefficientCommitmentMaterial:
-        | ProtocolSetupPackageVssCoefficientCommitmentMaterialSet
-        | JsonRecord;
-    readonly transportedVssCoefficientCommitmentMaterial?: ProtocolSetupTransportedVssCoefficientCommitmentMaterial;
+    readonly compactVssCoefficientCommitmentSet: JsonRecord;
+    readonly compactVssRecipientShareCommitmentSet: JsonRecord;
+    readonly compactVssAggregateThresholdCommitmentSet: JsonRecord;
+    readonly compactVssShareLinkageStatement: JsonRecord;
+    readonly compactVssShareLinkageProofMaterialSet: JsonRecord;
+    readonly compactSameSecretBridgeStatementSet: JsonRecord;
+    readonly compactSameSecretBridgeProofMaterialSet: JsonRecord;
     readonly privateVssEnvelopeCommitments: JsonRecord;
     readonly vssShareAcceptances: JsonRecord;
     readonly vssComplaints?: JsonRecord;
-    readonly thresholdShareCommitments?: JsonRecord;
+    readonly thresholdShareCommitments: JsonRecord;
     readonly sameSecretConsistency: JsonRecord;
     readonly sameSecretProofs: JsonRecord;
     readonly publicKeyShares: JsonRecord;

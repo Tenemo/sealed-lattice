@@ -311,12 +311,6 @@ describe('accepted setup public package API in Node', () => {
             kernel,
             'package-private-vss-envelope-root',
         );
-        const setupTransportChunkCount = Math.ceil(
-            Number(
-                setupParameters.publicVssCommitmentMaterialSize
-                    .fullMaterialCoefficientBytes,
-            ) / setupTransportChunkSizeBytes,
-        );
         const transportedCompanionObjects = [
             {
                 objectName: 'sameSecretProofMaterial',
@@ -384,27 +378,20 @@ describe('accepted setup public package API in Node', () => {
                 kernel,
                 'setup-transport-full-object',
             ),
-            chunkHashes: Array.from(
-                { length: setupTransportChunkCount },
-                (_unused, chunkIndex) =>
-                    hashFromKernel(
-                        kernel,
-                        `setup-transport-chunk-${String(chunkIndex)}`,
-                    ),
-            ),
+            chunkHashes: [
+                hashFromKernel(kernel, 'setup-transport-companion-chunk'),
+            ],
             transportedObjects: transportedCompanionObjects,
         };
         const setupCertificates = publicSetupApi.createSetupCertificates({
             setupParameters: setupParameters,
             bgvParameters: bgvParameters,
-            vssCoefficientCommitmentMaterial,
             transport: setupTransport,
         });
         expect(() =>
             publicSetupApi.createSetupCertificates({
                 setupParameters: setupParameters,
                 bgvParameters: bgvParameters,
-                vssCoefficientCommitmentMaterial,
                 transport: {
                     ...setupTransport,
                     transportedObjects: [
@@ -422,7 +409,6 @@ describe('accepted setup public package API in Node', () => {
             publicSetupApi.createSetupCertificates({
                 setupParameters: setupParameters,
                 bgvParameters: bgvParameters,
-                vssCoefficientCommitmentMaterial,
                 transport: {
                     ...setupTransport,
                     transportedObjects: [
@@ -452,6 +438,74 @@ describe('accepted setup public package API in Node', () => {
             commitRecords: [],
             revealRecords: [],
         } as const;
+        // The compact public VSS sets are stand-ins at the shape level: the
+        // package assembly validates object types, versions, and root formats,
+        // while the kernel verifier recomputes and verifies the real compact
+        // commitments and proofs.
+        const compactVssCoefficientCommitmentSet = {
+            objectType: 'CompactVssCoefficientCommitmentSet',
+            objectVersion: 1,
+            coefficientCommitmentRoot: hashFromKernel(
+                kernel,
+                'compact-coefficient-commitment-root',
+            ),
+        };
+        const compactVssRecipientShareCommitmentSet = {
+            objectType: 'CompactVssRecipientShareCommitmentSet',
+            objectVersion: 1,
+            recipientShareCommitmentRoot: hashFromKernel(
+                kernel,
+                'compact-recipient-share-commitment-root',
+            ),
+        };
+        const compactVssAggregateThresholdCommitmentSet = {
+            objectType: 'CompactVssAggregateThresholdCommitmentSet',
+            objectVersion: 1,
+            aggregateThresholdCommitmentRoot: hashFromKernel(
+                kernel,
+                'compact-aggregate-threshold-commitment-root',
+            ),
+        };
+        const compactVssShareLinkageStatement = {
+            objectType: 'CompactVssShareLinkageStatement',
+            objectVersion: 1,
+            statementRoot: hashFromKernel(
+                kernel,
+                'compact-share-linkage-statement-root',
+            ),
+        };
+        const compactVssShareLinkageProofMaterialSet = {
+            objectType: 'CompactVssShareLinkageProofMaterialSet',
+            objectVersion: 1,
+            proofMaterialSetRoot: hashFromKernel(
+                kernel,
+                'compact-share-linkage-proof-material-set-root',
+            ),
+        };
+        const compactSameSecretBridgeStatementSet = {
+            objectType: 'CompactVssSameSecretBridgeStatementSet',
+            objectVersion: 1,
+            compactSameSecretBridgeStatementSetRoot: hashFromKernel(
+                kernel,
+                'compact-same-secret-bridge-statement-set-root',
+            ),
+        };
+        const compactSameSecretBridgeProofMaterialSet = {
+            objectType: 'CompactVssSameSecretBridgeProofMaterialSet',
+            objectVersion: 1,
+            proofMaterialSetRoot: hashFromKernel(
+                kernel,
+                'compact-same-secret-bridge-proof-material-set-root',
+            ),
+        };
+        const thresholdShareCommitments = {
+            objectType: 'CompactThresholdShareCommitmentBinding',
+            objectVersion: 1,
+            thresholdShareCommitmentRoot: hashFromKernel(
+                kernel,
+                'compact-threshold-share-commitment-root',
+            ),
+        };
         const setupPackageInput = {
             setupContext,
             qShare: setupParameters.qShare,
@@ -462,8 +516,14 @@ describe('accepted setup public package API in Node', () => {
                     value: commonRandomnessWithoutRoot,
                 }),
             },
-            vssCoefficientCommitments,
-            vssCoefficientCommitmentMaterial,
+            compactVssCoefficientCommitmentSet,
+            compactVssRecipientShareCommitmentSet,
+            compactVssAggregateThresholdCommitmentSet,
+            compactVssShareLinkageStatement,
+            compactVssShareLinkageProofMaterialSet,
+            compactSameSecretBridgeStatementSet,
+            compactSameSecretBridgeProofMaterialSet,
+            thresholdShareCommitments,
             privateVssEnvelopeCommitments: {
                 objectType: 'PrivateVssEnvelopeCommitmentSet',
                 objectVersion: 1,
@@ -576,32 +636,20 @@ describe('accepted setup public package API in Node', () => {
         );
         expect(setupPackage.setupTransportCertificate).toMatchObject({
             chunkSizeBytes: setupTransportChunkSizeBytes,
-            chunkCount:
-                setupTransportChunkCount + transportedCompanionObjects.length,
-            totalByteLength:
-                Number(
-                    setupParameters.publicVssCommitmentMaterialSize
-                        .fullMaterialCoefficientBytes,
-                ) + transportedCompanionByteLength,
+            chunkCount: transportedCompanionObjects.length,
+            totalByteLength: transportedCompanionByteLength,
         });
         expect(
             (setupPackage.setupTransportCertificate as Record<string, unknown>)
                 .transportedObjects,
-        ).toMatchObject([
-            {
-                objectName: 'vssCoefficientCommitmentMaterial',
-                objectRole: 'public-vss-coefficient-commitment-material',
-                chunkStartIndex: 0,
-                chunkCount: setupTransportChunkCount,
-            },
-            ...transportedCompanionObjects.map(
+        ).toMatchObject(
+            transportedCompanionObjects.map(
                 (transportedObject, transportedObjectIndex) => ({
                     objectName: transportedObject.objectName,
                     objectRole: transportedObject.objectRole,
                     objectRoot: transportedObject.objectRoot,
                     byteLength: transportedObject.byteLength,
-                    chunkStartIndex:
-                        setupTransportChunkCount + transportedObjectIndex,
+                    chunkStartIndex: transportedObjectIndex,
                     chunkCount: 1,
                     chunkHashes: transportedObject.chunkHashes,
                     fullObjectHash: transportedObject.fullObjectHash,
@@ -609,7 +657,7 @@ describe('accepted setup public package API in Node', () => {
                     loadingPolicy: 'stream-verified-before-object-use',
                 }),
             ),
-        ]);
+        );
         expect(
             (setupPackage.thresholdShareCommitments as Record<string, unknown>)
                 .thresholdShareCommitmentRoot,
@@ -623,17 +671,11 @@ describe('accepted setup public package API in Node', () => {
             publicSetupApi.createSetupPackage({
                 ...setupPackageInput,
                 thresholdShareCommitments: {
-                    ...(setupPackage.thresholdShareCommitments as Record<
-                        string,
-                        unknown
-                    >),
-                    thresholdShareCommitmentRoot: hashFromKernel(
-                        kernel,
-                        'stale-threshold-share-commitment',
-                    ),
+                    ...thresholdShareCommitments,
+                    objectType: 'ThresholdShareCommitmentSet',
                 },
             }),
-        ).toThrow(/verifier-derived commitments/u);
+        ).toThrow(/CompactThresholdShareCommitmentBinding/u);
         for (const requiredPublicKeyClosureField of [
             'sameSecretProofs',
             'publicKeyShareMaterial',

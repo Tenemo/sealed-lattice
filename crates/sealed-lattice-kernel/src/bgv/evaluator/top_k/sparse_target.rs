@@ -28,30 +28,12 @@ pub(crate) fn project_packed_sparse_target_from_rank_evaluation(
         });
     }
 
-    let (indicators, order_values) = if rank_evaluation.exact_rank_indicators.len() >= top_count {
-        let indicator_terms = rank_evaluation.exact_rank_indicators[..top_count].to_vec();
-        let indicators = sum_aligned(&indicator_terms)?;
-        let order_terms = rank_evaluation.exact_rank_indicators[..top_count]
-            .iter()
-            .enumerate()
-            .map(|(rank_value, indicator)| {
-                scalar_mul(
-                    &normalize_scaling(indicator)?,
-                    i64::try_from(rank_value + 1).expect("rank value fits i64"),
-                )
-            })
-            .collect::<CanonicalResult<Vec<_>>>()?;
-        let order_values = sum_aligned(&order_terms)?;
-
-        (indicators, order_values)
-    } else {
-        top_k_indicator_and_order_value(
-            context,
-            &rank_evaluation.packed_ranks,
-            option_count,
-            top_count,
-        )?
-    };
+    let (indicators, order_values) = top_k_indicator_and_order_value(
+        context,
+        &rank_evaluation.packed_ranks,
+        option_count,
+        top_count,
+    )?;
 
     Ok(EncryptedSparseTarget {
         target_id: plaintext_mul(&normalize_scaling(&indicators)?, &id_selector)?,

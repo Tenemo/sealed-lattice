@@ -76,26 +76,3 @@ fn compact_rotation_basis_covers_selected_logical_rotations() {
         }
     }
 }
-
-#[test]
-fn packed_rank_rotation_set_matches_unordered_pair_schedule() {
-    let rotations = super::packed_rank_galois_elements(20).expect("rotations");
-    let unique_rotations = rotations
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-
-    assert_eq!(rotations.len(), 38);
-    assert_eq!(unique_rotations.len(), 38);
-    assert_eq!(rotations[0], 3);
-    assert_eq!(
-        rotations[1],
-        super::inverse_galois_element(3).expect("inverse")
-    );
-    assert!(rotations.iter().all(|rotation| rotation % 2 == 1));
-    assert!(
-        rotations
-            .iter()
-            .all(|rotation| *rotation < 2 * POLYNOMIAL_DEGREE)
-    );
-}

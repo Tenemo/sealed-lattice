@@ -1,5 +1,6 @@
 use super::super::*;
 use super::*;
+use num_bigint::BigInt;
 
 // Combined linkage lincheck vectors for one commitment field. For every
 // relation (commitment l, row k) and repetition r with Fiat-Shamir weight
@@ -238,23 +239,96 @@ pub(crate) fn build_private_vss_public_vectors(
 
 // Centered bound for a published masked consistency claim: the clear sum is
 // bounded by max witness magnitude * ring degree * (2^bits - 1), and the
-// smudging mask lies in [0, 2^CLAIM_MASK_DIGIT_COUNT).
-// Family-aware clear bound: the private-VSS family masks only the carry and the
-// ternary opening-randomness columns (its message columns carry no consistency
-// claim; see consistency_vector_count for why the message is pinned globally
-// rather than by a per-claim mask), so its witness bound is the lifted carry
-// bound (about 2^11); every other family uses 2 (centered-binomial magnitude).
-// The mask is one-sided in [0, 2^CLAIM_MASK_DIGIT_COUNT), so the centered claim
+// smudging mask lies in the family-selected base-3 range.
+// Family-aware clear bound: private VSS masks only the carry and ternary
+// opening-randomness columns. Compact share-linkage masks per-item carries and
+// compact message digits; carry claims use the lifted carry bound and digit
+// claims use the compact digit bound. Every other family uses 2
+// (centered-binomial magnitude).
+// The mask is one-sided in [0, CLAIM_MASK_RADIX^mask_digit_count), so the centered claim
 // lies in [-clear_bound, mask_bound + clear_bound]. The disclosed smudging
-// figure in accounting.rs recomputes from this same carry-driven family bound,
-// so the relation bound and the disclosed leakage figure agree by construction.
-// The carry's range bound here is essential to the global sharing-soundness
+// figure in accounting.rs recomputes from this same family-aware bound, so the
+// relation bound and the disclosed leakage figure agree by construction. The
+// carry's range bound here is essential to the global sharing-soundness
 // argument: it keeps the pinned evaluation a bounded centered lift.
-pub(crate) fn masked_claim_bounds(
+pub(crate) fn claim_mask_digit_count_for_global_claim(
     statement: &TrusteeEvaluationKeyStatement,
-) -> CanonicalResult<(i128, i128)> {
-    let ring_degree = statement.ring_degree;
-    let coefficient_bound = (1_i128 << CONSISTENCY_COEFFICIENT_BITS) - 1;
+    global_claim_id: u64,
+) -> usize {
+    let family_shape = statement
+        .family_shape()
+        .expect("statement shape validated before claim masking");
+    let consistency_repetitions = family_shape.consistency_repetitions();
+    if statement.target_decryption_share.is_some() {
+        let global_vector_index = global_claim_id as usize / consistency_repetitions;
+        let target_message_digit_vector_count =
+            statement.target_decryption_total_message_digit_count();
+        if global_vector_index < target_message_digit_vector_count {
+            let global_message_index = global_vector_index
+                / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+            match statement
+                .target_decryption_message_claim_kind(global_message_index)
+                .expect("target-decryption message claim id is in range")
+            {
+                TargetDecryptionMessageClaimKind::AggregateOpening => {
+                    TARGET_DECRYPTION_AGGREGATE_MESSAGE_CLAIM_MASK_DIGIT_COUNT
+                }
+                TargetDecryptionMessageClaimKind::SmudgingOpening => {
+                    TARGET_DECRYPTION_SMUDGING_MESSAGE_CLAIM_MASK_DIGIT_COUNT
+                }
+            }
+        } else {
+            unreachable!("target-decryption global claims only carry message digits")
+        }
+    } else if statement.compact_vss_share_linkage.is_some() {
+        let global_vector_index = global_claim_id as usize / consistency_repetitions;
+        if global_vector_index == 0 {
+            COMPACT_VSS_CARRY_CLAIM_MASK_DIGIT_COUNT
+        } else {
+            COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT
+        }
+    } else if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge {
+        let global_vector_index = global_claim_id as usize / consistency_repetitions;
+        let total_error_vectors = statement
+            .keys
+            .iter()
+            .map(|key| key.digit_count())
+            .sum::<usize>();
+        let bridge_digit_start = 1 + total_error_vectors + 1;
+        let bridge_digit_vector_count = compact_same_secret_bridge.target_rns_primes.len()
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+        if (bridge_digit_start..bridge_digit_start + bridge_digit_vector_count)
+            .contains(&global_vector_index)
+        {
+            COMPACT_VSS_DIGIT_CLAIM_MASK_DIGIT_COUNT
+        } else {
+            family_shape.claim_mask_digit_count()
+        }
+    } else {
+        family_shape.claim_mask_digit_count()
+    }
+}
+
+pub(crate) fn claim_mask_bound_for_digit_count(mask_digit_count: usize) -> CanonicalResult<BigInt> {
+    let exponent = u32::try_from(mask_digit_count)
+        .map_err(|_| invalid_succinct_setup_proof("claim mask digit count overflowed"))?;
+
+    Ok(BigInt::from(CLAIM_MASK_RADIX).pow(exponent))
+}
+
+pub(crate) fn masked_claim_bounds_for_global_claim(
+    statement: &TrusteeEvaluationKeyStatement,
+    global_claim_id: u64,
+) -> CanonicalResult<(BigInt, BigInt)> {
+    let family_shape = statement.family_shape()?;
+    let ring_degree = statement
+        .compact_vss_share_linkage
+        .as_ref()
+        .map(|share_linkage| share_linkage.packed_ring_degree(statement.ring_degree))
+        .transpose()?
+        .unwrap_or(statement.ring_degree);
+    let consistency_repetitions = family_shape.consistency_repetitions();
+    let coefficient_bound = (1_i128 << family_shape.consistency_coefficient_bits()) - 1;
     let witness_bound = match &statement.private_vss_share {
         Some(private_vss_share) => {
             // The message (Shamir coefficient) columns carry no masked
@@ -270,15 +344,112 @@ pub(crate) fn masked_claim_bounds(
             )?;
             carry_bound.max(1)
         }
-        None => 2,
+        None => match &statement.compact_vss_share_linkage {
+            Some(compact_vss_share_linkage) => {
+                let global_vector_index = global_claim_id as usize / consistency_repetitions;
+                if global_vector_index < compact_vss_share_linkage.item_count() {
+                    let carry_bound = if global_vector_index == 0 {
+                        private_vss_share_lifted_carry_bound(
+                            compact_vss_share_linkage.recipient_roster_position,
+                            compact_vss_share_linkage.coefficient_commitments.len(),
+                        )?
+                    } else {
+                        let item = &compact_vss_share_linkage.additional_linkage_items
+                            [global_vector_index - 1];
+                        private_vss_share_lifted_carry_bound(
+                            item.recipient_roster_position,
+                            item.coefficient_commitments.len(),
+                        )?
+                    };
+                    carry_bound.max(1)
+                } else {
+                    i128::from(
+                        crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE
+                            - 1,
+                    )
+                }
+            }
+            None => {
+                if let Some(compact_same_secret_bridge) = &statement.compact_same_secret_bridge {
+                    let global_vector_index = global_claim_id as usize / consistency_repetitions;
+                    let total_error_vectors = statement
+                        .keys
+                        .iter()
+                        .map(|key| key.digit_count())
+                        .sum::<usize>();
+                    let bridge_digit_start = 1 + total_error_vectors + 1;
+                    let bridge_digit_vector_count =
+                        compact_same_secret_bridge.target_rns_primes.len()
+                            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                    if (bridge_digit_start..bridge_digit_start + bridge_digit_vector_count)
+                        .contains(&global_vector_index)
+                    {
+                        i128::from(
+                            crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_BASE
+                                - 1,
+                        )
+                    } else {
+                        2
+                    }
+                } else if statement.target_decryption_share.is_some() {
+                    let global_vector_index = global_claim_id as usize / consistency_repetitions;
+                    let target_message_digit_vector_count =
+                        statement.target_decryption_total_message_digit_count();
+                    if global_vector_index < target_message_digit_vector_count {
+                        let global_message_index = global_vector_index
+                            / crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_index = global_vector_index
+                            % crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT;
+                        let digit_bound = statement
+                            .target_decryption_message_digit_bound(
+                                global_message_index,
+                                digit_index,
+                            )
+                            .expect("target-decryption digit claim id is in range");
+                        i128::from(digit_bound.saturating_sub(1))
+                    } else {
+                        unreachable!("target-decryption global claims only carry message digits")
+                    }
+                } else {
+                    2
+                }
+            }
+        },
     };
     let clear_bound = witness_bound
         .checked_mul(coefficient_bound)
         .and_then(|bound| bound.checked_mul(ring_degree as i128))
         .ok_or_else(|| invalid_succinct_setup_proof("masked claim bound overflowed"))?;
-    let mask_bound = 1_i128 << CLAIM_MASK_DIGIT_COUNT;
+    let mask_digit_count = claim_mask_digit_count_for_global_claim(statement, global_claim_id);
+    let mask_bound = claim_mask_bound_for_digit_count(mask_digit_count)?;
+    let clear_bound = BigInt::from(clear_bound);
 
-    Ok((-clear_bound, mask_bound + clear_bound))
+    Ok((-&clear_bound, mask_bound + clear_bound))
+}
+
+pub(crate) fn masked_claim_lift_residue_count_for_moduli(
+    moduli: impl IntoIterator<Item = u64>,
+    lower_bound: &BigInt,
+    upper_bound: &BigInt,
+) -> usize {
+    let lower_magnitude = -lower_bound;
+    let maximum_magnitude = if lower_magnitude > *upper_bound {
+        lower_magnitude
+    } else {
+        upper_bound.clone()
+    };
+    let required_product = maximum_magnitude * BigInt::from(2_u8);
+    let mut product = BigInt::from(1_u8);
+    let mut residue_count = 0_usize;
+    for modulus in moduli {
+        residue_count += 1;
+        product *= BigInt::from(modulus);
+        if product > required_product {
+            return residue_count;
+        }
+    }
+
+    residue_count + 1
 }
 
 pub(crate) fn private_vss_share_lifted_carry_bound(

@@ -2,6 +2,7 @@ import { createLocalRunLog, currentProcessExitCode } from './local-run-log.js';
 import { runCommandsInSeries, type CommandInvocation } from './run-command.js';
 import {
     cargoTestArgumentsForRustKernelFast,
+    memoryBoundedFastTestThreadCount,
     normalizeRustTestFilter,
 } from './rust-kernel-test-arguments.js';
 
@@ -51,8 +52,12 @@ export const parseRustKernelArguments = (
 
 export const buildRustKernelTestCommand = (
     parsedArguments: ParsedRustKernelArguments,
+    testThreadCount: number = memoryBoundedFastTestThreadCount(),
 ): CommandInvocation => ({
-    args: cargoTestArgumentsForRustKernelFast(parsedArguments.testFilter),
+    args: cargoTestArgumentsForRustKernelFast(
+        parsedArguments.testFilter,
+        testThreadCount,
+    ),
     command: 'cargo',
     description:
         parsedArguments.testFilter === undefined
