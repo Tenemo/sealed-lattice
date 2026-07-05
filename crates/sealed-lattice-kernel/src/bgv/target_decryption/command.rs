@@ -108,7 +108,7 @@ pub(crate) fn verify_bgv_target_decryption_share_proof_statement_binding_from_re
     )
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 pub(crate) fn generate_bgv_target_decryption_share_proof_material_from_local_witness_request(
     request: &Value,
 ) -> CanonicalResult<Value> {
@@ -146,7 +146,7 @@ pub(crate) fn generate_bgv_target_decryption_share_proof_material_from_local_wit
     )
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 pub(crate) fn verify_bgv_target_decryption_share_proof_material_from_request(
     request: &Value,
 ) -> CanonicalResult<Value> {

@@ -52,13 +52,12 @@ mod prover;
 mod relation;
 mod verifier;
 
+#[cfg(test)]
+pub(crate) use commands::describe_target_decryption_share_proof_layout_from_request;
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use commands::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use commands::generate_trustee_evaluation_key_proof_from_request;
 pub(crate) use commands::verify_target_decryption_share_proof_bytes_from_request;
-#[cfg(test)]
-pub(crate) use commands::{
-    describe_target_decryption_share_proof_layout_from_request,
-    generate_target_decryption_share_proof_bytes_from_request,
-};
 pub(crate) use commands::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,

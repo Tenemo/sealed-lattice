@@ -5,7 +5,7 @@ mod mutations;
 mod rng;
 mod types;
 
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub use codec::encode_standard_base64;
 pub use codec::{
     analyze_canonical_object, analyze_canonical_object_hex, decode_hex, decode_standard_base64,

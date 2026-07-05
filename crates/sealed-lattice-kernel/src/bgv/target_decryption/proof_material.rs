@@ -7,7 +7,7 @@ const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_TYPE: &str =
 const TARGET_DECRYPTION_SHARE_PROOF_MATERIAL_OBJECT_VERSION: u64 = 8;
 const TARGET_DECRYPTION_SHARE_PROOF_RECORD_OBJECT_VERSION: u64 = 7;
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 pub(super) struct TargetDecryptionShareProofMaterialGenerationInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
@@ -43,7 +43,7 @@ struct TargetDecryptionShareProofRecordVerificationInput<'a> {
     active_limb_count: usize,
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 pub(super) fn generate_target_decryption_share_proof_material_from_local_witness(
     input: TargetDecryptionShareProofMaterialGenerationInput<'_>,
 ) -> CanonicalResult<Value> {

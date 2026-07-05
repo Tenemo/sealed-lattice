@@ -1,6 +1,6 @@
 use super::*;
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 pub(super) struct TargetDecryptionShareAllActiveLimbsProofRequestInput<'a> {
     pub(super) setup_binding: &'a SetupBinding,
     pub(super) target_accepted: &'a TargetAcceptedBinding,
@@ -23,7 +23,7 @@ pub(super) struct TargetDecryptionShareAllActiveLimbsProofStatementInput<'a> {
     pub(super) proof_statement: &'a Value,
 }
 
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 pub(super) fn target_decryption_share_all_active_limbs_proof_request_from_local_witness(
     input: TargetDecryptionShareAllActiveLimbsProofRequestInput<'_>,
 ) -> CanonicalResult<Value> {
@@ -356,6 +356,7 @@ fn target_statement_aggregate_binding<'a>(
 }
 
 #[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 fn u64_coefficients_to_i64(coefficients: &[u64], field_name: &str) -> CanonicalResult<Vec<i64>> {
     coefficients
         .iter()

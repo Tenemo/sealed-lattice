@@ -27,9 +27,12 @@ pub(crate) use command::{
 pub(crate) use command::{
     derive_bgv_target_decryption_share_proof_statement_from_request,
     generate_bgv_target_decryption_share_from_local_share_request,
+    verify_bgv_target_decryption_share_proof_statement_binding_from_request,
+};
+#[cfg(feature = "target-decryption-development-commands")]
+pub(crate) use command::{
     generate_bgv_target_decryption_share_proof_material_from_local_witness_request,
     verify_bgv_target_decryption_share_proof_material_from_request,
-    verify_bgv_target_decryption_share_proof_statement_binding_from_request,
 };
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use compact_opening::*;
@@ -80,10 +83,12 @@ use crate::{
 };
 
 #[cfg(any(feature = "target-decryption-development-commands", test))]
-use crate::bgv::coefficient_codec::{signed_byte_vector_from_hex, signed_byte_vector_hex};
+use crate::bgv::coefficient_codec::signed_byte_vector_from_hex;
 #[cfg(test)]
-use crate::bgv::setup::compact_vss_canonical_message_digit_columns;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+use crate::bgv::coefficient_codec::signed_byte_vector_hex;
+#[cfg(test)]
+use crate::bgv::evaluator::engine::DevelopmentBgvKey;
+#[cfg(test)]
 use crate::bgv::setup::development_evaluator_key_from_passive_setup_package;
 use crate::bgv::setup::{COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT};
 #[cfg(any(feature = "target-decryption-development-commands", test))]
@@ -94,13 +99,13 @@ use crate::bgv::setup::{
 use crate::bgv::{
     coefficient_codec::coefficient_vector_le_hex,
     evaluator::{
-        engine::{DevelopmentBgvKey, negacyclic_mul, signed_residue},
+        engine::{negacyclic_mul, signed_residue},
         prg::DeterministicSampler,
     },
 };
 #[cfg(any(feature = "target-decryption-development-commands", test))]
 use crate::hashing::hash512_hex;
-#[cfg(any(feature = "target-decryption-development-commands", test))]
+#[cfg(feature = "target-decryption-development-commands")]
 use crate::transcript_core::encode_standard_base64;
 
 #[cfg(all(

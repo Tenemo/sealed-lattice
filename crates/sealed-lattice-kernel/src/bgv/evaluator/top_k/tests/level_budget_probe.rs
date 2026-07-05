@@ -195,8 +195,9 @@ fn linear_combination_from_powers(
         .filter_map(|(power, _)| powers[power].as_ref().map(|ciphertext| ciphertext.level))
         .min();
     let anchor_level = target_level.unwrap_or(reference.level);
-    let anchor = normalize_scaling(&modulus_switch_to(reference, anchor_level).expect("anchor level"))
-        .expect("anchor scaling");
+    let anchor =
+        normalize_scaling(&modulus_switch_to(reference, anchor_level).expect("anchor level"))
+            .expect("anchor scaling");
     let mut result = add_plaintext_coefficients(
         &scalar_mul(&anchor, 0).expect("zero anchor"),
         &broadcast_constant_coefficients(coefficients[0]),
@@ -211,9 +212,11 @@ fn linear_combination_from_powers(
             &modulus_switch_to(power_ciphertext, anchor_level).expect("power to anchor level"),
         )
         .expect("power scaling");
-        let scaled =
-            scalar_mul(&leveled, i64::try_from(*coefficient).expect("coefficient fits i64"))
-                .expect("scale power");
+        let scaled = scalar_mul(
+            &leveled,
+            i64::try_from(*coefficient).expect("coefficient fits i64"),
+        )
+        .expect("scale power");
         result = ciphertext_add(&result, &scaled).expect("accumulate term");
     }
 
@@ -253,7 +256,10 @@ fn evaluate_lookup_with_level_floor(
     trace: bool,
 ) -> Ciphertext {
     let degree = coefficients.len() - 1;
-    assert!(degree >= baby_step_count, "probe lookup expects a full block structure");
+    assert!(
+        degree >= baby_step_count,
+        "probe lookup expects a full block structure"
+    );
     let block_count = coefficients.len().div_ceil(baby_step_count);
     let working_input =
         modulus_switch_to(input, context.working_level()).expect("input to working level");
@@ -284,7 +290,10 @@ fn evaluate_lookup_with_level_floor(
         let start = block_index * baby_step_count;
         let end = coefficients.len().min(start + baby_step_count);
         let block_coefficients = &coefficients[start..end];
-        if block_coefficients.iter().all(|coefficient| *coefficient == 0) {
+        if block_coefficients
+            .iter()
+            .all(|coefficient| *coefficient == 0)
+        {
             continue;
         }
         let block_value =
@@ -294,7 +303,10 @@ fn evaluate_lookup_with_level_floor(
             continue;
         }
         let giant_power = giant_power.as_ref().expect("giant power present");
-        if block_coefficients[1..].iter().all(|coefficient| *coefficient == 0) {
+        if block_coefficients[1..]
+            .iter()
+            .all(|coefficient| *coefficient == 0)
+        {
             terms.push(
                 scalar_mul(
                     giant_power,
@@ -342,9 +354,13 @@ fn comparison_handoff(
         .expect("score ciphertext");
     let working_scores = modulus_switch_to(&encrypted_scores, context.working_level())
         .expect("scores to working level");
-    let packed_scores =
-        pack_direct_score_slots(context, &working_scores, option_count, "level-budget-probe-pack")
-            .expect("packed scores");
+    let packed_scores = pack_direct_score_slots(
+        context,
+        &working_scores,
+        option_count,
+        "level-budget-probe-pack",
+    )
+    .expect("packed scores");
     let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
         context,
         &packed_scores,
@@ -361,7 +377,7 @@ fn comparison_handoff(
 // direct encryption and modulus switching so the rank-lookup level budget can be
 // measured in isolation from the comparison circuit's noise. Normalized to scaling
 // one, matching the production lookup input.
-fn clean_level_six_rank_input(context: &EvaluatorContext, key: &DevelopmentBgvKey) -> Ciphertext {
+fn clean_level_six_rank_input(_context: &EvaluatorContext, key: &DevelopmentBgvKey) -> Ciphertext {
     let mut slots = vec![0u64; RANK_LOOKUP_DEGREE_OPTION_COUNT];
     for (rank, slot) in slots.iter_mut().enumerate() {
         *slot = rank as u64;
@@ -467,7 +483,9 @@ fn level_budget_rank_lookup_noise_probe() {
     let production_slots = key
         .decrypt_to_slots(&production_terminal)
         .expect("production slots");
-    let replica_slots = key.decrypt_to_slots(&replica_current).expect("replica slots");
+    let replica_slots = key
+        .decrypt_to_slots(&replica_current)
+        .expect("replica slots");
     assert_eq!(
         production_slots, replica_slots,
         "level-floor-0 replica must decrypt identically to the production lookup"
@@ -477,9 +495,13 @@ fn level_budget_rank_lookup_noise_probe() {
         "level-floor-0 replica must exit at the production level"
     );
     // correctness: indicator flips at k on the clean ranks 0..19.
-    for rank in 0..RANK_LOOKUP_DEGREE_OPTION_COUNT {
+    for (rank, production_slot) in production_slots
+        .iter()
+        .enumerate()
+        .take(RANK_LOOKUP_DEGREE_OPTION_COUNT)
+    {
         assert_eq!(
-            production_slots[rank],
+            *production_slot,
             u64::from(rank < selection_threshold),
             "indicator at rank {rank}"
         );
@@ -507,7 +529,10 @@ fn level_budget_rank_lookup_noise_probe() {
             .all(|rank| terminal_slots[rank] == u64::from(rank < selection_threshold));
         println!(
             "  TERMINAL: exit level {}, noise {:.1} bits, margin {:.1} bits, headroom {:.1} bits, decrypts correctly = {decrypts_correctly}",
-            terminal.level, terminal_noise, margin, margin - terminal_noise,
+            terminal.level,
+            terminal_noise,
+            margin,
+            margin - terminal_noise,
         );
     }
 
@@ -576,7 +601,7 @@ fn comparison_handoff_noise_diagnostic() {
 // A clean rank ciphertext (ranks 0..19 in slots 0..19) at a chosen level, for
 // measuring the natural (no-deferral) lookup exit from a raised handoff level.
 fn clean_rank_input_at_level(
-    context: &EvaluatorContext,
+    _context: &EvaluatorContext,
     key: &DevelopmentBgvKey,
     level: usize,
 ) -> Ciphertext {
@@ -776,7 +801,10 @@ fn faithful_multiballot_handoff_noise() {
             .collect();
 
         let mut aggregate = key
-            .encrypt_slots(&ballot_scores, &format!("faithful-ballot-0-n{ballot_count}"))
+            .encrypt_slots(
+                &ballot_scores,
+                &format!("faithful-ballot-0-n{ballot_count}"),
+            )
             .expect("ballot 0");
         for ballot_index in 1..ballot_count {
             let ballot = key
@@ -797,14 +825,15 @@ fn faithful_multiballot_handoff_noise() {
             "faithful-multiballot-pack",
         )
         .expect("packed scores");
-        let rank_evaluation = evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
-            &context,
-            &packed_scores,
-            option_count,
-            score_domain_max,
-            "faithful-multiballot-rank",
-        )
-        .expect("rank evaluation");
+        let rank_evaluation =
+            evaluate_packed_rank_evaluation_from_packed_scores_with_batched_pairs(
+                &context,
+                &packed_scores,
+                option_count,
+                score_domain_max,
+                "faithful-multiballot-rank",
+            )
+            .expect("rank evaluation");
         let handoff = rank_evaluation.packed_ranks;
 
         let oracle_ranks: Vec<u64> = (0..option_count)

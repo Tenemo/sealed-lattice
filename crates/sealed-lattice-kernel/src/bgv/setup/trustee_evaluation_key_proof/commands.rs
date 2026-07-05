@@ -13,6 +13,7 @@ use super::relation::{
     SameSecretLinkageStatement, SuccinctSetupProofContext, SuccinctSetupProofFamilyShape,
     TrusteeEvaluationKeyStatement, TrusteeEvaluationKeyWitness,
 };
+#[cfg(test)]
 use super::relation::{LimbColumnLayout, PHASE_TWO_COLUMN_COUNT, TargetDecryptionMessageClaimKind};
 use super::relation::{
     TargetDecryptionShareLimbStatement, TargetDecryptionShareRoleStatement,
@@ -1357,7 +1358,7 @@ pub(crate) fn verify_compact_same_secret_bridge_proof_from_request(
     }))
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 #[derive(Debug)]
 pub(crate) struct GeneratedTargetDecryptionShareProofBytes {
     pub(crate) target_roles: Vec<String>,
@@ -1365,7 +1366,7 @@ pub(crate) struct GeneratedTargetDecryptionShareProofBytes {
     pub(crate) proof_bytes: Vec<u8>,
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) fn generate_target_decryption_share_proof_bytes_from_request(
     request: &Value,
 ) -> CanonicalResult<GeneratedTargetDecryptionShareProofBytes> {
@@ -2375,7 +2376,7 @@ fn target_decryption_smudging_commitments_from_set(
     Ok((roots, commitments))
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 fn target_decryption_share_witness_from_request(
     request: &Value,
 ) -> CanonicalResult<TrusteeEvaluationKeyWitness> {

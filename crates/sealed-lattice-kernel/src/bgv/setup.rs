@@ -47,17 +47,20 @@ pub(crate) use compact_same_secret_bridge::{
     verify_compact_vss_same_secret_bridge_proof_material_set_request,
     verify_compact_vss_same_secret_bridge_statement_set_request,
 };
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) use compact_vss_commitment::compact_vss_canonical_message_digit_columns;
 pub(crate) use compact_vss_commitment::{
     COMPACT_VSS_OUTPUT_COORDINATE_COUNT, COMPACT_VSS_RANDOMNESS_COLUMN_COUNT,
-    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
     compute_compact_vss_commitment_from_opening_request,
     validate_standalone_compact_vss_commitment_body,
     verify_compact_vss_aggregate_threshold_commitment_set_request,
     verify_compact_vss_coefficient_commitment_set_request,
     verify_compact_vss_recipient_share_commitment_set_request,
     verify_compact_vss_share_linkage_statement_request,
+};
+#[cfg(any(feature = "target-decryption-development-commands", test))]
+pub(crate) use compact_vss_commitment::{
+    CompactVssCommitmentOpeningInput, compute_compact_vss_commitment_from_opening,
 };
 pub(crate) use local_trustee_state::verify_local_trustee_setup_state_from_request;
 pub(crate) use private_vss::{
@@ -71,7 +74,6 @@ pub(crate) use public_evaluation_key_material::{
 use public_evaluation_key_material::{
     read_public_evaluation_key_rotation_requests, selected_public_evaluation_key_rotation_requests,
 };
-pub(crate) use setup_proof::SETUP_PROOF_TRANSPORT_CHUNK_SIZE_BYTES;
 pub(crate) use setup_proof::{
     absorb_setup_proof_material_transport_stream_chunk_request,
     begin_setup_proof_material_transport_stream_request,
@@ -84,13 +86,10 @@ pub(crate) use threshold_share_commitments::{
     finish_threshold_share_commitment_transport_derivation_stream_request,
 };
 pub(crate) use trustee_evaluation_key_proof::TARGET_DECRYPTION_SHARE_PROOF_FAMILY;
+#[cfg(feature = "target-decryption-development-commands")]
+pub(crate) use trustee_evaluation_key_proof::generate_target_decryption_share_proof_bytes_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_compact_vss_share_linkage_proof_material_set_from_request;
 pub(crate) use trustee_evaluation_key_proof::verify_target_decryption_share_proof_bytes_from_request;
-#[cfg(test)]
-pub(crate) use trustee_evaluation_key_proof::{
-    describe_target_decryption_share_proof_layout_from_request,
-    generate_target_decryption_share_proof_bytes_from_request,
-};
 pub(crate) use trustee_evaluation_key_proof::{
     generate_compact_same_secret_bridge_proof_from_request,
     generate_compact_vss_share_linkage_proof_from_request,

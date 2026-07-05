@@ -30,3 +30,42 @@ pub(crate) mod witness_encoding;
 
 #[cfg(test)]
 mod gate_benchmark;
+
+#[cfg(test)]
+mod folded_opening_pricing;
+
+#[cfg(test)]
+mod witness_commitment;
+
+#[cfg(test)]
+mod atom_argument;
+
+#[cfg(test)]
+mod linear_opening;
+
+#[cfg(test)]
+mod atom_backend;
+
+#[cfg(test)]
+mod material_transport;
+
+#[cfg(test)]
+mod product_check;
+
+#[cfg(test)]
+mod support_proof;
+
+#[cfg(test)]
+mod eta2_support;
+
+#[cfg(test)]
+mod carry_range;
+
+#[cfg(test)]
+mod zk_linear_opening;
+
+#[cfg(test)]
+mod key_aggregation;
+
+#[cfg(test)]
+mod trustee_schedule_aggregation;

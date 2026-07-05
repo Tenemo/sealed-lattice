@@ -904,32 +904,31 @@ fn validate_masked_claim_lift_window(
             ));
         }
     }
-    if statement.target_decryption_share.is_some() {
-        if let Some(first_smudging_global_message_index) =
+    if statement.target_decryption_share.is_some()
+        && let Some(first_smudging_global_message_index) =
             statement.target_decryption_smudging_message_global_index()
-        {
-            let first_smudging_global_claim_id = (first_smudging_global_message_index
-                * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
-                * CONSISTENCY_REPETITIONS) as u64;
-            let smudging_limb_indices = statement
-                .target_decryption_message_claim_limb_indices(first_smudging_global_message_index);
-            let (smudging_lower_bound, smudging_upper_bound) =
-                masked_claim_bounds_for_global_claim(statement, first_smudging_global_claim_id)?;
-            let required_smudging_residue_count = masked_claim_lift_residue_count_for_moduli(
-                smudging_limb_indices
-                    .iter()
-                    .map(|limb_index| DATA_PRIMES[*limb_index]),
-                &smudging_lower_bound,
-                &smudging_upper_bound,
-            );
-            if required_smudging_residue_count
+    {
+        let first_smudging_global_claim_id = (first_smudging_global_message_index
+            * crate::bgv::setup::compact_vss_commitment::COMPACT_VSS_MESSAGE_DIGIT_COUNT
+            * CONSISTENCY_REPETITIONS) as u64;
+        let smudging_limb_indices = statement
+            .target_decryption_message_claim_limb_indices(first_smudging_global_message_index);
+        let (smudging_lower_bound, smudging_upper_bound) =
+            masked_claim_bounds_for_global_claim(statement, first_smudging_global_claim_id)?;
+        let required_smudging_residue_count = masked_claim_lift_residue_count_for_moduli(
+            smudging_limb_indices
+                .iter()
+                .map(|limb_index| DATA_PRIMES[*limb_index]),
+            &smudging_lower_bound,
+            &smudging_upper_bound,
+        );
+        if required_smudging_residue_count
                 > TrusteeEvaluationKeyStatement::TARGET_DECRYPTION_SMUDGING_MESSAGE_MASKED_CLAIM_FIELD_COUNT
             {
                 return Err(invalid_succinct_setup_proof(
                     "target-decryption smudging-message masked consistency claims need more carried limb fields",
                 ));
             }
-        }
     }
     Ok(())
 }

@@ -20,7 +20,17 @@ pub(super) struct CompactAggregateOpeningCredentialBinding {
     pub(super) rns_prime: u64,
     pub(super) aggregate_commitment_root: String,
     pub(super) aggregate_opening_root: String,
+    // Read by the development-command proof-request assembly in proof_slice;
+    // populated unconditionally so the verified opening travels with the binding.
+    #[cfg_attr(
+        not(feature = "target-decryption-development-commands"),
+        allow(dead_code)
+    )]
     pub(super) aggregate_commitment_message_values: Vec<u64>,
+    #[cfg_attr(
+        not(feature = "target-decryption-development-commands"),
+        allow(dead_code)
+    )]
     pub(super) aggregate_randomness_by_column: Vec<Vec<i64>>,
 }
 
@@ -48,6 +58,7 @@ struct TargetDecryptionSmudgingCommitmentOpening {
     public_matrix_seed_hash: String,
 }
 
+#[cfg(feature = "target-decryption-development-commands")]
 pub(super) struct TargetDecryptionSmudgingProofOpening {
     pub(super) message_coefficients: Vec<u64>,
     pub(super) randomness_by_column: Vec<Vec<i64>>,
@@ -495,6 +506,7 @@ pub(super) fn read_local_target_decryption_share_witness(
     })
 }
 
+#[cfg(test)]
 pub(super) fn derive_threshold_secret_share_by_limb(
     evaluator_key: &DevelopmentBgvKey,
     target_share_profile_hash: &str,
@@ -555,6 +567,7 @@ pub(super) fn derive_threshold_secret_share_by_limb(
 // from these very shares, so folding the package hash into the polynomial would
 // be circular (the shares would depend on a hash that depends on the shares).
 // The constant term is still the secret, so recombination at x=0 is unchanged.
+#[cfg(test)]
 pub(super) fn derive_threshold_secret_share_limb(
     secret: &[i64],
     target_share_profile_hash: &str,
@@ -615,6 +628,7 @@ pub(super) fn target_decryption_smudging_seed_hex(
     )
 }
 
+#[cfg(test)]
 pub(super) fn target_decryption_smudging_witness_value(
     setup_binding: &SetupBinding,
     target_accepted: &TargetAcceptedBinding,
@@ -1058,6 +1072,7 @@ pub(super) fn target_decryption_smudging_commitment_set_from_polynomial_openings
     Ok(TargetDecryptionSmudgingCommitmentSet { value, root })
 }
 
+#[cfg(feature = "target-decryption-development-commands")]
 #[allow(clippy::too_many_arguments)]
 pub(super) fn target_decryption_smudging_proof_openings_for_slice(
     setup_binding: &SetupBinding,

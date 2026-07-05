@@ -2515,7 +2515,7 @@ pub(in crate::bgv::setup) fn compact_vss_message_digits(
     Ok(digits)
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub(crate) fn compact_vss_canonical_message_digit_columns(
     message_coefficients: &[u64],
     ring_degree: usize,

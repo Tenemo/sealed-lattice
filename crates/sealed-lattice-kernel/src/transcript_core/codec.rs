@@ -19,7 +19,7 @@ pub fn encode_hex(bytes: &[u8]) -> String {
     to_hex(bytes)
 }
 
-#[cfg(test)]
+#[cfg(any(feature = "target-decryption-development-commands", test))]
 pub fn encode_standard_base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
